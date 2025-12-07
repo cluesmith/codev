@@ -43,9 +43,13 @@
       margin-right: 4px;
     }
 
-    .content { display: flex; }
-    .line-numbers {
+    /* Grid layout: each row has line number + code, guaranteeing alignment */
+    .content {
+      display: grid;
+      grid-template-columns: auto 1fr;
       padding: 15px 0;
+    }
+    .line-num {
       background: #252525;
       color: #666;
       text-align: right;
@@ -53,41 +57,31 @@
       font-size: 13px;
       user-select: none;
       border-right: 1px solid #333;
+      padding: 0 12px 0 8px;
+      cursor: pointer;
+      line-height: 1.5;
       min-width: 50px;
       position: sticky;
       left: 0;
     }
-    .line-numbers .line-num {
-      padding: 0 12px 0 8px;
-      cursor: pointer;
-      display: block;
-      line-height: 1.5;
-      height: 19.5px;
-    }
-    .line-numbers .line-num:hover { background: #333; color: #fff; }
-    .line-numbers .line-num.has-review {
+    .line-num:hover { background: #333; color: #fff; }
+    .line-num.has-review {
       background: rgba(250, 204, 21, 0.2);
       color: #facc15;
     }
-    .line-numbers .line-num.continuation {
-      color: #444;
-      cursor: default;
-    }
-
-    .code-content {
-      flex: 1;
-      padding: 15px;
-      overflow-x: auto;
+    .code-line {
       background: #1a1a1a;
+      padding: 0 15px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
-    pre { margin: 0; font-size: 13px; line-height: 1.5; }
-    pre code { font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; }
     /* Hybrid markdown: syntax visible but muted, content styled */
+    /* All text uses same font size for consistent line heights in annotation view */
     .md-syntax { color: #555; }  /* Muted syntax markers */
-    .md-h1 { font-size: 1.4em; font-weight: bold; color: #c678dd; }
-    .md-h2 { font-size: 1.25em; font-weight: bold; color: #c678dd; }
-    .md-h3 { font-size: 1.1em; font-weight: bold; color: #c678dd; }
-    .md-h4, .md-h5, .md-h6 { font-weight: bold; color: #c678dd; }
+    .md-h1, .md-h2, .md-h3, .md-h4, .md-h5, .md-h6 { font-weight: bold; color: #c678dd; }
     .md-bold { font-weight: bold; color: #e5c07b; }
     .md-italic { font-style: italic; color: #98c379; }
     .md-code { color: #e06c75; background: #2c313a; padding: 1px 4px; border-radius: 3px; }
@@ -97,11 +91,6 @@
     .md-blockquote { color: #abb2bf; border-left: 3px solid #555; padding-left: 10px; }
     .md-fence { color: #555; }
     .md-codeblock { color: #98c379; background: #2c313a; display: block; }
-    .code-line {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      min-height: 19.5px;
-    }
 
     /* Editor textarea */
     #editor {
@@ -148,9 +137,9 @@
     .review-line {
       background: rgba(250, 204, 21, 0.1);
       display: block;
-      margin: 0 -15px;
-      padding: 0 15px;
       border-left: 3px solid #facc15;
+      padding-left: 5px;
+      margin-left: -8px;
     }
 
     /* Comment Dialog - positioned popup */
@@ -223,10 +212,7 @@
   </div>
 
   <div class="content" id="viewMode">
-    <div class="line-numbers" id="lineNumbers"></div>
-    <div class="code-content">
-      <pre><code id="codeContent"></code></pre>
-    </div>
+    <!-- Grid: alternating line-num and code-line elements -->
   </div>
 
   <!-- Editor mode -->
@@ -310,8 +296,7 @@
     }
 
     function renderFile() {
-      const lineNums = document.getElementById('lineNumbers');
-      const codeEl = document.getElementById('codeContent');
+      const viewMode = document.getElementById('viewMode');
 
       // Render code with syntax highlighting - highlight LINE BY LINE
       const isMarkdown = lang === 'markdown' || lang === 'md';
@@ -328,8 +313,8 @@
         tableMap = buildTableMap(tables);
       }
 
-      // Wrap each line in a div so we can measure its height after word-wrap
-      const highlightedLines = fileLines.map((line, i) => {
+      // Generate grid rows: each row has [line-num, code-line]
+      const gridHtml = fileLines.map((line, i) => {
         let lineToRender = line;
 
         // For markdown tables: pad cells for alignment
@@ -344,35 +329,13 @@
         // Use custom hybrid renderer for markdown
         const highlighted = isMarkdown ? renderMarkdownLine(lineToRender) : Prism.highlight(lineToRender, prismLang, lang);
         const isReview = commentStyle.regex.test(line);
-        const content = isReview ? `<span class="review-line">${highlighted}</span>` : highlighted;
-        return `<div class="code-line" data-line="${i}">${content || '&nbsp;'}</div>`;
-      });
+        const codeContent = isReview ? `<span class="review-line">${highlighted}</span>` : highlighted;
 
-      codeEl.innerHTML = highlightedLines.join('');
+        const hasReviewClass = isReview ? 'has-review' : '';
+        return `<span class="line-num ${hasReviewClass}" onclick="openDialog(${i}, event)">${i + 1}</span><div class="code-line" data-line="${i}">${codeContent || '&nbsp;'}</div>`;
+      }).join('');
 
-      // After rendering, measure each line's height and generate line numbers
-      // to account for word wrapping (show ".." for continuation lines)
-      requestAnimationFrame(() => {
-        const lineHeight = 19.5; // matches CSS .line-num height
-        const codeLines = codeEl.querySelectorAll('.code-line');
-        let lineNumsHtml = '';
-
-        codeLines.forEach((el, i) => {
-          const height = el.getBoundingClientRect().height;
-          const visualLines = Math.max(1, Math.round(height / lineHeight));
-          const hasReview = commentStyle.regex.test(fileLines[i]);
-
-          // First visual line shows the actual line number
-          lineNumsHtml += `<span class="line-num ${hasReview ? 'has-review' : ''}" onclick="openDialog(${i}, event)">${i + 1}</span>\n`;
-
-          // Additional visual lines show ".."
-          for (let v = 1; v < visualLines; v++) {
-            lineNumsHtml += `<span class="line-num continuation">..</span>\n`;
-          }
-        });
-
-        lineNums.innerHTML = lineNumsHtml;
-      });
+      viewMode.innerHTML = gridHtml;
     }
 
     function openDialog(lineIndex, event) {
@@ -441,7 +404,8 @@
     // Open dialog from annotation panel (center it since no click position)
     function openDialogFromPanel(lineIndex) {
       // Create a fake event positioned at the line number
-      const lineNums = document.querySelectorAll('.line-num');
+      // Exclude continuation spans (..) so indexing matches fileLines
+      const lineNums = document.querySelectorAll('.line-num:not(.continuation)');
       if (lineNums[lineIndex]) {
         const fakeEvent = { target: lineNums[lineIndex] };
         openDialog(lineIndex, fakeEvent);
@@ -786,7 +750,7 @@
         currentContent = editor.value;
         fileLines = currentContent.split('\n');
         editor.style.display = 'none';
-        viewMode.style.display = 'flex';
+        viewMode.style.display = 'grid';
         editBtn.textContent = 'Switch to Editing';
         subtitle.textContent = 'Click on a line number to leave an annotation.';
         saveBtn.style.display = 'none';
