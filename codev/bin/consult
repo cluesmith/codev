@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
 """Consult tool - wrapper for gemini-cli, codex CLI, and claude CLI.
 
-Provides a unified interface for single-agent consultation via external AI CLIs.
+Provides a unified interface for AI consultation via external CLIs.
 Each invocation is stateless (fresh process).
 
 Usage:
-    consult gemini "Review this design"
-    consult codex "What do you think of this API?"
-    consult claude "Review this implementation"
-    consult pro "Review this"         # alias for gemini
-    consult gpt "Review this"         # alias for codex
-    consult opus "Review this"        # alias for claude
-    echo "Review this" | consult pro
+    consult --model <model> <subcommand> [args] [options]
 
-For parallel consultation, run multiple consult commands in separate shells.
+Subcommands:
+    pr <number>         Review a Pull Request
+    spec <number>       Review a Specification
+    plan <number>       Review an Implementation Plan
+    general <query>     General consultation query
+
+Models (--model is REQUIRED):
+    gemini, pro         Google Gemini
+    codex, gpt          OpenAI Codex
+    claude, opus        Anthropic Claude
+
+Examples:
+    consult --model gemini pr 33
+    consult --model claude spec 38
+    consult --model pro plan 38
+    consult --model gpt general "Review this design"
+
+For parallel consultation, run multiple commands in separate shells.
 """
 
+import glob as glob_module
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,19 +38,20 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-try:
-    import typer
-except ImportError:
-    print("Error: typer not installed. Run: pip install typer", file=sys.stderr)
-    sys.exit(1)
+# Note: This script now uses manual argument parsing instead of Typer
+# to support hybrid positional args (consult MODEL QUERY) with subcommands (consult pr N)
 
-# Model aliases
+# Model aliases (alias -> canonical name)
 MODEL_MAP = {
     "pro": "gemini",
     "gpt": "codex",
     "opus": "claude",
 }
+
+# Derive canonical model list from MODEL_MAP values
+ALL_MODELS = sorted(set(MODEL_MAP.values()))
 
 
 def load_dotenv(codev_root: Path) -> None:
@@ -76,9 +91,9 @@ def find_codev_root() -> Path:
 def get_role(role_file: Path) -> str:
     """Read the consultant role definition."""
     if not role_file.exists():
-        typer.echo(f"Error: Role file not found: {role_file}", err=True)
-        typer.echo("Are you in a codev-enabled project?", err=True)
-        raise typer.Exit(1)
+        print(f"Error: Role file not found: {role_file}", file=sys.stderr)
+        print("Are you in a codev-enabled project?", file=sys.stderr)
+        sys.exit(1)
     return role_file.read_text()
 
 
@@ -100,28 +115,480 @@ def log_query(log_dir: Path, model: str, query: str, duration_secs: float | None
         pass
 
 
-def consult(
-    model: str = typer.Argument(
-        ..., help="Model: gemini, codex, claude (or aliases: pro, gpt, opus)"
-    ),
-    query: str = typer.Argument(
-        None, help="Query (or pipe via stdin)"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", "-n", help="Print command without executing"
-    ),
-) -> None:
-    """Consult an external model for a second opinion.
+def run_model_consultation(
+    model: str,
+    query: str,
+    codev_root: Path,
+    output_file: Optional[Path] = None,
+) -> tuple[str, int, float]:
+    """Run a consultation with a specific model.
 
-    Examples:
-        consult gemini "Review this architecture"
-        consult codex "What's wrong with this code?"
-        consult claude "Review this design"
-        consult pro "Review this"   # alias for gemini
-        consult opus "Review this"  # alias for claude
-        echo "Review this" | consult gpt
+    Returns: (output, return_code, duration_secs)
     """
-    # Lazy load paths
+    role_file = codev_root / "codev" / "roles" / "consultant.md"
+    role = get_role(role_file)
+
+    # Resolve model aliases
+    resolved = MODEL_MAP.get(model.lower(), model.lower())
+    temp_system_file = None
+    env = {}
+
+    if resolved == "gemini":
+        if not shutil.which("gemini"):
+            return "Error: gemini-cli not found", 1, 0.0
+        temp_system_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        )
+        temp_system_file.write(role)
+        temp_system_file.close()
+        cmd = ["gemini", "--yolo", query]
+        env = {"GEMINI_SYSTEM_MD": temp_system_file.name}
+        if os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
+            env["GEMINI_API_KEY"] = ""
+    elif resolved == "codex":
+        if not shutil.which("codex"):
+            return "Error: codex not found", 1, 0.0
+        cmd = ["codex", "exec", "--full-auto", query]
+        env = {"CODEX_SYSTEM_MESSAGE": role}
+    elif resolved == "claude":
+        if not shutil.which("claude"):
+            return "Error: claude not found", 1, 0.0
+        full_query = f"{role}\n\n---\n\nConsultation Request:\n{query}"
+        cmd = ["claude", "--print", "-p", full_query, "--dangerously-skip-permissions"]
+        env = {}
+    else:
+        return f"Unknown model: {model}", 1, 0.0
+
+    full_env = {**os.environ, **env}
+    start_time = time.time()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            env=full_env,
+            capture_output=True,
+            text=True,
+        )
+        duration = time.time() - start_time
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[stderr]: {result.stderr}"
+
+        # Save to output file if specified
+        if output_file:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.write_text(output)
+
+        return output, result.returncode, duration
+    except KeyboardInterrupt:
+        return "Interrupted", 130, time.time() - start_time
+    finally:
+        if temp_system_file:
+            try:
+                os.unlink(temp_system_file.name)
+            except Exception:
+                pass
+
+
+def fetch_pr_data(pr_number: int, output_dir: Path) -> dict:
+    """Fetch PR data and save to files. Returns metadata."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metadata = {"pr_number": pr_number, "files": []}
+
+    # 1. PR info
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            metadata["pr_info_error"] = result.stderr.strip()
+        else:
+            (output_dir / "pr-info.txt").write_text(result.stdout)
+            metadata["pr_info"] = True
+
+            # Extract spec number from PR title or body
+            spec_match = re.search(r'\[Spec (\d+)\]|\bspec[- ]?(\d+)\b', result.stdout, re.IGNORECASE)
+            if spec_match:
+                metadata["spec_number"] = spec_match.group(1) or spec_match.group(2)
+    except Exception as e:
+        metadata["pr_info_error"] = str(e)
+
+    # 2. Comments
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--comments"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+             metadata["comments_error"] = result.stderr.strip()
+        else:
+            (output_dir / "pr-comments.txt").write_text(result.stdout)
+            metadata["comments"] = True
+    except Exception as e:
+        metadata["comments_error"] = str(e)
+
+    # 3. Diff
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "diff", str(pr_number)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+             metadata["diff_error"] = result.stderr.strip()
+        else:
+            (output_dir / "pr-diff.patch").write_text(result.stdout)
+            metadata["diff"] = True
+            metadata["diff_lines"] = len(result.stdout.splitlines())
+    except Exception as e:
+        metadata["diff_error"] = str(e)
+
+    # 4. Files list (JSON)
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--json", "files,title,headRefName"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            metadata["files_error"] = result.stderr.strip()
+        else:
+            files_data = json.loads(result.stdout)
+            metadata["files"] = files_data.get("files", [])
+            metadata["title"] = files_data.get("title", "")
+            metadata["branch"] = files_data.get("headRefName", "")
+            (output_dir / "pr-files.json").write_text(result.stdout)
+    except Exception as e:
+        metadata["files_error"] = str(e)
+
+    # 5. Find spec file (if exists)
+    # Note: spec_number from regex is already zero-padded (e.g., "0038" from "[Spec 0038]")
+    codev_root = find_codev_root()
+    spec_number = metadata.get("spec_number")
+    if spec_number:
+        spec_pattern = str(codev_root / "codev" / "specs" / f"{spec_number}-*.md")
+        spec_files = glob_module.glob(spec_pattern)
+        if spec_files:
+            spec_path = Path(spec_files[0])
+            shutil.copy(spec_path, output_dir / "spec.md")
+            metadata["spec"] = str(spec_path)
+
+    # 6. Find plan file (if exists)
+    if spec_number:
+        plan_pattern = str(codev_root / "codev" / "plans" / f"{spec_number}-*.md")
+        plan_files = glob_module.glob(plan_pattern)
+        if plan_files:
+            plan_path = Path(plan_files[0])
+            shutil.copy(plan_path, output_dir / "plan.md")
+            metadata["plan"] = str(plan_path)
+
+    # Save metadata
+    (output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+
+    return metadata
+
+
+def build_pr_query(pr_number: int, data_dir: Path, metadata: dict) -> str:
+    """Build structured query for consultant."""
+    files_count = len(metadata.get("files", []))
+    diff_lines = metadata.get("diff_lines", 0)
+    title = metadata.get("title", f"PR #{pr_number}")
+    branch = metadata.get("branch", "unknown")
+
+    query = f"""Review Pull Request #{pr_number}: {title}
+
+Branch: {branch}
+Files changed: {files_count}
+Diff size: {diff_lines} lines
+
+Available data files (read these to understand the PR):
+- PR Info: {data_dir}/pr-info.txt
+- Comments: {data_dir}/pr-comments.txt
+- Diff: {data_dir}/pr-diff.patch
+- Files JSON: {data_dir}/pr-files.json
+"""
+
+    if "spec" in metadata:
+        query += f"- Specification: {data_dir}/spec.md\n"
+    if "plan" in metadata:
+        query += f"- Implementation Plan: {data_dir}/plan.md\n"
+
+    query += """
+Please review:
+1. Code quality and correctness
+2. Alignment with spec/plan (if provided)
+3. Test coverage and quality
+4. Edge cases and error handling
+5. Documentation and comments
+6. Any security concerns
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]
+"""
+
+    return query
+
+
+def extract_verdict(full_output: str) -> str:
+    """Extract verdict section from consultation output.
+
+    Returns everything from VERDICT: marker to end of output.
+    Falls back to last 50 lines if no VERDICT marker found.
+    """
+    lines = full_output.split("\n")
+
+    # Find VERDICT marker
+    for i, line in enumerate(lines):
+        if "VERDICT:" in line.upper():
+            # Return from VERDICT line to end
+            return "\n".join(lines[i:])
+
+    # Fallback: return last 50 lines
+    return "\n".join(lines[-50:])
+
+
+def cleanup_old_pr_consultations(consult_dir: Path, keep_last: int = 10) -> int:
+    """Keep only the N most recent PR consultation directories.
+
+    Returns number of directories removed.
+    """
+    pr_dirs = sorted(
+        [d for d in consult_dir.glob("pr-*") if d.is_dir()],
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    )
+
+    removed = 0
+    for old_dir in pr_dirs[keep_last:]:
+        try:
+            shutil.rmtree(old_dir)
+            removed += 1
+        except Exception:
+            pass
+
+    return removed
+
+
+def do_spec(number: int, model: str, dry_run: bool) -> None:
+    """Execute a spec consultation with a single model."""
+    codev_root = find_codev_root()
+    log_dir = codev_root / ".consult"
+    spec_dir = log_dir / f"spec-{str(number).zfill(4)}"
+
+    # Load .env
+    load_dotenv(codev_root)
+
+    print(f"[Spec Review #{number}]", file=sys.stderr)
+    print(f"Model: {model}", file=sys.stderr)
+
+    # Find spec file
+    spec_pattern = str(codev_root / "codev" / "specs" / f"{str(number).zfill(4)}-*.md")
+    spec_files = glob_module.glob(spec_pattern)
+    if not spec_files:
+        print(f"Error: Spec {number} not found", file=sys.stderr)
+        print(f"Looked for: {spec_pattern}", file=sys.stderr)
+        sys.exit(1)
+
+    spec_path = Path(spec_files[0])
+    spec_name = spec_path.stem
+
+    # Find plan file (optional)
+    plan_pattern = str(codev_root / "codev" / "plans" / f"{str(number).zfill(4)}-*.md")
+    plan_files = glob_module.glob(plan_pattern)
+    plan_path = Path(plan_files[0]) if plan_files else None
+
+    if dry_run:
+        print("\n[DRY RUN] Would execute:", file=sys.stderr)
+        print(f"  1. Read spec: {spec_path}", file=sys.stderr)
+        if plan_path:
+            print(f"  2. Read plan: {plan_path}", file=sys.stderr)
+        print(f"  3. Run consultation with: {model}", file=sys.stderr)
+        print(f"  4. Save output to {spec_dir}/{model}-full.txt", file=sys.stderr)
+        sys.exit(0)
+
+    # Create output directory
+    spec_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build query
+    query = f"""Review Specification: {spec_name}
+
+Please read and review this specification:
+- Spec file: {spec_path}
+"""
+    if plan_path:
+        query += f"- Plan file: {plan_path}\n"
+
+    query += """
+Please review:
+1. Clarity and completeness of requirements
+2. Technical feasibility
+3. Edge cases and error scenarios
+4. Security considerations
+5. Testing strategy
+6. Any ambiguities or missing details
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]
+"""
+
+    print(f"\nSpec: {spec_path}", file=sys.stderr)
+    if plan_path:
+        print(f"Plan: {plan_path}", file=sys.stderr)
+
+    # Run consultation
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"[{model.upper()}] Starting consultation...", file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+
+    output_file = spec_dir / f"{model}-full.txt"
+    output, retcode, duration = run_model_consultation(
+        model, query, codev_root, output_file
+    )
+    log_query(log_dir, model, f"Spec #{number} review", duration)
+
+    # Extract and display verdict
+    verdict = extract_verdict(output)
+    verdict_file = spec_dir / f"{model}-verdict.txt"
+    verdict_file.write_text(verdict)
+
+    print(f"\n{'='*60}")
+    print(f"VERDICT [{model.upper()}] ({duration:.1f}s)")
+    print(f"{'='*60}")
+    print(verdict)
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    print(f"Spec: #{number} ({spec_name})")
+    print(f"Model: {model}")
+    print(f"Duration: {duration:.1f}s")
+    print(f"Output: {spec_dir}/")
+
+
+def do_plan(number: int, model: str, dry_run: bool) -> None:
+    """Execute a plan consultation with a single model."""
+    codev_root = find_codev_root()
+    log_dir = codev_root / ".consult"
+    plan_dir = log_dir / f"plan-{str(number).zfill(4)}"
+
+    # Load .env
+    load_dotenv(codev_root)
+
+    print(f"[Plan Review #{number}]", file=sys.stderr)
+    print(f"Model: {model}", file=sys.stderr)
+
+    # Find plan file
+    plan_pattern = str(codev_root / "codev" / "plans" / f"{str(number).zfill(4)}-*.md")
+    plan_files = glob_module.glob(plan_pattern)
+    if not plan_files:
+        print(f"Error: Plan {number} not found", file=sys.stderr)
+        print(f"Looked for: {plan_pattern}", file=sys.stderr)
+        sys.exit(1)
+
+    plan_path = Path(plan_files[0])
+    plan_name = plan_path.stem
+
+    # Find spec file (optional but recommended)
+    spec_pattern = str(codev_root / "codev" / "specs" / f"{str(number).zfill(4)}-*.md")
+    spec_files = glob_module.glob(spec_pattern)
+    spec_path = Path(spec_files[0]) if spec_files else None
+
+    if dry_run:
+        print("\n[DRY RUN] Would execute:", file=sys.stderr)
+        print(f"  1. Read plan: {plan_path}", file=sys.stderr)
+        if spec_path:
+            print(f"  2. Read spec: {spec_path}", file=sys.stderr)
+        print(f"  3. Run consultation with: {model}", file=sys.stderr)
+        print(f"  4. Save output to {plan_dir}/{model}-full.txt", file=sys.stderr)
+        sys.exit(0)
+
+    # Create output directory
+    plan_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build query
+    query = f"""Review Implementation Plan: {plan_name}
+
+Please read and review this implementation plan:
+- Plan file: {plan_path}
+"""
+    if spec_path:
+        query += f"- Spec file: {spec_path} (for context)\n"
+
+    query += """
+Please review:
+1. Alignment with specification requirements
+2. Implementation approach and architecture
+3. Task breakdown and ordering
+4. Risk identification and mitigation
+5. Testing strategy
+6. Any missing steps or considerations
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]
+"""
+
+    print(f"\nPlan: {plan_path}", file=sys.stderr)
+    if spec_path:
+        print(f"Spec: {spec_path}", file=sys.stderr)
+
+    # Run consultation
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"[{model.upper()}] Starting consultation...", file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+
+    output_file = plan_dir / f"{model}-full.txt"
+    output, retcode, duration = run_model_consultation(
+        model, query, codev_root, output_file
+    )
+    log_query(log_dir, model, f"Plan #{number} review", duration)
+
+    # Extract and display verdict
+    verdict = extract_verdict(output)
+    verdict_file = plan_dir / f"{model}-verdict.txt"
+    verdict_file.write_text(verdict)
+
+    print(f"\n{'='*60}")
+    print(f"VERDICT [{model.upper()}] ({duration:.1f}s)")
+    print(f"{'='*60}")
+    print(verdict)
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    print(f"Plan: #{number} ({plan_name})")
+    print(f"Model: {model}")
+    print(f"Duration: {duration:.1f}s")
+    print(f"Output: {plan_dir}/")
+
+
+def do_general(model: str, query: Optional[str], dry_run: bool) -> None:
+    """Execute a general consultation with the specified model."""
     codev_root = find_codev_root()
     role_file = codev_root / "codev" / "roles" / "consultant.md"
     log_dir = codev_root / ".consult"
@@ -134,30 +601,26 @@ def consult(
         if not sys.stdin.isatty():
             query = sys.stdin.read().rstrip()
             if not query:
-                typer.echo("Error: Empty input from stdin", err=True)
-                raise typer.Exit(1)
+                print("Error: Empty input from stdin", file=sys.stderr)
+                sys.exit(1)
         else:
-            typer.echo("Error: No query provided", err=True)
-            typer.echo("Usage: consult <model> <query>", err=True)
-            raise typer.Exit(1)
+            print("Error: No query provided", file=sys.stderr)
+            print("Usage: consult --model <model> general <query>", file=sys.stderr)
+            sys.exit(1)
 
     role = get_role(role_file)
 
-    # Resolve model aliases
-    resolved = MODEL_MAP.get(model.lower(), model.lower())
     # Track temp file for cleanup
     temp_system_file = None
 
-    if resolved == "gemini":
+    if model == "gemini":
         if not shutil.which("gemini"):
-            typer.echo(
+            print(
                 "Error: gemini-cli not found.\n"
                 "Install: https://github.com/google-gemini/gemini-cli",
-                err=True,
+                file=sys.stderr,
             )
-            raise typer.Exit(1)
-        # gemini-cli uses GEMINI_SYSTEM_MD env var pointing to a file
-        # Create a temp file with the role content
+            sys.exit(1)
         temp_system_file = tempfile.NamedTemporaryFile(
             mode="w", suffix=".md", delete=False
         )
@@ -165,71 +628,63 @@ def consult(
         temp_system_file.close()
         cmd = ["gemini", "--yolo", query]
         env = {"GEMINI_SYSTEM_MD": temp_system_file.name}
-        # Avoid "Both GOOGLE_API_KEY and GEMINI_API_KEY are set" warning
-        # by unsetting GEMINI_API_KEY if GOOGLE_API_KEY is present
         if os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
             env["GEMINI_API_KEY"] = ""
-    elif resolved == "codex":
+    elif model == "codex":
         if not shutil.which("codex"):
-            typer.echo(
+            print(
                 "Error: codex not found.\n"
                 "Install: npm install -g @openai/codex",
-                err=True,
+                file=sys.stderr,
             )
-            raise typer.Exit(1)
+            sys.exit(1)
         cmd = ["codex", "exec", "--full-auto", query]
         env = {"CODEX_SYSTEM_MESSAGE": role}
-    elif resolved == "claude":
+    elif model == "claude":
         if not shutil.which("claude"):
-            typer.echo(
+            print(
                 "Error: claude not found.\n"
                 "Install: npm install -g @anthropic-ai/claude-code",
-                err=True,
+                file=sys.stderr,
             )
-            raise typer.Exit(1)
-        # Claude Code: prepend role to query, use prompt mode with permission skip
+            sys.exit(1)
         full_query = f"{role}\n\n---\n\nConsultation Request:\n{query}"
         cmd = ["claude", "--print", "-p", full_query, "--dangerously-skip-permissions"]
         env = {}
     else:
-        typer.echo(
-            f"Unknown model: {model}\n"
-            f"Available: gemini, codex, claude (aliases: pro, gpt, opus)",
-            err=True,
-        )
-        raise typer.Exit(1)
+        # Should not reach here - model validated in main()
+        print(f"Error: Unknown model '{model}'", file=sys.stderr)
+        sys.exit(1)
 
     if dry_run:
-        typer.echo(f"Command: {' '.join(cmd)}")
+        print(f"[{model}] Would execute:")
+        print(f"  Command: {' '.join(cmd)}")
         if env:
             for key, value in env.items():
-                # Show truncated env var for long values
                 if key == "GEMINI_SYSTEM_MD":
-                    typer.echo(f"Env: {key}=<temp file with consultant role>")
+                    print(f"  Env: {key}=<temp file with consultant role>")
                 else:
                     preview = value[:50] + "..." if len(value) > 50 else value
-                    typer.echo(f"Env: {key}={preview}")
-        # Clean up temp file if created
+                    print(f"  Env: {key}={preview}")
         if temp_system_file:
             os.unlink(temp_system_file.name)
-        raise typer.Exit(0)
+        sys.exit(0)
 
-    # Execute with passthrough stdio, handle Ctrl+C gracefully, track timing
+    # Execute with passthrough stdio
     full_env = {**os.environ, **(env or {})}
     start_time = time.time()
     try:
         result = subprocess.run(cmd, env=full_env)
         duration = time.time() - start_time
-        log_query(log_dir, resolved, query, duration)
-        typer.echo(f"\n[{resolved} completed in {duration:.1f}s]", err=True)
-        raise typer.Exit(result.returncode)
+        log_query(log_dir, model, query, duration)
+        print(f"\n[{model} completed in {duration:.1f}s]", file=sys.stderr)
+        sys.exit(result.returncode)
     except KeyboardInterrupt:
         duration = time.time() - start_time
-        log_query(log_dir, resolved, query, duration)
-        typer.echo("\nInterrupted", err=True)
-        raise typer.Exit(130)
+        log_query(log_dir, model, query, duration)
+        print("\nInterrupted", file=sys.stderr)
+        sys.exit(130)
     finally:
-        # Clean up temp file if created
         if temp_system_file:
             try:
                 os.unlink(temp_system_file.name)
@@ -237,5 +692,344 @@ def consult(
                 pass
 
 
+def do_pr(number: int, model: str, dry_run: bool) -> None:
+    """Execute a PR consultation with a single model."""
+    codev_root = find_codev_root()
+    log_dir = codev_root / ".consult"
+    pr_dir = log_dir / f"pr-{str(number).zfill(4)}"
+
+    # Load .env
+    load_dotenv(codev_root)
+
+    print(f"[PR Review #{number}]", file=sys.stderr)
+    print(f"Model: {model}", file=sys.stderr)
+
+    if dry_run:
+        print("\n[DRY RUN] Would execute:", file=sys.stderr)
+        print(f"  1. Fetch PR data to {pr_dir}/", file=sys.stderr)
+        print("     - gh pr view N", file=sys.stderr)
+        print("     - gh pr view N --comments", file=sys.stderr)
+        print("     - gh pr diff N", file=sys.stderr)
+        print("     - gh pr view N --json files,title,headRefName", file=sys.stderr)
+        print("     - Copy spec/plan if found", file=sys.stderr)
+        print(f"  2. Build query with file paths", file=sys.stderr)
+        print(f"  3. Run consultation with: {model}", file=sys.stderr)
+        print(f"  4. Save output to {pr_dir}/{model}-full.txt", file=sys.stderr)
+        print(f"  5. Extract and display verdict", file=sys.stderr)
+        sys.exit(0)
+
+    # Step 1: Fetch PR data
+    print("\nFetching PR data...", file=sys.stderr)
+    fetch_start = time.time()
+    metadata = fetch_pr_data(number, pr_dir)
+    fetch_duration = time.time() - fetch_start
+    print(f"  Fetched in {fetch_duration:.1f}s", file=sys.stderr)
+
+    files_count = len(metadata.get("files", []))
+    diff_lines = metadata.get("diff_lines", 0)
+    print(f"  Files: {files_count}, Diff: {diff_lines} lines", file=sys.stderr)
+
+    if "spec" in metadata:
+        print(f"  Spec: {metadata['spec']}", file=sys.stderr)
+    if "plan" in metadata:
+        print(f"  Plan: {metadata['plan']}", file=sys.stderr)
+
+    # Step 2: Build query
+    query = build_pr_query(number, pr_dir, metadata)
+
+    # Step 3: Run consultation
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"[{model.upper()}] Starting consultation...", file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+
+    output_file = pr_dir / f"{model}-full.txt"
+    output, retcode, duration = run_model_consultation(
+        model, query, codev_root, output_file
+    )
+    log_query(log_dir, model, f"PR #{number} review", duration)
+
+    # Step 4: Extract and display verdict
+    verdict = extract_verdict(output)
+    verdict_file = pr_dir / f"{model}-verdict.txt"
+    verdict_file.write_text(verdict)
+
+    print(f"\n{'='*60}")
+    print(f"VERDICT [{model.upper()}] ({duration:.1f}s)")
+    print(f"{'='*60}")
+    print(verdict)
+
+    # Step 5: Summary
+    total_duration = fetch_duration + duration
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    print(f"PR: #{number}")
+    print(f"Model: {model}")
+    print(f"Pre-fetch: {fetch_duration:.1f}s")
+    print(f"Consultation: {duration:.1f}s")
+    print(f"Total: {total_duration:.1f}s")
+    print(f"Output: {pr_dir}/")
+
+    # Step 6: Cleanup old consultations
+    removed = cleanup_old_pr_consultations(log_dir, keep_last=10)
+    if removed > 0:
+        print(f"Cleaned up {removed} old PR consultation(s)", file=sys.stderr)
+
+
+def print_help():
+    """Print main help message."""
+    print("""Usage: consult --model <model> <subcommand> [args] [options]
+
+Consult external AI models for second opinions.
+
+Global Options:
+  -m, --model MODEL      Model to use (REQUIRED)
+                         Models: gemini, codex, claude (aliases: pro, gpt, opus)
+  -h, --help             Show this message and exit
+
+Subcommands:
+  pr <number>            Review a Pull Request
+  spec <number>          Review a Specification
+  plan <number>          Review an Implementation Plan
+  general <query>        General consultation query
+
+Subcommand Options:
+  -n, --dry-run          Show what would execute without running
+
+Examples:
+  consult --model gemini pr 33
+  consult --model claude spec 38
+  consult --model pro plan 38
+  consult --model gpt general "Review this design"
+
+For parallel consultation, run multiple commands in separate shells.
+""")
+
+
+def main():
+    """Main entry point with standardized subcommand pattern."""
+    args = sys.argv[1:]
+
+    # Check for help with no args
+    if not args or args == ["--help"] or args == ["-h"]:
+        print_help()
+        sys.exit(0)
+
+    # Parse global --model option first (before subcommand)
+    model = None
+    remaining_args = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ["--model", "-m"]:
+            if i + 1 >= len(args):
+                print("Error: --model requires a value", file=sys.stderr)
+                sys.exit(1)
+            model = args[i + 1]
+            i += 2
+        elif arg in ["--help", "-h"] and not remaining_args:
+            # Only show main help if --help comes before subcommand
+            print_help()
+            sys.exit(0)
+        else:
+            # Collect everything else (subcommand and its args)
+            remaining_args = args[i:]
+            break
+
+    # Model is required
+    if not model:
+        print("Error: --model is required", file=sys.stderr)
+        print("Usage: consult --model <model> <subcommand> [args]", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate model
+    resolved_model = MODEL_MAP.get(model.lower(), model.lower())
+    if resolved_model not in ALL_MODELS:
+        print(f"Error: Unknown model '{model}'", file=sys.stderr)
+        print(f"Available: {', '.join(ALL_MODELS)} (aliases: pro, gpt, opus)", file=sys.stderr)
+        sys.exit(1)
+
+    # Need a subcommand
+    if not remaining_args:
+        print("Error: Subcommand required (pr, spec, plan, or general)", file=sys.stderr)
+        print("Usage: consult --model <model> <subcommand> [args]", file=sys.stderr)
+        sys.exit(1)
+
+    subcommand = remaining_args[0].lower()
+    sub_args = remaining_args[1:]
+
+    if subcommand == "pr":
+        # Parse PR subcommand
+        if "--help" in sub_args or "-h" in sub_args:
+            print("""Usage: consult --model <model> pr <number> [options]
+
+Review a Pull Request with optimized data fetching.
+
+Pre-fetches PR data (info, comments, diff, files) and passes file paths
+to the consultant model, reducing git command overhead.
+
+Arguments:
+  number                 PR number to review [required]
+
+Options:
+  -n, --dry-run          Show what would be fetched without executing
+  -h, --help             Show this message and exit
+
+Examples:
+  consult --model gemini pr 33
+  consult --model claude pr 33 --dry-run
+""")
+            sys.exit(0)
+
+        if not sub_args:
+            print("Error: PR number required", file=sys.stderr)
+            print("Usage: consult --model <model> pr <number>", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            pr_number = int(sub_args[0])
+        except ValueError:
+            print(f"Error: Invalid PR number '{sub_args[0]}'", file=sys.stderr)
+            sys.exit(1)
+
+        # Parse PR options
+        dry_run = False
+        for arg in sub_args[1:]:
+            if arg in ["--dry-run", "-n"]:
+                dry_run = True
+            else:
+                print(f"Error: Unknown option '{arg}'", file=sys.stderr)
+                sys.exit(1)
+
+        do_pr(pr_number, resolved_model, dry_run)
+
+    elif subcommand == "general":
+        # Parse general subcommand
+        if "--help" in sub_args or "-h" in sub_args:
+            print("""Usage: consult --model <model> general <query> [options]
+
+General consultation query.
+
+Arguments:
+  query                  The query to send (or pipe via stdin)
+
+Options:
+  -n, --dry-run          Show what would execute without running
+  -h, --help             Show this message and exit
+
+Examples:
+  consult --model gemini general "Review this architecture"
+  consult --model pro general "What do you think of this API?"
+  echo "Review this code" | consult --model gpt general
+""")
+            sys.exit(0)
+
+        # Parse general options
+        dry_run = False
+        query_parts = []
+        for arg in sub_args:
+            if arg in ["--dry-run", "-n"]:
+                dry_run = True
+            elif arg.startswith("-"):
+                print(f"Error: Unknown option '{arg}'", file=sys.stderr)
+                sys.exit(1)
+            else:
+                query_parts.append(arg)
+
+        query = " ".join(query_parts) if query_parts else None
+        do_general(resolved_model, query, dry_run)
+
+    elif subcommand == "spec":
+        # Parse spec subcommand
+        if "--help" in sub_args or "-h" in sub_args:
+            print("""Usage: consult --model <model> spec <number> [options]
+
+Review a Specification.
+
+Finds and reads the spec file (and plan if available) for review.
+
+Arguments:
+  number                 Spec number to review [required]
+
+Options:
+  -n, --dry-run          Show what would be read without executing
+  -h, --help             Show this message and exit
+
+Examples:
+  consult --model gemini spec 38
+  consult --model claude spec 38 --dry-run
+""")
+            sys.exit(0)
+
+        if not sub_args:
+            print("Error: Spec number required", file=sys.stderr)
+            print("Usage: consult --model <model> spec <number>", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            spec_number = int(sub_args[0])
+        except ValueError:
+            print(f"Error: Invalid spec number '{sub_args[0]}'", file=sys.stderr)
+            sys.exit(1)
+
+        dry_run = False
+        for arg in sub_args[1:]:
+            if arg in ["--dry-run", "-n"]:
+                dry_run = True
+            else:
+                print(f"Error: Unknown option '{arg}'", file=sys.stderr)
+                sys.exit(1)
+
+        do_spec(spec_number, resolved_model, dry_run)
+
+    elif subcommand == "plan":
+        # Parse plan subcommand
+        if "--help" in sub_args or "-h" in sub_args:
+            print("""Usage: consult --model <model> plan <number> [options]
+
+Review an Implementation Plan.
+
+Finds and reads the plan file (and spec if available) for review.
+
+Arguments:
+  number                 Plan number to review [required]
+
+Options:
+  -n, --dry-run          Show what would be read without executing
+  -h, --help             Show this message and exit
+
+Examples:
+  consult --model gemini plan 38
+  consult --model pro plan 38 --dry-run
+""")
+            sys.exit(0)
+
+        if not sub_args:
+            print("Error: Plan number required", file=sys.stderr)
+            print("Usage: consult --model <model> plan <number>", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            plan_number = int(sub_args[0])
+        except ValueError:
+            print(f"Error: Invalid plan number '{sub_args[0]}'", file=sys.stderr)
+            sys.exit(1)
+
+        dry_run = False
+        for arg in sub_args[1:]:
+            if arg in ["--dry-run", "-n"]:
+                dry_run = True
+            else:
+                print(f"Error: Unknown option '{arg}'", file=sys.stderr)
+                sys.exit(1)
+
+        do_plan(plan_number, resolved_model, dry_run)
+
+    else:
+        print(f"Error: Unknown subcommand '{subcommand}'", file=sys.stderr)
+        print("Available subcommands: pr, spec, plan, general", file=sys.stderr)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    typer.run(consult)
+    main()
