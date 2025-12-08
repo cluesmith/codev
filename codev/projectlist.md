@@ -769,9 +769,23 @@ Projects that are paused or canceled.
     tags: [testing, npm, ci]
     notes: "SPIDER protocol. 3-way reviewed. BATS-based tests with XDG sandboxing, tarball testing before publish, CI for macOS+Linux."
 
+  - id: "0042"
+    title: "Namespace Builder Sessions"
+    summary: "Add project namespace to tmux sessions and builder IDs to prevent cross-project collisions"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: []
+    tags: [agent-farm, multi-project, bug-fix]
+    notes: "TICK protocol. Currently tmux sessions are named 'builder-{spec_id}' which collides across projects. Need 'builder-{project}-{spec_id}' pattern."
+
 ## Next Available Number
 
-**0042** - Reserve this number for your next project
+**0043** - Reserve this number for your next project
 
 ---
 
