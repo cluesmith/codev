@@ -307,6 +307,20 @@ Projects currently in development (conceived through committed), sorted by prior
     notes: "TICK protocol. 3-way reviewed (2-1 APPROVE). PR 58 merged 2025-12-07. Awaiting owner validation."
 
 # Low Priority
+  - id: "0036"
+    title: "Open in New Tab"
+    summary: "Add button to open dashboard tab content in standalone browser tab"
+    status: spec-draft
+    priority: low
+    release: null
+    files:
+      spec: codev/specs/0036-af-open-in-tab.md
+      plan: null
+      review: null
+    dependencies: ["0007"]
+    tags: [ui, dashboard]
+    notes: "TICK protocol. 3-way reviewed, spec rewritten to fix architecture issues."
+
   - id: "0006"
     title: "Tutorial Mode"
     summary: "Interactive onboarding for new Codev users"
