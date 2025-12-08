@@ -758,7 +758,7 @@ Projects that are paused or canceled.
   - id: "0041"
     title: "E2E Test Suite"
     summary: "Automated end-to-end tests for @cluesmith/codev npm package installation and CLI commands"
-    status: planned
+    status: implementing
     priority: high
     release: null
     files:
