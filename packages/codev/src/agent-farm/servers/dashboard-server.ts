@@ -30,6 +30,7 @@ import {
   clearState,
   getArchitect,
 } from '../state.js';
+import { spawnTtyd } from '../utils/shell.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -355,26 +356,15 @@ function spawnTmuxWithTtyd(
     }
 
     // Start ttyd to attach to the tmux session
-    // Using simple theme arg to avoid shell escaping issues
-    // Use custom index.html for file path click-to-open functionality (optional)
     const customIndexPath = findTemplatePath('ttyd-index.html');
-    const ttydArgs = [
-      '-W',
-      '-p', String(ttydPort),
-      '-t', 'theme={"background":"#000000"}',
-      '-t', 'fontSize=14',
-      '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-    ];
+    const ttydProcess = spawnTtyd({
+      port: ttydPort,
+      sessionName,
+      cwd,
+      customIndexPath: customIndexPath ?? undefined,
+    });
 
-    // Add custom index if it exists
-    if (customIndexPath) {
-      ttydArgs.push('-I', customIndexPath);
-    }
-
-    ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-    const pid = spawnDetached('ttyd', ttydArgs, cwd);
-    return pid;
+    return ttydProcess?.pid ?? null;
   } catch (err) {
     console.error(`Failed to create tmux session ${sessionName}:`, (err as Error).message);
     // Cleanup any partial session
@@ -448,23 +438,16 @@ function spawnWorktreeBuilder(
     execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
     execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
 
-    // Start ttyd
+    // Start ttyd connecting to the tmux session
     const customIndexPath = findTemplatePath('ttyd-index.html');
-    const ttydArgs = [
-      '-W',
-      '-p', String(builderPort),
-      '-t', 'theme={"background":"#000000"}',
-      '-t', 'fontSize=14',
-      '-t', 'rightClickSelectsWord=true',
-    ];
+    const ttydProcess = spawnTtyd({
+      port: builderPort,
+      sessionName,
+      cwd: worktreePath,
+      customIndexPath: customIndexPath ?? undefined,
+    });
 
-    if (customIndexPath) {
-      ttydArgs.push('-I', customIndexPath);
-    }
-
-    ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-    const pid = spawnDetached('ttyd', ttydArgs, worktreePath);
+    const pid = ttydProcess?.pid ?? null;
 
     if (!pid) {
       // Cleanup on failure

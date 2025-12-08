@@ -14,7 +14,7 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Builder, Config, BuilderType } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, spawnDetached, commandExists, findAvailablePort } from '../utils/shell.js';
+import { run, spawnDetached, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
 
 /**
@@ -277,25 +277,19 @@ exec ${baseCmd} "$(cat '${promptFile}')"
   // Start ttyd connecting to the tmux session
   logger.info('Starting builder terminal...');
   const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-  const ttydArgs = [
-    '-W',
-    '-p', String(port),
-    '-t', 'theme={"background":"#000000"}',
-    '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-  ];
-
-  if (existsSync(customIndexPath)) {
-    ttydArgs.push('-I', customIndexPath);
+  const hasCustomIndex = existsSync(customIndexPath);
+  if (hasCustomIndex) {
     logger.info('Using custom terminal with file click support');
   }
 
-  ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-  const ttydProcess = spawnDetached('ttyd', ttydArgs, {
+  const ttydProcess = spawnTtyd({
+    port,
+    sessionName,
     cwd: worktreePath,
+    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
   });
 
-  if (!ttydProcess.pid) {
+  if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process for builder');
   }
 
@@ -327,27 +321,19 @@ async function startShellSession(
   await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
   await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
-  // Start ttyd
+  // Start ttyd connecting to the tmux session
   logger.info('Starting shell terminal...');
   const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-  const ttydArgs = [
-    '-W',
-    '-p', String(port),
-    '-t', 'theme={"background":"#000000"}',
-    '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-  ];
+  const hasCustomIndex = existsSync(customIndexPath);
 
-  if (existsSync(customIndexPath)) {
-    ttydArgs.push('-I', customIndexPath);
-  }
-
-  ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-  const ttydProcess = spawnDetached('ttyd', ttydArgs, {
+  const ttydProcess = spawnTtyd({
+    port,
+    sessionName,
     cwd: config.projectRoot,
+    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
   });
 
-  if (!ttydProcess.pid) {
+  if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process for shell');
   }
 
@@ -658,28 +644,22 @@ exec ${commands.builder}
   await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
   await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
-  // Start ttyd
+  // Start ttyd connecting to the tmux session
   logger.info('Starting worktree terminal...');
   const customIndexPath = resolve(config.codevDir, 'templates', 'ttyd-index.html');
-  const ttydArgs = [
-    '-W',
-    '-p', String(port),
-    '-t', 'theme={"background":"#000000"}',
-    '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-  ];
-
-  if (existsSync(customIndexPath)) {
-    ttydArgs.push('-I', customIndexPath);
+  const hasCustomIndex = existsSync(customIndexPath);
+  if (hasCustomIndex) {
     logger.info('Using custom terminal with file click support');
   }
 
-  ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-  const ttydProcess = spawnDetached('ttyd', ttydArgs, {
+  const ttydProcess = spawnTtyd({
+    port,
+    sessionName,
     cwd: worktreePath,
+    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
   });
 
-  if (!ttydProcess.pid) {
+  if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process for worktree');
   }
 
