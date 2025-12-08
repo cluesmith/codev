@@ -106,6 +106,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Handle file reload (GET /file)
+  if (req.method === 'GET' && req.url?.startsWith('/file')) {
+    try {
+      // Re-read file from disk
+      const fileContent = fs.readFileSync(fullFilePath, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(fileContent);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Error reading file: ' + (err as Error).message);
+    }
+    return;
+  }
+
   // Handle file save
   if (req.method === 'POST' && req.url === '/save') {
     let body = '';

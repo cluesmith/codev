@@ -306,7 +306,7 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007", "0037"]
     tags: [ui, dashboard, cleanup]
-    notes: "TICK protocol. Builder spawned 2025-12-07."
+    notes: "TICK protocol. PR 60 merged but incomplete - missing: Open in New Tab, tooltips, Reload button, remove Refresh/Stop All. Builder respawned 2025-12-08."
 
   - id: "0006"
     title: "Tutorial Mode"

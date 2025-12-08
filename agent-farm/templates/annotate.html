@@ -204,6 +204,7 @@
     <h1 class="path">{{FILE_PATH}}</h1>
     <div class="subtitle">Click on a line number to leave an annotation.</div>
     <div class="actions">
+      <button id="reloadBtn" class="btn btn-secondary" onclick="reloadFile()" title="Reload from disk" aria-label="Reload file from disk">↻</button>
       <button id="editBtn" class="btn btn-primary" onclick="toggleEditMode()">Switch to Editing</button>
       <button id="saveBtn" class="btn btn-success" onclick="saveEdit()" style="display: none;">Save</button>
       <button id="cancelBtn" class="btn btn-secondary" onclick="cancelEdit()" style="display: none;">Cancel</button>
@@ -703,6 +704,42 @@
         }
       } catch (err) {
         console.error('Failed to save:', err.message);
+      }
+    }
+
+    // Reload file content from disk
+    async function reloadFile() {
+      // Warn if there are unsaved changes
+      if (hasUnsavedChanges) {
+        if (!confirm('You have unsaved changes. Reload from disk and lose changes?')) {
+          return;
+        }
+      }
+
+      try {
+        // The annotation server serves a single file, so just GET /file
+        const response = await fetch('/file');
+        if (!response.ok) {
+          throw new Error(await response.text() || 'Failed to load file');
+        }
+
+        const content = await response.text();
+        currentContent = content;
+        originalContent = content;
+        fileLines = content.split('\n');
+        hasUnsavedChanges = false;
+        updateUnsavedIndicator();
+
+        // Update editor if in edit mode
+        if (editMode) {
+          document.getElementById('editor').value = content;
+        }
+
+        renderFile();
+        updateAnnotationsList();
+        showNotification('Reloaded from disk');
+      } catch (err) {
+        showNotification('Error reloading file: ' + err.message, 'error');
       }
     }
 

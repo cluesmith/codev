@@ -426,6 +426,27 @@
       white-space: nowrap;
     }
 
+    .overflow-menu-item .overflow-open-btn {
+      opacity: 0.4;
+      cursor: pointer;
+      padding: 2px 6px;
+      font-size: 12px;
+      border-radius: 3px;
+      color: var(--text-secondary);
+    }
+
+    .overflow-menu-item:hover .overflow-open-btn {
+      opacity: 0.7;
+    }
+
+    .overflow-menu-item .overflow-open-btn:hover,
+    .overflow-menu-item .overflow-open-btn:focus {
+      opacity: 1;
+      background: rgba(59, 130, 246, 0.2);
+      color: var(--accent);
+      outline: none;
+    }
+
     /* Tab content */
     .tab-content {
       flex: 1;
@@ -620,8 +641,14 @@
       font-size: 13px;
     }
 
-    .context-menu-item:hover {
+    .context-menu-item:hover,
+    .context-menu-item:focus {
       background: var(--tab-hover);
+      outline: none;
+    }
+
+    .context-menu-item:focus {
+      box-shadow: inset 2px 0 0 var(--accent);
     }
 
     .context-menu-item.danger {
@@ -632,10 +659,6 @@
 <body>
   <header class="header">
     <h1>Agent Farm - {{PROJECT_NAME}}</h1>
-    <div class="header-actions">
-      <button class="btn" onclick="refresh()">Refresh</button>
-      <button class="btn btn-danger" onclick="stopAll()">Stop All</button>
-    </div>
   </header>
 
   <main class="main">
@@ -713,10 +736,19 @@
   </div>
 
   <!-- Context menu -->
-  <div class="context-menu hidden" id="context-menu">
-    <div class="context-menu-item" onclick="closeActiveTab()">Close</div>
-    <div class="context-menu-item" onclick="closeOtherTabs()">Close Others</div>
-    <div class="context-menu-item danger" onclick="closeAllTabs()">Close All</div>
+  <div class="context-menu hidden" id="context-menu" role="menu">
+    <div class="context-menu-item" role="menuitem" tabindex="0"
+         onclick="openContextTab()"
+         onkeydown="handleContextMenuKeydown(event, 'openContextTab')">Open in New Tab</div>
+    <div class="context-menu-item" role="menuitem" tabindex="-1"
+         onclick="closeActiveTab()"
+         onkeydown="handleContextMenuKeydown(event, 'closeActiveTab')">Close</div>
+    <div class="context-menu-item" role="menuitem" tabindex="-1"
+         onclick="closeOtherTabs()"
+         onkeydown="handleContextMenuKeydown(event, 'closeOtherTabs')">Close Others</div>
+    <div class="context-menu-item danger" role="menuitem" tabindex="-1"
+         onclick="closeAllTabs()"
+         onkeydown="handleContextMenuKeydown(event, 'closeAllTabs')">Close All</div>
   </div>
 
   <!-- Toast container -->
@@ -948,12 +980,14 @@
         const isActive = tab.id === activeTabId;
         const icon = getTabIcon(tab.type);
         const statusDot = tab.type === 'builder' ? getStatusDot(tab.status) : '';
+        const tooltip = escapeHtml(getTabTooltip(tab));
 
         return `
           <div class="tab ${isActive ? 'active' : ''}"
                onclick="selectTab('${tab.id}')"
                oncontextmenu="showContextMenu(event, '${tab.id}')"
-               data-tab-id="${tab.id}">
+               data-tab-id="${tab.id}"
+               title="${tooltip}">
             <span class="icon">${icon}</span>
             <span class="name">${tab.name}</span>
             ${statusDot}
@@ -1148,6 +1182,13 @@
                onkeydown="handleOverflowMenuKeydown(event, '${tab.id}')">
             <span class="icon">${icon}</span>
             <span class="name">${tab.name}</span>
+            <span class="overflow-open-btn"
+                  onclick="event.stopPropagation(); openInNewTab('${tab.id}'); hideOverflowMenu();"
+                  title="Open in new tab (press 'o')"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Open ${tab.name} in new tab"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openInNewTab('${tab.id}');hideOverflowMenu();}">↗</span>
           </div>
         `;
       }).join('');
@@ -1210,6 +1251,13 @@
         case ' ':
           event.preventDefault();
           selectTabFromMenu(tabId);
+          break;
+        case 'o':
+        case 'O':
+          // 'o' opens in new tab
+          event.preventDefault();
+          openInNewTab(tabId);
+          hideOverflowMenu();
           break;
         case 'Escape':
           event.preventDefault();
@@ -1305,6 +1353,10 @@
       menu.style.top = event.clientY + 'px';
       menu.classList.remove('hidden');
 
+      // Focus first item for keyboard navigation
+      const firstItem = menu.querySelector('.context-menu-item');
+      if (firstItem) firstItem.focus();
+
       // Close on click outside
       setTimeout(() => {
         document.addEventListener('click', hideContextMenu, { once: true });
@@ -1314,6 +1366,39 @@
     function hideContextMenu() {
       document.getElementById('context-menu').classList.add('hidden');
       contextMenuTabId = null;
+    }
+
+    // Handle keyboard navigation in context menu
+    function handleContextMenuKeydown(event, action) {
+      const menu = document.getElementById('context-menu');
+      const items = Array.from(menu.querySelectorAll('.context-menu-item'));
+      const currentIndex = items.findIndex(item => item === document.activeElement);
+
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
+          items[nextIndex].focus();
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+          items[prevIndex].focus();
+          break;
+        case 'Enter':
+        case ' ':
+          event.preventDefault();
+          window[action]();  // Call the action function
+          break;
+        case 'Escape':
+          event.preventDefault();
+          hideContextMenu();
+          break;
+        case 'Tab':
+          // Allow Tab to close menu
+          hideContextMenu();
+          break;
+      }
     }
 
     function closeActiveTab() {
@@ -1334,6 +1419,64 @@
     function closeAllTabs() {
       tabs.forEach(t => doCloseTab(t.id));
       hideContextMenu();
+    }
+
+    // Open tab content in a new browser tab
+    function openInNewTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+
+      let url;
+      if (tab.type === 'file') {
+        // File tabs use the port stored on the tab itself
+        if (!tab.port) {
+          showToast('Annotation viewer not ready', 'error');
+          return;
+        }
+        url = `http://localhost:${tab.port}`;
+      } else {
+        // Builder or shell - direct port access
+        if (!tab.port) {
+          showToast('Tab not ready yet', 'error');
+          return;
+        }
+        url = `http://localhost:${tab.port}`;
+      }
+
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    // Open tab from context menu
+    function openContextTab() {
+      if (contextMenuTabId) {
+        openInNewTab(contextMenuTabId);
+      }
+      hideContextMenu();
+    }
+
+    // Generate tooltip text for a tab
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function getTabTooltip(tab) {
+      const lines = [tab.name];
+
+      if (tab.type === 'builder') {
+        if (tab.port) lines.push(`Port: ${tab.port}`);
+        lines.push(`Status: ${tab.status || 'unknown'}`);
+        if (tab.projectId) lines.push(`Worktree: .builders/${tab.projectId}`);
+      } else if (tab.type === 'file') {
+        if (tab.path) lines.push(`Path: ${tab.path}`);
+        if (tab.port) lines.push(`Port: ${tab.port}`);
+      } else if (tab.type === 'shell') {
+        if (tab.port) lines.push(`Port: ${tab.port}`);
+      }
+
+      return lines.join('\n');
     }
 
     // File dialog
@@ -1467,21 +1610,6 @@
         updateStatusBar();
       } catch (err) {
         console.error('Refresh error:', err);
-      }
-    }
-
-    // Stop all
-    async function stopAll() {
-      if (!confirm('Stop all agent farm processes?')) return;
-
-      try {
-        const response = await fetch('/api/stop', { method: 'POST' });
-        if (response.ok) {
-          showToast('All processes stopped', 'success');
-          setTimeout(() => window.location.reload(), 500);
-        }
-      } catch (err) {
-        showToast('Failed to stop: ' + err.message, 'error');
       }
     }
 
