@@ -57,7 +57,30 @@ SPIDER works in phases. The Builder is responsible for **IDER** (the Architect h
      ```
    - Address concerns raised before proceeding to Review
 
-4. **Review** - Document lessons learned, create PR
+4. **Review** - Document lessons learned, run 3-way review, create PR
+   - Write the review document (`codev/reviews/XXXX-spec-name.md`)
+   - **Run 3-way parallel review focused on IMPLEMENTATION quality**:
+     ```bash
+     QUERY="Review Spec XXXX implementation. Branch: builder/XXXX-...
+
+     Focus on:
+     - Implementation quality and correctness
+     - Test coverage and quality
+     - Adherence to spec requirements
+     - Code patterns and best practices
+     - Edge cases and error handling
+
+     Give verdict: APPROVE or REQUEST_CHANGES."
+
+     ./codev/bin/consult gemini "$QUERY" &
+     ./codev/bin/consult codex "$QUERY" &
+     ./codev/bin/consult claude "$QUERY" &
+     wait
+     ```
+   - Address any REQUEST_CHANGES feedback before creating the PR
+   - Include the 3-way review summary in your PR description
+
+   **Note**: The Architect will run a separate 3-way review focused on **integration** concerns.
 
 **Commit at the end of each phase** with a message indicating the phase:
 ```bash

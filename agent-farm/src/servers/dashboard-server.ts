@@ -34,18 +34,22 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Configuration - new port scheme (42xx range)
-const CONFIG = {
-  dashboardPort: 4200,
-  architectPort: 4201,
-  builderPortStart: 4210,
-  utilPortStart: 4230,
-  annotatePortStart: 4250,
-  maxTabs: 20, // DoS protection: max concurrent tabs
-};
+// Default dashboard port
+const DEFAULT_DASHBOARD_PORT = 4200;
 
 // Parse arguments (override default port if provided)
-const port = parseInt(process.argv[2] || String(CONFIG.dashboardPort), 10);
+const port = parseInt(process.argv[2] || String(DEFAULT_DASHBOARD_PORT), 10);
+
+// Configuration - ports are relative to the dashboard port
+// This ensures multi-project support (e.g., dashboard on 4300 uses 4350 for annotations)
+const CONFIG = {
+  dashboardPort: port,
+  architectPort: port + 1,
+  builderPortStart: port + 10,
+  utilPortStart: port + 30,
+  annotatePortStart: port + 50,
+  maxTabs: 20, // DoS protection: max concurrent tabs
+};
 
 // Find project root by looking for .agent-farm directory
 function findProjectRoot(): string {

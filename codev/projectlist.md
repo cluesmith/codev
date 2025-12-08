@@ -295,7 +295,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0037"
     title: "Tab Bar UX Improvements"
     summary: "Improve tab bar active state visibility, close button contrast, and add overflow indicator"
-    status: committed
+    status: integrated
     priority: medium
     release: null
     files:
@@ -304,7 +304,7 @@ Projects currently in development (conceived through committed), sorted by prior
       review: codev/reviews/0037-tab-bar-ux.md
     dependencies: ["0007"]
     tags: [ui, dashboard, ux]
-    notes: "TICK protocol. 3-way reviewed (2-1 APPROVE). PR 58 merged 2025-12-07. Awaiting owner validation."
+    notes: "TICK protocol. PR 58 merged 2025-12-07. Close button improved 2025-12-07."
 
 # Low Priority
   - id: "0036"
@@ -317,9 +317,9 @@ Projects currently in development (conceived through committed), sorted by prior
       spec: codev/specs/0036-af-open-in-tab.md
       plan: null
       review: null
-    dependencies: ["0007"]
+    dependencies: ["0007", "0037"]
     tags: [ui, dashboard, cleanup]
-    notes: "TICK protocol. 3-way reviewed, expanded scope: tooltips, reload button, button cleanup."
+    notes: "TICK protocol. 3-way reviewed (REQUEST_CHANGES): fix state.annotationPort→tab.port, loadFile() impl, keyboard a11y."
 
   - id: "0006"
     title: "Tutorial Mode"

@@ -214,12 +214,31 @@ When a Builder reports `blocked`:
 
 ### Reviewing Builder PRs
 
-Before approving a Builder's PR, run a **3-way parallel review**:
+Both Builder and Architect run 3-way reviews, but with **different focus**:
+
+| Role | Focus |
+|------|-------|
+| Builder | Implementation quality, tests, spec adherence |
+| Architect | **Integration aspects** - how changes fit into the broader system |
+
+**Step 1: Verify Builder completed their review**
+1. Check PR description for builder's 3-way review summary
+2. Confirm any REQUEST_CHANGES from their review were addressed
+3. All SPIDER artifacts are present (especially the review document)
+
+**Step 2: Run Architect's 3-way integration review**
 
 ```bash
-QUERY="Review PR 35 (Spec 0034). Branch: builder/0034-...
-Verify: code quality, tests, adherence to spec.
-Give verdict: APPROVE or REQUEST_CHANGES."
+QUERY="Review PR 35 (Spec 0034) for INTEGRATION concerns. Branch: builder/0034-...
+
+Focus on:
+- How changes integrate with existing codebase
+- Impact on other modules/features
+- Architectural consistency
+- Potential side effects or regressions
+- API contract changes
+
+Give verdict: APPROVE or REQUEST_CHANGES with specific integration feedback."
 
 ./codev/bin/consult gemini "$QUERY" &
 ./codev/bin/consult codex "$QUERY" &
@@ -227,39 +246,23 @@ Give verdict: APPROVE or REQUEST_CHANGES."
 wait
 ```
 
-Then verify:
-1. Code quality and test coverage
-2. Matches the spec and plan
-3. **Adheres to the protocol** - All SPIDER artifacts are present (especially the review document)
-4. **Builder ran consultations** - Confirm the builder consulted Gemini/Codex during the Evaluate phase
-5. Integration tests pass
-
-### PR Review Workflow
-
-**Use GitHub PR comments for reviews, not direct pasting.** This approach:
-- Avoids tmux paste buffer issues with large messages
-- Documents feedback in the PR for posterity
-- Follows standard GitHub workflow
+**Step 3: Synthesize and communicate**
 
 ```bash
-# 1. Run 3-way consultation (see above)
+# Post integration review findings as PR comment
+gh pr comment 35 --body "## Architect Integration Review (3-Way)
 
-# 2. Synthesize findings into PR comment
-gh pr comment 35 --body "## 3-Way Review: Claude + Gemini + Codex
+**Verdict: [APPROVE/REQUEST_CHANGES]**
 
-**Verdict: REQUEST_CHANGES** (consensus)
-
-### High Priority Issues
-1. [High] Issue description...
-
-### Medium Priority Issues
-2. [Medium] Issue...
+### Integration Concerns
+- [Issue 1]
+- [Issue 2]
 
 ---
-🤖 Generated with 3-way AI consultation"
+🏗️ Architect integration review"
 
-# 3. Notify builder with short message
-af send 0034 "Check PR 35 comments and address feedback. Run: gh pr view 35 --comments"
+# Notify builder with short message
+af send 0034 "Check PR 35 comments"
 ```
 
 **Note:** Large messages via `af send` may have issues with tmux paste buffers. Keep direct messages short; put detailed feedback in PR comments.
