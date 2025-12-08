@@ -151,19 +151,6 @@ Projects currently in development (conceived through committed), sorted by prior
     tags: [cli, agents, communication]
     notes: "Merged PR 31. Uses tmux load-buffer + paste-buffer. Structured message format. Consulted GPT-5 and Gemini Pro."
 
-  - id: "0021"
-    title: "Multi-CLI Builder Support"
-    summary: "Support spawning builders with Gemini CLI or Codex CLI in addition to Claude Code"
-    status: specified
-    priority: high
-    release: null
-    files:
-      spec: codev/specs/0021-multi-cli-builder-support.md
-      plan: null
-      review: null
-    dependencies: ["0005"]
-    tags: [cli, agents, portability]
-    notes: "CLI Adapter pattern. CRITICAL: Must validate agentic capabilities - many CLIs are text-only. Consider adding Aider. Consulted GPT-5 and Gemini Pro."
 
   - id: "0022"
     title: "Consult Tool (Stateless)"
@@ -310,16 +297,16 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0036"
     title: "Tab Bar Actions & Tooltips"
     summary: "Add open-in-new-tab, reload, hover tooltips; remove unused Refresh/Stop All buttons"
-    status: spec-draft
+    status: implementing
     priority: low
     release: null
     files:
       spec: codev/specs/0036-af-open-in-tab.md
-      plan: null
+      plan: codev/plans/0036-af-open-in-tab.md
       review: null
     dependencies: ["0007", "0037"]
     tags: [ui, dashboard, cleanup]
-    notes: "TICK protocol. 3-way reviewed (REQUEST_CHANGES): fix state.annotationPort→tab.port, loadFile() impl, keyboard a11y."
+    notes: "TICK protocol. Builder spawned 2025-12-07."
 
   - id: "0006"
     title: "Tutorial Mode"
@@ -694,6 +681,20 @@ Projects that are paused or canceled.
     tags: [architecture, protocols, agents]
     notes: "Superseded by 0028, which was then superseded by 0035 (MAINTAIN protocol)."
 
+  - id: "0021"
+    title: "Multi-CLI Builder Support"
+    summary: "Support spawning builders with Gemini CLI or Codex CLI in addition to Claude Code"
+    status: on-hold
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0021-multi-cli-builder-support.md
+      plan: null
+      review: null
+    dependencies: ["0005"]
+    tags: [cli, agents, portability]
+    notes: "CLI Adapter pattern. On hold - other CLIs lack agentic capabilities needed for builder role."
+
   - id: "0028"
     title: "Librarian Role"
     summary: "Replace architecture-documenter agent with a broader Librarian role that owns all documentation stewardship"
@@ -711,9 +712,23 @@ Projects that are paused or canceled.
 
 ---
 
+  - id: "0038"
+    title: "Consult PR Mode"
+    summary: "Add pr subcommand to consult tool for optimized PR reviews with pre-fetched data and verdict extraction"
+    status: spec-draft
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0038-consult-pr-mode.md
+      plan: null
+      review: null
+    dependencies: ["0022"]
+    tags: [cli, consultation, performance]
+    notes: "TICK protocol. Pre-fetch PR diff/comments/specs to tmp files (6 commands vs 19+), extract verdict from output. 30% faster than current approach (138s vs 200s+)."
+
 ## Next Available Number
 
-**0038** - Reserve this number for your next project
+**0039** - Reserve this number for your next project
 
 ---
 
