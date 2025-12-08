@@ -232,16 +232,15 @@ async function startBuilderSession(
 
   if (roleContent) {
     // Write role to a file and use $(cat) to avoid shell escaping issues
-    // Pass the initial prompt via stdin (file redirection) instead of command argument
     const roleFile = resolve(worktreePath, '.builder-role.md');
     writeFileSync(roleFile, roleContent);
     logger.info(`Loaded role (${roleSource})`);
     scriptContent = `#!/bin/bash
-exec ${baseCmd} --append-system-prompt "$(cat '${roleFile}')" < '${promptFile}'
+exec ${baseCmd} --append-system-prompt "$(cat '${roleFile}')" "$(cat '${promptFile}')"
 `;
   } else {
     scriptContent = `#!/bin/bash
-exec ${baseCmd} < '${promptFile}'
+exec ${baseCmd} "$(cat '${promptFile}')"
 `;
   }
 
