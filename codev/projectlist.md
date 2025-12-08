@@ -311,7 +311,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0036"
     title: "Tab Bar Actions & Tooltips"
     summary: "Add open-in-new-tab, reload, hover tooltips; remove unused Refresh/Stop All buttons"
-    status: implemented
+    status: integrated
     priority: low
     release: null
     files:
@@ -320,7 +320,7 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007", "0037"]
     tags: [ui, dashboard, cleanup]
-    notes: "TICK protocol. Addressed 3-way review feedback: use tab.port, implemented /file endpoint for reload, added keyboard a11y."
+    notes: "TICK protocol. PR 62 merged 2025-12-08."
 
   - id: "0006"
     title: "Tutorial Mode"
