@@ -786,7 +786,7 @@ Projects that are paused or canceled.
   - id: "0043"
     title: "Codex Reliability for Codev"
     summary: "Get Codex CLI running consistently and rapidly with codev consultations"
-    status: planned
+    status: implementing
     priority: high
     release: null
     files:
