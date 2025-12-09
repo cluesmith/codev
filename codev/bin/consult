@@ -1,0 +1,7 @@
+#!/bin/bash
+# Shim: delegates to TypeScript implementation in @cluesmith/codev
+#
+# The Python implementation was removed in Spec 0039 TICK-001.
+# This shim ensures backwards compatibility for existing workflows.
+
+exec npx @cluesmith/codev consult "$@"
