@@ -1,7 +1,0 @@
-{
-  "shell": {
-    "architect": "claude",
-    "builder": "claude",
-    "shell": "bash"
-  }
-}

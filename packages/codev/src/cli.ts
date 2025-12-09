@@ -9,6 +9,7 @@ import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
+import { eject } from './commands/eject.js';
 import { tower } from './commands/tower.js';
 import { consult } from './commands/consult/index.js';
 import { runAgentFarm } from './agent-farm/cli.js';
@@ -71,6 +72,21 @@ program
   .action(async (options) => {
     try {
       await update({ dryRun: options.dryRun, force: options.force });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Eject command
+program
+  .command('eject [path]')
+  .description('Copy embedded skeleton files locally for customization')
+  .option('-l, --list', 'List available files to eject')
+  .option('-f, --force', 'Overwrite existing files')
+  .action(async (targetPath, options) => {
+    try {
+      await eject(targetPath, { list: options.list, force: options.force });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
