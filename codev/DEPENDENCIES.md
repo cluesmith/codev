@@ -130,26 +130,6 @@ gh auth login
 gh auth status  # Should show "Logged in to github.com"
 ```
 
-### Python 3
-
-| Requirement | Value |
-|-------------|-------|
-| Minimum Version | 3.10 |
-| Purpose | Consult tool, utility scripts |
-
-**Installation:**
-
-```bash
-# macOS
-brew install python
-
-# Ubuntu/Debian
-sudo apt install python3 python3-pip
-
-# Verify
-python3 --version  # Should show 3.10.x or higher
-```
-
 ---
 
 ## AI CLI Dependencies (At Least One Required)
@@ -206,30 +186,6 @@ codex --version
 
 ---
 
-## Python Packages (Optional)
-
-These are optional but enable additional features.
-
-### typer
-
-| Requirement | Value |
-|-------------|-------|
-| Purpose | CLI framework for the consult tool |
-
-**Installation:**
-
-```bash
-pip install typer
-
-# Or with uv
-uv pip install typer
-
-# Verify
-python3 -c "import typer; print('typer installed')"
-```
-
----
-
 ## Version Requirements Summary
 
 | Dependency | Minimum Version | Required? |
@@ -239,38 +195,9 @@ python3 -c "import typer; print('typer installed')"
 | ttyd | 1.7.0 | Yes |
 | git | 2.5.0 | Yes |
 | gh | latest | Yes |
-| Python 3 | 3.10 | Yes |
 | Claude Code | latest | At least one AI CLI |
 | Gemini CLI | latest | At least one AI CLI |
 | Codex CLI | latest | At least one AI CLI |
-| typer | latest | No (for consult tool) |
-
----
-
-## NPM Dependencies (Auto-installed)
-
-These are installed automatically via `npm install` in the `agent-farm/` directory:
-
-### better-sqlite3
-
-| Requirement | Value |
-|-------------|-------|
-| Purpose | SQLite database for runtime state (replaces JSON files) |
-| Note | Requires native compilation; pre-built binaries available |
-
-If you see errors about `better-sqlite3` failing to load:
-
-```bash
-# Rebuild native modules
-cd agent-farm && npm rebuild better-sqlite3
-
-# Or build from source
-npm install better-sqlite3 --build-from-source
-```
-
-**Note**: The native compilation requires build tools:
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Linux: `build-essential` package (`sudo apt install build-essential`)
 
 ---
 
@@ -282,7 +209,7 @@ All dependencies are available via Homebrew:
 
 ```bash
 # Install all core dependencies at once
-brew install node tmux ttyd gh python
+brew install node tmux ttyd gh
 
 # Git is included with Xcode command line tools
 xcode-select --install
@@ -294,7 +221,7 @@ Most dependencies are available via apt, except ttyd which must be built from so
 
 ```bash
 # Core dependencies
-sudo apt install nodejs npm tmux git python3 python3-pip
+sudo apt install nodejs npm tmux git
 
 # gh requires adding GitHub's apt repository (see above)
 

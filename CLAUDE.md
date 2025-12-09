@@ -415,17 +415,17 @@ The `consult` CLI provides a unified interface for single-agent consultation via
 
 ```
 # ✅ CORRECT - Two separate Bash tool calls in one message
-[Bash tool call 1]: ./codev/bin/consult --model gemini spec 39
-[Bash tool call 2]: ./codev/bin/consult --model codex spec 39
+[Bash tool call 1]: codev consult --model gemini spec 39
+[Bash tool call 2]: codev consult --model codex spec 39
 
 # ❌ WRONG - Sequential tool calls in separate messages
-[Message 1, Bash]: ./codev/bin/consult --model gemini spec 39
-[Message 2, Bash]: ./codev/bin/consult --model codex spec 39
+[Message 1, Bash]: codev consult --model gemini spec 39
+[Message 2, Bash]: codev consult --model codex spec 39
 ```
 
 ### Prerequisites
 
-- **Python 3**: With typer installed (`pip install typer`)
+- **@cluesmith/codev**: `npm install -g @cluesmith/codev`
 - **gemini-cli**: For Gemini consultations (see https://github.com/google-gemini/gemini-cli)
 - **codex**: For Codex consultations (`npm install -g @openai/codex`)
 - **claude**: For Claude consultations (`npm install -g @anthropic-ai/claude-code`)
@@ -434,18 +434,21 @@ The `consult` CLI provides a unified interface for single-agent consultation via
 
 ```bash
 # Subcommand-based interface (preferred)
-./codev/bin/consult --model gemini pr 33        # Review a PR
-./codev/bin/consult --model codex spec 39       # Review a spec
-./codev/bin/consult --model claude plan 39      # Review a plan
-./codev/bin/consult --model gemini general "Review this design"  # General query
+codev consult --model gemini pr 33        # Review a PR
+codev consult --model codex spec 39       # Review a spec
+codev consult --model claude plan 39      # Review a plan
+codev consult --model gemini general "Review this design"  # General query
 
 # Model aliases work too
-./codev/bin/consult --model pro spec 39    # alias for gemini
-./codev/bin/consult --model gpt pr 33      # alias for codex
-./codev/bin/consult --model opus plan 39   # alias for claude
+codev consult --model pro spec 39    # alias for gemini
+codev consult --model gpt pr 33      # alias for codex
+codev consult --model opus plan 39   # alias for claude
+
+# Shorthand (consult is aliased in the npm package)
+consult --model gemini spec 39
 
 # Dry run (print command without executing)
-./codev/bin/consult --model gemini spec 39 --dry-run
+codev consult --model gemini spec 39 --dry-run
 ```
 
 ### Parallel Consultation (3-Way Reviews)
@@ -454,16 +457,16 @@ For 3-way reviews, run consultations in parallel using separate Bash tool calls:
 
 ```bash
 # All three in parallel (separate Bash tool calls in same message)
-./codev/bin/consult --model gemini spec 39
-./codev/bin/consult --model codex spec 39
-./codev/bin/consult --model claude spec 39
+codev consult --model gemini spec 39
+codev consult --model codex spec 39
+codev consult --model claude spec 39
 ```
 
 Or use background processes in a single shell:
 ```bash
-./codev/bin/consult --model gemini spec 39 &
-./codev/bin/consult --model codex spec 39 &
-./codev/bin/consult --model claude spec 39 &
+codev consult --model gemini spec 39 &
+codev consult --model codex spec 39 &
+codev consult --model claude spec 39 &
 wait
 ```
 
@@ -540,7 +543,8 @@ The consultant role (`codev/roles/consultant.md`) defines a collaborative partne
 
 ### Key Files
 
-- `codev/bin/consult` - Python CLI script
+- `packages/codev/src/commands/consult/index.ts` - TypeScript implementation
+- `codev/bin/consult` - Backwards-compatible shim (delegates to TypeScript)
 - `codev/roles/consultant.md` - Role definition
 - `.consult/history.log` - Query history with timing (gitignored)
 
