@@ -524,7 +524,7 @@ wait
 2. For subcommands (pr, spec, plan), auto-locates the file (e.g., `codev/specs/0039-*.md`)
 3. Invokes the appropriate CLI with autonomous mode enabled:
    - gemini: `GEMINI_SYSTEM_MD=<temp_file> gemini --yolo <query>`
-   - codex: `CODEX_SYSTEM_MESSAGE=<role> codex exec --full-auto <query>`
+   - codex: `codex exec -c experimental_instructions_file=<temp_file> -c model_reasoning_effort=low --full-auto <query>`
    - claude: `claude --print -p <role + query> --dangerously-skip-permissions`
 4. Passes through stdout/stderr and exit codes
 5. Logs queries with timing to `.consult/history.log`

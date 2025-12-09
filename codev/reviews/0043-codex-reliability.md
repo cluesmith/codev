@@ -15,7 +15,7 @@ Successfully replaced the undocumented `CODEX_SYSTEM_MESSAGE` environment variab
 | Criterion | Status | Evidence | Notes |
 |-----------|--------|----------|-------|
 | CODEX_SYSTEM_MESSAGE replaced with experimental_instructions_file | ✅ | `codev/bin/consult` changes | All 3 codex invocation sites updated |
-| Consultant prompt reviewed and optimized | ✅ | `codev/roles/consultant.md` | Removed redundant role table, added efficiency focus |
+| Consultant prompt reviewed and optimized | ✅ | Analysis complete | No changes needed - prompt already concise and model-agnostic (shared across Gemini/Codex/Claude) |
 | Performance baseline documented | ✅ | Spec updated with results | 163.7s -> 118.7s (-27%) |
 | No regressions in consultation quality | ✅ | PR 33 review comparison | After review found issue baseline missed |
 
@@ -57,7 +57,7 @@ The "after" implementation actually caught an issue that the baseline review mis
 
 ### Files Modified
 1. `codev/bin/consult` - Core implementation changes (3 locations)
-2. `codev/roles/consultant.md` - Prompt optimization
+2. `AGENTS.md` / `CLAUDE.md` - Updated Consult Tool documentation
 3. `codev/specs/0043-codex-reliability.md` - Added results documentation
 4. `tests/e2e/consult.bats` - Added Codex config tests
 5. `tests/e2e/helpers.bash` - Added skip helpers for CLI availability
