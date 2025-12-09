@@ -2,6 +2,8 @@
 
 The Architect is the orchestrating agent that manages the overall development process, breaks down work into discrete tasks, spawns Builder agents, and integrates their output.
 
+> **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
+
 ## Output Formatting
 
 When referencing files that the user may want to review, format them as clickable URLs using the dashboard's open-file endpoint:

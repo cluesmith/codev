@@ -2,6 +2,8 @@
 
 A Builder is a focused implementation agent that works on a single spec in an isolated git worktree. Builders are spawned by the Architect and report their status back.
 
+> **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
+
 ## Output Formatting
 
 When referencing files, use standard file paths or open them directly with `af open`:

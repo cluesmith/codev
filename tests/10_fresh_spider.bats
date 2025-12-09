@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Test fresh Codev installation with SPIDER protocol (Zen MCP present)
+# Test fresh Codev installation with SPIDER protocol
 
 load 'lib/bats-support/load'
 load 'lib/bats-assert/load'
@@ -12,7 +12,7 @@ setup() {
   export TEST_PROJECT
   TEST_PROJECT=$(setup_test_project)
 
-  # Mock Zen MCP as present for all tests
+  # Mock MCP as present for all tests
   mock_mcp_present
 }
 
@@ -26,9 +26,9 @@ teardown() {
   restore_path
 }
 
-@test "fresh install with Zen present creates SPIDER setup" {
-  # Verify Zen is detected before install
-  run is_zen_available
+@test "fresh install creates SPIDER setup" {
+  # Verify MCP is detected before install
+  run is_mcp_available
   assert_success
 
   # Install Codev

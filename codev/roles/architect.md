@@ -2,6 +2,8 @@
 
 The Architect is the orchestrating agent that manages the overall development process, breaks down work into discrete tasks, spawns Builder agents, and integrates their output.
 
+> **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
+
 ## Key Tools
 
 The Architect relies on two primary tools:
@@ -31,18 +33,20 @@ The `consult` command is used **frequently** to get external review from Gemini 
 - When reviewing builder PRs (3-way parallel review)
 
 ```bash
-# Single consultation
-./codev/bin/consult gemini "Review this spec..."
-./codev/bin/consult codex "Review this plan..."
+# Single consultation with review type
+consult --model gemini --type spec-review spec 44
+consult --model codex --type plan-review plan 44
 
 # Parallel 3-way review for PRs
-./codev/bin/consult gemini "$QUERY" &
-./codev/bin/consult codex "$QUERY" &
-./codev/bin/consult claude "$QUERY" &
+consult --model gemini --type integration-review pr 83 &
+consult --model codex --type integration-review pr 83 &
+consult --model claude --type integration-review pr 83 &
 wait
 ```
 
-**Full reference:** See [codev/resources/agent-farm.md](../resources/agent-farm.md) and `./codev/bin/consult --help`
+**Review types**: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`
+
+**Full reference:** See `consult --help`
 
 ## Output Formatting
 

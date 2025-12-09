@@ -2,6 +2,8 @@
 
 Centralized tracking of all projects with status, priority, and dependencies.
 
+> **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
+
 ## Project Lifecycle
 
 Every project goes through stages. Not all projects reach completion:

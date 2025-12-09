@@ -38,7 +38,17 @@ interface ConsultOptions {
   subcommand: string;
   args: string[];
   dryRun?: boolean;
+  reviewType?: string;
 }
+
+// Valid review types
+const VALID_REVIEW_TYPES = [
+  'spec-review',
+  'plan-review',
+  'impl-review',
+  'pr-ready',
+  'integration-review',
+];
 
 /**
  * Load the consultant role.
@@ -54,6 +64,16 @@ function loadRole(projectRoot: string): string {
     );
   }
   return role;
+}
+
+/**
+ * Load a review type prompt.
+ * Checks local codev/roles/review-types/{type}.md first, then falls back to embedded skeleton.
+ */
+function loadReviewTypePrompt(projectRoot: string, reviewType: string): string | null {
+  const promptPath = `roles/review-types/${reviewType}.md`;
+  const prompt = readCodevFile(promptPath, projectRoot);
+  return prompt;
 }
 
 /**
@@ -163,9 +183,22 @@ async function runConsultation(
   model: string,
   query: string,
   projectRoot: string,
-  dryRun: boolean
+  dryRun: boolean,
+  reviewType?: string
 ): Promise<void> {
-  const role = loadRole(projectRoot);
+  let role = loadRole(projectRoot);
+
+  // Append review type prompt if specified
+  if (reviewType) {
+    const typePrompt = loadReviewTypePrompt(projectRoot, reviewType);
+    if (typePrompt) {
+      role = role + '\n\n---\n\n' + typePrompt;
+      console.error(`Review type: ${reviewType}`);
+    } else {
+      console.error(chalk.yellow(`Warning: Review type prompt not found: ${reviewType}`));
+    }
+  }
+
   const config = MODEL_CONFIGS[model];
 
   if (!config) {
@@ -378,7 +411,7 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
  * Main consult entry point
  */
 export async function consult(options: ConsultOptions): Promise<void> {
-  const { model: modelInput, subcommand, args, dryRun = false } = options;
+  const { model: modelInput, subcommand, args, dryRun = false, reviewType } = options;
 
   // Resolve model alias
   const model = MODEL_ALIASES[modelInput.toLowerCase()] || modelInput.toLowerCase();
@@ -387,6 +420,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
   if (!MODEL_CONFIGS[model]) {
     const validModels = [...Object.keys(MODEL_CONFIGS), ...Object.keys(MODEL_ALIASES)];
     throw new Error(`Unknown model: ${modelInput}\nValid models: ${validModels.join(', ')}`);
+  }
+
+  // Validate review type if provided
+  if (reviewType && !VALID_REVIEW_TYPES.includes(reviewType)) {
+    throw new Error(`Invalid review type: ${reviewType}\nValid types: ${VALID_REVIEW_TYPES.join(', ')}`);
   }
 
   const projectRoot = findProjectRoot();
@@ -466,5 +504,5 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, projectRoot, dryRun);
+  await runConsultation(model, query, projectRoot, dryRun, reviewType);
 }

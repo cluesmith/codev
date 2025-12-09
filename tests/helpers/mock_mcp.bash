@@ -125,8 +125,22 @@ is_mcp_available() {
     return 1
   fi
 
-  # Check if mcp command works
-  mcp list 2>/dev/null | grep -qv "(none)"
+  # Check if mcp command works and has servers (not just "(none)")
+  local output
+  output=$(mcp list 2>/dev/null)
+  local exit_code=$?
+
+  # Return failure if mcp command failed
+  if [[ $exit_code -ne 0 ]]; then
+    return 1
+  fi
+
+  # Return failure if output contains "(none)"
+  if echo "$output" | grep -q "(none)"; then
+    return 1
+  fi
+
+  return 0
 }
 
 # Legacy alias for backwards compatibility

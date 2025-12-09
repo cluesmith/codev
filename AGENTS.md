@@ -444,7 +444,25 @@ consult --model opus plan 39   # alias for claude
 
 # Dry run (print command without executing)
 consult --model gemini spec 39 --dry-run
+
+# Review type (use stage-specific review prompt)
+consult --model gemini spec 39 --type spec-review
+consult --model gemini pr 68 --type integration-review
 ```
+
+### Review Types
+
+Use the `--type` parameter to load stage-specific review prompts:
+
+| Type | Stage | Use Case |
+|------|-------|----------|
+| `spec-review` | conceived | Review specification for completeness and clarity |
+| `plan-review` | specified | Review implementation plan for coverage and feasibility |
+| `impl-review` | implementing | Review implementation for spec adherence and quality |
+| `pr-ready` | implemented | Final self-check before creating PR |
+| `integration-review` | committed | Architect's review for architectural fit |
+
+Review type prompts are in `codev/roles/review-types/`. The prompt is appended to the consultant role.
 
 ### Parallel Consultation (3-Way Reviews)
 

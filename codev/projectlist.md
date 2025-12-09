@@ -2,6 +2,8 @@
 
 Centralized tracking of all projects with status, priority, and dependencies.
 
+> **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
+
 ## Document Organization
 
 **Active projects appear first, integrated projects appear last (grouped by release).**

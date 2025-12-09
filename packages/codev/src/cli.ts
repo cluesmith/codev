@@ -119,6 +119,7 @@ program
   .argument('[args...]', 'Arguments for the subcommand')
   .requiredOption('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
   .option('-n, --dry-run', 'Show what would execute without running')
+  .option('-t, --type <type>', 'Review type: spec-review, plan-review, impl-review, pr-ready, integration-review')
   .allowUnknownOption(true)
   .action(async (subcommand, args, options) => {
     try {
@@ -127,6 +128,7 @@ program
         subcommand,
         args,
         dryRun: options.dryRun,
+        reviewType: options.type,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
