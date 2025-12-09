@@ -19,8 +19,9 @@ This affects the effectiveness of our 3-way consultation workflow (Gemini, Codex
 
 This spec covers:
 1. **Replace undocumented env var** with official `experimental_instructions_file` approach
-2. **Optimize the consultant prompt** (`codev/roles/consultant.md`) for better Codex performance
-3. **Investigate slowness** - determine if 200-250s is inherent to GPT-5.1-codex or fixable
+2. **Tune reasoning effort** - use `-c model_reasoning_effort=low` for faster responses
+3. **Optimize the consultant prompt** (`codev/roles/consultant.md`) for better Codex performance
+4. **Investigate slowness** - determine if 200-250s is inherent to GPT-5.1-codex or fixable
 
 **Out of scope:**
 - Model switching (GPT-5.1-codex is the only model to use)
@@ -53,7 +54,7 @@ elif resolved == "codex":
 
 ## Solution
 
-### Part 1: Replace Undocumented Env Var
+### Part 1: Replace Undocumented Env Var + Add Reasoning Tuning
 
 **Official approach** (from [OpenAI Codex discussions](https://github.com/openai/codex/discussions/3896)):
 
@@ -64,10 +65,11 @@ with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
     f.write(role)
     instructions_file = f.name
 
-# Use official config flag
+# Use official config flags with reasoning effort tuning
 cmd = [
     "codex", "exec",
     "-c", f"experimental_instructions_file={instructions_file}",
+    "-c", "model_reasoning_effort=low",  # Faster responses
     "--full-auto",
     query
 ]
@@ -75,6 +77,10 @@ cmd = [
 # Clean up after
 os.unlink(instructions_file)
 ```
+
+**Reasoning effort options**: `minimal` | `low` | `medium` | `high` | `none`
+- `low` recommended for consultations - balances speed and quality
+- Expected impact: 10-20% faster responses
 
 ### Part 2: Optimize Consultant Prompt
 

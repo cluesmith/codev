@@ -25,15 +25,16 @@ Fix the undocumented `CODEX_SYSTEM_MESSAGE` environment variable usage with the 
 - Baseline performance documented
 - Understand typical Codex behavior (shell commands, exploration patterns)
 
-## Phase 2: Replace CODEX_SYSTEM_MESSAGE
+## Phase 2: Replace CODEX_SYSTEM_MESSAGE + Add Reasoning Tuning
 
-**Goal**: Use official configuration instead of undocumented env var
+**Goal**: Use official configuration instead of undocumented env var, add reasoning effort tuning
 
 ### Tasks
 
 - [ ] Read current consult tool: `codev/bin/consult`
 - [ ] Find the Codex CLI invocation (around line 152)
 - [ ] Replace env var approach with temp file + `-c experimental_instructions_file=<path>`
+- [ ] Add `-c model_reasoning_effort=low` for faster responses
 - [ ] Ensure temp file cleanup in finally block (both success and failure)
 - [ ] Test that consultant role is still passed correctly
 
@@ -57,6 +58,7 @@ try:
     cmd = [
         "codex", "exec",
         "-c", f"experimental_instructions_file={instructions_file}",
+        "-c", "model_reasoning_effort=low",  # Faster responses (10-20% improvement)
         "--full-auto",
         query
     ]
@@ -68,6 +70,7 @@ finally:
 
 ### Exit Criteria
 - Codex consultations work without CODEX_SYSTEM_MESSAGE
+- Reasoning effort set to low
 - Temp files cleaned up after each run
 - No change in output quality
 
