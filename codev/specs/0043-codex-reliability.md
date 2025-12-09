@@ -145,6 +145,19 @@ From web research ([10 Codex Fixes](https://medium.com/@ThinkingLoop/10-openai-c
 - **Model inherent speed**: GPT-5.1-codex is slower than alternatives by design
 - **Token generation**: ~1ms per token, unavoidable
 
+## Implementation Results
+
+Performance measurements on PR #33 review (932-line diff, 8 files):
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Consultation Time | 163.7s | 118.7s | **-27.5%** |
+| Total Time | 167.2s | 121.6s | **-27.3%** |
+| Tokens Used | 51,223 | 38,556 | **-24.7%** |
+| Reasoning Effort | medium | low | Reduced |
+
+**Quality**: After implementation, Codex found a valid issue (missing `af spawn` integration) that the baseline review missed, suggesting quality is maintained or improved.
+
 ## References
 
 - [Codex CLI Reference](https://developers.openai.com/codex/cli/reference/)

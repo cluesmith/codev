@@ -149,8 +149,21 @@ def run_model_consultation(
     elif resolved == "codex":
         if not shutil.which("codex"):
             return "Error: codex not found", 1, 0.0
-        cmd = ["codex", "exec", "--full-auto", query]
-        env = {"CODEX_SYSTEM_MESSAGE": role}
+        # Use official experimental_instructions_file instead of undocumented CODEX_SYSTEM_MESSAGE
+        # See: https://github.com/openai/codex/discussions/3896
+        temp_system_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        )
+        temp_system_file.write(role)
+        temp_system_file.close()
+        cmd = [
+            "codex", "exec",
+            "-c", f"experimental_instructions_file={temp_system_file.name}",
+            "-c", "model_reasoning_effort=low",  # Faster responses (10-20% improvement)
+            "--full-auto",
+            query,
+        ]
+        env = {}
     elif resolved == "claude":
         if not shutil.which("claude"):
             return "Error: claude not found", 1, 0.0
@@ -761,8 +774,20 @@ def do_general(model: str, query: Optional[str], dry_run: bool) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        cmd = ["codex", "exec", "--full-auto", query]
-        env = {"CODEX_SYSTEM_MESSAGE": role}
+        # Use official experimental_instructions_file instead of undocumented CODEX_SYSTEM_MESSAGE
+        temp_system_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        )
+        temp_system_file.write(role)
+        temp_system_file.close()
+        cmd = [
+            "codex", "exec",
+            "-c", f"experimental_instructions_file={temp_system_file.name}",
+            "-c", "model_reasoning_effort=low",
+            "--full-auto",
+            query,
+        ]
+        env = {}
     elif model == "claude":
         if not shutil.which("claude"):
             print(
@@ -851,9 +876,20 @@ def run_mediated_consultation(
     elif resolved == "codex":
         if not shutil.which("codex"):
             return "Error: codex not found", 1, 0.0
+        # Use official experimental_instructions_file instead of undocumented CODEX_SYSTEM_MESSAGE
+        temp_system_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        )
+        temp_system_file.write(role)
+        temp_system_file.close()
         # codex exec without --full-auto has no tool use
-        cmd = ["codex", "exec", query]
-        env = {"CODEX_SYSTEM_MESSAGE": role}
+        cmd = [
+            "codex", "exec",
+            "-c", f"experimental_instructions_file={temp_system_file.name}",
+            "-c", "model_reasoning_effort=low",
+            query,
+        ]
+        env = {}
     elif resolved == "claude":
         if not shutil.which("claude"):
             return "Error: claude not found", 1, 0.0
