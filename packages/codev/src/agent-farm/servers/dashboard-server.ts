@@ -1049,6 +1049,43 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Read file contents (for Projects tab to read projectlist.md)
+    if (req.method === 'GET' && url.pathname === '/file') {
+      const filePath = url.searchParams.get('path');
+
+      if (!filePath) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Missing path parameter');
+        return;
+      }
+
+      // Validate path is within project root (prevent path traversal)
+      const fullPath = validatePathWithinProject(filePath);
+      if (!fullPath) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Path must be within project directory');
+        return;
+      }
+
+      // Check file exists
+      if (!fs.existsSync(fullPath)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end(`File not found: ${filePath}`);
+        return;
+      }
+
+      // Read and return file contents
+      try {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(content);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Error reading file: ' + (err as Error).message);
+      }
+      return;
+    }
+
     // Serve dashboard
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       try {

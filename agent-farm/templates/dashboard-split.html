@@ -2122,7 +2122,8 @@
 
       for (const line of lines) {
         // Match key: value or key: "value"
-        const match = line.match(/^\s*(\w+):\s*(.*)$/);
+        // Also handle "- id:" YAML list format
+        const match = line.match(/^\s*-?\s*(\w+):\s*(.*)$/);
         if (!match) continue;
 
         const [, key, rawValue] = match;
@@ -2325,6 +2326,12 @@
         // Completed stage
         indicator = '<span class="stage-indicator stage-indicator--completed" aria-hidden="true">●</span>';
         ariaLabel = `${stage}: completed`;
+
+        // Add link for completed stages with artifacts
+        const link = getStageLinkUrl(project, stage);
+        if (link) {
+          indicator = `<a href="#" onclick="openProjectFile('${link}'); return false;" class="stage-link" title="Open ${stage}">${indicator}</a>`;
+        }
       } else if (stageIndex === currentIndex) {
         // Current stage - use status color
         const color = `var(--project-${project.status})`;
