@@ -74,9 +74,11 @@ cmd = [
     query
 ]
 
-# Clean up after
+# Clean up after (in finally block for error safety)
 os.unlink(instructions_file)
 ```
+
+**Note**: The existing codebase already has try/finally blocks for temp file cleanup in all three Codex invocation paths (`run_model_consultation`, `do_general`, `run_mediated_consultation`). This implementation reuses that infrastructure.
 
 **Reasoning effort options**: `minimal` | `low` | `medium` | `high` | `none`
 - `low` recommended for consultations - balances speed and quality
@@ -84,14 +86,18 @@ os.unlink(instructions_file)
 
 ### Part 2: Optimize Consultant Prompt
 
-The consultant role (`codev/roles/consultant.md`) should be optimized for Codex:
+The consultant role (`codev/roles/consultant.md`) was reviewed for Codex optimization:
 
 1. **Leverage Codex's strengths**: Encourage use of shell commands (`git show`, `rg`, etc.)
 2. **Be directive**: Codex responds well to clear, specific instructions
 3. **Avoid redundancy**: Codex already knows coding conventions
 4. **Focus on the task**: PR review, spec review, or plan review
 
-Current prompt may be too generic. Need to review and optimize.
+**Analysis Result**: After review, the consultant prompt is already well-optimized:
+- Already encourages shell commands (PR Review Protocol section)
+- Already directive with clear instructions per review type
+- Model-agnostic design is correct since it's shared across Gemini/Codex/Claude
+- No changes needed - the prompt structure is appropriate for all models
 
 ### Part 3: Investigate Performance
 
@@ -103,10 +109,14 @@ Before optimizing, verify the baseline:
 
 ## Success Criteria
 
-- [ ] `CODEX_SYSTEM_MESSAGE` replaced with `experimental_instructions_file`
-- [ ] Consultant prompt reviewed and optimized for Codex
-- [ ] Performance baseline documented (main vs branch)
-- [ ] No regressions in consultation quality
+- [x] `CODEX_SYSTEM_MESSAGE` replaced with `experimental_instructions_file`
+- [x] Consultant prompt reviewed (no changes needed - already optimized)
+- [x] Performance baseline documented (163.7s -> 118.7s, -27%)
+- [x] No regressions in consultation quality (after review found issue baseline missed)
+
+## Out of Scope
+
+- **TypeScript consult CLI** (`packages/codev/src/commands/consult/index.ts`): This is a separate port (Spec 0039) and should be updated separately. The Python `codev/bin/consult` is the primary implementation.
 
 ## Constraints
 
