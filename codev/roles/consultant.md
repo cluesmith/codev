@@ -26,35 +26,25 @@ When reviewing specs or plans, the file is in the **current working directory**.
 
 This is simpler than PR reviews - just read and analyze.
 
-## PR Review Protocol
+## Review Types
 
-**CRITICAL**: When reviewing Pull Requests, you MUST examine the actual PR branch, not the working directory.
+There are two types of reviews:
 
-1. **Get the PR branch commits**: Use `gh pr view <number> --json commits` or `git log main..<branch>`
-2. **Examine PR file contents**: Use `git show <commit>:<filepath>` to see actual PR contents
-3. **Never trust `rg` or `grep` on working directory** - those search main branch, not the PR
-4. **Verify fixes by examining commit diffs**: `git show <commit>` shows what changed
+### 1. SPIDER Final Review (Builder self-review before PR)
 
-Example workflow for verifying a fix:
-```bash
-# Get PR commits
-gh pr view 33 --json commits
+All files are in the **current working directory**. This is the builder reviewing their own work.
 
-# Examine specific file in PR branch
-git show 9d5ffa2:codev/protocols/cleanup/protocol.md
+- Read files directly with `cat` - no git commands needed
+- All implementation, specs, plans are local
+- Focus on: Does implementation match spec? Are tests passing? Any issues missed?
 
-# Check if pattern exists in PR version
-git show 9d5ffa2:codev/plans/0015-cleanup-protocol.md | grep -i "INDEX"
-```
+### 2. Integration Review (Architect reviewing a PR)
 
-**Why this matters**: The working directory reflects main branch. PRs exist on separate branches. Searching the working directory gives false positives/negatives.
+Context is **provided to you** via the `--context` flag. You don't need to explore.
 
-## Relationship to Other Roles
+- All relevant diffs, specs, and context are in the provided overview
+- Focus on: Integration concerns, architectural fit, side effects
+- Be efficient - don't re-fetch what's already provided
+- If you must fetch additional context, use `gh pr diff <number>` once
 
-| Role | Focus |
-|------|-------|
-| Architect | Orchestrates, decomposes, integrates |
-| Builder | Implements in isolation |
-| Consultant | Provides perspective, supports decisions |
-
-You think alongside the other agents, helping them see blind spots.
+**Efficiency**: Don't run multiple git/gh commands. Work with what's provided or fetch once.
