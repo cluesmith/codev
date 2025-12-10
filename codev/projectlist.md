@@ -1239,11 +1239,33 @@ Projects that are paused or canceled.
       committed_at: null
       integrated_at: null
     notes: ""
+
+  - id: "0048"
+    title: "Markdown Preview for af open"
+    summary: "Add option to render markdown files as formatted HTML when opened via af open"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: []
+    tags: [dashboard, ui, markdown]
+    timestamps:
+      conceived_at: "2025-12-10T06:20:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: ""
 ```
 
 ## Next Available Number
 
-**0048** - Reserve this number for your next project
+**0049** - Reserve this number for your next project
 
 ---
 
