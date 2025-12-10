@@ -66,7 +66,14 @@ projects:
       review: codev/reviews/NNNN-name.md   # Required after "integrated"
     dependencies: []         # List of project IDs this depends on
     tags: []                # Categories (e.g., auth, billing, ui)
-    integrated_at: null     # ISO timestamp when marked integrated (e.g., "2025-12-09T20:34:53-08:00")
+    timestamps:              # ISO timestamps for state transitions (set when entering each state)
+      conceived_at: null     # When project was first created
+      specified_at: null     # When human approved the spec
+      planned_at: null       # When implementation plan was completed
+      implementing_at: null  # When builder started work
+      implemented_at: null   # When PR was created
+      committed_at: null     # When PR was merged
+      integrated_at: null    # When human validated in production
     notes: ""               # Optional notes about status or decisions
 ```
 
@@ -138,7 +145,14 @@ Projects currently in development (conceived through committed), sorted by prior
     ticks: [001, 002, 003]
     dependencies: ["0005", "0022"]
     tags: [cli, npm, architecture]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "PR #84 merged 2025-12-09. TICK-001 (consult TS consolidation) + TICK-002 (embedded skeleton) + TICK-003 (revert to copy-on-init for AI accessibility)."
 
   - id: "0040"
@@ -153,7 +167,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [protocols, architecture]
-    integrated_at: "2025-12-08T17:09:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-08T17:09:10-08:00"
     notes: "Human approved 2025-12-08. Implemented 2025-12-08. Updated templates (spec.md, plan.md), rewrote TICK protocol, updated CLAUDE.md/AGENTS.md. Tested with TICK 0022-001."
 
   - id: "0014"
@@ -168,7 +189,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0005"]
     tags: [cli, agents, architecture]
-    integrated_at: "2025-12-05T05:23:04-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T05:23:04-08:00"
     notes: "Five modes: spec, task, protocol, shell, worktree. 3-way reviewed, merged PR 35, 37 unit tests added."
 
   - id: "0020"
@@ -183,7 +211,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0005"]
     tags: [cli, agents, communication]
-    integrated_at: "2025-12-04T12:39:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-04T12:39:10-08:00"
     notes: "Merged PR 31. Uses tmux load-buffer + paste-buffer. Structured message format. Consulted GPT-5 and Gemini Pro."
 
 
@@ -200,7 +235,14 @@ Projects currently in development (conceived through committed), sorted by prior
     ticks: [001]
     dependencies: []
     tags: [architecture, agents, consultation]
-    integrated_at: "2025-12-04T12:39:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-04T12:39:10-08:00"
     notes: "Merged PR 30. Python/Typer CLI at codev/bin/consult. Consultant role as collaborative partner. Consulted GPT-5 and Gemini Pro. TICK-001: Architect-mediated PR reviews (2025-12-08)."
 
   - id: "0024"
@@ -215,7 +257,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0005"]
     tags: [cli, agents, communication]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Use tmux send-keys to notify builders of events. Example: architect completes PR review → builder gets notified. Complements 0020 (instructions) with event-driven notifications."
 
 # Medium Priority
@@ -231,7 +280,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007"]
     tags: [ui, dashboard, editing]
-    integrated_at: "2025-12-04T17:07:28-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-04T17:07:28-08:00"
     notes: "TICK protocol. PR 34 merged 2025-12-04. Edit mode with auto-save, Cancel restores disk state. UX polish: contextual subtitles, clearer button labels. Consulted GPT-5 and Gemini Pro."
 
   - id: "0011"
@@ -246,7 +302,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007"]
     tags: [ui, dashboard, multi-project]
-    integrated_at: "2025-12-05T06:15:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T06:15:10-08:00"
     notes: "TICK protocol. PROJECT_NAME placeholder in templates. Meta-dashboard split to 0029."
 
   - id: "0013"
@@ -261,7 +324,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [documentation, installation]
-    integrated_at: "2025-12-04T15:23:49-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-04T15:23:49-08:00"
     notes: "TICK protocol. codev-doctor (bash) + deps.ts (TypeScript). PR 32 merged 2025-12-04. Consulted GPT-5 and Gemini Pro."
 
   - id: "0015"
@@ -276,7 +346,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [protocols, maintenance]
-    integrated_at: "2025-12-04T16:54:48-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-04T16:54:48-08:00"
     notes: "TICK protocol. Four phases: AUDIT→PRUNE→VALIDATE→SYNC. PR 33 merged 2025-12-04. **Will be renamed to MAINTAIN and expanded per spec 0035.**"
 
   - id: "0019"
@@ -291,7 +368,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007"]
     tags: [ui, dashboard]
-    integrated_at: "2025-12-05T13:58:34-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T13:58:34-08:00"
     notes: "TICK protocol. Color dots with accessibility (shapes/tooltips for colorblind). Consulted GPT-5 and Gemini Pro."
 
   - id: "0023"
@@ -306,7 +390,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0022"]
     tags: [architecture, agents, consultation]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Phase 2: Stateful. Keep CLI running via stdio. Maintain session until closed. Depends on 0022."
 
   - id: "0035"
@@ -321,7 +412,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0015"]
     tags: [protocols, maintenance, documentation]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Supersedes CLEANUP (0015). Adds doc maintenance to code hygiene. Consulted Gemini/Codex. No new roles - MAINTAIN executed by Builder like any protocol."
 
   - id: "0037"
@@ -336,7 +434,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: codev/reviews/0037-tab-bar-ux.md
     dependencies: ["0007"]
     tags: [ui, dashboard, ux]
-    integrated_at: "2025-12-07T20:40:59-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-07T20:40:59-08:00"
     notes: "TICK protocol. PR 58 merged 2025-12-07. Close button improved 2025-12-07."
 
 # Low Priority
@@ -352,7 +457,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0007", "0037"]
     tags: [ui, dashboard, cleanup]
-    integrated_at: "2025-12-08T17:09:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-08T17:09:10-08:00"
     notes: "TICK protocol. Addressed 3-way review feedback: use tab.port, implemented /file endpoint for reload, added keyboard a11y."
 
   - id: "0006"
@@ -367,7 +479,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: codev/reviews/0006-tutorial-mode.md
     dependencies: []
     tags: [documentation, onboarding]
-    integrated_at: "2025-12-05T13:58:34-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T13:58:34-08:00"
     notes: "PR #36 merged 2025-12-05"
 
   - id: "0012"
@@ -382,7 +501,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [ui, dashboard]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "TICK protocol. tmux set-option status off. Add toggle for debugging. Consulted GPT-5 and Gemini Pro."
 
   - id: "0017"
@@ -397,7 +523,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [architecture, portability]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "SPIDER protocol. HIGH COMPLEXITY WARNING: May be premature (YAGNI). One-way transpilation. Consulted GPT-5 and Gemini Pro."
 
   - id: "0029"
@@ -412,7 +545,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0008", "0011"]
     tags: [ui, dashboard, multi-project]
-    integrated_at: "2025-12-06T06:57:59-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-06T06:57:59-08:00"
     notes: "TICK protocol. af tower command. PR 41 merged 2025-12-05."
 
   - id: "0030"
@@ -427,7 +567,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0010"]
     tags: [ui, annotation, markdown]
-    integrated_at: "2025-12-06T07:21:53-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-06T07:21:53-08:00"
     notes: "Hybrid approach: syntax visible but muted, content styled. Prism broke lines; custom renderer works. PR 49 merged 2025-12-06."
 
   - id: "0031"
@@ -442,7 +589,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [infrastructure, database, concurrency]
-    integrated_at: "2025-12-05T15:32:52-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T15:32:52-08:00"
     notes: "SPIDER protocol. Fixes race conditions in state.json and ports.json. Uses better-sqlite3 with WAL mode. 3-way reviewed. Merged 2025-12-05."
 
   - id: "0032"
@@ -457,7 +611,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [infrastructure, cleanup, agent-farm]
-    integrated_at: "2025-12-06T06:57:59-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-06T06:57:59-08:00"
     notes: "TICK protocol. PR 46 merged 2025-12-06."
 
   - id: "0033"
@@ -472,7 +633,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: ["0031"]
     tags: [cli, agent-farm]
-    integrated_at: "2025-12-05T15:37:11-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-05T15:37:11-08:00"
     notes: "Simple feature. Uses SQLite atomic UPDATE. Added getUtil(), renameBuilder(), renameUtil() to state.ts."
 
   - id: "0034"
@@ -487,7 +655,14 @@ Projects currently in development (conceived through committed), sorted by prior
       review: codev/reviews/0034-table-alignment.md
     dependencies: ["0030"]
     tags: [ui, annotation, markdown]
-    integrated_at: "2025-12-06T07:21:53-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-06T07:21:53-08:00"
     notes: "Two-pass rendering with code block awareness. Preserves alignment markers (:---:). Consulted Gemini/Codex. PR 51 merged 2025-12-06."
 ```
 
@@ -549,7 +724,14 @@ See Active Projects section above for full details and current status.
       review: codev/reviews/0001-test-infrastructure.md
     dependencies: []
     tags: [testing, infrastructure]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "64 tests passing, pre-commit hook installed"
 
   - id: "0002"
@@ -564,7 +746,14 @@ See Active Projects section above for full details and current status.
       review: null
     dependencies: []
     tags: [architecture, agents]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "Bash CLI implemented, superseded by 0005 TypeScript CLI"
 
   - id: "0004"
@@ -579,7 +768,14 @@ See Active Projects section above for full details and current status.
       review: null
     dependencies: ["0005"]
     tags: [ui, dashboard]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "Integrated with TypeScript CLI"
 
   - id: "0005"
@@ -594,7 +790,14 @@ See Active Projects section above for full details and current status.
       review: codev/reviews/0005-typescript-cli.md
     dependencies: ["0002"]
     tags: [cli, typescript, npm]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "Published as agent-farm@0.1.0 to npm"
 
   - id: "0007"
@@ -609,7 +812,14 @@ See Active Projects section above for full details and current status.
       review: null
     dependencies: ["0005"]
     tags: [ui, dashboard]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "Supersedes 0004 left-nav approach"
 
   - id: "0008"
@@ -624,7 +834,14 @@ See Active Projects section above for full details and current status.
       review: codev/reviews/0008-architecture-consolidation.md
     dependencies: ["0005"]
     tags: [architecture, cli, refactoring]
-    integrated_at: "2025-12-03T03:46:44-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:46:44-08:00"
     notes: "Completed 2025-12-03. Single TypeScript CLI, config.json, global port registry with file locking"
 
   - id: "0009"
@@ -639,7 +856,14 @@ See Active Projects section above for full details and current status.
       review: codev/reviews/0009-terminal-file-click.md
     dependencies: ["0007"]
     tags: [ui, dashboard, dx]
-    integrated_at: "2025-12-03T11:43:50-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T11:43:50-08:00"
     notes: "Uses ttyd's native http link handling. Fixed annotation server startup wait. Deleted broken custom xterm.js templates."
 
   - id: "0016"
@@ -654,7 +878,14 @@ See Active Projects section above for full details and current status.
       review: null
     dependencies: []
     tags: [documentation, naming]
-    integrated_at: "2025-12-03T03:58:51-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T03:58:51-08:00"
     notes: "Decided to keep 'Builder' after consulting Pro and Codex. Updated codev/resources/conceptual-model.md with expanded definition. 'Building' = build, remodel, repair, extend, validate, document, maintain."
 
   - id: "0018"
@@ -669,7 +900,14 @@ See Active Projects section above for full details and current status.
       review: null
     dependencies: ["0008"]
     tags: [bugfix, dashboard]
-    integrated_at: "2025-12-03T05:15:28-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-03T05:15:28-08:00"
     notes: "Fixed: (1) Template path now looks in codev/templates/ instead of deleted agent-farm/templates/, (2) Dashboard API now verifies annotation processes are alive before returning 'existing' entries, cleans up stale state automatically."
 ```
 
@@ -702,7 +940,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [automation, reporting]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Paused per project owner"
 
   - id: "0027"
@@ -717,7 +962,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [architecture, protocols, agents]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Superseded by 0028, which was then superseded by 0035 (MAINTAIN protocol)."
 
   - id: "0021"
@@ -732,7 +984,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: ["0005"]
     tags: [cli, agents, portability]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "CLI Adapter pattern. On hold - other CLIs lack agentic capabilities needed for builder role."
 
   - id: "0028"
@@ -747,7 +1006,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [roles, documentation, architecture]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "After consulting Gemini/Codex, decided against new roles. Documentation maintenance absorbed into MAINTAIN protocol (spec 0035)."
 
   - id: "0025"
@@ -762,7 +1028,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [infrastructure, onboarding]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Abandoned 2025-12-08. Low value - npm install is simple enough."
 
   - id: "0026"
@@ -777,7 +1050,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [ui, dashboard]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "Abandoned 2025-12-08. Current UX is sufficient."
 ```
 
@@ -796,7 +1076,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: ["0022"]
     tags: [cli, consultation, performance]
-    integrated_at: "2025-12-08T15:51:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-08T15:51:10-08:00"
     notes: "TICK protocol. Implemented as part of consult tool evolution. Pre-fetch PR diff/comments/specs, extract verdict from output."
 
   - id: "0041"
@@ -811,7 +1098,14 @@ Projects that are paused or canceled.
       review: codev/reviews/0041-e2e-test-suite.md
     dependencies: ["0039"]
     tags: [testing, npm, ci]
-    integrated_at: "2025-12-08T15:51:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-08T15:51:10-08:00"
     notes: "SPIDER protocol. PR #78 merged 2025-12-08. BATS-based tests with XDG sandboxing, CI for macOS+Linux."
 
   - id: "0042"
@@ -826,7 +1120,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [agent-farm, multi-project, bug-fix]
-    integrated_at: "2025-12-08T17:09:10-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-08T17:09:10-08:00"
     notes: "TICK protocol (hotfix). Changed session naming from 'builder-{spec_id}' to 'builder-{project}-{spec_id}'. PR #75."
 
   - id: "0043"
@@ -841,7 +1142,14 @@ Projects that are paused or canceled.
       review: codev/reviews/0043-codex-reliability.md
     dependencies: ["0022"]
     tags: [cli, consultation, codex]
-    integrated_at: "2025-12-09T03:46:18-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-09T03:46:18-08:00"
     notes: "Merged PR #83. Replaced undocumented CODEX_SYSTEM_MESSAGE with experimental_instructions_file, added model_reasoning_effort=low."
 
   - id: "0044"
@@ -856,7 +1164,14 @@ Projects that are paused or canceled.
       review: codev/reviews/0044-architect-builder-workflow.md
     dependencies: []
     tags: [protocol, workflow, spider]
-    integrated_at: "2025-12-09T20:34:53-08:00"
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: "2025-12-09T20:34:53-08:00"
     notes: "PR #86 merged 2025-12-09. Deleted SPIDER-SOLO, added workflow-reference.md, review-types prompts, consult --type parameter."
 
   - id: "0045"
@@ -871,7 +1186,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: ["0007"]
     tags: [ui, dashboard, onboarding]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "PR #85 merged 2025-12-09. Projects tab with Kanban view, welcome screen, parser, terminal states."
 
   - id: "0046"
@@ -886,7 +1208,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: ["0039"]
     tags: [documentation, cli]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: "PR #87 merged 2025-12-10."
 
   - id: "0047"
@@ -901,7 +1230,14 @@ Projects that are paused or canceled.
       review: null
     dependencies: []
     tags: [documentation, internals]
-    integrated_at: null
+    timestamps:
+      conceived_at: null
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
     notes: ""
 ```
 

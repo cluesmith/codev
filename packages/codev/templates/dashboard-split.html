@@ -2666,9 +2666,12 @@
     // Check if a project was integrated in the last 24 hours
     function isRecentlyIntegrated(project) {
       if (project.status !== 'integrated') return false;
-      if (!project.integrated_at) return false;
 
-      const integratedDate = new Date(project.integrated_at);
+      // Look in timestamps.integrated_at (new format)
+      const integratedAt = project.timestamps?.integrated_at;
+      if (!integratedAt) return false;
+
+      const integratedDate = new Date(integratedAt);
       if (isNaN(integratedDate.getTime())) return false;
 
       const now = new Date();
