@@ -240,6 +240,15 @@ The `codev-updater` agent keeps your Codev installation current with the latest 
 
 **Agent location**: `.claude/agents/codev-updater.md`
 
+## CLI Command Reference
+
+Codev provides three CLI tools. For complete reference documentation, see:
+
+- **[Overview](codev/docs/commands/overview.md)** - Quick start and summary of all tools
+- **[codev](codev/docs/commands/codev.md)** - Project management (init, adopt, doctor, update, eject, tower)
+- **[af](codev/docs/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
+- **[consult](codev/docs/commands/consult.md)** - AI consultation (pr, spec, plan, general)
+
 ## Architect-Builder Pattern
 
 The Architect-Builder pattern enables parallel AI-assisted development by separating concerns:

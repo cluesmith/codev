@@ -15,6 +15,8 @@ This provides three CLI commands:
 - `af` - Agent-farm CLI for parallel development
 - `consult` - Multi-agent consultation tool
 
+See the **[CLI Command Reference](codev/docs/commands/overview.md)** for complete documentation.
+
 ### Initialize a New Project
 
 ```bash
