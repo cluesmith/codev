@@ -1247,7 +1247,7 @@ Projects that are paused or canceled.
     priority: medium
     release: null
     files:
-      spec: null
+      spec: codev/specs/0048-markdown-preview.md
       plan: null
       review: null
     dependencies: []
