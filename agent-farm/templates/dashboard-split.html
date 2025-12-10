@@ -800,6 +800,12 @@
     .kanban-grid td:first-child {
       text-align: left;
       padding-left: 12px;
+      width: 40%;
+    }
+
+    .kanban-grid th:not(:first-child),
+    .kanban-grid td:not(:first-child) {
+      width: 8%;
     }
 
     .kanban-grid tbody tr {
@@ -828,7 +834,6 @@
     }
 
     .kanban-grid .project-title {
-      max-width: 150px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -2357,12 +2362,12 @@
     // Abbreviated column headers
     const STAGE_HEADERS = {
       'conceived': "CONC'D",
-      'specified': 'SPEC\'D',
+      'specified': "SPEC'D",
       'planned': 'PLANNED',
-      'implementing': 'IMPL\'G',
-      'implemented': 'IMPL\'D',
+      'implementing': 'IMPLING',
+      'implemented': 'IMPLED',
       'committed': 'CMTD',
-      'integrated': 'INTGR\'D'
+      'integrated': "INTGR'D"
     };
 
     // Get stage index (for comparison)
