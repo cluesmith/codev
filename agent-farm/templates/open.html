@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <title>Annotate: {{FILE}}</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+  <!-- Markdown preview dependencies (loaded only for .md files) -->
+  <script>
+    if ({{IS_MARKDOWN}}) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"><\/script>');
+      document.write('<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"><\/script>');
+    }
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -91,6 +98,86 @@
     .md-blockquote { color: #abb2bf; border-left: 3px solid #555; padding-left: 10px; }
     .md-fence { color: #555; }
     .md-codeblock { color: #98c379; background: #2c313a; display: block; }
+
+    /* Markdown Preview Container */
+    #preview-container {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      color: #fff;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    #preview-container h1,
+    #preview-container h2 {
+      border-bottom: 1px solid #333;
+      padding-bottom: 0.3em;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+
+    #preview-container h1 { font-size: 2em; }
+    #preview-container h2 { font-size: 1.5em; }
+    #preview-container h3 { font-size: 1.25em; margin-top: 1em; }
+
+    #preview-container code {
+      background: #2c313a;
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+
+    #preview-container pre {
+      background: #252525;
+      padding: 16px;
+      overflow: auto;
+      border-radius: 6px;
+      margin: 1em 0;
+    }
+
+    #preview-container pre code {
+      background: none;
+      padding: 0;
+    }
+
+    #preview-container table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1em 0;
+    }
+
+    #preview-container th,
+    #preview-container td {
+      border: 1px solid #333;
+      padding: 8px 12px;
+      text-align: left;
+    }
+
+    #preview-container th {
+      background: #2a2a2a;
+    }
+
+    #preview-container tr:nth-child(even) {
+      background: #252525;
+    }
+
+    #preview-container a {
+      color: #3b82f6;
+      text-decoration: underline;
+    }
+
+    #preview-container ul,
+    #preview-container ol {
+      padding-left: 2em;
+      margin: 1em 0;
+    }
+
+    #preview-container blockquote {
+      border-left: 4px solid #333;
+      padding-left: 1em;
+      margin: 1em 0;
+      color: #888;
+    }
 
     /* Editor textarea */
     #editor {
@@ -205,6 +292,9 @@
     <div class="subtitle">Click on a line number to leave an annotation.</div>
     <div class="actions">
       <button id="reloadBtn" class="btn btn-secondary" onclick="reloadFile()" title="Reload from disk" aria-label="Reload file from disk">↻</button>
+      <button id="togglePreviewBtn" class="btn btn-secondary" style="display: none;" title="Toggle Preview (Cmd+Shift+P)">
+        <span id="toggle-icon">👁</span> <span id="toggle-text">Preview</span>
+      </button>
       <button id="editBtn" class="btn btn-primary" onclick="toggleEditMode()">Switch to Editing</button>
       <button id="saveBtn" class="btn btn-success" onclick="saveEdit()" style="display: none;">Save</button>
       <button id="cancelBtn" class="btn btn-secondary" onclick="cancelEdit()" style="display: none;">Cancel</button>
@@ -215,6 +305,9 @@
   <div class="content" id="viewMode">
     <!-- Grid: alternating line-num and code-line elements -->
   </div>
+
+  <!-- Markdown preview mode -->
+  <div id="preview-container" style="display: none; padding: 20px; overflow: auto; height: calc(100vh - 80px);"></div>
 
   <!-- Editor mode -->
   <textarea id="editor" spellcheck="false"></textarea>
@@ -265,6 +358,10 @@
     let currentContent = '';
     let hasUnsavedChanges = false;
 
+    // Markdown preview state
+    const isMarkdownFile = {{IS_MARKDOWN}};
+    let isPreviewMode = false;
+
     // Comment patterns by file extension
     const COMMENT_PATTERNS = {
       js: { prefix: '// REVIEW', regex: /^(\s*)\/\/\s*REVIEW(\(@\w+\))?:\s*(.*)$/ },
@@ -294,6 +391,103 @@
       fileLines = content.split('\n');
       renderFile();
       updateAnnotationsList();
+      initPreviewToggle();
+    }
+
+    // Initialize preview toggle for markdown files
+    function initPreviewToggle() {
+      const togglePreviewBtn = document.getElementById('togglePreviewBtn');
+      if (isMarkdownFile && togglePreviewBtn) {
+        togglePreviewBtn.style.display = 'inline-block';
+        togglePreviewBtn.addEventListener('click', togglePreviewMode);
+      }
+    }
+
+    // Toggle between annotated view and preview mode
+    function togglePreviewMode() {
+      // Don't allow preview toggle while in textarea edit mode
+      if (editMode) {
+        return;
+      }
+
+      const viewMode = document.getElementById('viewMode');
+      const previewContainer = document.getElementById('preview-container');
+      const editBtn = document.getElementById('editBtn');
+      const toggleIcon = document.getElementById('toggle-icon');
+      const toggleText = document.getElementById('toggle-text');
+
+      // Capture scroll position as percentage before switching
+      const scrollPercent = document.documentElement.scrollHeight > 0
+        ? window.scrollY / document.documentElement.scrollHeight
+        : 0;
+
+      isPreviewMode = !isPreviewMode;
+
+      if (isPreviewMode) {
+        // Switch to Preview mode: hide viewMode, show preview
+        renderPreview();
+        viewMode.style.display = 'none';
+        previewContainer.style.display = 'block';
+        toggleIcon.textContent = '✏️';
+        toggleText.textContent = 'Edit';
+        editBtn.disabled = true;  // Can't enter edit mode while previewing
+      } else {
+        // Switch back to annotated view
+        viewMode.style.display = 'grid';
+        previewContainer.style.display = 'none';
+        toggleIcon.textContent = '👁';
+        toggleText.textContent = 'Preview';
+        editBtn.disabled = false;
+      }
+
+      // Restore approximate scroll position after content is rendered
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollPercent * document.documentElement.scrollHeight);
+      });
+    }
+
+    // Configure marked.js with secure link renderer (runs once when marked is loaded)
+    function configureMarked() {
+      if (typeof marked !== 'undefined' && !marked._configured) {
+        marked.use({
+          renderer: {
+            link(href, title, text) {
+              const titleAttr = title ? ` title="${title}"` : '';
+              return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+            }
+          }
+        });
+        marked._configured = true;
+      }
+    }
+
+    // Render markdown preview with DOMPurify sanitization
+    function renderPreview() {
+      const previewContainer = document.getElementById('preview-container');
+
+      // Check if marked and DOMPurify are available
+      if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+        previewContainer.innerHTML = '<p style="color: #ff6b6b;">Error: Markdown libraries not loaded. Please refresh the page.</p>';
+        return;
+      }
+
+      // Configure marked.js on first use
+      configureMarked();
+
+      // Parse markdown and sanitize HTML
+      const rawHtml = marked.parse(currentContent);
+      const cleanHtml = DOMPurify.sanitize(rawHtml);
+      previewContainer.innerHTML = cleanHtml;
+
+      // Highlight code blocks with Prism.js
+      previewContainer.querySelectorAll('pre code').forEach((block) => {
+        // Add language class if detected from code fence
+        const langMatch = block.className.match(/language-(\w+)/);
+        if (langMatch) {
+          block.parentElement.classList.add(`language-${langMatch[1]}`);
+        }
+        Prism.highlightElement(block);
+      });
     }
 
     function renderFile() {
@@ -871,6 +1065,14 @@
         e.preventDefault();
         if (editMode) {
           saveEdit();
+        }
+      }
+
+      // Cmd/Ctrl+Shift+P to toggle preview (markdown files only)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        if (isMarkdownFile) {
+          e.preventDefault();
+          togglePreviewMode();
         }
       }
     });
