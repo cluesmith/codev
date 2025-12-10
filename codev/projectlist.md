@@ -135,7 +135,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0039"
     title: "Codev CLI (First-Class Command)"
     summary: "Unified codev command as primary entry point: init, adopt, doctor, update, tower, consult"
-    status: implementing
+    status: integrated
     priority: high
     release: null
     files:
@@ -152,7 +152,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
+      integrated_at: "2025-12-09T21:54:55-08:00"
     notes: "PR #84 merged 2025-12-09. TICK-001 (consult TS consolidation) + TICK-002 (embedded skeleton) + TICK-003 (revert to copy-on-init for AI accessibility)."
 
   - id: "0040"
