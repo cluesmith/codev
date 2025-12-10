@@ -2663,7 +2663,7 @@
       `;
     }
 
-    // Check if a project was integrated in the last 24 hours
+    // Check if a project was integrated in the last 48 hours
     function isRecentlyIntegrated(project) {
       if (project.status !== 'integrated') return false;
       if (!project.notes) return false;
@@ -2676,7 +2676,7 @@
       const now = new Date();
       const hoursDiff = (now - integratedDate) / (1000 * 60 * 60);
 
-      return hoursDiff <= 24;
+      return hoursDiff <= 48;
     }
 
     // Render the Kanban grid with Active/Inactive sections
