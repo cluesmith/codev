@@ -9,3 +9,8 @@ tmp/
 # .trash/ contains soft-deleted files (bulk data, not versioned)
 codev/cleanup/.trash/
 # Note: audit-*.md reports ARE versioned for collaboration and review
+
+# packages/codev build artifacts
+packages/codev/dist/
+packages/codev/node_modules/
+packages/codev/skeleton/
