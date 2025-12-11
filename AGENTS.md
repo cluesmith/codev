@@ -160,6 +160,12 @@ Use sequential numbering with descriptive names:
 
 **Note**: Sequential numbering is shared across all protocols (SPIDER, TICK)
 
+**CRITICAL: Keep Specs and Plans Separate**
+- **DO NOT** put implementation plans in the spec file
+- Specs define WHAT to build (requirements, acceptance criteria)
+- Plans define HOW to build (phases, files to modify, implementation details)
+- Each document serves a distinct purpose and must remain separate
+
 ## Multi-Agent Consultation
 
 **DEFAULT BEHAVIOR**: Consultation is ENABLED by default with:

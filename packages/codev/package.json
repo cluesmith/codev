@@ -33,7 +33,7 @@
     "@types/node": "^22.10.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.6"
+    "vitest": "^4.0.15"
   },
   "engines": {
     "node": ">=18.0.0"

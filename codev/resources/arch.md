@@ -16,7 +16,7 @@ Codev is a context-driven development methodology framework that treats natural 
 
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
-- **proper-lockfile**: File locking for concurrent access safety
+- **better-sqlite3**: SQLite database for atomic state management (WAL mode)
 - **tree-kill**: Process cleanup and termination
 - **tmux**: Session persistence for builder terminals
 - **ttyd**: Web-based terminal interface
@@ -26,7 +26,15 @@ Codev is a context-driven development methodology framework that treats natural 
 - **bats-support**: Helper functions for bats tests
 - **bats-assert**: Assertion helpers for test validation
 - **bats-file**: File system assertion helpers
-- **Jest**: TypeScript unit testing for agent-farm
+- **Vitest**: TypeScript unit testing for packages/codev
+
+### External Tools (Required)
+- **git**: Version control with worktree support for isolated builder environments
+- **gh**: GitHub CLI for PR creation and management
+- **At least one AI CLI**:
+  - **claude** (Claude Code): Primary builder CLI
+  - **gemini** (Gemini CLI): Consultation and review
+  - **codex** (Codex CLI): Consultation and review
 
 ### Supported Platforms
 - macOS (Darwin)
@@ -40,7 +48,6 @@ This repository has a unique dual structure:
 
 ### 1. `codev/` - Our Instance (Self-Hosted Development)
 This is where the Codev project uses Codev to develop itself:
-- **Location**: `/Users/mwk/Development/ansari-project/codev/codev/`
 - **Purpose**: Development of Codev features using Codev methodology
 - **Contains**:
   - `specs/` - Feature specifications for Codev itself
@@ -50,7 +57,7 @@ This is where the Codev project uses Codev to develop itself:
   - `protocols/` - Working copies of protocols for development
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
-  - `templates/` - HTML templates for dashboard and annotation viewer
+  - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotation viewer
   - `config.json` - Shell command configuration for agent-farm
   - `bin/agent-farm` - Thin wrapper script to invoke TypeScript CLI
 
@@ -58,7 +65,6 @@ This is where the Codev project uses Codev to develop itself:
 
 ### 2. `codev-skeleton/` - Template for Other Projects
 This is what gets distributed to users when they install Codev:
-- **Location**: `/Users/mwk/Development/ansari-project/codev/codev-skeleton/`
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
   - `protocols/` - Protocol definitions (SPIDER, TICK, EXPERIMENT, MAINTAIN)
@@ -68,54 +74,82 @@ This is what gets distributed to users when they install Codev:
   - `resources/` - Empty directory (users add their own)
   - `agents/` - Agent definitions (copied during installation)
   - `roles/` - Role definitions for architect and builder
-  - `templates/` - HTML templates for dashboard UI
+  - `templates/` - HTML templates for Agent Farm (`af`) dashboard UI
   - `config.json` - Default shell command configuration
   - `bin/agent-farm` - Thin wrapper script
 
-**Key Distinction**: Skeleton directories are empty placeholders; codev/ contains our actual work.
+**Key Distinction**: `codev-skeleton/` provides templates for other projects to use when they install Codev. Our own `codev/` directory has nearly identical structure but contains our actual specs, plans, and reviews. The skeleton's empty placeholder directories become populated with real content in each project that adopts Codev.
 
-### 3. `agent-farm/` - The Orchestration Engine
-This is the canonical TypeScript implementation of the architect-builder system:
-- **Location**: `/Users/mwk/Development/ansari-project/codev/agent-farm/`
-- **Purpose**: Multi-agent orchestration CLI and dashboard server
+### 3. `packages/codev/` - The npm Package
+This is the `@cluesmith/codev` npm package containing all CLI tools:
+- **Purpose**: Published npm package with codev, af, and consult CLIs
 - **Contains**:
   - `src/` - TypeScript source code
-  - `dist/` - Compiled JavaScript (entry point: `dist/index.js`)
-  - `package.json` - Node.js dependencies (NOT published to npm)
-  - `protocols/` - Communication protocol definitions
+  - `src/agent-farm/` - Agent Farm orchestration (af command)
+  - `src/commands/` - codev subcommands (init, adopt, doctor, update, eject, tower)
+  - `src/commands/consult/` - Multi-agent consultation (consult command)
+  - `bin/` - CLI entry points (codev.js, af.js, consult.js)
+  - `skeleton/` - Embedded copy of codev-skeleton (built during `npm run build`)
+  - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotator
+  - `dist/` - Compiled JavaScript
 
-**Key Distinction**: agent-farm is the engine; codev/ and codev-skeleton/ provide templates and configuration.
+**Key Distinction**: packages/codev is the published npm package; codev-skeleton/ is the template embedded within it.
+
+**Note on skeleton/**: During `npm run build`, the codev-skeleton/ directory is copied into packages/codev/skeleton/. This embedded skeleton is what gets installed when users run `codev init`. Local files in a user's codev/ directory take precedence over the embedded skeleton.
 
 ## Complete Directory Structure
 
 ```
 codev/                                  # Project root (git repository)
-├── agent-farm/                         # TypeScript orchestration engine
-│   ├── src/                            # Source code
-│   │   ├── index.ts                    # CLI entry point
-│   │   ├── types.ts                    # Type definitions
-│   │   ├── state.ts                    # State management
-│   │   ├── commands/                   # CLI commands
-│   │   │   ├── start.ts                # Start architect dashboard
-│   │   │   ├── stop.ts                 # Stop all processes
-│   │   │   ├── spawn.ts                # Spawn builder
-│   │   │   ├── status.ts               # Show status
-│   │   │   ├── cleanup.ts              # Clean up builder
-│   │   │   ├── util.ts                 # Utility shell
-│   │   │   └── open.ts                 # File annotation viewer
-│   │   ├── utils/                      # Utilities
-│   │   │   ├── config.ts               # Configuration management
-│   │   │   ├── port-registry.ts        # Global port allocation
-│   │   │   ├── logger.ts               # Console logging
-│   │   │   └── tmux.ts                 # tmux session management
-│   │   ├── servers/                    # Web servers
-│   │   │   ├── dashboard-server.ts     # Dashboard HTTP server
-│   │   │   └── annotation-server.ts    # Annotation viewer server
-│   │   └── __tests__/                  # Jest unit tests
+├── packages/codev/                     # @cluesmith/codev npm package
+│   ├── src/                            # TypeScript source code
+│   │   ├── cli.ts                      # Main CLI entry point
+│   │   ├── commands/                   # codev subcommands
+│   │   │   ├── init.ts                 # codev init
+│   │   │   ├── adopt.ts                # codev adopt
+│   │   │   ├── doctor.ts               # codev doctor
+│   │   │   ├── update.ts               # codev update
+│   │   │   ├── eject.ts                # codev eject
+│   │   │   ├── tower.ts                # codev tower
+│   │   │   └── consult/                # consult command
+│   │   │       └── index.ts            # Multi-agent consultation
+│   │   ├── agent-farm/                 # af subcommands
+│   │   │   ├── cli.ts                  # af CLI entry point
+│   │   │   ├── index.ts                # Core orchestration
+│   │   │   ├── state.ts                # SQLite state management
+│   │   │   ├── types.ts                # Type definitions
+│   │   │   ├── commands/               # af CLI commands
+│   │   │   │   ├── start.ts            # Start architect dashboard
+│   │   │   │   ├── stop.ts             # Stop all processes
+│   │   │   │   ├── spawn.ts            # Spawn builder
+│   │   │   │   ├── status.ts           # Show status
+│   │   │   │   ├── cleanup.ts          # Clean up builder
+│   │   │   │   ├── util.ts             # Utility shell
+│   │   │   │   ├── open.ts             # File annotation viewer
+│   │   │   │   ├── send.ts             # Send message to builder
+│   │   │   │   └── rename.ts           # Rename builder/util
+│   │   │   ├── servers/                # Web servers
+│   │   │   │   ├── dashboard-server.ts # Dashboard HTTP server
+│   │   │   │   ├── tower-server.ts     # Multi-project overview
+│   │   │   │   └── open-server.ts      # File annotation viewer
+│   │   │   ├── db/                     # SQLite database layer
+│   │   │   │   ├── index.ts            # Database operations
+│   │   │   │   ├── schema.ts           # Table definitions
+│   │   │   │   └── migrate.ts          # JSON → SQLite migration
+│   │   │   └── __tests__/              # Vitest unit tests
+│   │   └── lib/                        # Shared library code
+│   │       ├── templates.ts            # Template file handling
+│   │       └── projectlist-parser.ts   # Parse projectlist.md
+│   ├── bin/                            # CLI entry points
+│   │   ├── codev.js                    # codev command
+│   │   ├── af.js                       # af command
+│   │   └── consult.js                  # consult command
+│   ├── skeleton/                       # Embedded codev-skeleton (built)
+│   ├── templates/                      # HTML templates
+│   │   ├── dashboard.html              # Split-pane dashboard
+│   │   └── annotate.html               # File annotation viewer
 │   ├── dist/                           # Compiled JavaScript
-│   │   └── index.js                    # Entry point (node invocation)
-│   ├── protocols/                      # Communication protocols
-│   ├── package.json                    # Dependencies (NOT published to npm)
+│   ├── package.json                    # npm package config
 │   └── tsconfig.json                   # TypeScript configuration
 ├── codev/                              # Our self-hosted instance
 │   ├── bin/                            # CLI wrapper scripts
@@ -170,10 +204,9 @@ codev/                                  # Project root (git repository)
 │   ├── agents/                         # Agent templates
 │   └── projectlist.md                  # Template project list
 ├── .agent-farm/                        # Project-scoped state (gitignored)
-│   └── state.json                      # Current architect/builder/util status
+│   └── state.db                        # SQLite database for architect/builder/util status
 ├── ~/.agent-farm/                      # Global registry (user home)
-│   ├── ports.json                      # Cross-project port allocations
-│   └── ports.lock                      # Lock file for concurrent access
+│   └── global.db                       # SQLite database for cross-project port allocations
 ├── .claude/                            # Claude Code-specific directory
 │   └── agents/                         # Agents for Claude Code
 ├── tests/                              # Test infrastructure
@@ -355,15 +388,14 @@ fi
 
 **Architecture**:
 - **Single canonical implementation** - All bash scripts deleted, TypeScript is the source of truth
-- **Thin wrapper invocation** - `codev/bin/agent-farm` calls `node agent-farm/dist/index.js`
-- **Project-scoped state** - `.agent-farm/state.json` tracks current session
-- **Global port registry** - `~/.agent-farm/ports.json` prevents cross-project port conflicts
+- **Thin wrapper invocation** - `af` command from npm package (installed globally)
+- **Project-scoped state** - `.agent-farm/state.db` (SQLite) tracks current session
+- **Global port registry** - `~/.agent-farm/global.db` (SQLite) prevents cross-project port conflicts
 
 #### CLI Commands
 
 ```bash
-# Recommended: set up alias
-alias af='./codev/bin/agent-farm'
+# af command is installed globally via: npm install -g @cluesmith/codev
 
 # Starting/stopping
 af start                      # Start architect dashboard
@@ -416,7 +448,7 @@ af spawn -p 0003 --builder-cmd "claude --model sonnet"
 - CLI overrides: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`
 - Early validation: on startup, verify commands exist and directories resolve
 
-#### Global Port Registry (`~/.agent-farm/ports.json`)
+#### Global Port Registry (`~/.agent-farm/global.db`)
 
 **Purpose**: Prevent port conflicts when running multiple architects across different repos
 
@@ -875,7 +907,7 @@ Codev itself follows test-driven development practices:
 - `codev/builders.md` (legacy state file)
 
 ### 13. Global Port Registry for Multi-Architect Support
-**Decision**: Use `~/.agent-farm/ports.json` to allocate deterministic port blocks per repository
+**Decision**: Use `~/.agent-farm/global.db` (SQLite) to allocate deterministic port blocks per repository
 
 **Rationale**:
 - **Cross-project coordination** - Multiple repos can run architects simultaneously
@@ -1329,35 +1361,18 @@ A well-maintained Codev architecture should enable:
 The architect-builder system was consolidated to eliminate brittleness from triple implementation.
 
 #### Agent-Farm TypeScript CLI
-- **Single canonical implementation** in `agent-farm/src/`
-- **Thin bash wrappers** at `codev/bin/agent-farm` and `codev-skeleton/bin/agent-farm`
+- **Single canonical implementation** in `packages/codev/src/agent-farm/`
+- **Global CLI commands** - `af`, `codev`, and `consult` installed via npm
 - **CLI commands**: start, stop, status, spawn, util, open, cleanup, ports
-- **Alias recommended**: `alias af='./codev/bin/agent-farm'`
 
 #### Global Port Registry
-- **Location**: `~/.agent-farm/ports.json`
+- **Location**: `~/.agent-farm/global.db` (SQLite)
 - **Purpose**: Cross-project port coordination for multiple simultaneous architects
 - **Port blocks**: 100 ports per project (4200-4299, 4300-4399, etc.)
 - **Features**:
-  - File locking with 30-second stale lock detection
-  - Schema versioning (version: 1)
+  - SQLite WAL mode for concurrent access
   - PID tracking for process ownership
   - Stale entry cleanup for deleted projects
-
-**Registry Structure**:
-```json
-{
-  "version": 1,
-  "entries": {
-    "/path/to/project": {
-      "basePort": 4200,
-      "registered": "2024-12-03T...",
-      "lastUsed": "2024-12-03T...",
-      "pid": 12345
-    }
-  }
-}
-```
 
 **Port Allocation per Project**:
 - Dashboard: base+0 (e.g., 4200)
@@ -1480,7 +1495,7 @@ const STATUS_CONFIG = {
 #### Integration with Dashboard
 - Status dots appear in builder tabs next to builder name
 - Updates via existing 1-second polling mechanism (`refresh()` called via `setInterval`)
-- No backend changes required (uses existing state.json status field)
+- No backend changes required (uses existing state.db status field)
 - Status automatically updates when builder status changes
 
 #### CSS Classes
@@ -1615,7 +1630,7 @@ const STATUS_CONFIG = {
 #### Integration Pattern
 - Status dots render in tab bar via `renderTabs()` function
 - Uses `getStatusDot(tab.status)` to generate HTML
-- Status field comes from builder tab object (populated from state.json)
+- Status field comes from builder tab object (populated from state.db)
 - Updates via existing 1-second polling mechanism (`refresh()` → `buildTabsFromState()` → `renderTabs()`)
 - No backend changes - uses existing builder status field
 
