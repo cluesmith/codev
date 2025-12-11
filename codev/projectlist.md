@@ -400,6 +400,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Phase 2: Stateful. Keep CLI running via stdio. Maintain session until closed. Depends on 0022."
 
+  - id: "0051"
+    title: "Codev Cheatsheet"
+    summary: "Comprehensive cheatsheet with philosophies, concepts (protocols, roles, hierarchy), and tools reference"
+    status: implementing
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0051-codev-cheatsheet.md
+      plan: codev/plans/0051-codev-cheatsheet.md
+      review: null
+    dependencies: []
+    tags: [documentation, onboarding]
+    timestamps:
+      conceived_at: "2025-12-11T10:50:00-08:00"
+      specified_at: "2025-12-11T10:50:00-08:00"
+      planned_at: "2025-12-11T10:50:00-08:00"
+      implementing_at: "2025-12-11T10:50:00-08:00"
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: ""
+
   - id: "0050"
     title: "Dashboard Polish"
     summary: "UX improvements: clickable title only for expand, show TICKs in project view, poll for projectlist.md creation"
