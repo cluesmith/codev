@@ -12,6 +12,7 @@ import { update } from './commands/update.js';
 import { eject } from './commands/eject.js';
 import { tower } from './commands/tower.js';
 import { consult } from './commands/consult/index.js';
+import { importCommand } from './commands/import.js';
 import { runAgentFarm } from './agent-farm/cli.js';
 
 const program = new Command();
@@ -130,6 +131,20 @@ program
         dryRun: options.dryRun,
         reviewType: options.type,
       });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Import command
+program
+  .command('import <source>')
+  .description('AI-assisted protocol import from other codev projects')
+  .option('-n, --dry-run', 'Show what would be imported without running Claude')
+  .action(async (source, options) => {
+    try {
+      await importCommand(source, { dryRun: options.dryRun });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);

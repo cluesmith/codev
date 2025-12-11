@@ -143,9 +143,7 @@ project-root/
 │       ├── arch.md         # Architecture documentation (updated during MAINTAIN)
 │       └── lessons-learned.md  # Extracted wisdom from reviews (generated during MAINTAIN)
 ├── .claude/
-│   └── agents/             # AI agent definitions
-│       ├── spider-protocol-updater.md
-│       └── codev-updater.md
+│   └── agents/             # AI agent definitions (custom project agents)
 ├── AGENTS.md              # Universal AI agent instructions (AGENTS.md standard)
 ├── CLAUDE.md              # This file (Claude Code-specific, identical to AGENTS.md)
 └── [project code]
@@ -182,69 +180,43 @@ To disable: User must explicitly say "without multi-agent consultation"
 5. **Evaluation Phase**: After evaluation completion
 6. **Review Phase**: After review document
 
-## Spider Protocol Updater Agent
+## Protocol Import Command
 
-The `spider-protocol-updater` agent helps evolve the SPIDER protocol by analyzing implementations in other repositories and identifying improvements to incorporate back into the main protocol.
+The `codev import` command provides AI-assisted import of protocol improvements from other codev projects.
 
-**When to use**:
-- Periodic review of SPIDER implementations in other repositories
-- When notified of significant SPIDER improvements in external projects
-- To check if a specific repository has protocol enhancements worth adopting
-
-**How to invoke**:
+**Usage**:
 ```bash
-# Ask Claude to check a specific repository
-"Check the ansari-project/webapp repo for any SPIDER improvements we should adopt"
+# Import from local directory
+codev import /path/to/other-project
 
-# Or for periodic reviews
-"It's been a month since we last checked for SPIDER improvements in other repos"
+# Import from GitHub
+codev import github:owner/repo
+codev import https://github.com/owner/repo
 ```
 
-**What the agent does**:
-1. Analyzes remote GitHub repositories implementing SPIDER
-2. Compares their protocol.md with our canonical version
-3. Reviews their lessons learned and review documents
-4. Classifies improvements as Universal, Domain-specific, Experimental, or Anti-pattern
-5. Recommends specific protocol updates with justification
+**How it works**:
+1. Fetches the source codev/ directory (local path or GitHub clone)
+2. Spawns an interactive Claude session with source and target context
+3. Claude analyzes differences and recommends imports
+4. You interactively approve/reject each suggested change
+5. Claude makes approved edits to your local codev/ files
 
-**Agent location**: `.claude/agents/spider-protocol-updater.md`
+**Focus areas**:
+- Protocol improvements (new phases, better documentation)
+- Lessons learned from other projects
+- Architectural patterns and documentation structure
+- New protocols not in your installation
 
-## Codev Updater Agent
-
-The `codev-updater` agent keeps your Codev installation current with the latest improvements from the main repository while preserving your project work.
-
-**When to use**:
-- Periodic framework updates (monthly recommended)
-- When new protocols are released (like TICK)
-- When agents receive improvements or bug fixes
-- When protocol templates are enhanced
-- To check for available updates
-
-**How to invoke**:
+**Example**:
 ```bash
-# Update to latest version
-"Please update my codev framework to the latest version"
+# Import improvements from another project
+codev import github:cluesmith/ansari-project
 
-# Check for available updates
-"Are there any updates available for codev?"
+# Dry run to see what would be compared
+codev import /path/to/project --dry-run
 ```
 
-**What the agent does**:
-1. Checks current installation and identifies installed components
-2. Fetches latest version from the main codev repository
-3. **Creates backups** of current installation
-4. Updates protocols, agents, and templates
-5. **Preserves all user work** (specs, plans, reviews)
-6. Provides update report and rollback instructions
-
-**Safety features**:
-- Always creates timestamped backups before updating
-- Never modifies user's specs, plans, or reviews
-- Preserves CLAUDE.md customizations
-- Provides clear rollback instructions if needed
-- Verifies successful update before completing
-
-**Agent location**: `.claude/agents/codev-updater.md`
+This replaces the older `codev-updater` and `spider-protocol-updater` agents with a more interactive, AI-assisted approach.
 
 ## CLI Command Reference
 
