@@ -149,26 +149,41 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 - Line numbers (they go stale)
 - Full API documentation (use JSDoc/docstrings for that)
 
+**Primary Purpose**: arch.md should enable a developer (or AI agent) to rapidly understand the entire system - not just file locations, but **how things actually work**.
+
 **Recommended Document Structure**:
 ```markdown
 # Project Architecture
 
 ## Overview
-[High-level description of the application architecture and design philosophy]
+[High-level description: what the system does, core design philosophy, 2-3 sentences]
+
+## Quick Start for Developers
+[The fastest path to understanding: "To understand X, read Y first"]
 
 ## Technology Stack
-[Detailed list of technologies, frameworks, and key dependencies with versions]
+[Technologies, frameworks, key dependencies with versions]
 
 ## Directory Structure
 [Complete directory tree with explanations for each major directory]
 
-## Core Components
-### [Component Category]
+## Major Components
+
+### [Component Name] (e.g., Agent Farm)
+- **Purpose**: What problem it solves
 - **Location**: path/to/component
-- **Purpose**: What it does
-- **Key Files**: List of important files
-- **Dependencies**: What it depends on
-- **Used By**: What uses it
+- **How It Works**:
+  - Step-by-step explanation of the mechanism
+  - Key technologies used (e.g., "uses tmux for terminal multiplexing")
+  - Runtime behavior (e.g., "spawns a tmux session per builder")
+  - State management (e.g., "state stored in SQLite at .agent-farm/state.db")
+- **Key Files**:
+  - `file.ts` - does X
+  - `other.ts` - handles Y
+- **Configuration**: How to customize behavior
+- **Common Operations**: Examples of typical usage
+
+[Repeat for each major component - be thorough about HOW, not just WHAT]
 
 ## Utility Functions & Helpers
 ### [Utility Category]
@@ -177,13 +192,10 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 - **When to Use**: Guidance on appropriate usage
 
 ## Data Flow
-[Diagrams or descriptions of how data moves through the system]
-
-## API Structure
-[Organization of API routes, endpoints, and their purposes]
+[How data moves through the system, with concrete examples]
 
 ## Key Design Decisions
-[Important architectural choices and their rationale]
+[Important architectural choices and their rationale - the WHY]
 
 ## Integration Points
 [External services, APIs, databases, and how they connect]
@@ -191,6 +203,17 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 ## Development Patterns
 [Common patterns used throughout the codebase]
 ```
+
+**Critical: The "How It Works" Requirement**
+
+For each major component, arch.md MUST explain the implementation mechanism, not just the purpose. Examples of good vs bad:
+
+| Bad (just WHAT) | Good (includes HOW) |
+|-----------------|---------------------|
+| "Agent Farm manages builders" | "Agent Farm spawns builders in isolated git worktrees. Each builder runs in a tmux session (named `builder-{id}`). The dashboard uses ttyd to expose terminals via HTTP on ports 4201-4299. State is persisted in SQLite." |
+| "Consult tool queries AI models" | "Consult shells out to external CLIs (gemini-cli, codex, claude). It writes the consultant role to a temp file, sets environment variables, and streams stdout/stderr back to the user." |
+
+This level of detail enables rapid onboarding and debugging.
 
 **Content Quality Standards**:
 - **Be Specific**: Include exact file paths, actual function names, concrete examples
