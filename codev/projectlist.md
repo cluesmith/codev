@@ -403,7 +403,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0035"
     title: "MAINTAIN Protocol"
     summary: "Rename CLEANUP to MAINTAIN, expand scope to include documentation maintenance (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md sync)"
-    status: specified
+    status: implementing
     priority: medium
     release: null
     files:

@@ -3,7 +3,7 @@
 ## Metadata
 - **ID**: 0035-maintain-protocol
 - **Protocol**: TICK
-- **Status**: draft
+- **Status**: implementing
 - **Created**: 2025-12-06
 - **Priority**: medium
 
@@ -174,12 +174,12 @@ All existing CLEANUP content is preserved and expanded.
 
 ## Success Criteria
 
-- [ ] `codev/protocols/cleanup/` renamed to `codev/protocols/maintain/`
-- [ ] MAINTAIN protocol.md includes documentation maintenance in all phases
-- [ ] lessons-learned.md template created
-- [ ] architecture-documenter agent deleted
-- [ ] CLAUDE.md updated to reference MAINTAIN (not CLEANUP)
-- [ ] Builder can be spawned with `--protocol maintain`
+- [x] `codev/protocols/cleanup/` renamed to `codev/protocols/maintain/`
+- [x] MAINTAIN protocol.md includes documentation maintenance in all phases
+- [x] lessons-learned.md template created
+- [x] architecture-documenter agent deleted (never existed - absorbed into protocol)
+- [x] CLAUDE.md updated to reference MAINTAIN (not CLEANUP)
+- [x] Builder can be spawned with `--protocol maintain`
 - [ ] At least one successful MAINTAIN run demonstrated
 
 ## Technical Changes

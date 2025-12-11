@@ -113,11 +113,30 @@ ruff check --select F401   # Find unused imports
 
 Scan the actual codebase and update `codev/resources/arch.md`:
 
+**Discovery phase**:
+1. `git log --oneline <base-commit>..HEAD` - what changed since last maintenance
+2. `ls -R` key directories to find new files/modules
+3. `grep` for new exports, classes, key functions
+
+**Update arch.md**:
 1. Verify directory structure matches documented structure
-2. Update component descriptions
+2. Update component descriptions for changed modules
 3. Add new utilities/helpers discovered
 4. Remove references to deleted code
-5. Update technology stack if changed
+5. Update technology stack if dependencies changed
+6. Document new integration points or APIs
+
+**What to include**:
+- File locations and their purpose
+- Key functions/classes and what they do
+- Data flow and dependencies
+- Configuration options
+- CLI commands and flags
+
+**What NOT to include**:
+- Implementation details that change frequently
+- Line numbers (they go stale)
+- Full API documentation (use JSDoc/docstrings for that)
 
 ### Generate lessons-learned.md
 
