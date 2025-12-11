@@ -633,7 +633,7 @@ This is where the Codev project uses Codev to develop itself:
   - `specs/` - Feature specifications for Codev itself
   - `plans/` - Implementation plans for Codev features
   - `reviews/` - Lessons learned from Codev development
-  - `resources/` - Reference materials (this file, llms.txt, etc.)
+  - `resources/` - Reference materials (arch.md, cheatsheet.md, lessons-learned.md, etc.)
   - `protocols/` - Working copies of protocols for development
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
@@ -754,8 +754,12 @@ codev/                                  # Project root (git repository)
 │   ├── plans/                          # Our implementation plans
 │   ├── reviews/                        # Our lessons learned
 │   ├── resources/                      # Reference materials
-│   │   ├── arch.md                     # This file
-│   │   └── llms.txt                    # LLM-friendly documentation
+│   │   ├── arch.md                     # This file (architecture documentation)
+│   │   ├── agent-farm.md               # Agent Farm quick reference
+│   │   ├── cheatsheet.md               # Codev philosophies, concepts, tools
+│   │   ├── conceptual-model.md         # Conceptual model documentation
+│   │   ├── lessons-learned.md          # Extracted wisdom from reviews
+│   │   └── workflow-reference.md       # Stage diagrams and common commands
 │   └── projectlist.md                  # Master project tracking
 ├── codev-skeleton/                     # Template for distribution
 │   ├── bin/                            # CLI wrapper
@@ -2159,6 +2163,6 @@ const STATUS_CONFIG = {
 
 ---
 
-**Last Updated**: 2025-12-04 (Spec 0019 implementation)
-**Version**: Post-tab-bar-status-indicators
+**Last Updated**: 2025-12-11 (Maintenance run 0003)
+**Version**: Post-0052-agent-farm-internals
 **Next Review**: After next significant feature implementation
