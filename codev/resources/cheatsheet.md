@@ -56,6 +56,8 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 
 ### Protocols
 
+A **protocol** is a structured workflow that defines how work progresses from idea to completion.
+
 | Protocol | Use For | Phases |
 |----------|---------|--------|
 | **SPIDER** | New features | Specify → Plan → Implement → Defend → Evaluate → Review |
@@ -64,6 +66,8 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
 
 ### Roles
+
+A **role** defines who does what work and what tools/permissions they have.
 
 | Role | Responsibilities |
 |------|------------------|
@@ -91,7 +95,7 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 └─────────────────────────────────────────┘
 ```
 
-**Key insight**: Higher levels inform lower levels. Start at the top, work down.
+**Key insight**: Higher levels inform lower levels. Start at the top, work down. Changes also propagate up—if source code changes, specs and plans should be updated to match.
 
 ---
 
@@ -99,33 +103,34 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 
 ### codev
 
-Project management commands.
+Project management commands. Typically used by **humans** to set up and maintain projects.
 
 | Command | Description |
 |---------|-------------|
-| `codev init <name>` | Create a new Codev project |
+| `codev init <dirname>` | Create a new Codev project |
 | `codev adopt` | Add Codev to an existing project |
 | `codev doctor` | Check dependencies and configuration |
 | `codev update` | Update Codev framework |
+| `codev import` | Import specs from another project |
 | `codev tower` | Cross-project dashboard |
 
 ### agent-farm (af)
 
-Architect-Builder orchestration.
+Architect-Builder orchestration. Used by both **humans and agents**—agents use it more frequently.
 
 | Command | Description |
 |---------|-------------|
-| `af start` | Start the architect dashboard |
+| `af start` | Start dashboard (port 4200, 4300, etc.) |
 | `af stop` | Stop all processes |
 | `af spawn -p <id>` | Spawn a builder for project |
 | `af status` | Check status of all builders |
-| `af send <id> <msg>` | Send message to a builder |
+| `af send <target> <msg>` | Send message (builder↔architect) |
 | `af cleanup -p <id>` | Clean up a builder worktree |
 | `af open <file>` | Open file in dashboard viewer |
 
 ### consult
 
-Multi-agent consultation.
+Multi-agent consultation. Used by both humans and agents—**mostly agents** during reviews.
 
 | Command | Description |
 |---------|-------------|
@@ -141,7 +146,7 @@ Multi-agent consultation.
 |------|----------|
 | `spec-review` | Review spec completeness and clarity |
 | `plan-review` | Review plan coverage and feasibility |
-| `impl-review` | Review implementation quality |
+| `impl-review` | Review implementation quality (Builder use) |
 | `integration-review` | Review architectural fit (Architect use) |
 
 ---
@@ -153,9 +158,10 @@ Multi-agent consultation.
 ```
 [ ] Specify - Write spec in codev/specs/XXXX-name.md
 [ ] Plan - Write plan in codev/plans/XXXX-name.md
-[ ] Implement - Write code following the plan
-[ ] Defend - Write tests for the implementation
-[ ] Evaluate - Consult external reviewers, address feedback
+    For each phase of the plan:
+      [ ] Implement - Write code following the plan
+      [ ] Defend - Write tests for the implementation
+      [ ] Evaluate - Consult external reviewers, address feedback
 [ ] Review - Write review in codev/reviews/XXXX-name.md, create PR
 ```
 
@@ -167,18 +173,6 @@ consult --model gemini pr <id> &
 consult --model codex pr <id> &
 consult --model claude pr <id> &
 wait
-```
-
-### Git Workflow
-
-```bash
-# NEVER use git add -A or git add .
-# ALWAYS add files explicitly
-git add codev/specs/XXXX-name.md
-git commit -m "[Spec XXXX][Phase] Description"
-
-# PR merging - use regular merge, not squash
-gh pr merge <number> --merge
 ```
 
 ---
