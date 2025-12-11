@@ -1,5 +1,190 @@
 # Glossary {#sec-glossary}
 
-::: {.callout-note}
-This appendix is under development.
-:::
+This glossary defines the key terms used throughout Codev. Terms are organized alphabetically for easy reference.
+
+## A
+
+**Agent Farm**
+: The orchestration system that manages multiple Builder agents working in parallel. Accessed via the `af` CLI tool. Agent Farm handles spawning builders, managing worktrees, tracking status, and coordinating communication between the Architect and Builders.
+
+**Approval Gate**
+: A checkpoint in the project lifecycle where human approval is required to proceed. Codev has two approval gates: (1) `conceived → specified` where the human approves a spec, and (2) `committed → integrated` where the human validates production deployment. AI agents cannot cross these gates autonomously.
+
+**Architect**
+: The orchestrating role in Codev that works alongside the human to manage the development process. The Architect creates specifications and plans, spawns Builders, monitors progress, and reviews PRs. In practice, the human and AI Architect function as a single collaborative unit. See @sec-roles for details.
+
+**Artifact**
+: A document produced during the development process. In Codev, the three primary artifacts are specifications, plans, and reviews. Each feature produces exactly three artifacts with the same filename in different directories.
+
+## B
+
+**Blocked**
+: A Builder status indicating the agent is stuck and needs Architect assistance. Builders should report blocked status promptly rather than spinning on unsolvable problems.
+
+**Builder**
+: An autonomous AI agent that implements a single specification in isolation. Builders work in dedicated git worktrees, follow the assigned protocol (SPIDER or TICK), and create PRs for review. Multiple Builders can work in parallel on different specs. See @sec-roles for details.
+
+**Branch**
+: In git workflow, each Builder works on a dedicated branch following the naming convention `builder/XXXX-spec-name`. The Architect typically works on `main` or feature branches.
+
+## C
+
+**Codev**
+: The Human-AI Software Development Operating System. A methodology framework that provides protocols, roles, and tools for productive human-AI collaboration in software development.
+
+**Codev CLI (`codev`)**
+: The project management command-line tool. Commands include `codev init` (create new project), `codev adopt` (add to existing project), `codev doctor` (health check), and `codev update` (framework updates). See @sec-codev-cli for details.
+
+**Committed**
+: A project status indicating the PR has been merged to the main branch. The code is in version control but has not yet been validated in production by the human.
+
+**Conceived**
+: The initial project status when an idea is first captured. A spec file may exist but is not yet approved. AI agents must stop at this status after writing a specification.
+
+**Consult Tool (`consult`)**
+: The CLI tool for multi-model AI consultation. Enables getting second opinions from different AI models (Gemini, Codex, Claude) on specs, plans, and implementations. See @sec-consult for details.
+
+**Consultation**
+: The practice of seeking review from multiple AI models to catch blind spots and improve quality. Codev defaults to consulting both Gemini and Codex at key checkpoints.
+
+**Consultation Checkpoint**
+: A defined point in a protocol where multi-agent consultation is required. In SPIDER, checkpoints occur after specification, planning, implementation, testing, and evaluation phases.
+
+## D
+
+**Dashboard**
+: The web-based UI served by Agent Farm that displays Builder status, provides terminal access, and offers file annotation capabilities.
+
+**Defend**
+: The "D" phase in SPIDER where comprehensive tests are written to validate the implementation. Tests guard functionality and prevent regressions. This phase must complete before Evaluate.
+
+## E
+
+**Evaluate**
+: The "E" phase in SPIDER where the implementation is assessed against requirements. Includes functional and non-functional evaluation, expert consultation, user discussion, and the mandatory phase commit.
+
+**EXPERIMENT Protocol**
+: A Codev protocol for disciplined exploration. Used for proof-of-concept work, testing new approaches, and research spikes. Follows a Hypothesis → Test → Learn cycle.
+
+## H
+
+**Human-Architect**
+: The collaborative unit formed by the human developer and the AI Architect. They function together for strategic direction, specification, planning, and quality assurance. The human provides domain expertise and approval authority; the AI provides analysis and execution.
+
+## I
+
+**IDER**
+: The implementation portion of SPIDER (Implement, Defend, Evaluate, Review) that Builders are responsible for. The Architect handles SP (Specify, Plan).
+
+**Implement**
+: The "I" phase in SPIDER where the plan is transformed into working code. Each implementation phase produces a single atomic commit after evaluation.
+
+**Implemented**
+: A project status indicating code is complete, tests pass, and a PR has been created and is awaiting review.
+
+**Implementing**
+: A project status indicating active work is in progress with one or more phases underway.
+
+**Institutional Knowledge**
+: Level 0 of the memory hierarchy. Long-term accumulated wisdom stored in `arch.md` (architecture documentation) and `lessons-learned.md` (extracted wisdom from reviews). This knowledge persists across projects and sessions.
+
+**Integrated**
+: The final project status indicating the work has been merged, deployed, validated in production, and explicitly approved by the project owner. Only humans can mark a project as integrated.
+
+**Integration Review**
+: The Architect's 3-way review of a Builder PR, focused on how changes fit into the broader system, architectural consistency, and potential side effects. Distinct from the Builder's implementation-focused review.
+
+## L
+
+**Lessons Learned**
+: Knowledge extracted from the Review phase documenting what went well, what was challenging, and methodology improvements. Accumulated in `codev/reviews/` and synthesized into `lessons-learned.md`.
+
+## M
+
+**MAINTAIN Protocol**
+: A Codev protocol for codebase hygiene. Used for removing dead code, syncing documentation, and quarterly maintenance. Keeps the codebase clean and documentation current.
+
+**Memory Architecture**
+: Codev's four-level hierarchy for persisting knowledge across sessions:
+: - **Level 0**: Institutional knowledge (`arch.md`, `lessons-learned.md`)
+: - **Level 1**: Project state (`projectlist.md`)
+: - **Level 2**: Project documentation (specs, plans, reviews)
+: - **Level 3**: Source code
+
+**Multi-Agent Consultation**
+: See *Consultation*.
+
+## O
+
+**Operating System (metaphor)**
+: The central metaphor for Codev. Just as an OS provides abstractions (processes, files, memory) that make hardware usable, Codev provides abstractions (protocols, roles, memory) that make AI collaboration productive.
+
+## P
+
+**Phase**
+: A discrete unit of work within a protocol. In SPIDER, phases are Specify, Plan, Implement, Defend, Evaluate, and Review. Each implementation phase produces an atomic commit.
+
+**Plan**
+: A document describing HOW to build what the specification defines. Plans break work into phases, define success metrics, and establish acceptance criteria. Stored in `codev/plans/XXXX-name.md`.
+
+**Planned**
+: A project status indicating the implementation plan has been created and approved.
+
+**PR-Ready**
+: A Builder status indicating implementation is complete and ready for Architect review.
+
+**Project**
+: A unit of tracked work in Codev. Each project has a four-digit ID, a specification, a plan, and eventually a review. Projects are tracked in `projectlist.md`.
+
+**Project Lifecycle**
+: The stages a project moves through: `conceived → specified → planned → implementing → implemented → committed → integrated`. See @sec-projectlist for details.
+
+**Project List (`projectlist.md`)**
+: The canonical source of truth for all project information. Contains status, priority, dependencies, and notes for every project. The Architect maintains this file.
+
+**Protocol**
+: A structured workflow defining how work proceeds through phases. Codev provides four protocols: SPIDER, TICK, EXPERIMENT, and MAINTAIN. Each protocol specifies required artifacts and checkpoints.
+
+## R
+
+**Release**
+: A deployable unit that groups related projects. Releases have semantic versions (v1.0.0, v1.1.0) and move through states: `planning → active → released → archived`.
+
+**Review**
+: (1) A document capturing lessons learned from implementing a feature. Stored in `codev/reviews/XXXX-name.md`. (2) The "R" phase in SPIDER where implementation is comprehensively reviewed and learnings are documented.
+
+**Role**
+: A defined set of responsibilities in Codev. The three primary roles are Human-Architect (design and coordination), Builder (implementation), and Consultant (second opinions).
+
+## S
+
+**Skeleton (`codev-skeleton/`)**
+: The template directory structure distributed to new Codev installations. Contains protocols, role definitions, and templates but no project-specific work.
+
+**Specification (Spec)**
+: A document describing WHAT to build and WHY. Defines the problem, solution approaches, success criteria, and constraints. Stored in `codev/specs/XXXX-name.md`.
+
+**Specified**
+: A project status indicating the specification has been approved by the human. Only humans can mark a project as specified.
+
+**SPIDER Protocol**
+: The primary Codev development protocol for new features. Phases: **S**pecify → **P**lan → **I**mplement → **D**efend → **E**valuate → **R**eview. Includes mandatory multi-agent consultation. See @sec-protocols for details.
+
+**Status**
+: The current state of a project or builder. Project statuses track lifecycle stage (conceived, implementing, etc.). Builder statuses track work state (spawning, blocked, pr-ready, etc.).
+
+## T
+
+**3-Way Review**
+: A consultation pattern where three AI models (typically Gemini, Codex, and Claude) review the same artifact in parallel. Used for both Builder implementation reviews and Architect integration reviews.
+
+**TICK Protocol**
+: A lightweight Codev protocol for amendments to existing specifications. Follows Understand → Implement → Verify → Done. Cannot be used for new features.
+
+**Tower Pattern**
+: A pattern for managing related projects across multiple repositories. Enables cross-project coordination while maintaining isolation.
+
+## W
+
+**Worktree**
+: A git feature allowing multiple working directories from a single repository. Each Builder operates in an isolated worktree at `.builders/XXXX/`, enabling parallel development without interference.
