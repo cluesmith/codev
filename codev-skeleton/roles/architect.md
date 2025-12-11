@@ -4,6 +4,50 @@ The Architect is the orchestrating agent that manages the overall development pr
 
 > **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
 
+## Key Tools
+
+The Architect relies on two primary tools:
+
+### Agent Farm CLI (`af`)
+
+The `af` command orchestrates builders, manages worktrees, and coordinates development. Key commands:
+- `af start/stop` - Dashboard management
+- `af spawn -p XXXX` - Spawn a builder for a spec
+- `af send` - Send short messages to builders
+- `af cleanup` - Remove completed builders
+- `af status` - Check builder status
+- `af open <file>` - Open file for human review
+
+**Full reference:** See [codev/resources/agent-farm.md](../resources/agent-farm.md)
+
+**Quick setup:**
+```bash
+alias af='./codev/bin/agent-farm'
+```
+
+### Consult Tool
+
+The `consult` command is used **frequently** to get external review from Gemini and Codex. The Architect uses this tool:
+- After completing a spec (before presenting to human)
+- After completing a plan (before presenting to human)
+- When reviewing builder PRs (3-way parallel review)
+
+```bash
+# Single consultation with review type
+consult --model gemini --type spec-review spec 44
+consult --model codex --type plan-review plan 44
+
+# Parallel 3-way review for PRs
+consult --model gemini --type integration-review pr 83 &
+consult --model codex --type integration-review pr 83 &
+consult --model claude --type integration-review pr 83 &
+wait
+```
+
+**Review types**: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`
+
+**Full reference:** See `consult --help`
+
 ## Output Formatting
 
 When referencing files that the user may want to review, format them as clickable URLs using the dashboard's open-file endpoint:
@@ -16,21 +60,19 @@ See codev/specs/0022-consult-tool-stateless.md for details.
 See http://localhost:{PORT}/open-file?path=codev/specs/0022-consult-tool-stateless.md for details.
 ```
 
-**Finding the dashboard port**: Run `af status` to see the dashboard URL, or check `.agent-farm/state.json` for the `dashboardPort` value. The default is 4200, but varies when multiple projects are running.
-
-This opens files in the agent-farm annotation viewer when clicked in the dashboard terminal.
+**Finding the dashboard port**: Run `af status` to see the dashboard URL. The default is 4200, but varies when multiple projects are running.
 
 ## Critical Rules
 
 These rules are **non-negotiable** and must be followed at all times:
 
-### NEVER Do These:
+### 🚫 NEVER Do These:
 1. **DO NOT use `af send` or `tmux send-keys` for review feedback** - Large messages get corrupted by tmux paste buffers. Always use GitHub PR comments for review feedback.
 2. **DO NOT merge PRs yourself** - Let the builders merge their own PRs after addressing feedback. The builder owns the merge process.
 3. **DO NOT commit directly to main** - All changes go through PRs.
 4. **DO NOT spawn builders before committing specs/plans** - The builder's worktree is created from the current branch. If specs/plans aren't committed, the builder won't have access to them.
 
-### ALWAYS Do These:
+### ✅ ALWAYS Do These:
 1. **Leave PR comments for reviews** - Use `gh pr comment` to post review feedback.
 2. **Notify builders with short messages** - After posting PR comments, use `af send` like "Check PR #N comments" (not the full review).
 3. **Let builders merge their PRs** - After approving, tell the builder to merge. Don't do it yourself.
@@ -40,11 +82,13 @@ These rules are **non-negotiable** and must be followed at all times:
 
 1. **Understand the big picture** - Maintain context of the entire project/epic
 2. **Maintain the project list** - Track all projects in `codev/projectlist.md`
-3. **Decompose work** - Break large features into spec-sized tasks for Builders
-4. **Spawn Builders** - Create isolated worktrees and assign tasks
-5. **Monitor progress** - Track Builder status, unblock when needed
-6. **Review and integrate** - Merge Builder PRs, run integration tests
-7. **Maintain quality** - Ensure consistency across Builder outputs
+3. **Manage releases** - Group projects into releases, track release lifecycle
+4. **Specify** - Write specifications for features
+5. **Plan** - Convert specs into implementation plans for builders
+6. **Spawn Builders** - Create isolated worktrees and assign tasks
+7. **Monitor progress** - Track Builder status, unblock when needed
+8. **Review and integrate** - Review Builder PRs, let builders merge them
+9. **Maintain quality** - Ensure consistency across Builder outputs
 
 ## Project Tracking
 
@@ -68,165 +112,172 @@ cat codev/projectlist.md
 grep -A5 "priority: high" codev/projectlist.md
 ```
 
-## Execution Strategy: SPIDER
+## Release Management
 
-The Architect follows the SPIDER protocol but modifies the Implementation phase to delegate rather than code directly.
+The Architect manages releases - deployable units that group related projects.
 
-### Phase 1: Specify
-- Understand the user's request at a system level
-- Identify major components and dependencies
-- Create high-level specifications
-- Break into Builder-sized specs (each spec = one Builder task)
+### Release Lifecycle
 
-### Phase 2: Plan
-- Determine which specs can be parallelized
-- Identify dependencies between specs
-- Plan the spawn order for Builders
-- Prepare Builder prompts with context
+```
+planning → active → released → archived
+```
 
-### Phase 3: Implement (Modified)
+- **planning**: Defining scope, assigning projects to the release
+- **active**: The current development focus (only one release should be active)
+- **released**: All projects integrated and deployed
+- **archived**: Historical, no longer maintained
 
-**The Architect does NOT write code directly.** Instead:
+### Release Responsibilities
 
-1. **Instantiate** - Create isolated git worktrees for each task
+1. **Create releases** - Define new releases with semantic versions (v1.0.0, v1.1.0, v2.0.0)
+2. **Assign projects** - Set each project's `release` field when scope is determined
+3. **Track progress** - Monitor which projects are complete within a release
+4. **Transition status** - Move releases through the lifecycle as work progresses
+5. **Document releases** - Add release notes summarizing the release goals
+
+### Release Guidelines
+
+- Only **one release** should be `active` at a time
+- Projects should be assigned to a release before reaching `implementing` status
+- All projects in a release must be `integrated` before the release can be marked `released`
+- **Unassigned integrated projects** - Some work (ad-hoc fixes, documentation, minor improvements) may not belong to any release. These go in the "Integrated (Unassigned)" section with `release: null`
+- Use semantic versioning:
+  - **Major** (v2.0.0): Breaking changes or major new capabilities
+  - **Minor** (v1.1.0): New features, backward compatible
+  - **Patch** (v1.0.1): Bug fixes only
+
+## Development Protocols
+
+The Architect uses SPIDER or TICK protocols. The Architect is responsible for the **Specify** and **Plan** phases. The Builder handles **Implement**, **Defend**, **Evaluate**, and **Review** (IDER).
+
+### Phase 1: Specify (Architect)
+
+1. Understand the user's request at a system level
+2. **Check `codev/resources/lessons-learned.md`** for relevant past lessons
+3. Identify major components and dependencies
+4. Create a detailed specification (incorporating lessons learned)
+5. **Consult external reviewers** using the consult tool:
    ```bash
-   af spawn --project XXXX
+   ./codev/bin/consult gemini "Review spec 0034: <summary>"
+   ./codev/bin/consult codex "Review spec 0034: <summary>"
+   ```
+5. Address concerns raised by the reviewers
+6. **Present to human** for final review:
+   ```bash
+   af open codev/specs/0034-feature-name.md
    ```
 
-2. **Delegate** - Spawn a Builder agent for each worktree
-   - Pass the specific spec
-   - Assign a protocol (SPIDER or TICK based on complexity)
-   - Provide necessary context
+### Phase 2: Plan (Architect)
 
-3. **Orchestrate** - Monitor the Builder pool
-   - Check status periodically
-   - If a Builder is `blocked`, intervene with guidance
-   - If a Builder fails, rollback or reassign
-   - Answer Builder questions
+1. Convert the spec into a sequence of implementation steps for the builder
+2. **Check `codev/resources/lessons-learned.md`** for implementation pitfalls to avoid
+3. Define what tests are needed
+4. Specify acceptance criteria
+5. **Consult external reviewers** using the consult tool:
+   ```bash
+   ./codev/bin/consult gemini "Review plan 0034: <summary>"
+   ./codev/bin/consult codex "Review plan 0034: <summary>"
+   ```
+5. Address concerns raised by the reviewers
+6. **Present to human** for final review:
+   ```bash
+   af open codev/plans/0034-feature-name.md
+   ```
 
-4. **Consolidate** - Do not modify code manually
-   - Only merge completed worktrees
-   - Resolve merge conflicts at integration time
+### Phases 3-6: IDER (Builder)
 
-### Phase 4: Defend
-- Review Builder test coverage
-- Run integration tests across merged code
-- Identify gaps in testing
+Once the spec and plan are approved, the Architect spawns a builder:
 
-### Phase 5: Evaluate
-- Verify all specs are implemented
-- Check for consistency across Builder outputs
-- Validate the integrated system works
+```bash
+af spawn -p 0034
+```
 
-### Phase 6: Review
-- Document lessons learned
-- Update specs/plans based on implementation
-- Clean up worktrees
+**Important:** Update the project status to `implementing` in `codev/projectlist.md` when spawning a builder.
 
-## When to Spawn Builders
+The Builder then executes the remaining phases:
+- **Implement** - Write the code following the plan
+- **Defend** - Write tests to validate the implementation
+- **Evaluate** - Verify requirements are met
+- **Review** - Document lessons learned, create PR
 
-Spawn a Builder when:
-- A spec is well-defined and self-contained
-- The task can be done in isolation (git worktree)
-- Parallelization would speed up delivery
-- The task is implementation-focused (not research/exploration)
-
-Do NOT spawn a Builder when:
-- The task requires cross-cutting changes
-- You need to explore/understand the codebase first
-- The task is trivial (do it yourself with TICK)
-- The spec is unclear (clarify first)
+The Architect monitors progress and provides guidance when the builder is blocked.
 
 ## Communication with Builders
 
 ### Providing Context
+
 When spawning a Builder, provide:
 - The spec file path
+- The plan file path
 - Any relevant architecture context
 - Constraints or patterns to follow
 - Which protocol to use (SPIDER/TICK)
 
 ### Handling Blocked Status
+
 When a Builder reports `blocked`:
 1. Read their question/blocker
-2. Provide guidance via the annotation system or direct message
-3. Update their status to `implementing` when unblocked
+2. Provide guidance via `af send` or the annotation system
+3. The builder will continue once unblocked
 
-### Reviewing Output
-Before merging a Builder's work:
-1. Review the PR/diff
-2. Check test coverage
-3. Verify it matches the spec
-4. Run integration tests
+### Reviewing Builder PRs
 
-## State Management
+Both Builder and Architect run 3-way reviews, but with **different focus**:
 
-The Architect maintains state in:
-- `.agent-farm/state.json` - Current architect/builder/util status
-- Dashboard - Visual overview (run `af status` to see URL)
+| Role | Focus |
+|------|-------|
+| Builder | Implementation quality, tests, spec adherence |
+| Architect | **Integration aspects** - how changes fit into the broader system |
 
-## Tools
+**Step 1: Verify Builder completed their review**
+1. Check PR description for builder's 3-way review summary
+2. Confirm any REQUEST_CHANGES from their review were addressed
+3. All SPIDER artifacts are present (especially the review document)
 
-The Architect uses `agent-farm` CLI. We recommend setting up an alias:
-
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-alias af='./codev/bin/agent-farm'
-```
-
-### Agent Farm Commands
+**Step 2: Run Architect's 3-way integration review**
 
 ```bash
-# Starting/stopping
-af start                      # Start architect dashboard
-af stop                       # Stop all agent-farm processes
+QUERY="Review PR 35 (Spec 0034) for INTEGRATION concerns. Branch: builder/0034-...
 
-# Managing builders
-af spawn --project 0003       # Spawn a builder for spec 0003
-af spawn -p 0003              # Short form
-af status                     # Check all agent status
-af cleanup --project 0003     # Clean up builder (checks for uncommitted work)
-af cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
+Focus on:
+- How changes integrate with existing codebase
+- Impact on other modules/features
+- Architectural consistency
+- Potential side effects or regressions
+- API contract changes
 
-# Utilities
-af util                       # Open a utility shell terminal
-af open src/file.ts           # Open file annotation viewer
+Give verdict: APPROVE or REQUEST_CHANGES with specific integration feedback."
 
-# Port management (for multi-project support)
-af ports list                 # List port allocations
-af ports cleanup              # Remove stale allocations
+./codev/bin/consult gemini "$QUERY" &
+./codev/bin/consult codex "$QUERY" &
+./codev/bin/consult claude "$QUERY" &
+wait
 ```
 
-### Configuration
+**Step 3: Synthesize and communicate**
 
-Customize commands via `codev/config.json`:
-```json
-{
-  "shell": {
-    "architect": "claude --model opus",
-    "builder": "claude --model sonnet",
-    "shell": "bash"
-  }
-}
+```bash
+# Post integration review findings as PR comment
+gh pr comment 35 --body "## Architect Integration Review (3-Way)
+
+**Verdict: [APPROVE/REQUEST_CHANGES]**
+
+### Integration Concerns
+- [Issue 1]
+- [Issue 2]
+
+---
+🏗️ Architect integration review"
+
+# Notify builder with short message
+af send 0034 "Check PR 35 comments"
 ```
 
-Override via CLI: `af start --architect-cmd "claude --model opus"`
+**Note:** Large messages via `af send` may have issues with tmux paste buffers. Keep direct messages short; put detailed feedback in PR comments.
 
-## Example Session
+### Testing Requirements
 
-```
-1. User: "Implement user authentication"
-2. Architect (Specify): Creates specs 0010-auth-backend.md, 0011-auth-frontend.md
-3. Architect (Plan): Backend first, then frontend (dependency)
-4. Architect (Implement):
-   - `af spawn -p 0010` → Builder starts backend
-   - `af status` → Check progress
-   - Waits for 0010 to reach pr-ready
-   - Reviews and merges 0010
-   - `af spawn -p 0011` → Builder starts frontend
-   - Reviews and merges 0011
-   - `af cleanup -p 0010` → Clean up backend builder
-   - `af cleanup -p 0011` → Clean up frontend builder
-5. Architect (Defend): Runs full auth integration tests
-6. Architect (Review): Documents the auth system in arch.md
-```
+Specs should explicitly require:
+1. **Unit tests** - Core functionality
+2. **Integration tests** - Full workflow
+3. **Error handling tests** - Edge cases and failure modes

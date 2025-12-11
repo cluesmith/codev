@@ -153,9 +153,10 @@ The Architect uses SPIDER or TICK protocols. The Architect is responsible for th
 ### Phase 1: Specify (Architect)
 
 1. Understand the user's request at a system level
-2. Identify major components and dependencies
-3. Create a detailed specification
-4. **Consult external reviewers** using the consult tool:
+2. **Check `codev/resources/lessons-learned.md`** for relevant past lessons
+3. Identify major components and dependencies
+4. Create a detailed specification (incorporating lessons learned)
+5. **Consult external reviewers** using the consult tool:
    ```bash
    ./codev/bin/consult gemini "Review spec 0034: <summary>"
    ./codev/bin/consult codex "Review spec 0034: <summary>"
@@ -169,9 +170,10 @@ The Architect uses SPIDER or TICK protocols. The Architect is responsible for th
 ### Phase 2: Plan (Architect)
 
 1. Convert the spec into a sequence of implementation steps for the builder
-2. Define what tests are needed
-3. Specify acceptance criteria
-4. **Consult external reviewers** using the consult tool:
+2. **Check `codev/resources/lessons-learned.md`** for implementation pitfalls to avoid
+3. Define what tests are needed
+4. Specify acceptance criteria
+5. **Consult external reviewers** using the consult tool:
    ```bash
    ./codev/bin/consult gemini "Review plan 0034: <summary>"
    ./codev/bin/consult codex "Review plan 0034: <summary>"
