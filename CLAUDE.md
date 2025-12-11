@@ -39,6 +39,8 @@ Future releases will continue this tradition, drawing from architectural wonders
 
 ## Quick Start
 
+> **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.
+
 You are working in the Codev project itself, with multiple development protocols available:
 
 **Available Protocols**:

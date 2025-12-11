@@ -74,6 +74,10 @@ Or ask to learn more about Codev.
 
 ## Learn about Codev
 
+### 📋 Cheatsheet
+
+Quick reference for Codev's philosophies, concepts, and tools: **[Cheatsheet](codev/resources/cheatsheet.md)**
+
 ### 📺 Quick Introduction (5 minutes)
 [![Codev Introduction](https://img.youtube.com/vi/vq_dmfyMHRA/0.jpg)](https://youtu.be/vq_dmfyMHRA)
 
