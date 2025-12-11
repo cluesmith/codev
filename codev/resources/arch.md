@@ -1354,6 +1354,455 @@ A well-maintained Codev architecture should enable:
 
 ---
 
+## Agent Farm Internals
+
+This section provides comprehensive documentation of how the Agent Farm (`af`) system works internally. Agent Farm is the most complex component of Codev, enabling parallel AI-assisted development through the architect-builder pattern.
+
+### Architecture Overview
+
+Agent Farm orchestrates multiple AI agents working in parallel on a codebase. The architecture consists of:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Dashboard (HTTP Server)                       │
+│                         http://localhost:4200                        │
+├─────────────────────────────────────────────────────────────────────┤
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
+│  │Architect │  │ Builder  │  │ Builder  │  │  Utils   │            │
+│  │  Tab     │  │  Tab 1   │  │  Tab 2   │  │  Tabs    │            │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
+│       │             │             │             │                   │
+│       ▼             ▼             ▼             ▼                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
+│  │  ttyd    │  │  ttyd    │  │  ttyd    │  │  ttyd    │            │
+│  │ :4201    │  │ :4210    │  │ :4211    │  │ :4230    │            │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+   │  tmux    │  │  tmux    │  │  tmux    │  │  tmux    │
+   │ session  │  │ session  │  │ session  │  │ session  │
+   │(claude)  │  │(claude)  │  │(claude)  │  │ (bash)   │
+   └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┘
+        │             │             │
+        ▼             ▼             ▼
+   ┌──────────┐  ┌──────────┐  ┌──────────┐
+   │  Main    │  │ Worktree │  │ Worktree │
+   │  Repo    │  │ .builders│  │ .builders│
+   │          │  │  /0003/  │  │  /0005/  │
+   └──────────┘  └──────────┘  └──────────┘
+```
+
+**Key Components**:
+1. **Dashboard Server**: Express HTTP server serving the web UI and REST API
+2. **ttyd**: Web-based terminal emulator exposing tmux sessions via HTTP
+3. **tmux**: Terminal multiplexer providing session persistence
+4. **Git Worktrees**: Isolated working directories for each builder
+5. **SQLite Databases**: State persistence (local and global)
+
+**Data Flow**:
+1. User opens dashboard at `http://localhost:4200`
+2. Dashboard polls `/api/state` for current state (1-second interval)
+3. Each tab embeds an iframe pointing to its ttyd port
+4. ttyd connects to a tmux session running claude or bash
+5. Builders work in isolated git worktrees under `.builders/`
+
+### Port System
+
+The port system ensures multiple projects can run Agent Farm simultaneously without conflicts.
+
+#### Port Block Allocation
+
+Each project receives a dedicated 100-port block:
+- First project: 4200-4299
+- Second project: 4300-4399
+- Third project: 4400-4499
+- Maximum: ~58 projects (ports 4200-9999)
+
+#### Port Layout Within a Block
+
+Given a base port (e.g., 4200):
+
+| Port Offset | Port (example) | Purpose |
+|-------------|----------------|---------|
+| +0 | 4200 | Dashboard HTTP server |
+| +1 | 4201 | Architect terminal (ttyd) |
+| +10 to +29 | 4210-4229 | Builder terminals (20 slots) |
+| +30 to +49 | 4230-4249 | Utility terminals (20 slots) |
+| +50 to +69 | 4250-4269 | Annotation viewers (20 slots) |
+| +70 to +99 | 4270-4299 | Reserved for future use |
+
+#### Global Registry (`~/.agent-farm/global.db`)
+
+The global registry is a SQLite database that tracks port allocations across all projects:
+
+```sql
+-- Schema (from packages/codev/src/agent-farm/db/schema.ts)
+CREATE TABLE port_allocations (
+  project_path TEXT PRIMARY KEY,
+  base_port INTEGER NOT NULL UNIQUE
+    CHECK(base_port >= 4200 AND base_port % 100 = 0),
+  pid INTEGER,
+  registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+**Key Operations** (from `utils/port-registry.ts`):
+- `getPortBlock(projectRoot)`: Allocates or retrieves port block for a project
+- `getProjectPorts(projectRoot)`: Returns all port assignments for a project
+- `cleanupStaleEntries()`: Removes allocations for deleted projects
+- `listAllocations()`: Lists all registered projects and ports
+
+**Concurrency Handling**:
+- Uses SQLite's `BEGIN IMMEDIATE` transaction for atomic allocation
+- WAL mode enables concurrent reads
+- 5-second busy timeout prevents deadlocks
+
+### tmux Integration
+
+tmux provides terminal session persistence and multiplexing, enabling terminals to survive browser refreshes and continue running in the background.
+
+#### Session Naming Convention
+
+Each session has a unique name based on its purpose:
+
+| Session Type | Name Pattern | Example |
+|--------------|--------------|---------|
+| Architect | `af-architect-{port}` | `af-architect-4201` |
+| Builder | `builder-{project}-{id}` | `builder-codev-0003` |
+| Shell | `shell-{id}` | `shell-U1A2B3C4` |
+| Utility | `af-shell-{id}` | `af-shell-U5D6E7F8` |
+
+#### Session Configuration
+
+Each tmux session is configured with:
+
+```bash
+# Create session with specific dimensions
+tmux new-session -d -s "${sessionName}" -x 200 -y 50 "${command}"
+
+# Hide tmux status bar (dashboard provides tabs)
+tmux set-option -t "${sessionName}" status off
+
+# Enable mouse support
+tmux set-option -t "${sessionName}" -g mouse on
+
+# Enable clipboard integration (OSC 52)
+tmux set-option -t "${sessionName}" -g set-clipboard on
+tmux set-option -t "${sessionName}" -g allow-passthrough on
+
+# Copy to system clipboard on mouse release (macOS)
+tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"
+```
+
+#### ttyd Integration
+
+ttyd exposes tmux sessions over HTTP:
+
+```bash
+ttyd --port {port} --writable tmux attach -t {sessionName}
+```
+
+**Custom Index Page** (`ttyd-index.html`):
+- Provides file path click detection using xterm.js link provider
+- Supports relative paths (`./foo.ts`), src-relative (`src/bar.js:42`), and absolute paths
+- Opens clicked files in the annotation viewer via `/open-file` route
+
+### State Management
+
+Agent Farm uses SQLite for ACID-compliant state persistence with two databases:
+
+#### Local State (`/.agent-farm/state.db`)
+
+Stores the current session's state:
+
+```sql
+-- Architect (singleton)
+CREATE TABLE architect (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL,
+  cmd TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  tmux_session TEXT
+);
+
+-- Builders
+CREATE TABLE builders (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  port INTEGER NOT NULL UNIQUE,
+  pid INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'spawning'
+    CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr-ready', 'complete')),
+  phase TEXT NOT NULL DEFAULT '',
+  worktree TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  tmux_session TEXT,
+  type TEXT NOT NULL DEFAULT 'spec'
+    CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree')),
+  task_text TEXT,
+  protocol_name TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Utility terminals
+CREATE TABLE utils (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  port INTEGER NOT NULL UNIQUE,
+  pid INTEGER NOT NULL,
+  tmux_session TEXT,
+  started_at TEXT NOT NULL
+);
+
+-- File annotation viewers
+CREATE TABLE annotations (
+  id TEXT PRIMARY KEY,
+  file TEXT NOT NULL,
+  port INTEGER NOT NULL UNIQUE,
+  pid INTEGER NOT NULL,
+  parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
+  parent_id TEXT,
+  started_at TEXT NOT NULL
+);
+```
+
+#### State Operations (from `state.ts`)
+
+All state operations are synchronous for simplicity:
+
+| Function | Purpose |
+|----------|---------|
+| `loadState()` | Load complete dashboard state |
+| `setArchitect(state)` | Set or clear architect state |
+| `upsertBuilder(builder)` | Add or update a builder |
+| `removeBuilder(id)` | Remove a builder |
+| `getBuilder(id)` | Get single builder |
+| `getBuilders()` | Get all builders |
+| `getBuildersByStatus(status)` | Filter by status |
+| `addUtil(util)` | Add utility terminal |
+| `removeUtil(id)` | Remove utility terminal |
+| `addAnnotation(annotation)` | Add file viewer |
+| `removeAnnotation(id)` | Remove file viewer |
+| `clearState()` | Clear all state |
+
+#### Builder Lifecycle States
+
+```
+spawning → implementing → blocked → implementing → pr-ready → complete
+               ↑______________|
+```
+
+| Status | Meaning |
+|--------|---------|
+| `spawning` | Worktree created, builder starting |
+| `implementing` | Actively working on spec |
+| `blocked` | Needs architect help |
+| `pr-ready` | Implementation complete, awaiting review |
+| `complete` | Merged, ready for cleanup |
+
+### Worktree Management
+
+Git worktrees provide isolated working directories for each builder, enabling parallel development without conflicts.
+
+#### Worktree Creation
+
+When spawning a builder (`af spawn -p 0003`):
+
+1. **Generate IDs**: Create builder ID and branch name
+   ```
+   builderId: "0003"
+   branchName: "builder/0003-feature-name"
+   worktreePath: ".builders/0003"
+   ```
+
+2. **Create Branch**: `git branch builder/0003-feature-name HEAD`
+
+3. **Create Worktree**: `git worktree add .builders/0003 builder/0003-feature-name`
+
+4. **Setup Files**:
+   - `.builder-prompt.txt`: Initial prompt for the builder
+   - `.builder-role.md`: Role definition (from `codev/roles/builder.md`)
+   - `.builder-start.sh`: Launch script for tmux
+
+#### Directory Structure
+
+```
+project-root/
+├── .builders/                    # All builder worktrees
+│   ├── 0003/                     # Builder for spec 0003
+│   │   ├── .builder-prompt.txt   # Initial instructions
+│   │   ├── .builder-role.md      # Builder role content
+│   │   ├── .builder-start.sh     # Launch script
+│   │   └── [full repo copy]      # Complete working directory
+│   ├── task-A1B2/                # Task-based builder
+│   │   └── ...
+│   └── worktree-C3D4/            # Interactive worktree
+│       └── ...
+└── .agent-farm/                  # State directory
+    └── state.db                  # SQLite database
+```
+
+#### Builder Types
+
+| Type | Flag | Worktree | Branch | Initial Prompt |
+|------|------|----------|--------|----------------|
+| `spec` | `--project/-p` | Yes | `builder/{id}-{name}` | Implement spec |
+| `task` | `--task` | Yes | `builder/task-{id}` | User-provided task |
+| `protocol` | `--protocol` | Yes | `builder/{protocol}-{id}` | Run protocol |
+| `shell` | `--shell` | No | None | None |
+| `worktree` | `--worktree` | Yes | `builder/worktree-{id}` | None |
+
+#### Cleanup Process
+
+When cleaning up a builder (`af cleanup -p 0003`):
+
+1. **Check for uncommitted changes**: Refuses if dirty (unless `--force`)
+2. **Kill ttyd process**: `kill(pid, SIGTERM)`
+3. **Kill tmux session**: `tmux kill-session -t {session}`
+4. **Remove worktree**: `git worktree remove .builders/0003`
+5. **Delete branch**: `git branch -d builder/0003-feature-name`
+6. **Update state**: Remove builder from database
+7. **Prune worktrees**: `git worktree prune`
+
+### Dashboard Server
+
+The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that provides the web UI and REST API.
+
+#### Server Architecture
+
+- **Framework**: Native Node.js `http` module (no Express)
+- **Port**: Base port (e.g., 4200)
+- **Security**: Host/Origin validation, path traversal prevention
+- **State**: Direct SQLite access via state functions
+
+#### API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/` | Serve dashboard HTML |
+| `GET` | `/api/state` | Get current state (polled every 1s) |
+| `POST` | `/api/tabs/file` | Open file annotation viewer |
+| `POST` | `/api/tabs/builder` | Create worktree builder |
+| `POST` | `/api/tabs/shell` | Create shell terminal |
+| `DELETE` | `/api/tabs/{id}` | Close a tab |
+| `POST` | `/api/stop` | Stop all processes |
+| `GET` | `/open-file?path=...&line=...` | Handle terminal file clicks |
+| `GET` | `/file?path=...` | Read file contents |
+| `GET` | `/api/projectlist-exists` | Check for projectlist.md |
+
+#### Dashboard UI (`templates/dashboard-split.html`)
+
+The dashboard is a single-page application with:
+
+**Tab System**:
+- Architect tab (always present when running)
+- Builder tabs (one per spawned builder)
+- Utility tabs (shell terminals)
+- File tabs (annotation viewers)
+
+**Status Indicators**:
+```javascript
+const STATUS_CONFIG = {
+  'spawning':     { color: 'var(--status-active)',   shape: 'circle',  animation: 'pulse' },
+  'implementing': { color: 'var(--status-active)',   shape: 'circle',  animation: 'pulse' },
+  'blocked':      { color: 'var(--status-error)',    shape: 'diamond', animation: 'blink-fast' },
+  'pr-ready':     { color: 'var(--status-waiting)',  shape: 'ring',    animation: 'blink-slow' },
+  'complete':     { color: 'var(--status-complete)', shape: 'circle',  animation: null }
+};
+```
+
+**Communication**:
+- Polls `/api/state` every 1 second
+- BroadcastChannel for cross-tab communication (file opening)
+- Each terminal iframe loads ttyd at its assigned port
+
+#### File Path Click Handling
+
+When a file path is clicked in a terminal:
+
+1. **xterm.js** detects link pattern via custom link provider
+2. **ttyd-index.html** navigates to `/open-file?path=...&line=...`
+3. **Dashboard server** validates path is within project
+4. **Response page** sends BroadcastChannel message to dashboard
+5. **Dashboard** receives message, opens file via `/api/tabs/file`
+6. **open-server.ts** spawns to serve the annotation viewer
+
+### Key Files Reference
+
+#### CLI Layer
+
+| File | Purpose |
+|------|---------|
+| `src/agent-farm/cli.ts` | CLI command definitions using commander.js |
+| `src/agent-farm/index.ts` | Re-exports for programmatic use |
+| `src/agent-farm/types.ts` | TypeScript type definitions |
+
+#### Commands
+
+| File | Purpose |
+|------|---------|
+| `commands/start.ts` | Start architect dashboard |
+| `commands/stop.ts` | Stop all processes |
+| `commands/spawn.ts` | Spawn builder (5 modes) |
+| `commands/cleanup.ts` | Clean up builder worktree |
+| `commands/status.ts` | Show agent status |
+| `commands/util.ts` | Spawn utility shell |
+| `commands/open.ts` | Open file annotation viewer |
+| `commands/send.ts` | Send message to builder |
+| `commands/rename.ts` | Rename builder/utility |
+| `commands/tower.ts` | Multi-project overview |
+
+#### Database Layer
+
+| File | Purpose |
+|------|---------|
+| `db/index.ts` | Database initialization and connection management |
+| `db/schema.ts` | SQLite schema definitions (local and global) |
+| `db/migrate.ts` | JSON to SQLite migration |
+| `db/types.ts` | Database row types and converters |
+| `db/errors.ts` | Error handling utilities |
+
+#### State Management
+
+| File | Purpose |
+|------|---------|
+| `state.ts` | High-level state operations |
+
+#### Servers
+
+| File | Purpose |
+|------|---------|
+| `servers/dashboard-server.ts` | Main dashboard HTTP server |
+| `servers/open-server.ts` | File annotation viewer server |
+| `servers/tower-server.ts` | Multi-project overview server |
+
+#### Utilities
+
+| File | Purpose |
+|------|---------|
+| `utils/config.ts` | Configuration loading and port initialization |
+| `utils/port-registry.ts` | Global port allocation |
+| `utils/shell.ts` | Shell command execution, ttyd spawning |
+| `utils/logger.ts` | Formatted console output |
+| `utils/deps.ts` | Dependency checking (git, tmux, ttyd) |
+| `utils/orphan-handler.ts` | Stale session cleanup |
+
+#### Templates
+
+| File | Purpose |
+|------|---------|
+| `templates/dashboard-split.html` | Main dashboard UI |
+| `templates/dashboard.html` | Legacy dashboard (fallback) |
+| `templates/annotate.html` | File annotation viewer |
+| `templates/ttyd-index.html` | Custom terminal with file clicks |
+
+---
+
 ## Recent Infrastructure Changes (2024-12-03)
 
 ### Architecture Consolidation (Spec 0008)
