@@ -59,9 +59,9 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 | Protocol | Use For | Phases |
 |----------|---------|--------|
 | **SPIDER** | New features | Specify → Plan → Implement → Defend → Evaluate → Review |
-| **TICK** | Amendments to existing specs | Understand → Implement → Verify → Done |
+| **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
-| **EXPERIMENT** | Research & prototyping | Hypothesize → Test → Conclude |
+| **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
 
 ### Roles
 
