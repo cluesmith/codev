@@ -403,12 +403,12 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0050"
     title: "Dashboard Polish"
     summary: "UX improvements: clickable title only for expand, show TICKs in project view, poll for projectlist.md creation"
-    status: conceived
+    status: planned
     priority: medium
     release: null
     files:
       spec: codev/specs/0050-dashboard-polish.md
-      plan: null
+      plan: codev/plans/0050-dashboard-polish.md
       review: null
     dependencies: []
     tags: [dashboard, ui, ux]
