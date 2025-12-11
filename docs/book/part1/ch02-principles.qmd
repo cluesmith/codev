@@ -1,5 +1,172 @@
 # Core Principles {#sec-principles}
 
-::: {.callout-note}
-This chapter is under development.
+Three foundational principles underpin Codev's approach to human-AI collaboration. These aren't arbitrary design choices---they emerge from observing what actually works when humans and AI systems build software together.
+
+## Natural Language is the New Programming Language {#sec-natural-language}
+
+For decades, programming meant translating human intent into machine-readable syntax. A developer would think "I need to sort this list" and then write:
+
+```python
+sorted_items = sorted(items, key=lambda x: x.priority, reverse=True)
+```
+
+The mental overhead wasn't the sorting algorithm---it was remembering the syntax, the parameter order, whether `reverse=True` meant ascending or descending. Programming languages were interfaces *for machines*, not humans.
+
+AI changes this equation fundamentally.
+
+### From Code-First to Intent-First
+
+With capable AI assistants, you can express intent directly:
+
+> "Sort the items by priority, highest first"
+
+The AI handles the translation. But this simple observation has profound implications for how we structure software development.
+
+**The traditional flow:**
+
+```
+Intent → Pseudocode → Code → Tests → Documentation
+```
+
+Each arrow represents a translation step where meaning can be lost or distorted. Documentation, written last (if at all), often diverges from what the code actually does.
+
+**The Codev flow:**
+
+```
+Intent → Specification → AI-Generated Code → AI-Generated Tests
+```
+
+The specification *is* the documentation. It's written first, in natural language, and remains the authoritative source of what the system should do. Code becomes an implementation detail---important, but derived from the spec rather than defining the truth.
+
+### The Specification as the New Unit of Work
+
+In traditional development, the "unit of work" is often a task, a ticket, or a pull request. These are code-centric artifacts: "Implement feature X" or "Fix bug Y."
+
+In Codev, the unit of work is the **specification**. A spec defines:
+
+- **What** needs to be built (requirements)
+- **Why** it matters (context and motivation)
+- **How** success will be measured (acceptance criteria)
+
+This isn't just documentation for documentation's sake. The specification serves as:
+
+1. **Context for the AI** - LLMs perform better with clear, detailed requirements
+2. **A contract** - Between the human (who approves) and the AI (who implements)
+3. **Institutional memory** - Future developers (human or AI) can understand *why* decisions were made
+
+::: {.callout-tip}
+## The Skill Shift
+The key skill shifts from "how do I write this code?" to "how do I express what I want clearly?" This is a different muscle---more like technical writing than traditional programming---but it's learnable and improvable.
 :::
+
+Consider the difference:
+
+**Vague spec (poor):**
+> "Add authentication to the app"
+
+**Clear spec (better):**
+> "Users should be able to log in with email and password. Failed login attempts should show a generic error message (to prevent username enumeration). After 5 failed attempts, lock the account for 15 minutes. Sessions should expire after 24 hours of inactivity."
+
+The second version gives the AI everything it needs. The first will require multiple rounds of clarification and will likely produce an incomplete implementation.
+
+## Multiple Models Outperform a Single Model {#sec-multiple-models}
+
+No single AI model excels at everything. Claude might be stronger at nuanced reasoning, GPT at certain coding patterns, Gemini at handling long contexts. More importantly, any single model has blind spots---assumptions it makes, edge cases it misses, patterns it over-applies.
+
+Codev addresses this through **systematic multi-model consultation**.
+
+### The Wisdom of Crowds, Applied to AI
+
+The "wisdom of crowds" phenomenon---where aggregate judgments from multiple independent sources often outperform individual expert opinions---applies surprisingly well to AI models. When multiple models agree on an approach, confidence is warranted. When they disagree, that disagreement is *information*: it signals complexity, ambiguity, or genuine trade-offs.
+
+Codev operationalizes this through the `consult` tool:
+
+```bash
+# Get perspectives from multiple models
+consult --model gemini spec 42
+consult --model codex spec 42
+consult --model claude spec 42
+```
+
+Each model reviews the specification independently, bringing different strengths:
+
+| Model | Typical Strengths |
+|-------|-------------------|
+| Gemini | Long-context analysis, thoroughness |
+| Codex | Code-specific patterns, implementation feasibility |
+| Claude | Nuanced reasoning, edge case identification |
+
+The goal isn't to find the "right" answer---it's to surface considerations that a single perspective might miss.
+
+### When to Consult, What to Ask
+
+Not every decision warrants multi-model consultation. Use it for:
+
+- **Specifications** - Are requirements complete? Are there hidden assumptions?
+- **Plans** - Is the approach feasible? Are phases well-scoped?
+- **Implementations** - Are there security issues? Better patterns?
+- **Reviews** - Did we miss anything? What can we learn?
+
+The SPIDER protocol builds consultation directly into its checkpoints. After writing a specification draft, you consult. After implementation, you consult again. This isn't bureaucratic overhead---it's quality assurance that catches issues before they compound.
+
+::: {.callout-note}
+## Interpreting Disagreement
+When models disagree, don't just pick one answer. Investigate *why* they disagree. Often the disagreement reveals a genuine trade-off (performance vs. readability, flexibility vs. simplicity) that requires a human judgment call.
+:::
+
+A practical example: You're designing an API endpoint. Gemini suggests REST with pagination. Codex suggests GraphQL. Claude raises concerns about rate limiting. The "right" answer depends on your specific context---but now you're aware of all three considerations rather than blindly following one model's recommendation.
+
+## Coordination Patterns from Traditional Software {#sec-coordination-patterns}
+
+Human software teams have spent decades developing coordination patterns: code review, separation of concerns, documentation standards, version control workflows. These patterns encode hard-won lessons about how complex collaborative work actually succeeds.
+
+Codev doesn't reinvent these patterns. It adapts them.
+
+### Standing on the Shoulders of Giants
+
+Consider some proven patterns and their Codev equivalents:
+
+| Traditional Pattern | Codev Adaptation |
+|---------------------|------------------|
+| Architect/Developer separation | Human-Architect / Builder roles |
+| Code review | Multi-model consultation + PR review |
+| Design documents | Specifications |
+| Sprint planning | Plan documents with phases |
+| Retrospectives | Review documents with lessons learned |
+| Branch-per-feature | Worktree-per-builder |
+
+The Architect-Builder pattern, for example, mirrors how senior engineers and junior developers collaborate. The Architect (human + primary AI) handles design, coordination, and integration concerns. Builders (autonomous AI agents) handle focused implementation tasks in isolated environments. This separation allows parallel work while maintaining architectural coherence.
+
+Similarly, the specification-plan-review document structure mirrors traditional waterfall phases (requirements, design, retrospective) but adapted for iterative AI-assisted development. The documents are living artifacts, updated as understanding evolves, not bureaucratic sign-offs created once and forgotten.
+
+### What Translates, What Doesn't
+
+Not everything from traditional software development applies directly. Some patterns need modification:
+
+**Time estimates don't translate.** Traditional planning involves estimating hours or days per task. With AI assistance, this becomes nearly meaningless---a task might take 5 minutes or 5 hours depending on how well-specified it is, not its inherent complexity. Codev focuses on *what* needs to be done, not *when*. Progress is measured by completed phases, not elapsed time.
+
+**Individual ownership doesn't translate.** In traditional teams, a developer "owns" a feature and builds deep context over time. With AI builders that can be spawned and terminated, ownership is ephemeral. Context must be externalized into documents (specs, plans) rather than held in someone's head.
+
+**Manual testing doesn't scale.** When an AI can generate code faster than a human can manually test it, comprehensive automated testing becomes non-negotiable. The SPIDER protocol's "Defend" phase exists precisely because AI-generated code needs AI-scale verification.
+
+::: {.callout-important}
+## The Human Remains Central
+These adaptations don't remove the human---they change what the human does. Instead of writing code, the human writes specifications. Instead of reviewing line-by-line, the human reviews architectural decisions. Instead of estimating tasks, the human prioritizes them. The judgment calls remain human; the execution becomes collaborative.
+:::
+
+### The Value of Structure
+
+Some developers resist structured methodologies, preferring to "just code." This impulse is understandable---bureaucracy can slow things down. But with AI collaboration, structure provides essential guardrails:
+
+1. **Repeatability** - A well-specified process produces consistent results regardless of which AI model executes it
+2. **Debuggability** - When something goes wrong, you can trace back through specs, plans, and reviews to find where understanding diverged
+3. **Scalability** - Multiple AI agents can work in parallel precisely because they're following the same protocol
+4. **Learning** - Review documents capture lessons that improve future iterations
+
+The structure isn't overhead---it's the mechanism that makes AI collaboration productive rather than chaotic.
+
+## Summary
+
+These three principles---natural language as programming, multi-model consultation, and adapted coordination patterns---form the philosophical foundation of Codev. They're not arbitrary rules but observed patterns of what makes human-AI collaboration actually work.
+
+In the next chapter, we'll see how these principles manifest in Codev's core concepts: the roles that humans and AI play, the protocols that structure their work, and the documents that capture and transmit knowledge.
