@@ -404,7 +404,7 @@ Projects currently in development (conceived through committed), sorted by prior
     title: "Agent Farm Internals Documentation"
     summary: "Comprehensive arch.md section on af internals: ports, tmux, state, worktrees, dashboard"
     status: integrated
-    priority: high
+    priority: medium
     release: null
     files:
       spec: codev/specs/0052-agent-farm-internals-docs.md
@@ -426,7 +426,7 @@ Projects currently in development (conceived through committed), sorted by prior
     title: "Codev Cheatsheet"
     summary: "Comprehensive cheatsheet with philosophies, concepts (protocols, roles, hierarchy), and tools reference"
     status: integrated
-    priority: high
+    priority: medium
     release: null
     files:
       spec: codev/specs/0051-codev-cheatsheet.md
@@ -469,7 +469,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0035"
     title: "MAINTAIN Protocol"
     summary: "Rename CLEANUP to MAINTAIN, expand scope to include documentation maintenance (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md sync)"
-    status: implementing
+    status: committed
     priority: medium
     release: null
     files:
@@ -484,9 +484,9 @@ Projects currently in development (conceived through committed), sorted by prior
       planned_at: null
       implementing_at: null
       implemented_at: null
-      committed_at: null
+      committed_at: "2025-12-06T15:40:02-08:00"
       integrated_at: null
-    notes: "Supersedes CLEANUP (0015). Adds doc maintenance to code hygiene. Consulted Gemini/Codex. No new roles - MAINTAIN executed by Builder like any protocol."
+    notes: "PR #56 merged 2025-12-06. Supersedes CLEANUP (0015). Adds doc maintenance to code hygiene. Consulted Gemini/Codex. No new roles - MAINTAIN executed by Builder like any protocol."
 
   - id: "0037"
     title: "Tab Bar UX Improvements"
@@ -1359,7 +1359,7 @@ Projects that are paused or canceled.
 
 ## Next Available Number
 
-**0050** - Reserve this number for your next project
+**0053** - Reserve this number for your next project
 
 ---
 

@@ -4,6 +4,93 @@
 
 Codev is a context-driven development methodology framework that treats natural language specifications as first-class code. This repository serves a dual purpose: it is both the canonical source of the Codev framework AND a self-hosted instance where Codev uses its own methodology to develop itself.
 
+## Quick Start for Developers
+
+**To understand Codev quickly:**
+1. Read `codev/resources/cheatsheet.md` - Core philosophies, concepts, and tool reference
+2. Read `CLAUDE.md` (or `AGENTS.md`) - Development workflow and Git safety rules
+3. Check `codev/projectlist.md` - Current project status and what's being worked on
+
+**To understand a specific subsystem:**
+- **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
+- **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
+- **Protocols**: Read the relevant protocol in `codev/protocols/{spider,tick,maintain,experiment}/protocol.md`
+
+**To add a new feature to Codev:**
+1. Reserve a project number in `codev/projectlist.md`
+2. Create spec using template from `codev/protocols/spider/templates/spec.md`
+3. Follow SPIDER protocol: Specify → Plan → Implement → Defend → Evaluate → Review
+
+## Quick Tracing Guide
+
+For debugging common issues, start here:
+
+| Issue | Entry Point | What to Check |
+|-------|-------------|---------------|
+| **"Dashboard won't start"** | `packages/codev/src/agent-farm/commands/start.ts` | Port conflicts, ttyd/tmux availability |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, tmux session, role injection |
+| **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
+| **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
+| **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
+| **"Projectlist not parsing"** | `packages/codev/src/projectlist-parser.ts` | YAML parsing, project entry format |
+| **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
+
+**Common debugging commands:**
+```bash
+# Check Agent Farm state
+sqlite3 -header -column .agent-farm/state.db "SELECT * FROM builders"
+
+# Check port allocations
+sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM port_allocations"
+
+# Verify tmux sessions
+tmux list-sessions
+
+# Check if ttyd is running
+pgrep -f ttyd
+```
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Spec** | Feature specification document (`codev/specs/XXXX-*.md`) defining WHAT to build |
+| **Plan** | Implementation plan (`codev/plans/XXXX-*.md`) defining HOW to build |
+| **Review** | Post-implementation lessons learned (`codev/reviews/XXXX-*.md`) |
+| **Builder** | An AI agent working in an isolated git worktree on a single spec |
+| **Architect** | The human + primary AI orchestrating builders and reviewing work |
+| **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
+| **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
+| **Protocol** | Defined workflow for a type of work (SPIDER, TICK, MAINTAIN, EXPERIMENT) |
+| **SPIDER** | Multi-phase protocol: Specify → Plan → Implement → Defend → Evaluate → Review |
+| **TICK** | Amendment protocol for extending existing SPIDER specs |
+| **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
+| **Worktree** | Git worktree providing isolated environment for a builder |
+| **ttyd** | Web-based terminal emulator exposing tmux sessions via HTTP |
+| **tmux** | Terminal multiplexer providing session persistence and multiplexing |
+| **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
+| **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
+
+## Invariants & Constraints
+
+**These MUST remain true - violating them will break the system:**
+
+1. **State Consistency**: `.agent-farm/state.db` is the single source of truth for builder/util state. Never modify it manually.
+
+2. **Port Isolation**: Each project gets a 100-port block (4200-4299, 4300-4399, etc.). Port assignments are tracked in `~/.agent-farm/ports.json`.
+
+3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `af cleanup`).
+
+4. **CLAUDE.md ≡ AGENTS.md**: These files MUST be identical. They are the same content for different tool ecosystems.
+
+5. **Skeleton Independence**: The skeleton (`codev-skeleton/`) is a template for OTHER projects. The `codev/` directory is OUR instance. Don't confuse them.
+
+6. **Git Safety**: Never use `git add -A`, `git add .`, or `git add --all`. Always add files explicitly.
+
+7. **Human Approval Gates**: Only humans can transition `conceived → specified` and `committed → integrated`.
+
+8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIDER checkpoints unless explicitly disabled.
+
 ## Agent Farm Internals
 
 This section provides comprehensive documentation of how the Agent Farm (`af`) system works internally. Agent Farm is the most complex component of Codev, enabling parallel AI-assisted development through the architect-builder pattern.
@@ -1488,6 +1575,64 @@ base+70-99: Reserved for future use
 - **tmux**: Session persistence for builder terminals (recommended)
 - **ttyd**: Web-based terminal interface (required for dashboard)
 
+## System-Wide Patterns
+
+Cross-cutting concerns that appear throughout the codebase:
+
+### Error Handling
+
+**Pattern**: Fail fast, never silently fallback.
+
+- Errors propagate up to the CLI entry point
+- Each command catches and formats errors for user display
+- No silent failures - if something can't complete, it throws
+- Exit codes: 0 = success, 1 = error
+
+**Example** (`packages/codev/src/commands/*.ts`):
+```typescript
+try {
+  await performAction();
+} catch (error) {
+  console.error(`[error] ${error.message}`);
+  process.exit(1);
+}
+```
+
+### Logging
+
+**Pattern**: Minimal, prefixed output.
+
+- `[info]` - Normal operation messages
+- `[warn]` - Non-fatal issues
+- `[error]` - Fatal errors
+- No log files - all output to stdout/stderr
+- No log levels or verbosity flags (yet)
+
+### Configuration Loading
+
+**Precedence** (highest to lowest):
+1. CLI arguments (`--port`, `--architect-cmd`, etc.)
+2. Config file (`codev/config.json`)
+3. Embedded defaults in code
+
+**Config file location**: `codev/config.json` (project-level, not user-level)
+
+### State Persistence
+
+**Pattern**: SQLite for all structured state.
+
+- `.agent-farm/state.db` - Builder/util state (local, per-project)
+- `~/.agent-farm/global.db` - Global port registry (cross-project)
+- `codev/projectlist.md` - Project tracking (YAML in markdown, human-editable)
+
+### Template Processing
+
+**Pattern**: Double-brace placeholder replacement.
+
+- `{{PROJECT_NAME}}` - Replaced with project name during init/adopt
+- Simple string replacement, no complex templating engine
+- Applied to CLAUDE.md, AGENTS.md, and similar files
+
 ## Development Patterns
 
 ### 1. Protocol-Driven Development
@@ -2159,6 +2304,7 @@ const STATUS_CONFIG = {
 
 ---
 
-**Last Updated**: 2025-12-04 (Spec 0019 implementation)
-**Version**: Post-tab-bar-status-indicators
+**Last Updated**: 2025-12-11 (Maintenance Run 0003)
+**Version**: Post-v1.2.0-Cordoba + Protocol-Compliant Structure
+**Changes**: Added Quick Start, Quick Tracing Guide, Glossary, Invariants & Constraints, System-Wide Patterns
 **Next Review**: After next significant feature implementation
