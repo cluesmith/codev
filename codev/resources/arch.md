@@ -2,7 +2,94 @@
 
 ## Overview
 
-Codev is a context-driven development methodology framework that treats natural language specifications as first-class code. This repository serves a dual purpose: it is both the canonical source of the Codev framework AND a self-hosted instance where Codev uses its own methodology to develop itself.
+Codev is a Human-Agent Software Development Operating System. This repository serves a dual purpose: it is both the canonical source of the Codev framework AND a self-hosted instance where Codev uses its own methodology to develop itself.
+
+## Quick Start for Developers
+
+**To understand Codev quickly:**
+1. Read `codev/resources/cheatsheet.md` - Core philosophies, concepts, and tool reference
+2. Read `CLAUDE.md` (or `AGENTS.md`) - Development workflow and Git safety rules
+3. Check `codev/projectlist.md` - Current project status and what's being worked on
+
+**To understand a specific subsystem:**
+- **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
+- **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
+- **Protocols**: Read the relevant protocol in `codev/protocols/{spider,tick,maintain,experiment}/protocol.md`
+
+**To add a new feature to Codev:**
+1. Reserve a project number in `codev/projectlist.md`
+2. Create spec using template from `codev/protocols/spider/templates/spec.md`
+3. Follow SPIDER protocol: Specify → Plan → Implement → Defend → Evaluate → Review
+
+## Quick Tracing Guide
+
+For debugging common issues, start here:
+
+| Issue | Entry Point | What to Check |
+|-------|-------------|---------------|
+| **"Dashboard won't start"** | `packages/codev/src/agent-farm/commands/start.ts` | Port conflicts, ttyd/tmux availability |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, tmux session, role injection |
+| **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
+| **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
+| **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
+| **"Projectlist not parsing"** | `packages/codev/src/lib/projectlist-parser.ts` | YAML parsing, project entry format |
+| **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
+
+**Common debugging commands:**
+```bash
+# Check Agent Farm state
+sqlite3 -header -column .agent-farm/state.db "SELECT * FROM builders"
+
+# Check port allocations
+sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM port_allocations"
+
+# Verify tmux sessions
+tmux list-sessions
+
+# Check if ttyd is running
+pgrep -f ttyd
+```
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Spec** | Feature specification document (`codev/specs/XXXX-*.md`) defining WHAT to build |
+| **Plan** | Implementation plan (`codev/plans/XXXX-*.md`) defining HOW to build |
+| **Review** | Post-implementation lessons learned (`codev/reviews/XXXX-*.md`) |
+| **Builder** | An AI agent working in an isolated git worktree on a single spec |
+| **Architect** | The human + primary AI orchestrating builders and reviewing work |
+| **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
+| **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
+| **Protocol** | Defined workflow for a type of work (SPIDER, TICK, MAINTAIN, EXPERIMENT) |
+| **SPIDER** | Multi-phase protocol: Specify → Plan → Implement → Defend → Evaluate → Review |
+| **TICK** | Amendment protocol for extending existing SPIDER specs |
+| **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
+| **Worktree** | Git worktree providing isolated environment for a builder |
+| **ttyd** | Web-based terminal emulator exposing tmux sessions via HTTP |
+| **tmux** | Terminal multiplexer providing session persistence and multiplexing |
+| **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
+| **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
+
+## Invariants & Constraints
+
+**These MUST remain true - violating them will break the system:**
+
+1. **State Consistency**: `.agent-farm/state.db` is the single source of truth for builder/util state. Never modify it manually.
+
+2. **Port Isolation**: Each project gets a 100-port block (4200-4299, 4300-4399, etc.). Port assignments are tracked in `~/.agent-farm/global.db`.
+
+3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `af cleanup`).
+
+4. **CLAUDE.md ≡ AGENTS.md**: These files MUST be identical. They are the same content for different tool ecosystems.
+
+5. **Skeleton Independence**: The skeleton (`codev-skeleton/`) is a template for OTHER projects. The `codev/` directory is OUR instance. Don't confuse them.
+
+6. **Git Safety**: Never use `git add -A`, `git add .`, or `git add --all`. Always add files explicitly.
+
+7. **Human Approval Gates**: Only humans can transition `conceived → specified` and `committed → integrated`.
+
+8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIDER checkpoints unless explicitly disabled.
 
 ## Agent Farm Internals
 
@@ -611,7 +698,7 @@ const CONFIG = {
 ### External Tools (Required)
 - **git**: Version control with worktree support for isolated builder environments
 - **gh**: GitHub CLI for PR creation and management
-- **At least one AI CLI**:
+- **AI CLIs** (all three required for full functionality):
   - **claude** (Claude Code): Primary builder CLI
   - **gemini** (Gemini CLI): Consultation and review
   - **codex** (Codex CLI): Consultation and review
@@ -1218,27 +1305,7 @@ codev/reviews/####-descriptive-name.md
 
 ## Git Commit Strategy
 
-### SPIDER Protocol
-**Commits per Feature**:
-1. `[Spec ####] Initial specification draft`
-2. `[Spec ####] Specification with multi-agent review`
-3. `[Plan ####] Initial implementation plan`
-4. `[Plan ####] Plan with multi-agent review`
-5. Per Phase:
-   - `[Spec ####][Phase: name] feat: Implementation`
-   - `[Spec ####][Phase: name] test: Defend phase tests`
-   - `[Spec ####][Phase: name] docs: Evaluation complete`
-6. `[Spec ####] Review document with lessons learned`
-
-### TICK Protocol
-**Commits per Task**:
-1. `TICK Spec: [descriptive-name]`
-2. `TICK Plan: [descriptive-name]`
-3. `TICK Impl: [descriptive-name]`
-4. `TICK Review: [descriptive-name]` (includes multi-agent consultation)
-
-Additional:
-- `TICK Fixes: [descriptive-name]` (if changes requested)
+See [CLAUDE.md](../../CLAUDE.md#git-workflow) for commit message formats and Git safety rules.
 
 ## Development Infrastructure
 
@@ -1488,6 +1555,64 @@ base+70-99: Reserved for future use
 - **tmux**: Session persistence for builder terminals (recommended)
 - **ttyd**: Web-based terminal interface (required for dashboard)
 
+## System-Wide Patterns
+
+Cross-cutting concerns that appear throughout the codebase:
+
+### Error Handling
+
+**Pattern**: Fail fast, never silently fallback.
+
+- Errors propagate up to the CLI entry point
+- Each command catches and formats errors for user display
+- No silent failures - if something can't complete, it throws
+- Exit codes: 0 = success, 1 = error
+
+**Example** (`packages/codev/src/commands/*.ts`):
+```typescript
+try {
+  await performAction();
+} catch (error) {
+  console.error(`[error] ${error.message}`);
+  process.exit(1);
+}
+```
+
+### Logging
+
+**Pattern**: Minimal, prefixed output.
+
+- `[info]` - Normal operation messages
+- `[warn]` - Non-fatal issues
+- `[error]` - Fatal errors
+- No log files - all output to stdout/stderr
+- No log levels or verbosity flags (yet)
+
+### Configuration Loading
+
+**Precedence** (highest to lowest):
+1. CLI arguments (`--port`, `--architect-cmd`, etc.)
+2. Config file (`codev/config.json`)
+3. Embedded defaults in code
+
+**Config file location**: `codev/config.json` (project-level, not user-level)
+
+### State Persistence
+
+**Pattern**: SQLite for all structured state.
+
+- `.agent-farm/state.db` - Builder/util state (local, per-project)
+- `~/.agent-farm/global.db` - Global port registry (cross-project)
+- `codev/projectlist.md` - Project tracking (YAML in markdown, human-editable)
+
+### Template Processing
+
+**Pattern**: Double-brace placeholder replacement.
+
+- `{{PROJECT_NAME}}` - Replaced with project name during init/adopt
+- Simple string replacement, no complex templating engine
+- Applied to CLAUDE.md, AGENTS.md, and similar files
+
 ## Development Patterns
 
 ### 1. Protocol-Driven Development
@@ -1507,29 +1632,10 @@ Default consultation pattern:
 5. THEN present to user
 ```
 
-### 3. Fail-Fast Principle
-From `CLAUDE.md`:
-- Fast failures are MANDATORY
-- NEVER implement fallbacks
-- When condition can't be met, fail immediately with clear error
-- Error messages explain what failed and why
+### 3. Fail-Fast & Git Safety
+See [CLAUDE.md](../../CLAUDE.md) for fail-fast principle and explicit file staging rules.
 
-### 4. Explicit File Staging
-Git workflow:
-```bash
-# ✅ CORRECT - Always specify exact files
-git add codev/specs/0001-feature.md
-git add src/components/TodoList.tsx
-
-# ❌ FORBIDDEN
-git add -A
-git add .
-git add --all
-```
-
-**Rationale**: Prevents accidental commit of sensitive files, API keys, or large data files
-
-### 5. Document Naming Convention
+### 4. Document Naming Convention
 ```
 ####-descriptive-name.md
 ```
@@ -1540,37 +1646,10 @@ git add --all
 
 ## File Naming Conventions
 
-### Specification Files
-```
-codev/specs/####-feature-name.md
-```
-
-### Plan Files
-```
-codev/plans/####-feature-name.md
-```
-
-### Review Files
-```
-codev/reviews/####-feature-name.md
-```
-
-### Test Files
-```
-tests/##_description.bats
-```
-- Two-digit prefix for ordering
-- Underscore separator
-- Descriptive name
-- .bats extension
-
-### Agent Files
-```
-codev/agents/agent-name.md
-```
-- Kebab-case names
-- .md extension (markdown format)
-- Agent frontmatter with name, description, model, color
+See [CLAUDE.md](../../CLAUDE.md#file-naming-convention) for naming patterns. Key paths:
+- Specs: `codev/specs/####-feature-name.md`
+- Plans: `codev/plans/####-feature-name.md`
+- Reviews: `codev/reviews/####-feature-name.md`
 
 ## Utility Functions & Helpers
 
@@ -1782,81 +1861,20 @@ fi
 
 ## Troubleshooting
 
-### Common Issues
+See the [Quick Tracing Guide](#quick-tracing-guide) for debugging entry points.
 
-#### Tests Hanging
-**Cause**: Missing timeout utility for Claude tests
-
-**Solution**:
-```bash
-brew install coreutils  # macOS
-```
-
-#### Permission Errors
-**Cause**: Test directories not writable
-
-**Solution**:
-```bash
-chmod -R u+w /tmp/codev-test.*
-```
-
-#### Agent Not Found
-**Cause**: Wrong agent location for tool
-
-**Solution**:
-- Claude Code: Check `.claude/agents/`
-- Other tools: Check `codev/agents/`
-
-#### CLAUDE.md Not Updated
-**Cause**: Installation didn't detect existing file
-
-**Solution**: Manually append Codev section from INSTALL.md
+Additional issues:
+- **Tests hanging**: Install `coreutils` on macOS (`brew install coreutils`)
+- **Permission errors**: `chmod -R u+w /tmp/codev-test.*`
+- **Agent not found**: Claude Code uses `.claude/agents/`, other tools use `codev/agents/`
 
 ## Maintenance
 
-### Regular Tasks
-1. **Update arch.md** - After significant changes (via architecture-documenter agent)
-2. **Sync AGENTS.md and CLAUDE.md** - Keep content identical
-3. **Update protocols** - Based on lessons learned
-4. **Run tests** - Before committing changes (automated via pre-commit hook)
-5. **Update skeleton** - Keep template current with protocol changes
-
-### Pre-Commit Hook Maintenance
-1. **Keep hooks in sync** - `hooks/pre-commit` should match `.git/hooks/pre-commit`
-2. **Test hook behavior** - Verify hook runs correctly before committing hook changes
-3. **Update installation script** - Modify `scripts/install-hooks.sh` if hook changes
-4. **Document bypass cases** - Update README with when `--no-verify` is acceptable
-
-### Versioning
-- Protocols have version numbers in manifest.yaml
-- Agents have version history in git
-- Framework version tracked via git tags
+See [MAINTAIN protocol](../protocols/maintain/protocol.md) for codebase hygiene and documentation sync procedures.
 
 ## Contributing
 
-### Adding New Protocols
-1. Create directory in `codev-skeleton/protocols/new-protocol/`
-2. Write `protocol.md` with complete specification
-3. Create templates in `templates/` subdirectory
-4. Add manifest.yaml with metadata
-5. Update INSTALL.md to reference new protocol
-6. Test installation with new protocol
-7. Document in README.md
-
-### Adding New Tests
-1. Create `.bats` file in `tests/` directory
-2. Use appropriate numbering prefix (00-09, 10-19, 20+)
-3. Include setup/teardown with XDG sandboxing
-4. Use test helpers from `helpers/`
-5. Document any special requirements
-6. Ensure test is hermetic and isolated
-
-### Updating Agents
-1. Modify agent file in `codev/agents/`
-2. Sync changes to `codev-skeleton/agents/`
-3. Update agent documentation in AGENTS.md/CLAUDE.md
-4. Test agent invocation
-5. Document changes in git commit
+See [README.md](../../README.md) for contribution guidelines.
 
 ## Success Metrics
 
@@ -1867,298 +1885,19 @@ A well-maintained Codev architecture should enable:
 - **Reliable Testing**: Tests pass consistently on all platforms
 - **Safe Updates**: Framework updates never break user work
 
-## Recent Infrastructure Changes (2024-12-03)
+## Recent Infrastructure Changes
 
-### Architecture Consolidation (Spec 0008)
-
-The architect-builder system was consolidated to eliminate brittleness from triple implementation.
-
-#### Agent-Farm TypeScript CLI
-- **Single canonical implementation** in `packages/codev/src/agent-farm/`
-- **Global CLI commands** - `af`, `codev`, and `consult` installed via npm
-- **CLI commands**: start, stop, status, spawn, util, open, cleanup, ports
-
-#### Global Port Registry
-- **Location**: `~/.agent-farm/global.db` (SQLite)
-- **Purpose**: Cross-project port coordination for multiple simultaneous architects
-- **Port blocks**: 100 ports per project (4200-4299, 4300-4399, etc.)
-- **Features**:
-  - SQLite WAL mode for concurrent access
-  - PID tracking for process ownership
-  - Stale entry cleanup for deleted projects
-
-**Port Allocation per Project**:
-- Dashboard: base+0 (e.g., 4200)
-- Architect: base+1 (e.g., 4201)
-- Builders: base+10 to base+29 (20 slots)
-- Utilities: base+30 to base+49 (20 slots)
-- Annotations: base+50 to base+69 (20 slots)
-
-#### config.json Configuration
-- **Location**: `codev/config.json`
-- **Purpose**: Shell command customization without modifying scripts
-- **Hierarchy**: CLI args > config.json > defaults
-
-**Structure**:
-```json
-{
-  "shell": {
-    "architect": "claude --model opus",
-    "builder": ["claude", "--model", "sonnet"],
-    "shell": "bash"
-  },
-  "templates": { "dir": "codev/templates" },
-  "roles": { "dir": "codev/roles" }
-}
-```
-
-**Features**:
-- String or array command formats
-- Environment variable expansion (`${VAR}` and `$VAR`)
-- CLI overrides: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`
-
-#### Deleted Duplicates
-- **Removed**: `codev/bin/architect` (713-line bash script)
-- **Removed**: `codev-skeleton/bin/architect`
-- **Removed**: `agent-farm/templates/` (uses codev/templates/)
-- **Removed**: `codev/builders.md` (legacy state file)
-
-#### Role Files Created
-- **`codev/roles/architect.md`** - Comprehensive architect role with af commands
-- **`codev/roles/builder.md`** - Builder role with status management
-- **Synced to**: `codev-skeleton/roles/`
-
-#### Clean Slate Safety
-- **Dirty worktree detection** before deletion
-- **`--force` flag** required for uncommitted changes
-- **Orphaned tmux session** detection on startup
-- **Stale artifact warnings** for legacy files
-
-### Previous Changes (2025-10-20)
-
-#### Test Infrastructure Completion
-- **Total tests**: 31 passing (agent-farm TypeScript tests)
-- **Framework**: Vitest for TypeScript, bats-core for shell
-
-#### Agent Installation
-- **Tool-agnostic installation** with conditional logic
-- **Dual paths**: `.claude/agents/` (Claude Code) or `codev/agents/` (universal)
-
-#### Pre-Commit Hooks
-- **`hooks/pre-commit`** - Runs test suite before commits
-- **`scripts/install-hooks.sh`** - Installation script
-
-### Tab Bar Status Indicators (Spec 0019)
-
-Added visual status indicators to builder tabs for at-a-glance monitoring.
-
-#### Status Indicator System
-- **Location**: `codev/templates/dashboard-split.html`
-- **Purpose**: Display builder status via color-coded dots in the tab bar
-- **Features**:
-  - Color-coded status dots using CSS variables
-  - Pulse animation for waiting/blocked states (WCAG 2.3.3 compliant)
-  - Diamond shape for blocked status (additional accessibility indicator)
-  - Tooltips on hover with ARIA labels
-  - prefers-reduced-motion support for accessibility
-
-#### CSS Variables (Status Colors)
-```css
---status-active: #22c55e;    /* Green: spawning, implementing */
---status-waiting: #eab308;   /* Yellow: pr-ready (waiting for review) */
---status-error: #ef4444;     /* Red: blocked */
---status-complete: #9e9e9e;  /* Gray: complete */
-```
-
-#### Status Configuration
-```javascript
-const STATUS_CONFIG = {
-  'spawning':     { color: 'var(--status-active)',   label: 'Spawning',     shape: 'circle',  animation: 'pulse' },
-  'implementing': { color: 'var(--status-active)',   label: 'Implementing', shape: 'circle',  animation: 'pulse' },
-  'blocked':      { color: 'var(--status-error)',    label: 'Blocked',      shape: 'diamond', animation: 'blink-fast' },
-  'pr-ready':     { color: 'var(--status-waiting)',  label: 'PR Ready',     shape: 'ring',    animation: 'blink-slow' },
-  'complete':     { color: 'var(--status-complete)', label: 'Complete',     shape: 'circle',  animation: null }
-};
-```
-
-#### Status Dot Rendering (`getStatusDot()` function)
-- Returns HTML `<span>` with status indicator
-- Adds CSS classes based on config:
-  - `status-dot` (always)
-  - `status-dot--diamond` (blocked - rotated square)
-  - `status-dot--ring` (pr-ready - hollow circle)
-  - `status-dot--pulse` (active states - gentle pulse)
-  - `status-dot--blink-slow` (pr-ready - slow blink)
-  - `status-dot--blink-fast` (blocked - fast blink)
-- Sets inline background color from CSS variable
-- Includes title attribute for tooltip and ARIA label
-- Uses `role="img"` to avoid screen reader chatter on polling updates
-- Output example: `<span class="status-dot status-dot--ring status-dot--blink-slow" style="background: var(--status-waiting)" title="PR Ready" role="img" aria-label="PR Ready"></span>`
-
-#### Accessibility Features
-1. **Color + Shape + Animation**: Each status has distinct visual cues
-   - Active: solid circle + pulse animation
-   - Waiting: ring (hollow circle) + slow blink
-   - Blocked: diamond shape + fast blink
-   - Complete: solid circle, static
-2. **Reduced Motion**: `@media (prefers-reduced-motion: reduce)` disables all animations while keeping shape differentiators
-3. **Tooltips**: Hover reveals status label
-4. **Screen Readers**: ARIA labels and role="img" for proper semantics
-
-#### Integration with Dashboard
-- Status dots appear in builder tabs next to builder name
-- Updates via existing 1-second polling mechanism (`refresh()` called via `setInterval`)
-- No backend changes required (uses existing state.db status field)
-- Status automatically updates when builder status changes
-
-#### CSS Classes
-```css
-/* Shape classes */
-.status-dot                 /* 6x6px circle (default) */
-.status-dot--diamond        /* Rotated 45deg for diamond shape (blocked) */
-.status-dot--ring           /* Hollow circle via box-shadow (pr-ready) */
-
-/* Animation classes */
-.status-dot--pulse          /* Gentle pulse 2s (active states) */
-.status-dot--blink-slow     /* Slow blink 3s (pr-ready) */
-.status-dot--blink-fast     /* Fast blink 0.8s (blocked) */
-
-@keyframes status-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(0.9); }
-}
-
-@keyframes status-blink-slow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-@keyframes status-blink-fast {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
-}
-```
-
-### Terminal File Click to Annotate (Spec 0009)
-
-Added clickable file paths in terminal output that open in the annotation viewer.
-
-#### Custom ttyd Index (`codev/templates/ttyd-index.html`)
-- **Purpose**: Custom xterm.js client with file path link detection
-- **Features**:
-  - Registers link provider with xterm.js for file path detection
-  - Supports patterns: relative (`./foo.ts`), src-relative (`src/bar.js:42`), absolute (`/path/to/file.ts`)
-  - Supports line numbers (`:42`) and column numbers (`:42:10`)
-  - Underlines paths on hover with tooltip
-  - Opens `/open-file` route when clicked
-
-**Supported Extensions**: `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.md`, `.json`, `.yaml`, `.yml`, `.sh`, `.bash`, `.html`, `.css`, `.scss`, `.go`, `.rs`, `.rb`, `.java`, `.c`, `.cpp`, `.h`, `.hpp`
-
-#### Dashboard `/open-file` Route
-- **Location**: `agent-farm/src/servers/dashboard-server.ts`
-- **URL**: `GET /open-file?path=<path>&line=<line>`
-- **Flow**:
-  1. Validates path is within project root (security check)
-  2. Serves small HTML page that:
-     - Uses BroadcastChannel to message dashboard
-     - Calls `/api/tabs/file` to create annotation tab
-     - Closes itself after 500ms
-
-#### BroadcastChannel Communication
-- **Channel name**: `agent-farm`
-- **Message format**: `{ type: 'openFile', path: string, line: number | null }`
-- **Dashboard listener** in `dashboard-split.html`:
-  - Receives message via `setupBroadcastChannel()`
-  - Opens file in annotation viewer via `openFileFromMessage()`
-  - Switches to the new tab
-
-#### ttyd Integration
-- **Flag**: `-I <path>` (custom index HTML)
-- **Updated files**:
-  - `agent-farm/src/commands/start.ts` - Architect terminal
-  - `agent-farm/src/commands/spawn.ts` - Builder terminals
-  - `agent-farm/src/servers/dashboard-server.ts` - Utility shells
-
-#### Known Issues (from Multi-Agent Consultation)
-1. **Hardcoded port**: `const DASHBOARD_PORT = 4200` in ttyd-index.html
-2. **Builder path resolution**: Relative paths resolve against project root, not builder worktree
-3. **Double API calls**: Both popup and dashboard POST to `/api/tabs/file`
-
-**Files Added**:
-- `codev/templates/ttyd-index.html`
-- `codev-skeleton/templates/ttyd-index.html`
-
-**Files Modified**:
-- `agent-farm/src/servers/dashboard-server.ts` (+103 lines)
-- `agent-farm/src/commands/start.ts` (+11 lines)
-- `agent-farm/src/commands/spawn.ts` (+11 lines)
-- `codev/templates/dashboard-split.html` (+54 lines)
-- `codev-skeleton/templates/dashboard-split.html` (+54 lines)
-
-### Tab Bar Status Indicators (Spec 0019)
-
-Added visual status indicators to the dashboard tab bar for at-a-glance builder monitoring.
-
-#### Dashboard UI Changes
-- **Location**: `codev/templates/dashboard-split.html`
-- **Change Type**: CSS + JavaScript enhancement
-
-#### CSS Status Color Variables
-```css
---status-active: #22c55e;      /* Green: spawning, implementing */
---status-waiting: #eab308;     /* Yellow: pr-ready (waiting for review) */
---status-error: #ef4444;       /* Red: blocked */
---status-complete: #9e9e9e;    /* Gray: complete */
-```
-
-#### New JavaScript Components
-
-**STATUS_CONFIG constant** - Maps builder status to visual properties:
-```javascript
-const STATUS_CONFIG = {
-  'spawning':     { color: 'var(--status-active)',   label: 'Spawning',     shape: 'circle',  animation: 'pulse' },
-  'implementing': { color: 'var(--status-active)',   label: 'Implementing', shape: 'circle',  animation: 'pulse' },
-  'blocked':      { color: 'var(--status-error)',    label: 'Blocked',      shape: 'diamond', animation: 'blink-fast' },
-  'pr-ready':     { color: 'var(--status-waiting)',  label: 'PR Ready',     shape: 'ring',    animation: 'blink-slow' },
-  'complete':     { color: 'var(--status-complete)', label: 'Complete',     shape: 'circle',  animation: null }
-};
-```
-
-**getStatusDot() function** - Renders status indicators with accessibility:
-- Generates HTML for status dot with appropriate CSS classes
-- Shape classes: `status-dot--diamond` (blocked), `status-dot--ring` (pr-ready)
-- Animation classes: `status-dot--pulse`, `status-dot--blink-slow`, `status-dot--blink-fast`
-- Sets inline color from CSS variables
-- Adds title tooltips and ARIA labels
-- Uses `role="img"` to prevent screen reader chatter on polling
-- Returns: `<span class="status-dot status-dot--ring status-dot--blink-slow" style="background: ..." title="..." role="img" aria-label="..."></span>`
-
-#### CSS Accessibility Features
-- **Distinct shapes** - Circle (active/complete), Ring/hollow (pr-ready), Diamond (blocked)
-- **Distinct animations** - Pulse (active), slow blink (waiting), fast blink (blocked), static (complete)
-- **Reduced motion support** - `@media (prefers-reduced-motion: reduce)` disables animations but keeps shape differentiators
-- **Tooltips** - Hover reveals status label
-- **Screen reader support** - ARIA labels on all indicators
-
-#### Integration Pattern
-- Status dots render in tab bar via `renderTabs()` function
-- Uses `getStatusDot(tab.status)` to generate HTML
-- Status field comes from builder tab object (populated from state.db)
-- Updates via existing 1-second polling mechanism (`refresh()` → `buildTabsFromState()` → `renderTabs()`)
-- No backend changes - uses existing builder status field
-
-#### Implementation Details
-- Hoisted `STATUS_CONFIG` for performance (consulted in every render cycle)
-- Changed from `role="status"` to `role="img"` to avoid screen reader chatter
-- CSS classes use BEM naming: `.status-dot`, `.status-dot--diamond`, `.status-dot--pulse`
-- Animation uses CSS custom properties for color consistency
-
-**Files Modified**:
-- `codev/templates/dashboard-split.html` - CSS variables, animations, getStatusDot() function
-- `codev-skeleton/templates/dashboard-split.html` - Synced with codev/ version
+See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
+- SQLite state management (Spec 0031)
+- Consult tool (Spec 0011-0012)
+- Architecture consolidation (Spec 0008)
+- Dashboard polish (Spec 0050)
+- Tab bar status indicators (Spec 0019)
+- Terminal file click (Spec 0009)
 
 ---
 
-**Last Updated**: 2025-12-04 (Spec 0019 implementation)
-**Version**: Post-tab-bar-status-indicators
+**Last Updated**: 2025-12-11 (Maintenance Run 0003)
+**Version**: Post-v1.2.0-Cordoba + Protocol-Compliant Structure
+**Changes**: Added Quick Start, Quick Tracing Guide, Glossary, Invariants & Constraints, System-Wide Patterns
 **Next Review**: After next significant feature implementation
