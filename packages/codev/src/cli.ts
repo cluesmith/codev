@@ -13,6 +13,7 @@ import { eject } from './commands/eject.js';
 import { tower } from './commands/tower.js';
 import { consult } from './commands/consult/index.js';
 import { importCommand } from './commands/import.js';
+import { generateImage } from './commands/generate-image.js';
 import { runAgentFarm } from './agent-farm/cli.js';
 
 const program = new Command();
@@ -145,6 +146,31 @@ program
   .action(async (source, options) => {
     try {
       await importCommand(source, { dryRun: options.dryRun });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Generate-image command
+program
+  .command('generate-image')
+  .description('Generate images using Google Gemini/Imagen models')
+  .argument('<prompt>', 'Text prompt or path to .txt file')
+  .option('-o, --output <path>', 'Output file path', 'output.png')
+  .option('-r, --resolution <res>', 'Resolution: 1K, 2K, or 4K', '1K')
+  .option('-a, --aspect <ratio>', 'Aspect ratio: 1:1, 16:9, 9:16, 3:4, 4:3, 3:2, 2:3', '1:1')
+  .option('-m, --model <model>', 'Model: gemini-3-pro-image, gemini-2.5-flash-image, imagen-4', 'gemini-2.5-flash-image')
+  .option('--ref <path>', 'Reference image for image-to-image generation')
+  .action(async (prompt, options) => {
+    try {
+      await generateImage(prompt, {
+        output: options.output,
+        resolution: options.resolution,
+        aspect: options.aspect,
+        model: options.model,
+        ref: options.ref,
+      });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);

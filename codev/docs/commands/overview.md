@@ -1,12 +1,13 @@
 # Codev CLI Command Reference
 
-Codev provides three CLI tools for AI-assisted software development:
+Codev provides CLI tools for AI-assisted software development:
 
 | Tool | Description |
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
 | `af` | Agent Farm - multi-agent orchestration for development |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
+| `generate-image` | AI-powered image generation using Google's Gemini/Imagen models |
 
 ## Quick Start
 
@@ -33,7 +34,7 @@ consult -m gemini spec 42
 npm install -g @cluesmith/codev
 ```
 
-This installs all three commands globally: `codev`, `af`, and `consult`.
+This installs all CLI commands: `codev`, `af`, `consult`, and `generate-image`.
 
 ## Command Summaries
 
@@ -76,6 +77,32 @@ See [agent-farm.md](agent-farm.md) for full documentation.
 | `consult general "<query>"` | General consultation |
 
 See [consult.md](consult.md) for full documentation.
+
+### generate-image - AI Image Generation
+
+| Option | Description |
+|--------|-------------|
+| `<prompt>` | Text prompt or path to .txt file |
+| `-o, --output` | Output file path (default: output.png) |
+| `-r, --resolution` | Resolution: 1K, 2K, or 4K |
+| `-a, --aspect` | Aspect ratio: 1:1, 16:9, 9:16, 3:4, 4:3, 3:2, 2:3 |
+| `-m, --model` | Model: gemini-3-pro-image, gemini-2.5-flash-image, imagen-4 |
+| `--ref` | Reference image for image-to-image generation |
+
+**Examples:**
+
+```bash
+# Basic image generation
+generate-image "A sunset over mountains" -o sunset.png
+
+# High resolution with custom aspect ratio
+generate-image "Futuristic cityscape" -r 4K -a 16:9 -o city.png
+
+# Image editing with reference
+generate-image "Make it look like winter" --ref photo.jpg -o winter.png
+```
+
+**Requires:** `GEMINI_API_KEY` environment variable. Get one at https://aistudio.google.com/apikey
 
 ## Global Options
 
