@@ -284,9 +284,71 @@
     .annotation-item:hover { background: #2a2a2a; }
     .annotation-item .line { color: #3b82f6; font-size: 12px; }
     .annotation-item .text { font-size: 13px; margin-top: 4px; }
+
+    /* Image Viewer */
+    #image-viewer {
+      display: none;
+      flex-direction: column;
+      height: calc(100vh - 80px);
+      padding: 15px;
+    }
+    .image-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      flex-shrink: 0;
+    }
+    .image-controls .btn {
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      background: #444;
+      color: #fff;
+    }
+    .image-controls .btn:hover { opacity: 0.9; }
+    .image-controls .btn.active {
+      background: #3b82f6;
+    }
+    #image-info {
+      color: #888;
+      font-size: 12px;
+      margin-left: auto;
+    }
+    .image-container {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #222;
+      border-radius: 4px;
+    }
+    .image-container.zoom-fit img {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+    }
+    .image-container.zoom-100 img,
+    .image-container.zoom-custom img {
+      max-width: none;
+      max-height: none;
+    }
+    #image-display {
+      transition: transform 0.1s ease;
+    }
+    #image-error {
+      color: #ef4444;
+      text-align: center;
+      padding: 40px;
+    }
   </style>
 </head>
-<body data-builder="{{BUILDER_ID}}" data-file="{{FILE_PATH}}" data-lang="{{LANG}}">
+<body data-builder="{{BUILDER_ID}}" data-file="{{FILE_PATH}}" data-lang="{{LANG}}" data-is-image="{{IS_IMAGE}}" data-file-size="{{FILE_SIZE}}">
   <div class="header">
     <h1 class="path">{{FILE_PATH}}</h1>
     <div class="subtitle">Click on a line number to leave an annotation.</div>
@@ -308,6 +370,22 @@
 
   <!-- Markdown preview mode -->
   <div id="preview-container" style="display: none; padding: 20px; overflow: auto; height: calc(100vh - 80px);"></div>
+
+  <!-- Image viewer mode -->
+  <div id="image-viewer">
+    <div class="image-controls">
+      <button id="zoomFitBtn" class="btn active" onclick="zoomFit()">Fit</button>
+      <button id="zoom100Btn" class="btn" onclick="zoom100()">100%</button>
+      <button id="zoomInBtn" class="btn" onclick="zoomIn()">+</button>
+      <button id="zoomOutBtn" class="btn" onclick="zoomOut()">−</button>
+      <span id="zoom-level"></span>
+      <span id="image-info"></span>
+    </div>
+    <div class="image-container zoom-fit" id="image-container">
+      <img id="image-display" alt="Image preview" />
+      <div id="image-error" style="display: none;"></div>
+    </div>
+  </div>
 
   <!-- Editor mode -->
   <textarea id="editor" spellcheck="false"></textarea>
@@ -362,6 +440,13 @@
     const isMarkdownFile = {{IS_MARKDOWN}};
     let isPreviewMode = false;
 
+    // Image viewer state
+    const isImageFile = {{IS_IMAGE}};
+    let currentZoomMode = 'fit';  // 'fit', '100', 'custom'
+    let currentZoomLevel = 1.0;
+    let imageNaturalWidth = 0;
+    let imageNaturalHeight = 0;
+
     // Comment patterns by file extension
     const COMMENT_PATTERNS = {
       js: { prefix: '// REVIEW', regex: /^(\s*)\/\/\s*REVIEW(\(@\w+\))?:\s*(.*)$/ },
@@ -401,6 +486,139 @@
         togglePreviewBtn.style.display = 'inline-block';
         togglePreviewBtn.addEventListener('click', togglePreviewMode);
       }
+    }
+
+    // Initialize image viewer
+    function initImage(fileSize) {
+      // Hide code view elements
+      document.getElementById('viewMode').style.display = 'none';
+      document.getElementById('editBtn').style.display = 'none';
+      document.getElementById('togglePreviewBtn').style.display = 'none';
+
+      // Update subtitle
+      document.querySelector('.subtitle').textContent = 'Image viewer - use zoom controls to adjust view.';
+
+      // Show image viewer
+      const imageViewer = document.getElementById('image-viewer');
+      imageViewer.style.display = 'flex';
+
+      // Load image
+      const img = document.getElementById('image-display');
+      const imageError = document.getElementById('image-error');
+
+      img.onload = function() {
+        imageNaturalWidth = img.naturalWidth;
+        imageNaturalHeight = img.naturalHeight;
+        updateImageInfo(fileSize);
+        imageError.style.display = 'none';
+        img.style.display = 'block';
+      };
+
+      img.onerror = function() {
+        imageError.textContent = 'Failed to load image. The file may be corrupted.';
+        imageError.style.display = 'block';
+        img.style.display = 'none';
+      };
+
+      // Add cache-busting query param to allow reload
+      img.src = '/api/image?t=' + Date.now();
+    }
+
+    // Update image info display
+    function updateImageInfo(fileSize) {
+      const info = document.getElementById('image-info');
+      const sizeStr = formatFileSize(fileSize);
+      info.textContent = `${imageNaturalWidth} × ${imageNaturalHeight} px · ${sizeStr}`;
+    }
+
+    // Format file size in human-readable form
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    // Update zoom level display
+    function updateZoomLevelDisplay() {
+      const zoomLevelEl = document.getElementById('zoom-level');
+      if (currentZoomMode === 'fit') {
+        zoomLevelEl.textContent = '';
+      } else {
+        zoomLevelEl.textContent = Math.round(currentZoomLevel * 100) + '%';
+      }
+    }
+
+    // Update active button state
+    function updateZoomButtons() {
+      document.getElementById('zoomFitBtn').classList.toggle('active', currentZoomMode === 'fit');
+      document.getElementById('zoom100Btn').classList.toggle('active', currentZoomMode === '100');
+    }
+
+    // Zoom fit - image fits within container
+    function zoomFit() {
+      const container = document.getElementById('image-container');
+      const img = document.getElementById('image-display');
+
+      container.className = 'image-container zoom-fit';
+      img.style.transform = '';
+      img.style.width = '';
+      img.style.height = '';
+
+      currentZoomMode = 'fit';
+      currentZoomLevel = 1.0;
+      updateZoomButtons();
+      updateZoomLevelDisplay();
+    }
+
+    // Zoom 100% - actual pixels
+    function zoom100() {
+      const container = document.getElementById('image-container');
+      const img = document.getElementById('image-display');
+
+      container.className = 'image-container zoom-100';
+      img.style.transform = '';
+      img.style.width = imageNaturalWidth + 'px';
+      img.style.height = imageNaturalHeight + 'px';
+
+      currentZoomMode = '100';
+      currentZoomLevel = 1.0;
+      updateZoomButtons();
+      updateZoomLevelDisplay();
+    }
+
+    // Zoom in by 25%
+    function zoomIn() {
+      if (currentZoomMode === 'fit') {
+        // Switch to custom zoom starting at 100%
+        currentZoomLevel = 1.0;
+      }
+      currentZoomLevel = Math.min(currentZoomLevel * 1.25, 10.0);  // Max 1000%
+      applyCustomZoom();
+    }
+
+    // Zoom out by 20%
+    function zoomOut() {
+      if (currentZoomMode === 'fit') {
+        // Switch to custom zoom starting at 100%
+        currentZoomLevel = 1.0;
+      }
+      currentZoomLevel = Math.max(currentZoomLevel * 0.8, 0.1);  // Min 10%
+      applyCustomZoom();
+    }
+
+    // Apply custom zoom level
+    function applyCustomZoom() {
+      const container = document.getElementById('image-container');
+      const img = document.getElementById('image-display');
+
+      container.className = 'image-container zoom-custom';
+      img.style.transform = '';
+      img.style.width = (imageNaturalWidth * currentZoomLevel) + 'px';
+      img.style.height = (imageNaturalHeight * currentZoomLevel) + 'px';
+
+      currentZoomMode = 'custom';
+      updateZoomButtons();
+      updateZoomLevelDisplay();
     }
 
     // Toggle between annotated view and preview mode

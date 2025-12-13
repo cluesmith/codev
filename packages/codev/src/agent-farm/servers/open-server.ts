@@ -64,6 +64,20 @@ const langMap: Record<string, string> = {
 const lang = langMap[ext] || ext;
 const isMarkdown = ext === 'md';
 
+// Image detection
+const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+const isImage = imageExtensions.includes(ext);
+
+// MIME type mapping for images
+const imageMimeTypes: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml'
+};
+
 // Create server
 const server = http.createServer((req, res) => {
   // CORS headers
@@ -81,7 +95,10 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
     try {
       let template = fs.readFileSync(templatePath, 'utf-8');
-      const fileContent = fs.readFileSync(fullFilePath, 'utf-8');
+
+      // Get file stats for images
+      const fileStats = fs.statSync(fullFilePath);
+      const fileSize = fileStats.size;
 
       // Replace placeholders
       template = template.replace(/\{\{BUILDER_ID\}\}/g, '');
@@ -89,15 +106,26 @@ const server = http.createServer((req, res) => {
       template = template.replace(/\{\{FILE\}\}/g, displayPath);
       template = template.replace(/\{\{LANG\}\}/g, lang);
       template = template.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
+      template = template.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
+      template = template.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
 
-      // Inject file content
-      // JSON.stringify escapes quotes but not </script> which would break HTML parsing
-      // Replace </script> with <\/script> (valid JS, doesn't match HTML closing tag)
-      const escapedContent = JSON.stringify(fileContent).replace(/<\/script>/gi, '<\\/script>');
-      template = template.replace(
-        '// FILE_CONTENT will be injected by the server',
-        `init(${escapedContent});`
-      );
+      if (isImage) {
+        // For images, don't inject file content - it will be loaded via /api/image
+        template = template.replace(
+          '// FILE_CONTENT will be injected by the server',
+          `initImage(${fileSize});`
+        );
+      } else {
+        // For text files, inject content as before
+        const fileContent = fs.readFileSync(fullFilePath, 'utf-8');
+        // JSON.stringify escapes quotes but not </script> which would break HTML parsing
+        // Replace </script> with <\/script> (valid JS, doesn't match HTML closing tag)
+        const escapedContent = JSON.stringify(fileContent).replace(/<\/script>/gi, '<\\/script>');
+        template = template.replace(
+          '// FILE_CONTENT will be injected by the server',
+          `init(${escapedContent});`
+        );
+      }
 
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(template);
@@ -118,6 +146,31 @@ const server = http.createServer((req, res) => {
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error reading file: ' + (err as Error).message);
+    }
+    return;
+  }
+
+  // Handle image content (GET /api/image)
+  // Use startsWith to allow query params like ?t=123 for cache busting
+  if (req.method === 'GET' && req.url?.startsWith('/api/image')) {
+    if (!isImage) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Not an image file');
+      return;
+    }
+
+    try {
+      const imageData = fs.readFileSync(fullFilePath);
+      const mimeType = imageMimeTypes[ext] || 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': mimeType,
+        'Content-Length': imageData.length,
+        'Cache-Control': 'no-cache'  // Don't cache, allow reload to work
+      });
+      res.end(imageData);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Error reading image: ' + (err as Error).message);
     }
     return;
   }
