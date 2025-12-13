@@ -1156,6 +1156,138 @@
     .tab.tab-uncloseable .close {
       display: none;
     }
+
+    /* Files Tab Styles (Spec 0055) */
+    .files-container {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .files-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .files-header-title {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .files-header-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .files-header-actions button {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .files-header-actions button:hover {
+      background: var(--tab-hover);
+      color: var(--text-primary);
+    }
+
+    .files-tree {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .tree-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .tree-item:hover {
+      background: var(--bg-secondary);
+    }
+
+    .tree-item.selected {
+      background: var(--tab-active);
+    }
+
+    .tree-item-icon {
+      width: 16px;
+      height: 16px;
+      margin-right: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .tree-item-icon.folder-toggle {
+      cursor: pointer;
+    }
+
+    .tree-item-icon.folder-toggle:hover {
+      color: var(--text-secondary);
+    }
+
+    .tree-item-name {
+      font-size: 13px;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-item:hover .tree-item-name {
+      color: var(--text-primary);
+    }
+
+    .tree-item[data-type="dir"] .tree-item-name {
+      color: var(--text-primary);
+    }
+
+    .tree-item[data-type="file"]:hover .tree-item-name {
+      color: var(--accent);
+    }
+
+    .tree-children {
+      overflow: hidden;
+    }
+
+    .tree-children.collapsed {
+      display: none;
+    }
+
+    .files-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .files-error {
+      padding: 16px;
+      margin: 8px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--status-error);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -1374,6 +1506,12 @@
     let projectlistError = null;
     let projectlistDebounce = null;
 
+    // Files tab state (Spec 0055)
+    let filesTreeData = [];
+    let filesTreeExpanded = new Set();  // Set of expanded folder paths
+    let filesTreeError = null;
+    let filesTreeLoaded = false;
+
     // Build tabs from initial state
     function buildTabsFromState() {
       const previousTabIds = new Set(tabs.map(t => t.id));
@@ -1384,6 +1522,14 @@
         id: 'projects',
         type: 'projects',
         name: 'Projects',
+        closeable: false
+      });
+
+      // Files tab is second and uncloseable (Spec 0055)
+      tabs.push({
+        id: 'files',
+        type: 'files',
+        name: 'Files',
         closeable: false
       });
 
@@ -1424,7 +1570,7 @@
 
       // Detect new tabs and auto-switch to them (skip projects tab)
       for (const tab of tabs) {
-        if (tab.id !== 'projects' && !knownTabIds.has(tab.id) && previousTabIds.size > 0) {
+        if (tab.id !== 'projects' && tab.id !== 'files' && !knownTabIds.has(tab.id) && previousTabIds.size > 0) {
           // This is a new tab - switch to it
           activeTabId = tab.id;
           break;
@@ -1519,6 +1665,7 @@
     function getTabIcon(type) {
       switch (type) {
         case 'projects': return '📋';
+        case 'files': return '📁';
         case 'file': return '📄';
         case 'builder': return '🔨';
         case 'shell': return '>_';
@@ -1622,6 +1769,16 @@
           currentTabType = 'projects';
           currentTabPort = null;
           renderProjectsTab();
+        }
+        return;
+      }
+
+      // Handle files tab specially (no iframe, inline content)
+      if (tab.type === 'files') {
+        if (currentTabType !== 'files') {
+          currentTabType = 'files';
+          currentTabPort = null;
+          renderFilesTab();
         }
         return;
       }
@@ -2809,6 +2966,225 @@
         </details>
       `;
     }
+
+    // ========================================
+    // Files Tab Functions (Spec 0055)
+    // ========================================
+
+    // Load the file tree from the API
+    async function loadFilesTree() {
+      try {
+        const response = await fetch('/api/files');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        filesTreeData = await response.json();
+        filesTreeError = null;
+        filesTreeLoaded = true;
+      } catch (err) {
+        console.error('Failed to load files tree:', err);
+        filesTreeError = 'Could not load file tree: ' + err.message;
+        filesTreeData = [];
+      }
+    }
+
+    // Render the files tab (entry point)
+    // Only fetches on first load; use refreshFilesTree() to force reload
+    async function renderFilesTab() {
+      const content = document.getElementById('tab-content');
+
+      // If already loaded, just render cached data (no network request)
+      if (filesTreeLoaded) {
+        renderFilesTabContent();
+        return;
+      }
+
+      // First load - show loading state and fetch
+      content.innerHTML = '<div class="files-loading">Loading files...</div>';
+      await loadFilesTree();
+      renderFilesTabContent();
+    }
+
+    // Render the files tab content (internal - called after data is loaded)
+    function renderFilesTabContent() {
+      const content = document.getElementById('tab-content');
+
+      if (filesTreeError) {
+        content.innerHTML = `
+          <div class="files-container">
+            <div class="files-error">${escapeHtml(filesTreeError)}</div>
+          </div>
+        `;
+        return;
+      }
+
+      content.innerHTML = `
+        <div class="files-container">
+          <div class="files-header">
+            <span class="files-header-title">Explorer</span>
+            <div class="files-header-actions">
+              <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
+              <button onclick="expandAllFolders()" title="Expand All">⊞</button>
+              <button onclick="refreshFilesTree()" title="Refresh">↻</button>
+            </div>
+          </div>
+          <div class="files-tree" id="files-tree">
+            ${renderTreeNodes(filesTreeData, 0)}
+          </div>
+        </div>
+      `;
+    }
+
+    // Escape a string for use inside a JavaScript string literal in onclick handlers
+    // This handles quotes, backslashes, and other special characters
+    function escapeJsString(str) {
+      return str
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+    }
+
+    // Render tree nodes recursively
+    function renderTreeNodes(nodes, depth) {
+      if (!nodes || nodes.length === 0) return '';
+
+      return nodes.map(node => {
+        const indent = depth * 16;
+        const isExpanded = filesTreeExpanded.has(node.path);
+        // Use escapeJsString for onclick handlers (handles quotes correctly)
+        // Use escapeHtml for data attributes and display text (handles XSS)
+        const jsPath = escapeJsString(node.path);
+
+        if (node.type === 'dir') {
+          const icon = isExpanded ? '▼' : '▶';
+          const childrenHtml = node.children && node.children.length > 0
+            ? `<div class="tree-children ${isExpanded ? '' : 'collapsed'}" data-path="${escapeHtml(node.path)}">${renderTreeNodes(node.children, depth + 1)}</div>`
+            : '';
+
+          return `
+            <div class="tree-item" data-type="dir" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="toggleFolder('${jsPath}')">
+              <span class="tree-item-icon folder-toggle">${icon}</span>
+              <span class="tree-item-name">${escapeHtml(node.name)}</span>
+            </div>
+            ${childrenHtml}
+          `;
+        } else {
+          return `
+            <div class="tree-item" data-type="file" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="openFileFromTree('${jsPath}')">
+              <span class="tree-item-icon">${getFileIcon(node.name)}</span>
+              <span class="tree-item-name">${escapeHtml(node.name)}</span>
+            </div>
+          `;
+        }
+      }).join('');
+    }
+
+    // Get file icon based on extension
+    function getFileIcon(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      const iconMap = {
+        'js': '📜',
+        'ts': '📜',
+        'jsx': '⚛️',
+        'tsx': '⚛️',
+        'json': '{}',
+        'md': '📝',
+        'html': '🌐',
+        'css': '🎨',
+        'py': '🐍',
+        'sh': '⚙️',
+        'bash': '⚙️',
+        'yml': '⚙️',
+        'yaml': '⚙️',
+        'png': '🖼️',
+        'jpg': '🖼️',
+        'jpeg': '🖼️',
+        'gif': '🖼️',
+        'svg': '🖼️',
+      };
+      return iconMap[ext] || '📄';
+    }
+
+    // Toggle folder expanded/collapsed state
+    function toggleFolder(path) {
+      if (filesTreeExpanded.has(path)) {
+        filesTreeExpanded.delete(path);
+      } else {
+        filesTreeExpanded.add(path);
+      }
+      renderFilesTabContent();
+    }
+
+    // Collapse all folders
+    function collapseAllFolders() {
+      filesTreeExpanded.clear();
+      renderFilesTabContent();
+    }
+
+    // Expand all folders
+    function expandAllFolders() {
+      function collectPaths(nodes) {
+        for (const node of nodes) {
+          if (node.type === 'dir') {
+            filesTreeExpanded.add(node.path);
+            if (node.children) {
+              collectPaths(node.children);
+            }
+          }
+        }
+      }
+      collectPaths(filesTreeData);
+      renderFilesTabContent();
+    }
+
+    // Refresh files tree
+    async function refreshFilesTree() {
+      await loadFilesTree();
+      renderFilesTabContent();
+      showToast('Files refreshed', 'success');
+    }
+
+    // Open file from tree click
+    async function openFileFromTree(filePath) {
+      try {
+        // Check if file is already open
+        const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
+        if (existingTab) {
+          selectTab(existingTab.id);
+          return;
+        }
+
+        // Open the file via API
+        const response = await fetch('/api/tabs/file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: filePath })
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        // Refresh state and switch to the new tab
+        await refresh();
+
+        // Find and select the new file tab
+        const newTab = tabs.find(t => t.type === 'file' && t.path === filePath);
+        if (newTab) {
+          selectTab(newTab.id);
+        }
+
+        showToast(`Opened ${getFileName(filePath)}`, 'success');
+      } catch (err) {
+        showToast('Failed to open file: ' + err.message, 'error');
+      }
+    }
+
+    // ========================================
+    // Projects Tab Functions (Spec 0045)
+    // ========================================
 
     // Render the info header with helpful links
     function renderInfoHeader() {

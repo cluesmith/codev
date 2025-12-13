@@ -1129,6 +1129,89 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Get directory tree for file browser (Spec 0055)
+    if (req.method === 'GET' && url.pathname === '/api/files') {
+      // Directories to exclude from the tree
+      const EXCLUDED_DIRS = new Set([
+        'node_modules',
+        '.git',
+        'dist',
+        '.builders',
+        '__pycache__',
+        '.next',
+        '.nuxt',
+        '.turbo',
+        'coverage',
+        '.nyc_output',
+        '.cache',
+        '.parcel-cache',
+        'build',
+        '.svelte-kit',
+        'vendor',
+        '.venv',
+        'venv',
+        'env',
+        '.env',
+      ]);
+
+      interface FileNode {
+        name: string;
+        path: string;
+        type: 'file' | 'dir';
+        children?: FileNode[];
+      }
+
+      // Recursively build directory tree
+      function buildTree(dirPath: string, relativePath: string = ''): FileNode[] {
+        const entries: FileNode[] = [];
+
+        try {
+          const items = fs.readdirSync(dirPath, { withFileTypes: true });
+
+          for (const item of items) {
+            // Skip excluded directories only (allow dotfiles like .github, .eslintrc, etc.)
+            if (EXCLUDED_DIRS.has(item.name)) continue;
+
+            const itemRelPath = relativePath ? `${relativePath}/${item.name}` : item.name;
+            const itemFullPath = path.join(dirPath, item.name);
+
+            if (item.isDirectory()) {
+              const children = buildTree(itemFullPath, itemRelPath);
+              entries.push({
+                name: item.name,
+                path: itemRelPath,
+                type: 'dir',
+                children,
+              });
+            } else if (item.isFile()) {
+              entries.push({
+                name: item.name,
+                path: itemRelPath,
+                type: 'file',
+              });
+            }
+          }
+        } catch (err) {
+          // Ignore permission errors or inaccessible directories
+          console.error(`Error reading directory ${dirPath}:`, (err as Error).message);
+        }
+
+        // Sort: directories first, then files, alphabetically within each group
+        entries.sort((a, b) => {
+          if (a.type === 'dir' && b.type === 'file') return -1;
+          if (a.type === 'file' && b.type === 'dir') return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        return entries;
+      }
+
+      const tree = buildTree(projectRoot);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(tree));
+      return;
+    }
+
     // Serve dashboard
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       try {
