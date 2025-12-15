@@ -1,5 +1,7 @@
 # Codev: A Human-Agent Software Development Operating System
 
+[FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md)
+
 Codev is an operating system for humans and AI agents to build software together. It provides:
 
 - **Core Philosophies** - Natural language as programming language, multi-model collaboration, structured human-agent workflows
@@ -19,7 +21,7 @@ This provides three CLI commands:
 - `af` - Agent-farm CLI for parallel development
 - `consult` - Multi-agent consultation tool
 
-See the **[CLI Command Reference](codev/docs/commands/overview.md)** for complete documentation.
+See the **[CLI Command Reference](codev/resources/commands/overview.md)** for complete documentation.
 
 ### Initialize a New Project
 
@@ -73,6 +75,14 @@ I want to build X using the SPIDER protocol
 Or ask to learn more about Codev. 
 
 ## Learn about Codev
+
+### ❓ FAQ
+
+Common questions about Codev: **[FAQ](docs/faq.md)**
+
+### 💡 Tips & Tricks
+
+Practical tips for getting the most out of Codev: **[Tips & Tricks](docs/tips.md)**
 
 ### 📋 Cheatsheet
 

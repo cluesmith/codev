@@ -1,7 +1,0 @@
-#!/bin/bash
-# Thin wrapper - forwards all commands to agent-farm TypeScript
-# Uses readlink to handle symlinks (e.g., if symlinked to /usr/local/bin)
-SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-exec node "$PROJECT_ROOT/agent-farm/dist/index.js" "$@"

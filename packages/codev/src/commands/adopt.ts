@@ -166,9 +166,37 @@ projects:
     fileCount++;
   }
 
+  // Create resources directory and copy templates if they don't exist
+  const resourcesDir = path.join(targetDir, 'codev', 'resources');
+  if (!fs.existsSync(resourcesDir)) {
+    fs.mkdirSync(resourcesDir, { recursive: true });
+  }
+
+  // Copy lessons-learned.md template if it doesn't exist
+  const lessonsPath = path.join(resourcesDir, 'lessons-learned.md');
+  if (!fs.existsSync(lessonsPath)) {
+    const lessonsTemplatePath = path.join(skeletonDir, 'templates', 'lessons-learned.md');
+    if (fs.existsSync(lessonsTemplatePath)) {
+      fs.copyFileSync(lessonsTemplatePath, lessonsPath);
+      console.log(chalk.green('  +'), 'codev/resources/lessons-learned.md');
+      fileCount++;
+    }
+  }
+
+  // Copy arch.md template if it doesn't exist
+  const archPath = path.join(resourcesDir, 'arch.md');
+  if (!fs.existsSync(archPath)) {
+    const archTemplatePath = path.join(skeletonDir, 'templates', 'arch.md');
+    if (fs.existsSync(archTemplatePath)) {
+      fs.copyFileSync(archTemplatePath, archPath);
+      console.log(chalk.green('  +'), 'codev/resources/arch.md');
+      fileCount++;
+    }
+  }
+
   // Create CLAUDE.md / AGENTS.md at project root from skeleton templates
-  const claudeMdSrc = path.join(skeletonDir, 'CLAUDE.md.template');
-  const agentsMdSrc = path.join(skeletonDir, 'AGENTS.md.template');
+  const claudeMdSrc = path.join(skeletonDir, 'templates', 'CLAUDE.md');
+  const agentsMdSrc = path.join(skeletonDir, 'templates', 'AGENTS.md');
 
   const claudeMdDest = path.join(targetDir, 'CLAUDE.md');
   const agentsMdDest = path.join(targetDir, 'AGENTS.md');

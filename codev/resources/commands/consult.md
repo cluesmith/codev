@@ -237,10 +237,11 @@ The consultant role (`codev/roles/consultant.md`) defines behavior:
 - Works constructively (not adversarial, not a rubber stamp)
 - Uses `git show <branch>:<file>` for PR reviews
 
-Customize by ejecting and modifying:
+Customize by copying to your local codev/ directory:
 
 ```bash
-codev eject roles/consultant.md
+mkdir -p codev/roles
+cp $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md codev/roles/
 ```
 
 ---

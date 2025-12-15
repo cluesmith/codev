@@ -4,10 +4,10 @@ This document describes all dependencies required to run Codev and Agent Farm.
 
 ## Quick Check
 
-Run the doctor script to verify your installation:
+Run the doctor command to verify your installation:
 
 ```bash
-./codev/bin/codev-doctor
+codev doctor
 ```
 
 ---
@@ -296,4 +296,4 @@ gh auth status
 
 - [INSTALL.md](INSTALL.md) - Installation guide
 - [MIGRATION-1.0.md](../MIGRATION-1.0.md) - Migration guide for existing projects
-- [codev/bin/codev-doctor](codev/bin/codev-doctor) - Automated dependency checker
+- `codev doctor` - Automated dependency checker

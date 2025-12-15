@@ -174,45 +174,6 @@ codev update --force
 
 ---
 
-### codev eject
-
-Copy embedded skeleton files locally for customization.
-
-```bash
-codev eject [path] [options]
-```
-
-**Arguments:**
-- `path` - File or directory to eject (e.g., `protocols/spider`)
-
-**Options:**
-- `-l, --list` - List available files to eject
-- `-f, --force` - Overwrite existing files
-
-**Description:**
-
-Copies embedded framework files to your local `codev/` directory so you can customize them. Ejected files become "local overrides" and won't be changed by `codev update`.
-
-Use this when you want to modify protocols, roles, or templates for your specific project.
-
-**Examples:**
-
-```bash
-# List available files
-codev eject --list
-
-# Eject a single file
-codev eject roles/consultant.md
-
-# Eject entire protocol directory
-codev eject protocols/spider
-
-# Force overwrite existing
-codev eject protocols/spider --force
-```
-
----
-
 ### codev import
 
 AI-assisted protocol import from other codev projects.

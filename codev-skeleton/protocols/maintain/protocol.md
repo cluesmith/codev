@@ -339,7 +339,7 @@ Size targets (~400 lines for CLAUDE.md/README.md) are **guidelines, not mandates
 - Never delete "development patterns" or "best practices" sections without explicit approval
 
 **What to extract (move, don't delete)**:
-- Detailed command references → `codev/docs/commands/`
+- Detailed command references → `codev/resources/commands/`
 - Protocol details → `codev/protocols/*/protocol.md`
 - Tool configuration → `codev/resources/`
 
@@ -356,7 +356,7 @@ Size targets (~400 lines for CLAUDE.md/README.md) are **guidelines, not mandates
   ```markdown
   ## Consult Tool
 
-  See `codev/docs/commands/consult.md` for full documentation.
+  See `codev/resources/commands/consult.md` for full documentation.
   ```
 - This keeps CLAUDE.md as an index/guide rather than duplicating detailed docs
 

@@ -230,10 +230,10 @@ This replaces the older `codev-updater` and `spider-protocol-updater` agents wit
 
 Codev provides three CLI tools. For complete reference documentation, see:
 
-- **[Overview](codev/docs/commands/overview.md)** - Quick start and summary of all tools
-- **[codev](codev/docs/commands/codev.md)** - Project management (init, adopt, doctor, update, eject, tower)
-- **[af](codev/docs/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
-- **[consult](codev/docs/commands/consult.md)** - AI consultation (pr, spec, plan, general)
+- **[Overview](codev/resources/commands/overview.md)** - Quick start and summary of all tools
+- **[codev](codev/resources/commands/codev.md)** - Project management (init, adopt, doctor, update, tower)
+- **[af](codev/resources/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
+- **[consult](codev/resources/commands/consult.md)** - AI consultation (pr, spec, plan, general)
 
 ## Architect-Builder Pattern
 
