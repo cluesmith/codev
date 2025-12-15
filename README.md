@@ -97,7 +97,7 @@ Watch a brief overview of what Codev is and how it works.
 
 ### 💬 Participate
 
-Join the conversation in [GitHub Discussions](https://github.com/ansari-project/codev/discussions)! Share your specs, ask questions, and learn from the community.
+Join the conversation in [GitHub Discussions](https://github.com/ansari-project/codev/discussions) or our [Discord community](https://discord.gg/mJ92DhDa6n)! Share your specs, ask questions, and learn from the community.
 
 **Get notified of new discussions**: Click the **Watch** button at the top of this repo → **Custom** → check **Discussions**.
 

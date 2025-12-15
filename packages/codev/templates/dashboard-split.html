@@ -1157,56 +1157,7 @@
       display: none;
     }
 
-    /* Files Tab Styles (Spec 0055) */
-    .files-container {
-      flex: 1;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .files-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .files-header-title {
-      font-size: 12px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .files-header-actions {
-      display: flex;
-      gap: 4px;
-    }
-
-    .files-header-actions button {
-      padding: 4px 8px;
-      border-radius: 4px;
-      border: 1px solid var(--border);
-      background: var(--bg-tertiary);
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 11px;
-    }
-
-    .files-header-actions button:hover {
-      background: var(--tab-hover);
-      color: var(--text-primary);
-    }
-
-    .files-tree {
-      flex: 1;
-      overflow-y: auto;
-      padding: 8px 0;
-    }
-
+    /* Tree Styles (used by dashboard file browser) */
     .tree-item {
       display: flex;
       align-items: center;
@@ -1270,25 +1221,6 @@
       display: none;
     }
 
-    .files-loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-
-    .files-error {
-      padding: 16px;
-      margin: 8px;
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid var(--status-error);
-      border-radius: 6px;
-      color: var(--text-secondary);
-      font-size: 13px;
-    }
-
     /* Dashboard Tab Styles (Spec 0057) */
     .dashboard-container {
       flex: 1;
@@ -1298,8 +1230,7 @@
     }
 
     .dashboard-header {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      display: flex;
       gap: 16px;
       padding: 16px;
       flex-shrink: 0;
@@ -1307,10 +1238,118 @@
 
     @media (max-width: 900px) {
       .dashboard-header {
-        grid-template-columns: 1fr;
+        flex-direction: column;
       }
     }
 
+    /* Collapsible section styles */
+    .dashboard-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dashboard-section.section-tabs,
+    .dashboard-section.section-files {
+      flex: 1;
+      max-height: 280px;
+    }
+
+    .dashboard-section.section-projects {
+      flex: 0 0 auto;
+      margin: 0 16px 16px 16px;
+      max-height: 50%;
+      overflow-y: auto;
+    }
+
+    .dashboard-section.section-projects .dashboard-section-content {
+      flex: 0 0 auto;
+    }
+
+    /* Tabs/Files expand to fill remaining space above Projects */
+    .dashboard-header {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .dashboard-section.section-tabs,
+    .dashboard-section.section-files {
+      max-height: none;
+    }
+
+    .dashboard-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      cursor: pointer;
+      user-select: none;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dashboard-section-header:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .dashboard-section-header h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dashboard-section-header .collapse-icon {
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+
+    .dashboard-section.collapsed .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .dashboard-section.collapsed .dashboard-section-header {
+      border-bottom: none;
+    }
+
+    .dashboard-section-header .header-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .dashboard-section-header .header-actions button {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .dashboard-section-header .header-actions button:hover {
+      background: var(--tab-hover);
+      color: var(--text-primary);
+    }
+
+    .dashboard-section-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+    }
+
+    .dashboard-section.collapsed .dashboard-section-content {
+      display: none;
+    }
+
+    /* Legacy support */
     .dashboard-column {
       background: var(--bg-secondary);
       border: 1px solid var(--border);
@@ -1442,12 +1481,6 @@
       font-size: 13px;
       padding: 12px;
       text-align: center;
-    }
-
-    .dashboard-projects {
-      flex: 1;
-      overflow-y: auto;
-      padding: 0 16px 16px 16px;
     }
 
     /* Status indicators in dashboard tab list */
@@ -1588,6 +1621,30 @@
     let pendingCloseTabId = null;
     let contextMenuTabId = null;
 
+    // Collapsible section state (persisted to localStorage)
+    const SECTION_STATE_KEY = 'codev-dashboard-sections';
+    let sectionState = loadSectionState();
+
+    function loadSectionState() {
+      try {
+        const saved = localStorage.getItem(SECTION_STATE_KEY);
+        if (saved) return JSON.parse(saved);
+      } catch (e) { /* ignore */ }
+      return { tabs: true, files: true, projects: true };
+    }
+
+    function saveSectionState() {
+      try {
+        localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(sectionState));
+      } catch (e) { /* ignore */ }
+    }
+
+    function toggleSection(section) {
+      sectionState[section] = !sectionState[section];
+      saveSectionState();
+      renderDashboardTabContent();
+    }
+
     // Initialize
     function init() {
       buildTabsFromState();
@@ -1713,14 +1770,6 @@
         id: 'dashboard',
         type: 'dashboard',
         name: 'Dashboard',
-        closeable: false
-      });
-
-      // Files tab is second and uncloseable (Spec 0055)
-      tabs.push({
-        id: 'files',
-        type: 'files',
-        name: 'Files',
         closeable: false
       });
 
@@ -1855,7 +1904,7 @@
     // Get tab icon
     function getTabIcon(type) {
       switch (type) {
-        case 'dashboard': return '📋';
+        case 'dashboard': return '🏠';
         case 'files': return '📁';
         case 'file': return '📄';
         case 'builder': return '🔨';
@@ -1960,16 +2009,6 @@
           currentTabType = 'dashboard';
           currentTabPort = null;
           renderDashboardTab();
-        }
-        return;
-      }
-
-      // Handle files tab specially (no iframe, inline content)
-      if (tab.type === 'files') {
-        if (currentTabType !== 'files') {
-          currentTabType = 'files';
-          currentTabPort = null;
-          renderFilesTab();
         }
         return;
       }
@@ -3179,53 +3218,6 @@
       }
     }
 
-    // Render the files tab (entry point)
-    // Only fetches on first load; use refreshFilesTree() to force reload
-    async function renderFilesTab() {
-      const content = document.getElementById('tab-content');
-
-      // If already loaded, just render cached data (no network request)
-      if (filesTreeLoaded) {
-        renderFilesTabContent();
-        return;
-      }
-
-      // First load - show loading state and fetch
-      content.innerHTML = '<div class="files-loading">Loading files...</div>';
-      await loadFilesTree();
-      renderFilesTabContent();
-    }
-
-    // Render the files tab content (internal - called after data is loaded)
-    function renderFilesTabContent() {
-      const content = document.getElementById('tab-content');
-
-      if (filesTreeError) {
-        content.innerHTML = `
-          <div class="files-container">
-            <div class="files-error">${escapeHtml(filesTreeError)}</div>
-          </div>
-        `;
-        return;
-      }
-
-      content.innerHTML = `
-        <div class="files-container">
-          <div class="files-header">
-            <span class="files-header-title">Explorer</span>
-            <div class="files-header-actions">
-              <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
-              <button onclick="expandAllFolders()" title="Expand All">⊞</button>
-              <button onclick="refreshFilesTree()" title="Refresh">↻</button>
-            </div>
-          </div>
-          <div class="files-tree" id="files-tree">
-            ${renderTreeNodes(filesTreeData, 0)}
-          </div>
-        </div>
-      `;
-    }
-
     // Escape a string for use inside a JavaScript string literal in onclick handlers
     // This handles quotes, backslashes, and other special characters
     function escapeJsString(str) {
@@ -3316,8 +3308,6 @@
         if (filesListEl) {
           filesListEl.innerHTML = renderDashboardFilesBrowser();
         }
-      } else if (activeTabId === 'files') {
-        renderFilesTabContent();
       }
     }
 
@@ -3394,10 +3384,9 @@
     function renderInfoHeader() {
       return `
         <div class="projects-info">
-          <h1 style="font-size: 20px; margin-bottom: 12px; color: var(--text-primary);">Codev: Project View</h1>
-          <p>This shows the state of all projects. Our goal is to move each project through all the stages until it reaches INTGR'D (integrated). Hover over column headers to learn about each stage.</p>
-          <p>To add projects, update status, or approve stages, use the <strong>Architect</strong> terminal on the left.</p>
-          <p>Docs: <a href="#" onclick="openProjectFile('codev/resources/cheatsheet.md'); return false;">Cheatsheet</a> · <a href="#" onclick="openProjectFile('codev/docs/lifecycle.md'); return false;">Lifecycle</a> · <a href="#" onclick="openProjectFile('codev/docs/commands/overview.md'); return false;">CLI Reference</a> · <a href="#" onclick="openProjectFile('codev/protocols/spider/protocol.md'); return false;">SPIDER Protocol</a> · <a href="https://github.com/cluesmith/codev#readme" target="_blank">README</a></p>
+          <h1 style="font-size: 20px; margin-bottom: 12px; color: var(--text-primary);">Agent Farm Dashboard</h1>
+          <p>Coordinate AI builders working on your codebase. The left panel shows the Architect terminal – tell it what you want to build. <strong>Tabs</strong> shows open terminals (Architect, Builders, utility shells). <strong>Files</strong> lets you browse and open project files. <strong>Projects</strong> tracks work as it moves from conception to integration.</p>
+          <p>Docs: <a href="#" onclick="openProjectFile('codev/resources/cheatsheet.md'); return false;">Cheatsheet</a> · <a href="#" onclick="openProjectFile('codev/resources/lifecycle.md'); return false;">Lifecycle</a> · <a href="#" onclick="openProjectFile('codev/resources/commands/overview.md'); return false;">CLI Reference</a> · <a href="#" onclick="openProjectFile('codev/protocols/spider/protocol.md'); return false;">SPIDER Protocol</a> · <a href="https://github.com/cluesmith/codev#readme" target="_blank">README</a> · <a href="https://discord.gg/mJ92DhDa6n" target="_blank">Discord</a></p>
         </div>
       `;
     }
@@ -3408,36 +3397,43 @@
 
       content.innerHTML = `
         <div class="dashboard-container">
+          ${renderInfoHeader()}
           <div class="dashboard-header">
-            <!-- Left Column: Tabs -->
-            <div class="dashboard-column">
-              <div class="dashboard-column-header">
-                <h3>Tabs</h3>
+            <!-- Tabs Section -->
+            <div class="dashboard-section section-tabs ${sectionState.tabs ? '' : 'collapsed'}">
+              <div class="dashboard-section-header" onclick="toggleSection('tabs')">
+                <h3><span class="collapse-icon">▼</span> Tabs</h3>
               </div>
-              <div class="dashboard-tabs-list" id="dashboard-tabs-list">
-                ${renderDashboardTabsList()}
-              </div>
-              <div class="dashboard-actions">
-                <button class="btn-action" onclick="createNewShell()" title="New utility shell">+ New Shell</button>
-                <button class="btn-action" onclick="createNewWorktreeShell()" title="New worktree shell">+ New Worktree</button>
+              <div class="dashboard-section-content">
+                <div class="dashboard-tabs-list" id="dashboard-tabs-list">
+                  ${renderDashboardTabsList()}
+                </div>
               </div>
             </div>
-            <!-- Right Column: Files -->
-            <div class="dashboard-column">
-              <div class="dashboard-column-header">
-                <h3>Files</h3>
-                <div class="header-actions">
+            <!-- Files Section -->
+            <div class="dashboard-section section-files ${sectionState.files ? '' : 'collapsed'}">
+              <div class="dashboard-section-header" onclick="toggleSection('files')">
+                <h3><span class="collapse-icon">▼</span> Files</h3>
+                <div class="header-actions" onclick="event.stopPropagation()">
                   <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
                   <button onclick="expandAllFolders()" title="Expand All">⊞</button>
                 </div>
               </div>
-              <div class="dashboard-files-list" id="dashboard-files-list">
-                ${renderDashboardFilesBrowser()}
+              <div class="dashboard-section-content">
+                <div class="dashboard-files-list" id="dashboard-files-list">
+                  ${renderDashboardFilesBrowser()}
+                </div>
               </div>
             </div>
           </div>
-          <div class="dashboard-projects" id="dashboard-projects">
-            ${renderDashboardProjectsSection()}
+          <!-- Projects Section -->
+          <div class="dashboard-section section-projects ${sectionState.projects ? '' : 'collapsed'}">
+            <div class="dashboard-section-header" onclick="toggleSection('projects')">
+              <h3><span class="collapse-icon">▼</span> Projects</h3>
+            </div>
+            <div class="dashboard-section-content" id="dashboard-projects">
+              ${renderDashboardProjectsSection()}
+            </div>
           </div>
         </div>
       `;
@@ -3516,9 +3512,8 @@
         `;
       }
 
-      // Render the existing project view (unchanged)
+      // Render the existing project view
       return `
-        ${renderInfoHeader()}
         ${renderKanbanGrid(projectsData)}
         ${renderTerminalProjects(projectsData)}
       `;

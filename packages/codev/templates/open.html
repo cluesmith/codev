@@ -13,11 +13,14 @@
   </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
+    html, body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #1a1a1a;
       color: #fff;
-      min-height: 100vh;
+      height: 100%;
+    }
+    body.preview-active {
+      overflow: hidden;
     }
     .header {
       padding: 15px 20px;
@@ -785,12 +788,14 @@
         renderPreview();
         viewMode.style.display = 'none';
         previewContainer.style.display = 'block';
+        document.body.classList.add('preview-active');
         toggleIcon.textContent = '📝';
         toggleText.textContent = 'Annotate';
       } else {
         // Switch back to annotated view
         viewMode.style.display = 'grid';
         previewContainer.style.display = 'none';
+        document.body.classList.remove('preview-active');
         toggleIcon.textContent = '👁';
         toggleText.textContent = 'Preview';
       }
