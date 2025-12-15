@@ -597,6 +597,417 @@ function getOpenServerPath(): { script: string; useTsx: boolean } {
   return { script: jsPath, useTsx: false };
 }
 
+// ============================================================
+// Activity Summary (Spec 0059)
+// ============================================================
+
+interface Commit {
+  hash: string;
+  message: string;
+  time: string;
+  branch: string;
+}
+
+interface PullRequest {
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+}
+
+interface BuilderActivity {
+  id: string;
+  status: string;
+  startTime: string;
+  endTime?: string;
+}
+
+interface ProjectChange {
+  id: string;
+  title: string;
+  oldStatus: string;
+  newStatus: string;
+}
+
+interface TimeTracking {
+  activeMinutes: number;
+  firstActivity: string;
+  lastActivity: string;
+}
+
+interface ActivitySummary {
+  commits: Commit[];
+  prs: PullRequest[];
+  builders: BuilderActivity[];
+  projectChanges: ProjectChange[];
+  files: string[];
+  timeTracking: TimeTracking;
+  aiSummary?: string;
+  error?: string;
+}
+
+interface TimeInterval {
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Get today's git commits from all branches for the current user
+ */
+function getGitCommits(projectRoot: string): Commit[] {
+  try {
+    const author = execSync('git config user.name', { cwd: projectRoot }).toString().trim();
+    if (!author) return [];
+
+    // Get commits from all branches since midnight
+    const output = execSync(
+      `git log --all --since="midnight" --author="${author}" --format="%H|%s|%aI|%D"`,
+      { cwd: projectRoot, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
+    ).toString();
+
+    if (!output.trim()) return [];
+
+    return output.trim().split('\n').filter(Boolean).map(line => {
+      const parts = line.split('|');
+      const hash = parts[0] || '';
+      const message = parts[1] || '';
+      const time = parts[2] || '';
+      const refs = parts.slice(3).join('|'); // refs might contain |
+
+      // Extract branch name from refs
+      let branch = 'unknown';
+      const headMatch = refs.match(/HEAD -> ([^,]+)/);
+      const branchMatch = refs.match(/([^,\s]+)$/);
+      if (headMatch) {
+        branch = headMatch[1];
+      } else if (branchMatch && branchMatch[1]) {
+        branch = branchMatch[1];
+      }
+
+      return {
+        hash: hash.slice(0, 7),
+        message: message.slice(0, 100), // Truncate long messages
+        time,
+        branch,
+      };
+    });
+  } catch (err) {
+    console.error('Error getting git commits:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Get unique files modified today
+ */
+function getModifiedFiles(projectRoot: string): string[] {
+  try {
+    const author = execSync('git config user.name', { cwd: projectRoot }).toString().trim();
+    if (!author) return [];
+
+    const output = execSync(
+      `git log --all --since="midnight" --author="${author}" --name-only --format=""`,
+      { cwd: projectRoot, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
+    ).toString();
+
+    if (!output.trim()) return [];
+
+    const files = [...new Set(output.trim().split('\n').filter(Boolean))];
+    return files.sort();
+  } catch (err) {
+    console.error('Error getting modified files:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Get GitHub PRs created/updated today via gh CLI
+ */
+function getGitHubPRs(projectRoot: string): PullRequest[] {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const output = execSync(
+      `gh pr list --author "@me" --state all --search "created:>=${today}" --json number,title,state,url`,
+      { cwd: projectRoot, encoding: 'utf-8', timeout: 10000 }
+    ).toString();
+
+    if (!output.trim()) return [];
+
+    const prs = JSON.parse(output) as Array<{ number: number; title: string; state: string; url: string }>;
+    return prs.map(pr => ({
+      number: pr.number,
+      title: pr.title.slice(0, 100),
+      state: pr.state,
+      url: pr.url,
+    }));
+  } catch (err) {
+    // gh CLI might not be available or authenticated
+    console.error('Error getting GitHub PRs:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Get builder activity from state.db for today
+ */
+function getBuilderActivity(): BuilderActivity[] {
+  try {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const midnightISO = midnight.toISOString();
+
+    const builders = getBuilders();
+
+    // Filter to builders active today (created or updated since midnight)
+    // Note: Builder objects don't have created_at/updated_at timestamps in state.json
+    // So we return all current builders as "today's activity"
+    return builders.map(b => ({
+      id: b.id,
+      status: b.status || 'unknown',
+      startTime: midnightISO, // Approximate - state.json doesn't track this
+      endTime: undefined,
+    }));
+  } catch (err) {
+    console.error('Error getting builder activity:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Detect project status changes in projectlist.md today
+ */
+function getProjectChanges(projectRoot: string): ProjectChange[] {
+  try {
+    const projectlistPath = path.join(projectRoot, 'codev/projectlist.md');
+    if (!fs.existsSync(projectlistPath)) return [];
+
+    // Get the first commit hash from today that touched projectlist.md
+    const firstCommitOutput = execSync(
+      `git log --since="midnight" --format=%H -- codev/projectlist.md | tail -1`,
+      { cwd: projectRoot, encoding: 'utf-8' }
+    ).toString().trim();
+
+    if (!firstCommitOutput) return [];
+
+    // Get diff of projectlist.md from that commit's parent to HEAD
+    const diff = execSync(
+      `git diff ${firstCommitOutput}^..HEAD -- codev/projectlist.md 2>/dev/null || echo ""`,
+      { cwd: projectRoot, encoding: 'utf-8', maxBuffer: 1024 * 1024 }
+    ).toString();
+
+    if (!diff.trim()) return [];
+
+    // Parse status changes from diff
+    // Looking for patterns like "- status: implemented" or "+ status: committed"
+    const changes: ProjectChange[] = [];
+    const lines = diff.split('\n');
+    let currentProject = '';
+    let oldStatus = '';
+    let newStatus = '';
+
+    for (const line of lines) {
+      // Track current project context
+      const projectMatch = line.match(/^[+-]?\s*##\s*(\d{4})[:-]\s*(.+)/);
+      if (projectMatch) {
+        currentProject = `${projectMatch[1]}: ${projectMatch[2].trim()}`;
+      }
+
+      // Track status changes
+      const statusMatch = line.match(/^([+-])\s*status:\s*(\w+)/);
+      if (statusMatch) {
+        const [, modifier, status] = statusMatch;
+        if (modifier === '-') {
+          oldStatus = status;
+        } else if (modifier === '+') {
+          newStatus = status;
+          if (oldStatus && currentProject) {
+            changes.push({
+              id: currentProject.split(':')[0],
+              title: currentProject.split(':').slice(1).join(':').trim(),
+              oldStatus,
+              newStatus,
+            });
+            oldStatus = '';
+            newStatus = '';
+          }
+        }
+      }
+    }
+
+    return changes;
+  } catch (err) {
+    console.error('Error getting project changes:', (err as Error).message);
+    return [];
+  }
+}
+
+/**
+ * Merge overlapping time intervals
+ */
+function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
+  if (intervals.length === 0) return [];
+
+  // Sort by start time
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  const merged: TimeInterval[] = [{ ...sorted[0] }];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    const current = sorted[i];
+
+    // If overlapping or within 2 hours, merge
+    const gapMs = current.start.getTime() - last.end.getTime();
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+
+    if (gapMs <= twoHoursMs) {
+      last.end = new Date(Math.max(last.end.getTime(), current.end.getTime()));
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Calculate active time from commits and builder activity
+ */
+function calculateTimeTracking(commits: Commit[], builders: BuilderActivity[]): TimeTracking {
+  const intervals: TimeInterval[] = [];
+  const fiveMinutesMs = 5 * 60 * 1000;
+
+  // Add commit timestamps (treat each as 5-minute interval)
+  for (const commit of commits) {
+    if (commit.time) {
+      const time = new Date(commit.time);
+      if (!isNaN(time.getTime())) {
+        intervals.push({
+          start: time,
+          end: new Date(time.getTime() + fiveMinutesMs),
+        });
+      }
+    }
+  }
+
+  // Add builder sessions
+  for (const builder of builders) {
+    if (builder.startTime) {
+      const start = new Date(builder.startTime);
+      const end = builder.endTime ? new Date(builder.endTime) : new Date();
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        intervals.push({ start, end });
+      }
+    }
+  }
+
+  if (intervals.length === 0) {
+    return {
+      activeMinutes: 0,
+      firstActivity: '',
+      lastActivity: '',
+    };
+  }
+
+  const merged = mergeIntervals(intervals);
+  const totalMinutes = merged.reduce((sum, interval) =>
+    sum + (interval.end.getTime() - interval.start.getTime()) / (1000 * 60), 0
+  );
+
+  return {
+    activeMinutes: Math.round(totalMinutes),
+    firstActivity: merged[0].start.toISOString(),
+    lastActivity: merged[merged.length - 1].end.toISOString(),
+  };
+}
+
+/**
+ * Generate AI summary via consult CLI
+ */
+async function generateAISummary(data: {
+  commits: Commit[];
+  prs: PullRequest[];
+  files: string[];
+  timeTracking: TimeTracking;
+  projectChanges: ProjectChange[];
+}): Promise<string> {
+  // Build prompt with commit messages and file names only (security: no full diffs)
+  const hours = Math.floor(data.timeTracking.activeMinutes / 60);
+  const mins = data.timeTracking.activeMinutes % 60;
+
+  const prompt = `Summarize this developer's activity today for a standup report.
+
+Commits (${data.commits.length}):
+${data.commits.slice(0, 20).map(c => `- ${c.message}`).join('\n') || '(none)'}
+${data.commits.length > 20 ? `... and ${data.commits.length - 20} more` : ''}
+
+PRs: ${data.prs.map(p => `#${p.number} ${p.title} (${p.state})`).join(', ') || 'None'}
+
+Files modified: ${data.files.length} files
+${data.files.slice(0, 10).join(', ')}${data.files.length > 10 ? ` ... and ${data.files.length - 10} more` : ''}
+
+Project status changes:
+${data.projectChanges.map(p => `- ${p.id} ${p.title}: ${p.oldStatus} → ${p.newStatus}`).join('\n') || '(none)'}
+
+Active time: ~${hours}h ${mins}m
+
+Write a brief, professional summary (2-3 sentences) focusing on accomplishments. Be concise and suitable for a standup or status report.`;
+
+  try {
+    // Use consult CLI to generate summary
+    const consultPath = path.join(__dirname, '../../../../bin/consult');
+    const escapedPrompt = prompt.replace(/'/g, "'\\''");
+
+    const output = execSync(
+      `"${consultPath}" --model gemini general '${escapedPrompt}'`,
+      { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024 }
+    ).toString();
+
+    return output.trim();
+  } catch (err) {
+    console.error('AI summary generation failed:', (err as Error).message);
+    return '';
+  }
+}
+
+/**
+ * Collect all activity data for today
+ */
+async function collectActivitySummary(projectRoot: string): Promise<ActivitySummary> {
+  // Collect data from all sources in parallel where possible
+  const [commits, files, prs, builders, projectChanges] = await Promise.all([
+    Promise.resolve(getGitCommits(projectRoot)),
+    Promise.resolve(getModifiedFiles(projectRoot)),
+    Promise.resolve(getGitHubPRs(projectRoot)),
+    Promise.resolve(getBuilderActivity()),
+    Promise.resolve(getProjectChanges(projectRoot)),
+  ]);
+
+  const timeTracking = calculateTimeTracking(commits, builders);
+
+  // Generate AI summary (skip if no activity)
+  let aiSummary = '';
+  if (commits.length > 0 || prs.length > 0) {
+    aiSummary = await generateAISummary({
+      commits,
+      prs,
+      files,
+      timeTracking,
+      projectChanges,
+    });
+  }
+
+  return {
+    commits,
+    prs,
+    builders,
+    projectChanges,
+    files,
+    timeTracking,
+    aiSummary: aiSummary || undefined,
+  };
+}
+
 // Use split template as main, legacy is already loaded via findTemplatePath
 const finalTemplatePath = templatePath;
 
@@ -1331,6 +1742,20 @@ const server = http.createServer(async (req, res) => {
       const tree = buildTree(projectRoot);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(tree));
+      return;
+    }
+
+    // API: Get daily activity summary (Spec 0059)
+    if (req.method === 'GET' && url.pathname === '/api/activity-summary') {
+      try {
+        const activitySummary = await collectActivitySummary(projectRoot);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(activitySummary));
+      } catch (err) {
+        console.error('Activity summary error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
       return;
     }
 
