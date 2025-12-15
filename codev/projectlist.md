@@ -135,7 +135,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0058"
     title: "File Search Autocomplete"
     summary: "VSCode-like Cmd+P quick file finder with substring matching and autocomplete"
-    status: planned
+    status: implementing
     priority: medium
     release: null
     files:
@@ -148,11 +148,33 @@ Projects currently in development (conceived through committed), sorted by prior
       conceived_at: "2025-12-15T00:00:00-08:00"
       specified_at: "2025-12-15T16:00:00-08:00"
       planned_at: "2025-12-15T16:30:00-08:00"
+      implementing_at: "2025-12-15T17:00:00-08:00"
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Quick file finder (Cmd+P + Files tab). Substring matching (no fuzzy). Builder spawned 2025-12-15."
+
+  - id: "0059"
+    title: "Daily Activity Summary"
+    summary: "Clock button in dashboard that uses AI to summarize today's work and time spent"
+    status: planned
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0059-daily-activity-summary.md
+      plan: codev/plans/0059-daily-activity-summary.md
+      review: null
+    dependencies: []
+    tags: [dashboard, ui, ai, productivity]
+    timestamps:
+      conceived_at: "2025-12-15T17:00:00-08:00"
+      specified_at: "2025-12-15T17:30:00-08:00"
+      planned_at: "2025-12-15T18:00:00-08:00"
       implementing_at: null
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Quick file finder (Cmd+P + Files tab). Substring matching (no fuzzy). Plan reviewed by Gemini/Codex."
+    notes: "What did I do today? button with AI summary. Uses consult CLI. Plan reviewed by Gemini/Codex."
 
   - id: "0039"
     title: "Codev CLI (First-Class Command)"
@@ -1503,7 +1525,7 @@ Projects that are paused or canceled.
 
 ## Next Available Number
 
-**0059** - Reserve this number for your next project
+**0060** - Reserve this number for your next project
 
 ---
 
