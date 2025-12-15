@@ -142,3 +142,123 @@ teardown() {
   run grep -q 'dashboard-tab-item.*onclick' node_modules/@cluesmith/codev/templates/dashboard-split.html
   assert_success
 }
+
+# === File Search Autocomplete Tests (Spec 0058) ===
+
+@test "file search has flattenFilesTree function" {
+  run grep -q "function flattenFilesTree" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has searchFiles function with relevance sorting" {
+  # Check that searchFiles function exists and has sorting logic
+  run grep -q "function searchFiles" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  # Verify relevance sorting is implemented
+  run grep -q "Sort by relevance" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has filesTreeFlat cache" {
+  # Check that the flat file list is cached
+  run grep -q "filesTreeFlat = " node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search input exists in Files section" {
+  # Check that the search input is rendered
+  run grep -q 'id="files-search-input"' node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has debounced input handler" {
+  # Check for debounce implementation
+  run grep -q "filesSearchDebounceTimer" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  # Check for 100ms debounce timeout
+  run grep -q "100" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has keyboard navigation" {
+  # Check for arrow key handling
+  run grep -q "onFilesSearchKeydown" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "ArrowDown" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "ArrowUp" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has highlight matching text" {
+  # Check for highlight function
+  run grep -q "function highlightMatch" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "files-search-highlight" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search palette HTML exists" {
+  # Check that the Cmd+P palette modal exists
+  run grep -q 'id="file-palette"' node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q 'id="palette-input"' node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has Cmd+P keyboard handler" {
+  # Check for global Cmd+P handler
+  run grep -q 'e.metaKey || e.ctrlKey' node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "e.key === 'p'" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search palette has open/close functions" {
+  run grep -q "function openPalette" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "function closePalette" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search reuses existing tab if file is open" {
+  # Check that openFileFromSearch checks for existing tabs
+  run grep -q "function openFileFromSearch" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "existingTab" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search has clear button" {
+  # Check for clear search button
+  run grep -q "files-search-clear" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q "clearFilesSearch" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search CSS styles exist" {
+  # Check for file search CSS
+  run grep -q ".files-search-container" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q ".files-search-input" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q ".files-search-result" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file palette CSS styles exist" {
+  # Check for palette CSS
+  run grep -q ".file-palette" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q ".file-palette-container" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+  run grep -q ".file-palette-results" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_success
+}
+
+@test "file search prevents browser print dialog" {
+  # Check that e.preventDefault is called for Cmd+P
+  run grep -A5 "e.key === 'p'" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  assert_output --partial "preventDefault"
+}
