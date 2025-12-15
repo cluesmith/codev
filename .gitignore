@@ -5,6 +5,12 @@ tmp/
 .agent-farm/
 .env
 
+# OS files
+.DS_Store
+
+# npm package tarballs
+*.tgz
+
 # Cleanup protocol artifacts
 # .trash/ contains soft-deleted files (bulk data, not versioned)
 codev/cleanup/.trash/
