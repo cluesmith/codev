@@ -457,7 +457,9 @@ Use the `--type` parameter to load stage-specific review prompts:
 | `pr-ready` | implemented | Final self-check before creating PR |
 | `integration-review` | committed | Architect's review for architectural fit |
 
-Review type prompts are in `codev/roles/review-types/`. The prompt is appended to the consultant role.
+Review type prompts are in `codev/consult-types/`. The prompt is appended to the consultant role.
+
+> **Migration Note (v1.4.0+)**: Review types moved from `codev/roles/review-types/` to `codev/consult-types/`. The old location still works with a deprecation warning. Run `codev doctor` to check your setup.
 
 ### Parallel Consultation (3-Way Reviews)
 

@@ -316,6 +316,45 @@ function verifyAiModel(modelName: string): CheckResult {
 }
 
 /**
+ * Find the project root with a codev/ directory
+ */
+function findProjectRoot(): string | null {
+  let current = process.cwd();
+  while (current !== dirname(current)) {
+    if (existsSync(resolve(current, 'codev'))) {
+      return current;
+    }
+    if (existsSync(resolve(current, '.git'))) {
+      return current;
+    }
+    current = dirname(current);
+  }
+  return null;
+}
+
+/**
+ * Check codev directory structure
+ */
+function checkCodevStructure(projectRoot: string): { warnings: string[] } {
+  const warnings: string[] = [];
+  const codevDir = resolve(projectRoot, 'codev');
+
+  // Check for consult-types/ directory (new location)
+  const consultTypesDir = resolve(codevDir, 'consult-types');
+  if (!existsSync(consultTypesDir)) {
+    warnings.push('consult-types/ directory not found - review types may not work correctly');
+  }
+
+  // Check for deprecated roles/review-types/ directory
+  const oldReviewTypes = resolve(codevDir, 'roles', 'review-types');
+  if (existsSync(oldReviewTypes)) {
+    warnings.push('Deprecated: roles/review-types/ still exists. Move contents to consult-types/');
+  }
+
+  return { warnings };
+}
+
+/**
  * Check if @cluesmith/codev is installed
  */
 function checkNpmDependencies(): CheckResult {
@@ -430,6 +469,24 @@ export async function doctor(): Promise<number> {
   }
 
   console.log('');
+
+  // Check codev directory structure (only if we're in a codev project)
+  const projectRoot = findProjectRoot();
+  if (projectRoot && existsSync(resolve(projectRoot, 'codev'))) {
+    console.log(chalk.bold('Codev Structure') + ' (project configuration)');
+    console.log('');
+
+    const structureCheck = checkCodevStructure(projectRoot);
+    if (structureCheck.warnings.length === 0) {
+      console.log(`  ${chalk.green('✓')} Project structure OK`);
+    } else {
+      for (const warning of structureCheck.warnings) {
+        console.log(`  ${chalk.yellow('⚠')} ${warning}`);
+        warnings++;
+      }
+    }
+    console.log('');
+  }
 
   // Summary
   console.log('============================================');

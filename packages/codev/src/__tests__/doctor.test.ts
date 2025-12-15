@@ -4,6 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execSync, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { tmpdir } from 'node:os';
 
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
@@ -193,6 +196,201 @@ describe('doctor command', () => {
       const { doctor } = await import('../commands/doctor.js');
       const result = await doctor();
       expect(result).toBe(1);
+    });
+  });
+
+  describe('codev structure checks (Spec 0056)', () => {
+    const testBaseDir = path.join(tmpdir(), `codev-doctor-test-${Date.now()}`);
+    let originalCwd: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+      fs.mkdirSync(testBaseDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      if (fs.existsSync(testBaseDir)) {
+        fs.rmSync(testBaseDir, { recursive: true });
+      }
+    });
+
+    it('should warn when consult-types/ directory is missing', async () => {
+      // Create a codev directory without consult-types/
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+
+      process.chdir(testBaseDir);
+
+      // Mock all dependencies as present to isolate our test
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should have warning about missing consult-types/
+      const hasWarning = logOutput.some(line =>
+        line.includes('consult-types/') && line.includes('not found')
+      );
+      expect(hasWarning).toBe(true);
+    });
+
+    it('should warn when deprecated roles/review-types/ still exists', async () => {
+      // Create a codev directory with both directories
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles', 'review-types'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'consult-types', 'spec-review.md'),
+        '# Spec Review'
+      );
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'review-types', 'old-type.md'),
+        '# Old Type'
+      );
+
+      process.chdir(testBaseDir);
+
+      // Mock all dependencies as present
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should have warning about deprecated roles/review-types/
+      const hasWarning = logOutput.some(line =>
+        line.includes('Deprecated') && line.includes('roles/review-types/')
+      );
+      expect(hasWarning).toBe(true);
+    });
+
+    it('should show no warnings when properly migrated', async () => {
+      // Create a properly migrated codev directory
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'consult-types', 'spec-review.md'),
+        '# Spec Review'
+      );
+      // No roles/review-types/ directory
+
+      process.chdir(testBaseDir);
+
+      // Mock all dependencies as present
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should show "Project structure OK" (no warnings for structure)
+      const hasOk = logOutput.some(line =>
+        line.includes('Project structure OK')
+      );
+      expect(hasOk).toBe(true);
     });
   });
 });

@@ -68,12 +68,27 @@ function loadRole(projectRoot: string): string {
 
 /**
  * Load a review type prompt.
- * Checks local codev/roles/review-types/{type}.md first, then falls back to embedded skeleton.
+ * Checks consult-types/{type}.md first (new location),
+ * then falls back to roles/review-types/{type}.md (deprecated) with a warning.
  */
 function loadReviewTypePrompt(projectRoot: string, reviewType: string): string | null {
-  const promptPath = `roles/review-types/${reviewType}.md`;
-  const prompt = readCodevFile(promptPath, projectRoot);
-  return prompt;
+  // Primary location: consult-types/
+  const primaryPath = `consult-types/${reviewType}.md`;
+  const primaryPrompt = readCodevFile(primaryPath, projectRoot);
+  if (primaryPrompt) {
+    return primaryPrompt;
+  }
+
+  // Fallback location: roles/review-types/ (deprecated)
+  const fallbackPath = `roles/review-types/${reviewType}.md`;
+  const fallbackPrompt = readCodevFile(fallbackPath, projectRoot);
+  if (fallbackPrompt) {
+    console.error(chalk.yellow('Warning: Review types in roles/review-types/ are deprecated.'));
+    console.error(chalk.yellow('Move your custom types to consult-types/ for future compatibility.'));
+    return fallbackPrompt;
+  }
+
+  return null;
 }
 
 /**
