@@ -241,7 +241,9 @@ This replaces the older `codev-updater` and `spider-protocol-updater` agents wit
 
 ## CLI Command Reference
 
-Codev provides three CLI tools. For complete reference documentation, see:
+Codev provides three CLI tools designed for **both humans and AI agents**. The commands have simple, memorable names and consistent interfaces that work equally well whether typed by a human or called by an AI assistant.
+
+For complete reference documentation, see:
 
 - **[Overview](codev/resources/commands/overview.md)** - Quick start and summary of all tools
 - **[codev](codev/resources/commands/codev.md)** - Project management (init, adopt, doctor, update, tower)
