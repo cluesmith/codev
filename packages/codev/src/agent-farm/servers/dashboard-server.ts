@@ -792,16 +792,28 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // API: Create shell tab
+    // API: Create shell tab (supports worktree parameter for Spec 0057)
     if (req.method === 'POST' && url.pathname === '/api/tabs/shell') {
       const body = await parseJsonBody(req);
       const name = (body.name as string) || undefined;
       const command = (body.command as string) || undefined;
+      const worktree = body.worktree === true;
+      const branch = (body.branch as string) || undefined;
 
       // Validate name if provided (prevent command injection)
       if (name && !/^[a-zA-Z0-9_-]+$/.test(name)) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
         res.end('Invalid name format');
+        return;
+      }
+
+      // Validate branch name if provided (prevent command injection)
+      if (branch && !/^[a-zA-Z0-9_\-\/]+$/.test(branch)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Invalid branch name. Use only letters, numbers, underscores, hyphens, and slashes.'
+        }));
         return;
       }
 
@@ -814,9 +826,54 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      // Determine working directory (project root or worktree)
+      let cwd = projectRoot;
+      let worktreePath: string | undefined;
+
+      if (worktree) {
+        // Create worktree for the shell
+        const worktreesDir = path.join(projectRoot, '.worktrees');
+        if (!fs.existsSync(worktreesDir)) {
+          fs.mkdirSync(worktreesDir, { recursive: true });
+        }
+
+        // Generate worktree name
+        const worktreeName = branch || `temp-${Date.now()}`;
+        worktreePath = path.join(worktreesDir, worktreeName);
+
+        // Check if worktree already exists
+        if (fs.existsSync(worktreePath)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: `Worktree '${worktreeName}' already exists at ${worktreePath}`
+          }));
+          return;
+        }
+
+        // Create worktree
+        try {
+          const gitCmd = branch
+            ? `git worktree add "${worktreePath}" -b "${branch}"`
+            : `git worktree add "${worktreePath}" --detach`;
+          execSync(gitCmd, { cwd: projectRoot, stdio: 'pipe' });
+          cwd = worktreePath;
+        } catch (gitError: unknown) {
+          const errorMsg = gitError instanceof Error
+            ? (gitError as { stderr?: Buffer }).stderr?.toString() || gitError.message
+            : 'Unknown error';
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: `Git worktree creation failed: ${errorMsg}`
+          }));
+          return;
+        }
+      }
+
       // Generate ID and name
       const id = generateId('U');
-      const utilName = name || `shell-${shellState.utils.length + 1}`;
+      const utilName = name || (worktree ? `worktree-${shellState.utils.length + 1}` : `shell-${shellState.utils.length + 1}`);
       const sessionName = `af-shell-${id}`;
 
       // Get shell command - if command provided, run it then keep shell open
@@ -835,8 +892,8 @@ const server = http.createServer(async (req, res) => {
         const currentState = loadState();
         const candidatePort = await findAvailablePort(CONFIG.utilPortStart, currentState);
 
-        // Start tmux session with ttyd attached
-        const spawnedPid = spawnTmuxWithTtyd(sessionName, shellCommand, candidatePort, projectRoot);
+        // Start tmux session with ttyd attached (use cwd which may be worktree)
+        const spawnedPid = spawnTmuxWithTtyd(sessionName, shellCommand, candidatePort, cwd);
 
         if (!spawnedPid) {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -875,7 +932,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ id, port: utilPort, name: utilName }));
+      res.end(JSON.stringify({ success: true, id, port: utilPort, name: utilName }));
       return;
     }
 
