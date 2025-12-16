@@ -3944,7 +3944,7 @@
               <div class="dashboard-section-header" onclick="toggleSection('tabs')">
                 <h3><span class="collapse-icon">▼</span> Tabs</h3>
                 <div class="header-actions" onclick="event.stopPropagation()">
-                  <button onclick="spawnBuilder()" title="New Builder">+ Builder</button>
+                  <button onclick="spawnBuilder()" title="New Worktree">+ Worktree</button>
                   <button onclick="spawnShell()" title="New Shell">+ Shell</button>
                 </div>
               </div>
@@ -3959,6 +3959,7 @@
               <div class="dashboard-section-header" onclick="toggleSection('files')">
                 <h3><span class="collapse-icon">▼</span> Files</h3>
                 <div class="header-actions" onclick="event.stopPropagation()">
+                  <button onclick="refreshFilesTree()" title="Refresh">↻</button>
                   <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
                   <button onclick="expandAllFolders()" title="Expand All">⊞</button>
                 </div>
