@@ -452,8 +452,10 @@ Ensure the new `dashboard/` directory is included in skeleton copying.
 
 ## Estimated Effort
 
-| Phase | Effort |
-|-------|--------|
+**Architect's estimate (to be measured against actual):**
+
+| Phase | Estimate |
+|-------|----------|
 | Phase 1: Server routes | 30 min |
 | Phase 2: Extract CSS | 1 hour |
 | Phase 3: Extract JS | 2 hours |
@@ -462,7 +464,9 @@ Ensure the new `dashboard/` directory is included in skeleton copying.
 | Phase 6: Hot reloading | 1 hour |
 | Phase 7: Testing | 1 hour |
 | Phase 8: Cleanup | 15 min |
-| **Total** | **~7 hours** |
+| **Total Estimate** | **~7 hours** |
+
+**Actual time:** _To be filled in after completion_
 
 ## File Checklist
 
