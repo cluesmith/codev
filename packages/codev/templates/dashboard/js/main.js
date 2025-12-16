@@ -461,29 +461,15 @@ async function pollHotReload() {
   }
 }
 
-// Check if we're in development mode
-function isDevMode() {
-  return window.location.search.includes('dev=1') ||
-         window.location.hostname === 'localhost' ||
-         window.location.hostname === '127.0.0.1';
-}
-
-// Start hot reload polling (only in dev mode)
+// Start hot reload polling
 function startHotReload() {
   if (hotReloadInterval) return;
-
-  // Only enable hot reload in development
-  if (!isDevMode()) {
-    console.log('[Hot Reload] Disabled (not in dev mode)');
-    return;
-  }
 
   // Initial fetch to populate mtimes
   pollHotReload();
 
   // Poll every 2 seconds
   hotReloadInterval = setInterval(pollHotReload, 2000);
-  console.log('[Hot Reload] Started polling for file changes');
 }
 
 // Stop hot reload polling
