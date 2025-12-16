@@ -651,6 +651,135 @@
       color: #ef4444;
     }
 
+    /* Activity Summary Modal (Spec 0059) */
+    .activity-dialog {
+      width: 600px;
+      max-width: 90vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .activity-dialog-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .activity-dialog-header h3 {
+      margin: 0;
+    }
+
+    .activity-close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0 8px;
+      line-height: 1;
+    }
+
+    .activity-close-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .activity-dialog-content {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 50vh;
+      margin-bottom: 16px;
+    }
+
+    .activity-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .activity-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .activity-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .activity-error {
+      text-align: center;
+      padding: 40px 20px;
+      color: #ef4444;
+    }
+
+    .activity-summary {
+      line-height: 1.6;
+    }
+
+    .activity-ai-summary {
+      background: var(--bg-tertiary);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-style: italic;
+      color: var(--text-secondary);
+    }
+
+    .activity-section {
+      margin-bottom: 16px;
+    }
+
+    .activity-section h4 {
+      font-size: 13px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 0 0 8px 0;
+      letter-spacing: 0.5px;
+    }
+
+    .activity-section ul {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--text-secondary);
+    }
+
+    .activity-section li {
+      margin-bottom: 4px;
+    }
+
+    .activity-section p {
+      margin: 4px 0;
+      color: var(--text-secondary);
+    }
+
+    .activity-time-value {
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .activity-dialog-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
     /* Projects Tab Styles (Spec 0045) */
     .projects-container {
       flex: 1;
@@ -1690,6 +1819,11 @@
 <body>
   <header class="header">
     <h1>Agent Farm - {{PROJECT_NAME}}</h1>
+    <div class="header-actions">
+      <button class="btn activity-summary-btn" onclick="showActivitySummary()" title="What did I do today?">
+        🕐 Today
+      </button>
+    </div>
   </header>
 
   <main class="main">
@@ -1772,6 +1906,26 @@
 
   <!-- Toast container -->
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Activity Summary Modal (Spec 0059) -->
+  <div class="dialog-overlay hidden" id="activity-modal">
+    <div class="dialog activity-dialog">
+      <div class="activity-dialog-header">
+        <h3>Today's Summary</h3>
+        <button class="activity-close-btn" onclick="closeActivityModal()" title="Close (Esc)">×</button>
+      </div>
+      <div class="activity-dialog-content" id="activity-content">
+        <div class="activity-loading">
+          <span class="activity-spinner"></span>
+          Loading activity...
+        </div>
+      </div>
+      <div class="activity-dialog-footer">
+        <button class="btn" onclick="copyActivitySummary()">📋 Copy to Clipboard</button>
+        <button class="btn" onclick="closeActivityModal()">Close</button>
+      </div>
+    </div>
+  </div>
 
   <!-- File search palette (Cmd+P) - Spec 0058 -->
   <div id="file-palette" class="file-palette hidden">
@@ -2803,6 +2957,11 @@
         hideCloseDialog();
         hideContextMenu();
         hideOverflowMenu();
+        // Activity modal (Spec 0059)
+        const activityModal = document.getElementById('activity-modal');
+        if (activityModal && !activityModal.classList.contains('hidden')) {
+          closeActivityModal();
+        }
       }
 
       // Enter in dialogs
@@ -4270,6 +4429,164 @@
 
     // Start projectlist polling (separate from main state polling)
     setInterval(pollProjectlist, 5000);
+
+    // ========================================
+    // Activity Summary (Spec 0059)
+    // ========================================
+
+    let activityData = null;
+
+    // Show activity summary modal
+    async function showActivitySummary() {
+      const modal = document.getElementById('activity-modal');
+      const content = document.getElementById('activity-content');
+
+      // Show modal with loading state
+      modal.classList.remove('hidden');
+      content.innerHTML = `
+        <div class="activity-loading">
+          <span class="activity-spinner"></span>
+          Loading activity...
+        </div>
+      `;
+
+      try {
+        const response = await fetch('/api/activity-summary');
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        activityData = await response.json();
+        renderActivitySummary(activityData);
+      } catch (err) {
+        content.innerHTML = `
+          <div class="activity-error">
+            Failed to load activity: ${escapeHtml(err.message)}
+          </div>
+        `;
+      }
+    }
+
+    // Render activity summary content
+    function renderActivitySummary(data) {
+      const content = document.getElementById('activity-content');
+
+      // Check for zero activity
+      if (data.commits.length === 0 && data.prs.length === 0 && data.builders.length === 0) {
+        content.innerHTML = `
+          <div class="activity-empty">
+            <p>No activity recorded today</p>
+            <p style="font-size: 12px; margin-top: 8px;">Make some commits or create PRs to see your daily summary!</p>
+          </div>
+        `;
+        return;
+      }
+
+      const hours = Math.floor(data.timeTracking.activeMinutes / 60);
+      const mins = data.timeTracking.activeMinutes % 60;
+      const uniqueBranches = new Set(data.commits.map(c => c.branch)).size;
+      const mergedPrs = data.prs.filter(p => p.state === 'MERGED').length;
+
+      // Format time strings
+      const formatTime = (isoString) => {
+        if (!isoString) return '--';
+        const date = new Date(isoString);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      };
+
+      let html = '<div class="activity-summary">';
+
+      // AI Summary (if available)
+      if (data.aiSummary) {
+        html += `<div class="activity-ai-summary">${escapeHtml(data.aiSummary)}</div>`;
+      }
+
+      // Activity section
+      html += `
+        <div class="activity-section">
+          <h4>Activity</h4>
+          <ul>
+            <li>${data.commits.length} commits across ${uniqueBranches} branch${uniqueBranches !== 1 ? 'es' : ''}</li>
+            <li>${data.files.length} files modified</li>
+            <li>${data.prs.length} PR${data.prs.length !== 1 ? 's' : ''} created${mergedPrs > 0 ? `, ${mergedPrs} merged` : ''}</li>
+          </ul>
+        </div>
+      `;
+
+      // Projects section (if any status changes)
+      if (data.projectChanges && data.projectChanges.length > 0) {
+        html += `
+          <div class="activity-section">
+            <h4>Projects Touched</h4>
+            <ul>
+              ${data.projectChanges.map(p => `<li>${escapeHtml(p.id)}: ${escapeHtml(p.title)} (${escapeHtml(p.oldStatus)} → ${escapeHtml(p.newStatus)})</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
+      // Time section
+      html += `
+        <div class="activity-section">
+          <h4>Time</h4>
+          <p><span class="activity-time-value">~${hours}h ${mins}m</span> active time</p>
+          <p>First activity: ${formatTime(data.timeTracking.firstActivity)}</p>
+          <p>Last activity: ${formatTime(data.timeTracking.lastActivity)}</p>
+        </div>
+      `;
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    // Close activity modal
+    function closeActivityModal() {
+      document.getElementById('activity-modal').classList.add('hidden');
+    }
+
+    // Copy activity summary to clipboard
+    function copyActivitySummary() {
+      if (!activityData) return;
+
+      const hours = Math.floor(activityData.timeTracking.activeMinutes / 60);
+      const mins = activityData.timeTracking.activeMinutes % 60;
+      const uniqueBranches = new Set(activityData.commits.map(c => c.branch)).size;
+      const mergedPrs = activityData.prs.filter(p => p.state === 'MERGED').length;
+
+      let markdown = `## Today's Summary\n\n`;
+
+      if (activityData.aiSummary) {
+        markdown += `${activityData.aiSummary}\n\n`;
+      }
+
+      markdown += `### Activity\n`;
+      markdown += `- ${activityData.commits.length} commits across ${uniqueBranches} branches\n`;
+      markdown += `- ${activityData.files.length} files modified\n`;
+      markdown += `- ${activityData.prs.length} PRs${mergedPrs > 0 ? ` (${mergedPrs} merged)` : ''}\n\n`;
+
+      if (activityData.projectChanges && activityData.projectChanges.length > 0) {
+        markdown += `### Projects Touched\n`;
+        activityData.projectChanges.forEach(p => {
+          markdown += `- ${p.id}: ${p.title} (${p.oldStatus} → ${p.newStatus})\n`;
+        });
+        markdown += '\n';
+      }
+
+      markdown += `### Time\n`;
+      markdown += `Active time: ~${hours}h ${mins}m\n`;
+
+      navigator.clipboard.writeText(markdown).then(() => {
+        showToast('Copied to clipboard', 'success');
+      }).catch(() => {
+        showToast('Failed to copy', 'error');
+      });
+    }
+
+    // Close activity modal when clicking backdrop
+    document.getElementById('activity-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'activity-modal') {
+        closeActivityModal();
+      }
+    });
 
     // Initialize on load
     init();
