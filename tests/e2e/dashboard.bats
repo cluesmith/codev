@@ -33,10 +33,10 @@ teardown() {
 }
 
 @test "dashboard template contains two-column layout CSS" {
-  # Check for the dashboard header grid CSS
+  # Check for the dashboard header flexbox CSS
   run grep -q "dashboard-header" node_modules/@cluesmith/codev/templates/dashboard-split.html
   assert_success
-  run grep -q "grid-template-columns" node_modules/@cluesmith/codev/templates/dashboard-split.html
+  run grep -q "display: flex" node_modules/@cluesmith/codev/templates/dashboard-split.html
   assert_success
 }
 
