@@ -1,78 +1,75 @@
 # Codev: A Human-Agent Software Development Operating System
 
-[FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md)
+[![npm version](https://img.shields.io/npm/v/@cluesmith/codev.svg)](https://www.npmjs.com/package/@cluesmith/codev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Codev is an operating system for humans and AI agents to build software together. It provides:
+Codev is an operating system for structured human-AI collaboration. You write specs and plans that AI agents execute reliably.
 
-- **Core Philosophies** - Natural language as programming language, multi-model collaboration, structured human-agent workflows
-- **Core Concepts** - Protocols (SPIDER, TICK, EXPERIMENT, MAINTAIN), roles (Architect, Builder, Consultant), information hierarchy
-- **Core Tools** - `codev`, `af` (agent-farm), `consult`
+> **Results**: In head-to-head comparison, SPIDER scored 92-95 vs VIBE's 12-15 on the same task. [See case study](#-example-implementations)
 
-## Installation
+**Quick Links**: [FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md) | [Discord](https://discord.gg/mJ92DhDa6n)
 
-Install Codev globally via npm:
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Learn About Codev](#learn-about-codev)
+- [What is Codev?](#what-is-codev)
+- [The SPIDER Protocol](#the-spider-protocol)
+- [Agent Farm](#agent-farm-optional)
+- [Example Implementations](#-example-implementations)
+- [Quick Start & Prerequisites](#quick-start)
+- [Contributing](#contributing)
+
+## Quick Start
 
 ```bash
+# 1. Install
 npm install -g @cluesmith/codev
-```
 
-This provides three CLI commands:
-- `codev` - Main CLI (init, adopt, doctor, update, tower)
-- `af` - Agent-farm CLI for parallel development
-- `consult` - Multi-agent consultation tool
-
-See the **[CLI Command Reference](codev/resources/commands/overview.md)** for complete documentation.
-
-### Initialize a New Project
-
-```bash
+# 2. Initialize a project
 mkdir my-project && cd my-project
 codev init
-```
 
-### Adopt Codev in an Existing Project
-
-```bash
-cd existing-project
-codev adopt
-```
-
-### Verify Installation
-
-```bash
+# 3. Verify setup
 codev doctor
+
+# 4. Start the dashboard (optional)
+af start
 ```
 
-This checks all dependencies and provides installation instructions for anything missing.
+Then tell your AI agent: *"I want to build X using the SPIDER protocol"*
 
-## Prerequisites
+**CLI Commands:**
+- `codev` - Main CLI (init, adopt, doctor, update)
+- `af` - Agent Farm for parallel AI builders
+- `consult` - Multi-model consultation
 
-Codev requires several dependencies. See **[DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md)** for complete installation instructions.
+See [CLI Reference](codev/resources/commands/overview.md) for details.
 
-**Quick summary:**
+### Prerequisites
 
-| Dependency | Min Version | macOS | Purpose |
-|------------|-------------|-------|---------|
-| Node.js | 18.0 | `brew install node` | Runtime |
-| tmux | 3.0 | `brew install tmux` | Terminal multiplexer |
-| ttyd | 1.7 | `brew install ttyd` | Web terminal |
-| git | 2.5 | (pre-installed) | Worktrees |
-| gh | latest | `brew install gh` | GitHub CLI |
-| AI CLI | - | See below | At least one required |
+**Core (required):**
 
-**AI CLI Options** (install at least one):
+| Dependency | Install | Purpose |
+|------------|---------|---------|
+| Node.js 18+ | `brew install node` | Runtime |
+| git 2.5+ | (pre-installed) | Version control |
+| AI CLIs | See below | All three recommended |
+
+**AI CLIs** (install all three for multi-model consultation):
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
 - Gemini CLI: [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
 - Codex CLI: `npm install -g @openai/codex`
 
-## Get Started
+**Agent Farm (optional):**
 
-Once installed, tell your AI agent:
-```
-I want to build X using the SPIDER protocol
-```
+| Dependency | Install | Purpose |
+|------------|---------|---------|
+| tmux 3.0+ | `brew install tmux` | Terminal multiplexer |
+| ttyd 1.7+ | `brew install ttyd` | Web terminal |
+| gh | `brew install gh` | GitHub CLI |
 
-Or ask to learn more about Codev. 
+See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md) for complete details. 
 
 ## Learn about Codev
 
@@ -105,6 +102,11 @@ Join the conversation in [GitHub Discussions](https://github.com/ansari-project/
 [![Codev Extended Overview](https://img.youtube.com/vi/8KTHoh4Q6ww/0.jpg)](https://www.youtube.com/watch?v=8KTHoh4Q6ww)
 
 A comprehensive walkthrough of the Codev methodology and its benefits.
+
+### 🛠️ Agent Farm Demo: Building a Feature with AI
+[![Agent Farm Demo](https://img.youtube.com/vi/0OEhdk7-plE/0.jpg)](https://www.youtube.com/watch?v=0OEhdk7-plE)
+
+Watch a real development session using Agent Farm - from spec to merged PR in 30 minutes. Demonstrates the Architect-Builder pattern with multi-model consultation.
 
 ### 🎯 Codev Tour - Building a Conversational Todo Manager
 See Codev in action! Follow along as we use the SPIDER protocol to build a conversational todo list manager from scratch:
@@ -158,26 +160,15 @@ your-project/
 └── [your code]
 ```
 
-**Framework files are provided at runtime** by the `@cluesmith/codev` package. This includes:
-- Protocols (SPIDER, TICK, EXPERIMENT, MAINTAIN)
-- Roles (architect, builder, consultant)
-- Templates and agents
+### Customizable and Extendable
 
-### Customizing Framework Files
+Codev is designed to be customized for your project's needs. The `codev/` directory is yours to extend:
 
-If you need to customize any framework file, create it in your local `codev/` directory. **Local files always take precedence** over the embedded skeleton:
+- **Add project-specific protocols** - For example, Codev itself has a `release` protocol specific to npm publishing
+- **Customize existing protocols** - Modify SPIDER phases to match your team's workflow
+- **Add new roles** - Define specialized consultant or reviewer roles
 
-```bash
-# Example: Customize the SPIDER protocol
-mkdir -p codev/protocols/spider
-cp $(npm root -g)/@cluesmith/codev/skeleton/protocols/spider/protocol.md codev/protocols/spider/
-
-# Example: Customize a role
-mkdir -p codev/roles
-cp $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md codev/roles/
-```
-
-This approach keeps your project clean while allowing full customization when needed.
+The framework provides defaults, but your local files always take precedence.
 
 ### Context Hierarchy
 
@@ -189,8 +180,8 @@ In much the same way an operating system has a memory hierarchy, Codev repos hav
 
 ## Key Features
 
-### 📄 Documents Are First-Class Citizens
-- Specifications, plans, and lessons all tracked
+### 📄 Natural Language is the Primary Programming Language
+- Specifications and plans drive implementation
 - All decisions captured in version control
 - Clear traceability from idea to implementation
 
@@ -222,9 +213,10 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 - Complete with specs, plans, and review documents
 - Multi-agent consultation throughout the process
 
-### 📊 Automated Multi-Agent Analysis
+<details>
+<summary><strong>📊 Automated Multi-Agent Analysis</strong> (click to expand)</summary>
 
-**Note**: This comparison was generated through automated analysis by 3 independent AI agents (Claude, GPT-5, and Gemini Pro), not human review. The findings below represent their consensus assessment:
+**Note**: This comparison was generated through automated analysis by 3 independent AI agents (Claude, GPT-5, and Gemini Pro), not human review.
 
 #### Quality Scores (out of 100)
 | Aspect | VIBE | SPIDER |
@@ -238,33 +230,17 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 
 #### Key Differences
 
-**VIBE Implementation:**
-- ❌ **3 files total** - Just Next.js boilerplate
-- ❌ **0% functionality** - No todo features implemented
-- ❌ **0 tests** - No validation or quality assurance
-- ❌ **No database** - No data persistence
-- ❌ **No API routes** - No backend functionality
-- ❌ **No components** - Just default Next.js template
+**VIBE**: 3 files (boilerplate only), 0% functionality, 0 tests, no database, no API
 
-**SPIDER Implementation:**
-- ✅ **32 source files** - Complete application structure
-- ✅ **100% functionality** - Full CRUD operations
-- ✅ **5 test suites** - API, components, database, MCP coverage
-- ✅ **SQLite + Drizzle ORM** - Proper data persistence
-- ✅ **Complete API** - RESTful endpoints for all operations
-- ✅ **Component architecture** - TodoForm, TodoList, TodoItem, ConversationalInterface
-- ✅ **MCP integration** - AI-ready with server wrapper
-- ✅ **Type safety** - TypeScript + Zod validation
-- ✅ **Error handling** - Boundaries and optimistic updates
-- ✅ **Documentation** - Specs, plans, and lessons learned
+**SPIDER**: 32 source files, 100% functionality, 5 test suites, SQLite + Drizzle ORM, complete REST API, full component architecture, MCP integration, TypeScript + Zod validation
 
 #### Why SPIDER Won
 
 As GPT-5 noted: *"SPIDER's methodology clearly outperformed... Plan-first approach with defined scope, iterative verification, and delivery mindset"*
 
-Gemini Pro explained: *"SPIDER correctly inferred the user's intent... It saves hours, if not days, of setup... It builds code the way a professional team would"*
+The verdict: **Context-driven development ensures completeness**, while conversational approaches can miss the mark entirely despite identical prompts and AI models.
 
-The verdict from all 3 agents: **Context-driven development ensures completeness**, while conversational approaches can miss the mark entirely despite identical prompts and AI models.
+</details>
 
 ## 🐕 Eating Our Own Dog Food
 
@@ -300,7 +276,8 @@ This repository has a dual nature:
 
 **In short**: `codev/` is how we use Codev, `codev-skeleton/` is what we provide to others.
 
-### Test Infrastructure
+<details>
+<summary><strong>Test Infrastructure</strong> (click to expand)</summary>
 
 Our comprehensive test suite (64 tests) validates the Codev installation process:
 
@@ -308,37 +285,16 @@ Our comprehensive test suite (64 tests) validates the Codev installation process
 - **Coverage**: SPIDER protocol, CLAUDE.md preservation, agent installation
 - **Isolation**: XDG sandboxing ensures tests never touch real user directories
 - **CI/CD Ready**: Tests run in seconds with clear TAP output
-- **Multi-Platform**: Works on macOS and Linux without modification
-- **Pre-commit Hook**: Automatically runs tests before commits
 
-Run tests locally:
 ```bash
-# Fast tests (< 30 seconds)
-./scripts/run-tests.sh
-
-# All tests including Claude CLI integration
-./scripts/run-all-tests.sh
+./scripts/run-tests.sh      # Fast tests (< 30 seconds)
+./scripts/run-all-tests.sh  # All tests including Claude CLI
+./scripts/install-hooks.sh  # Install pre-commit hook
 ```
 
-Install pre-commit hook for development:
-```bash
-# Install git hooks (runs tests before each commit)
-./scripts/install-hooks.sh
-```
+See `tests/README.md` for details.
 
-See `tests/README.md` for detailed test documentation.
-
-## Installation
-
-Ask your AI agent to:
-```
-Install Codev by following the instructions at https://github.com/ansari-project/codev/blob/main/INSTALL.md
-```
-
-The agent will:
-1. Create the codev/ directory structure
-2. Install the SPIDER protocol
-3. Set up or update your CLAUDE.md file
+</details>
 
 ## Examples
 
@@ -360,61 +316,6 @@ Templates in `codev/protocols/spider/templates/` can be modified to fit your tea
 - `plan.md` - Planning format
 - `lessons.md` - Retrospective template
 
-## AI Agents
-
-Codev includes three specialized AI agents to enhance your development workflow (requires Claude Code with the Task tool):
-
-### 🔄 Codev-Updater Agent
-
-Keep your Codev installation up-to-date with the latest protocols and improvements:
-
-```bash
-# Update your Codev framework
-"Please update my codev framework to the latest version"
-```
-
-The agent will:
-1. Check for updates to protocols (SPIDER, TICK, etc.)
-2. Update agents and templates
-3. **Preserve your specs, plans, and reviews**
-4. Create backups before updating
-5. Provide rollback instructions
-
-### 🏗️ Architecture-Documenter Agent
-
-Automatically maintains comprehensive architecture documentation:
-
-```bash
-# Invoked automatically at the end of TICK protocol reviews
-# Or manually: "Update the architecture documentation"
-```
-
-The agent maintains `codev/resources/arch.md` with:
-- Complete directory structure
-- All utility functions and helpers
-- Key architectural patterns
-- Component relationships
-- Technology stack details
-
-### 🕷️ Spider-Protocol-Updater Agent
-
-Learn from SPIDER implementations across the community:
-
-```bash
-# Check a repository for SPIDER improvements
-"Check [repository-url] for SPIDER improvements"
-```
-
-The agent will:
-1. Analyze the repository's SPIDER implementation
-2. Compare against current protocol
-3. Identify improvements and lessons learned
-4. Suggest protocol updates with justification
-
-Example repositories to monitor:
-- `ansari-project/todo-manager-spider` - SPIDER implementation with lessons
-- Your own SPIDER projects with discovered patterns
-
 ## Agent Farm (Optional)
 
 Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIDER, TICK, etc.) work perfectly in any AI coding assistant.
@@ -429,8 +330,6 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 - Currently optimized for **Claude Code** (uses `-p` flag, `--append-system-prompt`, etc.)
 - Requires **ttyd** and **tmux** for terminal embedding
 - macOS-focused (should work on Linux but less tested)
-
-Support for other AI CLIs (Gemini CLI, Codex CLI) is planned for future releases.
 
 ## Architect-Builder Pattern
 
@@ -492,32 +391,21 @@ See [INSTALL.md](INSTALL.md#architect-builder-pattern-optional) for full documen
 
 ## Releases
 
-Codev releases are named after great examples of architecture from around the world. To release a new version, simply tell the AI:
+Codev has a **release protocol** (`codev/protocols/release/`) that automates the entire release process. To release a new version:
 
 ```
 Let's release v1.4.0
 ```
 
-The AI guides you through the entire release process: pre-flight checks, maintenance cycle, E2E tests, version bump, release notes, GitHub release, and npm publish. You approve key decisions while the AI handles the mechanical steps.
+The AI guides you through: pre-flight checks, maintenance cycle, E2E tests, version bump, release notes, GitHub release, and npm publish.
 
-See [Release Notes](docs/releases/) for version history.
+Releases are named after great examples of architecture from around the world. See [Release Notes](docs/releases/) for version history.
 
 ## Contributing
 
-We welcome contributions! Please help us improve Codev:
+We welcome contributions of any kind! Talk to us on [Discord](https://discord.gg/mJ92DhDa6n) or [open an issue](https://github.com/ansari-project/codev/issues).
 
-### Filing Issues
-- **Bug Reports**: [Open an issue](https://github.com/ansari-project/codev/issues) with clear reproduction steps
-- **Feature Requests**: Share your ideas for new features or improvements
-- **Documentation**: Report unclear or missing documentation
-- **Questions**: Ask for clarification or help with implementation
-
-### Contributing Code
-- New protocols beyond SP(IDE)R
-- Improved templates
-- Integration tools
-- Case studies
-- SPIDER protocol improvements from your implementations
+We especially welcome contributions to **Agent Farm** - help us make it work with more AI CLIs and platforms.
 
 ## License
 

@@ -1605,6 +1605,178 @@
       font-size: 12px;
     }
 
+    /* File search styles (Spec 0058) */
+    .files-search-container {
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .files-search-input {
+      flex: 1;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .files-search-input:focus {
+      border-color: var(--accent);
+    }
+
+    .files-search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .files-search-clear {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+
+    .files-search-clear:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+
+    .files-search-clear.hidden {
+      display: none;
+    }
+
+    .files-search-results {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .files-search-result {
+      padding: 6px 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .files-search-result:hover,
+    .files-search-result.selected {
+      background: var(--bg-tertiary);
+    }
+
+    .files-search-result-name {
+      font-size: 12px;
+      color: var(--text-primary);
+    }
+
+    .files-search-result-path {
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .files-search-highlight {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* Cmd+P Palette styles (Spec 0058) */
+    .file-palette {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      justify-content: center;
+      padding-top: 80px;
+    }
+
+    .file-palette.hidden {
+      display: none;
+    }
+
+    .file-palette-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .file-palette-container {
+      position: relative;
+      width: 500px;
+      max-width: 90vw;
+      max-height: 450px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .file-palette-input {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--bg-tertiary);
+      border: none;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .file-palette-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .file-palette-results {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 380px;
+    }
+
+    .file-palette-result {
+      padding: 10px 16px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .file-palette-result:hover,
+    .file-palette-result.selected {
+      background: var(--bg-tertiary);
+    }
+
+    .file-palette-result-name {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
+    .file-palette-result-path {
+      font-size: 12px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-palette-empty {
+      padding: 16px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
     .dashboard-empty-state {
       color: var(--text-muted);
       font-size: 13px;
@@ -1673,10 +1845,6 @@
           <span class="overflow-count" id="overflow-count">+0</span>
         </button>
         <div class="overflow-menu hidden" id="overflow-menu" role="menu"></div>
-        <div class="add-buttons">
-          <button class="add-btn" onclick="spawnBuilder()" title="Spawn worktree builder">+ 🔨</button>
-          <button class="add-btn" onclick="spawnShell()" title="New shell">+ >_</button>
-        </div>
       </div>
       <div class="tab-content" id="tab-content"></div>
     </div>
@@ -1730,6 +1898,7 @@
   <!-- Context menu -->
   <div class="context-menu hidden" id="context-menu" role="menu">
     <div class="context-menu-item" role="menuitem" tabindex="0" data-action="openContextTab" onclick="openContextTab()" onkeydown="handleContextMenuKeydown(event)">Open in New Tab</div>
+    <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="reloadContextTab" id="context-reload" onclick="reloadContextTab()" onkeydown="handleContextMenuKeydown(event)">Reload</div>
     <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="closeActiveTab" onclick="closeActiveTab()" onkeydown="handleContextMenuKeydown(event)">Close</div>
     <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="closeOtherTabs" onclick="closeOtherTabs()" onkeydown="handleContextMenuKeydown(event)">Close Others</div>
     <div class="context-menu-item danger" role="menuitem" tabindex="-1" data-action="closeAllTabs" onclick="closeAllTabs()" onkeydown="handleContextMenuKeydown(event)">Close All</div>
@@ -1755,6 +1924,20 @@
         <button class="btn" onclick="copyActivitySummary()">📋 Copy to Clipboard</button>
         <button class="btn" onclick="closeActivityModal()">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- File search palette (Cmd+P) - Spec 0058 -->
+  <div id="file-palette" class="file-palette hidden">
+    <div class="file-palette-backdrop" onclick="closePalette()"></div>
+    <div class="file-palette-container">
+      <input type="text"
+             id="palette-input"
+             class="file-palette-input"
+             placeholder="Search files by name..."
+             oninput="onPaletteInput(this.value)"
+             onkeydown="onPaletteKeydown(event)" />
+      <div id="palette-results" class="file-palette-results"></div>
     </div>
   </div>
 
@@ -1863,8 +2046,9 @@
         // Check if file is already open
         const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
         if (existingTab) {
-          // Just switch to the existing tab
+          // Switch to the existing tab and refresh content
           selectTab(existingTab.id);
+          refreshFileTab(existingTab.id); // Refresh content in case file changed
           showToast(`Switched to ${getFileName(filePath)}`, 'success');
           // TODO: scroll to line if lineNumber provided
           return;
@@ -1913,6 +2097,20 @@
     let filesTreeExpanded = new Set();  // Set of expanded folder paths
     let filesTreeError = null;
     let filesTreeLoaded = false;
+
+    // File search state (Spec 0058)
+    let filesTreeFlat = [];  // Flattened array of {name, path} objects for searching
+    let filesSearchQuery = '';
+    let filesSearchResults = [];
+    let filesSearchIndex = 0;
+    let filesSearchDebounceTimer = null;
+
+    // Cmd+P palette state (Spec 0058)
+    let paletteOpen = false;
+    let paletteQuery = '';
+    let paletteResults = [];
+    let paletteIndex = 0;
+    let paletteDebounceTimer = null;
 
     // Build tabs from initial state
     function buildTabsFromState() {
@@ -2172,6 +2370,22 @@
         currentTabPort = tab.port;
         currentTabType = tab.type;
         content.innerHTML = `<iframe src="http://localhost:${tab.port}" title="${tab.name}" allow="clipboard-read; clipboard-write"></iframe>`;
+      }
+    }
+
+    // Force refresh the iframe for a file tab (reloads content from server)
+    function refreshFileTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab || tab.type !== 'file' || !tab.port) return;
+
+      // If this tab is currently active, force iframe reload
+      if (activeTabId === tabId) {
+        const content = document.getElementById('tab-content');
+        const iframe = content.querySelector('iframe');
+        if (iframe) {
+          // Add cache-busting query param to force reload
+          iframe.src = `http://localhost:${tab.port}?t=${Date.now()}`;
+        }
       }
     }
 
@@ -2453,6 +2667,13 @@
       menu.style.top = event.clientY + 'px';
       menu.classList.remove('hidden');
 
+      // Show/hide reload option based on tab type
+      const tab = tabs.find(t => t.id === tabId);
+      const reloadItem = document.getElementById('context-reload');
+      if (reloadItem) {
+        reloadItem.style.display = (tab && tab.type === 'file') ? 'block' : 'none';
+      }
+
       // Focus first item for keyboard navigation
       const firstItem = menu.querySelector('.context-menu-item');
       if (firstItem) firstItem.focus();
@@ -2461,6 +2682,15 @@
       setTimeout(() => {
         document.addEventListener('click', hideContextMenu, { once: true });
       }, 0);
+    }
+
+    // Reload file tab content
+    function reloadContextTab() {
+      if (contextMenuTabId) {
+        refreshFileTab(contextMenuTabId);
+        showToast('Reloaded', 'success');
+      }
+      hideContextMenu();
     }
 
     function hideContextMenu() {
@@ -3370,11 +3600,61 @@
         filesTreeData = await response.json();
         filesTreeError = null;
         filesTreeLoaded = true;
+        // Flatten tree for search (Spec 0058)
+        filesTreeFlat = flattenFilesTree(filesTreeData);
       } catch (err) {
         console.error('Failed to load files tree:', err);
         filesTreeError = 'Could not load file tree: ' + err.message;
         filesTreeData = [];
+        filesTreeFlat = [];
       }
+    }
+
+    // Flatten the file tree into a searchable array (Spec 0058)
+    function flattenFilesTree(nodes, result = []) {
+      for (const node of nodes) {
+        if (node.type === 'file') {
+          result.push({ name: node.name, path: node.path });
+        } else if (node.children) {
+          flattenFilesTree(node.children, result);
+        }
+      }
+      return result;
+    }
+
+    // Search files with relevance sorting (Spec 0058)
+    function searchFiles(query) {
+      if (!query) return [];
+      const q = query.toLowerCase();
+
+      const matches = filesTreeFlat.filter(f =>
+        f.path.toLowerCase().includes(q)
+      );
+
+      // Sort by relevance: exact filename > filename prefix > filename contains > path
+      matches.sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aPath = a.path.toLowerCase();
+        const bPath = b.path.toLowerCase();
+
+        // Exact filename match first
+        if (aName === q && bName !== q) return -1;
+        if (bName === q && aName !== q) return 1;
+
+        // Filename starts with query
+        if (aName.startsWith(q) && !bName.startsWith(q)) return -1;
+        if (bName.startsWith(q) && !aName.startsWith(q)) return 1;
+
+        // Filename contains query
+        if (aName.includes(q) && !bName.includes(q)) return -1;
+        if (bName.includes(q) && !aName.includes(q)) return 1;
+
+        // Alphabetical by path
+        return aPath.localeCompare(bPath);
+      });
+
+      return matches.slice(0, 15);
     }
 
     // Escape a string for use inside a JavaScript string literal in onclick handlers
@@ -3462,13 +3742,272 @@
     // Re-render file browser in current context (dashboard or files tab)
     function rerenderFilesBrowser() {
       if (activeTabId === 'dashboard') {
-        // Re-render just the files column in dashboard
-        const filesListEl = document.getElementById('dashboard-files-list');
-        if (filesListEl) {
-          filesListEl.innerHTML = renderDashboardFilesBrowser();
+        // Re-render just the files content in dashboard
+        const filesContentEl = document.getElementById('dashboard-files-content');
+        if (filesContentEl) {
+          filesContentEl.innerHTML = filesSearchQuery
+            ? renderFilesSearchResults()
+            : renderDashboardFilesBrowserWithWrapper();
         }
       }
     }
+
+    // Wrapper for file browser that includes the list element ID (Spec 0058)
+    function renderDashboardFilesBrowserWithWrapper() {
+      return `<div class="dashboard-files-list" id="dashboard-files-list">${renderDashboardFilesBrowser()}</div>`;
+    }
+
+    // ========================================
+    // File Search Functions (Spec 0058)
+    // ========================================
+
+    // Debounced search input handler for Files column
+    function onFilesSearchInput(value) {
+      clearTimeout(filesSearchDebounceTimer);
+      filesSearchDebounceTimer = setTimeout(() => {
+        filesSearchQuery = value;
+        filesSearchResults = searchFiles(value);
+        filesSearchIndex = 0;
+        rerenderFilesSearch();
+      }, 100);
+    }
+
+    // Clear files search and restore tree view
+    function clearFilesSearch() {
+      filesSearchQuery = '';
+      filesSearchResults = [];
+      filesSearchIndex = 0;
+      const input = document.getElementById('files-search-input');
+      if (input) {
+        input.value = '';
+      }
+      rerenderFilesSearch();
+    }
+
+    // Re-render the files search area (results or tree)
+    function rerenderFilesSearch() {
+      const filesContentEl = document.getElementById('dashboard-files-content');
+      if (filesContentEl) {
+        filesContentEl.innerHTML = filesSearchQuery
+          ? renderFilesSearchResults()
+          : renderDashboardFilesBrowserWithWrapper();
+      }
+      // Update clear button visibility
+      const clearBtn = document.querySelector('.files-search-clear');
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', !filesSearchQuery);
+      }
+    }
+
+    // Render search results for Files column
+    function renderFilesSearchResults() {
+      if (!filesSearchResults.length) {
+        return '<div class="dashboard-empty-state">No files found</div>';
+      }
+
+      return `<div class="files-search-results">${filesSearchResults.map((file, index) =>
+        renderSearchResult(file, index, index === filesSearchIndex, filesSearchQuery, 'files')
+      ).join('')}</div>`;
+    }
+
+    // Highlight matching text in search results
+    function highlightMatch(text, query) {
+      if (!query) return escapeHtml(text);
+      const q = query.toLowerCase();
+      const t = text.toLowerCase();
+      const idx = t.indexOf(q);
+      if (idx === -1) return escapeHtml(text);
+
+      return escapeHtml(text.substring(0, idx)) +
+             '<span class="files-search-highlight">' + escapeHtml(text.substring(idx, idx + query.length)) + '</span>' +
+             escapeHtml(text.substring(idx + query.length));
+    }
+
+    // Render a single search result (shared by Files column and palette)
+    function renderSearchResult(file, index, isSelected, query, context) {
+      const classPrefix = context === 'palette' ? 'file-palette' : 'files-search';
+      const jsPath = escapeJsString(file.path);
+
+      return `
+        <div class="${classPrefix}-result ${isSelected ? 'selected' : ''}"
+             data-index="${index}"
+             onclick="openFileFromSearch('${jsPath}', '${context}')">
+          <div class="${classPrefix}-result-name">${highlightMatch(file.name, query)}</div>
+          <div class="${classPrefix}-result-path">${highlightMatch(file.path, query)}</div>
+        </div>
+      `;
+    }
+
+    // Keyboard handler for Files search input
+    function onFilesSearchKeydown(event) {
+      if (!filesSearchResults.length) {
+        if (event.key === 'Escape') {
+          clearFilesSearch();
+          event.target.blur();
+        }
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        filesSearchIndex = Math.min(filesSearchIndex + 1, filesSearchResults.length - 1);
+        rerenderFilesSearch();
+        scrollSelectedIntoView('files');
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        filesSearchIndex = Math.max(filesSearchIndex - 1, 0);
+        rerenderFilesSearch();
+        scrollSelectedIntoView('files');
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (filesSearchResults[filesSearchIndex]) {
+          openFileFromSearch(filesSearchResults[filesSearchIndex].path, 'files');
+        }
+      } else if (event.key === 'Escape') {
+        clearFilesSearch();
+        event.target.blur();
+      }
+    }
+
+    // Scroll selected result into view
+    function scrollSelectedIntoView(context) {
+      const selector = context === 'palette'
+        ? '.file-palette-result.selected'
+        : '.files-search-result.selected';
+      const selected = document.querySelector(selector);
+      if (selected) {
+        selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+
+    // Open file from search result (shared by Files column and palette)
+    function openFileFromSearch(filePath, context) {
+      // Check if file is already open
+      const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
+      if (existingTab) {
+        selectTab(existingTab.id);
+        refreshFileTab(existingTab.id); // Refresh content in case file changed
+      } else {
+        openFileFromTree(filePath);
+      }
+
+      // Clear search / close palette
+      if (context === 'palette') {
+        closePalette();
+      } else {
+        clearFilesSearch();
+      }
+    }
+
+    // ========================================
+    // Cmd+P Palette Functions (Spec 0058)
+    // ========================================
+
+    // Open the file search palette
+    function openPalette() {
+      paletteOpen = true;
+      paletteQuery = '';
+      paletteResults = [];
+      paletteIndex = 0;
+      document.getElementById('file-palette').classList.remove('hidden');
+      const input = document.getElementById('palette-input');
+      input.value = '';
+      input.focus();
+      rerenderPaletteResults();
+    }
+
+    // Close the file search palette
+    function closePalette() {
+      paletteOpen = false;
+      paletteQuery = '';
+      paletteResults = [];
+      paletteIndex = 0;
+      document.getElementById('file-palette').classList.add('hidden');
+    }
+
+    // Debounced palette input handler
+    function onPaletteInput(value) {
+      clearTimeout(paletteDebounceTimer);
+      paletteDebounceTimer = setTimeout(() => {
+        paletteQuery = value;
+        paletteResults = searchFiles(value);
+        paletteIndex = 0;
+        rerenderPaletteResults();
+      }, 100);
+    }
+
+    // Re-render palette results
+    function rerenderPaletteResults() {
+      const resultsEl = document.getElementById('palette-results');
+      if (!resultsEl) return;
+
+      if (!paletteQuery) {
+        resultsEl.innerHTML = '<div class="file-palette-empty">Type to search files...</div>';
+        return;
+      }
+
+      if (!paletteResults.length) {
+        resultsEl.innerHTML = '<div class="file-palette-empty">No files found</div>';
+        return;
+      }
+
+      resultsEl.innerHTML = paletteResults.map((file, index) =>
+        renderSearchResult(file, index, index === paletteIndex, paletteQuery, 'palette')
+      ).join('');
+    }
+
+    // Keyboard handler for palette input
+    function onPaletteKeydown(event) {
+      if (event.key === 'Escape') {
+        closePalette();
+        return;
+      }
+
+      if (!paletteResults.length) return;
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        paletteIndex = Math.min(paletteIndex + 1, paletteResults.length - 1);
+        rerenderPaletteResults();
+        scrollSelectedIntoView('palette');
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        paletteIndex = Math.max(paletteIndex - 1, 0);
+        rerenderPaletteResults();
+        scrollSelectedIntoView('palette');
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (paletteResults[paletteIndex]) {
+          openFileFromSearch(paletteResults[paletteIndex].path, 'palette');
+        }
+      }
+    }
+
+    // Global keyboard handler for Cmd+P / Ctrl+P and Escape
+    document.addEventListener('keydown', (e) => {
+      // Global Escape handler for palette (works even if input loses focus)
+      if (e.key === 'Escape' && paletteOpen) {
+        closePalette();
+        return;
+      }
+
+      // Cmd+P (macOS) or Ctrl+P (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+        // Skip if user is typing in an input/textarea (except our search inputs)
+        const active = document.activeElement;
+        const isOurInput = active?.id === 'palette-input' || active?.id === 'files-search-input';
+        const isEditable = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA' || active?.isContentEditable;
+
+        if (!isOurInput && isEditable) return; // Let native behavior happen
+
+        e.preventDefault(); // Prevent browser Print dialog
+        if (paletteOpen) {
+          closePalette();
+        } else {
+          openPalette();
+        }
+      }
+    });
 
     // Collapse all folders
     function collapseAllFolders() {
@@ -3506,6 +4045,7 @@
         const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
         if (existingTab) {
           selectTab(existingTab.id);
+          refreshFileTab(existingTab.id); // Refresh content in case file changed
           return;
         }
 
@@ -3562,6 +4102,10 @@
             <div class="dashboard-section section-tabs ${sectionState.tabs ? '' : 'collapsed'}">
               <div class="dashboard-section-header" onclick="toggleSection('tabs')">
                 <h3><span class="collapse-icon">▼</span> Tabs</h3>
+                <div class="header-actions" onclick="event.stopPropagation()">
+                  <button onclick="spawnBuilder()" title="New Worktree">+ Worktree</button>
+                  <button onclick="spawnShell()" title="New Shell">+ Shell</button>
+                </div>
               </div>
               <div class="dashboard-section-content">
                 <div class="dashboard-tabs-list" id="dashboard-tabs-list">
@@ -3574,13 +4118,26 @@
               <div class="dashboard-section-header" onclick="toggleSection('files')">
                 <h3><span class="collapse-icon">▼</span> Files</h3>
                 <div class="header-actions" onclick="event.stopPropagation()">
+                  <button onclick="refreshFilesTree()" title="Refresh">↻</button>
                   <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
                   <button onclick="expandAllFolders()" title="Expand All">⊞</button>
                 </div>
               </div>
               <div class="dashboard-section-content">
-                <div class="dashboard-files-list" id="dashboard-files-list">
-                  ${renderDashboardFilesBrowser()}
+                <div class="files-search-container" onclick="event.stopPropagation()">
+                  <input type="text"
+                         id="files-search-input"
+                         class="files-search-input"
+                         placeholder="Search files by name..."
+                         oninput="onFilesSearchInput(this.value)"
+                         onkeydown="onFilesSearchKeydown(event)"
+                         value="${escapeHtml(filesSearchQuery)}" />
+                  <button class="files-search-clear ${filesSearchQuery ? '' : 'hidden'}"
+                          onclick="clearFilesSearch()"
+                          title="Clear search">×</button>
+                </div>
+                <div id="dashboard-files-content">
+                  ${filesSearchQuery ? renderFilesSearchResults() : renderDashboardFilesBrowserWithWrapper()}
                 </div>
               </div>
             </div>

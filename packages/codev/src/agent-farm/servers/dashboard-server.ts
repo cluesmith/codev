@@ -432,13 +432,14 @@ function spawnWorktreeBuilder(
     execSync(`git branch "${branchName}" HEAD`, { cwd: projectRoot, stdio: 'ignore' });
     execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
 
-    // Get builder command from config or use default
+    // Get builder command from config or use default shell
     const configPath = path.resolve(projectRoot, 'codev', 'config.json');
-    let builderCommand = 'claude';
+    const defaultShell = process.env.SHELL || 'bash';
+    let builderCommand = defaultShell;
     if (fs.existsSync(configPath)) {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        builderCommand = config?.shell?.builder || 'claude';
+        builderCommand = config?.shell?.builder || defaultShell;
       } catch {
         // Use default
       }
