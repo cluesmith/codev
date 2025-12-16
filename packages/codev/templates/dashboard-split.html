@@ -1711,10 +1711,6 @@
           <span class="overflow-count" id="overflow-count">+0</span>
         </button>
         <div class="overflow-menu hidden" id="overflow-menu" role="menu"></div>
-        <div class="add-buttons">
-          <button class="add-btn" onclick="spawnBuilder()" title="Spawn worktree builder">+ 🔨</button>
-          <button class="add-btn" onclick="spawnShell()" title="New shell">+ >_</button>
-        </div>
       </div>
       <div class="tab-content" id="tab-content"></div>
     </div>
@@ -1768,6 +1764,7 @@
   <!-- Context menu -->
   <div class="context-menu hidden" id="context-menu" role="menu">
     <div class="context-menu-item" role="menuitem" tabindex="0" data-action="openContextTab" onclick="openContextTab()" onkeydown="handleContextMenuKeydown(event)">Open in New Tab</div>
+    <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="reloadContextTab" id="context-reload" onclick="reloadContextTab()" onkeydown="handleContextMenuKeydown(event)">Reload</div>
     <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="closeActiveTab" onclick="closeActiveTab()" onkeydown="handleContextMenuKeydown(event)">Close</div>
     <div class="context-menu-item" role="menuitem" tabindex="-1" data-action="closeOtherTabs" onclick="closeOtherTabs()" onkeydown="handleContextMenuKeydown(event)">Close Others</div>
     <div class="context-menu-item danger" role="menuitem" tabindex="-1" data-action="closeAllTabs" onclick="closeAllTabs()" onkeydown="handleContextMenuKeydown(event)">Close All</div>
@@ -2516,6 +2513,13 @@
       menu.style.top = event.clientY + 'px';
       menu.classList.remove('hidden');
 
+      // Show/hide reload option based on tab type
+      const tab = tabs.find(t => t.id === tabId);
+      const reloadItem = document.getElementById('context-reload');
+      if (reloadItem) {
+        reloadItem.style.display = (tab && tab.type === 'file') ? 'block' : 'none';
+      }
+
       // Focus first item for keyboard navigation
       const firstItem = menu.querySelector('.context-menu-item');
       if (firstItem) firstItem.focus();
@@ -2524,6 +2528,15 @@
       setTimeout(() => {
         document.addEventListener('click', hideContextMenu, { once: true });
       }, 0);
+    }
+
+    // Reload file tab content
+    function reloadContextTab() {
+      if (contextMenuTabId) {
+        refreshFileTab(contextMenuTabId);
+        showToast('Reloaded', 'success');
+      }
+      hideContextMenu();
     }
 
     function hideContextMenu() {
@@ -3930,6 +3943,10 @@
             <div class="dashboard-section section-tabs ${sectionState.tabs ? '' : 'collapsed'}">
               <div class="dashboard-section-header" onclick="toggleSection('tabs')">
                 <h3><span class="collapse-icon">▼</span> Tabs</h3>
+                <div class="header-actions" onclick="event.stopPropagation()">
+                  <button onclick="spawnBuilder()" title="New Builder">+ Builder</button>
+                  <button onclick="spawnShell()" title="New Shell">+ Shell</button>
+                </div>
               </div>
               <div class="dashboard-section-content">
                 <div class="dashboard-tabs-list" id="dashboard-tabs-list">
