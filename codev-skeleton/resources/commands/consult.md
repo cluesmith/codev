@@ -27,6 +27,7 @@ consult -m <model> <subcommand> [args] [options]
 ```
 -n, --dry-run           Show what would execute without running
 -t, --type <type>       Review type (see Review Types below)
+-r, --role <role>       Custom role from codev/roles/ (see Custom Roles below)
 ```
 
 ## Subcommands
@@ -184,6 +185,55 @@ Use `--type` to load stage-specific review prompts:
 ```bash
 consult -m gemini spec 42 --type spec-review
 consult -m codex pr 68 --type integration-review
+```
+
+---
+
+## Custom Roles
+
+Use `--role` to load a custom role instead of the default consultant:
+
+```bash
+consult -m gemini --role security-reviewer general "Audit this API endpoint"
+consult -m codex --role gtm-specialist general "Review our landing page copy"
+```
+
+**Arguments:**
+- `role` - Name of role file in `codev/roles/` (without `.md` extension)
+
+**Available roles** depend on your project. Common ones include:
+- `architect` - System design perspective
+- `builder` - Implementation-focused review
+- `consultant` - Default balanced review (used when no `--role` specified)
+
+**Creating custom roles:**
+
+1. Create a markdown file in `codev/roles/`:
+   ```bash
+   # codev/roles/security-reviewer.md
+   # Role: Security Reviewer
+
+   You are a security-focused code reviewer...
+   ```
+
+2. Use it with `--role`:
+   ```bash
+   consult -m gemini --role security-reviewer pr 42
+   ```
+
+**Role name restrictions:**
+- Only letters, numbers, hyphens, and underscores
+- No path separators (security: prevents directory traversal)
+- Falls back to embedded skeleton if not found locally
+
+**Example:**
+
+```bash
+# Use the architect role for high-level review
+consult -m gemini --role architect general "Review this system design"
+
+# Use a custom GTM specialist role
+consult -m codex --role gtm-specialist general "Analyze our pricing page"
 ```
 
 ---

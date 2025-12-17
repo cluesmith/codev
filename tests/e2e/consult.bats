@@ -145,3 +145,53 @@ teardown() {
   # After count should not be greater than before (temp file was cleaned up)
   [[ "$after_count" -le "$before_count" ]]
 }
+
+# === Custom Role Support ===
+
+@test "consult --help shows --role option" {
+  run ./node_modules/.bin/consult --help
+  assert_success
+  assert_output --partial "--role"
+  assert_output --partial "codev/roles/"
+}
+
+@test "consult --role with valid name works in dry-run" {
+  # The consultant role exists in skeleton, should work
+  run ./node_modules/.bin/consult --model gemini --role consultant general "test" --dry-run
+  assert_success
+  assert_output --partial "Role: consultant"
+}
+
+@test "consult --role blocks directory traversal" {
+  # Attempting path traversal should fail with validation error
+  run ./node_modules/.bin/consult --model gemini --role "../../../etc/passwd" general "test" --dry-run
+  assert_failure
+  assert_output --partial "Invalid role name"
+  assert_output --partial "letters, numbers, hyphens, and underscores"
+}
+
+@test "consult --role blocks path separators" {
+  # Forward slashes should be rejected
+  run ./node_modules/.bin/consult --model gemini --role "foo/bar" general "test" --dry-run
+  assert_failure
+  assert_output --partial "Invalid role name"
+}
+
+@test "consult --role with nonexistent role shows helpful error" {
+  # Nonexistent role should fail and show helpful message
+  run ./node_modules/.bin/consult --model gemini --role nonexistent-role-xyz general "test" --dry-run
+  assert_failure
+  assert_output --partial "not found"
+  # Should show either available roles or "No custom roles found"
+  [[ "$output" == *"Available roles"* ]] || [[ "$output" == *"No custom roles found"* ]]
+}
+
+@test "consult --role accepts hyphens and underscores" {
+  # Valid characters: alphanumeric, hyphens, underscores
+  # This will fail because the role doesn't exist, but it should NOT fail on validation
+  run ./node_modules/.bin/consult --model gemini --role "my-custom_role123" general "test" --dry-run
+  assert_failure
+  # Should fail because role doesn't exist, NOT because of invalid name
+  assert_output --partial "not found"
+  refute_output --partial "Invalid role name"
+}

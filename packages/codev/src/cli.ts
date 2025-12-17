@@ -107,6 +107,7 @@ program
   .requiredOption('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
   .option('-n, --dry-run', 'Show what would execute without running')
   .option('-t, --type <type>', 'Review type: spec-review, plan-review, impl-review, pr-ready, integration-review')
+  .option('-r, --role <role>', 'Custom role from codev/roles/<name>.md (e.g., gtm-specialist, security-reviewer)')
   .allowUnknownOption(true)
   .action(async (subcommand, args, options) => {
     try {
@@ -116,6 +117,7 @@ program
         args,
         dryRun: options.dryRun,
         reviewType: options.type,
+        role: options.role,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));

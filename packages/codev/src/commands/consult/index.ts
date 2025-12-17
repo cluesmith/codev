@@ -39,6 +39,7 @@ interface ConsultOptions {
   args: string[];
   dryRun?: boolean;
   reviewType?: string;
+  role?: string;
 }
 
 // Valid review types
@@ -49,6 +50,63 @@ const VALID_REVIEW_TYPES = [
   'pr-ready',
   'integration-review',
 ];
+
+/**
+ * Validate role name to prevent directory traversal attacks.
+ * Only allows alphanumeric, hyphen, and underscore characters.
+ */
+function isValidRoleName(roleName: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(roleName);
+}
+
+/**
+ * List available roles in codev/roles/
+ * Excludes non-role files like README.md, review-types/, etc.
+ */
+function listAvailableRoles(projectRoot: string): string[] {
+  const rolesDir = path.join(projectRoot, 'codev', 'roles');
+  if (!fs.existsSync(rolesDir)) return [];
+
+  const excludePatterns = ['readme', 'review-types', 'overview', 'index'];
+
+  return fs.readdirSync(rolesDir)
+    .filter(f => {
+      if (!f.endsWith('.md')) return false;
+      const basename = f.replace('.md', '').toLowerCase();
+      return !excludePatterns.some(pattern => basename.includes(pattern));
+    })
+    .map(f => f.replace('.md', ''));
+}
+
+/**
+ * Load a custom role from codev/roles/<name>.md
+ * Falls back to embedded skeleton if not found locally.
+ */
+function loadCustomRole(projectRoot: string, roleName: string): string {
+  // Validate role name to prevent directory traversal
+  if (!isValidRoleName(roleName)) {
+    throw new Error(
+      `Invalid role name: '${roleName}'\n` +
+      'Role names can only contain letters, numbers, hyphens, and underscores.'
+    );
+  }
+
+  // Use readCodevFile which handles local-first with skeleton fallback
+  const rolePath = `roles/${roleName}.md`;
+  const roleContent = readCodevFile(rolePath, projectRoot);
+
+  if (!roleContent) {
+    const available = listAvailableRoles(projectRoot);
+    const availableStr = available.length > 0
+      ? `\n\nAvailable roles:\n${available.map(r => `  - ${r}`).join('\n')}`
+      : '\n\nNo custom roles found in codev/roles/';
+    throw new Error(
+      `Role '${roleName}' not found.${availableStr}`
+    );
+  }
+
+  return roleContent;
+}
 
 /**
  * Load the consultant role.
@@ -204,9 +262,11 @@ async function runConsultation(
   query: string,
   projectRoot: string,
   dryRun: boolean,
-  reviewType?: string
+  reviewType?: string,
+  customRole?: string
 ): Promise<void> {
-  let role = loadRole(projectRoot);
+  // Use custom role if specified, otherwise use default consultant role
+  let role = customRole ? loadCustomRole(projectRoot, customRole) : loadRole(projectRoot);
 
   // Append review type prompt if specified
   if (reviewType) {
@@ -469,7 +529,7 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
  * Main consult entry point
  */
 export async function consult(options: ConsultOptions): Promise<void> {
-  const { model: modelInput, subcommand, args, dryRun = false, reviewType } = options;
+  const { model: modelInput, subcommand, args, dryRun = false, reviewType, role: customRole } = options;
 
   // Resolve model alias
   const model = MODEL_ALIASES[modelInput.toLowerCase()] || modelInput.toLowerCase();
@@ -490,6 +550,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
 
   console.error(`[${subcommand} review]`);
   console.error(`Model: ${model}`);
+
+  // Log custom role if specified
+  if (customRole) {
+    console.error(`Role: ${customRole}`);
+  }
 
   let query: string;
 
@@ -568,5 +633,5 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, projectRoot, dryRun, reviewType);
+  await runConsultation(model, query, projectRoot, dryRun, reviewType, customRole);
 }
