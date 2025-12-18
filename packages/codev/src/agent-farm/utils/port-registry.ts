@@ -111,17 +111,27 @@ export function getPortBlock(projectRoot: string): number {
       return existing.base_port;
     }
 
-    // Find next available port block
-    const maxPort = db.prepare('SELECT MAX(base_port) as max FROM port_allocations').get() as { max: number | null };
-    let nextPort = (maxPort.max ?? (BASE_PORT - PORT_BLOCK_SIZE)) + PORT_BLOCK_SIZE;
+    // Find next available port block (with gap recycling)
+    // Get all allocated ports as a Set for O(1) lookup
+    const allocated = new Set(
+      (db.prepare('SELECT base_port FROM port_allocations').all() as { base_port: number }[])
+        .map(row => row.base_port)
+    );
 
-    // Skip blocked port blocks (e.g., 5000 for macOS AirPlay)
-    while (BLOCKED_PORT_BLOCKS.includes(nextPort)) {
+    // Find the first available port starting from BASE_PORT
+    let nextPort = BASE_PORT;
+    const maxPossiblePort = BASE_PORT + (MAX_ALLOCATIONS * PORT_BLOCK_SIZE);
+
+    while (nextPort < maxPossiblePort) {
+      // Skip if already allocated or blocked
+      if (!allocated.has(nextPort) && !BLOCKED_PORT_BLOCKS.includes(nextPort)) {
+        break;
+      }
       nextPort += PORT_BLOCK_SIZE;
     }
 
-    // Ensure we don't exceed max allocations
-    if (nextPort >= BASE_PORT + (MAX_ALLOCATIONS * PORT_BLOCK_SIZE)) {
+    // Ensure we found an available port
+    if (nextPort >= maxPossiblePort) {
       throw new Error('No available port blocks. Maximum allocations reached.');
     }
 
