@@ -17,6 +17,15 @@ vi.mock('node:readline', () => ({
   })),
 }));
 
+// Mock child_process spawn to avoid launching Claude
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(() => ({
+    on: vi.fn(),
+    stdout: null,
+    stderr: null,
+  })),
+}));
+
 // Mock chalk for cleaner test output
 vi.mock('chalk', () => ({
   default: {
@@ -25,6 +34,7 @@ vi.mock('chalk', () => ({
     yellow: (s: string) => s,
     red: (s: string) => s,
     blue: (s: string) => s,
+    cyan: (s: string) => s,
     dim: (s: string) => s,
   },
 }));
@@ -85,7 +95,7 @@ describe('adopt command', () => {
       await expect(adopt({ yes: true })).rejects.toThrow(/already exists/);
     });
 
-    it('should skip existing CLAUDE.md when present', async () => {
+    it('should create .codev-new for existing CLAUDE.md', async () => {
       const projectDir = path.join(testBaseDir, 'has-claude');
       fs.mkdirSync(projectDir, { recursive: true });
 
@@ -100,6 +110,9 @@ describe('adopt command', () => {
       // Verify CLAUDE.md was not overwritten
       const content = fs.readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf-8');
       expect(content).toBe(originalContent);
+
+      // Verify .codev-new was created for merge
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(true);
     });
 
     it('should update .gitignore if it exists', async () => {
@@ -134,20 +147,23 @@ describe('adopt command', () => {
   });
 
   describe('conflict detection', () => {
-    it('should detect CLAUDE.md conflict', async () => {
+    it('should detect CLAUDE.md conflict and create .codev-new', async () => {
       const projectDir = path.join(testBaseDir, 'conflict-test');
       fs.mkdirSync(projectDir, { recursive: true });
       fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), '# Existing');
 
       process.chdir(projectDir);
 
-      // The adopt function should proceed but skip the conflicting file
+      // The adopt function should proceed but create .codev-new for the conflicting file
       const { adopt } = await import('../commands/adopt.js');
       await adopt({ yes: true });
 
       // CLAUDE.md should be preserved
       const content = fs.readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf-8');
       expect(content).toBe('# Existing');
+
+      // .codev-new should be created for merge
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(true);
     });
   });
 });
