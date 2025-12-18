@@ -22,6 +22,10 @@ const PORT_BLOCK_SIZE = 100;
 // Maximum allocations (4200-9999 = ~58 projects)
 const MAX_ALLOCATIONS = 58;
 
+// Port blocks to skip (base ports that conflict with system services)
+// 5000: macOS AirPlay Receiver (ControlCenter)
+const BLOCKED_PORT_BLOCKS = [5000];
+
 /**
  * Check if a process is still running
  */
@@ -110,6 +114,11 @@ export function getPortBlock(projectRoot: string): number {
     // Find next available port block
     const maxPort = db.prepare('SELECT MAX(base_port) as max FROM port_allocations').get() as { max: number | null };
     let nextPort = (maxPort.max ?? (BASE_PORT - PORT_BLOCK_SIZE)) + PORT_BLOCK_SIZE;
+
+    // Skip blocked port blocks (e.g., 5000 for macOS AirPlay)
+    while (BLOCKED_PORT_BLOCKS.includes(nextPort)) {
+      nextPort += PORT_BLOCK_SIZE;
+    }
 
     // Ensure we don't exceed max allocations
     if (nextPort >= BASE_PORT + (MAX_ALLOCATIONS * PORT_BLOCK_SIZE)) {
