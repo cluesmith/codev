@@ -22,39 +22,12 @@ function findProjectRoot(): string {
 const projectRoot = findProjectRoot();
 
 describe('Dashboard clipboard permissions', () => {
-  // Legacy templates have static iframes
-  const legacyTemplates = [
-    'agent-farm/templates/dashboard.html',
-  ];
-
-  legacyTemplates.forEach((templatePath) => {
-    it(`${templatePath} includes clipboard permissions on iframes`, () => {
-      const fullPath = resolve(projectRoot, templatePath);
-
-      if (!existsSync(fullPath)) {
-        // Skip if template doesn't exist (might be in a worktree without skeleton)
-        return;
-      }
-
-      const content = readFileSync(fullPath, 'utf-8');
-
-      // Find all iframe tags
-      const iframeRegex = /<iframe[^>]*>/g;
-      const iframes = content.match(iframeRegex) || [];
-
-      expect(iframes.length).toBeGreaterThan(0);
-
-      // Each iframe should have clipboard permissions
-      iframes.forEach((iframe) => {
-        expect(iframe).toMatch(/allow="[^"]*clipboard-read[^"]*"/);
-        expect(iframe).toMatch(/allow="[^"]*clipboard-write[^"]*"/);
-      });
-    });
-  });
+  // Note: Legacy dashboard.html was removed in favor of modular dashboard/index.html
+  // The only iframe testing needed is for the modular dashboard's dynamic iframes (see below)
 
   // Modular dashboard (Spec 0060) creates iframes dynamically in JS
   it('modular dashboard tabs.js includes clipboard permissions on dynamic iframes', () => {
-    const tabsJsPath = resolve(projectRoot, 'agent-farm/templates/dashboard/js/tabs.js');
+    const tabsJsPath = resolve(projectRoot, 'packages/codev/templates/dashboard/js/tabs.js');
 
     if (!existsSync(tabsJsPath)) {
       return;
@@ -78,10 +51,10 @@ describe('Dashboard clipboard permissions', () => {
 
 describe('ttyd rightClickSelectsWord option', () => {
   const sourceFiles = [
-    'agent-farm/src/commands/start.ts',
-    'agent-farm/src/commands/util.ts',
-    'agent-farm/src/commands/spawn.ts',
-    'agent-farm/src/servers/dashboard-server.ts',
+    'packages/codev/src/agent-farm/commands/start.ts',
+    'packages/codev/src/agent-farm/commands/util.ts',
+    'packages/codev/src/agent-farm/commands/spawn.ts',
+    'packages/codev/src/agent-farm/servers/dashboard-server.ts',
   ];
 
   sourceFiles.forEach((filePath) => {
@@ -102,7 +75,7 @@ describe('ttyd rightClickSelectsWord option', () => {
   });
 
   it('spawn.ts has rightClickSelectsWord in all ttyd spawn locations', () => {
-    const spawnPath = resolve(projectRoot, 'agent-farm/src/commands/spawn.ts');
+    const spawnPath = resolve(projectRoot, 'packages/codev/src/agent-farm/commands/spawn.ts');
 
     if (!existsSync(spawnPath)) {
       return;
