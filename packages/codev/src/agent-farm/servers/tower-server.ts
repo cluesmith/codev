@@ -243,8 +243,9 @@ async function getDirectorySuggestions(inputPath: string): Promise<{ path: strin
 /**
  * Launch a new agent-farm instance
  * First stops any stale state, then starts fresh
+ * Auto-adopts non-codev directories
  */
-async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string }> {
+async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
   // Validate path exists
   if (!fs.existsSync(projectPath)) {
     return { success: false, error: `Path does not exist: ${projectPath}` };
@@ -256,16 +257,22 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     return { success: false, error: `Not a directory: ${projectPath}` };
   }
 
-  // Validate codev directory exists
+  // Auto-adopt non-codev directories
   const codevDir = path.join(projectPath, 'codev');
+  let adopted = false;
   if (!fs.existsSync(codevDir)) {
-    return { success: false, error: `Not a codev project: missing codev/ directory` };
-  }
-
-  // Validate roles directory exists
-  const rolesDir = path.join(codevDir, 'roles');
-  if (!fs.existsSync(rolesDir)) {
-    return { success: false, error: `Missing codev/roles/ directory. Run 'codev init' to set up the project.` };
+    try {
+      // Run codev adopt --yes to set up the project
+      execSync('npx codev adopt --yes', {
+        cwd: projectPath,
+        stdio: 'pipe',
+        timeout: 30000,
+      });
+      adopted = true;
+      console.log(`Auto-adopted codev in: ${projectPath}`);
+    } catch (err) {
+      return { success: false, error: `Failed to adopt codev: ${(err as Error).message}` };
+    }
   }
 
   // Determine which agent-farm CLI to use:
@@ -313,7 +320,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     }
     child.unref();
 
-    return { success: true };
+    return { success: true, adopted };
   } catch (err) {
     return { success: false, error: `Failed to launch: ${(err as Error).message}` };
   }

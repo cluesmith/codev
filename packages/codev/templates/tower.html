@@ -409,6 +409,13 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border);
       border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .recent-item:hover {
+      background: var(--bg-tertiary);
+      border-color: #444;
     }
 
     .recent-info {
@@ -640,6 +647,7 @@
       </div>
       <p class="launch-hint">
         Type a path to see suggestions. Directories with <code>codev/</code> are highlighted as valid projects.
+        Non-codev directories will be initialized with <code>codev init</code> on first launch.
       </p>
     </div>
   </main>
@@ -782,14 +790,14 @@
       const lastUsed = instance.lastUsed ? formatDate(instance.lastUsed) : 'Never';
 
       return `
-        <div class="recent-item">
+        <div class="recent-item" onclick="launchPath('${escapeHtml(instance.projectPath)}')" title="Click to start ${escapeHtml(instance.projectName)}">
           <div class="recent-info">
             <span class="recent-name">${escapeHtml(instance.projectName)}</span>
             <span class="recent-path">${escapeHtml(instance.projectPath)}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 16px;">
             <span class="recent-time">${lastUsed}</span>
-            <button class="btn btn-primary" onclick="launchPath('${escapeHtml(instance.projectPath)}')">Start</button>
+            <button class="btn btn-primary" onclick="event.stopPropagation(); launchPath('${escapeHtml(instance.projectPath)}')">Start</button>
           </div>
         </div>
       `;
@@ -928,7 +936,11 @@
           throw new Error(result.error || 'Launch failed');
         }
 
-        showToast('Instance launching...', 'success');
+        if (result.adopted) {
+          showToast('Codev adopted! Instance launching...', 'success');
+        } else {
+          showToast('Instance launching...', 'success');
+        }
         setTimeout(refresh, 2000);
       } catch (err) {
         showToast('Failed to launch: ' + err.message, 'error');
@@ -1014,7 +1026,11 @@
         }
 
         input.value = '';
-        showToast('Instance launching... Please wait a moment.', 'success');
+        if (result.adopted) {
+          showToast('Codev adopted! Instance launching...', 'success');
+        } else {
+          showToast('Instance launching... Please wait a moment.', 'success');
+        }
 
         // Refresh after a delay to allow instance to start
         setTimeout(refresh, 2000);
