@@ -211,17 +211,10 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log(chalk.dim(`  - ${result.skipped.length} unchanged (skipped)`));
   }
   if (result.conflicts.length > 0) {
-    console.log(chalk.yellow(`  ! ${result.conflicts.length} conflicts`));
-    console.log('');
-    console.log(chalk.yellow('Conflicts detected!'));
-    console.log('The following files were modified locally and have new versions available:');
-    console.log('');
-    for (const file of result.conflicts) {
-      console.log(chalk.dim(`  codev/${file}`));
-      console.log(chalk.dim(`    → New version: codev/${file}.codev-new`));
-    }
-    console.log('');
-    console.log('Please review and merge manually, then delete the .codev-new files.');
+    console.log(chalk.yellow(`  ! ${result.conflicts.length} codev/ conflicts`));
+  }
+  if (result.rootConflicts.length > 0) {
+    console.log(chalk.yellow(`  ! ${result.rootConflicts.length} root conflicts`));
   }
 
   if (result.newFiles.length === 0 && result.updated.length === 0 && result.conflicts.length === 0 && result.rootConflicts.length === 0) {
@@ -234,15 +227,22 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     return;
   }
 
-  // If there are root conflicts (CLAUDE.md, AGENTS.md), spawn Claude to merge
-  if (result.rootConflicts.length > 0) {
+  // Combine all conflicts for Claude merge
+  const allConflicts = [
+    ...result.conflicts.map(f => `codev/${f}`),
+    ...result.rootConflicts,
+  ];
+
+  // If there are any conflicts, spawn Claude to merge
+  if (allConflicts.length > 0) {
     console.log('');
     console.log(chalk.cyan('═══════════════════════════════════════════════════════════'));
     console.log(chalk.cyan('  Launching Claude to merge conflicts...'));
     console.log(chalk.cyan('═══════════════════════════════════════════════════════════'));
     console.log('');
 
-    const mergePrompt = `Merge ${result.rootConflicts.join(' and ')} from the .codev-new versions. Add new sections from the .codev-new files, preserve my customizations, then delete the .codev-new files when done.`;
+    const fileList = allConflicts.join(', ');
+    const mergePrompt = `Merge the following files from their .codev-new versions: ${fileList}. For each file, add new sections from the .codev-new version, preserve my customizations, then delete the .codev-new file when done.`;
 
     // Spawn Claude interactively with merge instructions as initial prompt
     const claude = spawn('claude', [mergePrompt], {
@@ -254,7 +254,7 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
       console.error(chalk.red('Failed to launch Claude:'), err.message);
       console.log('');
       console.log('Please merge the conflicts manually:');
-      for (const file of result.rootConflicts) {
+      for (const file of allConflicts) {
         console.log(chalk.dim(`  ${file} ← ${file}.codev-new`));
       }
     });
