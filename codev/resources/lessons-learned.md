@@ -35,6 +35,7 @@ Consolidated wisdom extracted from review documents. Updated during MAINTAIN pro
 - [From 0043] Establish baselines BEFORE optimizing - before/after data makes impact clear
 - [From 0044] Phased approach makes progress visible and commit messages meaningful
 - [From 0044] Test-first verification (grep for remaining references before committing) catches issues early
+- [Bug report] 3-way review can approve code that completely misses UX requirements - add manual testing step
 
 ## Documentation
 
@@ -64,8 +65,12 @@ Consolidated wisdom extracted from review documents. Updated during MAINTAIN pro
 - [From 0050] Differentiate "not found" vs "empty" - use hash/flag to track "file was loaded" and prevent infinite reload loops
 - [From 0050] State-change hooks - call checkState() after every state update, not just on init (prevents resource leaks)
 - [From 0050] UX consistency: if you remove click behavior, also remove visual indicators (cursor, hover)
+- [Bug report] Tests passing does NOT mean UX requirements are met - manually verify the actual user experience
+- [Bug report] If spec says "async" and code is sync, that's a critical bug even if tests pass
+- [Bug report] Code reviews miss UX gaps - reviewers must actually USE the feature as a user would
+- [Bug report] Compare spec flow diagrams to actual behavior before approving PRs
 
 ---
 
-*Last updated: 2025-12-11 (Maintenance Run 0003)*
+*Last updated: 2025-12-19 (UX Verification Process Improvements)*
 *Source: codev/reviews/*

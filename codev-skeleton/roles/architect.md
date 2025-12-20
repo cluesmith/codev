@@ -299,9 +299,39 @@ af send 0034 "Check PR 35 comments"
 
 **Note:** Large messages via `af send` may have issues with tmux paste buffers. Keep direct messages short; put detailed feedback in PR comments.
 
+### UX Verification (Critical)
+
+**CRITICAL:** Before approving ANY implementation with UX requirements:
+
+1. **Read the spec's "Goals" section** and any UX flow diagrams
+2. **Manually test** the actual user experience
+3. For each UX requirement, verify:
+   - Does the implementation actually do this?
+   - Does it FEEL right to use?
+   - Would a real user experience what the spec describes?
+
+**Automatic REJECT conditions:**
+- Spec says "async" but code is synchronous → **REJECT**
+- Spec says "immediate response" but user waits 30+ seconds → **REJECT**
+- Spec has a flow diagram but actual flow differs → **REJECT**
+- Spec describes "non-blocking" but implementation blocks → **REJECT**
+
+**UX Verification Checklist:**
+```markdown
+Before marking implementation complete:
+- [ ] Each "Must Have" requirement verified manually
+- [ ] UX flow diagrams match actual behavior
+- [ ] User can perform all described interactions
+- [ ] Time-to-response matches spec expectations
+- [ ] Concurrent/async behaviors work as described
+```
+
+**Why this matters:** Code reviews catch syntax and logic errors, but miss UX gaps. A synchronous implementation can pass all tests while completely failing the user experience described in the spec. The only way to catch this is to actually USE the feature as a user would.
+
 ### Testing Requirements
 
 Specs should explicitly require:
 1. **Unit tests** - Core functionality
 2. **Integration tests** - Full workflow
 3. **Error handling tests** - Edge cases and failure modes
+4. **UX tests** - For specs with UX requirements, verify timing and interaction patterns

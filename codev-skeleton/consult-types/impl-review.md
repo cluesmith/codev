@@ -27,6 +27,13 @@ You are reviewing implementation work at Stage 4 (IMPLEMENTING) of the workflow.
    - Are there deviations that make sense?
    - Are there plan items skipped or partially completed?
 
+5. **UX Verification** (if spec has UX requirements)
+   - Does the actual user experience match what the spec describes?
+   - If spec says "async" or "non-blocking", is it actually async?
+   - If spec says "immediate response", does user get one quickly?
+   - Do any flow diagrams in the spec match the actual behavior?
+   - **CRITICAL:** A synchronous implementation that passes tests can completely fail UX requirements
+
 ## Verdict Format
 
 After your review, provide your verdict in exactly this format:

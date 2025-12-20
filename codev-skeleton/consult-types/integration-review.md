@@ -34,6 +34,13 @@ You are performing an integration review at Stage 6 (COMMITTED) of the workflow.
    - Is migration path clear for existing users?
    - Are breaking changes properly communicated?
 
+6. **UX Verification** (if spec has UX requirements)
+   - Does the actual user experience match what the spec describes?
+   - Compare spec's "Goals" section and flow diagrams to actual behavior
+   - If spec says "async/non-blocking", verify the code is actually async
+   - If spec says "immediate response", verify user isn't blocked waiting
+   - **CRITICAL:** Tests passing does NOT mean UX requirements are met - verify manually
+
 ## Verdict Format
 
 After your review, provide your verdict in exactly this format:
