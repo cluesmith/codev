@@ -140,6 +140,18 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     saveHashStore(targetDir, newHashes);
   }
 
+  // Handle projectlist.md - create from template if it doesn't exist
+  const projectlistPath = path.join(codevDir, 'projectlist.md');
+  const projectlistTemplatePath = path.join(templatesDir, 'templates', 'projectlist.md');
+
+  if (!fs.existsSync(projectlistPath) && fs.existsSync(projectlistTemplatePath)) {
+    if (!dryRun) {
+      fs.copyFileSync(projectlistTemplatePath, projectlistPath);
+    }
+    result.newFiles.push('projectlist.md');
+    console.log(chalk.green('  + (new)'), 'codev/projectlist.md');
+  }
+
   // Handle root-level files (CLAUDE.md, AGENTS.md)
   const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
   const skeletonTemplatesDir = path.join(templatesDir, 'templates');
