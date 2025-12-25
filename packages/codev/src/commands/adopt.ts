@@ -11,6 +11,7 @@ import * as readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import { getTemplatesDir } from '../lib/templates.js';
+import { detectRuler } from '../lib/ruler.js';
 
 interface AdoptOptions {
   yes?: boolean;
@@ -77,15 +78,6 @@ function detectConflicts(targetDir: string): Conflict[] {
   }
 
   return conflicts;
-}
-
-/**
- * Detect if project uses Ruler for agent config management
- * https://github.com/intellectronica/ruler
- */
-function detectRuler(targetDir: string): boolean {
-  const rulerToml = path.join(targetDir, '.ruler', 'ruler.toml');
-  return fs.existsSync(rulerToml);
 }
 
 /**
