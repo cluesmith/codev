@@ -233,19 +233,18 @@ projects:
   if (isRulerProject) {
     // Ruler project: create .ruler/codev.md instead of root files
     // Ruler will generate CLAUDE.md/AGENTS.md via `ruler apply`
-    // Use AGENTS.md as source since it's the tool-agnostic format
+    // Use codev-instructions.md as source (tool-agnostic, no AGENTS.md/CLAUDE.md notes)
+    const codevInstructionsSrc = path.join(skeletonDir, 'templates', 'codev-instructions.md');
     const rulerCodevPath = path.join(targetDir, '.ruler', 'codev.md');
 
-    if (!fs.existsSync(rulerCodevPath) && fs.existsSync(agentsMdSrc)) {
-      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
-        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    if (!fs.existsSync(rulerCodevPath) && fs.existsSync(codevInstructionsSrc)) {
+      const content = fs.readFileSync(codevInstructionsSrc, 'utf-8');
       fs.writeFileSync(rulerCodevPath, content);
       console.log(chalk.green('  +'), '.ruler/codev.md');
       fileCount++;
-    } else if (fs.existsSync(rulerCodevPath) && fs.existsSync(agentsMdSrc)) {
+    } else if (fs.existsSync(rulerCodevPath) && fs.existsSync(codevInstructionsSrc)) {
       // Conflict: create .codev-new for merge
-      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
-        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      const content = fs.readFileSync(codevInstructionsSrc, 'utf-8');
       fs.writeFileSync(rulerCodevPath + '.codev-new', content);
       console.log(chalk.yellow('  !'), '.ruler/codev.md', chalk.dim('(conflict - .codev-new created)'));
       rootConflicts.push('.ruler/codev.md');
