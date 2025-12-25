@@ -49,6 +49,7 @@ async function confirm(question: string, defaultYes = true): Promise<boolean> {
  */
 function detectConflicts(targetDir: string): Conflict[] {
   const conflicts: Conflict[] = [];
+  const isRulerProject = fs.existsSync(path.join(targetDir, '.ruler', 'ruler.toml'));
 
   // Check for codev/ directory
   const codevDir = path.join(targetDir, 'codev');
@@ -56,19 +57,35 @@ function detectConflicts(targetDir: string): Conflict[] {
     conflicts.push({ file: 'codev/', type: 'directory' });
   }
 
-  // Check for CLAUDE.md
-  const claudeMd = path.join(targetDir, 'CLAUDE.md');
-  if (fs.existsSync(claudeMd)) {
-    conflicts.push({ file: 'CLAUDE.md', type: 'file' });
-  }
+  if (isRulerProject) {
+    // Ruler project: check .ruler/codev.md instead of root files
+    const rulerCodev = path.join(targetDir, '.ruler', 'codev.md');
+    if (fs.existsSync(rulerCodev)) {
+      conflicts.push({ file: '.ruler/codev.md', type: 'file' });
+    }
+  } else {
+    // Non-Ruler: check root files
+    const claudeMd = path.join(targetDir, 'CLAUDE.md');
+    if (fs.existsSync(claudeMd)) {
+      conflicts.push({ file: 'CLAUDE.md', type: 'file' });
+    }
 
-  // Check for AGENTS.md
-  const agentsMd = path.join(targetDir, 'AGENTS.md');
-  if (fs.existsSync(agentsMd)) {
-    conflicts.push({ file: 'AGENTS.md', type: 'file' });
+    const agentsMd = path.join(targetDir, 'AGENTS.md');
+    if (fs.existsSync(agentsMd)) {
+      conflicts.push({ file: 'AGENTS.md', type: 'file' });
+    }
   }
 
   return conflicts;
+}
+
+/**
+ * Detect if project uses Ruler for agent config management
+ * https://github.com/intellectronica/ruler
+ */
+function detectRuler(targetDir: string): boolean {
+  const rulerToml = path.join(targetDir, '.ruler', 'ruler.toml');
+  return fs.existsSync(rulerToml);
 }
 
 /**
@@ -206,47 +223,72 @@ projects:
     }
   }
 
-  // Create CLAUDE.md / AGENTS.md at project root from skeleton templates
+  // Create agent config files (Ruler-aware)
   const claudeMdSrc = path.join(skeletonDir, 'templates', 'CLAUDE.md');
   const agentsMdSrc = path.join(skeletonDir, 'templates', 'AGENTS.md');
 
-  const claudeMdDest = path.join(targetDir, 'CLAUDE.md');
-  const agentsMdDest = path.join(targetDir, 'AGENTS.md');
-
   const rootConflicts: string[] = [];
+  const isRulerProject = detectRuler(targetDir);
 
-  // CLAUDE.md
-  if (!fs.existsSync(claudeMdDest) && fs.existsSync(claudeMdSrc)) {
-    const content = fs.readFileSync(claudeMdSrc, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-    fs.writeFileSync(claudeMdDest, content);
-    console.log(chalk.green('  +'), 'CLAUDE.md');
-    fileCount++;
-  } else if (fs.existsSync(claudeMdDest) && fs.existsSync(claudeMdSrc)) {
-    // Create .codev-new for merge
-    const content = fs.readFileSync(claudeMdSrc, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-    fs.writeFileSync(claudeMdDest + '.codev-new', content);
-    console.log(chalk.yellow('  !'), 'CLAUDE.md', chalk.dim('(conflict - .codev-new created)'));
-    rootConflicts.push('CLAUDE.md');
-    skippedCount++;
-  }
+  if (isRulerProject) {
+    // Ruler project: create .ruler/codev.md instead of root files
+    // Ruler will generate CLAUDE.md/AGENTS.md via `ruler apply`
+    // Use AGENTS.md as source since it's the tool-agnostic format
+    const rulerCodevPath = path.join(targetDir, '.ruler', 'codev.md');
 
-  // AGENTS.md
-  if (!fs.existsSync(agentsMdDest) && fs.existsSync(agentsMdSrc)) {
-    const content = fs.readFileSync(agentsMdSrc, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-    fs.writeFileSync(agentsMdDest, content);
-    console.log(chalk.green('  +'), 'AGENTS.md');
-    fileCount++;
-  } else if (fs.existsSync(agentsMdDest) && fs.existsSync(agentsMdSrc)) {
-    // Create .codev-new for merge
-    const content = fs.readFileSync(agentsMdSrc, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-    fs.writeFileSync(agentsMdDest + '.codev-new', content);
-    console.log(chalk.yellow('  !'), 'AGENTS.md', chalk.dim('(conflict - .codev-new created)'));
-    rootConflicts.push('AGENTS.md');
-    skippedCount++;
+    if (!fs.existsSync(rulerCodevPath) && fs.existsSync(agentsMdSrc)) {
+      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(rulerCodevPath, content);
+      console.log(chalk.green('  +'), '.ruler/codev.md');
+      fileCount++;
+    } else if (fs.existsSync(rulerCodevPath) && fs.existsSync(agentsMdSrc)) {
+      // Conflict: create .codev-new for merge
+      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(rulerCodevPath + '.codev-new', content);
+      console.log(chalk.yellow('  !'), '.ruler/codev.md', chalk.dim('(conflict - .codev-new created)'));
+      rootConflicts.push('.ruler/codev.md');
+      skippedCount++;
+    }
+  } else {
+    // Non-Ruler project: create CLAUDE.md and AGENTS.md at project root
+    const claudeMdDest = path.join(targetDir, 'CLAUDE.md');
+    const agentsMdDest = path.join(targetDir, 'AGENTS.md');
+
+    // CLAUDE.md
+    if (!fs.existsSync(claudeMdDest) && fs.existsSync(claudeMdSrc)) {
+      const content = fs.readFileSync(claudeMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(claudeMdDest, content);
+      console.log(chalk.green('  +'), 'CLAUDE.md');
+      fileCount++;
+    } else if (fs.existsSync(claudeMdDest) && fs.existsSync(claudeMdSrc)) {
+      // Create .codev-new for merge
+      const content = fs.readFileSync(claudeMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(claudeMdDest + '.codev-new', content);
+      console.log(chalk.yellow('  !'), 'CLAUDE.md', chalk.dim('(conflict - .codev-new created)'));
+      rootConflicts.push('CLAUDE.md');
+      skippedCount++;
+    }
+
+    // AGENTS.md
+    if (!fs.existsSync(agentsMdDest) && fs.existsSync(agentsMdSrc)) {
+      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(agentsMdDest, content);
+      console.log(chalk.green('  +'), 'AGENTS.md');
+      fileCount++;
+    } else if (fs.existsSync(agentsMdDest) && fs.existsSync(agentsMdSrc)) {
+      // Create .codev-new for merge
+      const content = fs.readFileSync(agentsMdSrc, 'utf-8')
+        .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+      fs.writeFileSync(agentsMdDest + '.codev-new', content);
+      console.log(chalk.yellow('  !'), 'AGENTS.md', chalk.dim('(conflict - .codev-new created)'));
+      rootConflicts.push('AGENTS.md');
+      skippedCount++;
+    }
   }
 
   // Update .gitignore if it exists
@@ -281,10 +323,14 @@ codev/.update-hashes.json
   console.log('');
   console.log('  codev doctor           # Check dependencies');
   console.log('  af start               # Start the architect dashboard');
+  if (isRulerProject) {
+    console.log('');
+    console.log(chalk.cyan('  Note: Run `npx @intellectronica/ruler apply` to regenerate CLAUDE.md/AGENTS.md'));
+  }
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));
 
-  // If there are root conflicts (CLAUDE.md, AGENTS.md), spawn Claude to merge
+  // If there are root conflicts, spawn Claude to merge
   if (rootConflicts.length > 0) {
     console.log('');
     console.log(chalk.cyan('═══════════════════════════════════════════════════════════'));
@@ -292,7 +338,9 @@ codev/.update-hashes.json
     console.log(chalk.cyan('═══════════════════════════════════════════════════════════'));
     console.log('');
 
-    const mergePrompt = `Merge ${rootConflicts.join(' and ')} from the .codev-new versions. Add new sections from the .codev-new files, preserve my customizations, then delete the .codev-new files when done.`;
+    const mergePrompt = isRulerProject
+      ? `Merge .ruler/codev.md from the .codev-new version. Add new sections, preserve my customizations, then delete the .codev-new file. After merging, remind me to run 'npx @intellectronica/ruler apply' to regenerate CLAUDE.md/AGENTS.md.`
+      : `Merge ${rootConflicts.join(' and ')} from the .codev-new versions. Add new sections from the .codev-new files, preserve my customizations, then delete the .codev-new files when done.`;
 
     // Spawn Claude interactively with merge instructions as initial prompt
     const claude = spawn('claude', [mergePrompt], {
