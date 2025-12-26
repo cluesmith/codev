@@ -15,6 +15,7 @@ import {
   isUserDataPath,
   isUpdatableFile,
 } from '../lib/templates.js';
+import { detectRuler } from '../lib/ruler.js';
 
 interface UpdateOptions {
   dryRun?: boolean;
@@ -152,61 +153,106 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log(chalk.green('  + (new)'), 'codev/projectlist.md');
   }
 
-  // Handle root-level files (CLAUDE.md, AGENTS.md)
-  const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
+  // Handle root-level files (Ruler-aware)
   const skeletonTemplatesDir = path.join(templatesDir, 'templates');
+  const isRulerProject = detectRuler(targetDir);
 
-  for (const fileName of rootFiles) {
-    const srcPath = path.join(skeletonTemplatesDir, fileName);
-    const destPath = path.join(targetDir, fileName);
+  if (isRulerProject) {
+    // Ruler project: update .ruler/codev.md instead of root files
+    // Use codev-instructions.md (tool-agnostic, no AGENTS.md/CLAUDE.md notes)
+    const codevInstructionsSrc = path.join(skeletonTemplatesDir, 'codev-instructions.md');
+    const rulerCodevPath = path.join(targetDir, '.ruler', 'codev.md');
 
-    // Skip if source doesn't exist
-    if (!fs.existsSync(srcPath)) {
-      continue;
-    }
+    if (fs.existsSync(codevInstructionsSrc)) {
+      const templateContent = fs.readFileSync(codevInstructionsSrc, 'utf-8');
 
-    // New file - copy it (replacing {{PROJECT_NAME}} placeholder)
-    if (!fs.existsSync(destPath)) {
-      if (!dryRun) {
-        const projectName = path.basename(targetDir);
-        let content = fs.readFileSync(srcPath, 'utf-8');
-        content = content.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-        fs.writeFileSync(destPath, content);
+      if (!fs.existsSync(rulerCodevPath)) {
+        // New file - create it
+        if (!dryRun) {
+          fs.writeFileSync(rulerCodevPath, templateContent);
+        }
+        result.newFiles.push('.ruler/codev.md');
+        console.log(chalk.green('  + (new)'), '.ruler/codev.md');
+      } else {
+        // File exists - check if template has changed
+        const currentContent = fs.readFileSync(rulerCodevPath, 'utf-8');
+
+        if (currentContent === templateContent) {
+          result.skipped.push('.ruler/codev.md');
+        } else if (force) {
+          // Force mode - overwrite
+          if (!dryRun) {
+            fs.writeFileSync(rulerCodevPath, templateContent);
+          }
+          result.updated.push('.ruler/codev.md');
+          console.log(chalk.blue('  ~ (force)'), '.ruler/codev.md');
+        } else {
+          // Content differs - save as .codev-new for merge
+          if (!dryRun) {
+            fs.writeFileSync(rulerCodevPath + '.codev-new', templateContent);
+          }
+          result.rootConflicts.push('.ruler/codev.md');
+          console.log(chalk.yellow('  ! (conflict)'), '.ruler/codev.md');
+          console.log(chalk.dim('    New version saved as:'), '.ruler/codev.md.codev-new');
+        }
       }
-      result.newFiles.push(fileName);
-      console.log(chalk.green('  + (new)'), fileName);
-      continue;
     }
+  } else {
+    // Non-Ruler project: update CLAUDE.md and AGENTS.md at root
+    const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
 
-    // File exists - check if template has changed
-    const currentContent = fs.readFileSync(destPath, 'utf-8');
-    const projectName = path.basename(targetDir);
-    let templateContent = fs.readFileSync(srcPath, 'utf-8');
-    templateContent = templateContent.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    for (const fileName of rootFiles) {
+      const srcPath = path.join(skeletonTemplatesDir, fileName);
+      const destPath = path.join(targetDir, fileName);
 
-    // If content is identical, skip
-    if (currentContent === templateContent) {
-      result.skipped.push(fileName);
-      continue;
-    }
-
-    // If force mode, overwrite
-    if (force) {
-      if (!dryRun) {
-        fs.writeFileSync(destPath, templateContent);
+      // Skip if source doesn't exist
+      if (!fs.existsSync(srcPath)) {
+        continue;
       }
-      result.updated.push(fileName);
-      console.log(chalk.blue('  ~ (force)'), fileName);
-      continue;
-    }
 
-    // Content differs - save as .codev-new for merge
-    if (!dryRun) {
-      fs.writeFileSync(destPath + '.codev-new', templateContent);
+      // New file - copy it (replacing {{PROJECT_NAME}} placeholder)
+      if (!fs.existsSync(destPath)) {
+        if (!dryRun) {
+          const projectName = path.basename(targetDir);
+          let content = fs.readFileSync(srcPath, 'utf-8');
+          content = content.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+          fs.writeFileSync(destPath, content);
+        }
+        result.newFiles.push(fileName);
+        console.log(chalk.green('  + (new)'), fileName);
+        continue;
+      }
+
+      // File exists - check if template has changed
+      const currentContent = fs.readFileSync(destPath, 'utf-8');
+      const projectName = path.basename(targetDir);
+      let templateContent = fs.readFileSync(srcPath, 'utf-8');
+      templateContent = templateContent.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+
+      // If content is identical, skip
+      if (currentContent === templateContent) {
+        result.skipped.push(fileName);
+        continue;
+      }
+
+      // If force mode, overwrite
+      if (force) {
+        if (!dryRun) {
+          fs.writeFileSync(destPath, templateContent);
+        }
+        result.updated.push(fileName);
+        console.log(chalk.blue('  ~ (force)'), fileName);
+        continue;
+      }
+
+      // Content differs - save as .codev-new for merge
+      if (!dryRun) {
+        fs.writeFileSync(destPath + '.codev-new', templateContent);
+      }
+      result.rootConflicts.push(fileName);
+      console.log(chalk.yellow('  ! (conflict)'), fileName);
+      console.log(chalk.dim('    New version saved as:'), `${fileName}.codev-new`);
     }
-    result.rootConflicts.push(fileName);
-    console.log(chalk.yellow('  ! (conflict)'), fileName);
-    console.log(chalk.dim('    New version saved as:'), `${fileName}.codev-new`);
   }
 
   // Summary
@@ -233,6 +279,12 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log(chalk.dim('  No updates available - already up to date!'));
   }
 
+  // Remind Ruler users to regenerate root files
+  if (isRulerProject && (result.newFiles.includes('.ruler/codev.md') || result.updated.includes('.ruler/codev.md') || result.rootConflicts.includes('.ruler/codev.md'))) {
+    console.log('');
+    console.log(chalk.cyan('  Note: Run `npx @intellectronica/ruler apply` to regenerate CLAUDE.md/AGENTS.md'));
+  }
+
   if (dryRun) {
     console.log('');
     console.log(chalk.yellow('Dry run complete. Run without --dry-run to apply changes.'));
@@ -254,7 +306,9 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log('');
 
     const fileList = allConflicts.join(', ');
-    const mergePrompt = `Merge the following files from their .codev-new versions: ${fileList}. For each file, add new sections from the .codev-new version, preserve my customizations, then delete the .codev-new file when done.`;
+    const mergePrompt = isRulerProject
+      ? `Merge the following files from their .codev-new versions: ${fileList}. For each file, add new sections from the .codev-new version, preserve my customizations, then delete the .codev-new file when done. After merging, remind me to run 'npx @intellectronica/ruler apply' to regenerate CLAUDE.md/AGENTS.md.`
+      : `Merge the following files from their .codev-new versions: ${fileList}. For each file, add new sections from the .codev-new version, preserve my customizations, then delete the .codev-new file when done.`;
 
     // Spawn Claude interactively with merge instructions as initial prompt
     const claude = spawn('claude', [mergePrompt], {
