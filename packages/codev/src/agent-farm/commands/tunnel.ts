@@ -8,6 +8,7 @@
 import { networkInterfaces, userInfo, platform } from 'node:os';
 import { getArchitect } from '../state.js';
 import { logger } from '../utils/logger.js';
+import { getConfig } from '../utils/config.js';
 
 /**
  * Get all non-loopback IPv4 addresses from network interfaces
@@ -58,9 +59,10 @@ export function tunnel(_options: TunnelOptions = {}): void {
   const ips = getLocalIPs();
   const user = userInfo().username;
 
-  // Dashboard port is architect port minus 1 (derived from running state)
-  // This ensures correct port even if user started with custom --port
-  const dashboardPort = architect.port - 1;
+  // Dashboard port from config - this is the correct port even with custom --port
+  // The port registry ensures dashboardPort is always architectPort - 1
+  const config = getConfig();
+  const dashboardPort = config.dashboardPort;
 
   // Output SSH command
   console.log('');

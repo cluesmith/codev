@@ -59,52 +59,31 @@ af start --allow-insecure-remote
 
 #### Remote Access
 
-By default, Agent Farm binds to `localhost` (127.0.0.1), making it accessible only from the local machine. To access the dashboard from another device (e.g., a tablet, phone, or another computer on your network):
+By default, Agent Farm binds to `localhost` (127.0.0.1), making it accessible only from the local machine. For secure remote access, use `af tunnel`:
 
 ```bash
+# Step 1: Start Agent Farm
+af start
+
+# Step 2: Get SSH command for your network
+af tunnel
+
+# Step 3: Run the SSH command on your remote device
+# Example output: ssh -L 4200:localhost:4200 youruser@192.168.1.50
+
+# Step 4: Open http://localhost:4200 in your remote browser
+```
+
+See [af tunnel](#af-tunnel) for full documentation.
+
+**Legacy mode** (deprecated):
+
+```bash
+# DEPRECATED: Exposes dashboard without authentication
 af start --allow-insecure-remote
 ```
 
-This binds the server to `0.0.0.0`, making it accessible from any network interface.
-
-**Finding your machine's IP:**
-```bash
-# macOS
-ipconfig getifaddr en0    # WiFi
-ipconfig getifaddr en1    # Ethernet
-
-# Linux
-hostname -I | awk '{print $1}'
-```
-
-**Accessing remotely:**
-```
-http://<your-ip>:4200
-```
-
-**⚠️ Security Warning:**
-
-The `--allow-insecure-remote` flag provides **no authentication**. Anyone on your network can:
-- View and interact with all terminals
-- Execute commands as your user
-- Access and modify your code
-
-**Only use this on trusted networks** (home WiFi, isolated development networks). Never use on:
-- Public WiFi (coffee shops, airports)
-- Shared office networks without VPN
-- Any network with untrusted users
-
-**For secure remote access**, consider:
-1. **SSH tunneling** (recommended):
-   ```bash
-   # On remote machine, tunnel to your dev machine
-   ssh -L 4200:localhost:4200 user@your-dev-machine
-   # Then open http://localhost:4200 on the remote machine
-   ```
-
-2. **VPN** - Access your home/office network securely
-
-3. **Tailscale/ZeroTier** - Mesh VPN for secure device-to-device connections
+The `--allow-insecure-remote` flag binds to `0.0.0.0` with no authentication. Use `af tunnel` instead for secure remote access via SSH.
 
 ---
 
@@ -124,6 +103,58 @@ Stops all running agent-farm processes including:
 - Dashboard servers
 
 Does NOT clean up worktrees - use `af cleanup` for that.
+
+---
+
+### af tunnel
+
+Display SSH tunnel command for secure remote access.
+
+```bash
+af tunnel
+```
+
+**Description:**
+
+Outputs the SSH command needed to access Agent Farm from another device. The command uses SSH port forwarding to tunnel the dashboard through a single port, providing secure encrypted access with SSH authentication.
+
+**Example output:**
+
+```
+Remote Access via SSH Tunnel
+
+Run this command on your other device:
+
+  ssh -L 4200:localhost:4200 youruser@192.168.1.50
+
+Then open: http://localhost:4200
+
+Tip: Add to ~/.ssh/config for easy access:
+  Host agent-farm
+    HostName 192.168.1.50
+    User youruser
+    LocalForward 4200 localhost:4200
+```
+
+**How it works:**
+
+1. Detects your machine's non-loopback IPv4 addresses
+2. Gets the dashboard port from the running Agent Farm instance
+3. Outputs ready-to-use SSH commands
+
+**Prerequisites:**
+
+- SSH server must be running on the development machine
+- On macOS: System Settings → General → Sharing → Remote Login
+- On Windows: Enable OpenSSH Server or use WSL2
+- On Linux: `sudo systemctl start sshd`
+
+**Benefits over `--allow-insecure-remote`:**
+
+- **Authentication**: SSH key or password required
+- **Encryption**: All traffic encrypted
+- **Single port**: Only dashboard port forwarded
+- **No network exposure**: Server remains bound to localhost
 
 ---
 

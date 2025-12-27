@@ -16,6 +16,13 @@ vi.mock('../state.js', () => ({
   getArchitect: vi.fn(),
 }));
 
+// Mock the config module
+vi.mock('../utils/config.js', () => ({
+  getConfig: vi.fn(() => ({
+    dashboardPort: 4200,
+  })),
+}));
+
 
 // Mock the logger
 const mockLogger = {
