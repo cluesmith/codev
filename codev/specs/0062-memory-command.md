@@ -2,8 +2,9 @@
 
 ## Metadata
 - **ID**: 0062
-- **Status**: draft
+- **Status**: specified
 - **Created**: 2025-12-27
+- **Specified**: 2025-12-27
 
 ## Clarifying Questions Asked
 
@@ -177,12 +178,18 @@ The command should work across tech stacks (JS, Python, Rust, Go) and be extensi
 
 ### Generators
 
-| Generator | Output | Source Data |
-|-----------|--------|-------------|
+| Generator | Canonical Output Path | Source Data |
+|-----------|----------------------|-------------|
 | arch | `codev/resources/arch.md` | Structure, Package, Git, Docs |
-| claude | `CLAUDE.md` or `.ruler/codev.md` | Package, Structure, Docs |
+| claude | `CLAUDE.md` (or `.ruler/codev.md` if Ruler detected) | Package, Structure, Docs |
 | projectlist | `codev/projectlist.md` | **Codev collector**, GitHub, code TODOs |
 | lessons | `codev/resources/lessons-learned.md` | Reviews (extract patterns) |
+
+**Path Resolution**:
+- All paths are relative to project root
+- `arch` and `lessons` always in `codev/resources/`
+- `claude` checks for `.ruler/` directory; if exists, outputs to `.ruler/codev.md`
+- `projectlist` always in `codev/` (never in resources/)
 
 ### Codev Collector Details
 
@@ -221,20 +228,288 @@ codev memory sync --dry-run    # Show what would change
 - `sync`: Lightweight sync - only Codev collector → projectlist generator
 
 **Options for `init`:**
-- `--dry-run`: Preview changes without writing files
+- `--dry-run`: Preview changes without writing files (see Dry-Run Output Format below)
 - `--github`: Include GitHub issues/PRs in projectlist seeding
-- `--only <files>`: Generate specific outputs only (arch, claude, projectlist, lessons)
+- `--only <files>`: Generate specific outputs only (arch, claude, projectlist, lessons). Accepts comma-separated values: `--only arch,projectlist`. Skips collectors not needed for specified outputs.
+- `--merge`: Preserve existing content and append generated content with markers (default: backup and overwrite)
+- `--depth <n>`: Directory traversal depth for structure analysis (default: 3, max: 10)
+
+## Detailed Behaviors
+
+### Projectlist Schema
+
+Each project entry in `projectlist.md` uses this YAML structure:
+
+```yaml
+- id: "0001"                           # Required: 4-digit string, extracted from filename
+  title: "Feature Name"                # Required: from spec header or frontmatter
+  summary: "Brief description"         # Optional: first paragraph or AI-generated
+  status: conceived                    # Required: see Status Inference below
+  priority: medium                     # Optional: high/medium/low, default medium
+  release: null                        # Optional: release version assignment
+  files:
+    spec: codev/specs/0001-feature.md  # Required: path to spec file
+    plan: codev/plans/0001-feature.md  # Optional: null if not exists
+    review: codev/reviews/0001-feature.md  # Optional: null if not exists
+  dependencies: []                     # Optional: list of spec IDs
+  tags: []                             # Optional: extracted from spec or inferred
+  timestamps:
+    conceived_at: "2025-01-01T00:00:00Z"  # From git or file mtime
+    specified_at: null                 # When spec approved
+    planned_at: null                   # When plan created
+    implementing_at: null              # When builder spawned
+    implemented_at: null               # When PR merged
+  notes: ""                            # User-editable field, always preserved
+```
+
+### Merge Rules for Projectlist
+
+When syncing an existing projectlist:
+
+| Field | Behavior |
+|-------|----------|
+| `id`, `title`, `files.*` | **Auto-updated**: Always reflect current file state |
+| `status` | **Auto-updated**: Re-inferred from file existence (see below) |
+| `summary`, `tags` | **Preserve if set**: Only populate if currently empty |
+| `priority`, `release`, `dependencies` | **Preserve always**: Never overwritten by sync |
+| `notes` | **Preserve always**: User customization field |
+| `timestamps` | **Merge**: Update specific timestamps when status changes |
+
+**Orphan handling**: Entries in projectlist with no corresponding spec file are:
+1. Flagged with a warning comment: `# WARNING: No spec file found for 0042`
+2. Status set to `orphaned`
+3. NOT automatically removed (user must decide)
+
+**Conflict resolution**: If spec ID appears twice in projectlist, warn and keep first entry.
+
+### Status Inference Mapping
+
+Status is inferred from file existence, mapping to SPIDER lifecycle:
+
+| Files Present | Inferred Status | SPIDER Phase |
+|---------------|-----------------|--------------|
+| spec only | `conceived` | Specify (draft) |
+| spec + explicit "Status: specified" | `specified` | Specify (approved) |
+| spec + plan | `planned` | Plan |
+| spec + plan + builder worktree exists | `implementing` | Implement/Defend/Evaluate |
+| spec + plan + review (no "Status: integrated") | `implemented` | Review (pending merge) |
+| spec + plan + review + "Status: integrated" | `integrated` | Complete |
+| projectlist entry but no spec | `orphaned` | N/A |
+| spec with "Status: abandoned" | `abandoned` | N/A |
+
+**Partial phase handling**:
+- If spec has explicit `Status:` field, that takes precedence over file inference
+- User-set status in projectlist is **not** overwritten during sync (treated as manual override)
+
+**Builder worktree detection**:
+- Pattern: `.builders/<project-id>-*` (e.g., `.builders/0042-feature-name/`)
+- Detection: `ls .builders/ | grep "^<id>-"`
+- If match found AND worktree is valid git worktree → status = `implementing`
+- **Stale worktree handling**: If `.builders/<id>-*/` exists but is not a valid git worktree (no `.git` file), ignore it (don't infer `implementing`)
+- Multiple worktrees for same ID: Use most recently modified (by directory mtime)
+
+### File Regeneration Policy
+
+For existing files (`arch.md`, `CLAUDE.md`, `projectlist.md`):
+
+| Scenario | Behavior |
+|----------|----------|
+| File doesn't exist | Create new file |
+| File exists, `--dry-run` | Show diff, no changes |
+| File exists, no flag | **Backup** then overwrite |
+| File exists, `--merge` flag | Append new content with `<!-- GENERATED -->` markers |
+
+**Backup convention**: `<filename>.backup.<ISO-timestamp>`
+- Example: `arch.md.backup.2025-01-15T14-30-00`
+- Backups stored in same directory as original
+- Only most recent backup kept (older backups overwritten)
+
+**AI-generated content markers**:
+```markdown
+<!-- BEGIN GENERATED CONTENT - codev memory init -->
+[AI-generated content here]
+<!-- END GENERATED CONTENT -->
+
+<!-- User customizations below this line are preserved -->
+```
+
+**Per-file merge semantics with `--merge`**:
+
+| File | Merge Behavior |
+|------|----------------|
+| `arch.md` | Replace content inside `<!-- GENERATED -->` markers only. Content before first marker and after last marker preserved. If no markers exist, prepend generated content with markers, preserve all existing content after. |
+| `CLAUDE.md` | Append new sections at end with markers. Never modify existing content. User's custom instructions always preserved. |
+| `projectlist.md` | Merge entries by ID. New specs added. Existing entries: update `files.*` and `status`, preserve `priority`, `release`, `notes`, `dependencies`. |
+| `lessons-learned.md` | Append new lessons at end with date header. Never remove existing lessons. |
+
+**Without `--merge` (default)**: Backup existing file, then overwrite entirely.
+
+### GitHub Seeding Behavior
+
+When `--github` flag is used:
+
+**Fields pulled from GitHub**:
+| GitHub Field | Projectlist Field | Notes |
+|--------------|-------------------|-------|
+| Issue number | `id` | Prefixed with `GH-` (e.g., `GH-0042`) |
+| Issue title | `title` | Truncated to 80 chars |
+| First 200 chars of body | `summary` | Sanitized, no markdown |
+| Labels | `tags` | Direct mapping |
+| Milestone | `release` | If milestone matches semver pattern |
+
+**Idempotency rules**:
+- Issues already in projectlist (matched by `GH-` prefix) are skipped
+- Re-running with `--github` only adds NEW issues
+- Closed issues are not imported (only open issues)
+- PRs are not imported (issues only)
+
+**Deduplication**: If a spec file already exists for an issue (detected by matching title or `GitHub: #123` in spec), skip import.
+
+**ID Namespace Coexistence**:
+- Spec IDs: 4-digit numeric strings (`0001`-`9999`)
+- GitHub IDs: Prefixed with `GH-` (`GH-0042`, `GH-0123`)
+- These namespaces are **disjoint** - no collision possible
+- Sorting: Specs sorted numerically first, then GH items by number
+- Dependencies: Can reference either namespace (`dependencies: ["0015", "GH-0042"]`)
+- Status inference: GH items are always `conceived` (no spec/plan/review files)
+- GH items cannot progress through SPIDER lifecycle until converted to a spec
+
+### AI Synthesis Constraints
+
+**Claude CLI invocation**:
+```bash
+claude --print -p "<synthesis prompt>" < collected_data.json
+```
+
+**Prompt structure**:
+1. Role: "You are documenting a software project based on collected metadata."
+2. Constraints: "Be factual. Mark uncertain information with [UNCERTAIN]. Max 500 words per section."
+3. Collected data: JSON from all collectors
+4. Output format: Markdown matching target file structure
+
+**Token management**:
+- Collected data truncated to 50KB before sending to Claude
+- Large file lists summarized (show first 20, then "... and N more")
+- Git history limited to last 100 commits
+
+**Success criteria for "accurate" output**:
+- All detected languages listed in arch.md
+- Package names match actual manifest
+- Directory structure reflects actual layout
+- No hallucinated dependencies
+
+**Low-confidence handling**:
+- Sections with uncertain data marked: `> ⚠️ This section was auto-generated and may need review`
+- `--dry-run` shows confidence scores per section
+
+### Claude CLI Unavailability
+
+If Claude CLI is not installed or fails:
+1. Collection phase completes normally
+2. Synthesis phase skipped with warning: `Claude CLI not available. Skipping AI synthesis.`
+3. Collected data written to `.codev-memory-data.json` for manual processing
+4. Projectlist still generated (doesn't require AI)
+5. `arch.md` and `CLAUDE.md` not generated (require AI synthesis)
+
+### Dry-Run Output Format
+
+When `--dry-run` is specified, output uses a structured summary format:
+
+```
+codev memory init --dry-run
+
+📊 Collection Summary
+├── Package: npm monorepo detected (3 workspaces)
+├── Structure: 847 files, 12 directories analyzed
+├── Git: 234 commits, 5 contributors
+├── Docs: README.md, existing CLAUDE.md found
+├── Codev: 15 specs, 12 plans, 8 reviews discovered
+└── GitHub: skipped (use --github to enable)
+
+📝 Files to Generate
+┌─────────────────────────────────┬──────────┬─────────────┐
+│ File                            │ Action   │ Confidence  │
+├─────────────────────────────────┼──────────┼─────────────┤
+│ codev/resources/arch.md         │ CREATE   │ HIGH        │
+│ CLAUDE.md                       │ BACKUP   │ MEDIUM      │
+│ codev/projectlist.md            │ UPDATE   │ HIGH        │
+└─────────────────────────────────┴──────────┴─────────────┘
+
+📋 Projectlist Changes (diff)
++ 0016: "API Rate Limiting" (conceived)
++ 0017: "User Dashboard" (planned)
+~ 0015: status conceived → implemented
+
+Run without --dry-run to apply changes.
+```
+
+Actions: `CREATE` (new file), `BACKUP` (backup existing, overwrite), `UPDATE` (merge changes), `SKIP` (no changes needed)
+
+### Security and Redaction Policy
+
+Before sending collected data to Claude for synthesis:
+
+**Always excluded paths** (never sent to AI):
+- `.env*`, `*.pem`, `*.key`, `*credentials*`, `*secret*`
+- `node_modules/`, `vendor/`, `.git/objects/`
+- Files > 100KB
+- Binary files (detected by extension or null bytes)
+
+**Always excluded from git history**:
+- Commit diffs (only messages and file paths)
+- Author emails (only names)
+- Any line containing: `password`, `token`, `api_key`, `secret`, `credential`
+
+**Collected data sanitization**:
+```typescript
+interface SanitizedData {
+  // Package: dependency names only, no versions or registry URLs
+  // Structure: paths only, no file contents
+  // Git: messages and filenames only, no diffs
+  // Docs: first 1000 chars of README, no other docs content
+}
+```
+
+**User override**: `--include-path <glob>` to explicitly include paths matching pattern (use with caution).
+
+### GitHub Failure Modes
+
+| Scenario | Behavior |
+|----------|----------|
+| `gh` CLI not installed | Warn: "GitHub CLI not found, skipping --github", continue offline |
+| `gh` not authenticated | Warn: "Not authenticated with GitHub, run 'gh auth login'", continue offline |
+| Rate limit exceeded | Warn: "GitHub rate limit hit, imported N of M issues", continue with partial data |
+| Private repo (no access) | Warn: "Cannot access repo issues (private?)", continue offline |
+| Network timeout | Retry once after 5s, then warn and continue offline |
+| API error (5xx) | Warn with error message, continue offline |
+
+All GitHub failures are **fail-soft**: the command continues without GitHub data rather than aborting.
+
+### Edge Case Decisions
+
+| Edge Case | Behavior |
+|-----------|----------|
+| **Malformed spec (no title)** | Warn: "Skipping 0042: no title found", continue with others |
+| **Duplicate spec IDs** | Error: "Duplicate ID 0042 found", list all files, abort sync |
+| **Mixed Ruler/standard** | Detect `.ruler/` directory → use `.ruler/codev.md`; otherwise `CLAUDE.md` |
+| **Multiple package manifests** | Priority: root `package.json` > root `Cargo.toml` > root others > nested (alphabetically). Override with `--manifest <path>` |
+| **No manifest found** | Warn: "No package manifest found", continue with structure-only analysis |
+| **Spec ID vs filename mismatch** | **Filename wins** for `id` field; spec content used for `title`. Warn about mismatch. |
+| **Spec title vs frontmatter conflict** | **Frontmatter wins** if present; fall back to `# Specification:` header |
+| **Very large codebase (>10k files)** | Use `--depth` flag (default 3). Warn if truncated. Use `--depth 10` for full scan. |
+| **Multiple active builders** | Check all `.builders/*/` directories; if any matches project ID, status = `implementing` |
+| **Existing user sections in arch.md** | With `--merge`: preserve content outside `<!-- GENERATED -->` markers. Without: backup entire file. |
 
 ## Open Questions
 
 ### Critical (Blocks Progress)
 - [x] Should bootstrap be a separate command or flag on adopt? **Answered: Separate command**
 
-### Important (Affects Design)
-- [ ] How deep should code analysis go? (imports/exports or just structure?)
-- [ ] Should we detect and include linting/formatting rules in CLAUDE.md?
+### Important (Affects Design) - Resolved for v1
+- [x] How deep should code analysis go? **v1 Scope: Structure only** (directory tree, file counts, entry points). Import/export analysis deferred to v2.
+- [x] Should we detect and include linting/formatting rules in CLAUDE.md? **v1 Scope: No**. Only detect from config file presence (`.eslintrc`, `.prettierrc`), don't parse rules. Full lint/format detection deferred to v2.
 
-### Nice-to-Know (Optimization)
+### Nice-to-Know (Deferred to v2)
 - [ ] Could we use `tokei` for more accurate language breakdown?
 - [ ] Should we parse TODO/FIXME comments for projectlist seeding?
 
@@ -296,7 +571,30 @@ codev memory sync --dry-run    # Show what would change
 | Package manifest parsing fails | Low | Medium | Graceful degradation, warn and continue |
 
 ## Expert Consultation
-<!-- To be filled after consultation -->
+
+### 3-Way Review Results (2025-12-27)
+
+| Model | Verdict | Confidence | Summary |
+|-------|---------|------------|---------|
+| Claude | APPROVE | HIGH | Well-designed spec with clear requirements; minor clarifications needed |
+| Gemini | APPROVE | HIGH | Exceptionally well-defined, complete, and technically sound |
+| Codex | COMMENT | HIGH | Strong spec with clear behaviors; minor gaps around lessons/backup/tests |
+
+**Key feedback incorporated**:
+- Added Projectlist Schema and Merge Rules
+- Added Status Inference Mapping (SPIDER lifecycle)
+- Added File Regeneration Policy with per-file merge semantics
+- Added GitHub Seeding Behavior with ID namespace coexistence
+- Added AI Synthesis Constraints and Security/Redaction Policy
+- Added GitHub Failure Modes (fail-soft behavior)
+- Added Edge Case Decisions table
+- Resolved open design questions for v1 scope
+
+**Deferred to planning phase** (per Codex COMMENT):
+- Lessons generator success criteria details
+- Backup retention naming strategy
+- Non-AI fallback acceptance criteria
+- Additional test coverage for merge/GitHub/depth scenarios
 
 ## Approval
 - [ ] Technical Lead Review
