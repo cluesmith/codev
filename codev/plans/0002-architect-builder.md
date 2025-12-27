@@ -577,3 +577,67 @@ Phase 1 ─┬─► Phase 2
 ```
 
 Phases 2, 3, 4, 5 can be done in parallel after Phase 1.
+
+---
+
+### Phase 8: Direct CLI Access (TICK-001)
+
+**Goal**: Add `af architect` command for terminal-first access to the architect role.
+
+**Tasks**:
+1. Add `architect` subcommand to `src/agent-farm/cli.ts`
+2. Implement `src/agent-farm/commands/architect.ts`:
+   - Check if `af-architect` tmux session exists
+   - If exists → attach to it (`tmux attach-session -t af-architect`)
+   - If not → create new session with architect role, then attach
+   - Load role from `codev/roles/architect.md`
+   - Pass through additional arguments to claude
+3. Handle edge cases:
+   - Role file doesn't exist → clear error message
+   - tmux not installed → show install instructions
+4. Update help text and documentation
+
+**Implementation**:
+```typescript
+// src/agent-farm/commands/architect.ts
+export async function architect(args: string[]): Promise<void> {
+  const sessionName = 'af-architect';
+
+  // Check if session exists
+  const sessionExists = await tmuxSessionExists(sessionName);
+
+  if (sessionExists) {
+    // Attach to existing session
+    await attachToSession(sessionName);
+  } else {
+    // Create new session with architect role
+    const roleFile = resolve(config.codevDir, 'roles', 'architect.md');
+    if (!existsSync(roleFile)) {
+      fatal('Architect role not found: codev/roles/architect.md');
+    }
+
+    const cmd = `claude --append-system-prompt "$(cat '${roleFile}')" ${args.join(' ')}`;
+    await run(`tmux new-session -s ${sessionName} '${cmd}'`);
+  }
+}
+```
+
+**Acceptance criteria**:
+- [ ] `af architect` starts or attaches to tmux session
+- [ ] Session persists after detach (Ctrl+B, D)
+- [ ] Architect role is loaded correctly
+- [ ] Additional arguments passed to claude
+- [ ] Clear error if role file missing
+- [ ] Clear error if tmux not installed
+
+---
+
+## Amendment History
+
+### TICK-001: Direct CLI Access (2025-12-27)
+
+**Changes**:
+- Added Phase 8: Direct CLI Access implementation
+- New command: `af architect` for terminal-first architect access
+
+**Review**: See `reviews/0002-architect-builder-tick-001.md`

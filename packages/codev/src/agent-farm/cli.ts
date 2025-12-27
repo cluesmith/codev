@@ -80,6 +80,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Architect command - direct CLI access
+  program
+    .command('architect [args...]')
+    .description('Start or attach to architect tmux session (power user mode)')
+    .option('-l, --layout', 'Create multi-pane layout with status and shell')
+    .action(async (args: string[], options: { layout?: boolean }) => {
+      const { architect } = await import('./commands/architect.js');
+      try {
+        await architect({ args, layout: options.layout });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Status command
   program
     .command('status')

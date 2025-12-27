@@ -292,9 +292,44 @@ project-root/
 └── .gitignore                 # Includes .builders/
 ```
 
+### 8. Direct CLI Access for Power Users
+
+Power users often prefer terminal-first workflows without the browser overhead. The `af architect` command provides direct access to the architect role via tmux:
+
+```bash
+af architect              # Start/attach to architect tmux session
+af architect "prompt"     # With initial prompt
+af architect --layout     # Multi-pane layout with status and shell
+```
+
+**Basic Mode** (`af architect`):
+- If `af-architect` tmux session exists → attach to it
+- If no session exists → create new session with architect role
+- Session persists after detach (Ctrl+B, D)
+
+**Layout Mode** (`af architect --layout`):
+Creates a two-pane tmux layout:
+```
+┌────────────────────────────────┬──────────────────────────────┐
+│                                │                              │
+│   Architect Session            │   Utility Shell              │
+│   (60%)                        │   (40%)                      │
+│                                │                              │
+└────────────────────────────────┴──────────────────────────────┘
+```
+- Left pane: Architect Claude session (main workspace)
+- Right pane: Utility shell for running `af spawn`, `af status`, etc.
+- Navigate panes: Ctrl+B ←/→ | Zoom: Ctrl+B z | Detach: Ctrl+B d
+
+**Why tmux?** Consistency with other agent farm commands which all use tmux internally for session persistence.
+
 ### CLI Interface
 
 ```bash
+# Direct CLI access to architect (power users)
+af architect              # Start/attach to architect tmux session
+af architect --layout     # Multi-pane layout
+
 # Spawn a new builder for a project (spec)
 architect spawn --project 0003
 
@@ -466,3 +501,25 @@ Git worktrees provide isolation without the overhead of full clones:
 - **Editable** with any text editor
 - **Git history** shows builder activity over time
 - **Consistent** with projectlist.md pattern
+
+---
+
+## Amendments
+
+### TICK-001: Direct CLI Access (2025-12-27)
+
+**Summary**: Add `af architect` command for terminal-first access to architect role, with optional multi-pane layout mode.
+
+**Problem Addressed**:
+Power users prefer direct terminal access without browser overhead. Currently, accessing the architect requires either starting the full dashboard (`af start`) or knowing tmux internals (`tmux attach -t af-architect-4301`).
+
+**Spec Changes**:
+- Added "8. Direct CLI Access for Power Users" section
+- Basic mode: `af architect` for simple session
+- Layout mode: `af architect --layout` for multi-pane tmux layout
+- Updated CLI Interface to include `af architect` command
+
+**Plan Changes**:
+- Added Phase 8: Direct CLI Access implementation
+
+**Review**: See `reviews/0002-architect-builder-tick-001.md`
