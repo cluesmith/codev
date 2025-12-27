@@ -304,6 +304,20 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Tunnel command (Spec 0062 - Secure Remote Access)
+  program
+    .command('tunnel')
+    .description('Show SSH command for secure remote access')
+    .action(async () => {
+      const { tunnel } = await import('./commands/tunnel.js');
+      try {
+        tunnel({});
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Database commands
   const dbCmd = program
     .command('db')

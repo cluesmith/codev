@@ -1,8 +1,45 @@
 // Tab Management - Rendering, Selection, Overflow
 
 // Get the base URL for ttyd/server connections (uses current hostname for remote access)
+// DEPRECATED: Use getTerminalUrl() for terminal tabs (Spec 0062)
 function getBaseUrl(port) {
   return `http://${window.location.hostname}:${port}`;
+}
+
+/**
+ * Get the terminal URL for a tab (Spec 0062 - Secure Remote Access)
+ * Uses the reverse proxy instead of direct port access, enabling SSH tunnel support.
+ *
+ * @param {Object} tab - The tab object
+ * @returns {string} The URL to load in the iframe
+ */
+function getTerminalUrl(tab) {
+  // Architect terminal
+  if (tab.type === 'architect') {
+    return '/terminal/architect';
+  }
+
+  // Builder terminal - use the builder's ID (e.g., builder-0055)
+  if (tab.type === 'builder') {
+    return `/terminal/builder-${tab.projectId}`;
+  }
+
+  // Shell/utility terminal - use the utility's ID (e.g., util-U12345)
+  if (tab.type === 'shell') {
+    return `/terminal/util-${tab.utilId}`;
+  }
+
+  // File tabs still use direct port access (open-server, not ttyd)
+  if (tab.type === 'file' && tab.port) {
+    return getBaseUrl(tab.port);
+  }
+
+  // Fallback for backward compatibility
+  if (tab.port) {
+    return getBaseUrl(tab.port);
+  }
+
+  return null;
 }
 
 // Build tabs from initial state
@@ -88,7 +125,8 @@ function renderArchitect() {
     // Only update iframe if port changed (avoid flashing on poll)
     if (currentArchitectPort !== state.architect.port) {
       currentArchitectPort = state.architect.port;
-      content.innerHTML = `<iframe src="${getBaseUrl(state.architect.port)}" title="Architect Terminal" allow="clipboard-read; clipboard-write"></iframe>`;
+      // Use proxied URL for remote access support (Spec 0062)
+      content.innerHTML = `<iframe src="/terminal/architect" title="Architect Terminal" allow="clipboard-read; clipboard-write"></iframe>`;
     }
   } else {
     if (currentArchitectPort !== null) {
@@ -249,7 +287,13 @@ function renderTabContent() {
   if (currentTabPort !== tab.port || currentTabType !== tab.type) {
     currentTabPort = tab.port;
     currentTabType = tab.type;
-    content.innerHTML = `<iframe src="${getBaseUrl(tab.port)}" title="${tab.name}" allow="clipboard-read; clipboard-write"></iframe>`;
+    // Use proxied URL for terminal tabs (Spec 0062 - Secure Remote Access)
+    const url = getTerminalUrl(tab);
+    if (url) {
+      content.innerHTML = `<iframe src="${url}" title="${tab.name}" allow="clipboard-read; clipboard-write"></iframe>`;
+    } else {
+      content.innerHTML = `<div class="empty-state"><p>Terminal unavailable</p></div>`;
+    }
   }
 }
 
@@ -486,11 +530,12 @@ function openInNewTab(tabId) {
   const tab = tabs.find(t => t.id === tabId);
   if (!tab) return;
 
-  if (!tab.port) {
+  // Use proxied URL for terminal tabs (Spec 0062 - Secure Remote Access)
+  const url = getTerminalUrl(tab);
+  if (!url) {
     showToast('Tab not ready', 'error');
     return;
   }
 
-  const url = getBaseUrl(tab.port);
   window.open(url, '_blank', 'noopener,noreferrer');
 }
