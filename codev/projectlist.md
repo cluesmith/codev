@@ -251,6 +251,24 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v1.6.0"
+    name: "TBD"
+    status: planning
+    target_date: null
+    notes: "Next release - Tower Dashboard improvements"
+
+  - version: "v1.5.8"
+    name: "Florence"
+    status: released
+    target_date: "2025-12-28"
+    notes: "Secure remote access, 3D model viewer (STL/3MF), annotation proxy fixes"
+
+  - version: "v1.5.0"
+    name: "Florence (initial)"
+    status: released
+    target_date: "2025-12-19"
+    notes: "Dashboard modularization, file browser, file search, activity summary, tab overhaul"
+
   - version: "v1.4.0"
     name: "Eichler"
     status: released
@@ -542,7 +560,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0063** - Reserve this number for your next project
+**0064** - Reserve this number for your next project
 
 ---
 
