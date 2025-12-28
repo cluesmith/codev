@@ -2,8 +2,9 @@
  * Tests for start command utilities
  */
 
-import { describe, it, expect } from 'vitest';
-import { parseRemote } from '../commands/start.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { parseRemote, isPortAvailable } from '../commands/start.js';
+import * as net from 'net';
 
 describe('parseRemote', () => {
   it('should parse user@host format', () => {
@@ -68,5 +69,31 @@ describe('parseRemote', () => {
     expect(result.user).toBe('admin');
     expect(result.host).toBe('server');
     expect(result.remotePath).toBe('/var/www/app-name_v2/current');
+  });
+});
+
+describe('isPortAvailable', () => {
+  it('should detect when port is available', async () => {
+    // Use a high port that's unlikely to be in use
+    const port = 59999;
+    const available = await isPortAvailable(port);
+    expect(available).toBe(true);
+  });
+
+  it('should detect when port is in use', async () => {
+    // Create a server on a port
+    const port = 59998;
+    const server = net.createServer();
+
+    await new Promise<void>((resolve) => {
+      server.listen(port, '127.0.0.1', () => resolve());
+    });
+
+    try {
+      const available = await isPortAvailable(port);
+      expect(available).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

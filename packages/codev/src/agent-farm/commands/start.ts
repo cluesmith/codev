@@ -5,6 +5,7 @@
 import { resolve, basename } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
+import * as net from 'node:net';
 import type { StartOptions, ArchitectState } from '../types.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -20,6 +21,25 @@ interface ParsedRemote {
   user: string;
   host: string;
   remotePath?: string;
+}
+
+/**
+ * Check if a local port is available by attempting to bind to it.
+ * More reliable than fetch() which may miss some port conflicts.
+ */
+export function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(false);
+    });
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(true);
+      });
+    });
+    server.listen(port, '127.0.0.1');
+  });
 }
 
 /**
@@ -76,15 +96,9 @@ async function startRemote(options: StartOptions): Promise<void> {
   const remoteCommand = `${cdCommand} && af start --port ${localPort} --no-browser`;
 
   // Check if local port is already in use
-  try {
-    const response = await fetch(`http://localhost:${localPort}/`, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(500),
-    });
-    // If we get here, something is already running on this port
+  const portAvailable = await isPortAvailable(localPort);
+  if (!portAvailable) {
     fatal(`Port ${localPort} is already in use locally. Stop the existing service or use --port to specify a different port.`);
-  } catch {
-    // Port is available, continue
   }
 
   logger.info('Connecting via SSH...');
