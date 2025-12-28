@@ -375,7 +375,7 @@ af tunnel
 # Step 4: Open http://localhost:4200 in your remote browser
 ```
 
-The dashboard and all terminals work identically via the tunnel. SSH handles authentication and encryption.
+The dashboard and all terminals work identically via the tunnel. SSH handles authentication and encryption. (File tabs use separate ports and won't load through the tunnel.)
 
 **Note**: Requires SSH server on the dev machine. On Windows, enable OpenSSH Server or use WSL2.
 

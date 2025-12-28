@@ -156,6 +156,10 @@ Tip: Add to ~/.ssh/config for easy access:
 - **Single port**: Only dashboard port forwarded
 - **No network exposure**: Server remains bound to localhost
 
+**Limitations:**
+
+- **File tabs**: Clicking "Open File" in terminals opens files via `open-server` on separate ports. These file tabs won't load through the single-port tunnel. Terminals and the dashboard work fully; file viewing requires local access or forwarding additional ports.
+
 ---
 
 ### af spawn
