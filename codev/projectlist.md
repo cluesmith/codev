@@ -235,6 +235,28 @@ Projects currently in development (conceived through committed), sorted by prior
 
 # Low Priority
 
+  - id: "0062"
+    title: "Memory Command"
+    summary: "New codev memory command (init/sync) to populate and synchronize memory layers"
+    status: specified
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0062-memory-command.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [cli, memory, brownfield]
+    timestamps:
+      conceived_at: "2025-12-27T00:00:00-08:00"
+      specified_at: "2025-12-27T00:00:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "codev memory init: brownfield adoption + legacy upgrade. codev memory sync: keep projectlist in sync with specs."
+
 
 
 
