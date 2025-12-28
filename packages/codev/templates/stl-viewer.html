@@ -469,6 +469,58 @@
       renderer.render(scene, camera);
     }
 
+    // Auto-reload: poll file mtime and reload STL when changed
+    let lastMtime = null;
+    const POLL_INTERVAL = 1000; // 1 second
+
+    async function checkForChanges() {
+      try {
+        const res = await fetch('/api/mtime');
+        if (res.ok) {
+          const data = await res.json();
+          if (lastMtime === null) {
+            lastMtime = data.mtime;
+          } else if (data.mtime !== lastMtime) {
+            lastMtime = data.mtime;
+            reloadSTL();
+          }
+        }
+      } catch (err) {
+        // Ignore fetch errors (server may be restarting)
+      }
+    }
+
+    function reloadSTL() {
+      // Remove old mesh
+      if (mesh) {
+        scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+
+      // Reload STL with cache-busting
+      const loader = new THREE.STLLoader();
+      loader.load('/api/stl?t=' + Date.now(), (geometry) => {
+        geometry.computeVertexNormals();
+        geometry.center();
+
+        mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // Update info
+        const triangles = geometry.attributes.position.count / 3;
+        document.getElementById('info').textContent = triangles.toLocaleString() + ' triangles (reloaded)';
+
+        // Brief flash to indicate reload
+        setTimeout(() => {
+          document.getElementById('info').textContent = triangles.toLocaleString() + ' triangles';
+        }, 1000);
+      });
+    }
+
+    // Start polling for changes
+    setInterval(checkForChanges, POLL_INTERVAL);
+
     // Start
     init();
   </script>

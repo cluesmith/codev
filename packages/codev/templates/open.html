@@ -1660,6 +1660,72 @@
       }
     });
 
+    // Auto-reload: poll file mtime and reload when changed
+    let lastMtime = null;
+    const POLL_INTERVAL = 1000; // 1 second
+
+    async function checkForChanges() {
+      // Don't auto-reload if user has unsaved changes
+      if (hasUnsavedChanges || editMode) return;
+
+      try {
+        const res = await fetch('/api/mtime');
+        if (res.ok) {
+          const data = await res.json();
+          if (lastMtime === null) {
+            lastMtime = data.mtime;
+          } else if (data.mtime !== lastMtime) {
+            lastMtime = data.mtime;
+            autoReloadFile();
+          }
+        }
+      } catch (err) {
+        // Ignore fetch errors (server may be restarting)
+      }
+    }
+
+    async function autoReloadFile() {
+      // For images and videos, just reload the source
+      if (isImageFile) {
+        const img = document.getElementById('image-display');
+        img.src = '/api/image?t=' + Date.now();
+        showNotification('Image reloaded');
+        return;
+      }
+
+      if (isVideoFile) {
+        const video = document.getElementById('video-display');
+        video.src = '/api/video?t=' + Date.now();
+        showNotification('Video reloaded');
+        return;
+      }
+
+      // For text files, fetch new content
+      try {
+        const res = await fetch('/file');
+        if (res.ok) {
+          const content = await res.text();
+          currentContent = content;
+          originalContent = content;
+          fileLines = content.split('\n');
+
+          // Re-render based on current mode
+          if (isPreviewMode) {
+            renderPreview();
+          } else {
+            renderFile();
+          }
+          updateAnnotationsList();
+          showNotification('File reloaded');
+        }
+      } catch (err) {
+        // Ignore errors
+      }
+    }
+
+    // Start polling for changes
+    setInterval(checkForChanges, POLL_INTERVAL);
+
     // FILE_CONTENT will be injected by the server
   </script>
 </body>

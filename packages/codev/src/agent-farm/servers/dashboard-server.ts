@@ -1785,7 +1785,6 @@ const server = http.createServer(async (req, res) => {
         'node_modules',
         '.git',
         'dist',
-        '.builders',
         '__pycache__',
         '.next',
         '.nuxt',

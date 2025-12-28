@@ -245,6 +245,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Handle file mtime check (GET /api/mtime) - for auto-reload
+  if (req.method === 'GET' && req.url?.startsWith('/api/mtime')) {
+    try {
+      const stat = fs.statSync(fullFilePath);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mtime: stat.mtimeMs }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to stat file' }));
+    }
+    return;
+  }
+
   // Handle STL content (GET /api/stl)
   if (req.method === 'GET' && req.url?.startsWith('/api/stl')) {
     if (!isSTL) {
