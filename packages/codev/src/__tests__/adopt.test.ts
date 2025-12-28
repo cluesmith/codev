@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { execSync } from 'node:child_process';
 
 // Mock readline to avoid interactive prompts
 vi.mock('node:readline', () => ({
@@ -17,14 +18,18 @@ vi.mock('node:readline', () => ({
   })),
 }));
 
-// Mock child_process spawn to avoid launching Claude
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({
-    on: vi.fn(),
-    stdout: null,
-    stderr: null,
-  })),
-}));
+// Mock child_process spawn to avoid launching Claude, but keep execSync for Ruler tests
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: vi.fn(() => ({
+      on: vi.fn(),
+      stdout: null,
+      stderr: null,
+    })),
+  };
+});
 
 // Mock chalk for cleaner test output
 vi.mock('chalk', () => ({
@@ -164,6 +169,85 @@ describe('adopt command', () => {
 
       // .codev-new should be created for merge
       expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(true);
+    });
+  });
+
+  describe('Ruler support', () => {
+    it('should create .ruler/codev.md for Ruler projects (no root files)', async () => {
+      const projectDir = path.join(testBaseDir, 'ruler-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      process.chdir(projectDir);
+
+      // Initialize Ruler project
+      execSync('npx @intellectronica/ruler init', { stdio: 'pipe' });
+
+      // Verify Ruler was initialized
+      expect(fs.existsSync(path.join(projectDir, '.ruler', 'ruler.toml'))).toBe(true);
+
+      // Run codev adopt
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true });
+
+      // Verify .ruler/codev.md was created
+      expect(fs.existsSync(path.join(projectDir, '.ruler', 'codev.md'))).toBe(true);
+
+      // Verify codev.md contains expected content
+      const codevMd = fs.readFileSync(path.join(projectDir, '.ruler', 'codev.md'), 'utf-8');
+      expect(codevMd).toContain('codev');
+
+      // Verify NO root files created (Ruler generates these via `apply`)
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md'))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, 'AGENTS.md'))).toBe(false);
+    });
+
+    it('should create .codev-new for existing .ruler/codev.md', async () => {
+      const projectDir = path.join(testBaseDir, 'ruler-conflict');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      process.chdir(projectDir);
+
+      // Initialize Ruler project
+      execSync('npx @intellectronica/ruler init', { stdio: 'pipe' });
+
+      // Create existing .ruler/codev.md with custom content
+      const originalContent = '# My Custom Codev Config';
+      fs.writeFileSync(path.join(projectDir, '.ruler', 'codev.md'), originalContent);
+
+      // Run codev adopt
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true });
+
+      // Verify original .ruler/codev.md was preserved
+      const content = fs.readFileSync(path.join(projectDir, '.ruler', 'codev.md'), 'utf-8');
+      expect(content).toBe(originalContent);
+
+      // Verify .codev-new was created for merge
+      expect(fs.existsSync(path.join(projectDir, '.ruler', 'codev.md.codev-new'))).toBe(true);
+    });
+
+    it('E2E: ruler apply should include codev config in CLAUDE.md', async () => {
+      const projectDir = path.join(testBaseDir, 'ruler-e2e');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      process.chdir(projectDir);
+
+      // Initialize Ruler project
+      execSync('npx @intellectronica/ruler init', { stdio: 'pipe' });
+
+      // Run codev adopt
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true });
+
+      // Run ruler apply to generate CLAUDE.md
+      execSync('npx @intellectronica/ruler apply', { stdio: 'pipe' });
+
+      // Verify CLAUDE.md was generated and contains codev content
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md'))).toBe(true);
+      const claudeMd = fs.readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf-8');
+
+      // Should contain content from .ruler/codev.md
+      expect(claudeMd).toContain('codev');
     });
   });
 });
