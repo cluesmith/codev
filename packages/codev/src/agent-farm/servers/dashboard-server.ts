@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 const execAsync = promisify(exec);
 import { Command } from 'commander';
 import type { DashboardState, Annotation, UtilTerminal, Builder } from '../types.js';
+import { getPortForTerminal } from '../utils/terminal-ports.js';
 import {
   loadState,
   getAnnotations,
@@ -1136,39 +1137,7 @@ terminalProxy.on('error', (err, req, res) => {
   }
 });
 
-/**
- * Get the ttyd port for a given terminal ID
- * Returns null if the terminal is not found
- *
- * Terminal ID formats:
- * - 'architect' -> architect terminal
- * - 'builder-{id}' -> builder terminal
- * - 'util-{id}' -> utility terminal
- */
-function getPortForTerminal(terminalId: string): number | null {
-  const state = loadState();
-
-  // Architect terminal
-  if (terminalId === 'architect') {
-    return state.architect?.port || null;
-  }
-
-  // Builder terminal (format: builder-{id})
-  if (terminalId.startsWith('builder-')) {
-    const builderId = terminalId.replace('builder-', '');
-    const builder = state.builders.find(b => b.id === builderId);
-    return builder?.port || null;
-  }
-
-  // Utility terminal (format: util-{id})
-  if (terminalId.startsWith('util-')) {
-    const utilId = terminalId.replace('util-', '');
-    const util = state.utils.find(u => u.id === utilId);
-    return util?.port || null;
-  }
-
-  return null;
-}
+// getPortForTerminal is imported from utils/terminal-ports.ts (Spec 0062)
 
 // Security: Validate request origin
 function isRequestAllowed(req: http.IncomingMessage): boolean {
@@ -2011,7 +1980,7 @@ const server = http.createServer(async (req, res) => {
     const terminalMatch = url.pathname.match(/^\/terminal\/([^/]+)(\/.*)?$/);
     if (terminalMatch) {
       const terminalId = terminalMatch[1];
-      const terminalPort = getPortForTerminal(terminalId);
+      const terminalPort = getPortForTerminal(terminalId, loadState());
 
       if (!terminalPort) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2076,7 +2045,7 @@ server.on('upgrade', (req, socket, head) => {
 
   if (terminalMatch) {
     const terminalId = terminalMatch[1];
-    const terminalPort = getPortForTerminal(terminalId);
+    const terminalPort = getPortForTerminal(terminalId, loadState());
 
     if (terminalPort) {
       // Rewrite URL to strip /terminal/:id prefix

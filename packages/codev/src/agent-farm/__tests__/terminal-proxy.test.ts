@@ -1,44 +1,13 @@
 /**
  * Tests for terminal proxy functionality (Spec 0062 - Secure Remote Access)
  *
- * Tests the getPortForTerminal helper function logic that maps terminal IDs to ports.
- * The actual HTTP/WebSocket proxy is tested via integration tests.
+ * Tests the getPortForTerminal helper function that maps terminal IDs to ports.
+ * Imports the production code from utils/terminal-ports.ts for accurate testing.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { DashboardState } from '../types.js';
-
-// Mock the state module
-vi.mock('../state.js', () => ({
-  loadState: vi.fn(),
-}));
-
-const { loadState } = await import('../state.js');
-
-// Re-implement getPortForTerminal for unit testing
-// (In production this lives in dashboard-server.ts, but we extract the logic here)
-function getPortForTerminal(terminalId: string, state: DashboardState): number | null {
-  // Architect terminal
-  if (terminalId === 'architect') {
-    return state.architect?.port || null;
-  }
-
-  // Builder terminal (format: builder-{id})
-  if (terminalId.startsWith('builder-')) {
-    const builderId = terminalId.replace('builder-', '');
-    const builder = state.builders.find(b => b.id === builderId);
-    return builder?.port || null;
-  }
-
-  // Utility terminal (format: util-{id})
-  if (terminalId.startsWith('util-')) {
-    const utilId = terminalId.replace('util-', '');
-    const util = state.utils.find(u => u.id === utilId);
-    return util?.port || null;
-  }
-
-  return null;
-}
+import { getPortForTerminal } from '../utils/terminal-ports.js';
 
 describe('getPortForTerminal', () => {
   const mockState: DashboardState = {
@@ -88,11 +57,6 @@ describe('getPortForTerminal', () => {
     ],
     annotations: [],
   };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(loadState).mockReturnValue(mockState);
-  });
 
   describe('architect terminal', () => {
     it('should return architect port for "architect" ID', () => {
