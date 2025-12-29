@@ -322,8 +322,8 @@
       scene.add(directionalLight2);
 
       // Grid on XY plane (Z=0) for Z-up coordinate system
-      // GridHelper(size, divisions) - 10mm squares, 200mm total = 20 divisions
-      gridHelper = new THREE.GridHelper(200, 20, 0x808080, 0x808080);
+      // 260mm with 26 divisions (27 lines) - roughly print bed size, 10mm squares
+      gridHelper = new THREE.GridHelper(260, 26, 0x808080, 0x808080);
       gridHelper.rotation.x = Math.PI / 2;  // Rotate from XZ to XY plane
       gridHelper.material.transparent = true;
       gridHelper.material.opacity = 0.5;
@@ -467,11 +467,9 @@
       orthoCamera.bottom = -frustumSize / 2;
       orthoCamera.updateProjectionMatrix();
 
-      // Scale grid and axes to model size - always 10mm squares, minimum 10 squares
-      const minGridSize = 100;  // 10 squares of 10mm
-      const neededSize = Math.ceil(maxDim * 2 / 100) * 100; // Round up to nearest 100mm
-      const gridSize = Math.max(minGridSize, neededSize);
-      const divisions = gridSize / 10;  // 10mm per square
+      // Grid: 260mm with 26 divisions (27 lines) - roughly print bed size, 10mm squares
+      const gridSize = 260;
+      const divisions = 26;  // 27 grid lines, 10mm per square
       scene.remove(gridHelper);
       gridHelper = new THREE.GridHelper(gridSize, divisions, 0x808080, 0x808080);
       gridHelper.rotation.x = Math.PI / 2;  // Rotate from XZ to XY plane
