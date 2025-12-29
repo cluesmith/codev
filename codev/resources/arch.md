@@ -370,16 +370,57 @@ The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that prov
 | `GET` | `/open-file?path=...&line=...` | Handle terminal file clicks |
 | `GET` | `/file?path=...` | Read file contents |
 | `GET` | `/api/projectlist-exists` | Check for projectlist.md |
+| `GET` | `/api/files` | Get file tree for file browser (v1.5.0+) |
+| `GET` | `/api/activity-summary` | Get daily activity summary (v1.5.0+) |
+| `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
+| `GET` | `/terminal/:id` | Reverse proxy to ttyd terminal (v1.5.2+) |
 
-#### Dashboard UI (`templates/dashboard-split.html`)
+#### Dashboard UI (`templates/dashboard/`)
 
-The dashboard is a single-page application with:
+As of v1.5.0 (Spec 0060), the dashboard is modularized into separate JS/CSS files:
+
+```
+templates/dashboard/
+├── index.html         # Main entry point
+├── css/               # Stylesheets (~1900 lines total)
+│   ├── variables.css  # CSS custom properties, reset
+│   ├── layout.css     # Header, main layout, panes
+│   ├── tabs.css       # Tab bar, buttons, status dots
+│   ├── statusbar.css  # Footer status bar
+│   ├── dialogs.css    # Dialog overlays, context menus, toasts
+│   ├── activity.css   # Activity summary modal and tab
+│   ├── projects.css   # Projects kanban grid
+│   ├── files.css      # File tree, Cmd+P palette, search
+│   └── utilities.css  # Hidden, sr-only, scrollbar utilities
+└── js/                # JavaScript (~2700 lines total)
+    ├── state.js       # Global state management
+    ├── utils.js       # escapeHtml, showToast, helpers
+    ├── tabs.js        # Tab rendering, selection, iframe management
+    ├── dialogs.js     # Close dialogs, context menu, file dialog
+    ├── projects.js    # Project list parsing, kanban grid
+    ├── files.js       # File tree browser, search, Cmd+P palette
+    ├── activity.js    # Activity summary tab/modal rendering
+    └── main.js        # init(), polling, keyboard shortcuts, hot reload
+```
+
+**Hot Reload (Development)**:
+- Server-side `/api/hot-reload` endpoint returns file modification times
+- Client polls every 2 seconds
+- CSS changes: Instant reload via stylesheet link replacement
+- JS changes: Saves UI state to sessionStorage, reloads page, restores state
 
 **Tab System**:
 - Architect tab (always present when running)
 - Builder tabs (one per spawned builder)
 - Utility tabs (shell terminals)
 - File tabs (annotation viewers)
+- Activity tab (daily summary)
+
+**Dashboard Features** (v1.5.0+):
+- **File Browser** (Spec 0055): VSCode-like collapsible folder tree
+- **File Search** (Spec 0058): Cmd+P palette with fuzzy matching
+- **Daily Activity Summary** (Spec 0059): Clock button showing commits, PRs, active time, AI summary
+- **Two-Column Layout** (Spec 0057): Tabs list + file browser, quick action buttons
 
 **Status Indicators**:
 ```javascript
@@ -624,6 +665,9 @@ const CONFIG = {
 | `commands/send.ts` | Send message to builder |
 | `commands/rename.ts` | Rename builder/utility |
 | `commands/tower.ts` | Multi-project overview |
+| `commands/tunnel.ts` | Secure remote access setup (v1.5.2+) |
+| `commands/architect.ts` | Direct CLI access to architect session (v1.5.0+) |
+| `commands/db.ts` | Database inspection/management (dump, query, reset, stats) |
 
 #### Database Layer
 
@@ -664,10 +708,14 @@ const CONFIG = {
 
 | File | Purpose |
 |------|---------|
-| `templates/dashboard-split.html` | Main dashboard UI |
-| `templates/dashboard.html` | Legacy dashboard (fallback) |
+| `templates/dashboard/` | Modular dashboard (v1.5.0+) with JS/CSS split |
+| `templates/dashboard-split.html` | Legacy monolithic dashboard |
+| `templates/dashboard.html` | Legacy basic dashboard (fallback) |
 | `templates/annotate.html` | File annotation viewer |
+| `templates/open.html` | File viewer with image support (v1.5.0+) |
+| `templates/3d-viewer.html` | STL/3MF 3D model viewer (v1.5.0+) |
 | `templates/ttyd-index.html` | Custom terminal with file clicks (optional) |
+| `templates/tower.html` | Multi-project overview |
 
 ---
 
@@ -778,6 +826,7 @@ codev/                                  # Project root (git repository)
 │   │   │   ├── update.ts               # codev update
 │   │   │   ├── eject.ts                # codev eject
 │   │   │   ├── tower.ts                # codev tower
+│   │   │   ├── generate-image.ts       # codev generate-image (v1.5.0+)
 │   │   │   └── consult/                # consult command
 │   │   │       └── index.ts            # Multi-agent consultation
 │   │   ├── agent-farm/                 # af subcommands
@@ -1015,9 +1064,23 @@ af send 0003 "msg" --file diff.txt    # Include file content
 af send 0003 "msg" --interrupt        # Send Ctrl+C first
 af send 0003 "msg" --raw              # Skip structured formatting
 
+# Direct CLI access (v1.5.0+)
+af architect                  # Start/attach to architect tmux session
+af architect "initial prompt" # With initial prompt
+
+# Remote access (v1.5.2+)
+af tunnel                     # Show SSH command for remote access
+af start --remote user@host   # Start on remote machine with tunnel
+
 # Port management (multi-project support)
 af ports list                 # List port allocations
 af ports cleanup              # Remove stale allocations
+
+# Database inspection
+af db dump                    # Dump state database
+af db query "SQL"             # Run SQL query
+af db reset                   # Reset state database
+af db stats                   # Show database statistics
 
 # Command overrides
 af start --architect-cmd "claude --model opus"
@@ -1888,16 +1951,35 @@ A well-maintained Codev architecture should enable:
 ## Recent Infrastructure Changes
 
 See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
+
+**v1.5.x (Florence)**:
+- Dashboard modularization with hot reload (Spec 0060)
+- Daily activity summary (Spec 0059)
+- File search with Cmd+P palette (Spec 0058)
+- Dashboard tab overhaul with two-column layout (Spec 0057)
+- Consult types refactor (Spec 0056)
+- Dashboard file browser (Spec 0055)
+- Generate image tool (Spec 0054)
+- Image support in `af open` (Spec 0053)
+- STL/3MF 3D model viewer (Spec 0061)
+- Secure remote access with SSH tunneling (Spec 0062)
+- Direct CLI access to architect session (Spec 0002-TICK-001)
+
+**v1.4.x (Eichler)**:
+- Agent Farm internals documentation (Spec 0052)
+- Codev cheatsheet (Spec 0051)
+- Dashboard polish (Spec 0050)
+
+**Earlier**:
 - SQLite state management (Spec 0031)
 - Consult tool (Spec 0011-0012)
 - Architecture consolidation (Spec 0008)
-- Dashboard polish (Spec 0050)
 - Tab bar status indicators (Spec 0019)
 - Terminal file click (Spec 0009)
 
 ---
 
-**Last Updated**: 2025-12-11 (Maintenance Run 0003)
-**Version**: Post-v1.2.0-Cordoba + Protocol-Compliant Structure
-**Changes**: Added Quick Start, Quick Tracing Guide, Glossary, Invariants & Constraints, System-Wide Patterns
+**Last Updated**: 2025-12-28 (Maintenance Run 0004)
+**Version**: Post-v1.5.8-Florence
+**Changes**: Updated Dashboard UI section for modularization, added new API endpoints, templates, CLI commands, and v1.5.x feature list
 **Next Review**: After next significant feature implementation

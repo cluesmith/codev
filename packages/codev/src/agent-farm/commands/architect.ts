@@ -5,34 +5,17 @@
  * requiring the full dashboard. Uses tmux for session persistence.
  */
 
-import { existsSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run, commandExists } from '../utils/shell.js';
+import { findRolePromptPath } from '../utils/roles.js';
 
 const SESSION_NAME = 'af-architect';
 
-/**
- * Find and load a role file - tries local codev/roles/ first, falls back to bundled
- * TODO: Extract to shared utils (duplicated from start.ts)
- */
-function loadRolePrompt(config: { codevDir: string; bundledRolesDir: string }, roleName: string): { path: string; source: string } | null {
-  // Try local project first
-  const localPath = resolve(config.codevDir, 'roles', `${roleName}.md`);
-  if (existsSync(localPath)) {
-    return { path: localPath, source: 'local' };
-  }
-
-  // Fall back to bundled
-  const bundledPath = resolve(config.bundledRolesDir, `${roleName}.md`);
-  if (existsSync(bundledPath)) {
-    return { path: bundledPath, source: 'bundled' };
-  }
-
-  return null;
-}
+// findRolePromptPath imported from ../utils/roles.js
 
 /**
  * Check if a tmux session exists
@@ -74,7 +57,7 @@ async function createAndAttach(args: string[]): Promise<void> {
   await ensureDirectories(config);
 
   // Load architect role
-  const role = loadRolePrompt(config, 'architect');
+  const role = findRolePromptPath(config, 'architect');
   if (!role) {
     fatal('Architect role not found. Expected at: codev/roles/architect.md');
   }
@@ -135,7 +118,7 @@ async function createLayoutAndAttach(args: string[]): Promise<void> {
   await ensureDirectories(config);
 
   // Load architect role
-  const role = loadRolePrompt(config, 'architect');
+  const role = findRolePromptPath(config, 'architect');
   if (!role) {
     fatal('Architect role not found. Expected at: codev/roles/architect.md');
   }

@@ -181,36 +181,9 @@ async function refreshFilesTree() {
 }
 
 // Open file from tree click
+// Uses shared openFileTab from utils.js (Maintenance Run 0004)
 async function openFileFromTree(filePath) {
-  try {
-    const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
-    if (existingTab) {
-      selectTab(existingTab.id);
-      refreshFileTab(existingTab.id);
-      return;
-    }
-
-    const response = await fetch('/api/tabs/file', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: filePath })
-    });
-
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-
-    await refresh();
-
-    const newTab = tabs.find(t => t.type === 'file' && t.path === filePath);
-    if (newTab) {
-      selectTab(newTab.id);
-    }
-
-    showToast(`Opened ${getFileName(filePath)}`, 'success');
-  } catch (err) {
-    showToast('Failed to open file: ' + err.message, 'error');
-  }
+  await openFileTab(filePath, { showSwitchToast: false });
 }
 
 // ========================================

@@ -51,143 +51,17 @@ async function renderActivityTab() {
 }
 
 // Render activity tab content
+// Uses shared renderActivityContentHtml from utils.js (Maintenance Run 0004)
 function renderActivityTabContent(data) {
   const content = document.getElementById('tab-content');
-
-  if (data.commits.length === 0 && data.prs.length === 0 && data.builders.length === 0) {
-    content.innerHTML = `
-      <div class="activity-tab-container">
-        <div class="activity-empty">
-          <p>No activity recorded today</p>
-          <p style="font-size: 12px; margin-top: 8px;">Make some commits or create PRs to see your daily summary!</p>
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  const hours = Math.floor(data.timeTracking.activeMinutes / 60);
-  const mins = data.timeTracking.activeMinutes % 60;
-  const uniqueBranches = new Set(data.commits.map(c => c.branch)).size;
-  const mergedPrs = data.prs.filter(p => p.state === 'MERGED').length;
-
-  const formatTime = (isoString) => {
-    if (!isoString) return '--';
-    const date = new Date(isoString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  let html = '<div class="activity-tab-container"><div class="activity-summary">';
-
-  if (data.aiSummary) {
-    html += `<div class="activity-ai-summary">${escapeHtml(data.aiSummary)}</div>`;
-  }
-
-  html += `
-    <div class="activity-section">
-      <h4>Activity</h4>
-      <ul>
-        <li>${data.commits.length} commits across ${uniqueBranches} branch${uniqueBranches !== 1 ? 'es' : ''}</li>
-        <li>${data.files.length} files modified</li>
-        <li>${data.prs.length} PR${data.prs.length !== 1 ? 's' : ''} created${mergedPrs > 0 ? `, ${mergedPrs} merged` : ''}</li>
-      </ul>
-    </div>
-  `;
-
-  if (data.projectChanges && data.projectChanges.length > 0) {
-    html += `
-      <div class="activity-section">
-        <h4>Projects Touched</h4>
-        <ul>
-          ${data.projectChanges.map(p => `<li>${escapeHtml(p.id)}: ${escapeHtml(p.title)} (${escapeHtml(p.oldStatus)} → ${escapeHtml(p.newStatus)})</li>`).join('')}
-        </ul>
-      </div>
-    `;
-  }
-
-  html += `
-    <div class="activity-section">
-      <h4>Time</h4>
-      <p><span class="activity-time-value">~${hours}h ${mins}m</span> active time</p>
-      <p>First activity: ${formatTime(data.timeTracking.firstActivity)}</p>
-      <p>Last activity: ${formatTime(data.timeTracking.lastActivity)}</p>
-    </div>
-  `;
-
-  html += `
-    <div class="activity-actions">
-      <button class="btn" onclick="copyActivityToClipboard()">Copy to Clipboard</button>
-    </div>
-  `;
-
-  html += '</div></div>';
-  content.innerHTML = html;
+  content.innerHTML = renderActivityContentHtml(data, { isTab: true });
 }
 
 // Render activity summary content (for modal)
+// Uses shared renderActivityContentHtml from utils.js (Maintenance Run 0004)
 function renderActivitySummary(data) {
   const content = document.getElementById('activity-content');
-
-  if (data.commits.length === 0 && data.prs.length === 0 && data.builders.length === 0) {
-    content.innerHTML = `
-      <div class="activity-empty">
-        <p>No activity recorded today</p>
-        <p style="font-size: 12px; margin-top: 8px;">Make some commits or create PRs to see your daily summary!</p>
-      </div>
-    `;
-    return;
-  }
-
-  const hours = Math.floor(data.timeTracking.activeMinutes / 60);
-  const mins = data.timeTracking.activeMinutes % 60;
-  const uniqueBranches = new Set(data.commits.map(c => c.branch)).size;
-  const mergedPrs = data.prs.filter(p => p.state === 'MERGED').length;
-
-  const formatTime = (isoString) => {
-    if (!isoString) return '--';
-    const date = new Date(isoString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  let html = '<div class="activity-summary">';
-
-  if (data.aiSummary) {
-    html += `<div class="activity-ai-summary">${escapeHtml(data.aiSummary)}</div>`;
-  }
-
-  html += `
-    <div class="activity-section">
-      <h4>Activity</h4>
-      <ul>
-        <li>${data.commits.length} commits across ${uniqueBranches} branch${uniqueBranches !== 1 ? 'es' : ''}</li>
-        <li>${data.files.length} files modified</li>
-        <li>${data.prs.length} PR${data.prs.length !== 1 ? 's' : ''} created${mergedPrs > 0 ? `, ${mergedPrs} merged` : ''}</li>
-      </ul>
-    </div>
-  `;
-
-  if (data.projectChanges && data.projectChanges.length > 0) {
-    html += `
-      <div class="activity-section">
-        <h4>Projects Touched</h4>
-        <ul>
-          ${data.projectChanges.map(p => `<li>${escapeHtml(p.id)}: ${escapeHtml(p.title)} (${escapeHtml(p.oldStatus)} → ${escapeHtml(p.newStatus)})</li>`).join('')}
-        </ul>
-      </div>
-    `;
-  }
-
-  html += `
-    <div class="activity-section">
-      <h4>Time</h4>
-      <p><span class="activity-time-value">~${hours}h ${mins}m</span> active time</p>
-      <p>First activity: ${formatTime(data.timeTracking.firstActivity)}</p>
-      <p>Last activity: ${formatTime(data.timeTracking.lastActivity)}</p>
-    </div>
-  `;
-
-  html += '</div>';
-  content.innerHTML = html;
+  content.innerHTML = renderActivityContentHtml(data, { isTab: false });
 }
 
 // Close activity modal

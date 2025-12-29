@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+import { escapeHtml } from '../utils/server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,17 +52,7 @@ function findTemplatePath(filename: string): string {
 
 const templatePath = findTemplatePath('open.html');
 
-/**
- * Escape string for safe HTML insertion
- */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// escapeHtml imported from ../utils/server-utils.js
 
 // Validate file exists
 if (!fs.existsSync(fullFilePath)) {

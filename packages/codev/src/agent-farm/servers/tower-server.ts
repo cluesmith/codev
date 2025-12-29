@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { getGlobalDb } from '../db/index.js';
+import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -415,67 +416,7 @@ function findTemplatePath(): string | null {
   return null;
 }
 
-/**
- * HTML-escape a string to prevent XSS
- */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/**
- * Parse JSON body from request
- */
-function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    let size = 0;
-
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > maxSize) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      body += chunk.toString();
-    });
-
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-
-    req.on('error', reject);
-  });
-}
-
-/**
- * Security: Validate request origin
- */
-function isRequestAllowed(req: http.IncomingMessage): boolean {
-  const host = req.headers.host;
-  const origin = req.headers.origin;
-
-  // Host check (prevent DNS rebinding attacks)
-  if (host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-    return false;
-  }
-
-  // Origin check for CORS requests
-  if (origin && !origin.startsWith('http://localhost') && !origin.startsWith('http://127.0.0.1')) {
-    return false;
-  }
-
-  return true;
-}
+// escapeHtml, parseJsonBody, isRequestAllowed imported from ../utils/server-utils.js
 
 // Find template path
 const templatePath = findTemplatePath();

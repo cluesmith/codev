@@ -494,36 +494,12 @@ function openInNewTabFromMenu(tabId) {
 }
 
 // Handle keyboard navigation in overflow menu
+// Uses shared handleMenuKeydown from utils.js (Maintenance Run 0004)
 function handleOverflowMenuKeydown(event, tabId) {
-  const menu = document.getElementById('overflow-menu');
-  const items = Array.from(menu.querySelectorAll('.overflow-menu-item'));
-  const currentIndex = items.findIndex(item => item === document.activeElement);
-
-  switch (event.key) {
-    case 'ArrowDown':
-      event.preventDefault();
-      const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
-      items[nextIndex].focus();
-      break;
-    case 'ArrowUp':
-      event.preventDefault();
-      const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
-      items[prevIndex].focus();
-      break;
-    case 'Enter':
-    case ' ':
-      event.preventDefault();
-      selectTabFromMenu(tabId);
-      break;
-    case 'Escape':
-      event.preventDefault();
-      hideOverflowMenu();
-      document.getElementById('overflow-btn').focus();
-      break;
-    case 'Tab':
-      hideOverflowMenu();
-      break;
-  }
+  handleMenuKeydown(event, 'overflow-menu', 'overflow-menu-item', hideOverflowMenu, {
+    onEnter: () => selectTabFromMenu(tabId),
+    focusOnEscape: 'overflow-btn'
+  });
 }
 
 // Open tab content in a new browser tab

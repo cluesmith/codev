@@ -15,6 +15,7 @@ import { checkCoreDependencies } from '../utils/deps.js';
 import { loadState, setArchitect } from '../state.js';
 import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan-handler.js';
 import { getPortBlock } from '../utils/port-registry.js';
+import { loadRolePrompt } from '../utils/roles.js';
 
 /**
  * Rename a Claude session after it starts
@@ -72,24 +73,7 @@ export function parseRemote(remote: string): ParsedRemote {
   return { user: match[1], host: match[2], remotePath: match[3] };
 }
 
-/**
- * Find and load a role file - tries local codev/roles/ first, falls back to bundled
- */
-function loadRolePrompt(config: { codevDir: string; bundledRolesDir: string }, roleName: string): { content: string; source: string } | null {
-  // Try local project first
-  const localPath = resolve(config.codevDir, 'roles', `${roleName}.md`);
-  if (existsSync(localPath)) {
-    return { content: readFileSync(localPath, 'utf-8'), source: 'local' };
-  }
-
-  // Fall back to bundled
-  const bundledPath = resolve(config.bundledRolesDir, `${roleName}.md`);
-  if (existsSync(bundledPath)) {
-    return { content: readFileSync(bundledPath, 'utf-8'), source: 'bundled' };
-  }
-
-  return null;
-}
+// loadRolePrompt imported from ../utils/roles.js
 
 /**
  * Check if passwordless SSH is configured for a host

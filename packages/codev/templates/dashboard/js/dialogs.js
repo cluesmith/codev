@@ -108,38 +108,9 @@ function hideContextMenu() {
 }
 
 // Handle keyboard navigation in context menu
+// Uses shared handleMenuKeydown from utils.js (Maintenance Run 0004)
 function handleContextMenuKeydown(event) {
-  const menu = document.getElementById('context-menu');
-  const items = Array.from(menu.querySelectorAll('.context-menu-item'));
-  const currentIndex = items.findIndex(item => item === document.activeElement);
-
-  switch (event.key) {
-    case 'ArrowDown':
-      event.preventDefault();
-      const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
-      items[nextIndex].focus();
-      break;
-    case 'ArrowUp':
-      event.preventDefault();
-      const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
-      items[prevIndex].focus();
-      break;
-    case 'Enter':
-    case ' ':
-      event.preventDefault();
-      const actionName = event.target.dataset.action;
-      if (actionName && typeof window[actionName] === 'function') {
-        window[actionName]();
-      }
-      break;
-    case 'Escape':
-      event.preventDefault();
-      hideContextMenu();
-      break;
-    case 'Tab':
-      hideContextMenu();
-      break;
-  }
+  handleMenuKeydown(event, 'context-menu', 'context-menu-item', hideContextMenu);
 }
 
 function closeActiveTab() {
@@ -186,27 +157,11 @@ function setFilePath(path) {
   document.getElementById('file-path-input').focus();
 }
 
+// Uses shared openFileTab from utils.js (Maintenance Run 0004)
 async function openFile() {
   const path = document.getElementById('file-path-input').value.trim();
   if (!path) return;
-
-  try {
-    const response = await fetch('/api/tabs/file', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path })
-    });
-
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-
-    hideFileDialog();
-    await refresh();
-    showToast(`Opened ${path}`, 'success');
-  } catch (err) {
-    showToast('Failed to open file: ' + err.message, 'error');
-  }
+  await openFileTab(path, { onSuccess: hideFileDialog });
 }
 
 // Spawn worktree builder

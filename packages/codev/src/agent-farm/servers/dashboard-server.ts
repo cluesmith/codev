@@ -20,6 +20,11 @@ import { Command } from 'commander';
 import type { DashboardState, Annotation, UtilTerminal, Builder } from '../types.js';
 import { getPortForTerminal } from '../utils/terminal-ports.js';
 import {
+  escapeHtml,
+  parseJsonBody,
+  isRequestAllowed as isRequestAllowedBase,
+} from '../utils/server-utils.js';
+import {
   loadState,
   getAnnotations,
   addAnnotation,
@@ -107,15 +112,7 @@ function getProjectName(projectRoot: string): string {
   return '...' + baseName.slice(-(maxLength - 3));
 }
 
-// HTML-escape a string to prevent XSS
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// escapeHtml imported from ../utils/server-utils.js
 
 /**
  * Find a template in the agent-farm templates directory
@@ -521,33 +518,7 @@ function spawnWorktreeBuilder(
   }
 }
 
-// Parse JSON body from request with size limit
-function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    let size = 0;
-
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > maxSize) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      body += chunk.toString();
-    });
-
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-
-    req.on('error', reject);
-  });
-}
+// parseJsonBody imported from ../utils/server-utils.js
 
 // Validate path is within project root (prevent path traversal)
 // Handles URL-encoded dots (%2e), symlinks, and other encodings
@@ -1139,28 +1110,13 @@ terminalProxy.on('error', (err, req, res) => {
 
 // getPortForTerminal is imported from utils/terminal-ports.ts (Spec 0062)
 
-// Security: Validate request origin
+// Security: Validate request origin (uses base from server-utils with insecureRemoteMode override)
 function isRequestAllowed(req: http.IncomingMessage): boolean {
   // Skip all security checks in insecure remote mode
   if (insecureRemoteMode) {
     return true;
   }
-
-  const host = req.headers.host;
-  const origin = req.headers.origin;
-
-  // Host check (prevent DNS rebinding attacks)
-  if (host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-    return false;
-  }
-
-  // Origin check (prevent CSRF from external sites)
-  // Note: CLI tools/curl might not send Origin, so we only block if Origin is present and invalid
-  if (origin && !origin.startsWith('http://localhost') && !origin.startsWith('http://127.0.0.1')) {
-    return false;
-  }
-
-  return true;
+  return isRequestAllowedBase(req);
 }
 
 // Create server
@@ -1686,12 +1642,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // HTML-escape the file path for safe display
-      const escapeHtml = (str: string) => str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+      // HTML-escape the file path for safe display (uses imported escapeHtml from server-utils.js)
       const safeFilePath = escapeHtml(filePath);
       const safeLineDisplay = line ? ':' + escapeHtml(line) : '';
 

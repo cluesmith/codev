@@ -26,38 +26,9 @@ function setupBroadcastChannel() {
 }
 
 // Open a file from a BroadcastChannel message
+// Uses shared openFileTab from utils.js (Maintenance Run 0004)
 async function openFileFromMessage(filePath, lineNumber) {
-  try {
-    const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
-    if (existingTab) {
-      selectTab(existingTab.id);
-      refreshFileTab(existingTab.id);
-      showToast(`Switched to ${getFileName(filePath)}`, 'success');
-      return;
-    }
-
-    const response = await fetch('/api/tabs/file', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: filePath })
-    });
-
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-
-    const result = await response.json();
-    await refresh();
-
-    const newTab = tabs.find(t => t.type === 'file' && (t.path === filePath || t.annotationId === result.id));
-    if (newTab) {
-      selectTab(newTab.id);
-    }
-
-    showToast(`Opened ${getFileName(filePath)}${lineNumber ? ':' + lineNumber : ''}`, 'success');
-  } catch (err) {
-    showToast('Failed to open file: ' + err.message, 'error');
-  }
+  await openFileTab(filePath, { lineNumber });
 }
 
 // Refresh state from API

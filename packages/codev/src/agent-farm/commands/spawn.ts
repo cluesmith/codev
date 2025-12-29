@@ -16,6 +16,7 @@ import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/inde
 import { logger, fatal } from '../utils/logger.js';
 import { run, spawnDetached, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
+import { loadRolePrompt } from '../utils/roles.js';
 
 /**
  * Generate a short 4-character base64-encoded ID
@@ -101,24 +102,7 @@ function getSpawnMode(options: SpawnOptions): BuilderType {
   throw new Error('No mode specified');
 }
 
-/**
- * Find and load a role file - tries local codev/roles/ first, falls back to bundled
- */
-function loadRolePrompt(config: Config, roleName: string): { content: string; source: string } | null {
-  // Try local project first
-  const localPath = resolve(config.codevDir, 'roles', `${roleName}.md`);
-  if (existsSync(localPath)) {
-    return { content: readFileSync(localPath, 'utf-8'), source: 'local' };
-  }
-
-  // Fall back to bundled
-  const bundledPath = resolve(config.bundledRolesDir, `${roleName}.md`);
-  if (existsSync(bundledPath)) {
-    return { content: readFileSync(bundledPath, 'utf-8'), source: 'bundled' };
-  }
-
-  return null;
-}
+// loadRolePrompt imported from ../utils/roles.js
 
 /**
  * Load a protocol-specific role if it exists
