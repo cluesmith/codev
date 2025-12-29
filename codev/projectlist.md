@@ -235,6 +235,28 @@ Projects currently in development (conceived through committed), sorted by prior
 
 # Low Priority
 
+  - id: "0064"
+    title: "Dashboard Tab State Preservation"
+    summary: "Cache iframes instead of recreating them to preserve scroll position and edit mode when switching tabs"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0064-dashboard-tab-state-preservation.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [dashboard, ui, dx]
+    timestamps:
+      conceived_at: "2025-12-29T08:15:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Annotation tabs lose state when switching tabs. Need iframe caching with LRU eviction."
+
 
 
 
@@ -560,7 +582,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0064** - Reserve this number for your next project
+**0065** - Reserve this number for your next project
 
 ---
 
