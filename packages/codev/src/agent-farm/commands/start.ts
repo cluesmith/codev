@@ -99,7 +99,9 @@ export function parseRemote(remote: string): ParsedRemote {
   if (!match) {
     throw new Error(`Invalid remote format: ${remote}. Use user@host or user@host:/path`);
   }
-  return { user: match[1], host: match[2], remotePath: match[3] };
+  // Strip trailing slash to avoid duplicate port allocations (e.g., /path/ vs /path)
+  const remotePath = match[3]?.replace(/\/$/, '');
+  return { user: match[1], host: match[2], remotePath };
 }
 
 // loadRolePrompt imported from ../utils/roles.js

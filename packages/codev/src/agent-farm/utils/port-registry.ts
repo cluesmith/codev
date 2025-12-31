@@ -195,7 +195,8 @@ export function listAllocations(): Array<{
     basePort: alloc.base_port,
     registered: alloc.registered_at,
     lastUsed: alloc.last_used_at,
-    exists: projectExists(alloc.project_path),
+    // Remote keys are synthetic - can't check if they exist, assume true
+    exists: alloc.project_path.startsWith('remote:') || projectExists(alloc.project_path),
     pid: alloc.pid ?? undefined,
     pidAlive: alloc.pid ? isProcessAlive(alloc.pid) : undefined,
   }));
@@ -206,7 +207,8 @@ export function listAllocations(): Array<{
  * Note: This function is now synchronous
  */
 export function removeAllocation(projectRoot: string): boolean {
-  const normalizedPath = resolve(projectRoot);
+  // Don't resolve synthetic keys like "remote:..."
+  const normalizedPath = projectRoot.startsWith('remote:') ? projectRoot : resolve(projectRoot);
   const db = getGlobalDb();
 
   const result = db.prepare('DELETE FROM port_allocations WHERE project_path = ?').run(normalizedPath);
