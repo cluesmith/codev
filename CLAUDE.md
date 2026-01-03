@@ -133,6 +133,24 @@ The user's time is valuable. Stay responsive.
 
 ## Protocol Selection Guide
 
+### Use BUGFIX for (GitHub issue fixes):
+- Bug reported as a **GitHub Issue**
+- Fix is isolated (< 300 LOC net diff)
+- No spec/plan artifacts needed
+- Single builder can fix independently
+- Examples:
+  - "Login fails when username has spaces" (#42)
+  - "consult-types/ not copied during adopt" (#127)
+  - Crash on invalid input
+  - Missing validation
+
+**BUGFIX uses GitHub Issues as source of truth**, not projectlist.md. See `codev/protocols/bugfix/protocol.md`.
+
+```bash
+af spawn --issue 42      # Spawn builder for issue
+af cleanup --issue 42    # Cleanup after merge
+```
+
 ### Use TICK for (amendments to existing specs):
 - **Amendments** to an existing SPIDER spec that is already `integrated`
 - Small scope (< 300 lines of new/changed code)
