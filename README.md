@@ -29,8 +29,8 @@ Codev is an operating system for structured human-AI collaboration. You write sp
 npm install -g @cluesmith/codev
 
 # 2. Initialize a project
-mkdir my-project && cd my-project
-codev init
+codev init # for new projects
+codev adopt # for existing projects
 
 # 3. Verify setup
 codev doctor
