@@ -14,6 +14,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0009] Check for existing work (PRs, git history) before implementing from scratch
 - [From bug reports] Tests passing does NOT mean requirements are met - manually verify the actual user experience before marking complete
 - [From 0043] Establish baselines BEFORE optimizing - before/after data makes impact clear
+- [From 0065/PR-133] NEVER skip CMAP reviews - they catch issues manual review misses (e.g., stale commits in PR, scope creep)
 
 ## Security
 
