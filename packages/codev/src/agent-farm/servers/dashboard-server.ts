@@ -1486,6 +1486,49 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Check if tab process is running (Bugfix #132)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/tabs\/[^/]+\/running$/)) {
+      const match = url.pathname.match(/^\/api\/tabs\/([^/]+)\/running$/);
+      if (!match) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Invalid tab ID');
+        return;
+      }
+      const tabId = decodeURIComponent(match[1]);
+      let running = false;
+      let found = false;
+
+      // Check if it's a shell tab
+      if (tabId.startsWith('shell-')) {
+        const utilId = tabId.replace('shell-', '');
+        const tabUtils = getUtils();
+        const util = tabUtils.find((u) => u.id === utilId);
+        if (util) {
+          found = true;
+          running = isProcessRunning(util.pid);
+        }
+      }
+
+      // Check if it's a builder tab
+      if (tabId.startsWith('builder-')) {
+        const builderId = tabId.replace('builder-', '');
+        const builder = getBuilder(builderId);
+        if (builder) {
+          found = true;
+          running = isProcessRunning(builder.pid);
+        }
+      }
+
+      if (found) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ running }));
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ running: false }));
+      }
+      return;
+    }
+
     // API: Close tab
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/tabs/')) {
       const tabId = decodeURIComponent(url.pathname.replace('/api/tabs/', ''));

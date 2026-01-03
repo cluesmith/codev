@@ -1,7 +1,7 @@
 // Dialog, Context Menu, and Tab Close Functions
 
 // Close tab
-function closeTab(tabId, event) {
+async function closeTab(tabId, event) {
   const tab = tabs.find(t => t.id === tabId);
   if (!tab) return;
 
@@ -17,7 +17,23 @@ function closeTab(tabId, event) {
     return;
   }
 
-  // Show confirmation for builders and shells
+  // Check if process is still running before showing confirmation (Bugfix #132)
+  // If the shell/builder already exited, close immediately without confirmation
+  try {
+    const response = await fetch(`/api/tabs/${encodeURIComponent(tabId)}/running`);
+    if (response.ok) {
+      const { running } = await response.json();
+      if (!running) {
+        // Process already exited, close without confirmation
+        doCloseTab(tabId);
+        return;
+      }
+    }
+  } catch {
+    // On error, fall through to show confirmation (safer default)
+  }
+
+  // Show confirmation for builders and shells with running processes
   pendingCloseTabId = tabId;
   const dialog = document.getElementById('close-dialog');
   const title = document.getElementById('close-dialog-title');

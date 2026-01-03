@@ -274,3 +274,32 @@ DASHBOARD_DIR="node_modules/@cluesmith/codev/templates/dashboard"
   run grep -q "realpathSync" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
   assert_success
 }
+
+# === Tab Running Status API Tests (Bugfix #132) ===
+
+@test "dashboard-server has GET /api/tabs/:tabId/running endpoint" {
+  # Check for the comment marker and the regex pattern (escaped slashes in compiled regex)
+  run grep -q "Check if tab process is running" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "running endpoint checks shell process status" {
+  run grep -q "isProcessRunning" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "running endpoint returns JSON with running field" {
+  run grep -q 'JSON.stringify({ running' node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "closeTab function checks running status before confirmation" {
+  run grep -q "/running" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
+
+@test "closeTab skips confirmation for exited processes" {
+  # Check that closeTab closes without confirmation when not running
+  run grep -q "!running" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
