@@ -169,4 +169,34 @@ wait
 
 ---
 
+## Dashboard API
+
+The Agent Farm dashboard exposes REST endpoints for programmatic access.
+
+### File Operations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/files` | GET | List project files as tree structure |
+| `/api/files` | POST | Create a new file |
+
+**Create File** (`POST /api/files`):
+```json
+// Request
+{ "path": "codev/specs/0042-new-feature.md", "content": "" }
+
+// Response (201 Created)
+{ "success": true, "path": "codev/specs/0042-new-feature.md" }
+
+// Error responses:
+// 400 - Missing path
+// 403 - Path outside project (security)
+// 409 - File already exists
+// 500 - Write failed
+```
+
+**Security**: Paths are validated to prevent traversal attacks (`..`, absolute paths, symlinks pointing outside project).
+
+---
+
 *For detailed documentation, see the full protocol files in `codev/protocols/`.*
