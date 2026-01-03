@@ -132,8 +132,8 @@ describe('template utilities', () => {
       expect(isUpdatableFile('plans/0001-feature.md')).toBe(false);
     });
 
-    it('should match config.json as updatable', () => {
-      expect(isUpdatableFile('config.json')).toBe(true);
+    it('should NOT match config.json as updatable (user configuration)', () => {
+      expect(isUpdatableFile('config.json')).toBe(false);
     });
 
     it('should match resources/commands as updatable', () => {
