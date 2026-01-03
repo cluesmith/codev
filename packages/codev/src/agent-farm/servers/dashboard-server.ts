@@ -1830,6 +1830,74 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Create a new file (Bugfix #131)
+    if (req.method === 'POST' && url.pathname === '/api/files') {
+      const body = await parseJsonBody(req);
+      const filePath = body.path as string;
+      const content = (body.content as string) || '';
+
+      if (!filePath) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing path' }));
+        return;
+      }
+
+      // Validate path is within project root (prevent path traversal)
+      const fullPath = validatePathWithinProject(filePath);
+      if (!fullPath) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Path must be within project directory' }));
+        return;
+      }
+
+      // Check if file already exists
+      if (fs.existsSync(fullPath)) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'File already exists' }));
+        return;
+      }
+
+      // Additional security: validate parent directories don't symlink outside project
+      // Find the deepest existing parent and ensure it's within project
+      let checkDir = path.dirname(fullPath);
+      while (checkDir !== projectRoot && !fs.existsSync(checkDir)) {
+        checkDir = path.dirname(checkDir);
+      }
+      if (fs.existsSync(checkDir) && checkDir !== projectRoot) {
+        try {
+          const realParent = fs.realpathSync(checkDir);
+          if (!realParent.startsWith(projectRoot + path.sep) && realParent !== projectRoot) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Path must be within project directory' }));
+            return;
+          }
+        } catch {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Cannot resolve path' }));
+          return;
+        }
+      }
+
+      try {
+        // Create parent directories if they don't exist
+        const parentDir = path.dirname(fullPath);
+        if (!fs.existsSync(parentDir)) {
+          fs.mkdirSync(parentDir, { recursive: true });
+        }
+
+        // Write the file
+        fs.writeFileSync(fullPath, content, 'utf-8');
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, path: filePath }));
+      } catch (err) {
+        console.error('Error creating file:', (err as Error).message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to create file: ' + (err as Error).message }));
+      }
+      return;
+    }
+
     // API: Get daily activity summary (Spec 0059)
     if (req.method === 'GET' && url.pathname === '/api/activity-summary') {
       try {

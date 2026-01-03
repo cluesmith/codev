@@ -164,6 +164,74 @@ async function openFile() {
   await openFileTab(path, { onSuccess: hideFileDialog });
 }
 
+// ========================================
+// Create File Dialog (Bugfix #131)
+// ========================================
+
+// Show create file dialog
+function showCreateFileDialog() {
+  document.getElementById('create-file-dialog').classList.remove('hidden');
+  const input = document.getElementById('create-file-path-input');
+  input.value = '';
+  input.focus();
+}
+
+// Hide create file dialog
+function hideCreateFileDialog() {
+  document.getElementById('create-file-dialog').classList.add('hidden');
+  document.getElementById('create-file-path-input').value = '';
+}
+
+// Set quick path for create file dialog
+function setCreateFilePath(path) {
+  const input = document.getElementById('create-file-path-input');
+  input.value = path;
+  input.focus();
+  // Move cursor to end
+  input.setSelectionRange(path.length, path.length);
+}
+
+// Create a new file
+async function createFile() {
+  const input = document.getElementById('create-file-path-input');
+  const filePath = input.value.trim();
+
+  if (!filePath) {
+    showToast('Please enter a file path', 'error');
+    return;
+  }
+
+  // Basic validation - prevent absolute paths and path traversal
+  if (filePath.startsWith('/') || filePath.includes('..')) {
+    showToast('Invalid file path', 'error');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content: '' })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      showToast(result.error || 'Failed to create file', 'error');
+      return;
+    }
+
+    hideCreateFileDialog();
+    showToast(`Created ${filePath}`, 'success');
+
+    // Refresh files tree and open the new file
+    await refreshFilesTree();
+    await openFileTab(filePath, { showSwitchToast: false });
+  } catch (err) {
+    showToast('Network error: ' + err.message, 'error');
+  }
+}
+
 // Spawn worktree builder
 async function spawnBuilder() {
   try {

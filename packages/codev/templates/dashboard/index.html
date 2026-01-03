@@ -82,6 +82,23 @@
     </div>
   </div>
 
+  <!-- Create file dialog (Bugfix #131) -->
+  <div class="dialog-overlay hidden" id="create-file-dialog">
+    <div class="dialog">
+      <h3>Create New File</h3>
+      <div class="quick-paths">
+        <button class="quick-path" onclick="setCreateFilePath('codev/specs/')">codev/specs/</button>
+        <button class="quick-path" onclick="setCreateFilePath('codev/plans/')">codev/plans/</button>
+        <button class="quick-path" onclick="setCreateFilePath('src/')">src/</button>
+      </div>
+      <input type="text" id="create-file-path-input" placeholder="Enter file path (e.g., src/utils/helper.ts)" />
+      <div class="dialog-actions">
+        <button class="btn" onclick="hideCreateFileDialog()">Cancel</button>
+        <button class="btn btn-primary" onclick="createFile()">Create</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Close confirmation dialog -->
   <div class="dialog-overlay hidden" id="close-dialog">
     <div class="dialog">

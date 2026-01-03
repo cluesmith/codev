@@ -217,3 +217,60 @@ DASHBOARD_DIR="node_modules/@cluesmith/codev/templates/dashboard"
   run grep -rq "preventDefault" "$DASHBOARD_DIR/js/"
   assert_success
 }
+
+# === Create File Dialog Tests (Bugfix #131) ===
+
+@test "create file dialog exists in dashboard HTML" {
+  run grep -q "create-file-dialog" "$DASHBOARD_DIR/index.html"
+  assert_success
+}
+
+@test "create file dialog has input field" {
+  run grep -q "create-file-path-input" "$DASHBOARD_DIR/index.html"
+  assert_success
+}
+
+@test "create file has showCreateFileDialog function" {
+  run grep -q "showCreateFileDialog" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
+
+@test "create file has hideCreateFileDialog function" {
+  run grep -q "hideCreateFileDialog" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
+
+@test "create file has createFile function" {
+  run grep -q "function createFile\|async function createFile" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
+
+@test "create file calls POST /api/files" {
+  run grep -q "/api/files" "$DASHBOARD_DIR/js/dialogs.js"
+  assert_success
+}
+
+@test "files section header has create file button" {
+  run grep -q "showCreateFileDialog" "$DASHBOARD_DIR/js/main.js"
+  assert_success
+}
+
+@test "dashboard-server has POST /api/files endpoint" {
+  run grep -q "req.method === 'POST' && url.pathname === '/api/files'" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "create file API validates path traversal" {
+  run grep -q "validatePathWithinProject" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "create file API creates parent directories" {
+  run grep -q "recursive.*true" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "create file API validates parent symlinks" {
+  run grep -q "realpathSync" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}

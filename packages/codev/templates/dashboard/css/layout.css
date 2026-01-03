@@ -43,6 +43,15 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
+.btn-primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
 /* Main content area */
 .main {
   display: flex;

@@ -128,6 +128,7 @@ function renderDashboardTabContent() {
           <div class="dashboard-section-header" onclick="toggleSection('files')">
             <h3><span class="collapse-icon">▼</span> Files</h3>
             <div class="header-actions" onclick="event.stopPropagation()">
+              <button onclick="showCreateFileDialog()" title="Create New File">+</button>
               <button onclick="refreshFilesTree()" title="Refresh">↻</button>
               <button onclick="collapseAllFolders()" title="Collapse All">⊟</button>
               <button onclick="expandAllFolders()" title="Expand All">⊞</button>
@@ -243,6 +244,7 @@ function setupKeyboardShortcuts() {
     if (e.key === 'Escape') {
       hideFileDialog();
       hideCloseDialog();
+      hideCreateFileDialog();
       hideContextMenu();
       hideOverflowMenu();
       const activityModal = document.getElementById('activity-modal');
@@ -258,6 +260,9 @@ function setupKeyboardShortcuts() {
     if (e.key === 'Enter') {
       if (!document.getElementById('file-dialog').classList.contains('hidden')) {
         openFile();
+      }
+      if (!document.getElementById('create-file-dialog').classList.contains('hidden')) {
+        createFile();
       }
     }
 
