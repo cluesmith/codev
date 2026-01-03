@@ -334,6 +334,70 @@ describe('doctor command', () => {
       expect(hasWarning).toBe(true);
     });
 
+    it('should display warning details in summary (regression test for #129)', async () => {
+      // Create a codev directory with missing consult-types/ to trigger a warning
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+
+      process.chdir(testBaseDir);
+
+      // Mock all core dependencies as present
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Issue #129: Summary should show WHICH dependencies have warnings
+      // Look for warning details in the summary section (after the separator)
+      const separatorIndex = logOutput.findIndex(line => line.includes('============'));
+      const summaryLines = logOutput.slice(separatorIndex);
+
+      // Should mention "issues detected" (not vague "below recommended version")
+      const hasIssuesMessage = summaryLines.some(line =>
+        line.includes('issue') && line.includes('detected')
+      );
+      expect(hasIssuesMessage).toBe(true);
+
+      // Should list the specific warning with its name
+      const hasSpecificWarning = summaryLines.some(line =>
+        line.includes('Project structure') && line.includes('consult-types')
+      );
+      expect(hasSpecificWarning).toBe(true);
+    });
+
     it('should show no warnings when properly migrated', async () => {
       // Create a properly migrated codev directory
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
