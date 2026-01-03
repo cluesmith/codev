@@ -444,12 +444,19 @@ function checkNpmDependencies(): CheckResult {
   };
 }
 
+interface WarningInfo {
+  name: string;
+  issue: string;
+  recommendation?: string;
+}
+
 /**
  * Main doctor function
  */
 export async function doctor(): Promise<number> {
   let errors = 0;
   let warnings = 0;
+  const warningDetails: WarningInfo[] = [];
 
   console.log(chalk.bold('Codev Doctor') + ' - Checking your environment');
   console.log('============================================');
@@ -463,13 +470,27 @@ export async function doctor(): Promise<number> {
     const result = checkDependency(dep);
     printStatus(dep.name, result);
     if (result.status === 'fail') errors++;
-    if (result.status === 'warn') warnings++;
+    if (result.status === 'warn') {
+      warnings++;
+      warningDetails.push({
+        name: dep.name,
+        issue: result.version,
+        recommendation: result.note || (dep.minVersion ? `upgrade to >= ${dep.minVersion}` : undefined),
+      });
+    }
   }
 
   // Check npm package
   const npmResult = checkNpmDependencies();
   printStatus('@cluesmith/codev', npmResult);
-  if (npmResult.status === 'warn') warnings++;
+  if (npmResult.status === 'warn') {
+    warnings++;
+    warningDetails.push({
+      name: '@cluesmith/codev',
+      issue: npmResult.version,
+      recommendation: npmResult.note,
+    });
+  }
 
   console.log('');
 
@@ -511,6 +532,11 @@ export async function doctor(): Promise<number> {
         aiCliCount++;
       } else if (result.status === 'fail') {
         warnings++;
+        warningDetails.push({
+          name: cliName,
+          issue: result.version,
+          recommendation: result.note,
+        });
       }
     }
 
@@ -536,6 +562,10 @@ export async function doctor(): Promise<number> {
       for (const warning of structureCheck.warnings) {
         console.log(`  ${chalk.yellow('⚠')} ${warning}`);
         warnings++;
+        warningDetails.push({
+          name: 'Project structure',
+          issue: warning,
+        });
       }
     }
     console.log('');
@@ -549,9 +579,16 @@ export async function doctor(): Promise<number> {
     console.log('Install missing dependencies and run this command again.');
     return 1;
   } else if (warnings > 0) {
-    console.log(chalk.yellow.bold('OK with warnings') + ` - ${warnings} dependency/dependencies below recommended version`);
+    const issueWord = warnings === 1 ? 'issue' : 'issues';
+    console.log(chalk.yellow.bold('OK with warnings') + ` - ${warnings} ${issueWord} detected`);
     console.log('');
-    console.log('Consider upgrading for best experience.');
+    for (const w of warningDetails) {
+      let line = `  ${chalk.yellow('⚠')} ${w.name}: ${w.issue}`;
+      if (w.recommendation) {
+        line += chalk.blue(` → ${w.recommendation}`);
+      }
+      console.log(line);
+    }
     return 0;
   } else {
     console.log(chalk.green.bold('ALL OK') + ' - Your environment is ready for Codev!');
