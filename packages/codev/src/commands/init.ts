@@ -14,6 +14,7 @@ import {
   createUserDirs,
   copyProjectlist,
   copyProjectlistArchive,
+  copyConsultTypes,
   copyResourceTemplates,
   copyRootFiles,
   createGitignore,
@@ -99,6 +100,17 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   const resourcesResult = copyResourceTemplates(targetDir, skeletonDir);
   for (const file of resourcesResult.copied) {
     console.log(chalk.green('  +'), `codev/resources/${file}`);
+    fileCount++;
+  }
+
+  // Copy consult-types (review type prompts)
+  const consultTypesResult = copyConsultTypes(targetDir, skeletonDir);
+  if (consultTypesResult.directoryCreated) {
+    console.log(chalk.green('  +'), 'codev/consult-types/');
+    fileCount++;
+  }
+  for (const file of consultTypesResult.copied) {
+    console.log(chalk.green('  +'), `codev/consult-types/${file}`);
     fileCount++;
   }
 

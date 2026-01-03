@@ -157,6 +157,61 @@ export function copyProjectlistArchive(
   return { copied: true };
 }
 
+interface CopyConsultTypesOptions {
+  skipExisting?: boolean;
+}
+
+interface CopyConsultTypesResult {
+  copied: string[];
+  skipped: string[];
+  directoryCreated: boolean;
+}
+
+/**
+ * Copy consult-types directory from skeleton.
+ * Contains review type prompts that users can customize.
+ */
+export function copyConsultTypes(
+  targetDir: string,
+  skeletonDir: string,
+  options: CopyConsultTypesOptions = {}
+): CopyConsultTypesResult {
+  const { skipExisting = false } = options;
+  const consultTypesDir = path.join(targetDir, 'codev', 'consult-types');
+  const srcDir = path.join(skeletonDir, 'consult-types');
+  const copied: string[] = [];
+  const skipped: string[] = [];
+  let directoryCreated = false;
+
+  // Ensure consult-types directory exists
+  if (!fs.existsSync(consultTypesDir)) {
+    fs.mkdirSync(consultTypesDir, { recursive: true });
+    directoryCreated = true;
+  }
+
+  // If source directory doesn't exist, return early
+  if (!fs.existsSync(srcDir)) {
+    return { copied, skipped, directoryCreated };
+  }
+
+  // Copy all .md files from skeleton consult-types
+  const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.md'));
+  for (const file of files) {
+    const destPath = path.join(consultTypesDir, file);
+    const srcPath = path.join(srcDir, file);
+
+    if (skipExisting && fs.existsSync(destPath)) {
+      skipped.push(file);
+      continue;
+    }
+
+    fs.copyFileSync(srcPath, destPath);
+    copied.push(file);
+  }
+
+  return { copied, skipped, directoryCreated };
+}
+
 interface CopyResourceTemplatesOptions {
   skipExisting?: boolean;
 }

@@ -11,6 +11,7 @@ import {
   createUserDirs,
   copyProjectlist,
   copyProjectlistArchive,
+  copyConsultTypes,
   copyResourceTemplates,
   copyRootFiles,
   createGitignore,
@@ -51,6 +52,17 @@ describe('Scaffold Utilities', () => {
     fs.writeFileSync(
       path.join(mockSkeletonDir, 'templates', 'AGENTS.md'),
       '# {{PROJECT_NAME}} Instructions\n\nAgents template'
+    );
+
+    // Create mock consult-types directory
+    fs.mkdirSync(path.join(mockSkeletonDir, 'consult-types'), { recursive: true });
+    fs.writeFileSync(
+      path.join(mockSkeletonDir, 'consult-types', 'spec-review.md'),
+      '# Spec Review\n\nSpec review prompt'
+    );
+    fs.writeFileSync(
+      path.join(mockSkeletonDir, 'consult-types', 'impl-review.md'),
+      '# Impl Review\n\nImpl review prompt'
     );
   });
 
@@ -152,6 +164,49 @@ describe('Scaffold Utilities', () => {
 
       expect(result.copied).toBe(false);
       expect(result.templateNotFound).toBe(true);
+    });
+  });
+
+  describe('copyConsultTypes', () => {
+    it('should copy all .md files from consult-types directory', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      const result = copyConsultTypes(targetDir, mockSkeletonDir);
+
+      expect(result.copied).toContain('spec-review.md');
+      expect(result.copied).toContain('impl-review.md');
+      expect(result.directoryCreated).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types', 'impl-review.md'))).toBe(true);
+    });
+
+    it('should skip existing files in adopt mode', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(path.join(targetDir, 'codev', 'consult-types'), { recursive: true });
+      fs.writeFileSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'), 'custom content');
+
+      const result = copyConsultTypes(targetDir, mockSkeletonDir, { skipExisting: true });
+
+      expect(result.copied).toContain('impl-review.md');
+      expect(result.skipped).toContain('spec-review.md');
+      expect(result.directoryCreated).toBe(false);
+      // Verify existing file was not overwritten
+      expect(fs.readFileSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'), 'utf-8')).toBe('custom content');
+    });
+
+    it('should handle missing source directory gracefully', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(targetDir, { recursive: true });
+      const emptySkeletonDir = path.join(tempDir, 'empty-skeleton');
+      fs.mkdirSync(emptySkeletonDir, { recursive: true });
+
+      const result = copyConsultTypes(targetDir, emptySkeletonDir);
+
+      expect(result.copied).toEqual([]);
+      expect(result.directoryCreated).toBe(true);
+      // Directory should still be created even if source is missing
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types'))).toBe(true);
     });
   });
 

@@ -15,6 +15,7 @@ import {
   createUserDirs,
   copyProjectlist,
   copyProjectlistArchive,
+  copyConsultTypes,
   copyResourceTemplates,
   copyRootFiles,
   updateGitignore,
@@ -131,6 +132,17 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   const resourcesResult = copyResourceTemplates(targetDir, skeletonDir, { skipExisting: true });
   for (const file of resourcesResult.copied) {
     console.log(chalk.green('  +'), `codev/resources/${file}`);
+    fileCount++;
+  }
+
+  // Copy consult-types - skip existing
+  const consultTypesResult = copyConsultTypes(targetDir, skeletonDir, { skipExisting: true });
+  if (consultTypesResult.directoryCreated) {
+    console.log(chalk.green('  +'), 'codev/consult-types/');
+    fileCount++;
+  }
+  for (const file of consultTypesResult.copied) {
+    console.log(chalk.green('  +'), `codev/consult-types/${file}`);
     fileCount++;
   }
 
