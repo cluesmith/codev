@@ -457,4 +457,286 @@ describe('doctor command', () => {
       expect(hasOk).toBe(true);
     });
   });
+
+  describe('AI model verification (Issue #128)', () => {
+    const testBaseDir = path.join(tmpdir(), `codev-doctor-ai-test-${Date.now()}`);
+    let originalCwd: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
+      process.chdir(testBaseDir);
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      if (fs.existsSync(testBaseDir)) {
+        fs.rmSync(testBaseDir, { recursive: true });
+      }
+    });
+
+    it('should provide actionable hints when Codex auth fails', async () => {
+      // Mock Codex CLI exists but login status fails
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
+        // Codex login status returns non-zero when not logged in
+        if (cmd === 'codex' && args?.includes('login')) {
+          return {
+            status: 1,
+            stdout: '',
+            stderr: 'Not logged in. Run `codex login` to authenticate.',
+            signal: null,
+            output: [null, '', 'Not logged in. Run `codex login` to authenticate.'],
+            pid: 0,
+          };
+        }
+
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+          'gemini': '0.1.0',
+          'codex': '0.60.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should show actionable hint for Codex
+      const hasActionableHint = logOutput.some(line =>
+        line.includes('Codex') && line.includes('codex login')
+      );
+      expect(hasActionableHint).toBe(true);
+    });
+
+    it('should show auth error with hint when API key related failure', async () => {
+      // Mock Claude CLI exists but auth fails with API key error
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
+        // Claude version check succeeds, but auth check fails with API key error
+        if (cmd === 'claude') {
+          // Version check (--version) succeeds
+          if (args?.includes('--version')) {
+            return {
+              status: 0,
+              stdout: '1.0.0',
+              stderr: '',
+              signal: null,
+              output: [null, '1.0.0', ''],
+              pid: 0,
+            };
+          }
+          // Auth check (--print) fails with API key error
+          return {
+            status: 1,
+            stdout: '',
+            stderr: 'Error: Invalid API key provided',
+            signal: null,
+            output: [null, '', 'Error: Invalid API key provided'],
+            pid: 0,
+          };
+        }
+
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should show auth error with actionable hint
+      const hasAuthError = logOutput.some(line =>
+        line.includes('Claude') && (line.includes('auth error') || line.includes('ANTHROPIC_API_KEY'))
+      );
+      expect(hasAuthError).toBe(true);
+    });
+
+    it('should show timeout message for network issues', async () => {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
+        // Gemini version check succeeds, but auth check times out
+        if (cmd === 'gemini') {
+          // Version check (--version) succeeds
+          if (args?.includes('--version')) {
+            return {
+              status: 0,
+              stdout: '0.1.0',
+              stderr: '',
+              signal: null,
+              output: [null, '0.1.0', ''],
+              pid: 0,
+            };
+          }
+          // Auth check (--yolo) times out
+          return {
+            status: null,
+            stdout: '',
+            stderr: '',
+            signal: 'SIGTERM',
+            output: [null, '', ''],
+            pid: 0,
+          };
+        }
+
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should show timeout with network hint
+      const hasTimeoutHint = logOutput.some(line =>
+        line.includes('Gemini') && (line.includes('timeout') || line.includes('network'))
+      );
+      expect(hasTimeoutHint).toBe(true);
+    });
+
+    it('should show operational when Codex login status succeeds', async () => {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
+        // Codex login status succeeds
+        if (cmd === 'codex' && args?.includes('login')) {
+          return {
+            status: 0,
+            stdout: 'Logged in as user@example.com',
+            stderr: '',
+            signal: null,
+            output: [null, 'Logged in as user@example.com', ''],
+            pid: 0,
+          };
+        }
+
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'tmux': 'tmux 3.4',
+          'ttyd': '1.7.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+          'gemini': '0.1.0',
+          'codex': '0.60.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      // Capture console.log output
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      // Should show Codex as operational
+      const hasOperational = logOutput.some(line =>
+        line.includes('Codex') && line.includes('operational')
+      );
+      expect(hasOperational).toBe(true);
+    });
+  });
 });
