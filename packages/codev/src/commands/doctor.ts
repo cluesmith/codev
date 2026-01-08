@@ -386,6 +386,27 @@ function findProjectRoot(): string | null {
 }
 
 /**
+ * Check if git remote is configured
+ */
+function checkGitRemote(): { hasRemote: boolean; remoteName?: string; remoteUrl?: string } {
+  try {
+    const result = spawnSync('git', ['remote', '-v'], { encoding: 'utf-8', timeout: 5000 });
+    if (result.status === 0 && result.stdout.trim()) {
+      const lines = result.stdout.trim().split('\n');
+      if (lines.length > 0) {
+        const match = lines[0].match(/^(\S+)\s+(\S+)/);
+        if (match) {
+          return { hasRemote: true, remoteName: match[1], remoteUrl: match[2] };
+        }
+      }
+    }
+    return { hasRemote: false };
+  } catch {
+    return { hasRemote: false };
+  }
+}
+
+/**
  * Check codev directory structure
  */
 function checkCodevStructure(projectRoot: string): { warnings: string[] } {
@@ -402,6 +423,12 @@ function checkCodevStructure(projectRoot: string): { warnings: string[] } {
   const oldReviewTypes = resolve(codevDir, 'roles', 'review-types');
   if (existsSync(oldReviewTypes)) {
     warnings.push('Deprecated: roles/review-types/ still exists. Move contents to consult-types/');
+  }
+
+  // Check for git remote (required for builders to create PRs)
+  const remoteCheck = checkGitRemote();
+  if (!remoteCheck.hasRemote) {
+    warnings.push('No git remote configured - builders cannot push branches or create PRs. Run: git remote add origin <url>');
   }
 
   return { warnings };

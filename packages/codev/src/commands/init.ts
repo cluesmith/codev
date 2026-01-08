@@ -143,8 +143,9 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   console.log(chalk.bold('Next steps:'));
   console.log('');
   console.log(`  cd ${projectBaseName}`);
-  console.log('  codev doctor           # Check dependencies');
-  console.log('  af start               # Start the architect dashboard');
+  console.log('  git remote add origin <url>  # Required for builders to create PRs');
+  console.log('  codev doctor                 # Check dependencies');
+  console.log('  af start                     # Start the architect dashboard');
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));
 }
