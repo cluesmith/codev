@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { parseRemote, isPortAvailable } from '../commands/start.js';
 import * as net from 'net';
+import * as state from '../state.js';
+import * as shell from '../utils/shell.js';
 
 describe('parseRemote', () => {
   it('should parse user@host format', () => {
@@ -95,5 +97,51 @@ describe('isPortAvailable', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+/**
+ * Tests for stale architect state recovery (Issue #148)
+ *
+ * These tests verify that the isProcessRunning check correctly identifies
+ * dead PIDs and allows recovery from stale state.
+ */
+describe('stale architect state recovery', () => {
+  it('isProcessRunning returns false for definitely-dead PID', async () => {
+    // PID 999999 is virtually guaranteed not to exist on any system
+    const result = await shell.isProcessRunning(999999);
+    expect(result).toBe(false);
+  });
+
+  it('isProcessRunning returns true for current process PID', async () => {
+    // Our own process is definitely running
+    const result = await shell.isProcessRunning(process.pid);
+    expect(result).toBe(true);
+  });
+
+  it('setArchitect(null) clears architect state', () => {
+    // Set up a mock architect state
+    const mockArchitect = {
+      port: 4501,
+      pid: 12345,
+      cmd: 'claude',
+      startedAt: '2024-01-01T00:00:00Z',
+      tmuxSession: 'af-architect-4501',
+    };
+
+    // First set the architect
+    state.setArchitect(mockArchitect);
+
+    // Verify it was set
+    const loaded = state.loadState();
+    expect(loaded.architect).not.toBeNull();
+    expect(loaded.architect?.pid).toBe(12345);
+
+    // Now clear it (simulating stale state recovery)
+    state.setArchitect(null);
+
+    // Verify it was cleared
+    const cleared = state.loadState();
+    expect(cleared.architect).toBeNull();
   });
 });
