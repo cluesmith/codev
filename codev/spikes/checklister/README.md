@@ -466,3 +466,236 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 2. **Add git hooks as backstop** - For non-Claude-Code environments
 3. **Consider opt-in** - Make enforcement configurable in `codev/config.json`
 4. **Instructional errors** - Error messages should tell agent what to do next
+
+---
+
+## Key Insight: Enforcement vs Execution
+
+### The Question
+
+"The blocking part works, but what about the execution part? The part that induces the creation of the spec or follows through with the IDE?"
+
+### The Answer
+
+**The checklister is for enforcement, not execution.** Workflow execution already exists in the Builder + Protocol combination:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     WORKFLOW EXECUTION                          │
+│                                                                 │
+│  af spawn --project 0070                                       │
+│       │                                                         │
+│       ▼                                                         │
+│  ┌──────────────────┐                                          │
+│  │  Builder Role    │ ← "Follow SPIDER protocol"               │
+│  │  (codev/roles/   │                                          │
+│  │   builder.md)    │                                          │
+│  └────────┬─────────┘                                          │
+│           │                                                     │
+│           ▼                                                     │
+│  ┌──────────────────┐                                          │
+│  │  SPIDER Protocol │ ← "Do S, then P, then IDE, then R"       │
+│  │  (codev/proto-   │                                          │
+│  │   cols/spider/)  │                                          │
+│  └────────┬─────────┘                                          │
+│           │                                                     │
+│           ▼                                                     │
+│  ┌──────────────────┐                                          │
+│  │  Spec File       │ ← "Build THIS specific thing"            │
+│  │  (codev/specs/   │                                          │
+│  │   0070-*.md)     │                                          │
+│  └──────────────────┘                                          │
+└────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────┐
+│                     ENFORCEMENT (CHECKLISTER)                   │
+│                                                                 │
+│  ┌──────────────────┐                                          │
+│  │  Hooks           │ ← Blocks wrong file edits per phase      │
+│  │  (.claude/hooks/ │                                          │
+│  │   guard.sh)      │                                          │
+│  └──────────────────┘                                          │
+│                                                                 │
+│  ┌──────────────────┐                                          │
+│  │  State File      │ ← Tracks what's done                     │
+│  │  (codev/check-   │                                          │
+│  │   lists/*.json)  │                                          │
+│  └──────────────────┘                                          │
+│                                                                 │
+│  ┌──────────────────┐                                          │
+│  │  Gate Commands   │ ← Validates phase transitions            │
+│  │  (/checklister   │                                          │
+│  │   gate <target>) │                                          │
+│  └──────────────────┘                                          │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Responsibilities
+
+| Component | Role | Already Exists? |
+|-----------|------|-----------------|
+| Builder Role | Tells Claude to follow SPIDER | ✓ Yes |
+| SPIDER Protocol | Defines phases and steps | ✓ Yes |
+| Spec File | Defines what to build | ✓ Yes |
+| **Checklister Hooks** | **Prevents deviation** | ✓ New |
+| **Checklister State** | **Tracks progress** | ✓ New |
+| **Checklister Gates** | **Validates transitions** | ✓ New |
+
+### Implication
+
+The checklister doesn't need to "induce" anything because:
+1. `af spawn` already loads Builder + Protocol + Spec
+2. The Builder role says "follow SPIDER"
+3. The Protocol defines each phase
+4. The checklister adds **guardrails** - it blocks deviation, doesn't drive execution
+
+This is the right separation of concerns:
+- **Execution**: Prompt-driven (Builder role + Protocol)
+- **Enforcement**: Hook-driven (Checklister guard)
+
+---
+
+## Final Spike Summary
+
+### What We Built
+
+1. **Skill**: `/checklister` commands for tracking progress
+2. **State**: `codev/checklists/*.json` for persistence
+3. **Enforcement**: Claude Code PreToolUse hooks blocking wrong file edits
+
+### What We Learned
+
+1. **Execution ≠ Enforcement**: The protocol already handles execution; checklister adds enforcement
+2. **Hooks are Claude-only**: Not portable to Codex/Gemini CLI
+3. **Phase-based gating works**: Blocking by file path per phase is effective
+4. **Context preservation**: Keep Builder as primary agent, don't fragment with agent layering
+5. **Architect-Builder split matters**: Builders don't do S+P phases - they start at Implement
+
+### Architect-Builder Implications
+
+The Architect-Builder pattern splits SPIDER across contexts:
+
+| Phase | Agent | Context | Checklister Scope |
+|-------|-------|---------|-------------------|
+| Specify | Architect | Main repo | Architect enforcement (if any) |
+| Plan | Architect | Main repo | Architect enforcement (if any) |
+| Implement | Builder | Worktree | **Builder enforcement** |
+| Defend | Builder | Worktree | **Builder enforcement** |
+| Evaluate | Builder | Worktree | **Builder enforcement** |
+| Review | Architect | Main repo | Architect enforcement (if any) |
+
+**Current implementation gap**: Hooks assume a single agent doing all phases. For production:
+
+1. **Builder hooks** should start at Implement phase (not Specify)
+2. **Builders should never edit** `codev/specs/*.md` or `codev/plans/*.md` (Architect's domain)
+3. **Architect enforcement** is separate (could use hooks in main repo, or just trust prompting)
+
+The spike tested enforcement in a builder worktree context, which is correct. But the phase rules need adjustment - a Builder shouldn't be in Specify/Plan phases at all.
+
+### Success Criteria Final Results
+
+| Test | Result | Evidence |
+|------|--------|----------|
+| Blocks phase transition when incomplete | **PASS** | Gate returns BLOCKED with missing items |
+| Allows transition when complete | **PASS** | Gate returns ALLOWED, updates phase |
+| State persists across sessions | **PASS** | JSON file in codev/checklists/ |
+| Clear feedback about missing items | **PASS** | Lists specific item IDs and labels |
+| Overhead feels reasonable | **TBD** | Needs full SPIDER run to evaluate |
+| **Blocks wrong file edits** | **PASS** | Hooks block src/* during Specify phase |
+
+### Recommendation for Production
+
+**Adopt the checklister for Claude Code environments** with:
+1. PreToolUse hooks for enforcement
+2. `/checklister` skill for state management
+3. Git hooks as backstop for other environments
+4. Configurable opt-in via `codev/config.json`
+
+---
+
+## Implementation Summary (End-to-End)
+
+### Files Changed/Created
+
+| File | Purpose | Location |
+|------|---------|----------|
+| `.claude/hooks/checklister-guard.sh` | Guard script for hook enforcement | Project root |
+| `.claude/settings.json` | Claude Code hook configuration | Project root |
+| `.claude/commands/checklister.md` | `/checklister` skill definition | Project root |
+| `codev/roles/builder.md` | Builder role with checklister section | codev/ |
+| `packages/codev/src/agent-farm/commands/spawn.ts` | Auto-init checklist at implement phase | Package |
+
+### Workflow (End-to-End)
+
+```
+ARCHITECT (main repo)
+══════════════════════════════════════════════════════════════
+
+1. Write spec: codev/specs/0070-feature.md
+2. Write plan: codev/plans/0070-feature.md
+3. Run: af spawn --project 0070
+
+                    │
+                    ▼
+
+BUILDER (worktree: .builders/0070/)
+══════════════════════════════════════════════════════════════
+
+4. Checklist auto-created at implement phase
+   └── codev/checklists/0070.json (current_phase: "implement")
+
+5. Hooks enforce:
+   ✗ Cannot edit codev/specs/*.md (blocked with helpful error)
+   ✗ Cannot edit codev/plans/*.md (blocked with helpful error)
+   ✓ Can edit src/, tests/, etc.
+
+6. Builder works through IDE loop:
+
+   IMPLEMENT
+   ├── Write implementation code
+   ├── /checklister complete <phase>_code_complete
+   ├── Consult experts
+   └── /checklister gate defend
+
+   DEFEND
+   ├── Write tests
+   ├── Run tests until passing
+   ├── /checklister complete <phase>_tests_passing
+   └── /checklister gate evaluate
+
+   EVALUATE
+   ├── Verify acceptance criteria
+   ├── Get user approval
+   ├── Create commit
+   └── /checklister gate next-phase (or review)
+
+7. Create PR when all phases complete
+
+                    │
+                    ▼
+
+ARCHITECT (main repo)
+══════════════════════════════════════════════════════════════
+
+8. Review PR
+9. Merge
+10. af cleanup --project 0070
+```
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| State location | `codev/checklists/<id>.json` | Per-project, persistent, human-readable |
+| Enforcement mechanism | Claude Code PreToolUse hooks | True enforcement, not honor system |
+| Builder initial phase | `implement` | Architect does S+P before spawning |
+| Context detection | Check for `.builders/` in path | Simple, reliable heuristic |
+| Spec/plan protection | Always blocked for Builders | Clean separation of concerns |
+
+### Follow-up Work (Not in Spike)
+
+1. **Adoption integration**: `codev adopt` should copy `.claude/` files
+2. **Git hooks backstop**: For non-Claude-Code environments
+3. **Opt-in configuration**: `codev/config.json` to enable/disable
+4. **Stage-level enforcement**: Currently only phase-level (I/D/E all allowed)
+5. **Auto-detect evidence**: Parse git commits to auto-mark items
