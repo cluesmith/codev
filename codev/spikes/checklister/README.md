@@ -350,20 +350,119 @@ The SPIDER protocol (`codev/protocols/spider/protocol.md`) has been updated with
 
 Gate targets: `plan`, `implement`, `defend`, `evaluate`, `next-phase`, `review`
 
-### Recommendations for Next Steps
+---
 
-1. **Test with real SPIDER workflow**
-   - Use checklister for an actual spec (e.g., tower theme toggle)
-   - Measure actual friction
+## Phase 2: True Enforcement via Claude Code Hooks
 
-2. **Consider auto-completion triggers**
-   - Watch git commits for certain patterns
-   - Auto-mark items when evidence detected
+### The Problem with Honor System
 
-3. **Add progress visualization**
-   - Show progress bar in status output
-   - Track time spent per phase
+Initial design relied on Claude voluntarily:
+1. Maintaining the state file
+2. Checking gates before transitions
+3. Not skipping steps
 
-4. **Integration with af dashboard**
-   - Show checklister status in builder panel
-   - Visual progress indicator
+**This is not enforcement - it's honor system.** Claude can rationalize skipping steps.
+
+### Solution: Claude Code PreToolUse Hooks
+
+Claude Code has hooks that intercept tool calls BEFORE they execute. If the hook returns exit code 2, the tool call is **blocked**.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    BUILDER                          │
+│  (maintains full context, executes entire SPIDER)   │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       ▼
+              ┌────────────────┐
+              │  PreToolUse    │
+              │  Hook          │
+              │  (Edit/Write)  │
+              └────────┬───────┘
+                       │
+              ┌────────▼────────┐
+              │  checklister-   │
+              │  guard.sh       │
+              │  (validates     │
+              │   phase rules)  │
+              └─────────────────┘
+                       │
+            ┌──────────┴──────────┐
+            │                     │
+       [ALLOWED]             [BLOCKED]
+       exit 0                exit 2 + stderr
+```
+
+### Files Created
+
+1. **`.claude/hooks/checklister-guard.sh`** - Guard script that:
+   - Reads current phase from `codev/checklists/*.json`
+   - Validates file path against phase rules
+   - Returns exit 2 with instructional error if blocked
+
+2. **`.claude/settings.json`** - Hook configuration:
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [{
+         "matcher": "Edit|Write",
+         "hooks": [{"type": "command", "command": "...guard.sh"}]
+       }]
+     }
+   }
+   ```
+
+### Phase Rules
+
+| Phase | Allowed Files |
+|-------|--------------|
+| Specify | `codev/specs/*.md`, `codev/checklists/*`, `.claude/*` |
+| Plan | Above + `codev/plans/*.md` |
+| Implement/Defend/Evaluate | All files |
+| Review | All files |
+
+### Test Results
+
+Guard script correctly blocks:
+```
+⚠️ BLOCKED by Checklister
+
+Current phase: SPECIFY
+Attempted to edit: src/test-file.ts
+
+In Specify phase, you can only edit:
+  - codev/specs/*.md
+  - codev/checklists/*
+
+To proceed to Plan phase, complete all spec_* items and run:
+  /checklister gate plan
+```
+
+**Note:** Hooks load at session start. Must restart Claude Code after adding settings.json.
+
+### Portability Limitation
+
+| CLI | Hooks Support | True Enforcement |
+|-----|--------------|------------------|
+| Claude Code | ✓ PreToolUse | ✓ Yes |
+| Codex | ✗ No hooks | ✗ No |
+| Gemini CLI | ✗ No hooks | ✗ No |
+
+**Claude Code hooks are not portable.** Other CLIs would need different enforcement (git hooks as backstop).
+
+### Consultation Insights
+
+Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
+- **Keep Builder as primary** (maintains context)
+- **Checklister as validator, not orchestrator**
+- **Enforcement at boundaries** (hooks, git)
+- **Don't fragment context** with agent layering
+
+### Recommendations for Production
+
+1. **Test in new session** - Hooks only load at session start
+2. **Add git hooks as backstop** - For non-Claude-Code environments
+3. **Consider opt-in** - Make enforcement configurable in `codev/config.json`
+4. **Instructional errors** - Error messages should tell agent what to do next
