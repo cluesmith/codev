@@ -155,6 +155,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Time-boxed spike (4-6h) to validate Ralph-inspired SPIDER where Builder runs entire S→P→I→D→E→R lifecycle with human approval gates."
 
+  - id: "0073"
+    title: "Porch - Protocol Orchestrator"
+    summary: "Standalone CLI that runs SPIDER/TICK/BUGFIX protocols as interactive REPL with state machine enforcement and human approval gates"
+    status: implementing
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0073-porch-protocol-orchestrator.md
+      plan: codev/plans/0073-porch-protocol-orchestrator.md
+      review: null
+    dependencies: ["0072"]
+    tags: [porch, workflow, ralph, v2]
+    timestamps:
+      conceived_at: "2026-01-19T10:00:00-08:00"
+      specified_at: "2026-01-19T12:00:00-08:00"
+      planned_at: "2026-01-19T14:00:00-08:00"
+      implementing_at: "2026-01-19T16:00:00-08:00"
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af."
+
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
     summary: "Spike to validate CODEV_HQ architecture: WebSocket connection, status sync, remote approvals"
