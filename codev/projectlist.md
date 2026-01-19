@@ -133,10 +133,32 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
+  - id: "0071"
+    title: "Ralph-SPIDER Integration Spike"
+    summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: ["0069", "0070"]
+    tags: [spike, workflow, ralph, v2]
+    timestamps:
+      conceived_at: "2026-01-19T10:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Time-boxed spike (4-6h) to validate Ralph-inspired SPIDER where Builder runs entire S→P→I→D→E→R lifecycle with human approval gates."
+
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
     summary: "Spike to validate CODEV_HQ architecture: WebSocket connection, status sync, remote approvals"
-    status: conceived
+    status: committed
     priority: high
     release: v2.0.0
     files:
@@ -158,7 +180,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0069"
     title: "Checklister Agent Spike"
     summary: "Spike to build a checklister agent that enforces SPIDER protocol compliance"
-    status: conceived
+    status: committed
     priority: high
     release: v2.0.0
     files:
@@ -725,7 +747,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0071** - Reserve this number for your next project
+**0072** - Reserve this number for your next project
 
 ---
 
