@@ -94,50 +94,6 @@ function renameClaudeSession(sessionName: string, displayName: string): void {
 }
 
 /**
- * Initialize checklister state for a builder
- * Builders start at the "implement" phase (Architect has already done S+P)
- */
-function initBuilderChecklist(worktreePath: string, projectId: string, specName: string, protocol: string = 'spider'): void {
-  const checklistDir = resolve(worktreePath, 'codev', 'checklists');
-  const checklistFile = resolve(checklistDir, `${projectId}.json`);
-
-  // Create directory if needed
-  if (!existsSync(checklistDir)) {
-    mkdirSync(checklistDir, { recursive: true });
-  }
-
-  // Create initial state - builders start at implement phase
-  const initialState = {
-    project_id: projectId,
-    spec_name: specName,
-    protocol: protocol,
-    current_phase: 'implement',
-    current_impl_phase: null,
-    current_stage: 'implement',
-    started_at: new Date().toISOString(),
-    completed: {
-      // Mark S+P phases as complete since Architect did them
-      spec_draft: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      spec_consult_1: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      spec_feedback_commit: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      spec_human_review: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      spec_consult_2: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      spec_final: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_draft: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_consult_1: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_feedback_commit: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_human_review: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_consult_2: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-      plan_final: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
-    },
-    implementation_phases: {},
-  };
-
-  writeFileSync(checklistFile, JSON.stringify(initialState, null, 2));
-  logger.info(`Initialized checklister at implement phase: ${checklistFile}`);
-}
-
-/**
  * Validate spawn options - ensure exactly one mode is selected
  */
 function validateSpawnOptions(options: SpawnOptions): void {
@@ -479,9 +435,6 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const protocolMatch = specContent.match(/\*\*Protocol\*\*:\s*(\w+)/i);
   const protocol = protocolMatch ? protocolMatch[1].toUpperCase() : 'SPIDER';
   const protocolPath = `codev/protocols/${protocol.toLowerCase()}/protocol.md`;
-
-  // Initialize checklister for the builder at implement phase
-  initBuilderChecklist(worktreePath, projectId, specName, protocol.toLowerCase());
 
   // Build the prompt
   const specRelPath = `codev/specs/${specName}.md`;

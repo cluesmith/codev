@@ -5,6 +5,7 @@
   "type": "module",
   "bin": {
     "codev": "./bin/codev.js",
+    "porch": "./bin/porch.js",
     "af": "./bin/af.js",
     "consult": "./bin/consult.js",
     "generate-image": "./bin/generate-image.js"

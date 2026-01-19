@@ -150,6 +150,29 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Kickoff command - porch-driven builder
+  program
+    .command('kickoff')
+    .description('Kickoff a new porch-driven builder for a spec')
+    .requiredOption('-p, --project <id>', 'Project/spec ID to kickoff')
+    .option('--protocol <name>', 'Protocol to use (default: spider)')
+    .option('--no-role', 'Skip loading builder role prompt')
+    .option('--resume', 'Resume existing porch state')
+    .action(async (options) => {
+      const { kickoff } = await import('./commands/kickoff.js');
+      try {
+        await kickoff({
+          project: options.project,
+          protocol: options.protocol,
+          noRole: !options.role,
+          resume: options.resume,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Util/Shell command
   program
     .command('util')

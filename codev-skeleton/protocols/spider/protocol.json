@@ -1,0 +1,204 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "spider",
+  "version": "1.0.0",
+  "description": "Specification-driven development with multi-agent consultation",
+  "phases": [
+    {
+      "id": "specify",
+      "name": "Specify",
+      "description": "Collaborative design exploration and specification",
+      "type": "once",
+      "steps": [
+        "clarifying_questions",
+        "problem_analysis",
+        "solution_exploration",
+        "open_questions",
+        "success_criteria",
+        "spec_draft",
+        "consultation_1",
+        "human_review",
+        "consultation_2",
+        "spec_final"
+      ],
+      "consultation": {
+        "on": "review",
+        "models": ["gemini", "codex", "claude"],
+        "type": "spec-review",
+        "parallel": true,
+        "max_rounds": 3
+      },
+      "gate": {
+        "name": "spec-approval",
+        "description": "Human approves specification before planning",
+        "requires": ["spec_final", "consultation_2"],
+        "next": "plan"
+      }
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Implementation planning with phased breakdown",
+      "type": "once",
+      "steps": [
+        "analyze_spec",
+        "identify_phases",
+        "define_steps",
+        "plan_draft",
+        "consultation",
+        "human_review",
+        "plan_final"
+      ],
+      "consultation": {
+        "on": "review",
+        "models": ["gemini", "codex", "claude"],
+        "type": "plan-review",
+        "parallel": true,
+        "max_rounds": 2
+      },
+      "gate": {
+        "name": "plan-approval",
+        "description": "Human approves plan before implementation",
+        "requires": ["plan_final", "consultation"],
+        "next": "implement"
+      }
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "description": "Code implementation following the plan",
+      "type": "per_plan_phase",
+      "steps": [
+        "read_phase",
+        "implement_code",
+        "self_review",
+        "commit"
+      ],
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "typecheck": {
+          "command": "npm run typecheck",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "transition": {
+        "on_complete": "defend",
+        "on_fail": "implement"
+      }
+    },
+    {
+      "id": "defend",
+      "name": "Defend",
+      "description": "Testing and verification",
+      "type": "per_plan_phase",
+      "steps": [
+        "write_tests",
+        "run_tests",
+        "fix_failures",
+        "commit"
+      ],
+      "checks": {
+        "tests": {
+          "command": "npm test",
+          "on_fail": "implement",
+          "max_retries": 1
+        },
+        "lint": {
+          "command": "npm run lint",
+          "on_fail": "retry",
+          "max_retries": 1
+        }
+      },
+      "consultation": {
+        "on": "complete",
+        "models": ["gemini", "codex", "claude"],
+        "type": "impl-review",
+        "parallel": true,
+        "max_rounds": 2
+      },
+      "transition": {
+        "on_complete": "evaluate",
+        "on_fail": "implement"
+      }
+    },
+    {
+      "id": "evaluate",
+      "name": "Evaluate",
+      "description": "Verify implementation against spec",
+      "type": "per_plan_phase",
+      "steps": [
+        "check_spec_compliance",
+        "check_success_criteria",
+        "document_deviations"
+      ],
+      "gate": {
+        "name": "phase-complete",
+        "description": "Plan phase implementation is verified",
+        "requires": ["all_checks_pass", "spec_compliance"],
+        "next": "implement"
+      },
+      "transition": {
+        "on_complete": "implement",
+        "on_all_phases_complete": "review"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Final review and lessons learned",
+      "type": "once",
+      "steps": [
+        "create_review_document",
+        "document_lessons",
+        "final_consultation",
+        "create_pr"
+      ],
+      "consultation": {
+        "on": "review",
+        "models": ["gemini", "codex", "claude"],
+        "type": "pr-ready",
+        "parallel": true,
+        "max_rounds": 1
+      },
+      "gate": {
+        "name": "pr-ready",
+        "description": "Implementation ready for PR",
+        "requires": ["review_complete", "all_tests_pass", "consultation"],
+        "next": null
+      }
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "BLOCKED": {
+      "description": "Signal implementation is blocked",
+      "requires": "reason"
+    },
+    "REVISION_NEEDED": {
+      "description": "Signal changes requested",
+      "transitions_to": "current_phase"
+    },
+    "APPROVED": {
+      "description": "Signal gate approval received"
+    }
+  },
+  "defaults": {
+    "consultation": {
+      "enabled": true,
+      "models": ["gemini", "codex", "claude"],
+      "parallel": true
+    },
+    "checks": {
+      "build": "npm run build",
+      "test": "npm test"
+    }
+  }
+}

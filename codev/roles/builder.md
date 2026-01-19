@@ -63,33 +63,56 @@ Full phases with self-review and testing:
 Fast autonomous implementation:
 - Understand → Implement → Verify → Done
 
-## Checklister Integration (SPIDER)
+## Porch Orchestration (SPIDER)
 
-When working on SPIDER tasks, the checklister enforces phase transitions. Your checklist is auto-initialized at `implement` phase since the Architect completed S+P.
+When working on SPIDER tasks, **Porch** (Protocol Orchestrator) manages phase transitions. Porch tracks your state in `codev/projects/<id>/status.yaml`.
 
-### Phase Gates
-
-Before transitioning between IDE stages, verify via gates:
+### Check Your Status
 
 ```bash
-# Before transitioning from Implement to Defend
-/checklister gate defend
+# Check current phase and state
+porch status
 
-# Before transitioning from Defend to Evaluate
-/checklister gate evaluate
-
-# Before moving to next implementation phase
-/checklister gate next-phase
-
-# Before final Review phase
-/checklister gate review
+# From worktree, auto-detects project ID
+porch status
 ```
+
+### Signal Phase Transitions
+
+Emit signals to indicate phase completion. Porch parses these from your output:
+
+```bash
+# After drafting spec
+<signal>SPEC_DRAFTED</signal>
+
+# After implementing a plan phase
+<signal>PHASE_IMPLEMENTED</signal>
+
+# After writing tests
+<signal>TESTS_WRITTEN</signal>
+
+# After evaluation
+<signal>EVALUATION_COMPLETE</signal>
+
+# After final review
+<signal>REVIEW_COMPLETE</signal>
+```
+
+### IDE Loop (Implement → Defend → Evaluate)
+
+For multi-phase plans, porch loops through each plan phase:
+
+1. **Implement**: Write code for the current plan phase
+2. **Defend**: Write tests, run checks
+3. **Evaluate**: Self-review, ensure quality
+
+Porch automatically advances to the next plan phase after evaluation.
 
 ### Enforcement
 
 - **Hooks block wrong file edits**: You cannot edit `codev/specs/` or `codev/plans/` - those are Architect's domain
-- **Track your progress**: Mark items complete as you work: `/checklister complete <item_id> --evidence "..."`
-- **Check status anytime**: `/checklister status`
+- **Gates require approval**: Human gates (spec_approval, plan_approval) block until the Architect approves
+- **State persists**: Porch state survives restarts - resume with `porch run`
 
 ### If You Need Spec/Plan Changes
 

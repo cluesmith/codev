@@ -96,13 +96,24 @@ Key locations:
 
 ### Project Tracking
 
-**`codev/projectlist.md` is the canonical source of truth for all project information.**
+**Two complementary tracking systems:**
 
-When asked about project status, incomplete work, or what to work on next:
-1. Read `codev/projectlist.md` first
-2. It contains status, priority, dependencies, and notes for every project
-3. Update it when project status changes (e.g., implementing → implemented)
-4. Reserve project numbers there BEFORE creating spec files
+1. **`codev/projectlist.md`** - Master list of ALL projects (planning and history)
+   - Contains status, priority, dependencies, and notes for every project
+   - Reserve project numbers here BEFORE creating spec files
+   - Update when project lifecycle changes (conceived → specified → committed → integrated)
+
+2. **`codev/projects/<id>/status.yaml`** - Runtime state for ACTIVE porch projects
+   - Detailed phase tracking (specify:draft, plan:consult, implement:phase_1, etc.)
+   - Gate status (pending, passed, failed)
+   - Managed automatically by porch
+
+**When to use which:**
+- **Starting work**: Check `codev/projectlist.md` for priorities and incomplete work
+- **During implementation**: Use `porch status <id>` for detailed phase status
+- **After completion**: Update `codev/projectlist.md` status field
+
+**Note**: Porch state provides granular phase tracking during active development. Update projectlist.md when transitioning major lifecycle stages (conceived → specified → committed → integrated).
 
 **🚨 CRITICAL: Two human approval gates exist:**
 - **conceived → specified**: AI creates spec, but ONLY the human can approve it
@@ -694,6 +705,112 @@ The consultant role (`codev/roles/consultant.md`) defines a collaborative partne
 - `packages/codev/src/commands/consult/index.ts` - TypeScript implementation
 - `codev/roles/consultant.md` - Role definition
 - `.consult/history.log` - Query history with timing (gitignored)
+
+## Porch - Protocol Orchestrator
+
+Porch is the protocol orchestration system that drives SPIDER, TICK, and BUGFIX protocols. It uses a state machine to enforce phase transitions, manage gates, run defense checks, and coordinate multi-agent consultations.
+
+### CLI Commands
+
+```bash
+# Initialize a new porch project
+porch init spider 0073 "feature-name" --worktree .builders/0073
+
+# Check current status
+porch status 0073
+
+# List pending gates
+porch pending
+
+# Approve a gate
+porch approve 0073 spec-approval
+
+# Run the protocol loop (single iteration)
+porch run 0073
+
+# Run with options
+porch run 0073 --dry-run        # Show what would happen
+porch run 0073 --no-claude      # Skip Claude invocations
+```
+
+### AF Kickoff (Porch-Driven Builders)
+
+Use `af kickoff` to spawn a builder with porch orchestration:
+
+```bash
+# Kickoff a porch-driven builder for a spec
+af kickoff -p 0073
+
+# With specific protocol
+af kickoff -p 0073 --protocol spider
+
+# Resume existing porch state
+af kickoff -p 0073 --resume
+
+# Without role prompt
+af kickoff -p 0073 --no-role
+```
+
+This combines:
+1. Creating a git worktree
+2. Initializing porch state
+3. Starting the builder with porch context
+
+### Project State
+
+Porch state is stored in `codev/projects/<id>-<name>/status.yaml`:
+
+```yaml
+id: "0073"
+title: "feature-name"
+protocol: "spider"
+current_state: "implement:coding"
+gates:
+  spec-approval:
+    status: passed
+    approved_at: "2026-01-19T10:30:00Z"
+phases:
+  phase-1:
+    status: complete
+    title: "Core Implementation"
+iteration: 3
+```
+
+### Protocol Definitions
+
+Protocols are defined in `codev-skeleton/protocols/<name>/protocol.json`:
+
+```json
+{
+  "name": "spider",
+  "version": "1.0.0",
+  "phases": [
+    {
+      "id": "specify",
+      "type": "once",
+      "consultation": { "models": ["gemini", "codex", "claude"] },
+      "gate": { "name": "spec-approval", "next": "plan" }
+    }
+  ]
+}
+```
+
+### Signal-Based Transitions
+
+Porch uses signals embedded in Claude output to drive state transitions:
+
+```
+<signal>PHASE_COMPLETE</signal>     # Move to next phase
+<signal>BLOCKED:reason</signal>     # Report blocker
+<signal>REVISION_NEEDED</signal>    # Request changes
+```
+
+### Key Files
+
+- `packages/codev/src/commands/porch/` - Porch implementation
+- `packages/codev/bin/porch.js` - Standalone binary
+- `codev-skeleton/protocols/` - Protocol JSON definitions
+- `codev/projects/` - Project state files
 
 ## Important Notes
 

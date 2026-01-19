@@ -1,0 +1,127 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "bugfix",
+  "version": "1.0.0",
+  "description": "Lightweight protocol for minor bugfixes using GitHub Issues",
+  "phases": [
+    {
+      "id": "investigate",
+      "name": "Investigate",
+      "description": "Understand the bug and its root cause",
+      "type": "once",
+      "steps": [
+        "read_issue",
+        "reproduce_bug",
+        "identify_root_cause",
+        "assess_complexity"
+      ],
+      "transition": {
+        "on_complete": "fix",
+        "on_too_complex": "escalate"
+      }
+    },
+    {
+      "id": "fix",
+      "name": "Fix",
+      "description": "Implement the bug fix",
+      "type": "once",
+      "steps": [
+        "implement_fix",
+        "add_tests",
+        "verify_fix",
+        "commit"
+      ],
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "tests": {
+          "command": "npm test",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "transition": {
+        "on_complete": "pr"
+      }
+    },
+    {
+      "id": "pr",
+      "name": "Create PR",
+      "description": "Create pull request for the fix",
+      "type": "once",
+      "steps": [
+        "create_pr",
+        "link_issue",
+        "request_review"
+      ],
+      "consultation": {
+        "on": "review",
+        "models": ["gemini", "codex"],
+        "type": "impl-review",
+        "parallel": true,
+        "max_rounds": 1
+      },
+      "transition": {
+        "on_complete": "review"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Address review feedback",
+      "type": "once",
+      "steps": [
+        "address_feedback",
+        "update_pr"
+      ],
+      "transition": {
+        "on_complete": "merge"
+      }
+    },
+    {
+      "id": "merge",
+      "name": "Merge",
+      "description": "Merge the fix and close the issue",
+      "type": "once",
+      "steps": [
+        "merge_pr",
+        "verify_main",
+        "close_issue"
+      ],
+      "gate": {
+        "name": "merge-approval",
+        "description": "Architect approves merge",
+        "requires": ["review_complete", "tests_pass"],
+        "next": null
+      }
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "TOO_COMPLEX": {
+      "description": "Bug is too complex for BUGFIX, escalate to SPIDER",
+      "transitions_to": "escalate"
+    },
+    "BLOCKED": {
+      "description": "Signal fix is blocked",
+      "requires": "reason"
+    }
+  },
+  "defaults": {
+    "consultation": {
+      "enabled": true,
+      "models": ["gemini", "codex"],
+      "parallel": true
+    },
+    "checks": {
+      "build": "npm run build",
+      "test": "npm test"
+    }
+  }
+}
