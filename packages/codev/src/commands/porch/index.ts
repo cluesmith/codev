@@ -34,6 +34,9 @@ import {
   findExecutions,
   findStatusFile,
   findPendingGates,
+  getConsultationAttempts,
+  incrementConsultationAttempts,
+  resetConsultationAttempts,
 } from './state.js';
 import {
   extractPhasesFromPlanFile,
@@ -491,19 +494,21 @@ export async function run(
       return;
     }
 
-    // Check for gate blocking
-    const gateInfo = getGateForState(protocol, currentState.current_state);
-
-    if (gateInfo) {
-      const { gateId } = gateInfo;
-      console.log(chalk.cyan(`[phase] Phase: ${phaseId} (waiting for gate: ${gateId})`));
+    // Check if there's a pending gate from a previous iteration (step already executed)
+    const pendingGateInfo = getGateForState(protocol, currentState.current_state);
+    if (pendingGateInfo) {
+      const { gateId } = pendingGateInfo;
 
       // Check if gate is already approved
       if (currentState.gates[gateId]?.status === 'passed') {
+        // Gate approved - proceed to next state
         const nextState = getGateNextState(protocol, phaseId);
         if (nextState) {
           console.log(chalk.green(`[porch] Gate ${gateId} passed! Proceeding to ${nextState}`));
           await notifier.gateApproved(gateId);
+
+          // Reset any consultation attempts for the gated state
+          currentState = resetConsultationAttempts(currentState, currentState.current_state);
 
           // If entering a phased phase, start with first plan phase
           if (isPhasedPhase(protocol, nextState.split(':')[0]) && currentState.plan_phases?.length) {
@@ -514,21 +519,17 @@ export async function run(
             currentState = updateState(currentState, nextState);
           }
           await writeState(statusFilePath, currentState);
+          continue; // Start next iteration with new state
         }
-      } else {
-        // Request gate approval if not already requested
-        if (!currentState.gates[gateId]?.requested_at) {
-          currentState = requestGateApproval(currentState, gateId);
-          await writeState(statusFilePath, currentState);
-          console.log(chalk.yellow(`[porch] Gate approval requested: ${gateId}`));
-          await notifier.gatePending(phaseId, gateId);
-        }
-
+      } else if (currentState.gates[gateId]?.requested_at) {
+        // Gate requested but not approved - wait
+        console.log(chalk.cyan(`[phase] Phase: ${phaseId} (waiting for gate: ${gateId})`));
         console.log(chalk.yellow(`[porch] BLOCKED - Waiting for gate: ${gateId}`));
         console.log(chalk.yellow(`[porch] To approve: porch approve ${projectId} ${gateId}`));
         await new Promise(r => setTimeout(r, pollInterval * 1000));
+        continue;
       }
-      continue;
+      // If gate not yet requested, fall through to execute phase first
     }
 
     // Get the current phase definition
@@ -590,7 +591,13 @@ export async function run(
 
       // Check if consultation is triggered by current substate
       if (consultConfig.on === currentSubstate || consultConfig.on === phaseId) {
-        console.log(chalk.blue(`[porch] Consultation triggered for phase ${phaseId}`));
+        const maxRounds = consultConfig.max_rounds || 3;
+        const stateKey = currentState.current_state;
+
+        // Get attempt count from state (persisted across porch iterations)
+        const attemptCount = getConsultationAttempts(currentState, stateKey) + 1;
+
+        console.log(chalk.blue(`[porch] Consultation triggered for phase ${phaseId} (attempt ${attemptCount}/${maxRounds})`));
         await notifier.consultationStart(phaseId, consultConfig.models || ['gemini', 'codex', 'claude']);
 
         const consultResult = await runConsultationLoop(consultConfig, {
@@ -604,19 +611,25 @@ export async function run(
         console.log(formatConsultationResults(consultResult));
         await notifier.consultationComplete(phaseId, consultResult.feedback, consultResult.allApproved);
 
-        // If not all approved after max rounds, escalate to human gate
+        // If not all approved, track attempt and check for escalation
         if (!consultResult.allApproved) {
-          const maxRounds = consultConfig.max_rounds || 3;
-          if (consultResult.round >= maxRounds) {
+          // Increment attempt count in state (persists across iterations)
+          currentState = incrementConsultationAttempts(currentState, stateKey);
+          await writeState(statusFilePath, currentState);
+
+          // Check if we've reached max attempts
+          if (attemptCount >= maxRounds) {
             // Create escalation gate - requires human intervention
             const escalationGateId = `${phaseId}_consultation_escalation`;
 
             // Check if escalation gate was already approved (human override)
             if (currentState.gates[escalationGateId]?.status === 'passed') {
               console.log(chalk.green(`[porch] Consultation escalation gate already approved, continuing`));
-              // Don't continue loop - fall through to next state handling
+              // Reset attempts and fall through to next state handling
+              currentState = resetConsultationAttempts(currentState, stateKey);
+              await writeState(statusFilePath, currentState);
             } else {
-              console.log(chalk.red(`[porch] Consultation failed after ${maxRounds} rounds - escalating to human`));
+              console.log(chalk.red(`[porch] Consultation failed after ${attemptCount} attempts - escalating to human`));
               console.log(chalk.yellow(`[porch] To override and continue: porch approve ${projectId} ${escalationGateId}`));
 
               // Request human gate if not already requested
@@ -631,13 +644,18 @@ export async function run(
               continue;
             }
           } else {
-            console.log(chalk.yellow(`[porch] Consultation requested changes (round ${consultResult.round}/${maxRounds}), staying for revision`));
+            console.log(chalk.yellow(`[porch] Consultation requested changes (attempt ${attemptCount}/${maxRounds}), continuing for revision`));
+            // Stay in same state for Claude to revise on next iteration
             await new Promise(r => setTimeout(r, 2000));
             continue;
           }
+        } else {
+          // All approved - reset attempt counter
+          currentState = resetConsultationAttempts(currentState, stateKey);
+          await writeState(statusFilePath, currentState);
         }
 
-        // All approved - use consultation's next state if defined
+        // All approved (or escalation gate passed) - use consultation's next state if defined
         if (consultConfig.next) {
           if (planPhaseId) {
             currentState = updateState(currentState, `${consultConfig.next}:${planPhaseId}`);
@@ -647,6 +665,29 @@ export async function run(
           await writeState(statusFilePath, currentState);
           continue;
         }
+      }
+    }
+
+    // Check if current state has a gate that should trigger AFTER this step
+    // This is the gate trigger point - step has executed, now block before transition
+    const gateInfo = getGateForState(protocol, currentState.current_state);
+    if (gateInfo) {
+      const { gateId } = gateInfo;
+
+      // Request gate approval if not already requested
+      if (!currentState.gates[gateId]?.requested_at) {
+        currentState = requestGateApproval(currentState, gateId);
+        await writeState(statusFilePath, currentState);
+        console.log(chalk.yellow(`[porch] Step complete. Gate approval requested: ${gateId}`));
+        await notifier.gatePending(phaseId, gateId);
+      }
+
+      // Gate not yet approved - wait (will check approval at start of next iteration)
+      if (currentState.gates[gateId]?.status !== 'passed') {
+        console.log(chalk.yellow(`[porch] BLOCKED - Waiting for gate: ${gateId}`));
+        console.log(chalk.yellow(`[porch] To approve: porch approve ${projectId} ${gateId}`));
+        await new Promise(r => setTimeout(r, pollInterval * 1000));
+        continue;
       }
     }
 

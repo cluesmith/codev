@@ -202,6 +202,15 @@ export function serializeState(state: ProjectState): string {
     lines.push('');
   }
 
+  // Consultation attempts (for tracking retries across iterations)
+  if (state.consultation_attempts && Object.keys(state.consultation_attempts).length > 0) {
+    lines.push('consultation_attempts:');
+    for (const [stateKey, count] of Object.entries(state.consultation_attempts)) {
+      lines.push(`  "${stateKey}": ${count}`);
+    }
+    lines.push('');
+  }
+
   // Metadata
   lines.push(`iteration: ${state.iteration || 0}`);
   lines.push(`started_at: "${state.started_at || new Date().toISOString()}"`);
@@ -240,6 +249,7 @@ export function parseState(content: string): ProjectState {
     gates: {},
     phases: {},
     log: [],
+    consultation_attempts: {},
   };
 
   const lines = content.split('\n');
@@ -268,6 +278,10 @@ export function parseState(content: string): ProjectState {
     }
     if (line.match(/^log:\s*$/)) {
       currentSection = 'log';
+      continue;
+    }
+    if (line.match(/^consultation_attempts:\s*$/)) {
+      currentSection = 'consultation_attempts';
       continue;
     }
 
@@ -314,6 +328,16 @@ export function parseState(content: string): ProjectState {
       } else if (line.match(/^\s+description:/)) {
         const descMatch = line.match(/description:\s*"([^"]*)"/);
         if (descMatch && currentArrayItem) currentArrayItem.description = descMatch[1];
+      }
+      continue;
+    }
+
+    if (currentSection === 'consultation_attempts') {
+      // Parse: "state:key": count
+      const match = line.match(/^\s+"([^"]+)":\s*(\d+)/);
+      if (match) {
+        const [, stateKey, count] = match;
+        state.consultation_attempts![stateKey] = parseInt(count, 10);
       }
       continue;
     }
@@ -731,6 +755,58 @@ export function findStatusFile(projectRoot: string, projectId: string): string |
 
   return null;
 }
+
+// ============================================================================
+// Consultation Attempt Tracking
+// ============================================================================
+
+/**
+ * Get the number of consultation attempts for a given state
+ */
+export function getConsultationAttempts(state: ProjectState, stateKey: string): number {
+  return state.consultation_attempts?.[stateKey] ?? 0;
+}
+
+/**
+ * Increment consultation attempts for a given state
+ */
+export function incrementConsultationAttempts(state: ProjectState, stateKey: string): ProjectState {
+  const now = new Date().toISOString();
+  const currentAttempts = getConsultationAttempts(state, stateKey);
+
+  return {
+    ...state,
+    consultation_attempts: {
+      ...state.consultation_attempts,
+      [stateKey]: currentAttempts + 1,
+    },
+    last_updated: now,
+    log: [...state.log, {
+      ts: now,
+      event: 'consultation_attempt',
+      phase: stateKey,
+      count: currentAttempts + 1,
+    }],
+  };
+}
+
+/**
+ * Reset consultation attempts for a given state (e.g., after gate approval)
+ */
+export function resetConsultationAttempts(state: ProjectState, stateKey: string): ProjectState {
+  const newAttempts = { ...state.consultation_attempts };
+  delete newAttempts[stateKey];
+
+  return {
+    ...state,
+    consultation_attempts: newAttempts,
+    last_updated: new Date().toISOString(),
+  };
+}
+
+// ============================================================================
+// Discovery
+// ============================================================================
 
 /**
  * Find all status files with pending gates

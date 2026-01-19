@@ -203,6 +203,8 @@ export interface ProjectState {
   gates: Record<string, GateStatusEntry>;
   phases: Record<string, PhaseStatusEntry>;
   plan_phases?: PlanPhase[];
+  /** Consultation attempt counts per state key (e.g., "specify:consult" -> 2) */
+  consultation_attempts?: Record<string, number>;
   iteration: number;
   started_at: string;
   last_updated: string;

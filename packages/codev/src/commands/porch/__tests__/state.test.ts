@@ -16,6 +16,9 @@ import {
   updatePhaseStatus,
   setPlanPhases,
   findProjects,
+  getConsultationAttempts,
+  incrementConsultationAttempts,
+  resetConsultationAttempts,
   PROJECTS_DIR,
 } from '../state.js';
 import type { ProjectState } from '../types.js';
@@ -218,6 +221,76 @@ describe('state management', () => {
     it('should return empty array for non-existent directory', () => {
       const projects = findProjects('/nonexistent/path');
       expect(projects).toEqual([]);
+    });
+  });
+
+  describe('consultation attempt tracking', () => {
+    it('should return 0 for state with no consultation attempts', () => {
+      const state = createSampleState();
+      expect(getConsultationAttempts(state, 'specify:consult')).toBe(0);
+    });
+
+    it('should increment consultation attempts', () => {
+      const state = createSampleState();
+      const updated = incrementConsultationAttempts(state, 'specify:consult');
+
+      expect(updated.consultation_attempts).toBeDefined();
+      expect(updated.consultation_attempts!['specify:consult']).toBe(1);
+      expect(getConsultationAttempts(updated, 'specify:consult')).toBe(1);
+    });
+
+    it('should increment multiple times', () => {
+      let state = createSampleState();
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'specify:consult');
+
+      expect(getConsultationAttempts(state, 'specify:consult')).toBe(3);
+    });
+
+    it('should track different states independently', () => {
+      let state = createSampleState();
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'plan:consult');
+
+      expect(getConsultationAttempts(state, 'specify:consult')).toBe(2);
+      expect(getConsultationAttempts(state, 'plan:consult')).toBe(1);
+    });
+
+    it('should reset consultation attempts', () => {
+      let state = createSampleState();
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'specify:consult');
+
+      expect(getConsultationAttempts(state, 'specify:consult')).toBe(2);
+
+      state = resetConsultationAttempts(state, 'specify:consult');
+      expect(getConsultationAttempts(state, 'specify:consult')).toBe(0);
+    });
+
+    it('should log consultation attempts', () => {
+      const state = createSampleState();
+      const updated = incrementConsultationAttempts(state, 'specify:consult');
+
+      const logEntry = updated.log[updated.log.length - 1] as { event: string; phase: string; count: number };
+      expect(logEntry.event).toBe('consultation_attempt');
+      expect(logEntry.phase).toBe('specify:consult');
+      expect(logEntry.count).toBe(1);
+    });
+
+    it('should serialize and parse consultation attempts', () => {
+      let state = createSampleState();
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'specify:consult');
+      state = incrementConsultationAttempts(state, 'plan:consult');
+
+      const yaml = serializeState(state);
+      const parsed = parseState(yaml);
+
+      expect(parsed.consultation_attempts).toBeDefined();
+      expect(parsed.consultation_attempts!['specify:consult']).toBe(2);
+      expect(parsed.consultation_attempts!['plan:consult']).toBe(1);
     });
   });
 });
