@@ -136,7 +136,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0072"
     title: "Ralph-SPIDER Integration Spike"
     summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
-    status: committed
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -152,19 +152,19 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
-    notes: "Time-boxed spike (4-6h) to validate Ralph-inspired SPIDER where Builder runs entire S→P→I→D→E→R lifecycle with human approval gates."
+      integrated_at: "2026-01-20T10:00:00-08:00"
+    notes: "Spike complete - learnings incorporated into Porch (0073)."
 
   - id: "0073"
     title: "Porch - Protocol Orchestrator"
     summary: "Standalone CLI that runs SPIDER/TICK/BUGFIX protocols as interactive REPL with state machine enforcement and human approval gates"
-    status: implementing
+    status: integrated
     priority: high
     release: v2.0.0
     files:
       spec: codev/specs/0073-porch-protocol-orchestrator.md
       plan: codev/plans/0073-porch-protocol-orchestrator.md
-      review: null
+      review: codev/reviews/0073-porch-protocol-orchestrator.md
     dependencies: ["0072"]
     tags: [porch, workflow, ralph, v2]
     timestamps:
@@ -172,10 +172,10 @@ Projects currently in development (conceived through committed), sorted by prior
       specified_at: "2026-01-19T12:00:00-08:00"
       planned_at: "2026-01-19T14:00:00-08:00"
       implementing_at: "2026-01-19T16:00:00-08:00"
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af."
+      implemented_at: "2026-01-20T08:00:00-08:00"
+      committed_at: "2026-01-20T09:00:00-08:00"
+      integrated_at: "2026-01-20T10:00:00-08:00"
+    notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af. 8 rounds of 3-way review before merge."
 
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
@@ -202,7 +202,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0069"
     title: "Checklister Agent Spike"
     summary: "Spike to build a checklister agent that enforces SPIDER protocol compliance"
-    status: committed
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -218,8 +218,8 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
-    notes: "Time-boxed spike (2-4h) to build deterministic SPIDER enforcement via checklister state machine."
+      integrated_at: "2026-01-20T10:00:00-08:00"
+    notes: "Spike complete - superseded by Porch (0073) which implements state machine enforcement."
 
   - id: "0068"
     title: "Codev 2.0 - Cloud Tower + Deterministic Core"
@@ -769,7 +769,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0073** - Reserve this number for your next project
+**0074** - Reserve this number for your next project
 
 ---
 
