@@ -157,6 +157,7 @@ async function createWorktree(config: Config, branchName: string, worktreePath: 
       logger.debug('Failed to symlink .env');
     }
   }
+
 }
 
 /**
@@ -211,8 +212,13 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   const safeName = specFile
     ? specName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-')
     : porchState!.title.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
+  const actualProtocol = porchState?.protocol || protocolName;
+
+  // Use worktrees/ directory with protocol-prefixed naming per spec 0073
+  const worktreesDir = resolve(config.projectRoot, 'worktrees');
+  const worktreeName = `${actualProtocol.toLowerCase()}_${projectId}_${safeName}`;
   const branchName = `builder/${projectId}-${safeName}`;
-  const worktreePath = resolve(config.buildersDir, builderId);
+  const worktreePath = resolve(worktreesDir, worktreeName);
 
   // Check for plan file (only if spec exists)
   const planFile = specFile ? resolve(config.codevDir, 'plans', `${basename(specFile, '.md')}.md`) : null;
@@ -230,6 +236,12 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
 
   await ensureDirectories(config);
   await checkDependencies();
+
+  // Ensure worktrees directory exists
+  if (!existsSync(worktreesDir)) {
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(worktreesDir, { recursive: true });
+  }
 
   // Check if worktree already exists
   if (existsSync(worktreePath)) {
@@ -259,7 +271,6 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   }
 
   // Build the prompt
-  const actualProtocol = porchState?.protocol || protocolName;
   const specRelPath = specFile ? `codev/specs/${basename(specFile)}` : `codev/specs/${projectId}-${safeName}.md`;
   const planRelPath = `codev/plans/${projectId}-${safeName}.md`;
   const protocolPath = `codev/protocols/${actualProtocol.toLowerCase()}/protocol.md`;

@@ -1,6 +1,7 @@
 .claude-task
 tmp/
 .builders/
+worktrees/
 .consult/
 .agent-farm/
 .env
@@ -25,8 +26,6 @@ packages/codev/skeleton/
 # Checklister runtime state (per-project JSON files)
 codev/checklists/*.json
 
-# Porch runtime state (project state and execution logs)
-codev/projects/
+# Porch execution logs (not project state - that's versioned)
 codev/executions/
-codev-skeleton/projects/
 codev-skeleton/executions/

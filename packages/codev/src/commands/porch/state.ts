@@ -262,6 +262,20 @@ export function parseState(content: string): ProjectState {
       continue;
     }
 
+    // Reset section if we hit a non-indented line (top-level field)
+    if (currentSection && !line.startsWith(' ') && !line.startsWith('\t')) {
+      // If we have a pending array item, push it before leaving the section
+      if (currentArrayItem) {
+        if (currentSection === 'plan_phases') {
+          state.plan_phases!.push(currentArrayItem as { id: string; title: string; description?: string });
+        } else if (currentSection === 'log') {
+          state.log!.push(currentArrayItem as unknown);
+        }
+        currentArrayItem = null;
+      }
+      currentSection = '';
+    }
+
     // Detect section headers
     if (line.match(/^gates:\s*$/)) {
       currentSection = 'gates';
