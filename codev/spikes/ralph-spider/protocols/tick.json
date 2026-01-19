@@ -1,0 +1,76 @@
+{
+  "$schema": "./protocol-schema.json",
+  "name": "tick",
+  "version": "1.0.0",
+  "description": "TICK: Fast autonomous implementation for amendments",
+
+  "phases": [
+    {
+      "id": "understand",
+      "name": "Understand",
+      "prompt": "understand.md",
+      "substates": null,
+      "signals": {
+        "UNDERSTOOD": "implement"
+      }
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "prompt": "implement.md",
+      "substates": null,
+      "signals": {
+        "IMPLEMENTED": "verify",
+        "BUILD_FAILED": "implement"
+      }
+    },
+    {
+      "id": "verify",
+      "name": "Verify",
+      "prompt": "verify.md",
+      "substates": null,
+      "signals": {
+        "VERIFIED": "complete",
+        "VERIFICATION_FAILED": "implement"
+      },
+      "backpressure": {
+        "tests_pass": {
+          "command": "npm test",
+          "on_fail": "implement"
+        },
+        "build_pass": {
+          "command": "npm run build",
+          "on_fail": "implement"
+        }
+      }
+    },
+    {
+      "id": "complete",
+      "name": "Complete",
+      "terminal": true
+    }
+  ],
+
+  "gates": [],
+
+  "transitions": {
+    "understand": {
+      "default": "implement"
+    },
+    "implement": {
+      "default": "verify"
+    },
+    "verify": {
+      "on_backpressure_pass": "complete",
+      "on_backpressure_fail": "implement"
+    }
+  },
+
+  "initial_state": "understand",
+
+  "config": {
+    "poll_interval": 5,
+    "max_iterations": 50,
+    "prompts_dir": "prompts"
+  }
+}

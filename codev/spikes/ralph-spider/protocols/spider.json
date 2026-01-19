@@ -1,0 +1,135 @@
+{
+  "$schema": "./protocol-schema.json",
+  "name": "spider",
+  "version": "1.0.0",
+  "description": "SPIDER: Specify, Plan, Implement, Defend, Evaluate, Review",
+
+  "phases": [
+    {
+      "id": "specify",
+      "name": "Specify",
+      "prompt": "specify.md",
+      "substates": ["draft", "review"],
+      "initial_substate": "draft",
+      "signals": {
+        "SPEC_READY_FOR_REVIEW": "specify:review"
+      }
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "prompt": "plan.md",
+      "substates": ["draft", "review"],
+      "initial_substate": "draft",
+      "signals": {
+        "PLAN_READY_FOR_REVIEW": "plan:review"
+      }
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "prompt": "implement.md",
+      "substates": null,
+      "signals": {
+        "PHASE_IMPLEMENTED": "defend",
+        "BUILD_FAILED": "implement"
+      }
+    },
+    {
+      "id": "defend",
+      "name": "Defend",
+      "prompt": "defend.md",
+      "substates": null,
+      "signals": {
+        "TESTS_PASSING": "evaluate",
+        "TESTS_FAILED": "defend"
+      },
+      "backpressure": {
+        "tests_pass": {
+          "command": "npm test",
+          "on_fail": "defend"
+        }
+      }
+    },
+    {
+      "id": "evaluate",
+      "name": "Evaluate",
+      "prompt": "evaluate.md",
+      "substates": null,
+      "signals": {
+        "EVALUATION_COMPLETE": "review",
+        "CRITERIA_NOT_MET": "implement",
+        "NEXT_PHASE": "implement"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "prompt": "review.md",
+      "substates": null,
+      "signals": {
+        "REVIEW_COMPLETE": "complete"
+      }
+    },
+    {
+      "id": "complete",
+      "name": "Complete",
+      "terminal": true
+    }
+  ],
+
+  "gates": [
+    {
+      "id": "specify_approval",
+      "after_state": "specify:review",
+      "next_state": "plan:draft",
+      "type": "human",
+      "description": "Human approval of specification"
+    },
+    {
+      "id": "plan_approval",
+      "after_state": "plan:review",
+      "next_state": "implement",
+      "type": "human",
+      "description": "Human approval of implementation plan"
+    }
+  ],
+
+  "transitions": {
+    "specify:draft": {
+      "default": "specify:review"
+    },
+    "specify:review": {
+      "on_gate_pass": "plan:draft",
+      "wait_for": "specify_approval"
+    },
+    "plan:draft": {
+      "default": "plan:review"
+    },
+    "plan:review": {
+      "on_gate_pass": "implement",
+      "wait_for": "plan_approval"
+    },
+    "implement": {
+      "default": "defend"
+    },
+    "defend": {
+      "on_backpressure_pass": "evaluate",
+      "on_backpressure_fail": "defend"
+    },
+    "evaluate": {
+      "default": "review"
+    },
+    "review": {
+      "default": "complete"
+    }
+  },
+
+  "initial_state": "specify:draft",
+
+  "config": {
+    "poll_interval": 30,
+    "max_iterations": 100,
+    "prompts_dir": "prompts"
+  }
+}

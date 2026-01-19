@@ -1,0 +1,85 @@
+{
+  "$schema": "./protocol-schema.json",
+  "name": "bugfix",
+  "version": "1.0.0",
+  "description": "BUGFIX: Fast bug fixing from GitHub issues",
+
+  "phases": [
+    {
+      "id": "diagnose",
+      "name": "Diagnose",
+      "prompt": "diagnose.md",
+      "substates": null,
+      "signals": {
+        "ROOT_CAUSE_FOUND": "fix",
+        "NEEDS_MORE_INFO": "diagnose"
+      }
+    },
+    {
+      "id": "fix",
+      "name": "Fix",
+      "prompt": "fix.md",
+      "substates": null,
+      "signals": {
+        "FIX_APPLIED": "test",
+        "FIX_FAILED": "diagnose"
+      }
+    },
+    {
+      "id": "test",
+      "name": "Test",
+      "prompt": "test.md",
+      "substates": null,
+      "signals": {
+        "TESTS_PASS": "pr",
+        "TESTS_FAIL": "fix"
+      },
+      "backpressure": {
+        "tests_pass": {
+          "command": "npm test",
+          "on_fail": "fix"
+        }
+      }
+    },
+    {
+      "id": "pr",
+      "name": "Pull Request",
+      "prompt": "pr.md",
+      "substates": null,
+      "signals": {
+        "PR_CREATED": "complete"
+      }
+    },
+    {
+      "id": "complete",
+      "name": "Complete",
+      "terminal": true
+    }
+  ],
+
+  "gates": [],
+
+  "transitions": {
+    "diagnose": {
+      "default": "fix"
+    },
+    "fix": {
+      "default": "test"
+    },
+    "test": {
+      "on_backpressure_pass": "pr",
+      "on_backpressure_fail": "fix"
+    },
+    "pr": {
+      "default": "complete"
+    }
+  },
+
+  "initial_state": "diagnose",
+
+  "config": {
+    "poll_interval": 5,
+    "max_iterations": 30,
+    "prompts_dir": "prompts"
+  }
+}
