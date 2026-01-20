@@ -1,9 +1,10 @@
 # Specification: Remove Today Summary Feature (Spec 0059)
 
 **Project ID**: 0074
-**Status**: Draft
+**Status**: Ready for Final Review
 **Created**: 2026-01-20
 **Protocol**: SPIDER
+**Author**: AI (Claude)
 
 ## Problem Statement
 
@@ -116,10 +117,21 @@ This is a straightforward deletion task with no alternative approaches needed. T
 **`codev/projectlist.md`:**
 - Update Spec 0059 status from "integrated" to "removed" with note about this spec
 
+#### Tests
+
+**Confirmed**: No tests exist for the Today Summary feature. Verified via:
+```bash
+grep -r "activity|today.*summary|0059" tests/     # 0 matches
+grep -r "activity|today.*summary|0059" **/*.test.ts  # 0 matches
+grep -r "activity|today.*summary|0059" **/*.bats     # 0 matches
+```
+
+If any tests are discovered during implementation, they should be removed.
+
 ### Out of Scope
 
 - Backend server file itself (kept, only removing activity-related code)
-- Other dashboard functionality
+- Other dashboard functionality (including other summary buttons)
 - The `consult` CLI tool (used elsewhere)
 - The `gh` CLI dependency (used elsewhere)
 - User communication (feature was unused, no migration needed)
@@ -237,3 +249,9 @@ af start
 
 - **2026-01-20**: Initial specification draft
 - **2026-01-20**: Incorporated multi-agent consultation feedback (Codex REQUEST_CHANGES addressed)
+- **2026-01-20**: Incorporated user clarifications:
+  - Scope: ALL references across entire codebase
+  - Reason: Feature not used
+  - UI: Remove entirely (not hide)
+  - Other summary buttons: Keep
+  - Tests: Remove any found (confirmed none exist)
