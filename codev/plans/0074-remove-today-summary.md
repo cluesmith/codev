@@ -60,7 +60,8 @@ The work is sequenced so that backend removal happens first (API endpoint remove
 
 #### Test Plan
 - **Unit Tests**: No existing tests for this feature (verified in spec)
-- **Integration Tests**: Run `npm test` to ensure no regressions
+- **Automated Tests**: Run `npm test` to ensure no regressions
+- **Lint Check**: Run `npm run lint` to verify code quality
 - **Manual Testing**: Start dashboard (`af start`) and verify it loads
 
 #### Rollback Strategy
@@ -138,6 +139,8 @@ The work is sequenced so that backend removal happens first (API endpoint remove
 - [ ] `grep -r "showActivitySummary" packages/codev/templates/` returns no matches
 
 #### Test Plan
+- **Automated Tests**: Run `npm test` to ensure no regressions
+- **Lint Check**: Run `npm run lint` to verify code quality
 - **Manual Testing**:
   - Open dashboard, check browser console for errors
   - Click through all tabs
@@ -189,11 +192,15 @@ The work is sequenced so that backend removal happens first (API endpoint remove
 - `codev/resources/lessons-learned.md` - Remove Spec 0059 references (if any)
 
 #### Acceptance Criteria
-- [ ] `grep -r "0059" codev/` returns only this spec (0074) as expected
+- [ ] `grep -r "0059" codev/` returns ONLY matches in this spec (0074) and its plan - no other files should reference 0059
 - [ ] No orphaned references to "activity-summary" in documentation
 - [ ] projectlist-archive.md shows 0059 as "removed"
 
+**Note on grep expectation**: The spec states `grep -r "0059" codev/` should return 0 matches. However, this spec (0074) and this plan necessarily reference "0059" as the feature being removed. The *intent* is that no other codev files should reference 0059. After implementation, the only matches should be in `codev/specs/0074-*.md` and `codev/plans/0074-*.md`.
+
 #### Test Plan
+- **Automated Tests**: Run `npm test` to ensure no regressions
+- **Lint Check**: Run `npm run lint` to verify code quality
 - **Manual Testing**: Run verification greps from spec
 - **Review**: Check updated documentation for consistency
 
@@ -232,9 +239,9 @@ None - this is a removal operation with no external dependencies.
 | Missing documentation updates | Medium | Low | Comprehensive doc scan in Phase 3 |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `npm run build` succeeds, server starts
-2. **After Phase 2**: Dashboard loads, no console errors, all tabs work
-3. **After Phase 3**: All verification greps pass
+1. **After Phase 1**: `npm run build` succeeds, `npm test` passes, `npm run lint` passes, server starts
+2. **After Phase 2**: `npm test` passes, `npm run lint` passes, Dashboard loads, no console errors, all tabs work
+3. **After Phase 3**: `npm test` passes, `npm run lint` passes, all verification greps pass
 
 ## Verification Commands (Post-Implementation)
 ```bash
@@ -246,7 +253,7 @@ grep -r "activity-summary" packages/codev/     # 0 matches expected
 grep -r "ActivitySummary" packages/codev/      # 0 matches expected
 grep -r "activityData" packages/codev/         # 0 matches expected
 grep -r "showActivitySummary" packages/codev/  # 0 matches expected
-grep -r "0059" codev/                          # Only 0074 spec should match
+grep -r "0059" codev/                          # Only 0074 spec/plan should match
 
 # Manual: Open dashboard and verify no errors
 af start
@@ -266,13 +273,30 @@ af start
 
 ## Consultation Log
 
-### First Consultation (After Draft)
-_Pending - will be filled after running consultations_
+### First Consultation (After Draft) - 2026-01-20
 
-- **Gemini Feedback**: [To be filled]
-- **Codex Feedback**: [To be filled]
-- **Changes Made**: [To be filled]
-- **Not Incorporated**: [To be filled]
+**Gemini Pro**:
+- **Verdict**: APPROVE
+- **Confidence**: HIGH
+- **Summary**: Comprehensive and well-structured plan that accurately reflects the specification with clear phases and verification steps.
+- **Key Issues**: None
+
+**GPT-5 Codex**:
+- **Verdict**: REQUEST_CHANGES
+- **Confidence**: HIGH
+- **Summary**: Resolve the contradictory grep requirement, document when lint/tests run, and complete the consultation log before approval.
+- **Key Issues**:
+  1. Acceptance criteria conflict with spec regarding `grep -r "0059"` (Plan Phase 3 vs Spec "Expected Grep Results")
+  2. Automated test/lint execution not anchored to any phase/test plan
+  3. Consultation log left empty despite being a required artifact
+
+**Changes Made in Response**:
+1. **Clarified grep expectation**: Added note in Phase 3 acceptance criteria explaining that 0074 spec/plan will reference "0059" as the feature being removed, so the intent is no *other* files should reference it
+2. **Added test/lint to all phases**: Updated each phase's Test Plan section to include explicit `npm test` and `npm run lint` execution
+3. **Updated Validation Checkpoints**: Added test/lint requirements to all three validation checkpoints
+4. **Filled Consultation Log**: This section now documents the consultation results
+
+**Not Incorporated**: None - all feedback addressed
 
 ## Approval
 - [ ] Multi-agent consultation complete
@@ -282,6 +306,7 @@ _Pending - will be filled after running consultations_
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-01-20 | Initial plan draft | Created implementation plan | AI |
+| 2026-01-20 | Incorporated consultation feedback | Address Codex REQUEST_CHANGES | AI |
 
 ---
 
