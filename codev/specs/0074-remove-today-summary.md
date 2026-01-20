@@ -114,8 +114,10 @@ This is a straightforward deletion task with no alternative approaches needed. T
 
 #### Project Tracking Updates
 
-**`codev/projectlist.md`:**
-- Update Spec 0059 status from "integrated" to "removed" with note about this spec
+**`codev/projectlist-archive.md`:**
+- Update Spec 0059 entry: change status to "removed" with note "Removed by Spec 0074 - feature was unused"
+
+**Note**: Spec 0059 resides in `projectlist-archive.md`, not `projectlist.md`
 
 #### Tests
 
@@ -136,6 +138,7 @@ If any tests are discovered during implementation, they should be removed.
 - The `gh` CLI dependency (used elsewhere)
 - User communication (feature was unused, no migration needed)
 - Cache busting (dashboard assets are served fresh, no service workers)
+- Build manifests (template assets are served directly via `express.static`, no bundling/manifest)
 
 ## Dependency Verification
 
@@ -165,10 +168,21 @@ No cleanup of env vars or credentials required.
 - [ ] No TypeScript compilation errors
 - [ ] No orphaned references to activity/today summary in codebase
 - [ ] Documentation updated to remove references
+- [ ] `codev/projectlist-archive.md` updated with removal status for Spec 0059
+- [ ] Other dashboard tabs still render correctly (no tab index regression)
 
 ### SHOULD Have
 - [ ] All existing tests pass (`npm test`)
 - [ ] Lint passes (`npm run lint`)
+
+### Archival Decision
+
+**Intent**: Full deletion (not archival). The Spec 0059 artifacts (spec/plan/review) document a feature that:
+- Was never widely used
+- Has no historical value worth preserving
+- Will be documented by THIS spec (0074) as the removal rationale
+
+The projectlist-archive.md entry serves as sufficient historical record.
 
 ### Expected Grep Results After Removal
 
@@ -243,6 +257,33 @@ af start
 4. Added "Environment Variables" section confirming no env var cleanup needed
 5. Added note that no user communication needed (feature unused, no migration)
 
+### Second Consultation (2026-01-20) - Final Review
+
+**Gemini Pro**:
+- **Verdict**: APPROVE
+- **Summary**: Comprehensive and well-structured specification for removing the unused "Today Summary" feature.
+- **Confidence**: HIGH
+- **Key Issues**: None
+- **Note**: Suggested clarifying that Spec 0059 is in `projectlist-archive.md`, not `projectlist.md`
+
+**GPT-5 Codex**:
+- **Verdict**: COMMENT
+- **Summary**: Spec is comprehensive, but tighten automated verification, archival intent, asset-manifest checks, and acceptance coverage for archive updates.
+- **Confidence**: HIGH
+- **Key Issues**: None (comments only)
+- **Suggestions**:
+  1. UI sanity coverage: Consider automated DOM check vs manual inspection
+  2. Historical artifacts: Clarify delete vs archive intent for old spec/plan/review
+  3. Asset bundling: Verify no build manifests reference removed files
+  4. Acceptance criteria: Add explicit checkbox for archive update
+
+**Changes Made in Response**:
+1. Clarified that Spec 0059 is in `projectlist-archive.md` (Gemini's note)
+2. Added explicit acceptance criteria for archive update (Codex #4)
+3. Added tab regression verification to acceptance criteria (Codex's edge case)
+4. Confirmed deletion intent (not archival) - these are low-value artifacts for a removed feature
+5. Noted that template assets are not bundled (served directly, no manifest)
+
 ---
 
 ## Changelog
@@ -255,3 +296,9 @@ af start
   - UI: Remove entirely (not hide)
   - Other summary buttons: Keep
   - Tests: Remove any found (confirmed none exist)
+- **2026-01-20**: Second consultation (final review) - both APPROVE/COMMENT with high confidence
+  - Clarified projectlist-archive.md location
+  - Added explicit archive update acceptance criteria
+  - Added tab regression verification
+  - Documented archival vs deletion decision
+  - Noted no build manifest concerns (assets served directly)
