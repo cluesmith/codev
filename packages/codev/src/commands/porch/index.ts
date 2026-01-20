@@ -200,41 +200,92 @@ function getDefaultNextState(protocol: Protocol, state: string): string | null {
 // Note: extractSignal is now imported from signal-parser.js
 
 /**
- * Rolling buffer for last N lines of output
+ * Claude Runner - Manages background Claude execution with logging
  */
-class OutputBuffer {
-  private lines: string[] = [];
-  private currentLine = '';
-  private maxLines: number;
+interface ClaudeRunnerState {
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
+  phaseId: string;
+  logFile: string;
+  startTime: number;
+  lineCount: number;
+  output: string;
+  error?: string;
+  pid?: number;
+}
 
-  constructor(maxLines = 20) {
-    this.maxLines = maxLines;
+let currentRunner: ClaudeRunnerState | null = null;
+let currentProc: ReturnType<typeof spawn> | null = null;
+
+/**
+ * Get the logs directory for a project
+ */
+function getLogsDir(projectRoot: string, projectId: string, projectTitle: string): string {
+  return path.join(projectRoot, 'codev', 'projects', `${projectId}-${projectTitle}`, 'logs');
+}
+
+/**
+ * Get current log file path
+ */
+function getCurrentLogFile(): string | null {
+  return currentRunner?.logFile || null;
+}
+
+/**
+ * Get runner status for display
+ */
+function getRunnerStatus(): { status: string; details: string } | null {
+  if (!currentRunner) return null;
+
+  const elapsed = Math.floor((Date.now() - currentRunner.startTime) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  return {
+    status: currentRunner.status,
+    details: `Phase: ${currentRunner.phaseId} | ${currentRunner.lineCount} lines | ${timeStr}`,
+  };
+}
+
+/**
+ * Cancel the current Claude execution
+ */
+function cancelClaude(): boolean {
+  if (!currentProc || !currentRunner || currentRunner.status !== 'running') {
+    return false;
   }
 
-  append(data: string): void {
-    const text = data.toString();
-    for (const char of text) {
-      if (char === '\n') {
-        this.lines.push(this.currentLine);
-        if (this.lines.length > this.maxLines) {
-          this.lines.shift();
-        }
-        this.currentLine = '';
-      } else {
-        this.currentLine += char;
-      }
+  currentRunner.status = 'cancelled';
+  currentProc.kill('SIGTERM');
+
+  setTimeout(() => {
+    if (currentProc && !currentProc.killed) {
+      currentProc.kill('SIGKILL');
     }
+  }, 2000);
+
+  return true;
+}
+
+/**
+ * Read last N lines from log file
+ */
+function tailLog(n = 20): string[] {
+  if (!currentRunner?.logFile || !fs.existsSync(currentRunner.logFile)) {
+    return [];
   }
 
-  getContext(): string[] {
-    return this.currentLine
-      ? [...this.lines, this.currentLine]
-      : [...this.lines];
+  try {
+    const content = fs.readFileSync(currentRunner.logFile, 'utf-8');
+    const lines = content.split('\n');
+    return lines.slice(-n);
+  } catch {
+    return [];
   }
 }
 
 /**
- * Invoke Claude for a phase with escape-to-cancel and output buffering
+ * Invoke Claude for a phase - runs in background, writes to log file
  */
 async function invokeClaude(
   protocol: Protocol,
@@ -263,12 +314,19 @@ async function invokeClaude(
     return '';
   }
 
-  console.log(chalk.cyan(`[phase] Invoking Claude for phase: ${phaseId}`));
-  console.log(chalk.gray(`[porch] Press ESC to cancel`));
+  // Set up log file
+  const logsDir = getLogsDir(projectRoot, state.id, state.title);
+  fs.mkdirSync(logsDir, { recursive: true });
+  const logFile = path.join(logsDir, `${phaseId}_${state.iteration}_${Date.now()}.log`);
+
+  console.log(chalk.cyan(`[phase] Starting Claude for phase: ${phaseId}`));
+  console.log(chalk.gray(`[porch] Log: ${logFile}`));
+  console.log(chalk.gray(`[porch] Commands: tail, status, cancel`));
   console.log('');
 
   const timeout = protocol.config?.claude_timeout || 600000; // 10 minutes default
   const startTime = Date.now();
+  const maxRetries = 3;
 
   const fullPrompt = `## Protocol: ${protocol.name}
 ## Phase: ${phaseId}
@@ -294,118 +352,120 @@ ${promptContent}
 - Output <signal>...</signal> tags when you reach completion points
 `;
 
+  // Retry loop for crashes
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await runClaudeWithLogging(fullPrompt, logFile, phaseId, timeout);
+      return result;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Check for known crash patterns that warrant retry
+      if (errorMsg.includes('No messages returned') ||
+          errorMsg.includes('SIGTERM') ||
+          errorMsg.includes('ECONNRESET')) {
+        if (attempt < maxRetries) {
+          console.log(chalk.yellow(`[porch] Claude crashed (attempt ${attempt}/${maxRetries}): ${errorMsg}`));
+          console.log(chalk.yellow(`[porch] Retrying in 5 seconds...`));
+          await new Promise(r => setTimeout(r, 5000));
+          continue;
+        }
+      }
+
+      // Non-retryable error or max retries reached
+      throw error;
+    }
+  }
+
+  return ''; // Should not reach here
+}
+
+/**
+ * Run Claude with output logging
+ */
+async function runClaudeWithLogging(
+  prompt: string,
+  logFile: string,
+  phaseId: string,
+  timeout: number
+): Promise<string> {
+  const startTime = Date.now();
+
   return new Promise((resolve, reject) => {
-    const args = ['--print', '-p', fullPrompt, '--dangerously-skip-permissions'];
+    const args = ['--print', '-p', prompt, '--dangerously-skip-permissions'];
     const proc = spawn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout,
     });
 
+    currentProc = proc;
+    currentRunner = {
+      status: 'running',
+      phaseId,
+      logFile,
+      startTime,
+      lineCount: 0,
+      output: '',
+      pid: proc.pid,
+    };
+
     let output = '';
     let stderr = '';
-    let cancelled = false;
-    const outputBuffer = new OutputBuffer(20);
 
-    // Set up escape key handler
-    const wasRawMode = process.stdin.isRaw;
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-    }
-
-    const escapeHandler = (key: Buffer) => {
-      // ESC key is ASCII 27, Ctrl+C is 3
-      if (key[0] === 27 || key[0] === 3) {
-        cancelled = true;
-        console.log('');
-        console.log(chalk.yellow('━'.repeat(50)));
-        console.log(chalk.yellow('[porch] Cancelling Claude execution...'));
-        console.log(chalk.yellow('━'.repeat(50)));
-
-        // Show last 20 lines of context
-        const context = outputBuffer.getContext();
-        if (context.length > 0) {
-          console.log(chalk.gray('\nLast output:'));
-          console.log(chalk.gray('─'.repeat(40)));
-          for (const line of context.slice(-10)) {
-            console.log(chalk.gray('  ' + line.slice(0, 70)));
-          }
-          console.log(chalk.gray('─'.repeat(40)));
-        }
-
-        proc.kill('SIGTERM');
-
-        // Give it a moment then force kill
-        setTimeout(() => {
-          if (!proc.killed) {
-            proc.kill('SIGKILL');
-          }
-        }, 2000);
-      }
-    };
-
-    if (process.stdin.isTTY) {
-      process.stdin.on('data', escapeHandler);
-    }
-
-    // Periodic status update timer
-    let lineCount = 0;
-    const statusInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const mins = Math.floor(elapsed / 60);
-      const secs = elapsed % 60;
-      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-      // Use stderr so it doesn't interfere with output parsing
-      process.stderr.write(chalk.gray(`\n[porch] Running... ${lineCount} lines | ${timeStr} elapsed | ESC to cancel\n`));
-    }, 30000); // Every 30 seconds
-
-    const cleanup = () => {
-      clearInterval(statusInterval);
-      if (process.stdin.isTTY) {
-        process.stdin.removeListener('data', escapeHandler);
-        process.stdin.setRawMode(wasRawMode ?? false);
-        process.stdin.pause();
-      }
-    };
+    // Open log file for writing
+    const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+    logStream.write(`=== Claude execution started at ${new Date().toISOString()} ===\n`);
+    logStream.write(`=== Phase: ${phaseId} ===\n\n`);
 
     proc.stdout.on('data', (data) => {
       const text = data.toString();
       output += text;
-      outputBuffer.append(text);
-      // Count newlines for status
-      lineCount += (text.match(/\n/g) || []).length;
-      process.stdout.write(data);
+      if (currentRunner) {
+        currentRunner.output += text;
+        currentRunner.lineCount += (text.match(/\n/g) || []).length;
+      }
+      logStream.write(text);
     });
 
     proc.stderr.on('data', (data) => {
-      stderr += data.toString();
-      process.stderr.write(data);
+      const text = data.toString();
+      stderr += text;
+      logStream.write(`[stderr] ${text}`);
     });
 
     proc.on('close', (code) => {
-      cleanup();
-
-      // Show completion summary
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       const mins = Math.floor(elapsed / 60);
       const secs = elapsed % 60;
       const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 
-      if (cancelled) {
+      logStream.write(`\n=== Completed in ${timeStr} with code ${code} ===\n`);
+      logStream.end();
+
+      currentProc = null;
+
+      if (currentRunner?.status === 'cancelled') {
         console.log(chalk.yellow(`[porch] Cancelled after ${timeStr}`));
-        resolve(''); // Return empty on cancel, don't reject
+        currentRunner.status = 'cancelled';
+        resolve('');
       } else if (code !== 0) {
         console.log(chalk.red(`[porch] Failed after ${timeStr} (exit code ${code})`));
+        if (currentRunner) currentRunner.status = 'failed';
         reject(new Error(`Claude exited with code ${code}\n${stderr}`));
       } else {
         console.log('');
-        console.log(chalk.green(`[porch] Phase complete: ${lineCount} lines in ${timeStr}`));
+        const lines = currentRunner?.lineCount || 0;
+        console.log(chalk.green(`[porch] Phase complete: ${lines} lines in ${timeStr}`));
+        if (currentRunner) currentRunner.status = 'completed';
         resolve(output);
       }
     });
 
     proc.on('error', (err) => {
-      cleanup();
+      logStream.write(`\n=== Error: ${err.message} ===\n`);
+      logStream.end();
+      currentProc = null;
+      if (currentRunner) currentRunner.status = 'failed';
       reject(err);
     });
   });
@@ -552,9 +612,17 @@ async function prompt(rl: readline.Interface, message: string): Promise<string> 
 function showReplHelp(): void {
   console.log('');
   console.log(chalk.blue('Porch REPL Commands:'));
+  console.log(chalk.gray('  While Claude is running:'));
+  console.log('  ' + chalk.green('tail') + ' [n]        - Show last n lines of Claude output (default: 20)');
+  console.log('  ' + chalk.green('logs') + '            - Show path to current log file');
+  console.log('  ' + chalk.green('cancel') + '          - Cancel current Claude execution');
+  console.log('  ' + chalk.green('status') + '          - Show current project/runner status');
+  console.log('');
+  console.log(chalk.gray('  At gate prompts:'));
   console.log('  ' + chalk.green('approve') + ' [gate]  - Approve pending gate (or current if omitted)');
   console.log('  ' + chalk.green('view') + '            - View the full artifact for current gate');
-  console.log('  ' + chalk.green('status') + '          - Show current project status');
+  console.log('');
+  console.log(chalk.gray('  General:'));
   console.log('  ' + chalk.green('continue') + '        - Continue to next iteration');
   console.log('  ' + chalk.green('skip') + '            - Skip current phase (use with caution)');
   console.log('  ' + chalk.green('help') + '            - Show this help');
@@ -581,6 +649,20 @@ function displayStatus(state: ProjectState, protocol: Protocol): void {
   if (pendingGates.length > 0) {
     console.log(chalk.yellow(`Pending gates: ${pendingGates.join(', ')}`));
   }
+
+  // Show Claude runner status
+  const runnerStatus = getRunnerStatus();
+  if (runnerStatus) {
+    const statusColor = runnerStatus.status === 'running' ? chalk.cyan :
+                       runnerStatus.status === 'completed' ? chalk.green :
+                       runnerStatus.status === 'failed' ? chalk.red :
+                       chalk.yellow;
+    console.log(statusColor(`Claude: ${runnerStatus.status} | ${runnerStatus.details}`));
+    if (currentRunner?.logFile) {
+      console.log(chalk.gray(`Log: ${currentRunner.logFile}`));
+    }
+  }
+
   console.log(chalk.blue('─'.repeat(50)));
   console.log('');
 }
@@ -827,6 +909,36 @@ export async function run(
               break;
             case 'status':
               displayStatus(currentState, protocol);
+              break;
+            case 'tail': {
+              const lines = tailLog(20);
+              if (lines.length > 0) {
+                console.log(chalk.gray('─'.repeat(50)));
+                for (const line of lines) {
+                  console.log(line);
+                }
+                console.log(chalk.gray('─'.repeat(50)));
+              } else {
+                console.log(chalk.yellow('No log output available'));
+              }
+              break;
+            }
+            case 'logs':
+            case 'log': {
+              const logFile = getCurrentLogFile();
+              if (logFile) {
+                console.log(chalk.cyan(`Log file: ${logFile}`));
+              } else {
+                console.log(chalk.yellow('No active log file'));
+              }
+              break;
+            }
+            case 'cancel':
+              if (cancelClaude()) {
+                console.log(chalk.yellow('Claude execution cancelled'));
+              } else {
+                console.log(chalk.gray('No Claude process running'));
+              }
               break;
             case 'view':
             case 'cat':
@@ -1080,6 +1192,36 @@ export async function run(
               break;
             case 'status':
               displayStatus(currentState, protocol);
+              break;
+            case 'tail': {
+              const tailLines = tailLog(20);
+              if (tailLines.length > 0) {
+                console.log(chalk.gray('─'.repeat(50)));
+                for (const line of tailLines) {
+                  console.log(line);
+                }
+                console.log(chalk.gray('─'.repeat(50)));
+              } else {
+                console.log(chalk.yellow('No log output available'));
+              }
+              break;
+            }
+            case 'logs':
+            case 'log': {
+              const logPath = getCurrentLogFile();
+              if (logPath) {
+                console.log(chalk.cyan(`Log file: ${logPath}`));
+              } else {
+                console.log(chalk.yellow('No active log file'));
+              }
+              break;
+            }
+            case 'cancel':
+              if (cancelClaude()) {
+                console.log(chalk.yellow('Claude execution cancelled'));
+              } else {
+                console.log(chalk.gray('No Claude process running'));
+              }
               break;
             case 'help':
             case '?':
