@@ -40,6 +40,7 @@ interface PhaseJson {
   name: string;
   description?: string;
   type: 'once' | 'per_plan_phase';
+  prompt?: string;
   steps?: string[];
   checks?: Record<string, CheckJson>;
   consultation?: ConsultationJson;
@@ -150,6 +151,11 @@ function convertPhase(json: PhaseJson, defaults?: ProtocolJson['defaults']): Pha
     name: json.name,
     phased: json.type === 'per_plan_phase',
   };
+
+  // Add prompt file reference
+  if (json.prompt) {
+    phase.prompt = json.prompt;
+  }
 
   // Add substates from steps
   if (json.steps && json.steps.length > 0) {

@@ -431,6 +431,7 @@ function showReplHelp(): void {
   console.log('');
   console.log(chalk.blue('Porch REPL Commands:'));
   console.log('  ' + chalk.green('approve') + ' [gate]  - Approve pending gate (or current if omitted)');
+  console.log('  ' + chalk.green('view') + '            - View the full artifact for current gate');
   console.log('  ' + chalk.green('status') + '          - Show current project status');
   console.log('  ' + chalk.green('continue') + '        - Continue to next iteration');
   console.log('  ' + chalk.green('skip') + '            - Skip current phase (use with caution)');
@@ -459,6 +460,80 @@ function displayStatus(state: ProjectState, protocol: Protocol): void {
     console.log(chalk.yellow(`Pending gates: ${pendingGates.join(', ')}`));
   }
   console.log(chalk.blue('─'.repeat(50)));
+  console.log('');
+}
+
+/**
+ * Get the artifact file path for a gate
+ */
+function getGateArtifact(gateId: string, state: ProjectState, projectRoot: string): string | null {
+  const projectDir = `${state.id}-${state.title}`;
+
+  if (gateId === 'specify_approval') {
+    // Look for spec file
+    const specPath = path.join(projectRoot, 'codev', 'specs', `${projectDir}.md`);
+    if (fs.existsSync(specPath)) return specPath;
+    // Try alternate naming
+    const altPath = path.join(projectRoot, 'codev', 'specs', `${state.id}-${state.title}.md`);
+    if (fs.existsSync(altPath)) return altPath;
+  } else if (gateId === 'plan_approval') {
+    // Look for plan file
+    const planPath = path.join(projectRoot, 'codev', 'plans', `${projectDir}.md`);
+    if (fs.existsSync(planPath)) return planPath;
+    const altPath = path.join(projectRoot, 'codev', 'plans', `${state.id}-${state.title}.md`);
+    if (fs.existsSync(altPath)) return altPath;
+  } else if (gateId === 'review_approval') {
+    // Look for review file
+    const reviewPath = path.join(projectRoot, 'codev', 'reviews', `${projectDir}.md`);
+    if (fs.existsSync(reviewPath)) return reviewPath;
+  }
+  return null;
+}
+
+/**
+ * Display gate context - show what artifact was created and key information
+ */
+function displayGateContext(gateId: string, state: ProjectState, projectRoot: string): void {
+  const artifactPath = getGateArtifact(gateId, state, projectRoot);
+
+  console.log('');
+  console.log(chalk.cyan('─'.repeat(50)));
+  console.log(chalk.cyan('  CONTEXT FOR REVIEW'));
+  console.log(chalk.cyan('─'.repeat(50)));
+
+  if (artifactPath) {
+    console.log(chalk.white(`  Artifact: ${artifactPath}`));
+    console.log('');
+
+    // Read and show first ~30 lines of the artifact
+    try {
+      const content = fs.readFileSync(artifactPath, 'utf-8');
+      const lines = content.split('\n');
+      const preview = lines.slice(0, 30).join('\n');
+      console.log(chalk.gray('  ┌' + '─'.repeat(46) + '┐'));
+      for (const line of preview.split('\n')) {
+        console.log(chalk.gray('  │ ') + line.slice(0, 44));
+      }
+      if (lines.length > 30) {
+        console.log(chalk.gray(`  │ ... (${lines.length - 30} more lines)`));
+      }
+      console.log(chalk.gray('  └' + '─'.repeat(46) + '┘'));
+      console.log('');
+      console.log(chalk.white(`  To view full document: cat ${artifactPath}`));
+    } catch (e) {
+      console.log(chalk.yellow(`  Could not read artifact: ${e}`));
+    }
+  } else {
+    console.log(chalk.yellow('  No artifact file found for this gate.'));
+    console.log(chalk.yellow('  This may indicate Claude did not produce the expected output.'));
+
+    // Show what we expected
+    if (gateId === 'specify_approval') {
+      console.log(chalk.gray(`  Expected: codev/specs/${state.id}-${state.title}.md`));
+    } else if (gateId === 'plan_approval') {
+      console.log(chalk.gray(`  Expected: codev/plans/${state.id}-${state.title}.md`));
+    }
+  }
   console.log('');
 }
 
@@ -605,7 +680,9 @@ export async function run(
         console.log(chalk.yellow('═'.repeat(50)));
         console.log(chalk.cyan(`  Phase: ${phaseId}`));
         console.log(chalk.cyan(`  State: ${currentState.current_state}`));
-        console.log('');
+
+        // Show context for the gate - what artifact was created
+        displayGateContext(gateId, currentState, projectRoot);
 
         // Interactive gate approval loop
         let gateHandled = false;
@@ -628,6 +705,24 @@ export async function run(
               break;
             case 'status':
               displayStatus(currentState, protocol);
+              break;
+            case 'view':
+            case 'cat':
+            case 'show':
+              // Show full artifact
+              const artifactPath = getGateArtifact(gateId, currentState, projectRoot);
+              if (artifactPath) {
+                console.log(chalk.cyan(`\n─── ${artifactPath} ───\n`));
+                try {
+                  const content = fs.readFileSync(artifactPath, 'utf-8');
+                  console.log(content);
+                  console.log(chalk.cyan(`\n─── End of ${artifactPath} ───\n`));
+                } catch (e) {
+                  console.log(chalk.red(`Error reading file: ${e}`));
+                }
+              } else {
+                console.log(chalk.yellow('No artifact file found for this gate.'));
+              }
               break;
             case 'help':
             case '?':
