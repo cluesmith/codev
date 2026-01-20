@@ -111,12 +111,38 @@ This is a straightforward deletion task with no alternative approaches needed. T
 **`codev/resources/lessons-learned.md`:**
 - Remove any references to Spec 0059
 
+#### Project Tracking Updates
+
+**`codev/projectlist.md`:**
+- Update Spec 0059 status from "integrated" to "removed" with note about this spec
+
 ### Out of Scope
 
 - Backend server file itself (kept, only removing activity-related code)
 - Other dashboard functionality
 - The `consult` CLI tool (used elsewhere)
 - The `gh` CLI dependency (used elsewhere)
+- User communication (feature was unused, no migration needed)
+- Cache busting (dashboard assets are served fresh, no service workers)
+
+## Dependency Verification
+
+The following helper functions are **ONLY** used within the Today Summary feature and are safe to remove:
+
+| Function | Used By | Safe to Remove |
+|----------|---------|----------------|
+| `escapeShellArg()` | `getGitCommits()`, `getModifiedFiles()`, `generateAISummary()` | Yes |
+| `findConsultPath()` | `generateAISummary()` | Yes |
+
+**Verification**: `grep -r "escapeShellArg\|findConsultPath" packages/codev/src/` returns only hits within activity-related code blocks (lines 640-1051).
+
+## Environment Variables
+
+**No environment variables** are specific to the Today Summary feature. The feature uses:
+- `gh` CLI (system-installed, credentials managed externally)
+- `consult` CLI (system-installed, credentials managed externally)
+
+No cleanup of env vars or credentials required.
 
 ## Acceptance Criteria
 
@@ -129,8 +155,21 @@ This is a straightforward deletion task with no alternative approaches needed. T
 - [ ] Documentation updated to remove references
 
 ### SHOULD Have
-- [ ] All tests pass (any activity-related tests removed)
-- [ ] `grep -r "activity" packages/codev/templates/dashboard/` returns no false positives (only legitimate uses like CSS transitions)
+- [ ] All existing tests pass (`npm test`)
+- [ ] Lint passes (`npm run lint`)
+
+### Expected Grep Results After Removal
+
+After removal, these greps should return **no matches**:
+```bash
+grep -r "activity-summary" packages/codev/     # 0 matches expected
+grep -r "ActivitySummary" packages/codev/      # 0 matches expected
+grep -r "activityData" packages/codev/         # 0 matches expected
+grep -r "showActivitySummary" packages/codev/  # 0 matches expected
+grep -r "0059" codev/                          # 0 matches expected
+```
+
+**Note**: The word "activity" alone may still appear in legitimate contexts (CSS transitions, etc.) - this is acceptable.
 
 ### Verification Commands
 ```bash
@@ -167,11 +206,34 @@ af start
 
 ## Consultation Log
 
-### Initial Consultation (Pending)
-*To be filled after multi-agent consultation*
+### First Consultation (2026-01-20)
+
+**Gemini Pro**:
+- **Verdict**: APPROVE
+- **Summary**: Comprehensive plan to remove unused "Today Summary" feature; covers all touched files and functions correctly.
+- **Confidence**: HIGH
+- **Key Issues**: None
+
+**GPT-5 Codex**:
+- **Verdict**: REQUEST_CHANGES
+- **Summary**: File/function deletion list is strong, but tracking updates, dependency confirmation, testing, and cleanup details need clarification.
+- **Confidence**: MEDIUM
+- **Key Issues**:
+  1. Missing instructions for updating canonical tracking (projectlist.md)
+  2. No confirmation that shared helpers being removed aren't used elsewhere
+  3. Insufficient testing/verification guidance beyond build + manual check
+  4. No plan to clean up credentials/env vars or communicate removal to users
+
+**Changes Made in Response**:
+1. Added "Project Tracking Updates" section for `codev/projectlist.md`
+2. Added "Dependency Verification" section confirming `escapeShellArg()` and `findConsultPath()` are only used in activity code
+3. Expanded "Acceptance Criteria" with specific test/lint requirements and expected grep results
+4. Added "Environment Variables" section confirming no env var cleanup needed
+5. Added note that no user communication needed (feature unused, no migration)
 
 ---
 
 ## Changelog
 
 - **2026-01-20**: Initial specification draft
+- **2026-01-20**: Incorporated multi-agent consultation feedback (Codex REQUEST_CHANGES addressed)
