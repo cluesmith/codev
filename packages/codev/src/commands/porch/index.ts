@@ -200,7 +200,41 @@ function getDefaultNextState(protocol: Protocol, state: string): string | null {
 // Note: extractSignal is now imported from signal-parser.js
 
 /**
- * Invoke Claude for a phase
+ * Rolling buffer for last N lines of output
+ */
+class OutputBuffer {
+  private lines: string[] = [];
+  private currentLine = '';
+  private maxLines: number;
+
+  constructor(maxLines = 20) {
+    this.maxLines = maxLines;
+  }
+
+  append(data: string): void {
+    const text = data.toString();
+    for (const char of text) {
+      if (char === '\n') {
+        this.lines.push(this.currentLine);
+        if (this.lines.length > this.maxLines) {
+          this.lines.shift();
+        }
+        this.currentLine = '';
+      } else {
+        this.currentLine += char;
+      }
+    }
+  }
+
+  getContext(): string[] {
+    return this.currentLine
+      ? [...this.lines, this.currentLine]
+      : [...this.lines];
+  }
+}
+
+/**
+ * Invoke Claude for a phase with escape-to-cancel and output buffering
  */
 async function invokeClaude(
   protocol: Protocol,
@@ -230,8 +264,11 @@ async function invokeClaude(
   }
 
   console.log(chalk.cyan(`[phase] Invoking Claude for phase: ${phaseId}`));
+  console.log(chalk.gray(`[porch] Press ESC to cancel`));
+  console.log('');
 
   const timeout = protocol.config?.claude_timeout || 600000; // 10 minutes default
+  const startTime = Date.now();
 
   const fullPrompt = `## Protocol: ${protocol.name}
 ## Phase: ${phaseId}
@@ -266,9 +303,77 @@ ${promptContent}
 
     let output = '';
     let stderr = '';
+    let cancelled = false;
+    const outputBuffer = new OutputBuffer(20);
+
+    // Set up escape key handler
+    const wasRawMode = process.stdin.isRaw;
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+    }
+
+    const escapeHandler = (key: Buffer) => {
+      // ESC key is ASCII 27, Ctrl+C is 3
+      if (key[0] === 27 || key[0] === 3) {
+        cancelled = true;
+        console.log('');
+        console.log(chalk.yellow('━'.repeat(50)));
+        console.log(chalk.yellow('[porch] Cancelling Claude execution...'));
+        console.log(chalk.yellow('━'.repeat(50)));
+
+        // Show last 20 lines of context
+        const context = outputBuffer.getContext();
+        if (context.length > 0) {
+          console.log(chalk.gray('\nLast output:'));
+          console.log(chalk.gray('─'.repeat(40)));
+          for (const line of context.slice(-10)) {
+            console.log(chalk.gray('  ' + line.slice(0, 70)));
+          }
+          console.log(chalk.gray('─'.repeat(40)));
+        }
+
+        proc.kill('SIGTERM');
+
+        // Give it a moment then force kill
+        setTimeout(() => {
+          if (!proc.killed) {
+            proc.kill('SIGKILL');
+          }
+        }, 2000);
+      }
+    };
+
+    if (process.stdin.isTTY) {
+      process.stdin.on('data', escapeHandler);
+    }
+
+    // Periodic status update timer
+    let lineCount = 0;
+    const statusInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      // Use stderr so it doesn't interfere with output parsing
+      process.stderr.write(chalk.gray(`\n[porch] Running... ${lineCount} lines | ${timeStr} elapsed | ESC to cancel\n`));
+    }, 30000); // Every 30 seconds
+
+    const cleanup = () => {
+      clearInterval(statusInterval);
+      if (process.stdin.isTTY) {
+        process.stdin.removeListener('data', escapeHandler);
+        process.stdin.setRawMode(wasRawMode ?? false);
+        process.stdin.pause();
+      }
+    };
 
     proc.stdout.on('data', (data) => {
-      output += data.toString();
+      const text = data.toString();
+      output += text;
+      outputBuffer.append(text);
+      // Count newlines for status
+      lineCount += (text.match(/\n/g) || []).length;
       process.stdout.write(data);
     });
 
@@ -278,14 +383,31 @@ ${promptContent}
     });
 
     proc.on('close', (code) => {
-      if (code !== 0) {
+      cleanup();
+
+      // Show completion summary
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+      if (cancelled) {
+        console.log(chalk.yellow(`[porch] Cancelled after ${timeStr}`));
+        resolve(''); // Return empty on cancel, don't reject
+      } else if (code !== 0) {
+        console.log(chalk.red(`[porch] Failed after ${timeStr} (exit code ${code})`));
         reject(new Error(`Claude exited with code ${code}\n${stderr}`));
       } else {
+        console.log('');
+        console.log(chalk.green(`[porch] Phase complete: ${lineCount} lines in ${timeStr}`));
         resolve(output);
       }
     });
 
-    proc.on('error', reject);
+    proc.on('error', (err) => {
+      cleanup();
+      reject(err);
+    });
   });
 }
 
