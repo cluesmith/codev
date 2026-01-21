@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    # Run daily at 9am UTC (2am PST / 5am EST)
+    - cron: '0 9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -58,3 +61,25 @@ jobs:
           path: |
             packages/codev/*.tgz
           retention-days: 7
+
+  notify:
+    name: Discord Notification
+    needs: e2e
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "${{ needs.e2e.result }}" == "success" ]; then
+            COLOR=3066993  # Green
+            STATUS="✅ Passed"
+          else
+            COLOR=15158332  # Red
+            STATUS="❌ Failed"
+          fi
+
+          curl -H "Content-Type: application/json" \
+            -d "{\"embeds\": [{\"title\": \"Codev E2E Tests - ${STATUS}\", \"description\": \"Scheduled daily E2E test run completed.\", \"color\": ${COLOR}, \"fields\": [{\"name\": \"Result\", \"value\": \"${{ needs.e2e.result }}\", \"inline\": true}, {\"name\": \"Run\", \"value\": \"[View Workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}], \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+            $DISCORD_WEBHOOK
