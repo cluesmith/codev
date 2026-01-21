@@ -46,9 +46,6 @@ let paletteResults = [];
 let paletteIndex = 0;
 let paletteDebounceTimer = null;
 
-// Activity state (Spec 0059)
-let activityData = null;
-
 // Collapsible section state (persisted to localStorage)
 const SECTION_STATE_KEY = 'codev-dashboard-sections';
 let sectionState = loadSectionState();

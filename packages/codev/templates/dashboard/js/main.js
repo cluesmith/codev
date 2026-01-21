@@ -11,7 +11,6 @@ function init() {
   setupBroadcastChannel();
   setupOverflowDetection();
   setupKeyboardShortcuts();
-  setupActivityModalListeners();
 }
 
 // Set up BroadcastChannel for cross-tab communication
@@ -250,10 +249,6 @@ function setupKeyboardShortcuts() {
       hideCreateFileDialog();
       hideContextMenu();
       hideOverflowMenu();
-      const activityModal = document.getElementById('activity-modal');
-      if (activityModal && !activityModal.classList.contains('hidden')) {
-        closeActivityModal();
-      }
       if (paletteOpen) {
         closePalette();
       }
@@ -310,18 +305,6 @@ function setupKeyboardShortcuts() {
       }
     }
   });
-}
-
-// Set up activity modal event listeners
-function setupActivityModalListeners() {
-  const activityModal = document.getElementById('activity-modal');
-  if (activityModal) {
-    activityModal.addEventListener('click', (e) => {
-      if (e.target.id === 'activity-modal') {
-        closeActivityModal();
-      }
-    });
-  }
 }
 
 // Start projectlist polling (separate from main state polling)

@@ -33,13 +33,13 @@ Projects that have been completed and validated in production.
   - id: "0059"
     title: "Daily Activity Summary"
     summary: "Clock button in dashboard that uses AI to summarize today's work and time spent"
-    status: integrated
+    status: removed
     priority: medium
     release: null
     files:
-      spec: codev/specs/0059-daily-activity-summary.md
-      plan: codev/plans/0059-daily-activity-summary.md
-      review: codev/reviews/0059-daily-activity-summary.md
+      spec: null
+      plan: null
+      review: null
     dependencies: []
     tags: [dashboard, ui, ai, productivity]
     timestamps:
@@ -50,7 +50,8 @@ Projects that have been completed and validated in production.
       implemented_at: "2025-12-15T20:00:00-08:00"
       committed_at: "2025-12-15T20:15:00-08:00"
       integrated_at: "2025-12-16T00:00:00-08:00"
-    notes: "What did I do today? button with AI summary. PR #111 merged 2025-12-15."
+      removed_at: "2026-01-20T00:00:00-08:00"
+    notes: "What did I do today? button with AI summary. PR #111 merged 2025-12-15. REMOVED by Spec 0074 (never used in practice, added complexity without clear value)."
   - id: "0039"
     title: "Codev CLI (First-Class Command)"
     summary: "Unified codev command as primary entry point: init, adopt, doctor, update, tower, consult"

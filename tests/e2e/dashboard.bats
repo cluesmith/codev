@@ -303,3 +303,106 @@ DASHBOARD_DIR="node_modules/@cluesmith/codev/templates/dashboard"
   run grep -q "!running" "$DASHBOARD_DIR/js/dialogs.js"
   assert_success
 }
+
+# === Today Summary Removal Tests (Spec 0074) ===
+# These tests verify that the Today Summary feature (Spec 0059) was removed
+# and guard against it accidentally being reintroduced.
+
+@test "activity.js file does not exist (Spec 0074)" {
+  assert_file_not_exist "$DASHBOARD_DIR/js/activity.js"
+}
+
+@test "activity.css file does not exist (Spec 0074)" {
+  assert_file_not_exist "$DASHBOARD_DIR/css/activity.css"
+}
+
+@test "dashboard HTML does not contain activity modal (Spec 0074)" {
+  run grep -q "activity-modal" "$DASHBOARD_DIR/index.html"
+  assert_failure
+}
+
+@test "dashboard HTML does not contain Today button (Spec 0074)" {
+  run grep -q "Today" "$DASHBOARD_DIR/index.html"
+  assert_failure
+}
+
+@test "dashboard HTML does not import activity.js (Spec 0074)" {
+  run grep -q "activity.js" "$DASHBOARD_DIR/index.html"
+  assert_failure
+}
+
+@test "dashboard HTML does not import activity.css (Spec 0074)" {
+  run grep -q "activity.css" "$DASHBOARD_DIR/index.html"
+  assert_failure
+}
+
+@test "state.js does not contain activityData (Spec 0074)" {
+  run grep -q "activityData" "$DASHBOARD_DIR/js/state.js"
+  assert_failure
+}
+
+@test "main.js does not contain activity modal listeners (Spec 0074)" {
+  run grep -q "setupActivityModalListeners\|activity-modal" "$DASHBOARD_DIR/js/main.js"
+  assert_failure
+}
+
+@test "utils.js does not contain activity functions (Spec 0074)" {
+  run grep -q "formatActivityTime\|renderActivityContentHtml" "$DASHBOARD_DIR/js/utils.js"
+  assert_failure
+}
+
+@test "tabs.js does not contain activity tab handling (Spec 0074)" {
+  run grep -q "type === 'activity'" "$DASHBOARD_DIR/js/tabs.js"
+  assert_failure
+}
+
+@test "dashboard-server has no activity-summary endpoint (Spec 0074)" {
+  run grep -q "activity-summary" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no ActivitySummary type (Spec 0074)" {
+  run grep -q "ActivitySummary" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no generateAISummary function (Spec 0074)" {
+  run grep -q "generateAISummary" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no escapeShellArg function (Spec 0074)" {
+  # This helper was only used by activity features
+  run grep -q "escapeShellArg" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no findConsultPath function (Spec 0074)" {
+  # This helper was only used by activity features
+  run grep -q "findConsultPath" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no collectActivitySummary function (Spec 0074)" {
+  # Main activity collection function
+  run grep -q "collectActivitySummary" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no getGitCommits function (Spec 0074)" {
+  # Git commit fetching for activity
+  run grep -q "getGitCommits" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no getBuilderActivity function (Spec 0074)" {
+  # Builder activity tracking
+  run grep -q "getBuilderActivity" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}
+
+@test "dashboard-server has no TimeTracking type (Spec 0074)" {
+  # Time tracking interface
+  run grep -q "TimeTracking" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_failure
+}

@@ -36,7 +36,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From 0044] Phased approach makes progress visible and commit messages meaningful
 - [From 0054] Keep specs technology-agnostic when implementation should match existing codebase patterns
-- [From 0059] Verify what data is actually available in state before designing features that depend on it
 - [From 0057] Always handle both new and existing branches when creating worktrees
 
 ## Testing
@@ -44,7 +43,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0009] Verify dependencies actually export what you expect before using them
 - [From 0041] Tarball-based E2E testing catches packaging issues that unit tests miss
 - [From 0039-TICK-005] Regex character classes need careful design - consider all valid characters in user input
-- [From 0059] Timezone handling: use local date formatting, not UTC, when displaying to users
 
 ## UI/UX
 
