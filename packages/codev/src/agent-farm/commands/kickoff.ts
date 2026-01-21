@@ -179,9 +179,16 @@ async function checkDependencies(): Promise<void> {
 }
 
 /**
- * Get porch command (prefer standalone, fall back to codev porch)
+ * Get porch command
+ * When running from the codev source repo, use the local build for latest fixes
  */
-async function getPorchCommand(): Promise<string> {
+async function getPorchCommand(config: Config): Promise<string> {
+  // Check if we're in the codev source repo - use local build
+  const localPorch = resolve(config.projectRoot, 'packages/codev/bin/porch.js');
+  if (existsSync(localPorch)) {
+    return `node "${localPorch}"`;
+  }
+
   if (await commandExists('porch')) {
     return 'porch';
   }
@@ -263,14 +270,15 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
     await createWorktree(config, branchName, worktreePath);
   }
 
-  const porchCmd = await getPorchCommand();
+  const porchCmd = await getPorchCommand(config);
 
   // Initialize porch state if not resuming existing
+  // IMPORTANT: Run from worktree so state is created there, not in main project
   if (!hasExistingState && !resume) {
     logger.info('Initializing porch state...');
     try {
-      await run(`${porchCmd} init ${protocolName} ${projectId} "${safeName}" --worktree "${worktreePath}"`, {
-        cwd: config.projectRoot,
+      await run(`${porchCmd} init ${protocolName} ${projectId} "${safeName}"`, {
+        cwd: worktreePath,
       });
       logger.success('Porch state initialized');
     } catch (error) {
@@ -350,12 +358,21 @@ ${initialPrompt}`;
 
   // Run porch as the main orchestrator
   // Porch will invoke Claude for each phase with appropriate context
-  scriptContent = `#!/bin/bash
+  // Don't use exec so the session stays alive if porch exits
+  scriptContent = `#!/bin/zsh
 cd "${worktreePath}"
 echo "Starting porch orchestrator for project ${projectId}..."
 echo "Protocol: ${protocolName.toUpperCase()}"
 echo ""
-exec ${porchCmd} run ${projectId}
+${porchCmd} run ${projectId}
+EXIT_CODE=$?
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo "Porch exited with code $EXIT_CODE"
+echo "To restart: ${porchCmd} run ${projectId}"
+echo "To exit: type 'exit'"
+echo "═══════════════════════════════════════════════════"
+exec zsh
 `;
 
   writeFileSync(scriptPath, scriptContent);

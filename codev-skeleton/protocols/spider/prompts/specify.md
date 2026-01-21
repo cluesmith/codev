@@ -117,10 +117,17 @@ Include a **Consultation Log** section in the spec documenting all consultation 
 
 Emit appropriate signals based on your progress:
 
-- When waiting for clarifying question answers:
+- When waiting for clarifying question answers, **include your questions in the signal**:
   ```
-  <signal>AWAITING_INPUT</signal>
+  <signal type=AWAITING_INPUT>
+  Please answer these questions:
+  1. What should the primary use case be - internal tooling or customer-facing?
+  2. What are the key constraints we should consider?
+  3. Who are the main stakeholders?
+  </signal>
   ```
+
+  The content inside the signal tag is displayed prominently to the user.
 
 - After completing the initial spec draft:
   ```
