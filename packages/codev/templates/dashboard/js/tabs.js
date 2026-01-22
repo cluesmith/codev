@@ -45,8 +45,6 @@ function getTerminalUrl(tab) {
 // Build tabs from initial state
 function buildTabsFromState() {
   const previousTabIds = new Set(tabs.map(t => t.id));
-  // Preserve client-side-only tabs (like activity)
-  const clientSideTabs = tabs.filter(t => t.type === 'activity');
   tabs = [];
 
   // Dashboard tab is ALWAYS first and uncloseable (Spec 0045, 0057)
@@ -92,10 +90,6 @@ function buildTabsFromState() {
     });
   }
 
-  // Re-add preserved client-side tabs
-  for (const tab of clientSideTabs) {
-    tabs.push(tab);
-  }
 
   // Detect new tabs and auto-switch to them (skip projects tab)
   for (const tab of tabs) {
@@ -269,16 +263,6 @@ function renderTabContent() {
       currentTabType = 'dashboard';
       currentTabPort = null;
       renderDashboardTab();
-    }
-    return;
-  }
-
-  // Handle activity tab specially (no iframe, inline content)
-  if (tab.type === 'activity') {
-    if (currentTabType !== 'activity') {
-      currentTabType = 'activity';
-      currentTabPort = null;
-      renderActivityTab();
     }
     return;
   }
