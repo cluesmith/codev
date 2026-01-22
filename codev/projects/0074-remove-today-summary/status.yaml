@@ -1,0 +1,17 @@
+id: '0074'
+title: remove-today-summary
+protocol: spider
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  phase-complete:
+    status: pending
+  pr-ready:
+    status: pending
+started_at: '2026-01-22T04:29:59.232Z'
+updated_at: '2026-01-22T04:29:59.232Z'

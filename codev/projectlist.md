@@ -177,6 +177,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: "2026-01-20T10:00:00-08:00"
     notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af. 8 rounds of 3-way review before merge."
 
+  - id: "0075"
+    title: "Porch Minimal Redesign"
+    summary: "Redesign porch from 4800 lines to ~500 lines. Claude calls porch as a tool instead of porch spawning Claude."
+    status: implemented
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0075-porch-minimal-redesign.md
+      plan: codev/plans/0075-porch-minimal-redesign.md
+      review: null
+    dependencies: ["0073"]
+    tags: [porch, workflow, v2]
+    timestamps:
+      conceived_at: "2026-01-21T12:00:00-08:00"
+      specified_at: "2026-01-21T12:30:00-08:00"
+      planned_at: "2026-01-21T12:30:00-08:00"
+      implementing_at: "2026-01-21T20:00:00-08:00"
+      implemented_at: "2026-01-21T20:25:00-08:00"
+      committed_at: null
+      integrated_at: null
+    notes: "Implemented porch2 (845 lines code, 79% reduction). All 68 unit tests pass. Integration tested with full SPIDER workflow."
+
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
     summary: "Spike to validate CODEV_HQ architecture: WebSocket connection, status sync, remote approvals"

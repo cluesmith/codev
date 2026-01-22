@@ -41,6 +41,72 @@ You are expected to **adhere FULLY to the protocol**. Before starting:
    - TICK: `codev/protocols/tick/protocol.md`
 3. Follow every phase and produce all required artifacts
 
+## CRITICAL: Porch Protocol Enforcement
+
+**You are operating under protocol orchestration. Porch is the gatekeeper.**
+
+Porch (`porch2`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
+
+### MANDATORY BEHAVIORS
+
+1. **FIRST ACTION**: Run `porch2 status {PROJECT_ID}` to see your current state
+2. **BEFORE ANY WORK**: Read porch's instructions carefully
+3. **AFTER COMPLETING WORK**: Run `porch2 check {PROJECT_ID}` to verify criteria
+4. **TO ADVANCE**: Run `porch2 done {PROJECT_ID}` - porch will verify and advance
+5. **AT GATES**: Run `porch2 gate {PROJECT_ID}` and **STOP**. Wait for human.
+
+### PORCH IS AUTHORITATIVE
+
+- Porch tells you what phase you're in
+- Porch tells you what to do next
+- Porch runs the checks that determine if you're done
+- Porch controls advancement between phases
+- You CANNOT skip phases or ignore porch
+
+### WHEN PORCH SAYS STOP, YOU STOP
+
+If porch output contains **"STOP"** or **"WAIT"**, you must stop working and wait for human intervention. Do not try to proceed.
+
+```
+GATE: spec_approval
+
+  Human approval required. STOP and wait.
+  Do not proceed until gate is approved.
+
+STATUS: WAITING FOR HUMAN APPROVAL
+```
+
+When you see output like this, **STOP IMMEDIATELY**. Output a message indicating you're waiting for approval and do not continue until the gate is approved.
+
+### Porch Command Reference
+
+```bash
+porch2 status <id>              # See current state and instructions
+porch2 check <id>               # Run checks for current phase
+porch2 done <id>                # Advance to next phase (if checks pass)
+porch2 gate <id>                # Request human approval
+```
+
+### Example Workflow
+
+```bash
+# Start of session - check where you are
+porch2 status 0074
+
+# After implementing code
+porch2 check 0074
+
+# If checks pass, advance
+porch2 done 0074
+
+# If gate is required
+porch2 gate 0074
+# OUTPUT: "STOP and wait" → STOP HERE, wait for human
+
+# After human approves, continue
+porch2 status 0074
+```
+
 ### SPIDER Protocol Summary
 
 SPIDER works in phases. The Builder is responsible for **IDER** (the Architect handles SP):

@@ -6,6 +6,7 @@
   "bin": {
     "codev": "./bin/codev.js",
     "porch": "./bin/porch.js",
+    "porch2": "./bin/porch2.js",
     "af": "./bin/af.js",
     "consult": "./bin/consult.js",
     "generate-image": "./bin/generate-image.js"
@@ -31,6 +32,7 @@
     "commander": "^12.1.0",
     "glob": "^11.0.0",
     "http-proxy": "^1.18.1",
+    "js-yaml": "^4.1.0",
     "open": "^10.1.0",
     "tree-kill": "^1.2.2",
     "ws": "^8.18.0"
@@ -38,6 +40,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/http-proxy": "^1.17.17",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.1",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
