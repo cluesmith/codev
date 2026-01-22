@@ -17,7 +17,7 @@ import {
 
 describe('porch2 protocol loading', () => {
   const testDir = path.join(tmpdir(), `porch2-protocol-test-${Date.now()}`);
-  const protocolsDir = path.join(testDir, 'codev/protocols');
+  const protocolsDir = path.join(testDir, 'codev/porch/protocols');
 
   // Create test protocol JSON
   const spiderProtocol = {
@@ -65,9 +65,9 @@ describe('porch2 protocol loading', () => {
   };
 
   beforeEach(() => {
-    fs.mkdirSync(path.join(protocolsDir, 'spider'), { recursive: true });
+    fs.mkdirSync(protocolsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(protocolsDir, 'spider', 'protocol.json'),
+      path.join(protocolsDir, 'spider.json'),
       JSON.stringify(spiderProtocol, null, 2)
     );
   });
@@ -95,7 +95,7 @@ describe('porch2 protocol loading', () => {
 
     it('should throw error for invalid JSON', () => {
       fs.writeFileSync(
-        path.join(protocolsDir, 'spider', 'protocol.json'),
+        path.join(protocolsDir, 'spider.json'),
         '{ invalid json }'
       );
 
@@ -106,7 +106,7 @@ describe('porch2 protocol loading', () => {
 
     it('should throw error for missing name field', () => {
       fs.writeFileSync(
-        path.join(protocolsDir, 'spider', 'protocol.json'),
+        path.join(protocolsDir, 'spider.json'),
         JSON.stringify({ phases: [] })
       );
 
@@ -223,14 +223,14 @@ describe('porch2 protocol loading', () => {
 
   describe('codev-skeleton fallback', () => {
     it('should load from codev-skeleton if not in codev', () => {
-      // Remove from codev/protocols
-      fs.rmSync(path.join(protocolsDir, 'spider'), { recursive: true });
+      // Remove from codev/porch/protocols
+      fs.rmSync(path.join(protocolsDir, 'spider.json'));
 
-      // Create in codev-skeleton/protocols
-      const skeletonDir = path.join(testDir, 'codev-skeleton/protocols/spider');
+      // Create in codev-skeleton/porch/protocols
+      const skeletonDir = path.join(testDir, 'codev-skeleton/porch/protocols');
       fs.mkdirSync(skeletonDir, { recursive: true });
       fs.writeFileSync(
-        path.join(skeletonDir, 'protocol.json'),
+        path.join(skeletonDir, 'spider.json'),
         JSON.stringify({ ...spiderProtocol, description: 'From skeleton' })
       );
 

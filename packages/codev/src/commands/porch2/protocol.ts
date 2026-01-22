@@ -80,6 +80,13 @@ function normalizeProtocol(json: unknown): Protocol {
 
   const phases: ProtocolPhase[] = obj.phases.map((p: unknown) => normalizePhase(p));
 
+  // Set next phase based on array order (if not explicitly set)
+  for (let i = 0; i < phases.length; i++) {
+    if (!phases[i].next && i + 1 < phases.length) {
+      phases[i].next = phases[i + 1].id;
+    }
+  }
+
   // Extract default checks
   const checks: Record<string, string> = {};
   const defaults = obj.defaults as Record<string, unknown> | undefined;
