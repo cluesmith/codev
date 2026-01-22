@@ -371,7 +371,6 @@ The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that prov
 | `GET` | `/file?path=...` | Read file contents |
 | `GET` | `/api/projectlist-exists` | Check for projectlist.md |
 | `GET` | `/api/files` | Get file tree for file browser (v1.5.0+) |
-| `GET` | `/api/activity-summary` | Get daily activity summary (v1.5.0+) |
 | `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
 | `GET` | `/terminal/:id` | Reverse proxy to ttyd terminal (v1.5.2+) |
 
