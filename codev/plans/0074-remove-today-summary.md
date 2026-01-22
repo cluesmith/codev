@@ -27,6 +27,12 @@ This plan implements the removal of the Today Summary feature (Spec 0059) from t
 4. **Clean up state.js** (`packages/codev/templates/dashboard/js/state.js`):
    - Search for and remove `activityData` global variable if present
 
+5. **Search for remaining frontend references**:
+   - `grep -r "activity" packages/codev/templates/dashboard/` to find any missed references
+   - `grep -r "Activity" packages/codev/templates/dashboard/` for capitalized variants
+   - Verify utility functions being removed (`formatActivityTime`, `renderActivityContentHtml`) are not called elsewhere
+   - Clean up any orphaned code
+
 ### Done Criteria
 
 - [ ] `activity.js` file deleted
@@ -138,3 +144,31 @@ This plan implements the removal of the Today Summary feature (Spec 0059) from t
 ## Dependencies
 
 None. This work is self-contained.
+
+---
+
+## Consultation
+
+### Summary
+
+All three consultants reviewed this plan. Two approved outright (Gemini, Claude), one provided comments (Codex).
+
+### Gemini (APPROVE)
+> Plan correctly identifies all assets for removal and follows a logical, safe sequence with appropriate verification steps.
+
+No issues raised.
+
+### Codex (COMMENT)
+Raised concern:
+- **Missing frontend grep**: Plan only checks `state.js` explicitly but should have repo-wide frontend search for activity references
+
+Addressed by adding Task 5 to Phase 1 with explicit grep commands for frontend.
+
+### Claude (APPROVE)
+> Well-organized removal plan with complete spec coverage and appropriate verification steps.
+
+Noted same minor suggestion as Codex (frontend grep) - addressed in this revision.
+
+### Resolution
+
+Plan updated to add explicit frontend grep step (Phase 1, Task 5). Ready for approval.
