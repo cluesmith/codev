@@ -69,6 +69,12 @@ Fast autonomous implementation:
 
 Porch (`porch2`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
 
+**Command availability**: If `porch2` is not in PATH, use:
+```bash
+node ../../packages/codev/bin/porch2.js <command> <args>
+```
+This works from your worktree at `.builders/XXXX/`.
+
 ### MANDATORY BEHAVIORS
 
 1. **FIRST ACTION**: Run `porch2 status {PROJECT_ID}` to see your current state
