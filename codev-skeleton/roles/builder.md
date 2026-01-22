@@ -107,15 +107,34 @@ porch2 gate 0074
 porch2 status 0074
 ```
 
-### SPIDER Protocol Summary
+### SPIDER Protocol Execution
 
-SPIDER works in phases. The Builder is responsible for **IDER** (the Architect handles SP):
+As a builder with porch2, you execute the **full SPIDER protocol**:
 
-1. **Implement** - Write the code following the plan
+1. **Specify**: Write the spec (`codev/specs/XXXX-name.md`)
+   - Write the spec with all required sections
+   - **Run 3-way consultation** and add a `## Consultation` section summarizing findings:
+     ```bash
+     consult --model gemini --type spec-review spec XXXX
+     consult --model codex --type spec-review spec XXXX
+     consult --model claude --type spec-review spec XXXX
+     ```
+   - **NO phases in spec** - phases belong in the plan, not the spec
+   - Run `porch2 check` → verifies spec exists, has Consultation section, no phases
+   - Run `porch2 done` → hits `spec_approval` gate
+   - Run `porch2 gate` → **STOP and wait for human**
 
-2. **Defend** - Write tests to validate the implementation
+2. **Plan**: Write the plan (`codev/plans/XXXX-name.md`)
+   - Write the plan with numbered phases (`## Phase 1`, `## Phase 2`, etc.)
+   - Run `porch2 check` → ensures plan file exists with phases
+   - Run `porch2 done` → hits `plan_approval` gate
+   - Run `porch2 gate` → **STOP and wait for human**
 
-3. **Evaluate** - Verify requirements are met
+3. **Implement** - Write the code following the plan
+
+4. **Defend** - Write tests to validate the implementation
+
+5. **Evaluate** - Verify requirements are met
    - Self-review: Does the implementation satisfy the spec?
    - Self-review: Do the tests adequately cover the requirements?
    - **Consult external reviewers** on the complete implementation + tests:
@@ -125,21 +144,10 @@ SPIDER works in phases. The Builder is responsible for **IDER** (the Architect h
      ```
    - Address concerns raised before proceeding to Review
 
-4. **Review** - Document lessons learned, run 3-way review, create PR
+6. **Review** - Document lessons learned, run 3-way review, create PR
    - Write the review document (`codev/reviews/XXXX-spec-name.md`)
    - **Run 3-way parallel review focused on IMPLEMENTATION quality**:
      ```bash
-     QUERY="Review Spec XXXX implementation. Branch: builder/XXXX-...
-
-     Focus on:
-     - Implementation quality and correctness
-     - Test coverage and quality
-     - Adherence to spec requirements
-     - Code patterns and best practices
-     - Edge cases and error handling
-
-     Give verdict: APPROVE or REQUEST_CHANGES."
-
      consult --model gemini --type pr-ready pr $PR_NUMBER &
      consult --model codex --type pr-ready pr $PR_NUMBER &
      consult --model claude --type pr-ready pr $PR_NUMBER &
@@ -147,6 +155,8 @@ SPIDER works in phases. The Builder is responsible for **IDER** (the Architect h
      ```
    - Address any REQUEST_CHANGES feedback before creating the PR
    - Include the 3-way review summary in your PR description
+
+**Commit at the end of each phase** with clear phase markers.
 
    **Note**: The Architect will run a separate 3-way review focused on **integration** concerns.
 

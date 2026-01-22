@@ -9,14 +9,16 @@ import {
   runPhaseChecks,
   formatCheckResults,
   allChecksPassed,
+  type CheckEnv,
 } from '../checks.js';
 
 describe('porch2 check runner', () => {
   const cwd = tmpdir();
+  const defaultEnv: CheckEnv = { PROJECT_ID: '0001', PROJECT_TITLE: 'test-project' };
 
   describe('runCheck', () => {
     it('should pass for successful command', async () => {
-      const result = await runCheck('echo', 'echo hello', cwd);
+      const result = await runCheck('echo', 'echo hello', cwd, defaultEnv);
 
       expect(result.passed).toBe(true);
       expect(result.name).toBe('echo');
@@ -25,31 +27,40 @@ describe('porch2 check runner', () => {
     });
 
     it('should fail for unsuccessful command', async () => {
-      const result = await runCheck('false', 'false', cwd);
+      const result = await runCheck('false', 'false', cwd, defaultEnv);
 
       expect(result.passed).toBe(false);
       expect(result.error).toBeDefined();
     });
 
     it('should fail for non-existent command', async () => {
-      const result = await runCheck('bad', 'nonexistentcommand12345', cwd);
+      const result = await runCheck('bad', 'nonexistentcommand12345', cwd, defaultEnv);
 
       expect(result.passed).toBe(false);
       expect(result.error).toBeDefined();
     });
 
     it('should timeout for long-running command', async () => {
-      const result = await runCheck('sleep', 'sleep 10', cwd, 100);
+      const result = await runCheck('sleep', 'sleep 10', cwd, defaultEnv, 100);
 
       expect(result.passed).toBe(false);
       expect(result.error).toContain('Timed out');
     }, 5000);
 
     it('should capture stderr on failure', async () => {
-      const result = await runCheck('ls', 'ls /nonexistent/path/12345', cwd);
+      const result = await runCheck('ls', 'ls /nonexistent/path/12345', cwd, defaultEnv);
 
       expect(result.passed).toBe(false);
       expect(result.error).toBeDefined();
+    });
+
+    it('should pass project env variables to command', async () => {
+      const env: CheckEnv = { PROJECT_ID: '0042', PROJECT_TITLE: 'my-project' };
+      const result = await runCheck('echo-env', 'echo $PROJECT_ID $PROJECT_TITLE', cwd, env);
+
+      expect(result.passed).toBe(true);
+      expect(result.output).toContain('0042');
+      expect(result.output).toContain('my-project');
     });
   });
 
@@ -60,7 +71,7 @@ describe('porch2 check runner', () => {
         echo2: 'echo two',
       };
 
-      const results = await runPhaseChecks(checks, cwd);
+      const results = await runPhaseChecks(checks, cwd, defaultEnv);
 
       expect(results).toHaveLength(2);
       expect(results[0].passed).toBe(true);
@@ -74,7 +85,7 @@ describe('porch2 check runner', () => {
         echo2: 'echo two', // Should not run
       };
 
-      const results = await runPhaseChecks(checks, cwd);
+      const results = await runPhaseChecks(checks, cwd, defaultEnv);
 
       expect(results).toHaveLength(2); // Stopped after fail
       expect(results[0].passed).toBe(true);
@@ -82,7 +93,7 @@ describe('porch2 check runner', () => {
     });
 
     it('should return empty array for no checks', async () => {
-      const results = await runPhaseChecks({}, cwd);
+      const results = await runPhaseChecks({}, cwd, defaultEnv);
       expect(results).toHaveLength(0);
     });
   });

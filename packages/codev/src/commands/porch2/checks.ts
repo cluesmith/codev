@@ -15,6 +15,12 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 // Check Execution
 // ============================================================================
 
+/** Environment variables passed to check commands */
+export interface CheckEnv {
+  PROJECT_ID: string;
+  PROJECT_TITLE: string;
+}
+
 /**
  * Run a single check command
  */
@@ -22,6 +28,7 @@ export async function runCheck(
   name: string,
   command: string,
   cwd: string,
+  env: CheckEnv,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<CheckResult> {
   const startTime = Date.now();
@@ -40,6 +47,11 @@ export async function runCheck(
       cwd,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PROJECT_ID: env.PROJECT_ID,
+        PROJECT_TITLE: env.PROJECT_TITLE,
+      },
     });
 
     // Set up timeout
@@ -112,12 +124,13 @@ export async function runCheck(
 export async function runPhaseChecks(
   checks: Record<string, string>,
   cwd: string,
+  env: CheckEnv,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   for (const [name, command] of Object.entries(checks)) {
-    const result = await runCheck(name, command, cwd, timeoutMs);
+    const result = await runCheck(name, command, cwd, env, timeoutMs);
     results.push(result);
 
     // Stop on first failure

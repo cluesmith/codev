@@ -37,6 +37,7 @@ import {
   runPhaseChecks,
   formatCheckResults,
   allChecksPassed,
+  type CheckEnv,
 } from './checks.js';
 
 // ============================================================================
@@ -137,11 +138,13 @@ export async function check(projectRoot: string, projectId: string): Promise<voi
     return;
   }
 
+  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
   console.log('');
 
-  const results = await runPhaseChecks(checks, projectRoot);
+  const results = await runPhaseChecks(checks, projectRoot, checkEnv);
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -171,10 +174,12 @@ export async function done(projectRoot: string, projectId: string): Promise<void
 
   // Run checks first
   if (Object.keys(checks).length > 0) {
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
 
-    const results = await runPhaseChecks(checks, projectRoot);
+    const results = await runPhaseChecks(checks, projectRoot, checkEnv);
     console.log(formatCheckResults(results));
 
     if (!allChecksPassed(results)) {

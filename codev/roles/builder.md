@@ -140,12 +140,21 @@ porch2 status 0074
 As a builder with porch2, you execute the **full SPIDER protocol**:
 
 1. **Specify**: Write the spec (`codev/specs/XXXX-name.md`)
-   - Run `porch2 check` → ensures spec file exists
+   - Write the spec with all required sections
+   - **Run 3-way consultation** and add a `## Consultation` section summarizing findings:
+     ```bash
+     consult --model gemini --type spec-review spec XXXX
+     consult --model codex --type spec-review spec XXXX
+     consult --model claude --type spec-review spec XXXX
+     ```
+   - **NO phases in spec** - phases belong in the plan, not the spec
+   - Run `porch2 check` → verifies spec exists, has Consultation section, no phases
    - Run `porch2 done` → hits `spec_approval` gate
    - Run `porch2 gate` → **STOP and wait for human**
 
 2. **Plan**: Write the plan (`codev/plans/XXXX-name.md`)
-   - Run `porch2 check` → ensures plan file exists
+   - Write the plan with numbered phases (`## Phase 1`, `## Phase 2`, etc.)
+   - Run `porch2 check` → ensures plan file exists with phases
    - Run `porch2 done` → hits `plan_approval` gate
    - Run `porch2 gate` → **STOP and wait for human**
 
