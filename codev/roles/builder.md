@@ -63,65 +63,105 @@ Full phases with self-review and testing:
 Fast autonomous implementation:
 - Understand → Implement → Verify → Done
 
-## Porch Orchestration (SPIDER)
+## CRITICAL: Porch Protocol Enforcement
 
-When working on SPIDER tasks, **Porch** (Protocol Orchestrator) manages phase transitions. Porch tracks your state in `codev/projects/<id>/status.yaml`.
+**You are operating under protocol orchestration. Porch is the gatekeeper.**
 
-### Check Your Status
+Porch (`porch2`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
 
-```bash
-# Check current phase and state
-porch status
+### MANDATORY BEHAVIORS
 
-# From worktree, auto-detects project ID
-porch status
+1. **FIRST ACTION**: Run `porch2 status {PROJECT_ID}` to see your current state
+2. **BEFORE ANY WORK**: Read porch's instructions carefully
+3. **AFTER COMPLETING WORK**: Run `porch2 check {PROJECT_ID}` to verify criteria
+4. **TO ADVANCE**: Run `porch2 done {PROJECT_ID}` - porch will verify and advance
+5. **AT GATES**: Run `porch2 gate {PROJECT_ID}` and **STOP**. Wait for human.
+
+### PORCH IS AUTHORITATIVE
+
+- Porch tells you what phase you're in
+- Porch tells you what to do next
+- Porch runs the checks that determine if you're done
+- Porch controls advancement between phases
+- You CANNOT skip phases or ignore porch
+
+### WHEN PORCH SAYS STOP, YOU STOP
+
+If porch output contains **"STOP"** or **"WAIT"**, you must stop working and wait for human intervention. Do not try to proceed.
+
+```
+GATE: spec_approval
+
+  Human approval required. STOP and wait.
+  Do not proceed until gate is approved.
+
+STATUS: WAITING FOR HUMAN APPROVAL
 ```
 
-### Signal Phase Transitions
+When you see output like this, **STOP IMMEDIATELY**. Output a message indicating you're waiting for approval and do not continue until the gate is approved.
 
-Emit signals to indicate phase completion. Porch parses these from your output:
-
-```bash
-# After drafting spec
-<signal>SPEC_DRAFTED</signal>
-
-# After implementing a plan phase
-<signal>PHASE_IMPLEMENTED</signal>
-
-# After writing tests
-<signal>TESTS_WRITTEN</signal>
-
-# After evaluation
-<signal>EVALUATION_COMPLETE</signal>
-
-# After final review
-<signal>REVIEW_COMPLETE</signal>
-```
-
-### IDE Loop (Implement → Defend → Evaluate)
-
-For multi-phase plans, porch loops through each plan phase:
-
-1. **Implement**: Write code for the current plan phase
-2. **Defend**: Write tests, run checks
-3. **Evaluate**: Self-review, ensure quality
-
-Porch automatically advances to the next plan phase after evaluation.
-
-### Enforcement
-
-- **Hooks block wrong file edits**: You cannot edit `codev/specs/` or `codev/plans/` - those are Architect's domain
-- **Gates require approval**: Human gates (spec_approval, plan_approval) block until the Architect approves
-- **State persists**: Porch state survives restarts - resume with `porch run`
-
-### If You Need Spec/Plan Changes
-
-Since you cannot edit specs or plans, notify the Architect:
+### Porch Command Reference
 
 ```bash
-af send architect "Spec needs update: Found edge case not covered - [details]"
-af send architect "Plan needs update: Phase 2 depends on library not available - [details]"
+porch2 status <id>              # See current state and instructions
+porch2 check <id>               # Run checks for current phase
+porch2 done <id>                # Advance to next phase (if checks pass)
+porch2 gate <id>                # Request human approval
 ```
+
+### Example Workflow
+
+```bash
+# Start of session - check where you are
+porch2 status 0074
+
+# After implementing code
+porch2 check 0074
+
+# If checks pass, advance
+porch2 done 0074
+
+# If gate is required
+porch2 gate 0074
+# OUTPUT: "STOP and wait" → STOP HERE, wait for human
+
+# After human approves, continue
+porch2 status 0074
+```
+
+### SPIDER Protocol Execution
+
+As a builder with porch2, you execute the **full SPIDER protocol**:
+
+1. **Specify**: Write the spec (`codev/specs/XXXX-name.md`)
+   - Run `porch2 check` → ensures spec file exists
+   - Run `porch2 done` → hits `spec_approval` gate
+   - Run `porch2 gate` → **STOP and wait for human**
+
+2. **Plan**: Write the plan (`codev/plans/XXXX-name.md`)
+   - Run `porch2 check` → ensures plan file exists
+   - Run `porch2 done` → hits `plan_approval` gate
+   - Run `porch2 gate` → **STOP and wait for human**
+
+3. **Implement**: Write code following the plan
+
+4. **Defend**: Write tests
+
+5. **Evaluate**: Self-review, consult external reviewers
+   ```bash
+   consult --model gemini --type impl-review spec XXXX
+   consult --model codex --type impl-review spec XXXX
+   ```
+
+6. **Review**: Document lessons, create PR, run 3-way review
+   ```bash
+   consult --model gemini --type pr-ready pr $PR_NUMBER &
+   consult --model codex --type pr-ready pr $PR_NUMBER &
+   consult --model claude --type pr-ready pr $PR_NUMBER &
+   wait
+   ```
+
+**Commit at the end of each phase** with clear phase markers.
 
 ## Status Lifecycle
 
