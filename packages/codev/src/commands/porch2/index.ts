@@ -410,6 +410,27 @@ export async function approve(
     process.exit(1);
   }
 
+  // Run phase checks before approving
+  const protocol = loadProtocol(projectRoot, state.protocol);
+  const checks = getPhaseChecks(protocol, state.phase);
+
+  if (Object.keys(checks).length > 0) {
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+
+    console.log('');
+    console.log(chalk.bold('RUNNING CHECKS...'));
+
+    const results = await runPhaseChecks(checks, projectRoot, checkEnv);
+    console.log(formatCheckResults(results));
+
+    if (!allChecksPassed(results)) {
+      console.log('');
+      console.log(chalk.red('CHECKS FAILED. Cannot approve gate.'));
+      console.log(`\n  Fix the failures and try again.`);
+      process.exit(1);
+    }
+  }
+
   state.gates[gateName].status = 'approved';
   state.gates[gateName].approved_at = new Date().toISOString();
   writeState(statusPath, state);

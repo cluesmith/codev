@@ -351,3 +351,5 @@ gh pr view <PR_NUMBER> --web
 - **Don't spawn other Builders** - Only Architects spawn Builders
 - **Keep worktree clean** - No untracked files, no debug code
 - **Follow the protocol** - All phases, all artifacts
+- **NEVER edit status.yaml directly** - Only porch2 commands modify project state
+- **NEVER call porch2 approve unless explicitly told to by the human** - Gates require human instruction to approve

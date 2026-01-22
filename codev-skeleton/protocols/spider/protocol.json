@@ -65,7 +65,8 @@
       },
       "checks": {
         "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
-        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md"
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md",
+        "has_consultation": "grep -q '^## Consultation' codev/plans/${PROJECT_ID}-*.md"
       },
       "gate": {
         "name": "plan-approval",
