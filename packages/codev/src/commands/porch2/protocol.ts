@@ -11,8 +11,8 @@ import type { Protocol, ProtocolPhase } from './types.js';
 
 /** Known protocol locations (relative to project root) */
 const PROTOCOL_PATHS = [
-  'codev/protocols',
-  'codev-skeleton/protocols',
+  'codev/porch/protocols',
+  'codev-skeleton/porch/protocols',
 ];
 
 // ============================================================================
@@ -46,13 +46,19 @@ export function loadProtocol(projectRoot: string, protocolName: string): Protoco
 }
 
 /**
- * Find protocol.json file
+ * Find protocol file (supports both {name}.json and {name}/protocol.json)
  */
 function findProtocolFile(projectRoot: string, protocolName: string): string | null {
   for (const basePath of PROTOCOL_PATHS) {
-    const fullPath = path.resolve(projectRoot, basePath, protocolName, 'protocol.json');
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
+    // Try {name}.json first (flat structure)
+    const flatPath = path.resolve(projectRoot, basePath, `${protocolName}.json`);
+    if (fs.existsSync(flatPath)) {
+      return flatPath;
+    }
+    // Then try {name}/protocol.json (directory structure)
+    const dirPath = path.resolve(projectRoot, basePath, protocolName, 'protocol.json');
+    if (fs.existsSync(dirPath)) {
+      return dirPath;
     }
   }
   return null;
