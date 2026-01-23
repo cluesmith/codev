@@ -9,9 +9,9 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 1: Core Types and State Management
 
 **Files:**
-- `packages/codev/src/commands/porch2/types.ts` (~50 lines)
-- `packages/codev/src/commands/porch2/state.ts` (~100 lines)
-- `packages/codev/src/commands/porch2/__tests__/state.test.ts` (~80 lines)
+- `packages/codev/src/commands/porch/types.ts` (~50 lines)
+- `packages/codev/src/commands/porch/state.ts` (~100 lines)
+- `packages/codev/src/commands/porch/__tests__/state.test.ts` (~80 lines)
 
 **Deliverables:**
 - [ ] ProjectState interface (simplified from current)
@@ -31,8 +31,8 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 2: Protocol Loading
 
 **Files:**
-- `packages/codev/src/commands/porch2/protocol.ts` (~80 lines)
-- `packages/codev/src/commands/porch2/__tests__/protocol.test.ts` (~80 lines)
+- `packages/codev/src/commands/porch/protocol.ts` (~80 lines)
+- `packages/codev/src/commands/porch/__tests__/protocol.test.ts` (~80 lines)
 
 **Deliverables:**
 - [ ] loadProtocol() - parse protocol.json from codev/protocols or codev-skeleton/protocols
@@ -51,8 +51,8 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 3: Plan Parsing
 
 **Files:**
-- `packages/codev/src/commands/porch2/plan.ts` (~80 lines)
-- `packages/codev/src/commands/porch2/__tests__/plan.test.ts` (~100 lines)
+- `packages/codev/src/commands/porch/plan.ts` (~80 lines)
+- `packages/codev/src/commands/porch/__tests__/plan.test.ts` (~100 lines)
 
 **Deliverables:**
 - [ ] findPlanFile() - locate plan markdown by project id
@@ -80,8 +80,8 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 4: Check Runner
 
 **Files:**
-- `packages/codev/src/commands/porch2/checks.ts` (~80 lines)
-- `packages/codev/src/commands/porch2/__tests__/checks.test.ts` (~60 lines)
+- `packages/codev/src/commands/porch/checks.ts` (~80 lines)
+- `packages/codev/src/commands/porch/__tests__/checks.test.ts` (~60 lines)
 
 **Deliverables:**
 - [ ] runCheck() - run a single check command with 5-minute timeout
@@ -105,7 +105,7 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 5: Commands Implementation
 
 **Files:**
-- `packages/codev/src/commands/porch2/index.ts` (~150 lines)
+- `packages/codev/src/commands/porch/index.ts` (~150 lines)
 
 **Deliverables:**
 - [ ] status() - show current state and instructions
@@ -123,7 +123,7 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 ### Phase 6: CLI Wiring
 
 **Files:**
-- `packages/codev/bin/porch2.js` (new binary)
+- `packages/codev/bin/porch.js` (new binary)
 - `packages/codev/package.json` (add bin entry)
 
 **Deliverables:**
@@ -132,7 +132,7 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 - [ ] Error handling
 
 **Acceptance:**
-- `porch2 status 0074` works from command line
+- `porch status 0074` works from command line
 - All commands accessible via CLI
 
 ### Phase 7: Role Prompt Updates
@@ -164,9 +164,9 @@ Replace the current 4,800-line porch with a minimal ~400-line implementation tha
 
 ## Migration Strategy
 
-1. Build porch2 alongside existing porch
+1. Build porch alongside existing porch
 2. Test with spec 0074
-3. If successful, rename porch2 → porch
+3. If successful, rename porch → porch
 4. Delete old porch code
 
 ## File Count Estimate

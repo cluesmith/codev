@@ -1,5 +1,5 @@
 /**
- * Tests for porch2 plan parsing
+ * Tests for porch plan parsing
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -34,8 +34,8 @@ const completePhase = (id: string, title: string): PlanPhase => ({
   stages: { implement: 'complete', defend: 'complete', evaluate: 'complete' },
 });
 
-describe('porch2 plan parsing', () => {
-  const testDir = path.join(tmpdir(), `porch2-plan-test-${Date.now()}`);
+describe('porch plan parsing', () => {
+  const testDir = path.join(tmpdir(), `porch-plan-test-${Date.now()}`);
   const plansDir = path.join(testDir, 'codev/plans');
 
   // Sample plan content with JSON phases block

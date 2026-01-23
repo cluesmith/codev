@@ -19,7 +19,7 @@
 
 ## Phases (Machine Readable)
 
-<!-- REQUIRED: porch2 uses this JSON to track phase progress. Update this when adding/removing phases. -->
+<!-- REQUIRED: porch uses this JSON to track phase progress. Update this when adding/removing phases. -->
 
 ```json
 {

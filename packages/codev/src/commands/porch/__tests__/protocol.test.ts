@@ -1,5 +1,5 @@
 /**
- * Tests for porch2 protocol loading
+ * Tests for porch protocol loading
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -15,8 +15,8 @@ import {
   isPhased,
 } from '../protocol.js';
 
-describe('porch2 protocol loading', () => {
-  const testDir = path.join(tmpdir(), `porch2-protocol-test-${Date.now()}`);
+describe('porch protocol loading', () => {
+  const testDir = path.join(tmpdir(), `porch-protocol-test-${Date.now()}`);
   const protocolsDir = path.join(testDir, 'codev/protocols/spider');
 
   // Create test protocol JSON

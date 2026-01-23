@@ -2,295 +2,243 @@
  * Tests for porch state management
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   readState,
-  serializeState,
-  parseState,
-  updateState,
-  approveGate,
-  requestGateApproval,
-  updatePhaseStatus,
-  setPlanPhases,
-  findProjects,
-  getConsultationAttempts,
-  incrementConsultationAttempts,
-  resetConsultationAttempts,
+  writeState,
+  createInitialState,
+  findStatusPath,
+  getProjectDir,
+  getStatusPath,
   PROJECTS_DIR,
 } from '../state.js';
-import type { ProjectState } from '../types.js';
+import type { ProjectState, Protocol } from '../types.js';
 
-describe('state management', () => {
+describe('porch state management', () => {
   const testDir = path.join(tmpdir(), `porch-state-test-${Date.now()}`);
   const projectsDir = path.join(testDir, PROJECTS_DIR);
 
-  // Create a sample state for testing
+  // Sample protocol for testing
+  const sampleProtocol: Protocol = {
+    name: 'spider',
+    version: '1.0.0',
+    phases: [
+      { id: 'specify', name: 'Specification', gate: 'spec_approval', next: 'plan' },
+      { id: 'plan', name: 'Planning', gate: 'plan_approval', next: 'implement' },
+      { id: 'implement', name: 'Implementation', checks: ['build', 'test'], next: 'review' },
+      { id: 'review', name: 'Review', gate: 'review_approval', next: null },
+    ],
+    checks: {
+      build: 'npm run build',
+      test: 'npm test',
+    },
+  };
+
+  // Sample state for testing
   function createSampleState(overrides: Partial<ProjectState> = {}): ProjectState {
     return {
-      id: '0073',
+      id: '0074',
       title: 'test-feature',
       protocol: 'spider',
-      current_state: 'specify:draft',
-      gates: {},
-      phases: {},
-      iteration: 0,
-      started_at: '2026-01-19T10:00:00Z',
-      last_updated: '2026-01-19T10:00:00Z',
-      log: [],
+      phase: 'specify',
+      plan_phases: [],
+      current_plan_phase: null,
+      gates: {
+        spec_approval: { status: 'pending' },
+        plan_approval: { status: 'pending' },
+      },
+      started_at: '2026-01-21T10:00:00Z',
+      updated_at: '2026-01-21T10:00:00Z',
       ...overrides,
     };
   }
 
   beforeEach(() => {
     fs.mkdirSync(projectsDir, { recursive: true });
-    vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     if (fs.existsSync(testDir)) {
       fs.rmSync(testDir, { recursive: true });
     }
   });
 
-  describe('serializeState / parseState', () => {
-    it('should serialize and parse state correctly', () => {
-      const state = createSampleState();
-      const serialized = serializeState(state);
-      const parsed = parseState(serialized);
-
-      expect(parsed.id).toBe('0073');
-      expect(parsed.title).toBe('test-feature');
-      expect(parsed.protocol).toBe('spider');
-      expect(parsed.current_state).toBe('specify:draft');
+  describe('path utilities', () => {
+    it('should return correct project directory', () => {
+      const dir = getProjectDir('/root', '0074', 'test-feature');
+      expect(dir).toBe('/root/codev/projects/0074-test-feature');
     });
 
-    it('should handle gates in serialization', () => {
-      const state = createSampleState({
-        gates: {
-          // Use underscore format as that's what the YAML parser expects
-          'spec_approval': {
-            status: 'pending',
-            requested_at: '2026-01-19T10:00:00Z',
-          },
-        },
-      });
-      const serialized = serializeState(state);
-      const parsed = parseState(serialized);
-
-      expect(parsed.gates['spec_approval'].status).toBe('pending');
-      expect(parsed.gates['spec_approval'].requested_at).toBe('2026-01-19T10:00:00Z');
-    });
-
-    it('should handle phases in serialization', () => {
-      const state = createSampleState({
-        phases: {
-          'phase_1': { status: 'complete', title: 'Setup' },
-          'phase_2': { status: 'in_progress', title: 'Build' },
-        },
-      });
-      const serialized = serializeState(state);
-      const parsed = parseState(serialized);
-
-      expect(parsed.phases['phase_1'].status).toBe('complete');
-      expect(parsed.phases['phase_2'].status).toBe('in_progress');
-    });
-
-    it('should handle worktree path', () => {
-      const state = createSampleState({
-        worktree: '/path/to/worktree',
-      });
-      const serialized = serializeState(state);
-      const parsed = parseState(serialized);
-
-      expect(parsed.worktree).toBe('/path/to/worktree');
+    it('should return correct status path', () => {
+      const statusPath = getStatusPath('/root', '0074', 'test-feature');
+      expect(statusPath).toBe('/root/codev/projects/0074-test-feature/status.yaml');
     });
   });
 
   describe('readState', () => {
-    it('should return null for non-existent file', () => {
-      const result = readState('/nonexistent/path/status.yaml');
+    it('should throw error for non-existent file', () => {
+      expect(() => {
+        readState('/nonexistent/path/status.yaml');
+      }).toThrow('Project not found');
+    });
+
+    it('should throw error for invalid YAML', () => {
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+      fs.writeFileSync(statusFile, '{ invalid yaml :::');
+
+      expect(() => {
+        readState(statusFile);
+      }).toThrow('YAML parse error');
+    });
+
+    it('should throw error for missing required fields', () => {
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+      fs.writeFileSync(statusFile, 'title: test\n');
+
+      expect(() => {
+        readState(statusFile);
+      }).toThrow('missing required fields');
+    });
+
+    it('should read valid state file', () => {
+      const state = createSampleState();
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+
+      // Write using js-yaml format
+      const yaml = `id: "${state.id}"
+title: "${state.title}"
+protocol: "${state.protocol}"
+phase: "${state.phase}"
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec_approval:
+    status: pending
+started_at: "${state.started_at}"
+updated_at: "${state.updated_at}"
+`;
+      fs.writeFileSync(statusFile, yaml);
+
+      const read = readState(statusFile);
+      expect(read.id).toBe('0074');
+      expect(read.title).toBe('test-feature');
+      expect(read.protocol).toBe('spider');
+      expect(read.phase).toBe('specify');
+    });
+  });
+
+  describe('writeState', () => {
+    it('should write state atomically', () => {
+      const state = createSampleState();
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+
+      writeState(statusFile, state);
+
+      expect(fs.existsSync(statusFile)).toBe(true);
+      expect(fs.existsSync(`${statusFile}.tmp`)).toBe(false); // tmp should be removed
+    });
+
+    it('should update timestamp on write', () => {
+      const state = createSampleState({
+        updated_at: '2026-01-01T00:00:00Z',
+      });
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+
+      writeState(statusFile, state);
+      const read = readState(statusFile);
+
+      // updated_at should be newer than the original
+      expect(new Date(read.updated_at).getTime()).toBeGreaterThan(
+        new Date('2026-01-01T00:00:00Z').getTime()
+      );
+    });
+
+    it('should round-trip state correctly', () => {
+      const state = createSampleState({
+        phase: 'implement',
+        plan_phases: [
+          { id: 'phase_1', title: 'Core types', status: 'complete' },
+          { id: 'phase_2', title: 'State mgmt', status: 'in_progress' },
+        ],
+        current_plan_phase: 'phase_2',
+        gates: {
+          spec_approval: { status: 'approved', approved_at: '2026-01-20T10:00:00Z' },
+          plan_approval: { status: 'approved', approved_at: '2026-01-20T11:00:00Z' },
+        },
+      });
+      const statusFile = path.join(projectsDir, '0074-test', 'status.yaml');
+
+      writeState(statusFile, state);
+      const read = readState(statusFile);
+
+      expect(read.id).toBe('0074');
+      expect(read.phase).toBe('implement');
+      expect(read.plan_phases).toHaveLength(2);
+      expect(read.plan_phases[0].status).toBe('complete');
+      expect(read.current_plan_phase).toBe('phase_2');
+      expect(read.gates.spec_approval.status).toBe('approved');
+    });
+  });
+
+  describe('createInitialState', () => {
+    it('should create state with first phase', () => {
+      const state = createInitialState(sampleProtocol, '0075', 'new-feature');
+
+      expect(state.id).toBe('0075');
+      expect(state.title).toBe('new-feature');
+      expect(state.protocol).toBe('spider');
+      expect(state.phase).toBe('specify');
+    });
+
+    it('should initialize gates from protocol', () => {
+      const state = createInitialState(sampleProtocol, '0075', 'new-feature');
+
+      expect(state.gates.spec_approval).toEqual({ status: 'pending' });
+      expect(state.gates.plan_approval).toEqual({ status: 'pending' });
+      expect(state.gates.review_approval).toEqual({ status: 'pending' });
+    });
+
+    it('should set timestamps', () => {
+      const before = new Date().toISOString();
+      const state = createInitialState(sampleProtocol, '0075', 'new-feature');
+      const after = new Date().toISOString();
+
+      expect(state.started_at >= before).toBe(true);
+      expect(state.started_at <= after).toBe(true);
+      expect(state.updated_at).toBe(state.started_at);
+    });
+  });
+
+  describe('findStatusPath', () => {
+    it('should return null for non-existent project', () => {
+      const result = findStatusPath(testDir, '9999');
       expect(result).toBeNull();
     });
 
-    it('should read existing state file', () => {
-      const state = createSampleState();
-      const statusFile = path.join(projectsDir, '0073-test', 'status.yaml');
-      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
-      fs.writeFileSync(statusFile, serializeState(state));
-
-      const read = readState(statusFile);
-      expect(read).not.toBeNull();
-      expect(read!.id).toBe('0073');
-    });
-  });
-
-  describe('updateState', () => {
-    it('should update current state', () => {
-      const state = createSampleState();
-      const updated = updateState(state, 'plan:draft');
-
-      expect(updated.current_state).toBe('plan:draft');
-      expect(updated.iteration).toBe(1);
-    });
-
-    it('should add log entry', () => {
-      const state = createSampleState();
-      const updated = updateState(state, 'plan:draft', { signal: 'SPEC_READY' });
-
-      expect(updated.log.length).toBe(1);
-      const entry = updated.log[0] as { from: string; to: string; signal: string };
-      expect(entry.from).toBe('specify:draft');
-      expect(entry.to).toBe('plan:draft');
-      expect(entry.signal).toBe('SPEC_READY');
-    });
-  });
-
-  describe('approveGate', () => {
-    it('should mark gate as passed', () => {
-      const state = createSampleState({
-        gates: {
-          'spec-approval': { status: 'pending', requested_at: '2026-01-19T10:00:00Z' },
-        },
-      });
-
-      const updated = approveGate(state, 'spec-approval');
-
-      expect(updated.gates['spec-approval'].status).toBe('passed');
-      expect(updated.gates['spec-approval'].approved_at).toBeDefined();
-    });
-  });
-
-  describe('requestGateApproval', () => {
-    it('should mark gate as pending with timestamp', () => {
-      const state = createSampleState();
-      const updated = requestGateApproval(state, 'spec-approval');
-
-      expect(updated.gates['spec-approval'].status).toBe('pending');
-      expect(updated.gates['spec-approval'].requested_at).toBeDefined();
-    });
-  });
-
-  describe('updatePhaseStatus', () => {
-    it('should update phase status', () => {
-      const state = createSampleState({
-        phases: {
-          'phase_1': { status: 'pending', title: 'Setup' },
-        },
-      });
-
-      const updated = updatePhaseStatus(state, 'phase_1', 'complete');
-
-      expect(updated.phases['phase_1'].status).toBe('complete');
-    });
-  });
-
-  describe('setPlanPhases', () => {
-    it('should set plan phases and initialize phase status', () => {
-      const state = createSampleState();
-      const phases = [
-        { id: 'phase_1', title: 'Setup' },
-        { id: 'phase_2', title: 'Build' },
-      ];
-
-      const updated = setPlanPhases(state, phases);
-
-      expect(updated.plan_phases).toHaveLength(2);
-      expect(updated.phases['phase_1'].status).toBe('pending');
-      expect(updated.phases['phase_2'].status).toBe('pending');
-    });
-  });
-
-  describe('findProjects', () => {
-    it('should find projects in directory', () => {
+    it('should find project by ID prefix', () => {
       // Create a project
-      const projectDir = path.join(projectsDir, '0073-feature');
+      const projectDir = path.join(projectsDir, '0074-test-feature');
       fs.mkdirSync(projectDir, { recursive: true });
-      const state = createSampleState();
-      fs.writeFileSync(path.join(projectDir, 'status.yaml'), serializeState(state));
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0074"\nprotocol: spider\nphase: specify\n');
 
-      const projects = findProjects(testDir);
+      const result = findStatusPath(testDir, '0074');
 
-      expect(projects).toHaveLength(1);
-      expect(projects[0].id).toBe('0073');
+      expect(result).not.toBeNull();
+      expect(result).toContain('0074-test-feature');
     });
 
-    it('should return empty array for non-existent directory', () => {
-      const projects = findProjects('/nonexistent/path');
-      expect(projects).toEqual([]);
-    });
-  });
+    it('should return null if projects directory does not exist', () => {
+      const emptyDir = path.join(testDir, 'empty');
+      fs.mkdirSync(emptyDir);
 
-  describe('consultation attempt tracking', () => {
-    it('should return 0 for state with no consultation attempts', () => {
-      const state = createSampleState();
-      expect(getConsultationAttempts(state, 'specify:consult')).toBe(0);
-    });
-
-    it('should increment consultation attempts', () => {
-      const state = createSampleState();
-      const updated = incrementConsultationAttempts(state, 'specify:consult');
-
-      expect(updated.consultation_attempts).toBeDefined();
-      expect(updated.consultation_attempts!['specify:consult']).toBe(1);
-      expect(getConsultationAttempts(updated, 'specify:consult')).toBe(1);
-    });
-
-    it('should increment multiple times', () => {
-      let state = createSampleState();
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'specify:consult');
-
-      expect(getConsultationAttempts(state, 'specify:consult')).toBe(3);
-    });
-
-    it('should track different states independently', () => {
-      let state = createSampleState();
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'plan:consult');
-
-      expect(getConsultationAttempts(state, 'specify:consult')).toBe(2);
-      expect(getConsultationAttempts(state, 'plan:consult')).toBe(1);
-    });
-
-    it('should reset consultation attempts', () => {
-      let state = createSampleState();
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'specify:consult');
-
-      expect(getConsultationAttempts(state, 'specify:consult')).toBe(2);
-
-      state = resetConsultationAttempts(state, 'specify:consult');
-      expect(getConsultationAttempts(state, 'specify:consult')).toBe(0);
-    });
-
-    it('should log consultation attempts', () => {
-      const state = createSampleState();
-      const updated = incrementConsultationAttempts(state, 'specify:consult');
-
-      const logEntry = updated.log[updated.log.length - 1] as { event: string; phase: string; count: number };
-      expect(logEntry.event).toBe('consultation_attempt');
-      expect(logEntry.phase).toBe('specify:consult');
-      expect(logEntry.count).toBe(1);
-    });
-
-    it('should serialize and parse consultation attempts', () => {
-      let state = createSampleState();
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'specify:consult');
-      state = incrementConsultationAttempts(state, 'plan:consult');
-
-      const yaml = serializeState(state);
-      const parsed = parseState(yaml);
-
-      expect(parsed.consultation_attempts).toBeDefined();
-      expect(parsed.consultation_attempts!['specify:consult']).toBe(2);
-      expect(parsed.consultation_attempts!['plan:consult']).toBe(1);
+      const result = findStatusPath(emptyDir, '0074');
+      expect(result).toBeNull();
     });
   });
 });

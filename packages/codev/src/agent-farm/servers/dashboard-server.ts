@@ -1989,20 +1989,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // API: Get daily activity summary (Spec 0059)
-    if (req.method === 'GET' && url.pathname === '/api/activity-summary') {
-      try {
-        const activitySummary = await collectActivitySummary(projectRoot);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(activitySummary));
-      } catch (err) {
-        console.error('Activity summary error:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: (err as Error).message }));
-      }
-      return;
-    }
-
     // API: Hot reload check (Spec 0060)
     // Returns modification times for all dashboard CSS/JS files
     if (req.method === 'GET' && url.pathname === '/api/hot-reload') {

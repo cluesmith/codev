@@ -1,5 +1,5 @@
 /**
- * Tests for porch2 check runner
+ * Tests for porch check runner
  */
 
 import { describe, it, expect } from 'vitest';
@@ -12,7 +12,7 @@ import {
   type CheckEnv,
 } from '../checks.js';
 
-describe('porch2 check runner', () => {
+describe('porch check runner', () => {
   const cwd = tmpdir();
   const defaultEnv: CheckEnv = { PROJECT_ID: '0001', PROJECT_TITLE: 'test-project' };
 

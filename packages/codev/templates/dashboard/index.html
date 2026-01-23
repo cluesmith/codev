@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="/dashboard/css/tabs.css">
   <link rel="stylesheet" href="/dashboard/css/statusbar.css">
   <link rel="stylesheet" href="/dashboard/css/dialogs.css">
-  <link rel="stylesheet" href="/dashboard/css/activity.css">
   <link rel="stylesheet" href="/dashboard/css/projects.css">
   <link rel="stylesheet" href="/dashboard/css/files.css">
   <link rel="stylesheet" href="/dashboard/css/utilities.css">
@@ -18,11 +17,6 @@
 <body>
   <header class="header">
     <h1>Agent Farm - {{PROJECT_NAME}}</h1>
-    <div class="header-actions">
-      <button class="btn activity-summary-btn" onclick="showActivitySummary()" title="What did I do today?">
-        🕐 Today
-      </button>
-    </div>
   </header>
 
   <main class="main">
@@ -123,26 +117,6 @@
   <!-- Toast container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- Activity Summary Modal (Spec 0059) -->
-  <div class="dialog-overlay hidden" id="activity-modal">
-    <div class="dialog activity-dialog">
-      <div class="activity-dialog-header">
-        <h3>Today's Summary</h3>
-        <button class="activity-close-btn" onclick="closeActivityModal()" title="Close (Esc)">×</button>
-      </div>
-      <div class="activity-dialog-content" id="activity-content">
-        <div class="activity-loading">
-          <span class="activity-spinner"></span>
-          Loading activity...
-        </div>
-      </div>
-      <div class="activity-dialog-footer">
-        <button class="btn" onclick="copyActivitySummary()">📋 Copy to Clipboard</button>
-        <button class="btn" onclick="closeActivityModal()">Close</button>
-      </div>
-    </div>
-  </div>
-
   <!-- File search palette (Cmd+P) - Spec 0058 -->
   <div id="file-palette" class="file-palette hidden">
     <div class="file-palette-backdrop" onclick="closePalette()"></div>
@@ -169,7 +143,6 @@
   <script src="/dashboard/js/dialogs.js"></script>
   <script src="/dashboard/js/projects.js"></script>
   <script src="/dashboard/js/files.js"></script>
-  <script src="/dashboard/js/activity.js"></script>
   <script src="/dashboard/js/main.js"></script>
 </body>
 </html>

@@ -197,7 +197,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: "2026-01-21T20:25:00-08:00"
       committed_at: null
       integrated_at: null
-    notes: "Implemented porch2 (845 lines code, 79% reduction). All 68 unit tests pass. Integration tested with full SPIDER workflow."
+    notes: "Implemented porch (845 lines code, 79% reduction). All 68 unit tests pass. Integration tested with full SPIDER workflow."
 
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"

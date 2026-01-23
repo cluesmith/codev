@@ -206,6 +206,13 @@
       "description": "Signal gate approval received"
     }
   },
+  "phase_completion": {
+    "build_succeeds": "npm run build 2>&1",
+    "tests_pass": "npm test 2>&1",
+    "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'",
+    "commit_has_tests": "git log -1 --name-only --pretty=format: | grep -qE '(test|spec)\\.'",
+    "commit_has_3way_review": "git log -1 --pretty=format:'%B' | grep -qiE '(3-way|three-way|3way|consultation|gemini.*codex|codex.*gemini)'"
+  },
   "defaults": {
     "consultation": {
       "enabled": true,
