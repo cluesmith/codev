@@ -45,15 +45,15 @@ You are expected to **adhere FULLY to the protocol**. Before starting:
 
 **You are operating under protocol orchestration. Porch is the gatekeeper.**
 
-Porch (`porch2`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
+Porch (`porch`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
 
 ### MANDATORY BEHAVIORS
 
-1. **FIRST ACTION**: Run `porch2 status {PROJECT_ID}` to see your current state
+1. **FIRST ACTION**: Run `porch status {PROJECT_ID}` to see your current state
 2. **BEFORE ANY WORK**: Read porch's instructions carefully
-3. **AFTER COMPLETING WORK**: Run `porch2 check {PROJECT_ID}` to verify criteria
-4. **TO ADVANCE**: Run `porch2 done {PROJECT_ID}` - porch will verify and advance
-5. **AT GATES**: Run `porch2 gate {PROJECT_ID}` and **STOP**. Wait for human.
+3. **AFTER COMPLETING WORK**: Run `porch check {PROJECT_ID}` to verify criteria
+4. **TO ADVANCE**: Run `porch done {PROJECT_ID}` - porch will verify and advance
+5. **AT GATES**: Run `porch gate {PROJECT_ID}` and **STOP**. Wait for human.
 
 ### PORCH IS AUTHORITATIVE
 
@@ -81,35 +81,35 @@ When you see output like this, **STOP IMMEDIATELY**. Output a message indicating
 ### Porch Command Reference
 
 ```bash
-porch2 status <id>              # See current state and instructions
-porch2 check <id>               # Run checks for current phase
-porch2 done <id>                # Advance to next phase (if checks pass)
-porch2 gate <id>                # Request human approval
+porch status <id>              # See current state and instructions
+porch check <id>               # Run checks for current phase
+porch done <id>                # Advance to next phase (if checks pass)
+porch gate <id>                # Request human approval
 ```
 
 ### Example Workflow
 
 ```bash
 # Start of session - check where you are
-porch2 status 0074
+porch status 0074
 
 # After implementing code
-porch2 check 0074
+porch check 0074
 
 # If checks pass, advance
-porch2 done 0074
+porch done 0074
 
 # If gate is required
-porch2 gate 0074
+porch gate 0074
 # OUTPUT: "STOP and wait" → STOP HERE, wait for human
 
 # After human approves, continue
-porch2 status 0074
+porch status 0074
 ```
 
 ### SPIDER Protocol Execution
 
-As a builder with porch2, you execute the **full SPIDER protocol**:
+As a builder with porch, you execute the **full SPIDER protocol**:
 
 1. **Specify**: Write the spec (`codev/specs/XXXX-name.md`)
    - Write the spec with all required sections
@@ -120,29 +120,18 @@ As a builder with porch2, you execute the **full SPIDER protocol**:
      consult --model claude --type spec-review spec XXXX
      ```
    - **NO phases in spec** - phases belong in the plan, not the spec
-   - Run `porch2 check` → verifies spec exists, has Consultation section, no phases
-   - Run `porch2 done` → hits `spec_approval` gate
-   - Run `porch2 gate` → **STOP and wait for human**
+   - **COMMIT** the spec file
+   - Run `porch done` → hits `spec_approval` gate
+   - Run `porch gate` → **STOP and wait for human**
 
 2. **Plan**: Write the plan (`codev/plans/XXXX-name.md`)
-   - Write the plan with numbered phases (`## Phase 1`, `## Phase 2`, etc.)
-   - Run `porch2 check` → ensures plan file exists with phases
-   - Run `porch2 done` → hits `plan_approval` gate
-   - Run `porch2 gate` → **STOP and wait for human**
+   - Write the plan with numbered phases and a JSON phases block
+   - **Run 3-way consultation** and add a `## Consultation` section
+   - **COMMIT** the plan file
+   - Run `porch done` → hits `plan_approval` gate
+   - Run `porch gate` → **STOP and wait for human**
 
-3. **Implement** - Write the code following the plan
-
-4. **Defend** - Write tests to validate the implementation
-
-5. **Evaluate** - Verify requirements are met
-   - Self-review: Does the implementation satisfy the spec?
-   - Self-review: Do the tests adequately cover the requirements?
-   - **Consult external reviewers** on the complete implementation + tests:
-     ```bash
-     consult --model gemini --type impl-review spec XXXX
-     consult --model codex --type impl-review spec XXXX
-     ```
-   - Address concerns raised before proceeding to Review
+3-5. **Implement → Defend → Evaluate** (per plan phase): See detailed section below
 
 6. **Review** - Document lessons learned, run 3-way review, create PR
    - Write the review document (`codev/reviews/XXXX-spec-name.md`)
@@ -156,17 +145,73 @@ As a builder with porch2, you execute the **full SPIDER protocol**:
    - Address any REQUEST_CHANGES feedback before creating the PR
    - Include the 3-way review summary in your PR description
 
-**Commit at the end of each phase** with clear phase markers.
-
    **Note**: The Architect will run a separate 3-way review focused on **integration** concerns.
 
-**Commit at the end of each phase** with a message indicating the phase:
-```bash
-git add <files>
-git commit -m "[Spec XXXX][Implement] Add auth routes"
-git commit -m "[Spec XXXX][Defend] Add unit tests for auth"
-git commit -m "[Spec XXXX][Review] Add lessons learned"
+### 🚨 CRITICAL: Implement → Defend → Evaluate Cycle 🚨
+
+**For EACH plan phase (phase_1, phase_2, etc.), you MUST complete the full I→D→E cycle WITH commits and porch calls.**
+
+**This is NOT optional. Porch runs phase completion checks that verify your commit.**
+
+#### The Required Workflow (for each plan phase):
+
 ```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE N: [Title from plan]                                 │
+├─────────────────────────────────────────────────────────────┤
+│  1. IMPLEMENT                                               │
+│     - Write the code for this phase                         │
+│     - Run `porch done XXXX` → advances to defend           │
+│                                                             │
+│  2. DEFEND                                                  │
+│     - Write tests for the code                              │
+│     - Run `porch done XXXX` → advances to evaluate         │
+│                                                             │
+│  3. EVALUATE                                                │
+│     - Run 3-way consultation on implementation              │
+│     - Address any feedback                                  │
+│     - **COMMIT everything** (code + tests + consultation)   │
+│     - Run `porch done XXXX` → runs PHASE COMPLETION CHECKS │
+│                                                             │
+│  Phase completion checks verify your commit has:            │
+│     ✓ Build passes                                          │
+│     ✓ Tests pass                                            │
+│     ✓ Commit includes code files                            │
+│     ✓ Commit includes test files                            │
+│     ✓ Commit message mentions 3-way review                  │
+│                                                             │
+│  If checks fail → FIX and try `porch done` again           │
+│  If checks pass → Advances to next phase                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Example Commit Message (end of phase):
+
+```
+[Spec 0074][Phase 1] Remove backend activity code
+
+- Removed ActivitySummary types and interfaces
+- Removed getGitCommits, getModifiedFiles, getGitHubPRs functions
+- Removed /api/activity-summary endpoint
+- Added tests for remaining endpoints
+
+3-way review: Gemini APPROVE, Codex APPROVE, Claude APPROVE
+```
+
+#### What Happens If You Skip This
+
+If you do NOT call `porch done` after each stage:
+- Porch doesn't know you finished
+- Phase completion checks never run
+- Your work is not validated
+- The Architect will reject your PR
+
+**DO NOT just implement everything and skip porch calls.**
+
+Each `porch done` is a checkpoint that:
+1. Validates your work meets criteria
+2. Records your progress
+3. Ensures quality gates are enforced
 
 ### TICK Protocol Summary
 
@@ -351,5 +396,5 @@ gh pr view <PR_NUMBER> --web
 - **Don't spawn other Builders** - Only Architects spawn Builders
 - **Keep worktree clean** - No untracked files, no debug code
 - **Follow the protocol** - All phases, all artifacts
-- **NEVER edit status.yaml directly** - Only porch2 commands modify project state
-- **NEVER call porch2 approve unless explicitly told to by the human** - Gates require human instruction to approve
+- **NEVER edit status.yaml directly** - Only porch commands modify project state
+- **NEVER call porch approve unless explicitly told to by the human** - Gates require human instruction to approve
