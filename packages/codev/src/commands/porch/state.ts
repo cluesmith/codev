@@ -120,7 +120,7 @@ export function createInitialState(
     gates,
     iteration: 1,
     build_complete: false,
-    last_feedback: {},
+    history: [],
     started_at: now,
     updated_at: now,
   };

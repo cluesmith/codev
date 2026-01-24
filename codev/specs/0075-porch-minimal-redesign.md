@@ -125,29 +125,41 @@ The protocol.json format expresses build-verify cycles:
 }
 ```
 
-### Feedback Synthesis
+### Feedback via Files (Simplified)
 
-When verification fails, porch synthesizes feedback for the next iteration:
+When verification runs, porch writes each consultation's output to a file:
+- `.porch/0075-specify-iter1-gemini.txt`
+- `.porch/0075-specify-iter1-codex.txt`
+- `.porch/0075-specify-iter1-claude.txt`
+
+On the next iteration, porch lists all previous files (build outputs + reviews) in the prompt header. **Claude reads these files itself** to understand the history and address feedback.
 
 ```markdown
-# Previous Review Feedback
+# ⚠️ REVISION REQUIRED
 
-## Gemini (REQUEST_CHANGES)
-- Missing error handling for edge case X
-- Consider adding Y to requirements
+This is iteration 2. Previous iterations received feedback from reviewers.
 
-## Codex (APPROVE)
-- Looks good overall
+**Read the files below to understand the history and address the feedback.**
 
-## Claude (REQUEST_CHANGES)
-- Unclear success criteria for item 3
+## Previous Iterations
 
----
+### Iteration 1
 
-Please address the above feedback and signal PHASE_COMPLETE when done.
+**Build Output:** `.porch/0075-specify-iter-1.txt`
+
+**Reviews:**
+- gemini (✓ APPROVE): `.porch/0075-specify-iter1-gemini.txt`
+- codex (✗ REQUEST_CHANGES): `.porch/0075-specify-iter1-codex.txt`
+- claude (💬 COMMENT): `.porch/0075-specify-iter1-claude.txt`
+
+## Instructions
+
+1. Read the review files above to understand the feedback
+2. Address any REQUEST_CHANGES issues
+3. Consider suggestions from COMMENT and APPROVE reviews
 ```
 
-This is prepended to Claude's prompt on subsequent iterations.
+This approach is simpler than synthesizing feedback - Claude has full access to the raw consultation output.
 
 ### Consultation Output
 
@@ -157,8 +169,9 @@ Porch captures consultation verdicts:
 |---------|---------|
 | `APPROVE` | No changes needed, ready to proceed |
 | `REQUEST_CHANGES` | Issues found, needs revision |
+| `COMMENT` | Suggestions only, no blocking issues |
 
-Porch parses the final line of each consultation for the verdict.
+Porch parses the output for verdict keywords (REQUEST_CHANGES takes priority, then APPROVE, else COMMENT).
 
 ### State Tracking
 
@@ -168,11 +181,20 @@ title: "porch-minimal-redesign"
 protocol: "spider"
 phase: "specify"
 iteration: 2
-max_iterations: 3
-last_feedback:
-  gemini: { verdict: "REQUEST_CHANGES", summary: "..." }
-  codex: { verdict: "APPROVE", summary: "..." }
-  claude: { verdict: "REQUEST_CHANGES", summary: "..." }
+build_complete: false
+history:
+  - iteration: 1
+    build_output: ".porch/0075-specify-iter-1.txt"
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: ".porch/0075-specify-iter1-gemini.txt"
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: ".porch/0075-specify-iter1-codex.txt"
+      - model: claude
+        verdict: COMMENT
+        file: ".porch/0075-specify-iter1-claude.txt"
 gates:
   spec-approval: { status: "pending" }
 ```

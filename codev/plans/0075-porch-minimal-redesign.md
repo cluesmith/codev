@@ -114,19 +114,29 @@ interface PhaseConfig {
 **State additions:**
 
 ```typescript
+type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
+interface ReviewResult {
+  model: string;
+  verdict: Verdict;
+  file: string;  // Path to review output file
+}
+
+interface IterationRecord {
+  iteration: number;
+  build_output: string;    // Path to Claude's build output
+  reviews: ReviewResult[]; // Reviews from verification
+}
+
 interface ProjectState {
   // ... existing
   iteration: number;           // Current iteration (1-based)
   build_complete: boolean;     // Has build finished this iteration?
-  last_feedback: FeedbackSet;  // Feedback from last verify
-}
-
-interface FeedbackSet {
-  gemini?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
-  codex?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
-  claude?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
+  history: IterationRecord[];  // All iterations (file paths, not summaries)
 }
 ```
+
+**Key insight:** Instead of synthesizing feedback, porch stores file paths. Claude reads these files itself.
 
 **Run loop pseudocode:**
 
@@ -164,65 +174,75 @@ async function runBuildVerifyCycle(state, phaseConfig) {
 
 ### Phase 3: Consultation Integration
 
-**Goal:** Run consult CLI, parse verdicts, synthesize feedback.
+**Goal:** Run consult CLI, write output to files, parse verdicts.
 
-**Files to create/modify:**
+**Files to modify:**
 
 | File | Action |
 |------|--------|
-| `packages/codev/src/commands/porch/verify.ts` | Create: Verification logic |
-| `packages/codev/src/commands/porch/feedback.ts` | Create: Feedback synthesis |
+| `packages/codev/src/commands/porch/run.ts` | Update: Verification logic inline |
+| `packages/codev/src/commands/porch/prompts.ts` | Update: List history files |
 
-**Verification flow:**
+**Verification flow (writes output to files):**
 
 ```typescript
-async function runVerification(verifyConfig, artifact) {
-  const results = await Promise.all(
-    verifyConfig.models.map(model =>
-      runConsult(model, verifyConfig.type, artifact)
-    )
+async function runVerification(state, verifyConfig): Promise<ReviewResult[]> {
+  const reviews: ReviewResult[] = [];
+
+  await Promise.all(
+    verifyConfig.models.map(async (model) => {
+      const outputFile = `.porch/${state.id}-${state.phase}-iter${state.iteration}-${model}.txt`;
+
+      const proc = spawn('consult', [
+        '--model', model,
+        '--type', verifyConfig.type,
+        'spec',
+        state.id
+      ]);
+
+      const output = await captureOutput(proc);
+      fs.writeFileSync(outputFile, output);
+
+      reviews.push({
+        model,
+        verdict: parseVerdict(output),
+        file: outputFile,
+      });
+    })
   );
 
-  return parseResults(results);
+  return reviews;
 }
 
-async function runConsult(model, type, artifact) {
-  const proc = spawn('consult', [
-    '--model', model,
-    '--type', type,
-    'spec',  // or 'plan', 'pr' based on artifact type
-    projectId
-  ]);
-
-  const output = await captureOutput(proc);
-  return { model, output, verdict: parseVerdict(output) };
-}
-
-function parseVerdict(output) {
-  // Look for APPROVE or REQUEST_CHANGES in output
-  if (output.includes('APPROVE')) return 'APPROVE';
+function parseVerdict(output: string): Verdict {
   if (output.includes('REQUEST_CHANGES')) return 'REQUEST_CHANGES';
-  return 'REQUEST_CHANGES';  // Default to changes needed
+  if (output.includes('APPROVE')) return 'APPROVE';
+  return 'COMMENT';  // No explicit verdict = comment only
 }
 ```
 
-**Feedback synthesis:**
+**History header (lists files, Claude reads them):**
 
 ```typescript
-function synthesizeFeedback(feedback: FeedbackSet): string {
-  let md = '# Previous Review Feedback\n\n';
+function buildHistoryHeader(history: IterationRecord[]): string {
+  let md = '# ⚠️ REVISION REQUIRED\n\n';
+  md += '**Read the files below to understand the history and address the feedback.**\n\n';
 
-  for (const [model, result] of Object.entries(feedback)) {
-    md += `## ${model} (${result.verdict})\n`;
-    md += result.summary + '\n\n';
+  for (const record of history) {
+    md += `### Iteration ${record.iteration}\n\n`;
+    md += `**Build Output:** \`${record.build_output}\`\n\n`;
+    md += '**Reviews:**\n';
+    for (const review of record.reviews) {
+      md += `- ${review.model} (${review.verdict}): \`${review.file}\`\n`;
+    }
+    md += '\n';
   }
-
-  md += '---\n\n';
-  md += 'Please address the above feedback and signal PHASE_COMPLETE when done.\n';
 
   return md;
 }
 ```
+
+**Key simplification:** No feedback synthesis needed. Claude reads raw consultation output.
 
 ### Phase 4: Commit and Push
 
@@ -289,9 +309,11 @@ Update status display for build-verify:
 
 | Metric | Value |
 |--------|-------|
-| New files | 3 (verify.ts, feedback.ts, git.ts) |
-| Modified files | 5 (run.ts, types.ts, protocol.ts, state.ts, protocol-format.md) |
-| Lines of code | ~400 |
+| New files | 0 (all logic inline in existing files) |
+| Modified files | 6 (run.ts, types.ts, protocol.ts, state.ts, prompts.ts, protocol-format.md) |
+| Lines of code | ~300 |
+
+**Simplification:** Verification and git logic are inline in run.ts. No feedback synthesis needed - Claude reads files directly.
 
 ## Risks
 

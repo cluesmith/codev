@@ -93,20 +93,25 @@ export interface PlanPhase {
 /**
  * Verdict from a 3-way review
  */
-export type Verdict = 'APPROVE' | 'REQUEST_CHANGES';
+export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 
 /**
- * Result from a single consultation
+ * Review result with file path
  */
-export interface FeedbackResult {
+export interface ReviewResult {
+  model: string;
   verdict: Verdict;
-  summary: string;
+  file: string;           // Path to review output file
 }
 
 /**
- * Feedback from all models in a 3-way review
+ * Record of a single build-verify iteration
  */
-export type FeedbackSet = Record<string, FeedbackResult>;
+export interface IterationRecord {
+  iteration: number;
+  build_output: string;   // Path to Claude's build output file
+  reviews: ReviewResult[]; // Reviews from verification
+}
 
 /**
  * Project state (stored in status.yaml)
@@ -121,7 +126,7 @@ export interface ProjectState {
   gates: Record<string, GateStatus>;       // Gate statuses
   iteration: number;                       // Current build-verify iteration (1-based)
   build_complete: boolean;                 // Has build finished this iteration?
-  last_feedback: FeedbackSet;              // Feedback from last verify
+  history: IterationRecord[];              // History of all iterations (for context)
   started_at: string;
   updated_at: string;
 }
