@@ -38,7 +38,7 @@ Add a persistent setting to disable close confirmation dialogs for tabs with run
 
 ### Approach: Settings Toggle
 
-Implement a new setting in the dashboard that allows users to disable the close confirmation dialog globally for their session.
+Implement a new setting in the dashboard that allows users to persistently disable the close confirmation dialog globally.
 
 **Key Design Decisions:**
 
