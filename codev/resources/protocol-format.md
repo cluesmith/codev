@@ -138,6 +138,38 @@ Configure multi-agent review:
 }
 ```
 
+### Verification
+
+Checks run after Claude signals PHASE_COMPLETE. If verification fails, porch respawns Claude (up to max_retries times):
+
+```json
+{
+  "verification": {
+    "checks": {
+      "pr_has_3way": "gh pr list --head $(git branch --show-current) --json number -q '.[0].number' | xargs -I{} gh pr view {} --json comments -q '.comments[].body' | grep -qE '(Gemini|gemini).*(Codex|codex)'"
+    },
+    "max_retries": 5
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `checks` | object | Yes | Name → command pairs to verify phase output |
+| `max_retries` | number | No | Max respawn attempts before proceeding to gate (default: 5) |
+
+**Behavior:**
+1. Claude signals PHASE_COMPLETE
+2. Porch runs verification checks
+3. If all pass → proceed to gate (or next phase)
+4. If any fail and retries < max_retries → respawn Claude
+5. If retries >= max_retries → proceed to gate (human decides)
+
+**Use cases:**
+- Review phase: Verify PR has 3-way consultation comment
+- Spec phase: Verify spec has required sections
+- Any phase needing post-completion validation with retry
+
 ### Signals
 
 Define signals that AI agents can emit:

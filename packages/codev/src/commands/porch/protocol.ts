@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase } from './types.js';
+import type { Protocol, ProtocolPhase, PhaseVerification } from './types.js';
 
 /** Known protocol locations (relative to project root) */
 const PROTOCOL_PATHS = [
@@ -137,12 +137,23 @@ function normalizePhase(p: unknown): ProtocolPhase {
     checks.push(...Object.keys(phase.checks as Record<string, unknown>));
   }
 
+  // Parse verification config
+  let verification: PhaseVerification | undefined;
+  const verificationRaw = phase.verification as Record<string, unknown> | undefined;
+  if (verificationRaw?.checks && typeof verificationRaw.checks === 'object') {
+    verification = {
+      checks: verificationRaw.checks as Record<string, string>,
+      max_retries: (verificationRaw.max_retries as number) ?? 5,
+    };
+  }
+
   return {
     id: phase.id as string,
     name: (phase.name as string) || phase.id as string,
     type: phase.type as 'once' | 'per_plan_phase' | 'phased' | undefined,
     gate: gate?.name as string | undefined,
     checks: checks.length > 0 ? checks : undefined,
+    verification,
     next,
   };
 }
@@ -208,4 +219,12 @@ export function isPhased(protocol: Protocol, phaseId: string): boolean {
  */
 export function getPhaseCompletionChecks(protocol: Protocol): Record<string, string> {
   return protocol.phase_completion ?? {};
+}
+
+/**
+ * Get verification config for a phase (if any)
+ */
+export function getPhaseVerification(protocol: Protocol, phaseId: string): PhaseVerification | null {
+  const phase = getPhaseConfig(protocol, phaseId);
+  return phase?.verification || null;
 }

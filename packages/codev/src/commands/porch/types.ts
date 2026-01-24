@@ -10,6 +10,14 @@
 // ============================================================================
 
 /**
+ * Verification config - checks run after PHASE_COMPLETE with retry
+ */
+export interface PhaseVerification {
+  checks: Record<string, string>;  // Check name -> command
+  max_retries?: number;            // Max respawn attempts (default: 5)
+}
+
+/**
  * Phase definition in a protocol
  */
 export interface ProtocolPhase {
@@ -18,6 +26,7 @@ export interface ProtocolPhase {
   type?: 'once' | 'per_plan_phase' | 'phased';
   gate?: string;           // Gate name that blocks after this phase
   checks?: string[];       // Check names to run (keys into protocol.checks)
+  verification?: PhaseVerification; // Post-completion checks with retry
   next?: string | null;    // Next phase id, or null if terminal
 }
 
@@ -72,6 +81,7 @@ export interface ProjectState {
   plan_phases: PlanPhase[];                // Phases from plan.md
   current_plan_phase: string | null;       // Current plan phase id
   gates: Record<string, GateStatus>;       // Gate statuses
+  verification_retries: number;            // Current retry count for verification
   started_at: string;
   updated_at: string;
 }

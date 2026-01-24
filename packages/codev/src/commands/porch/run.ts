@@ -9,7 +9,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
-import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate } from './protocol.js';
+import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, getPhaseVerification } from './protocol.js';
+import { runPhaseChecks, allChecksPassed, formatCheckResults, type CheckEnv } from './checks.js';
 import { getCurrentPlanPhase } from './plan.js';
 import { spawnClaude, type ClaudeProcess } from './claude.js';
 import { watchForSignal, type Signal } from './signals.js';
@@ -118,7 +119,11 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
         return;
 
       case 'signal':
-        await handleSignal(action.signal, state, statusPath, projectRoot, protocol);
+        const shouldRespawn = await handleSignal(action.signal, state, statusPath, projectRoot, protocol);
+        if (shouldRespawn) {
+          console.log(chalk.dim('\nRespawning Claude for retry...'));
+          await sleep(1000);
+        }
         break;
 
       case 'claude_exit':
@@ -232,6 +237,7 @@ async function handleGate(
 
 /**
  * Handle signal from Claude output.
+ * Returns true if should respawn Claude (verification failed), false otherwise.
  */
 async function handleSignal(
   signal: Signal,
@@ -239,16 +245,49 @@ async function handleSignal(
   statusPath: string,
   projectRoot: string,
   protocol: Protocol
-): Promise<void> {
+): Promise<boolean> {
   console.log('');
 
   switch (signal.type) {
     case 'PHASE_COMPLETE':
       console.log(chalk.green('Signal: PHASE_COMPLETE'));
+
+      // Check for verification requirements
+      const verification = getPhaseVerification(protocol, state.phase);
+      if (verification) {
+        const maxRetries = verification.max_retries ?? 5;
+        const currentRetries = state.verification_retries ?? 0;
+
+        console.log(chalk.dim(`Running verification checks (attempt ${currentRetries + 1}/${maxRetries})...`));
+
+        const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+        const results = await runPhaseChecks(verification.checks, projectRoot, checkEnv);
+        console.log(formatCheckResults(results));
+
+        if (!allChecksPassed(results)) {
+          if (currentRetries < maxRetries - 1) {
+            // Increment retry count and respawn
+            state.verification_retries = currentRetries + 1;
+            writeState(statusPath, state);
+            console.log(chalk.yellow(`\nVerification failed. Respawning Claude (${state.verification_retries}/${maxRetries})...`));
+            return true; // Signal to respawn
+          } else {
+            // Max retries reached, proceed to gate anyway
+            console.log(chalk.yellow(`\nVerification failed after ${maxRetries} attempts. Proceeding to gate for human decision.`));
+            state.verification_retries = 0; // Reset for next phase
+            writeState(statusPath, state);
+          }
+        } else {
+          console.log(chalk.green('Verification passed.'));
+          state.verification_retries = 0; // Reset on success
+          writeState(statusPath, state);
+        }
+      }
+
       // Advance state (reuse existing done logic)
       const { done } = await import('./index.js');
       await done(projectRoot, state.id);
-      break;
+      return false;
 
     case 'GATE_NEEDED':
       console.log(chalk.yellow('Signal: GATE_NEEDED'));
@@ -257,13 +296,15 @@ async function handleSignal(
         state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
         writeState(statusPath, state);
       }
-      break;
+      return false;
 
     case 'BLOCKED':
       console.log(chalk.red(`Signal: BLOCKED - ${signal.reason}`));
       console.log(chalk.dim('Human intervention required.'));
-      break;
+      return false;
   }
+
+  return false;
 }
 
 /**

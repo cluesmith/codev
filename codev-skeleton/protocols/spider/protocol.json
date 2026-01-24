@@ -181,6 +181,13 @@
         "parallel": true,
         "max_rounds": 1
       },
+      "verification": {
+        "checks": {
+          "pr_exists": "gh pr list --head $(git branch --show-current) --json number -q '.[0].number' | grep -q .",
+          "pr_has_3way_comment": "gh pr list --head $(git branch --show-current) --json number -q '.[0].number' | xargs -I{} gh pr view {} --json comments -q '.comments[].body' | grep -qiE '(gemini|codex|claude).*(gemini|codex|claude)'"
+        },
+        "max_retries": 5
+      },
       "gate": {
         "name": "pr-ready",
         "description": "Implementation ready for PR",

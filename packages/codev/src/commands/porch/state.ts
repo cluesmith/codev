@@ -118,6 +118,7 @@ export function createInitialState(
     plan_phases: [],
     current_plan_phase: null,
     gates,
+    verification_retries: 0,
     started_at: now,
     updated_at: now,
   };
