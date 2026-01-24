@@ -371,7 +371,6 @@ The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that prov
 | `GET` | `/file?path=...` | Read file contents |
 | `GET` | `/api/projectlist-exists` | Check for projectlist.md |
 | `GET` | `/api/files` | Get file tree for file browser (v1.5.0+) |
-| `GET` | `/api/activity-summary` | Get daily activity summary (v1.5.0+) |
 | `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
 | `GET` | `/terminal/:id` | Reverse proxy to ttyd terminal (v1.5.2+) |
 
@@ -419,7 +418,6 @@ templates/dashboard/
 **Dashboard Features** (v1.5.0+):
 - **File Browser** (Spec 0055): VSCode-like collapsible folder tree
 - **File Search** (Spec 0058): Cmd+P palette with fuzzy matching
-- **Daily Activity Summary** (Spec 0059): Clock button showing commits, PRs, active time, AI summary
 - **Two-Column Layout** (Spec 0057): Tabs list + file browser, quick action buttons
 
 **Status Indicators**:
@@ -1975,7 +1973,6 @@ See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
 
 **v1.5.x (Florence)**:
 - Dashboard modularization with hot reload (Spec 0060)
-- Daily activity summary (Spec 0059)
 - File search with Cmd+P palette (Spec 0058)
 - Dashboard tab overhaul with two-column layout (Spec 0057)
 - Consult types refactor (Spec 0056)
