@@ -1,0 +1,28 @@
+id: '0074'
+title: remove-today-summary
+protocol: spider
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Remove Backend Code and Update Docs
+    stages:
+      implement: complete
+      defend: complete
+      evaluate: complete
+current_plan_phase: phase_1
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-01-23T23:51:21.433Z'
+    approved_at: '2026-01-24T00:18:28.279Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-01-24T00:20:31.568Z'
+    approved_at: '2026-01-24T01:26:18.662Z'
+  phase-complete:
+    status: approved
+    approved_at: '2026-01-24T01:45:00.000Z'
+  pr-ready:
+    status: pending
+started_at: '2026-01-23T23:47:30.955Z'
+updated_at: '2026-01-24T01:26:22.509Z'
