@@ -387,7 +387,6 @@ templates/dashboard/
 │   ├── tabs.css       # Tab bar, buttons, status dots
 │   ├── statusbar.css  # Footer status bar
 │   ├── dialogs.css    # Dialog overlays, context menus, toasts
-│   ├── activity.css   # Activity summary modal and tab
 │   ├── projects.css   # Projects kanban grid
 │   ├── files.css      # File tree, Cmd+P palette, search
 │   └── utilities.css  # Hidden, sr-only, scrollbar utilities
@@ -398,7 +397,6 @@ templates/dashboard/
     ├── dialogs.js     # Close dialogs, context menu, file dialog
     ├── projects.js    # Project list parsing, kanban grid
     ├── files.js       # File tree browser, search, Cmd+P palette
-    ├── activity.js    # Activity summary tab/modal rendering
     └── main.js        # init(), polling, keyboard shortcuts, hot reload
 ```
 
@@ -413,7 +411,6 @@ templates/dashboard/
 - Builder tabs (one per spawned builder)
 - Utility tabs (shell terminals)
 - File tabs (annotation viewers)
-- Activity tab (daily summary)
 
 **Dashboard Features** (v1.5.0+):
 - **File Browser** (Spec 0055): VSCode-like collapsible folder tree
