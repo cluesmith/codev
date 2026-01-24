@@ -63,65 +63,177 @@ Full phases with self-review and testing:
 Fast autonomous implementation:
 - Understand → Implement → Verify → Done
 
-## Porch Orchestration (SPIDER)
+## CRITICAL: Porch Protocol Enforcement
 
-When working on SPIDER tasks, **Porch** (Protocol Orchestrator) manages phase transitions. Porch tracks your state in `codev/projects/<id>/status.yaml`.
+**You are operating under protocol orchestration. Porch is the gatekeeper.**
 
-### Check Your Status
+Porch (`porch`) is the authoritative source of truth for your current state, what to do next, and whether you can advance. You MUST follow porch's instructions.
 
+**Command availability**: If `porch` is not in PATH, use:
 ```bash
-# Check current phase and state
-porch status
+node ../../packages/codev/bin/porch.js <command> <args>
+```
+This works from your worktree at `.builders/XXXX/`.
 
-# From worktree, auto-detects project ID
-porch status
+### MANDATORY BEHAVIORS
+
+1. **FIRST ACTION**: Run `porch status {PROJECT_ID}` to see your current state
+2. **BEFORE ANY WORK**: Read porch's instructions carefully
+3. **AFTER COMPLETING WORK**: Run `porch check {PROJECT_ID}` to verify criteria
+4. **TO ADVANCE**: Run `porch done {PROJECT_ID}` - porch will verify and advance
+5. **AT GATES**: Run `porch gate {PROJECT_ID}` and **STOP**. Wait for human.
+
+### PORCH IS AUTHORITATIVE
+
+- Porch tells you what phase you're in
+- Porch tells you what to do next
+- Porch runs the checks that determine if you're done
+- Porch controls advancement between phases
+- You CANNOT skip phases or ignore porch
+
+### WHEN PORCH SAYS STOP, YOU STOP
+
+If porch output contains **"STOP"** or **"WAIT"**, you must stop working and wait for human intervention. Do not try to proceed.
+
+```
+GATE: spec_approval
+
+  Human approval required. STOP and wait.
+  Do not proceed until gate is approved.
+
+STATUS: WAITING FOR HUMAN APPROVAL
 ```
 
-### Signal Phase Transitions
+When you see output like this, **STOP IMMEDIATELY**. Output a message indicating you're waiting for approval and do not continue until the gate is approved.
 
-Emit signals to indicate phase completion. Porch parses these from your output:
-
-```bash
-# After drafting spec
-<signal>SPEC_DRAFTED</signal>
-
-# After implementing a plan phase
-<signal>PHASE_IMPLEMENTED</signal>
-
-# After writing tests
-<signal>TESTS_WRITTEN</signal>
-
-# After evaluation
-<signal>EVALUATION_COMPLETE</signal>
-
-# After final review
-<signal>REVIEW_COMPLETE</signal>
-```
-
-### IDE Loop (Implement → Defend → Evaluate)
-
-For multi-phase plans, porch loops through each plan phase:
-
-1. **Implement**: Write code for the current plan phase
-2. **Defend**: Write tests, run checks
-3. **Evaluate**: Self-review, ensure quality
-
-Porch automatically advances to the next plan phase after evaluation.
-
-### Enforcement
-
-- **Hooks block wrong file edits**: You cannot edit `codev/specs/` or `codev/plans/` - those are Architect's domain
-- **Gates require approval**: Human gates (spec_approval, plan_approval) block until the Architect approves
-- **State persists**: Porch state survives restarts - resume with `porch run`
-
-### If You Need Spec/Plan Changes
-
-Since you cannot edit specs or plans, notify the Architect:
+### Porch Command Reference
 
 ```bash
-af send architect "Spec needs update: Found edge case not covered - [details]"
-af send architect "Plan needs update: Phase 2 depends on library not available - [details]"
+porch status <id>              # See current state and instructions
+porch check <id>               # Run checks for current phase
+porch done <id>                # Advance to next phase (if checks pass)
+porch gate <id>                # Request human approval
 ```
+
+### Example Workflow
+
+```bash
+# Start of session - check where you are
+porch status 0074
+
+# After implementing code
+porch check 0074
+
+# If checks pass, advance
+porch done 0074
+
+# If gate is required
+porch gate 0074
+# OUTPUT: "STOP and wait" → STOP HERE, wait for human
+
+# After human approves, continue
+porch status 0074
+```
+
+### SPIDER Protocol Execution
+
+As a builder with porch, you execute the **full SPIDER protocol**:
+
+1. **Specify**: Write the spec (`codev/specs/XXXX-name.md`)
+   - Write the spec with all required sections
+   - **Run 3-way consultation** and add a `## Consultation` section summarizing findings:
+     ```bash
+     consult --model gemini --type spec-review spec XXXX
+     consult --model codex --type spec-review spec XXXX
+     consult --model claude --type spec-review spec XXXX
+     ```
+   - **NO phases in spec** - phases belong in the plan, not the spec
+   - **COMMIT** the spec file
+   - Run `porch done` → hits `spec_approval` gate
+   - Run `porch gate` → **STOP and wait for human**
+
+2. **Plan**: Write the plan (`codev/plans/XXXX-name.md`)
+   - Write the plan with numbered phases and a JSON phases block
+   - **Run 3-way consultation** and add a `## Consultation` section
+   - **COMMIT** the plan file
+   - Run `porch done` → hits `plan_approval` gate
+   - Run `porch gate` → **STOP and wait for human**
+
+3-5. **Implement → Defend → Evaluate** (per plan phase): See detailed section below
+
+6. **Review**: Document lessons, create PR, run 3-way review
+   ```bash
+   consult --model gemini --type pr-ready pr $PR_NUMBER &
+   consult --model codex --type pr-ready pr $PR_NUMBER &
+   consult --model claude --type pr-ready pr $PR_NUMBER &
+   wait
+   ```
+
+### 🚨 CRITICAL: Implement → Defend → Evaluate Cycle 🚨
+
+**For EACH plan phase (phase_1, phase_2, etc.), you MUST complete the full I→D→E cycle WITH commits and porch calls.**
+
+**This is NOT optional. Porch runs phase completion checks that verify your commit.**
+
+#### The Required Workflow (for each plan phase):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE N: [Title from plan]                                 │
+├─────────────────────────────────────────────────────────────┤
+│  1. IMPLEMENT                                               │
+│     - Write the code for this phase                         │
+│     - Run `porch done XXXX` → advances to defend           │
+│                                                             │
+│  2. DEFEND                                                  │
+│     - Write tests for the code                              │
+│     - Run `porch done XXXX` → advances to evaluate         │
+│                                                             │
+│  3. EVALUATE                                                │
+│     - Run 3-way consultation on implementation              │
+│     - Address any feedback                                  │
+│     - **COMMIT everything** (code + tests + consultation)   │
+│     - Run `porch done XXXX` → runs PHASE COMPLETION CHECKS │
+│                                                             │
+│  Phase completion checks verify your commit has:            │
+│     ✓ Build passes                                          │
+│     ✓ Tests pass                                            │
+│     ✓ Commit includes code files                            │
+│     ✓ Commit includes test files                            │
+│     ✓ Commit message mentions 3-way review                  │
+│                                                             │
+│  If checks fail → FIX and try `porch done` again           │
+│  If checks pass → Advances to next phase                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Example Commit Message (end of phase):
+
+```
+[Spec 0074][Phase 1] Remove backend activity code
+
+- Removed ActivitySummary types and interfaces
+- Removed getGitCommits, getModifiedFiles, getGitHubPRs functions
+- Removed /api/activity-summary endpoint
+- Added tests for remaining endpoints
+
+3-way review: Gemini APPROVE, Codex APPROVE, Claude APPROVE
+```
+
+#### What Happens If You Skip This
+
+If you do NOT call `porch done` after each stage:
+- Porch doesn't know you finished
+- Phase completion checks never run
+- Your work is not validated
+- The Architect will reject your PR
+
+**DO NOT just implement everything and skip porch calls.**
+
+Each `porch done` is a checkpoint that:
+1. Validates your work meets criteria
+2. Records your progress
+3. Ensures quality gates are enforced
 
 ## Status Lifecycle
 
@@ -259,3 +371,5 @@ When implementation is complete:
 - **Don't merge yourself** - The Architect handles integration
 - **Don't spawn other Builders** - Only Architects spawn Builders
 - **Keep worktree clean** - No untracked files, no debug code
+- **NEVER edit status.yaml directly** - Only porch commands modify project state
+- **NEVER call porch approve unless explicitly told to by the human** - Gates require human instruction to approve

@@ -214,59 +214,49 @@ planning → active → released → archived
 
 ## Development Protocols
 
-The Architect uses SPIDER or TICK protocols. The Architect is responsible for the **Specify** and **Plan** phases. The Builder handles **Implement**, **Defend**, **Evaluate**, and **Review** (IDER).
+The Architect uses SPIDER or TICK protocols. **The Builder executes the full SPIDER protocol** (Specify → Plan → Implement → Defend → Evaluate → Review). The Architect's role is to spawn builders, approve gates, and integrate their work.
 
-### Phase 1: Specify (Architect)
+### Spawning a Builder
 
-1. Understand the user's request at a system level
-2. **Check `codev/resources/lessons-learned.md`** for relevant past lessons
-3. Identify major components and dependencies
-4. Create a detailed specification (incorporating lessons learned)
-5. **Consult external reviewers** using the consult tool:
-   ```bash
-   consult --model gemini --type spec-review spec 0034
-   consult --model codex --type spec-review spec 0034
-   ```
-5. Address concerns raised by the reviewers
-6. **Present to human** for final review:
-   ```bash
-   af open codev/specs/0034-feature-name.md
-   ```
-
-### Phase 2: Plan (Architect)
-
-1. Convert the spec into a sequence of implementation steps for the builder
-2. **Check `codev/resources/lessons-learned.md`** for implementation pitfalls to avoid
-3. Define what tests are needed
-4. Specify acceptance criteria
-5. **Consult external reviewers** using the consult tool:
-   ```bash
-   consult --model gemini --type plan-review plan 0034
-   consult --model codex --type plan-review plan 0034
-   ```
-5. Address concerns raised by the reviewers
-6. **Present to human** for final review:
-   ```bash
-   af open codev/plans/0034-feature-name.md
-   ```
-
-### Phases 3-6: IDER (Builder)
-
-Once the spec and plan are approved, the Architect spawns a builder:
+When a new feature is needed:
 
 ```bash
 af spawn -p 0034
 ```
 
-**Important:** Update the project status to `implementing` in `codev/projectlist.md` when spawning a builder.
+The builder will:
+1. **Specify** - Write the spec, run 3-way consultation, then hit `spec-approval` gate
+2. **Plan** - Write the plan, run 3-way consultation, then hit `plan-approval` gate
+3. **Implement/Defend/Evaluate** - Complete I→D→E cycles for each plan phase
+4. **Review** - Create review document and PR
 
-The Builder then executes the remaining phases:
-- **Implement** - Write the code following the plan
-- **Defend** - Write tests to validate the implementation
-- **Evaluate** - Verify requirements are met
-- **Review** - Document lessons learned, create PR
+### Approving Gates
 
-The Architect monitors progress and provides guidance when the builder is blocked.
+The builder stops at two gates that require human approval:
+
+1. **spec-approval** - After the builder writes the spec
+   - Review the spec at `codev/specs/XXXX-name.md`
+   - Verify it captures requirements correctly
+   - Approve: `porch approve XXXX spec-approval --a-human-explicitly-approved-this`
+
+2. **plan-approval** - After the builder writes the plan
+   - Review the plan at `codev/plans/XXXX-name.md`
+   - Verify phases are logical and complete
+   - Approve: `porch approve XXXX plan-approval --a-human-explicitly-approved-this`
+
+**Important:** Update the project status in `codev/projectlist.md` as gates are approved.
+
+### Monitoring Progress
+
+```bash
+# Check builder status
+af status
+
+# Check porch state for a project
+porch status 0034
+```
+
+The Architect monitors progress and provides guidance when builders are blocked.
 
 ## Spikes: De-risking Technical Unknowns
 
@@ -285,11 +275,13 @@ When facing high-risk technical unknowns, use **spikes** - short, time-boxed exp
 ### Providing Context
 
 When spawning a Builder, provide:
-- The spec file path
-- The plan file path
+- The project ID and name
+- High-level description of the feature
 - Any relevant architecture context
 - Constraints or patterns to follow
 - Which protocol to use (SPIDER/TICK)
+
+The builder will create the spec and plan files themselves.
 
 ### Handling Blocked Status
 

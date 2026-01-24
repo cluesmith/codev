@@ -2,10 +2,8 @@
  * Start command - launches the architect dashboard
  */
 
-import { resolve, basename, join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { resolve, basename } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
 import type { StartOptions, ArchitectState } from '../types.js';
@@ -19,49 +17,6 @@ import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan
 import { getPortBlock, cleanupStaleEntries } from '../utils/port-registry.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { initHQConnector, isHQEnabled } from '../hq-connector.js';
-
-/**
- * Format current date/time as YYYY-MM-DD HH:MM
- */
-function formatDateTime(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}`;
-}
-
-/**
- * Rename a Claude session after it starts
- * Uses tmux buffer approach for reliable text input (same as af send)
- */
-function renameClaudeSession(sessionName: string, displayName: string): void {
-  // Wait for Claude to be ready, then send /rename command
-  setTimeout(async () => {
-    try {
-      // Add date/time to the display name
-      const nameWithTime = `${displayName} (${formatDateTime()})`;
-      const renameCommand = `/rename ${nameWithTime}`;
-
-      // Use buffer approach for reliable input (like af send)
-      const tempFile = join(tmpdir(), `rename-${randomUUID()}.txt`);
-      const bufferName = `rename-${sessionName}`;
-
-      writeFileSync(tempFile, renameCommand);
-      await run(`tmux load-buffer -b "${bufferName}" "${tempFile}"`);
-      await run(`tmux paste-buffer -b "${bufferName}" -t "${sessionName}"`);
-      await run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
-      await run(`tmux send-keys -t "${sessionName}" Enter`);
-
-      // Clean up temp file
-      try { unlinkSync(tempFile); } catch {}
-    } catch {
-      // Non-fatal - session naming is a nice-to-have
-    }
-  }, 5000);
-}
 
 /**
  * Parsed remote target
@@ -476,9 +431,6 @@ done
     fatal('Failed to start ttyd process');
   }
 
-  // Rename Claude session for better history tracking
-  const projectName = basename(config.projectRoot);
-  renameClaudeSession(sessionName, `Architect ${projectName}`);
 
   // Save architect state
   const architectState: ArchitectState = {

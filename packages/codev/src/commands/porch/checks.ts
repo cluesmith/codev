@@ -1,67 +1,72 @@
 /**
- * Defense Checks
+ * Porch Check Runner
  *
- * Runs build/test commands defined in protocol phases.
- * Supports retry logic and configurable failure behavior.
+ * Runs check commands (npm test, npm run build, etc.)
+ * with timeout support.
  */
 
 import { spawn } from 'node:child_process';
-import chalk from 'chalk';
-import type { Check, Phase } from './types.js';
+import type { CheckResult } from './types.js';
 
-/**
- * Result of a single check
- */
-export interface CheckResult {
-  name: string;
-  success: boolean;
-  output: string;
-  error?: string;
-  attempts: number;
-  duration: number;
+/** Default timeout for checks: 5 minutes */
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+
+// ============================================================================
+// Check Execution
+// ============================================================================
+
+/** Environment variables passed to check commands */
+export interface CheckEnv {
+  PROJECT_ID: string;
+  PROJECT_TITLE: string;
 }
 
 /**
- * Result of running all checks for a phase
+ * Run a single check command
  */
-export interface ChecksResult {
-  success: boolean;
-  checks: CheckResult[];
-  returnTo?: string; // Phase to return to on failure
-}
-
-/**
- * Run a single command with timeout
- */
-async function runCommand(
+export async function runCheck(
+  name: string,
   command: string,
-  options: {
-    cwd?: string;
-    timeout?: number;
-  } = {}
-): Promise<{ success: boolean; output: string; error?: string; duration: number }> {
+  cwd: string,
+  env: CheckEnv,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<CheckResult> {
   const startTime = Date.now();
-  const timeout = options.timeout || 300000; // 5 minutes default
 
   return new Promise((resolve) => {
-    const [cmd, ...args] = command.split(/\s+/);
-    const proc = spawn(cmd, args, {
-      cwd: options.cwd,
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    // Parse command into executable and args
+    const parts = command.split(/\s+/);
+    const executable = parts[0];
+    const args = parts.slice(1);
+
+    const proc = spawn(executable, args, {
+      cwd,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PROJECT_ID: env.PROJECT_ID,
+        PROJECT_TITLE: env.PROJECT_TITLE,
+      },
     });
 
-    let output = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
+    // Set up timeout
+    const timeout = setTimeout(() => {
+      killed = true;
       proc.kill('SIGTERM');
-    }, timeout);
+      setTimeout(() => {
+        if (!proc.killed) {
+          proc.kill('SIGKILL');
+        }
+      }, 5000);
+    }, timeoutMs);
 
     proc.stdout.on('data', (data) => {
-      output += data.toString();
+      stdout += data.toString();
     });
 
     proc.stderr.on('data', (data) => {
@@ -69,198 +74,110 @@ async function runCommand(
     });
 
     proc.on('close', (code) => {
-      clearTimeout(timeoutId);
+      clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
-      if (timedOut) {
+      if (killed) {
         resolve({
-          success: false,
-          output,
-          error: `Command timed out after ${timeout}ms`,
-          duration,
+          name,
+          command,
+          passed: false,
+          error: `Timed out after ${timeoutMs / 1000}s`,
+          duration_ms: duration,
+        });
+      } else if (code === 0) {
+        resolve({
+          name,
+          command,
+          passed: true,
+          output: stdout.trim(),
+          duration_ms: duration,
         });
       } else {
         resolve({
-          success: code === 0,
-          output: output + stderr,
-          error: code !== 0 ? `Exit code: ${code}` : undefined,
-          duration,
+          name,
+          command,
+          passed: false,
+          output: stdout.trim(),
+          error: stderr.trim() || `Exit code ${code}`,
+          duration_ms: duration,
         });
       }
     });
 
     proc.on('error', (err) => {
-      clearTimeout(timeoutId);
+      clearTimeout(timeout);
       resolve({
-        success: false,
-        output: '',
+        name,
+        command,
+        passed: false,
         error: err.message,
-        duration: Date.now() - startTime,
+        duration_ms: Date.now() - startTime,
       });
     });
   });
 }
 
 /**
- * Run a check with retry logic
- */
-async function runCheckWithRetry(
-  name: string,
-  check: Check,
-  options: {
-    cwd?: string;
-  } = {}
-): Promise<CheckResult> {
-  const maxRetries = check.max_retries || 3;
-  const retryDelay = check.retry_delay || 5; // seconds
-
-  let attempts = 0;
-  let lastResult: { success: boolean; output: string; error?: string; duration: number } | null = null;
-
-  while (attempts < maxRetries) {
-    attempts++;
-    console.log(chalk.blue(`[check] Running ${name} (attempt ${attempts}/${maxRetries}): ${check.command}`));
-
-    lastResult = await runCommand(check.command, options);
-
-    if (lastResult.success) {
-      console.log(chalk.green(`[check] ${name} passed (${lastResult.duration}ms)`));
-      return {
-        name,
-        success: true,
-        output: lastResult.output,
-        attempts,
-        duration: lastResult.duration,
-      };
-    }
-
-    console.log(chalk.yellow(`[check] ${name} failed: ${lastResult.error}`));
-
-    // Only retry if on_fail is 'retry'
-    if (check.on_fail !== 'retry' || attempts >= maxRetries) {
-      break;
-    }
-
-    console.log(chalk.blue(`[check] Retrying in ${retryDelay}s...`));
-    await new Promise(r => setTimeout(r, retryDelay * 1000));
-  }
-
-  return {
-    name,
-    success: false,
-    output: lastResult?.output || '',
-    error: lastResult?.error,
-    attempts,
-    duration: lastResult?.duration || 0,
-  };
-}
-
-/**
- * Run all checks for a phase
+ * Run multiple checks for a phase
  */
 export async function runPhaseChecks(
-  phase: Phase,
-  options: {
-    cwd?: string;
-    dryRun?: boolean;
-  } = {}
-): Promise<ChecksResult> {
-  if (!phase.checks || Object.keys(phase.checks).length === 0) {
-    return { success: true, checks: [] };
-  }
-
-  if (options.dryRun) {
-    console.log(chalk.yellow(`[check] [DRY RUN] Would run checks for phase ${phase.id}:`));
-    for (const [name, check] of Object.entries(phase.checks)) {
-      console.log(chalk.yellow(`  - ${name}: ${check.command}`));
-    }
-    return { success: true, checks: [] };
-  }
-
+  checks: Record<string, string>,
+  cwd: string,
+  env: CheckEnv,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  let returnTo: string | undefined;
 
-  for (const [name, check] of Object.entries(phase.checks)) {
-    const result = await runCheckWithRetry(name, check, { cwd: options.cwd });
+  for (const [name, command] of Object.entries(checks)) {
+    const result = await runCheck(name, command, cwd, env, timeoutMs);
     results.push(result);
 
-    if (!result.success) {
-      console.log(chalk.red(`[check] ${name} failed after ${result.attempts} attempts`));
+    // Stop on first failure
+    if (!result.passed) {
+      break;
+    }
+  }
 
-      // Determine failure action
-      if (check.on_fail === 'retry') {
-        // Already retried, now fail
-        returnTo = undefined;
-      } else {
-        // on_fail specifies a phase to return to
-        returnTo = check.on_fail;
+  return results;
+}
+
+// ============================================================================
+// Result Formatting
+// ============================================================================
+
+/**
+ * Format check results for terminal output
+ */
+export function formatCheckResults(results: CheckResult[]): string {
+  const lines: string[] = [];
+
+  for (const result of results) {
+    const status = result.passed ? '✓' : '✗';
+    const duration = result.duration_ms
+      ? ` (${(result.duration_ms / 1000).toFixed(1)}s)`
+      : '';
+
+    lines.push(`  ${status} ${result.name}${duration}`);
+
+    if (!result.passed && result.error) {
+      // Indent error message
+      const errorLines = result.error.split('\n').slice(0, 5);
+      for (const line of errorLines) {
+        lines.push(`    ${line}`);
       }
-
-      return {
-        success: false,
-        checks: results,
-        returnTo,
-      };
+      if (result.error.split('\n').length > 5) {
+        lines.push('    ...');
+      }
     }
-  }
-
-  console.log(chalk.green(`[check] All checks passed for phase ${phase.id}`));
-  return {
-    success: true,
-    checks: results,
-  };
-}
-
-/**
- * Create default checks for common phases
- */
-export function getDefaultChecks(phaseName: string): Record<string, Check> {
-  switch (phaseName.toLowerCase()) {
-    case 'implement':
-      return {
-        build: {
-          command: 'npm run build',
-          on_fail: 'retry',
-          max_retries: 2,
-        },
-      };
-    case 'defend':
-      return {
-        tests: {
-          command: 'npm test',
-          on_fail: 'implement', // Return to implement on test failure
-          max_retries: 1,
-        },
-      };
-    default:
-      return {};
-  }
-}
-
-/**
- * Format check results for display
- */
-export function formatCheckResults(results: ChecksResult): string {
-  if (results.checks.length === 0) {
-    return 'No checks ran';
-  }
-
-  const lines: string[] = ['Check Results:'];
-
-  for (const check of results.checks) {
-    const status = check.success ? '✓' : '✗';
-    const duration = `(${check.duration}ms)`;
-    const attempts = check.attempts > 1 ? ` [${check.attempts} attempts]` : '';
-    lines.push(`  ${status} ${check.name} ${duration}${attempts}`);
-
-    if (!check.success && check.error) {
-      lines.push(`    Error: ${check.error}`);
-    }
-  }
-
-  if (results.returnTo) {
-    lines.push(`  → Returning to phase: ${results.returnTo}`);
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Check if all results passed
+ */
+export function allChecksPassed(results: CheckResult[]): boolean {
+  return results.every(r => r.passed);
 }

@@ -17,6 +17,20 @@
 - [ ] Zero critical security issues
 - [ ] Documentation complete
 
+## Phases (Machine Readable)
+
+<!-- REQUIRED: porch uses this JSON to track phase progress. Update this when adding/removing phases. -->
+
+```json
+{
+  "phases": [
+    {"id": "phase_1", "title": "Phase 1 Title Here"},
+    {"id": "phase_2", "title": "Phase 2 Title Here"},
+    {"id": "phase_3", "title": "Phase 3 Title Here"}
+  ]
+}
+```
+
 ## Phase Breakdown
 
 ### Phase 1: [Descriptive Name]
