@@ -1,21 +1,24 @@
 /**
- * porch run - Main run loop (Porch Outer design)
+ * porch run - Main run loop (Build-Verify design)
  *
- * Porch is the outer loop that spawns Claude for each phase,
- * monitors output, and controls transitions.
+ * Porch orchestrates build-verify cycles:
+ * 1. BUILD: Spawn Claude to create artifact
+ * 2. VERIFY: Run 3-way consultation (Gemini, Codex, Claude)
+ * 3. ITERATE: If any REQUEST_CHANGES, feed back to Claude
+ * 4. COMPLETE: When all APPROVE (or max iterations), commit + push + gate
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
-import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig } from './protocol.js';
+import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig, getBuildConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
 import { spawnClaude, type ClaudeProcess } from './claude.js';
 import { watchForSignal, type Signal } from './signals.js';
 import { runRepl } from './repl.js';
 import { buildPhasePrompt } from './prompts.js';
-import type { ProjectState, Protocol } from './types.js';
+import type { ProjectState, Protocol, FeedbackSet } from './types.js';
 
 const PORCH_DIR = '.porch';
 
@@ -72,7 +75,7 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
   console.log('');
 
   while (true) {
-    const state = readState(statusPath);
+    let state = readState(statusPath);
     const protocol = loadProtocol(projectRoot, state.protocol);
     const phaseConfig = getPhaseConfig(protocol, state.phase);
 
@@ -82,18 +85,83 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
       break;
     }
 
-    // Generate output file for this iteration
-    const outputFileName = getOutputFileName(state, protocol);
-    const outputPath = path.join(porchDir, outputFileName);
-
     // Check for pending gate
     const gateName = getPhaseGate(protocol, state.phase);
     if (gateName && state.gates[gateName]?.status === 'pending' && state.gates[gateName]?.requested_at) {
+      const outputPath = path.join(porchDir, `${state.id}-gate.txt`);
       await handleGate(state, gateName, statusPath, projectRoot, outputPath, protocol);
       continue;
     }
 
-    // Build prompt for current phase
+    // Handle build_verify phases
+    if (isBuildVerify(protocol, state.phase)) {
+      const maxIterations = getMaxIterations(protocol, state.phase);
+
+      // Check if we need to run VERIFY (build just completed)
+      if (state.build_complete) {
+        console.log('');
+        console.log(chalk.cyan(`[${state.id}] VERIFY - Iteration ${state.iteration}/${maxIterations}`));
+
+        const feedback = await runVerification(projectRoot, state, protocol);
+
+        if (allApprove(feedback)) {
+          console.log(chalk.green('\nAll reviewers APPROVE!'));
+
+          // Run on_complete actions (commit + push)
+          await runOnComplete(projectRoot, state, protocol);
+
+          // Request gate
+          if (gateName) {
+            state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
+          }
+
+          // Reset for next phase
+          state.build_complete = false;
+          state.iteration = 1;
+          state.last_feedback = {};
+          writeState(statusPath, state);
+          continue;
+        }
+
+        // Some reviewers requested changes
+        console.log(chalk.yellow('\nChanges requested. Feeding back to Claude...'));
+        state.last_feedback = feedback;
+
+        if (state.iteration >= maxIterations) {
+          console.log(chalk.yellow(`\nMax iterations (${maxIterations}) reached. Proceeding to gate.`));
+
+          // Run on_complete actions anyway
+          await runOnComplete(projectRoot, state, protocol);
+
+          // Request gate
+          if (gateName) {
+            state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
+          }
+
+          state.build_complete = false;
+          state.iteration = 1;
+          state.last_feedback = {};
+          writeState(statusPath, state);
+          continue;
+        }
+
+        // Increment iteration and continue to BUILD
+        state.iteration++;
+        state.build_complete = false;
+        writeState(statusPath, state);
+        // Fall through to BUILD phase
+      }
+
+      // BUILD phase
+      console.log('');
+      console.log(chalk.cyan(`[${state.id}] BUILD - ${phaseConfig.name} - Iteration ${state.iteration}/${maxIterations}`));
+    }
+
+    // Generate output file for this iteration
+    const outputFileName = getOutputFileName(state, protocol);
+    const outputPath = path.join(porchDir, outputFileName);
+
+    // Build prompt for current phase (includes feedback if iteration > 1)
     const prompt = buildPhasePrompt(projectRoot, state, protocol);
 
     // Create output file
@@ -145,6 +213,192 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
   }
 }
 
+// ============================================================================
+// Verification (3-way consultation)
+// ============================================================================
+
+/**
+ * Run 3-way verification on the current phase artifact.
+ * Returns feedback from all models.
+ */
+async function runVerification(
+  projectRoot: string,
+  state: ProjectState,
+  protocol: Protocol
+): Promise<FeedbackSet> {
+  const verifyConfig = getVerifyConfig(protocol, state.phase);
+  if (!verifyConfig) {
+    return {}; // No verification configured
+  }
+
+  console.log(chalk.dim(`Running ${verifyConfig.models.length}-way consultation...`));
+
+  const feedback: FeedbackSet = {};
+
+  // Run consultations in parallel
+  const promises = verifyConfig.models.map(async (model) => {
+    console.log(chalk.dim(`  ${model}: starting...`));
+    const result = await runConsult(projectRoot, model, verifyConfig.type, state);
+    feedback[model] = result;
+    console.log(`  ${model}: ${result.verdict === 'APPROVE' ? chalk.green('APPROVE') : chalk.yellow('REQUEST_CHANGES')}`);
+  });
+
+  await Promise.all(promises);
+
+  return feedback;
+}
+
+/**
+ * Get the consult artifact type for a phase.
+ */
+function getConsultArtifactType(phaseId: string): string {
+  switch (phaseId) {
+    case 'specify':
+      return 'spec';
+    case 'plan':
+      return 'plan';
+    case 'implement':
+      return 'plan'; // Implementation reviews the plan phase
+    case 'review':
+      return 'spec'; // Review phase reviews overall work
+    default:
+      return 'spec';
+  }
+}
+
+/**
+ * Run a single consultation.
+ */
+async function runConsult(
+  projectRoot: string,
+  model: string,
+  reviewType: string,
+  state: ProjectState
+): Promise<{ verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string }> {
+  const { spawn } = await import('node:child_process');
+
+  const artifactType = getConsultArtifactType(state.phase);
+
+  return new Promise((resolve) => {
+    const args = ['--model', model, '--type', reviewType, artifactType, state.id];
+    const proc = spawn('consult', args, {
+      cwd: projectRoot,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    proc.stdout.on('data', (data) => { output += data.toString(); });
+    proc.stderr.on('data', (data) => { output += data.toString(); });
+
+    proc.on('close', (code) => {
+      // Parse verdict from output
+      const verdict = parseVerdict(output);
+      const summary = extractSummary(output);
+      resolve({ verdict, summary });
+    });
+
+    proc.on('error', (err) => {
+      console.log(chalk.red(`  ${model}: error - ${err.message}`));
+      resolve({ verdict: 'REQUEST_CHANGES', summary: `Error: ${err.message}` });
+    });
+  });
+}
+
+/**
+ * Parse verdict from consultation output.
+ */
+function parseVerdict(output: string): 'APPROVE' | 'REQUEST_CHANGES' {
+  // Look for verdict in output (case insensitive)
+  const upperOutput = output.toUpperCase();
+  if (upperOutput.includes('APPROVE') && !upperOutput.includes('REQUEST_CHANGES')) {
+    return 'APPROVE';
+  }
+  return 'REQUEST_CHANGES';
+}
+
+/**
+ * Extract summary from consultation output.
+ */
+function extractSummary(output: string): string {
+  // Take last 500 chars as summary (the conclusion)
+  const trimmed = output.trim();
+  if (trimmed.length <= 500) {
+    return trimmed;
+  }
+  return '...' + trimmed.slice(-500);
+}
+
+/**
+ * Check if all reviewers approved.
+ */
+function allApprove(feedback: FeedbackSet): boolean {
+  const results = Object.values(feedback);
+  if (results.length === 0) return true; // No verification = auto-approve
+  return results.every(r => r.verdict === 'APPROVE');
+}
+
+/**
+ * Run on_complete actions (commit + push).
+ */
+async function runOnComplete(
+  projectRoot: string,
+  state: ProjectState,
+  protocol: Protocol
+): Promise<void> {
+  const onComplete = getOnCompleteConfig(protocol, state.phase);
+  if (!onComplete) return;
+
+  const buildConfig = getBuildConfig(protocol, state.phase);
+  if (!buildConfig) return;
+
+  // Resolve artifact path
+  const artifact = buildConfig.artifact
+    .replace('${PROJECT_ID}', state.id)
+    .replace('${PROJECT_TITLE}', state.title);
+
+  const { exec } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execAsync = promisify(exec);
+
+  if (onComplete.commit) {
+    console.log(chalk.dim('Committing...'));
+    try {
+      // Stage artifact
+      await execAsync(`git add ${artifact}`, { cwd: projectRoot });
+
+      // Commit
+      const message = `[Spec ${state.id}] ${state.phase}: ${state.title}
+
+Iteration ${state.iteration}
+3-way review: ${formatVerdicts(state.last_feedback)}`;
+
+      await execAsync(`git commit -m "${message}"`, { cwd: projectRoot });
+      console.log(chalk.green('Committed.'));
+    } catch (err) {
+      console.log(chalk.yellow('Commit failed (may be nothing to commit).'));
+    }
+  }
+
+  if (onComplete.push) {
+    console.log(chalk.dim('Pushing...'));
+    try {
+      await execAsync('git push', { cwd: projectRoot });
+      console.log(chalk.green('Pushed.'));
+    } catch (err) {
+      console.log(chalk.yellow('Push failed.'));
+    }
+  }
+}
+
+/**
+ * Format verdicts for commit message.
+ */
+function formatVerdicts(feedback: FeedbackSet): string {
+  return Object.entries(feedback)
+    .map(([model, result]) => `${model}=${result.verdict}`)
+    .join(', ') || 'N/A';
+}
+
 /**
  * Display current status.
  */
@@ -154,6 +408,11 @@ function showStatus(state: ProjectState, protocol: Protocol): void {
   console.log('');
   console.log(chalk.bold(`[${state.id}] ${state.title}`));
   console.log(`  Phase: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
+
+  if (isBuildVerify(protocol, state.phase)) {
+    const maxIterations = getMaxIterations(protocol, state.phase);
+    console.log(`  Iteration: ${state.iteration}/${maxIterations}`);
+  }
 
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);

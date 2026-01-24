@@ -13,25 +13,31 @@ import {
   getCurrentPlanPhase,
   getNextPlanPhase,
   allPlanPhasesComplete,
-  advanceStage,
+  advancePlanPhase,
   getPhaseContent,
   isPlanPhaseComplete,
-  getCurrentStage,
 } from '../plan.js';
 import type { PlanPhase } from '../types.js';
 
-// Helper to create a plan phase with all stages pending
+// Helper to create a pending plan phase
 const pendingPhase = (id: string, title: string): PlanPhase => ({
   id,
   title,
-  stages: { implement: 'pending', defend: 'pending', evaluate: 'pending' },
+  status: 'pending',
 });
 
-// Helper to create a fully complete plan phase
+// Helper to create an in-progress plan phase
+const inProgressPhase = (id: string, title: string): PlanPhase => ({
+  id,
+  title,
+  status: 'in_progress',
+});
+
+// Helper to create a complete plan phase
 const completePhase = (id: string, title: string): PlanPhase => ({
   id,
   title,
-  stages: { implement: 'complete', defend: 'complete', evaluate: 'complete' },
+  status: 'complete',
 });
 
 describe('porch plan parsing', () => {
@@ -123,13 +129,13 @@ Implement CLI commands.
       expect(phases).toHaveLength(3);
       expect(phases[0].id).toBe('phase_1');
       expect(phases[0].title).toBe('Core Types');
-      expect(phases[0].stages.implement).toBe('pending');
-      expect(phases[0].stages.defend).toBe('pending');
-      expect(phases[0].stages.evaluate).toBe('pending');
+      expect(phases[0].status).toBe('in_progress'); // First phase starts in_progress
       expect(phases[1].id).toBe('phase_2');
       expect(phases[1].title).toBe('State Management');
+      expect(phases[1].status).toBe('pending');
       expect(phases[2].id).toBe('phase_3');
       expect(phases[2].title).toBe('Commands');
+      expect(phases[2].status).toBe('pending');
     });
 
     it('should return default phase if no JSON block', () => {
@@ -198,34 +204,19 @@ Implement CLI commands.
   });
 
   describe('isPlanPhaseComplete', () => {
-    it('should return true when all stages complete', () => {
+    it('should return true when status is complete', () => {
       const phase = completePhase('phase_1', 'Test');
       expect(isPlanPhaseComplete(phase)).toBe(true);
     });
 
-    it('should return false when any stage incomplete', () => {
-      const phase: PlanPhase = {
-        id: 'phase_1',
-        title: 'Test',
-        stages: { implement: 'complete', defend: 'complete', evaluate: 'pending' },
-      };
+    it('should return false when status is not complete', () => {
+      const phase = inProgressPhase('phase_1', 'Test');
       expect(isPlanPhaseComplete(phase)).toBe(false);
     });
-  });
 
-  describe('getCurrentStage', () => {
-    it('should return first incomplete stage', () => {
-      const phase: PlanPhase = {
-        id: 'phase_1',
-        title: 'Test',
-        stages: { implement: 'complete', defend: 'in_progress', evaluate: 'pending' },
-      };
-      expect(getCurrentStage(phase)).toBe('defend');
-    });
-
-    it('should return null when all stages complete', () => {
-      const phase = completePhase('phase_1', 'Test');
-      expect(getCurrentStage(phase)).toBeNull();
+    it('should return false when status is pending', () => {
+      const phase = pendingPhase('phase_1', 'Test');
+      expect(isPlanPhaseComplete(phase)).toBe(false);
     });
   });
 
@@ -233,11 +224,19 @@ Implement CLI commands.
     it('should return first non-complete phase', () => {
       const phases: PlanPhase[] = [
         completePhase('phase_1', 'One'),
-        {
-          id: 'phase_2',
-          title: 'Two',
-          stages: { implement: 'in_progress', defend: 'pending', evaluate: 'pending' },
-        },
+        inProgressPhase('phase_2', 'Two'),
+        pendingPhase('phase_3', 'Three'),
+      ];
+
+      const current = getCurrentPlanPhase(phases);
+
+      expect(current?.id).toBe('phase_2');
+    });
+
+    it('should return first pending phase when none in progress', () => {
+      const phases: PlanPhase[] = [
+        completePhase('phase_1', 'One'),
+        pendingPhase('phase_2', 'Two'),
         pendingPhase('phase_3', 'Three'),
       ];
 
@@ -301,72 +300,57 @@ Implement CLI commands.
     });
   });
 
-  describe('advanceStage', () => {
-    it('should advance from implement to defend', () => {
+  describe('advancePlanPhase', () => {
+    it('should mark current phase complete and next phase in_progress', () => {
       const phases: PlanPhase[] = [
-        {
-          id: 'phase_1',
-          title: 'One',
-          stages: { implement: 'in_progress', defend: 'pending', evaluate: 'pending' },
-        },
+        inProgressPhase('phase_1', 'One'),
         pendingPhase('phase_2', 'Two'),
+        pendingPhase('phase_3', 'Three'),
       ];
 
-      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'implement');
+      const { phases: updated, moveToReview } = advancePlanPhase(phases, 'phase_1');
 
-      expect(updated[0].stages.implement).toBe('complete');
-      expect(updated[0].stages.defend).toBe('in_progress');
-      expect(nextProtocolPhase).toBe('defend');
+      expect(updated[0].status).toBe('complete');
+      expect(updated[1].status).toBe('in_progress');
+      expect(updated[2].status).toBe('pending');
+      expect(moveToReview).toBe(false);
     });
 
-    it('should advance from defend to evaluate', () => {
-      const phases: PlanPhase[] = [
-        {
-          id: 'phase_1',
-          title: 'One',
-          stages: { implement: 'complete', defend: 'in_progress', evaluate: 'pending' },
-        },
-        pendingPhase('phase_2', 'Two'),
-      ];
-
-      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'defend');
-
-      expect(updated[0].stages.defend).toBe('complete');
-      expect(updated[0].stages.evaluate).toBe('in_progress');
-      expect(nextProtocolPhase).toBe('evaluate');
-    });
-
-    it('should advance from evaluate to next plan phase implement', () => {
-      const phases: PlanPhase[] = [
-        {
-          id: 'phase_1',
-          title: 'One',
-          stages: { implement: 'complete', defend: 'complete', evaluate: 'in_progress' },
-        },
-        pendingPhase('phase_2', 'Two'),
-      ];
-
-      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'evaluate');
-
-      expect(updated[0].stages.evaluate).toBe('complete');
-      expect(updated[1].stages.implement).toBe('in_progress');
-      expect(nextProtocolPhase).toBe('implement');
-    });
-
-    it('should return review when last phase evaluate completes', () => {
+    it('should return moveToReview true when last phase completes', () => {
       const phases: PlanPhase[] = [
         completePhase('phase_1', 'One'),
-        {
-          id: 'phase_2',
-          title: 'Two',
-          stages: { implement: 'complete', defend: 'complete', evaluate: 'in_progress' },
-        },
+        inProgressPhase('phase_2', 'Two'),
       ];
 
-      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_2', 'evaluate');
+      const { phases: updated, moveToReview } = advancePlanPhase(phases, 'phase_2');
 
-      expect(updated[1].stages.evaluate).toBe('complete');
-      expect(nextProtocolPhase).toBe('review');
+      expect(updated[0].status).toBe('complete');
+      expect(updated[1].status).toBe('complete');
+      expect(moveToReview).toBe(true);
+    });
+
+    it('should handle single phase', () => {
+      const phases: PlanPhase[] = [
+        inProgressPhase('phase_1', 'Only'),
+      ];
+
+      const { phases: updated, moveToReview } = advancePlanPhase(phases, 'phase_1');
+
+      expect(updated[0].status).toBe('complete');
+      expect(moveToReview).toBe(true);
+    });
+
+    it('should do nothing for non-existent phase', () => {
+      const phases: PlanPhase[] = [
+        inProgressPhase('phase_1', 'One'),
+        pendingPhase('phase_2', 'Two'),
+      ];
+
+      const { phases: updated, moveToReview } = advancePlanPhase(phases, 'phase_99');
+
+      expect(updated[0].status).toBe('in_progress');
+      expect(updated[1].status).toBe('pending');
+      expect(moveToReview).toBe(false);
     });
   });
 

@@ -3,12 +3,15 @@
  *
  * Loads phase-specific prompts from the protocol's prompts/ directory.
  * Prompts are markdown files with {{variable}} placeholders.
+ *
+ * For build-verify cycles, when iteration > 1, feedback from previous
+ * verification is prepended to help guide the next iteration.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ProjectState, Protocol, ProtocolPhase, PlanPhase } from './types.js';
-import { getPhaseConfig, isPhased } from './protocol.js';
+import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, FeedbackSet } from './types.js';
+import { getPhaseConfig, isPhased, isBuildVerify } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 
 /** Locations to search for protocol prompts */
@@ -69,8 +72,47 @@ function substituteVariables(
 }
 
 /**
+ * Synthesize feedback from previous verification into a prompt header.
+ * This helps guide Claude on what to improve in the next iteration.
+ */
+function synthesizeFeedback(feedback: FeedbackSet, iteration: number): string {
+  const lines: string[] = [
+    '# ⚠️ REVISION REQUIRED',
+    '',
+    `This is iteration ${iteration}. The previous version received feedback from reviewers.`,
+    '',
+    '## Reviewer Feedback',
+    '',
+  ];
+
+  for (const [model, result] of Object.entries(feedback)) {
+    const icon = result.verdict === 'APPROVE' ? '✓' : '✗';
+    lines.push(`### ${model.charAt(0).toUpperCase() + model.slice(1)} (${icon} ${result.verdict})`);
+    lines.push('');
+    if (result.summary) {
+      lines.push(result.summary);
+    } else {
+      lines.push('(No detailed feedback provided)');
+    }
+    lines.push('');
+  }
+
+  lines.push('## Instructions');
+  lines.push('');
+  lines.push('Address the feedback above in your revision. Focus on:');
+  lines.push('1. Issues flagged as REQUEST_CHANGES');
+  lines.push('2. Suggestions for improvement from all reviewers');
+  lines.push('3. Any concerns raised about quality, completeness, or correctness');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
  * Build a prompt for the current phase.
  * Loads from protocol's prompts/ directory if available, otherwise uses fallback.
+ *
+ * For build-verify phases with iteration > 1, prepends feedback from previous verification.
  */
 export function buildPhasePrompt(
   projectRoot: string,
@@ -89,6 +131,12 @@ export function buildPhasePrompt(
     currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
   }
 
+  // Build feedback header if this is a retry iteration
+  let feedbackHeader = '';
+  if (isBuildVerify(protocol, state.phase) && state.iteration > 1 && Object.keys(state.last_feedback).length > 0) {
+    feedbackHeader = synthesizeFeedback(state.last_feedback, state.iteration);
+  }
+
   // Try to load prompt from protocol directory
   const promptsDir = findPromptsDir(projectRoot, state.protocol);
   if (promptsDir) {
@@ -103,6 +151,11 @@ export function buildPhasePrompt(
         result = addPlanPhaseContext(projectRoot, state, currentPlanPhase, result);
       }
 
+      // Prepend feedback if this is a retry
+      if (feedbackHeader) {
+        result = feedbackHeader + '\n\n---\n\n' + result;
+      }
+
       // Add signal instructions footer
       result += buildSignalFooter();
 
@@ -111,7 +164,14 @@ export function buildPhasePrompt(
   }
 
   // Fallback to generic prompt if no protocol prompt found
-  return buildFallbackPrompt(state, phaseConfig.name, currentPlanPhase);
+  let fallback = buildFallbackPrompt(state, phaseConfig.name, currentPlanPhase);
+
+  // Prepend feedback if this is a retry
+  if (feedbackHeader) {
+    fallback = feedbackHeader + '\n\n---\n\n' + fallback;
+  }
+
+  return fallback;
 }
 
 /**
