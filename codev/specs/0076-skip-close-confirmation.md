@@ -42,10 +42,11 @@ Implement a new setting in the dashboard that allows users to disable the close 
 
 **Key Design Decisions:**
 
-1. **Scope**: Per-session setting (stored in localStorage)
+1. **Scope**: Persistent browser setting (stored in localStorage)
 2. **Default**: Confirmations enabled (safe default for new users)
-3. **UI Location**: Settings panel in the dashboard
-4. **Persistence**: Browser localStorage (per-browser, not per-user account)
+3. **UI Location**: Settings section in the Dashboard tab (new collapsible section)
+4. **Persistence**: Browser localStorage - persists across browser sessions (per-browser, not per-user account)
+5. **Cross-tab sync**: Changes sync to other open dashboard tabs via `storage` event listener
 
 ### Alternatives Considered
 
@@ -99,44 +100,61 @@ The settings toggle approach provides the best balance of:
 
 **MUST:**
 1. Add a toggle setting "Skip close confirmation for running processes"
-2. Store the setting in localStorage (key: `skipCloseConfirmation`)
+2. Store the setting in localStorage (key: `skipCloseConfirmation`, value: `"true"` or absent)
 3. When enabled, close builder/shell tabs immediately without dialog
-4. Default to disabled (confirmations shown)
+4. Default to disabled (confirmations shown) - when key is absent or any value other than `"true"`
 5. Shift+click behavior remains unchanged (always bypasses regardless of setting)
+6. Cross-tab synchronization via `storage` event listener - when setting changes in one tab, other tabs read the new value
+7. Integrate cleanly with Bugfix #132 logic - the already-exited process check happens first (short-circuit), then setting is checked
 
 **SHOULD:**
-1. Show a tooltip explaining what the setting does
-2. Provide visual feedback when the setting is changed
+1. Show a tooltip/hint text explaining what the setting does
+2. Provide visual feedback when the setting is changed (checkbox state change is sufficient)
 3. Apply immediately without page refresh
 
 **COULD:**
-1. Add keyboard shortcut hint near the setting
-2. Show count of tabs that would be affected
+1. Add keyboard shortcut hint near the setting ("Tip: Shift+click always skips")
+2. Show count of running tabs that would be affected
 
 ### Non-Functional Requirements
 
 1. **Performance**: No measurable impact on tab close latency
 2. **Storage**: Single localStorage key, minimal footprint
 3. **Accessibility**: Setting toggle must be keyboard navigable and screen reader friendly
+4. **Client-side only**: This is a UI-only preference. It does not affect server-side process lifecycle - closing a tab still terminates the process via the existing DELETE API call
+
+### Edge Cases
+
+1. **Process exits between click and check**: The Bugfix #132 check (`/api/tabs/:id/running`) runs first. If the process exited, the tab closes immediately regardless of the setting. This preserves the existing fast-path behavior.
+2. **Tabs created after toggling**: New tabs inherit the current setting value (read from localStorage at close time, not tab creation time).
+3. **Multiple browser windows**: Each window reads from the same localStorage. If user changes setting in Window A, Window B will see the new value on next close attempt (or immediately if storage event listener is implemented).
+4. **localStorage unavailable**: Falls back to showing confirmations (safe default).
 
 ## UI Design
 
 ### Settings Location
 
-The setting will appear in a new "Settings" section of the Dashboard tab, below the existing quick actions.
+The setting will appear in a new "Settings" collapsible section in the Dashboard tab, following the existing pattern of the Tabs, Files, and Projects sections. This provides consistency with the existing UI.
 
 ```
 ┌──────────────────────────────────────┐
 │ Dashboard                            │
 ├──────────────────────────────────────┤
-│ Quick Actions                        │
-│ [+ Builder] [+ Shell] [Open File]    │
+│ ▼ Tabs                               │
+│   [+ Create new shell]               │
+│   [+ Create new worktree + shell]    │
+│   ⬡ Architect  ● builder-42          │
 ├──────────────────────────────────────┤
-│ Settings                             │
-│                                      │
-│ ☐ Skip close confirmation for        │
-│   running processes                  │
-│   (Tip: Shift+click always skips)    │
+│ ▼ Files                              │
+│   [file tree...]                     │
+├──────────────────────────────────────┤
+│ ▼ Projects                           │
+│   [project list...]                  │
+├──────────────────────────────────────┤
+│ ▼ Settings                           │
+│   ☐ Skip close confirmation for      │
+│     running processes                │
+│     (Tip: Shift+click always skips)  │
 └──────────────────────────────────────┘
 ```
 
@@ -149,10 +167,10 @@ The setting will appear in a new "Settings" section of the Dashboard tab, below 
 
 ### In Scope
 
-1. Settings toggle in Dashboard tab
-2. localStorage persistence
-3. Modified `closeTab()` behavior in `dialogs.js`
-4. Updated dashboard rendering in `main.js`
+1. Settings toggle UI in Dashboard tab content area
+2. localStorage read/write for persistence
+3. Modified close behavior to check the setting before showing confirmation
+4. Storage event listener for cross-tab sync
 
 ### Out of Scope
 
@@ -160,6 +178,7 @@ The setting will appear in a new "Settings" section of the Dashboard tab, below 
 2. Server-side setting storage
 3. Per-tab-type settings (all or nothing)
 4. Annotation editor `beforeunload` behavior (separate concern)
+5. Changes to `closeOtherTabs()` or `closeAllTabs()` (these already bypass confirmation)
 
 ## Success Criteria
 
@@ -178,13 +197,22 @@ The setting will appear in a new "Settings" section of the Dashboard tab, below 
 1. Close latency unchanged when setting enabled
 2. localStorage key created only after first toggle interaction
 
+### Automated Testing Guidance
+
+1. **E2E test**: Toggle the setting, spawn a builder, close it, verify no confirmation modal appears
+2. **E2E test**: Toggle the setting OFF, spawn a builder, close it, verify confirmation modal appears
+3. **E2E test**: Verify Shift+click bypasses regardless of setting state
+4. **Unit test**: Verify localStorage read defaults to confirmations enabled when key is absent
+5. **Unit test**: Verify localStorage read with `"true"` value returns skip-enabled
+6. **Regression test**: Verify Bugfix #132 behavior (already-exited processes) still works with setting enabled
+
 ## Open Questions
 
 ### Critical
 *None - requirements are clear*
 
 ### Important
-1. Should the setting sync across tabs in the same browser? (Current: Yes, via localStorage + storage event listener)
+*None - cross-tab sync moved to requirements*
 
 ### Nice-to-Know
 1. Do users want per-tab-type control (builders vs shells)? (Deferred to future enhancement if requested)
@@ -198,13 +226,23 @@ The setting will appear in a new "Settings" section of the Dashboard tab, below 
 
 ## Consultation Log
 
-*To be populated after multi-agent consultation*
-
 ### First Consultation (After Draft)
-- **Date**: Pending
+- **Date**: 2026-01-24
 - **Models consulted**: Gemini 3 Pro, GPT-5 Codex
-- **Key feedback**: TBD
-- **Changes made**: TBD
+- **Verdicts**: Gemini APPROVE (with suggestions), Codex REQUEST_CHANGES
+
+**Gemini feedback (APPROVE, HIGH confidence):**
+1. Move cross-tab sync from "Open Questions" to "Requirements" - **DONE**
+2. Be explicit about localStorage string comparison (`=== 'true'`) - **DONE** (added to MUST #2)
+3. Ensure Settings section follows existing collapsible pattern - **DONE** (clarified in UI Design)
+
+**Codex feedback (REQUEST_CHANGES, HIGH confidence):**
+1. Contradictory "per-session" vs localStorage persistence - **FIXED** (changed to "Persistent browser setting")
+2. Cross-tab synchronization unspecified - **FIXED** (added as MUST #6)
+3. Missing automated testing guidance - **FIXED** (added "Automated Testing Guidance" section)
+4. Edge cases not described - **FIXED** (added "Edge Cases" section)
+5. Clarify client-side only nature - **FIXED** (added to Non-Functional Requirements #4)
+6. Files vs behaviors in implementation scope - **FIXED** (changed to behavior descriptions)
 
 ### Second Consultation (After Human Review)
 - **Date**: Pending
