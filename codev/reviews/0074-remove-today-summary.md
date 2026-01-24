@@ -56,6 +56,9 @@ Porch checks assume `npm run build` works from the worktree root, but in a monor
 | Plan | Claude | APPROVE | Use comment markers as boundary |
 | Impl | Codex | REQUEST_CHANGES | Unused `execAsync` import (fixed) |
 | Impl | Claude | REQUEST_CHANGES | Unused imports (fixed) |
+| PR | Gemini | APPROVE | Dead code removed, tests passing |
+| PR | Codex | REQUEST_CHANGES | Frontend refs in arch.md (fixed) |
+| PR | Claude | APPROVE | Clean removal, ready for merge |
 
 ## Verdict
 
