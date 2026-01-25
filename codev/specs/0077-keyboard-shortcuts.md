@@ -1,6 +1,6 @@
 # Specification 0077: Keyboard Shortcuts for Agent Farm Dashboard
 
-**Status**: Draft (Iteration 3)
+**Status**: Ready for Approval
 **Created**: 2026-01-24
 **Protocol**: SPIDER
 
@@ -75,6 +75,14 @@ const shortcuts = [
     code: 'F1',           // Physical key (event.code) for cross-platform consistency
     key: 'F1',            // Display character (for help modal)
     modifiers: [],        // No modifiers for F1
+    action: 'showHelp',
+    description: 'Show keyboard shortcuts',
+    category: 'General'
+  },
+  {
+    code: 'Slash',        // Physical key for Ctrl+/
+    key: '/',             // Display character
+    modifiers: ['ctrl'],
     action: 'showHelp',
     description: 'Show keyboard shortcuts',
     category: 'General'
