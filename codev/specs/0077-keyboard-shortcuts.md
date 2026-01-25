@@ -1,6 +1,6 @@
 # Specification 0077: Keyboard Shortcuts for Agent Farm Dashboard
 
-**Status**: Draft
+**Status**: Ready for Approval
 **Created**: 2026-01-24
 **Protocol**: SPIDER
 
