@@ -18,7 +18,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": {
         "commit": true,
         "push": true
@@ -40,7 +40,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": {
         "commit": true,
         "push": true
@@ -66,7 +66,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": {
         "commit": true,
         "push": true
@@ -102,7 +102,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": {
         "commit": true,
         "push": true
@@ -127,7 +127,7 @@
     "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
   },
   "defaults": {
-    "max_iterations": 3,
+    "max_iterations": 7,
     "verify": {
       "models": ["gemini", "codex", "claude"],
       "parallel": true

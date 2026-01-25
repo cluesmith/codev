@@ -11,7 +11,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
-import { getPhaseConfig, isPhased, isBuildVerify } from './protocol.js';
+import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 
 /** Locations to search for protocol prompts */
@@ -200,7 +200,9 @@ export function buildPhasePrompt(
   // Try to load prompt from protocol directory
   const promptsDir = findPromptsDir(projectRoot, state.protocol);
   if (promptsDir) {
-    const promptFileName = `${state.phase}.md`;
+    // Get prompt filename from protocol's build config, fallback to phase.md
+    const buildConfig = getBuildConfig(protocol, state.phase);
+    const promptFileName = buildConfig?.prompt || `${state.phase}.md`;
 
     const promptContent = loadPromptFile(promptsDir, promptFileName);
     if (promptContent) {

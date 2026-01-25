@@ -4,7 +4,7 @@ You are executing the **IMPLEMENT** phase of the SPIDER protocol.
 
 ## Your Goal
 
-Write clean, well-structured code that implements the current plan phase.
+Write clean, well-structured code AND tests that implement the current plan phase.
 
 ## Context
 
@@ -15,14 +15,13 @@ Write clean, well-structured code that implements the current plan phase.
 - **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
 - **Plan File**: `codev/plans/{{project_id}}-{{title}}.md`
 
-## Consultation Context
+## What Happens After You Finish
 
-**Implementation does NOT require consultation checkpoints** - that happens after Defend.
-
-However, you should be aware:
-- Spec and Plan have already been reviewed by GPT-5 Codex and Gemini Pro
-- After you complete Implement + Defend, your work will be reviewed
-- Implementation must strictly follow the approved spec and plan
+When you signal `PHASE_COMPLETE`, porch will:
+1. Run 3-way consultation (Gemini, Codex, Claude) on your implementation
+2. Check that tests exist and pass
+3. If reviewers request changes, you'll be respawned with their feedback
+4. Once approved, porch commits and moves to the next plan phase
 
 ## Spec Compliance (CRITICAL)
 
@@ -89,7 +88,7 @@ Read the current phase in the plan:
 - Check that previous phase is committed: `git log --oneline -5`
 - Ensure build passes before starting: `npm run build` (or equivalent)
 
-### 3. Implement
+### 3. Implement the Code
 
 Write the code following these principles:
 
@@ -103,60 +102,72 @@ Write the code following these principles:
 **Implementation Approach**:
 - Work on one file at a time
 - Make small, incremental changes
-- Test as you go (manual verification is fine here)
 - Document complex logic with comments
 
-### 4. Self-Review
+### 4. Write Tests
 
-Before signaling completion:
-- Read through all changes
-- Check for obvious bugs
-- Verify code matches the spec requirements
-- Ensure no accidental debug code
+**Tests are required.** For each piece of functionality you implement:
 
-### 5. Build Verification
+- Write unit tests for core logic
+- Write integration tests if the phase involves multiple components
+- Test error cases and edge conditions
+- Ensure tests are deterministic (no flaky tests)
 
-Run build checks using **project-specific commands**:
+**Test file locations** (follow project conventions):
+- `tests/` or `__tests__/` directories
+- `*.test.ts` or `*.spec.ts` naming
+
+### 5. Verify Everything Works
+
+Run both build and tests:
 
 ```bash
-# Check package.json scripts or Makefile for actual commands
-# Common patterns:
-npm run build      # Node.js/TypeScript projects
-npm run typecheck  # TypeScript type checking
-npm run lint       # Linting (ESLint, etc.)
-cargo build        # Rust projects
-go build ./...     # Go projects
-make build         # Projects using Makefiles
+npm run build      # Must pass
+npm test           # Must pass
 ```
 
-**Important**: Don't assume `npm run build` exists. Check `package.json` or equivalent first.
+**Important**: Don't assume these commands exist. Check `package.json` first.
 
-Fix any errors before proceeding.
+Fix any errors before signaling completion.
+
+### 6. Self-Review
+
+Before signaling completion:
+- Read through all code changes
+- Read through all test changes
+- Verify code matches the spec requirements
+- Ensure no accidental debug code
+- Check test coverage is adequate
 
 ## Output
 
+When complete, you should have:
 - Modified/created source files as specified in the plan phase
+- Tests covering the new functionality
 - All build checks passing
-- Code ready for the Defend (testing) phase
+- All tests passing
 
 ## Signals
 
-Emit appropriate signals based on your progress:
+When implementation AND tests are complete and passing:
 
-- After implementation is complete and builds pass:
-  ```
-  <signal>PHASE_IMPLEMENTED</signal>
-  ```
+```
+<signal>PHASE_COMPLETE</signal>
+```
 
-- If you encounter a blocker:
-  ```
-  <signal>BLOCKED:reason goes here</signal>
-  ```
+If you encounter a blocker:
 
-- If you need spec/plan clarification:
-  ```
-  <signal>NEEDS_CLARIFICATION:specific question</signal>
-  ```
+```
+<signal>BLOCKED:reason goes here</signal>
+```
+
+If you need spec/plan clarification:
+
+```
+<signal type=AWAITING_INPUT>
+Your specific questions here
+</signal>
+```
 
 ## Important Notes
 
@@ -164,21 +175,21 @@ Emit appropriate signals based on your progress:
 2. **Don't over-engineer** - Simplest solution that works
 3. **Don't skip error handling** - But don't go overboard either
 4. **Keep changes focused** - Only touch files in this phase
-5. **Build must pass** - Don't proceed if build fails
+5. **Build AND tests must pass** - Don't signal complete until both pass
+6. **Write tests** - Every implementation phase needs tests
 
 ## What NOT to Do
 
-- Don't write tests yet (that's Defend phase)
 - Don't modify files outside this phase's scope
 - Don't add features not in the spec
 - Don't leave TODO comments for later (fix now or note as blocker)
-- Don't commit yet (that happens after Defend + Evaluate)
-- Don't use `git add .` or `git add -A` when you do commit (security risk)
+- Don't skip writing tests
+- Don't use `git add .` or `git add -A` when you commit (security risk)
 
 ## Handling Problems
 
 **If the plan is unclear**:
-Signal `NEEDS_CLARIFICATION` with your specific question.
+Signal `AWAITING_INPUT` with your specific question.
 
 **If you discover the spec is wrong**:
 Signal `BLOCKED` and explain the issue. The Architect may need to update the spec.
@@ -186,5 +197,5 @@ Signal `BLOCKED` and explain the issue. The Architect may need to update the spe
 **If a dependency is missing**:
 Signal `BLOCKED` with details about what's missing.
 
-**If build fails and you can't fix it**:
+**If build or tests fail and you can't fix it**:
 Signal `BLOCKED` with the error message.
