@@ -16,11 +16,40 @@ Porch orchestrates **build-verify cycles** where:
 
 1. **3-way reviews are automatic** - Porch runs them, not Claude
 2. **Feedback loops** - Consultation feedback feeds back into next Claude iteration
-3. **Capped iterations** - Max N attempts before proceeding to gate
+3. **Capped iterations** - Max 7 attempts before proceeding to gate (configurable)
 4. **Commit boundaries** - Each stage ends with commit + push
 5. **Human gates** - Come after build-verify cycles, not within them
 
 ### Architecture
+
+**The Claude → Porch → Claude Pattern:**
+
+```
+Architect Claude
+    │
+    └──► af kickoff -p XXXX
+              │
+              └──► Builder Claude (outer)
+                        │
+                        └──► porch run XXXX
+                                  │
+                                  └──► Claude (inner) creates artifact
+                                  │         │
+                                  │         └──► <signal>PHASE_COMPLETE</signal>
+                                  │                      or
+                                  │              <signal type=AWAITING_INPUT>questions</signal>
+                                  │
+                                  └──► 3-way verification (Gemini, Codex, Claude)
+                                  │
+                                  └──► Iterate if needed, or advance
+```
+
+The outer builder Claude just runs `porch run` and handles gates. Porch spawns an inner Claude instance that does the actual work. This separates concerns:
+- **Outer Claude**: Runs porch, handles gates, manages session
+- **Porch**: Protocol orchestration, 3-way reviews, iteration
+- **Inner Claude**: Creates artifacts, writes code, answers questions
+
+**Build-Verify Cycle:**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -114,7 +143,7 @@ The protocol.json format expresses build-verify cycles:
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": {
         "commit": true,
         "push": true
@@ -160,6 +189,35 @@ This is iteration 2. Previous iterations received feedback from reviewers.
 ```
 
 This approach is simpler than synthesizing feedback - Claude has full access to the raw consultation output.
+
+### Claude Signals
+
+Inner Claude communicates with porch via XML signals in its output:
+
+| Signal | Meaning | Porch Action |
+|--------|---------|--------------|
+| `<signal>PHASE_COMPLETE</signal>` | Artifact created, ready for verification | Run 3-way review |
+| `<signal>GATE_NEEDED</signal>` | Human approval required | Stop and wait |
+| `<signal>BLOCKED:reason</signal>` | Claude is stuck | Log blocker, may retry |
+| `<signal type=AWAITING_INPUT>questions</signal>` | Claude needs clarification | Prompt user for answers, store in `context.user_answers`, respawn Claude |
+
+**AWAITING_INPUT Flow:**
+
+When Claude needs to ask clarifying questions (e.g., during spec writing), it emits:
+
+```xml
+<signal type=AWAITING_INPUT>
+Please answer these questions:
+1. What's the primary use case?
+2. What's in scope vs out of scope?
+</signal>
+```
+
+Porch:
+1. Displays the questions to the user
+2. Collects answers
+3. Stores answers in `status.yaml` under `context.user_answers`
+4. Respawns Claude with answers prepended to the prompt
 
 ### Consultation Output
 

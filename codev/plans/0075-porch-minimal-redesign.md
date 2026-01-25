@@ -72,7 +72,7 @@ interface PhaseConfig {
   type: 'build_verify' | 'once' | 'per_plan_phase';
   build?: BuildConfig;
   verify?: VerifyConfig;
-  max_iterations?: number;  // Default: 3
+  max_iterations?: number;  // Default: 7
   on_complete?: {
     commit: boolean;
     push: boolean;
@@ -91,7 +91,7 @@ interface PhaseConfig {
       "type": "build_verify",
       "build": { "prompt": "specify.md", "artifact": "codev/specs/${PROJECT_ID}-*.md" },
       "verify": { "type": "spec-review", "models": ["gemini", "codex", "claude"] },
-      "max_iterations": 3,
+      "max_iterations": 7,
       "on_complete": { "commit": true, "push": true },
       "gate": "spec-approval"
     }
@@ -291,6 +291,40 @@ async function runOnComplete(projectRoot, state, protocol, reviews) {
 ```
 
 **Note:** Git logic is inline in run.ts, not a separate git.ts file.
+
+## Claude → Porch → Claude Architecture
+
+**The outer builder Claude just runs porch. Porch spawns an inner Claude to do the work.**
+
+```
+Builder Claude (outer)
+    │
+    └──► porch run XXXX
+              │
+              └──► Claude (inner) creates artifact
+              │         │
+              │         └──► <signal>PHASE_COMPLETE</signal>
+              │                      or
+              │              <signal type=AWAITING_INPUT>questions</signal>
+              │
+              └──► 3-way verification (Gemini, Codex, Claude)
+              │
+              └──► Iterate if needed, or advance
+```
+
+**Signals from inner Claude:**
+
+| Signal | Meaning | Porch Action |
+|--------|---------|--------------|
+| `<signal>PHASE_COMPLETE</signal>` | Artifact created, ready for verification | Run 3-way review |
+| `<signal>GATE_NEEDED</signal>` | Human approval required | Stop and wait |
+| `<signal>BLOCKED:reason</signal>` | Claude is stuck | Log blocker, may retry |
+| `<signal type=AWAITING_INPUT>questions</signal>` | Claude needs clarification | Prompt user for answers, store in `context.user_answers`, respawn Claude |
+
+**Role separation:**
+- **Builder role (outer)**: `codev-skeleton/roles/builder.md` - Just runs porch, handles gates
+- **Phase prompts (inner)**: `codev-skeleton/protocols/spider/prompts/*.md` - Detailed work instructions
+- **Spec compliance**: Added to `implement.md` since inner Claude does the coding work
 
 ## REPL Updates
 

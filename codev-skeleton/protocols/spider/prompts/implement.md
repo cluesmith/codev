@@ -24,6 +24,47 @@ However, you should be aware:
 - After you complete Implement + Defend, your work will be reviewed
 - Implementation must strictly follow the approved spec and plan
 
+## Spec Compliance (CRITICAL)
+
+**The spec is the source of truth. Code that doesn't match the spec is wrong, even if it "works".**
+
+### Trust Hierarchy
+
+```
+SPEC (source of truth)
+  ↓
+PLAN (implementation guide derived from spec)
+  ↓
+EXISTING CODE (NOT TRUSTED - must be validated against spec)
+```
+
+**Never trust existing code over the spec.** Previous implementations may have drifted.
+
+### Pre-Implementation Sanity Check (PISC)
+
+**Before writing ANY code:**
+
+1. ✅ "Have I read the spec in the last 30 minutes?"
+2. ✅ "If the spec has a 'Traps to Avoid' section, have I read it?"
+3. ✅ "Does my approach match the spec's Technical Implementation section?"
+4. ✅ "If the spec has code examples, am I following them?"
+5. ✅ "Does the existing code I'm building on actually match the spec?"
+
+**If ANY answer is "no" or "unsure" → STOP and re-read the spec.**
+
+### Avoiding "Fixing Mode"
+
+A dangerous pattern: You start looking at symptoms in code, making incremental fixes, copying existing patterns - without going back to the spec. This leads to:
+- Cargo-culting patterns that may be wrong
+- Building on broken foundations
+- Implementing something different from the spec
+
+**When you catch yourself "fixing" code:**
+1. STOP
+2. Ask: "What does the spec say about this?"
+3. Re-read the spec's Traps to Avoid section
+4. Verify existing code matches the spec before building on it
+
 ## Prerequisites
 
 Before implementing, verify:
