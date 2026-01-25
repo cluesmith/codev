@@ -1,6 +1,6 @@
 # Specification 0077: Keyboard Shortcuts for Agent Farm Dashboard
 
-**Status**: Ready for Approval
+**Status**: Draft (Iteration 3)
 **Created**: 2026-01-24
 **Protocol**: SPIDER
 
@@ -72,22 +72,33 @@ A centralized system for registering, handling, and documenting shortcuts.
 ```javascript
 const shortcuts = [
   {
-    key: '?',
-    modifiers: ['meta'],  // 'meta' = Cmd on macOS, Ctrl on Windows/Linux
+    code: 'Slash',        // Physical key (event.code) for cross-platform consistency
+    key: '?',             // Display character (for help modal)
+    modifiers: ['meta', 'shift'],  // 'meta' = Cmd on macOS, Ctrl on Windows/Linux
     action: 'showHelp',
     description: 'Show keyboard shortcuts',
     category: 'General'
   },
   {
-    key: 'n',
-    modifiers: ['meta', 'shift'],
-    action: 'newBuilder',
-    description: 'Spawn new builder',
-    category: 'Actions'
+    code: 'Digit1',       // Physical key for Alt+1
+    key: '1',             // Display character
+    modifiers: ['alt'],
+    action: 'goToTab1',
+    description: 'Jump to tab 1',
+    category: 'Navigation'
   }
   // ... more shortcuts
 ];
 ```
+
+**Key Matching Strategy**:
+The registry uses `event.code` (physical key position) rather than `event.key` (character produced) for shortcut matching. This is critical for two reasons:
+
+1. **macOS Option Key**: On macOS, the Option (Alt) key modifies characters. `Alt+1` produces `¡`, `Alt+W` produces `∑`. Using `event.code` matches the physical key regardless of character output.
+
+2. **International Layouts**: Physical key positions are consistent across layouts. `event.code: 'Digit1'` is always the "1" key position, regardless of what character it produces.
+
+The `key` field is retained for display purposes in the help modal.
 
 **Modifier Handling**:
 - `meta` → `Cmd` on macOS, `Ctrl` on Windows/Linux
