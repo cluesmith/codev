@@ -114,7 +114,14 @@ This is evaluated once at page load and cached. The result determines:
 
 ### Component 2: Help Modal
 
-A modal dialog triggered by **Cmd+?** (or **Ctrl+?**) showing all available shortcuts.
+A modal dialog showing all available shortcuts. Accessible via:
+1. **Keyboard**: Cmd+? (macOS) or Ctrl+? (Windows/Linux) — Note: "?" requires Shift, so actual key combo is Cmd+Shift+/
+2. **Mouse**: "Keyboard Shortcuts" menu item in dashboard header dropdown
+
+**Discoverability Entry Points**:
+- Dashboard header menu includes "Keyboard Shortcuts" item with shortcut hint
+- First-time users see a one-time tooltip pointing to the menu item
+- Footer link: "Press Cmd+? for keyboard shortcuts"
 
 **Features**:
 - Categorized shortcut list (General, Navigation, Actions, Files)
@@ -147,24 +154,30 @@ A modal dialog triggered by **Cmd+?** (or **Ctrl+?**) showing all available shor
 |----------|--------|-------------|
 | Ctrl+Tab | nextTab | Switch to next tab |
 | Ctrl+Shift+Tab | prevTab | Switch to previous tab |
-| Cmd+1-8 | goToTab | Jump to tab 1-8 |
-| Cmd+9 | goToLastTab | Jump to last tab (regardless of count) |
-| Cmd+[ | prevTab | Previous tab (alternative) |
-| Cmd+] | nextTab | Next tab (alternative) |
+| Alt+1-8 | goToTab | Jump to tab 1-8 |
+| Alt+9 | goToLastTab | Jump to last tab (regardless of count) |
 
 **Tab Numbering Behavior**:
-- `Cmd+1` through `Cmd+8`: Jump to that specific tab position. If tab doesn't exist, no-op (no wrap, no error).
-- `Cmd+9`: Always jumps to the last tab (following Chrome/VSCode convention).
+- `Alt+1` through `Alt+8`: Jump to that specific tab position. If tab doesn't exist, no-op (no wrap, no error).
+- `Alt+9`: Always jumps to the last tab (following common IDE conventions).
+
+**Why Alt instead of Cmd?**: Cmd+1-9 conflicts with browser tab switching shortcuts. Using Alt avoids all browser conflicts while maintaining a familiar modifier pattern.
 
 #### Actions
 | Shortcut | Action | Description |
 |----------|--------|-------------|
-| Cmd+Shift+B | newBuilder | Spawn new builder |
-| Cmd+Shift+S | newShell | Open new shell |
-| Cmd+Shift+R | refresh | Refresh dashboard state |
+| Alt+Shift+B | newBuilder | Spawn new builder |
+| Alt+Shift+S | newShell | Open new shell |
+| Alt+Shift+R | refresh | Refresh dashboard state |
 | Alt+W | closeTab | Close current tab |
 
-**Note on Alt+W**: We use Alt+W instead of Cmd+W because Cmd+W cannot be reliably intercepted in web browsers—it will close the browser tab regardless of `preventDefault()`. Alt+W is not browser-reserved and works consistently.
+**Note on Alt-based shortcuts**: We use Alt+Shift instead of Cmd+Shift for actions to avoid browser conflicts:
+- `Cmd+Shift+B` conflicts with Chrome's bookmark bar toggle
+- `Cmd+W` cannot be reliably intercepted (closes browser tab)
+
+Using Alt as the primary modifier ensures consistent behavior across all browsers.
+
+**Behavior when dialog already open**: If a shortcut triggers an action whose dialog is already open (e.g., Alt+Shift+B when spawn builder dialog is visible), focus the existing dialog rather than attempting to open a second one.
 
 #### Files
 | Shortcut | Action | Description |
@@ -172,7 +185,7 @@ A modal dialog triggered by **Cmd+?** (or **Ctrl+?**) showing all available shor
 | Cmd+P | openFilePalette | Open file search palette |
 | Cmd+O | openFileBrowser | Toggle file browser panel |
 
-**Total: 15 shortcuts** (including existing ones)
+**Total: 13 shortcuts** (including existing ones)
 
 ### Browser Shortcut Conflicts
 
@@ -183,11 +196,19 @@ Shortcuts to **avoid** (browser takes precedence and cannot be overridden):
 - Cmd+R (reload page)
 - Cmd+Q (quit browser)
 - Cmd+W (close browser tab) — **cannot be overridden reliably**
+- Cmd+1-9 (switch browser tabs)
+- Cmd+[ and Cmd+] (browser back/forward navigation)
+- Cmd+Shift+B (Chrome bookmark bar toggle)
 - F5 (reload)
 - F11 (fullscreen)
 - F12 (dev tools)
 
-**Decision**: Use Alt+W for closing dashboard tabs instead of Cmd+W. Attempting to override Cmd+W in browsers is unreliable—the browser will close the tab before JavaScript can intercept it. Alt+W is not browser-reserved and provides consistent behavior.
+**Design Decision**: Use Alt-based shortcuts to avoid ALL browser conflicts:
+- `Alt+1-9` for tab navigation (not Cmd+1-9)
+- `Alt+Shift+B/S/R` for actions (not Cmd+Shift+B/S/R)
+- `Alt+W` for close tab (not Cmd+W)
+
+This ensures consistent behavior across Chrome, Firefox, Safari, and Edge without any browser interception issues.
 
 ### Focus Management
 
@@ -196,13 +217,18 @@ Shortcuts should NOT trigger when:
 2. User is typing in an input field (search boxes, dialogs)
 3. User is typing in a textarea
 
+**Technical Limitation - Terminal Iframe Focus**:
+When the terminal iframe has focus, the parent document's keydown event listener simply does not fire. This is browser security behavior (cross-origin iframe isolation). The implementation does NOT need to detect iframe focus and suppress shortcuts — they won't fire in the first place. The `shouldIgnoreShortcut()` check for iframes is defensive code for same-origin iframes (e.g., if we ever embed non-ttyd content).
+
+**Important**: There is no way to intercept shortcuts while the terminal has focus. Users must click outside the terminal (on the dashboard chrome) to use keyboard shortcuts. This is an unavoidable architectural constraint of browser security.
+
 **Focus Detection**:
 ```javascript
 function shouldIgnoreShortcut() {
   const active = document.activeElement;
   if (!active) return false;
 
-  // Terminal iframe has focus
+  // Terminal iframe has focus (defensive; cross-origin won't fire anyway)
   if (active.tagName === 'IFRAME') return true;
 
   // Input elements have focus
@@ -223,6 +249,16 @@ function shouldIgnoreShortcut() {
 2. **Terminal isolation**: Terminal iframes need full keyboard access; shortcuts only work when dashboard has focus
 3. **Input focus**: Shortcuts must not interfere with typing in search boxes or dialogs
 4. **No external dependencies**: Must work with existing dashboard architecture (vanilla JS, no React/Vue)
+5. **Windows Alt+Shift conflict**: On Windows, Alt+Shift is a system-level keyboard layout switcher. Our Alt+Shift shortcuts may not work for users with multiple keyboard layouts. This is an accepted limitation; workarounds (like Ctrl+Shift) would conflict with browser shortcuts.
+
+### International Keyboard Layouts
+
+International keyboard layouts are **out of scope** for this iteration:
+- Alt+number positions vary on non-US layouts
+- Some symbols require different key combinations
+- Help modal will display US-layout key names
+
+Users with non-US keyboards may need to identify physical key positions. Future iterations could add layout detection and remapping.
 
 ## Assumptions
 
@@ -247,19 +283,19 @@ function shouldIgnoreShortcut() {
 ## Success Criteria
 
 ### MUST Have
-- [ ] Cmd+? (or Ctrl+?) opens help modal showing all shortcuts
+- [ ] Cmd+? (Cmd+Shift+/) opens help modal showing all shortcuts
+- [ ] Help modal is also accessible via menu item (mouse-only users)
 - [ ] Help modal displays shortcuts in categories
 - [ ] Platform-appropriate modifier display (⌘ on macOS, Ctrl on Windows/Linux)
-- [ ] Cmd+1-8 jumps to specific tabs, Cmd+9 jumps to last tab
-- [ ] Cmd+Shift+B opens spawn builder dialog
-- [ ] Cmd+Shift+S opens new shell dialog
+- [ ] Alt+1-8 jumps to specific tabs, Alt+9 jumps to last tab
+- [ ] Alt+Shift+B opens spawn builder dialog (or focuses existing dialog if open)
+- [ ] Alt+Shift+S opens new shell dialog (or focuses existing dialog if open)
 - [ ] All shortcuts documented in help modal
 - [ ] Shortcuts do not fire when terminal iframe is focused
 - [ ] Shortcuts do not fire when typing in input fields
 
 ### SHOULD Have
 - [ ] Help modal is searchable (prefix matching, arrow key navigation)
-- [ ] Cmd+[ and Cmd+] for prev/next tab
 - [ ] Alt+W closes current tab (with confirmation for architect tab)
 - [ ] Toast notification when shortcut triggers action
 
@@ -273,6 +309,8 @@ function shouldIgnoreShortcut() {
 - Accessibility-focused features (screen reader announcements)
 - Touch/mobile support
 - File path detection from terminal output (rely on existing OSC 8 hyperlinks)
+- International keyboard layout support (assumed US layout)
+- Direct navigation to tabs 10+ (Alt+9 always jumps to last tab)
 
 ## Test Scenarios
 
@@ -282,31 +320,37 @@ function shouldIgnoreShortcut() {
 3. Help modal renders all registered shortcuts
 4. Category grouping works correctly
 5. Focus detection correctly identifies iframes, inputs, textareas
+6. Modifier display shows ⌘ on macOS, Ctrl on Windows/Linux
+7. Help modal menu item exists in dashboard header
 
 ### Integration Tests
-1. Cmd+? opens help modal
-2. Escape closes help modal
-3. Cmd+1 switches to tab 1 (if exists)
-4. Cmd+1 does nothing if tab 1 doesn't exist (no error)
-5. Cmd+9 switches to last tab
-6. Cmd+Shift+B triggers builder spawn dialog
-7. Shortcuts do NOT trigger when terminal has focus
-8. Shortcuts do NOT trigger when typing in search input
-9. Shortcuts do NOT trigger when typing in file picker dialog
-10. Escape DOES close dialogs even when input is focused
-11. Alt+W closes current tab
-12. Alt+W on architect tab shows confirmation dialog
+1. Cmd+Shift+/ opens help modal
+2. Click on "Keyboard Shortcuts" menu item opens help modal
+3. Escape closes help modal
+4. Alt+1 switches to tab 1 (if exists)
+5. Alt+1 does nothing if tab 1 doesn't exist (no error)
+6. Alt+9 switches to last tab
+7. Alt+Shift+B triggers builder spawn dialog
+8. Alt+Shift+B when dialog already open focuses existing dialog (no second dialog)
+9. Shortcuts do NOT trigger when terminal has focus
+10. Shortcuts do NOT trigger when typing in search input
+11. Shortcuts do NOT trigger when typing in file picker dialog
+12. Escape DOES close dialogs even when input is focused
+13. Alt+W closes current tab
+14. Alt+W on architect tab shows confirmation dialog
 
 ### Cross-Browser Tests (Manual)
 1. Test on Chrome (macOS, Windows, Linux)
 2. Test on Firefox (macOS, Windows, Linux)
 3. Test on Safari (macOS)
 4. Verify modifier key display matches platform
+5. Verify Alt+1-9 does NOT conflict with browser shortcuts
 
 ### Negative Tests
-1. Cmd+Shift+B when spawn dialog already open - no-op (don't open second dialog)
+1. Alt+Shift+B when spawn dialog already open - focuses existing dialog
 2. Tab shortcuts when no tabs exist - graceful no-op
 3. Help modal search with no matches - show "No matching shortcuts" message
+4. Alt+Shift shortcuts on Windows with multiple keyboard layouts - may trigger layout switch (documented limitation)
 
 ## Security Considerations
 
@@ -357,7 +401,37 @@ function shouldIgnoreShortcut() {
 9. Updated security section to address label rendering
 
 ### Round 2 (After Human Feedback)
-- **Date**: TBD
+- **Date**: 2026-01-24
 - **Models consulted**: GPT-5 Codex, Gemini Pro
-- **Key feedback**: TBD
-- **Changes made**: TBD
+- **Verdict**: Gemini APPROVED (HIGH confidence), Codex REQUEST_CHANGES (HIGH confidence)
+
+**Human Feedback (incorporated before Round 2)**:
+- Change Cmd+1-9 to Alt+1-9 (browser tab conflict)
+- Change Cmd+Shift+B to Alt+Shift+B (Chrome bookmark bar conflict)
+- Remove Cmd+[ and Cmd+] (browser back/forward conflict)
+- Keep Cmd+P for file palette (commonly interceptable)
+
+**Key feedback from Gemini Pro**:
+1. Well-structured, mature specification
+2. Suggested `event.preventDefault()` be explicit (implementation detail)
+3. Suggested aliasing `Cmd+/` alongside `Cmd+?` (nice-to-have)
+
+**Key feedback from GPT-5 Codex**:
+1. No non-keyboard entry point for help modal (discoverability issue)
+2. International keyboard layouts not addressed
+3. Windows Alt+Shift conflict (keyboard layout switcher)
+4. Shortcut notation ambiguous (Cmd+? = Cmd+Shift+/)
+5. Dialog re-entry behavior undefined (what if dialog already open)
+6. Terminal iframe focus limitation should be explicit
+7. Tabs 10+ navigation not addressed
+
+**Changes made in response**:
+1. Added menu item entry point for help modal discoverability
+2. Added "International Keyboard Layouts" section - explicitly out of scope
+3. Added Windows Alt+Shift limitation to Constraints section
+4. Clarified Cmd+? notation (requires Shift key)
+5. Added "focus existing dialog" behavior when shortcut triggers already-open dialog
+6. Added "Technical Limitation - Terminal Iframe Focus" section explaining browser isolation
+7. Added "Direct navigation to tabs 10+" to WON'T Have section
+8. Updated test scenarios to validate discoverability and platform rendering
+9. Updated negative tests to document Windows layout switch limitation
