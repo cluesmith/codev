@@ -187,6 +187,8 @@ A modal dialog showing all available shortcuts. Accessible via:
 
 ### Proposed Shortcuts
 
+**Multiple Shortcuts for Same Action**: Some actions have multiple shortcuts (e.g., F1 and Ctrl+/ both trigger `showHelp`). Both are valid and execute the same action. In the help modal, all shortcuts for an action are listed together (e.g., "F1 / Ctrl+/" in the shortcut column).
+
 #### General
 | Shortcut | Action | Description |
 |----------|--------|-------------|
@@ -205,6 +207,7 @@ A modal dialog showing all available shortcuts. Accessible via:
 **Tab Numbering Behavior**:
 - `Alt+1` through `Alt+8`: Jump to that specific tab position. If tab doesn't exist, no-op (no wrap, no error).
 - `Alt+9`: Always jumps to the last tab (following common IDE conventions).
+- Tab positions are based on **visible order** in the tab bar, not creation order. If tabs overflow and some are hidden in a menu, hidden tabs are not accessible via Alt+number shortcuts (use the overflow menu instead).
 
 **Why Alt instead of Cmd?**: Cmd+1-9 conflicts with browser tab switching shortcuts. Using Alt avoids all browser conflicts while maintaining a familiar modifier pattern.
 
@@ -223,6 +226,11 @@ A modal dialog showing all available shortcuts. Accessible via:
 Using Alt as the primary modifier ensures consistent behavior across all browsers.
 
 **Behavior when dialog already open**: If a shortcut triggers an action whose dialog is already open (e.g., Alt+Shift+B when spawn builder dialog is visible), focus the existing dialog rather than attempting to open a second one.
+
+**Behavior when any modal is open**: When a modal dialog is open (spawn builder, help modal, confirmation dialog, etc.), only the following shortcuts are active:
+- **Escape**: Closes the modal
+- **F1** (when help modal is open): Closes the help modal (toggle behavior)
+- All other shortcuts are suppressed while a modal is open to prevent accidental actions. This aligns with standard modal behavior where the modal "traps" keyboard focus.
 
 #### Files
 | Shortcut | Action | Description |
@@ -337,15 +345,23 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 - [ ] Alt+Shift+B opens spawn builder dialog (or focuses existing dialog if open) †
 - [ ] Alt+Shift+S opens new shell dialog (or focuses existing dialog if open) †
 - [ ] All shortcuts documented in help modal
-- [ ] Shortcuts do not fire when terminal iframe is focused
-- [ ] Shortcuts do not fire when typing in input fields
+- [ ] Shortcuts do not interfere with terminal when terminal iframe has focus (browser isolation ensures keydown events don't reach dashboard)
+- [ ] Shortcuts are suppressed when typing in input fields (focus detection check)
 
 † **Windows Alt+Shift caveat**: On Windows systems with multiple keyboard layouts enabled, Alt+Shift is a system-level keyboard layout switcher that intercepts keystrokes before the browser. This is an OS-level limitation that cannot be overridden. The implementation will correctly handle Alt+Shift events when they reach the browser; the limitation is purely at the OS level. Test environments should use a single keyboard layout to verify functionality.
 
 ### SHOULD Have
 - [ ] Help modal is searchable (prefix matching, arrow key navigation)
 - [ ] Alt+W closes current tab (with confirmation for architect tab)
-- [ ] Toast notification when shortcut triggers action
+- [ ] Toast notification when shortcut triggers action (see design below)
+
+**Toast Notification Design** (SHOULD Have):
+- Triggered for action shortcuts only (Alt+Shift+B, Alt+Shift+S, Alt+Shift+R, Alt+W), not for navigation or modal toggles
+- Format: "[Action completed]" e.g., "New builder spawned", "Tab closed"
+- Duration: 2 seconds, auto-dismiss
+- Position: Bottom-right corner, above existing dashboard toasts if any
+- Stacking: Single toast at a time (new toast replaces previous shortcut toast; does not stack)
+- If the dashboard already has a toast system, integrate with existing styles
 
 ### COULD Have
 - [ ] Shortcut hints in context menus (e.g., "Close Tab Alt+W")
@@ -519,3 +535,25 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 7. Added toggle behavior: F1 when modal open closes modal
 8. Clarified Windows Alt+Shift caveat directly in success criteria (test with single layout)
 9. Added unit tests for event.code matching, case-insensitive search, and tooltip persistence
+
+### Round 3 Verification
+- **Date**: 2026-01-25
+- **Models consulted**: Gemini Pro, GPT-5 Codex
+
+**Gemini Pro**: APPROVE (HIGH confidence)
+- Praised comprehensive coverage of `event.code` matching and cross-platform handling
+- No issues identified
+
+**GPT-5 Codex**: COMMENT (HIGH confidence)
+- Toast notification needs design guidance (copy, duration, stacking)
+- MUST criteria wording about iframe/input focus should align with actual browser behavior
+- Behavior when other modals are open needs clarification
+- Tab ordering (creation vs visible) for >9 tabs needs clarification
+- Multiple shortcuts for same action (F1 vs Ctrl+/) display needs clarification
+
+**Changes made in response**:
+1. Added "Toast Notification Design" section with format, duration, position, and stacking behavior
+2. Reframed MUST criteria to say "do not interfere with" rather than "do not fire when" for iframe focus
+3. Added "Behavior when any modal is open" section specifying which shortcuts remain active during modals
+4. Clarified tab numbering is based on visible order (overflow tabs not accessible via shortcuts)
+5. Added "Multiple Shortcuts for Same Action" explaining both are valid and how displayed in help modal
