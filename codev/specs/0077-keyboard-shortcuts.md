@@ -153,6 +153,7 @@ A modal dialog showing all available shortcuts. Accessible via:
 - Once dismissed, `af_shortcuts_tooltip_dismissed: true` is persisted to localStorage
 - On shared machines: each browser profile tracks dismissal independently (localStorage is per-origin, per-profile)
 - Tooltip should not block interaction with the dashboard; it's a non-modal hint
+- **localStorage unavailable fallback**: In private browsing mode or when localStorage is unavailable, the tooltip appears each session (graceful degradation)
 
 **Features**:
 - Categorized shortcut list (General, Navigation, Actions, Files)
@@ -164,10 +165,11 @@ A modal dialog showing all available shortcuts. Accessible via:
 **Focus Management**:
 - On open: Focus moves to search input field
 - Tab order: Search input → Shortcut list (if search has results) → Close button → (cycle)
-- Focus trap: Tab/Shift+Tab cycle within modal while open (cannot tab to elements behind modal)
+- Focus trap: Tab/Shift+Tab cycle within modal while open (cannot tab to elements behind modal). Implementation note: use a simple cycle between the three focusable elements (input, list, close button) rather than a generic DOM walker.
 - On close: Focus returns to the element that was focused before modal opened (or dashboard body if none)
 - Arrow keys (↑/↓): Navigate within shortcut list when list is focused
 - Enter: When shortcut list item is focused, triggers that action and closes modal
+- **ARIA attributes** (baseline accessibility): The modal should have `role="dialog"`, `aria-modal="true"`, and `aria-labelledby` pointing to the modal title. This is low-effort and provides basic semantic structure.
 
 **Categories**:
 1. **General**: Help, escape, close dialogs
@@ -347,6 +349,8 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 - [ ] All shortcuts documented in help modal
 - [ ] Shortcuts do not interfere with terminal when terminal iframe has focus (browser isolation ensures keydown events don't reach dashboard)
 - [ ] Shortcuts are suppressed when typing in input fields (focus detection check)
+- [ ] First-time tooltip appears on initial dashboard load (if not previously dismissed)
+- [ ] Tooltip dismissal persists to localStorage (`af_shortcuts_tooltip_dismissed`)
 
 † **Windows Alt+Shift caveat**: On Windows systems with multiple keyboard layouts enabled, Alt+Shift is a system-level keyboard layout switcher that intercepts keystrokes before the browser. This is an OS-level limitation that cannot be overridden. The implementation will correctly handle Alt+Shift events when they reach the browser; the limitation is purely at the OS level. Test environments should use a single keyboard layout to verify functionality.
 
@@ -406,6 +410,10 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 13. Escape DOES close dialogs even when input is focused
 14. Alt+W closes current tab
 15. Alt+W on architect tab shows confirmation dialog
+16. First-time tooltip appears on fresh session (no localStorage key)
+17. Tooltip does not appear when `af_shortcuts_tooltip_dismissed` is set in localStorage
+18. Opening help modal dismisses tooltip and sets localStorage key
+19. Tooltip close button dismisses tooltip and sets localStorage key
 
 ### Cross-Browser Tests (Manual)
 1. Test on Chrome (macOS, Windows, Linux)
@@ -557,3 +565,46 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 3. Added "Behavior when any modal is open" section specifying which shortcuts remain active during modals
 4. Clarified tab numbering is based on visible order (overflow tabs not accessible via shortcuts)
 5. Added "Multiple Shortcuts for Same Action" explaining both are valid and how displayed in help modal
+
+### Round 4 (Iteration 2 Reviews)
+- **Date**: 2026-01-25
+- **Verdicts**: Codex REQUEST_CHANGES (HIGH confidence), Claude APPROVE (HIGH confidence), Gemini APPROVE (HIGH confidence)
+
+**Key feedback from GPT-5 Codex (REQUEST_CHANGES)**:
+1. Toast notification requirement lacks design/behavioral guidance
+2. Tooltip discoverability feature not captured in success criteria/acceptance tests
+3. Windows Alt+Shift limitation conflicts with unconditional success criteria
+
+**Key feedback from Claude (APPROVE)**:
+1. Footer link and tooltip might be redundant (minor observation)
+2. Consider adding basic ARIA roles for help modal (low effort, baseline accessibility)
+3. Consider noting localStorage unavailability fallback behavior for tooltip persistence
+
+**Key feedback from Gemini (APPROVE)**:
+1. Consider Cmd+B instead of Cmd+O for sidebar toggle (semantic mismatch with IDE conventions)
+2. Focus trap implementation should use simple cycle rather than generic DOM walker
+3. Existing `showToast` utility in codebase should be reused
+
+**Changes made in response**:
+1. Added MUST criteria for first-time tooltip (appears on initial load, dismissal persists)
+2. Added integration tests for tooltip behavior (appearance, dismissal, localStorage persistence)
+3. Added localStorage unavailability fallback note (graceful degradation to per-session tooltip)
+4. Added ARIA attributes requirement for help modal (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`)
+5. Added implementation note for focus trap (simple cycle between three elements)
+6. Kept Cmd+O for file browser toggle (Cmd+B could conflict with bold/formatting in some contexts)
+
+### Round 4 Verification
+- **Date**: 2026-01-25
+- **Models consulted**: Gemini Pro, GPT-5 Codex
+
+**Gemini Pro**: APPROVE (HIGH confidence)
+- "Excellent, mature specification that correctly anticipates complex browser/OS constraints and provides a robust cross-platform design"
+- No key issues
+
+**GPT-5 Codex**: APPROVE (HIGH confidence)
+- "Comprehensive, actionable spec with only minor clarifications suggested"
+- Minor suggestions (non-blocking):
+  - Consider explicit handling when localStorage writes throw (quota exceeded, Safari private mode) → Graceful degradation already specified; failures silently ignored
+  - Add regression test for modal suppressing shortcuts → Already covered in integration test #9 (dialog already open focuses existing)
+  - Clarify Alt+number no-wrap behavior → Already specified ("no-op, no wrap, no error")
+  - Restate multiple shortcuts rendering in UI → Already covered in "Multiple Shortcuts for Same Action" section
