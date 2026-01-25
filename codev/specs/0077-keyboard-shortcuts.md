@@ -72,9 +72,9 @@ A centralized system for registering, handling, and documenting shortcuts.
 ```javascript
 const shortcuts = [
   {
-    code: 'Slash',        // Physical key (event.code) for cross-platform consistency
-    key: '?',             // Display character (for help modal)
-    modifiers: ['meta', 'shift'],  // 'meta' = Cmd on macOS, Ctrl on Windows/Linux
+    code: 'F1',           // Physical key (event.code) for cross-platform consistency
+    key: 'F1',            // Display character (for help modal)
+    modifiers: [],        // No modifiers for F1
     action: 'showHelp',
     description: 'Show keyboard shortcuts',
     category: 'General'
@@ -126,19 +126,40 @@ This is evaluated once at page load and cached. The result determines:
 ### Component 2: Help Modal
 
 A modal dialog showing all available shortcuts. Accessible via:
-1. **Keyboard**: Cmd+? (macOS) or Ctrl+? (Windows/Linux) — Note: "?" requires Shift, so actual key combo is Cmd+Shift+/
+1. **Keyboard**: F1 or Ctrl+/ (all platforms)
 2. **Mouse**: "Keyboard Shortcuts" menu item in dashboard header dropdown
 
+**Why F1 and Ctrl+/ instead of Cmd+?**:
+- `Cmd+Shift+/` (Cmd+?) is a reserved macOS system shortcut that opens the Help menu search bar. This conflicts with and often takes precedence over web application shortcuts.
+- `F1` is the universal help key convention and is not intercepted by browsers.
+- `Ctrl+/` is commonly used for toggling comments in IDEs and is available on all platforms.
+
 **Discoverability Entry Points**:
-- Dashboard header menu includes "Keyboard Shortcuts" item with shortcut hint
+- Dashboard header menu includes "Keyboard Shortcuts" item with shortcut hint (F1)
 - First-time users see a one-time tooltip pointing to the menu item
-- Footer link: "Press Cmd+? for keyboard shortcuts"
+- Footer link: "Press F1 for keyboard shortcuts"
+
+**First-Time Tooltip Behavior**:
+- Tooltip appears on first dashboard load if `af_shortcuts_tooltip_dismissed` is not set in localStorage
+- Tooltip is dismissed on: (a) clicking the tooltip's close button, (b) opening the help modal, or (c) clicking the menu item
+- Once dismissed, `af_shortcuts_tooltip_dismissed: true` is persisted to localStorage
+- On shared machines: each browser profile tracks dismissal independently (localStorage is per-origin, per-profile)
+- Tooltip should not block interaction with the dashboard; it's a non-modal hint
 
 **Features**:
 - Categorized shortcut list (General, Navigation, Actions, Files)
 - Platform-appropriate modifier display (shows Cmd or Ctrl based on OS)
 - Searchable (type to filter shortcuts)
 - Dismissible via Escape or clicking outside
+- Toggle behavior: F1 when modal is open closes the modal
+
+**Focus Management**:
+- On open: Focus moves to search input field
+- Tab order: Search input → Shortcut list (if search has results) → Close button → (cycle)
+- Focus trap: Tab/Shift+Tab cycle within modal while open (cannot tab to elements behind modal)
+- On close: Focus returns to the element that was focused before modal opened (or dashboard body if none)
+- Arrow keys (↑/↓): Navigate within shortcut list when list is focused
+- Enter: When shortcut list item is focused, triggers that action and closes modal
 
 **Categories**:
 1. **General**: Help, escape, close dialogs
@@ -147,17 +168,22 @@ A modal dialog showing all available shortcuts. Accessible via:
 4. **Files**: File search palette
 
 **Help Modal Search**:
-- Prefix matching on shortcut descriptions and action names
-- Arrow keys navigate results, Enter activates
-- Escape clears search or closes modal (if search empty)
+- Case-insensitive prefix matching on shortcut descriptions and action names
+- Results ordered by: category (alphabetically), then shortcut within category
+- Arrow keys navigate results (↑/↓), Enter activates selected shortcut
+- First match is auto-selected when results appear
+- Escape clears search (if search has text) or closes modal (if search empty)
+- Empty state: "No matching shortcuts" message displayed, no selectable items
 - No fuzzy matching (keep it simple)
+- Minimum 1 character required before filtering begins
 
 ### Proposed Shortcuts
 
 #### General
 | Shortcut | Action | Description |
 |----------|--------|-------------|
-| Cmd+? | showHelp | Show keyboard shortcuts help |
+| F1 | showHelp | Show keyboard shortcuts help |
+| Ctrl+/ | showHelp | Show keyboard shortcuts help (alternative) |
 | Escape | closeModal | Close any open dialog/menu |
 
 #### Navigation
@@ -294,16 +320,19 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 ## Success Criteria
 
 ### MUST Have
-- [ ] Cmd+? (Cmd+Shift+/) opens help modal showing all shortcuts
+- [ ] F1 opens help modal showing all shortcuts
+- [ ] Ctrl+/ opens help modal (alternative shortcut)
 - [ ] Help modal is also accessible via menu item (mouse-only users)
 - [ ] Help modal displays shortcuts in categories
 - [ ] Platform-appropriate modifier display (⌘ on macOS, Ctrl on Windows/Linux)
 - [ ] Alt+1-8 jumps to specific tabs, Alt+9 jumps to last tab
-- [ ] Alt+Shift+B opens spawn builder dialog (or focuses existing dialog if open)
-- [ ] Alt+Shift+S opens new shell dialog (or focuses existing dialog if open)
+- [ ] Alt+Shift+B opens spawn builder dialog (or focuses existing dialog if open) †
+- [ ] Alt+Shift+S opens new shell dialog (or focuses existing dialog if open) †
 - [ ] All shortcuts documented in help modal
 - [ ] Shortcuts do not fire when terminal iframe is focused
 - [ ] Shortcuts do not fire when typing in input fields
+
+† **Windows Alt+Shift caveat**: On Windows systems with multiple keyboard layouts enabled, Alt+Shift is a system-level keyboard layout switcher that intercepts keystrokes before the browser. This is an OS-level limitation that cannot be overridden. The implementation will correctly handle Alt+Shift events when they reach the browser; the limitation is purely at the OS level. Test environments should use a single keyboard layout to verify functionality.
 
 ### SHOULD Have
 - [ ] Help modal is searchable (prefix matching, arrow key navigation)
@@ -335,20 +364,21 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 7. Help modal menu item exists in dashboard header
 
 ### Integration Tests
-1. Cmd+Shift+/ opens help modal
-2. Click on "Keyboard Shortcuts" menu item opens help modal
-3. Escape closes help modal
-4. Alt+1 switches to tab 1 (if exists)
-5. Alt+1 does nothing if tab 1 doesn't exist (no error)
-6. Alt+9 switches to last tab
-7. Alt+Shift+B triggers builder spawn dialog
-8. Alt+Shift+B when dialog already open focuses existing dialog (no second dialog)
-9. Shortcuts do NOT trigger when terminal has focus
-10. Shortcuts do NOT trigger when typing in search input
-11. Shortcuts do NOT trigger when typing in file picker dialog
-12. Escape DOES close dialogs even when input is focused
-13. Alt+W closes current tab
-14. Alt+W on architect tab shows confirmation dialog
+1. F1 opens help modal
+2. Ctrl+/ opens help modal
+3. Click on "Keyboard Shortcuts" menu item opens help modal
+4. Escape closes help modal
+5. Alt+1 switches to tab 1 (if exists)
+6. Alt+1 does nothing if tab 1 doesn't exist (no error)
+7. Alt+9 switches to last tab
+8. Alt+Shift+B triggers builder spawn dialog
+9. Alt+Shift+B when dialog already open focuses existing dialog (no second dialog)
+10. Shortcuts do NOT trigger when terminal has focus
+11. Shortcuts do NOT trigger when typing in search input
+12. Shortcuts do NOT trigger when typing in file picker dialog
+13. Escape DOES close dialogs even when input is focused
+14. Alt+W closes current tab
+15. Alt+W on architect tab shows confirmation dialog
 
 ### Cross-Browser Tests (Manual)
 1. Test on Chrome (macOS, Windows, Linux)
