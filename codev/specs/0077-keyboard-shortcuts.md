@@ -35,9 +35,10 @@ These shortcuts are:
 A comprehensive keyboard shortcut system that:
 1. Provides shortcuts for all common dashboard actions
 2. Includes a discoverable help modal showing all shortcuts
-3. Enables file opening from terminal output via keyboard
-4. Uses platform-appropriate modifiers (Cmd on macOS, Ctrl on Windows/Linux)
-5. Avoids conflicts with browser shortcuts
+3. Uses platform-appropriate modifiers (Cmd on macOS, Ctrl on Windows/Linux)
+4. Avoids conflicts with browser shortcuts
+
+**Note**: Opening files from terminal output is already supported via OSC 8 hyperlinks (clickable file paths). This spec focuses on the keyboard shortcut system and discovery UI, not on adding new file detection capabilities.
 
 ## Stakeholders
 
@@ -52,11 +53,10 @@ A comprehensive keyboard shortcut system that:
 
 ### Overview
 
-Implement a comprehensive keyboard shortcut system with three components:
+Implement a comprehensive keyboard shortcut system with two components:
 
 1. **Shortcut Registry** - Centralized registration and handling of shortcuts
 2. **Help Modal** - Discoverable UI showing all available shortcuts
-3. **File Path Detection** - Detect and open file paths from terminal output
 
 ### Component 1: Shortcut Registry
 
@@ -95,6 +95,23 @@ const shortcuts = [
 - `shift` → Always `Shift`
 - `alt` → `Option` on macOS, `Alt` on Windows/Linux
 
+**Platform Detection**:
+Platform is detected via `navigator.platform` or `navigator.userAgentData.platform`:
+```javascript
+function isMac() {
+  // Modern API (Chrome 93+)
+  if (navigator.userAgentData?.platform) {
+    return navigator.userAgentData.platform === 'macOS';
+  }
+  // Fallback for older browsers
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+}
+```
+
+This is evaluated once at page load and cached. The result determines:
+1. Whether `metaKey` or `ctrlKey` is checked for `meta` modifier shortcuts
+2. How modifier keys are displayed in the help modal (⌘ vs Ctrl)
+
 ### Component 2: Help Modal
 
 A modal dialog triggered by **Cmd+?** (or **Ctrl+?**) showing all available shortcuts.
@@ -109,28 +126,13 @@ A modal dialog triggered by **Cmd+?** (or **Ctrl+?**) showing all available shor
 1. **General**: Help, escape, close dialogs
 2. **Navigation**: Tab switching, panel focus
 3. **Actions**: Spawn builder, new shell, refresh
-4. **Files**: File search, open file from terminal
+4. **Files**: File search palette
 
-### Component 3: File Path Detection
-
-Enable opening files referenced in terminal output via keyboard.
-
-**Approach**:
-The user wants to open files that appear in terminal output. Since terminal content is rendered by ttyd/xterm.js inside an iframe, and OSC 8 hyperlinks are already enabled:
-
-1. **Primary mechanism**: OSC 8 hyperlinks (already supported by ttyd)
-   - Programs can emit file links that are clickable
-   - Claude already uses OSC 8 for file references
-
-2. **Keyboard enhancement**: Quick file open palette
-   - **Cmd+Shift+P**: Open "quick file" palette
-   - Pre-populated with recently referenced files from terminal
-   - Also searches project files
-
-**Implementation Note**: Extracting paths from terminal output is complex (the content is in an iframe with cross-origin restrictions). Rather than trying to parse terminal content, we rely on:
-1. OSC 8 hyperlinks (already work)
-2. The existing Cmd+P file palette
-3. Terminal's own copy/paste functionality
+**Help Modal Search**:
+- Prefix matching on shortcut descriptions and action names
+- Arrow keys navigate results, Enter activates
+- Escape clears search or closes modal (if search empty)
+- No fuzzy matching (keep it simple)
 
 ### Proposed Shortcuts
 
@@ -145,9 +147,14 @@ The user wants to open files that appear in terminal output. Since terminal cont
 |----------|--------|-------------|
 | Ctrl+Tab | nextTab | Switch to next tab |
 | Ctrl+Shift+Tab | prevTab | Switch to previous tab |
-| Cmd+1-9 | goToTab | Jump to tab 1-9 |
+| Cmd+1-8 | goToTab | Jump to tab 1-8 |
+| Cmd+9 | goToLastTab | Jump to last tab (regardless of count) |
 | Cmd+[ | prevTab | Previous tab (alternative) |
 | Cmd+] | nextTab | Next tab (alternative) |
+
+**Tab Numbering Behavior**:
+- `Cmd+1` through `Cmd+8`: Jump to that specific tab position. If tab doesn't exist, no-op (no wrap, no error).
+- `Cmd+9`: Always jumps to the last tab (following Chrome/VSCode convention).
 
 #### Actions
 | Shortcut | Action | Description |
@@ -155,7 +162,9 @@ The user wants to open files that appear in terminal output. Since terminal cont
 | Cmd+Shift+B | newBuilder | Spawn new builder |
 | Cmd+Shift+S | newShell | Open new shell |
 | Cmd+Shift+R | refresh | Refresh dashboard state |
-| Cmd+W | closeTab | Close current tab |
+| Alt+W | closeTab | Close current tab |
+
+**Note on Alt+W**: We use Alt+W instead of Cmd+W because Cmd+W cannot be reliably intercepted in web browsers—it will close the browser tab regardless of `preventDefault()`. Alt+W is not browser-reserved and works consistently.
 
 #### Files
 | Shortcut | Action | Description |
@@ -167,43 +176,60 @@ The user wants to open files that appear in terminal output. Since terminal cont
 
 ### Browser Shortcut Conflicts
 
-Shortcuts to **avoid** (browser takes precedence):
+Shortcuts to **avoid** (browser takes precedence and cannot be overridden):
 - Cmd+T (new browser tab)
 - Cmd+N (new browser window)
 - Cmd+L (focus URL bar)
-- Cmd+R (reload page) — but Cmd+Shift+R is safe
+- Cmd+R (reload page)
 - Cmd+Q (quit browser)
-- Cmd+W (close tab) — we override this, may want to reconsider
+- Cmd+W (close browser tab) — **cannot be overridden reliably**
 - F5 (reload)
 - F11 (fullscreen)
 - F12 (dev tools)
 
-**Decision**: Cmd+W will close the dashboard tab, not the browser tab. This matches VSCode and other web apps that override Cmd+W. We'll add a confirmation if closing the architect tab.
+**Decision**: Use Alt+W for closing dashboard tabs instead of Cmd+W. Attempting to override Cmd+W in browsers is unreliable—the browser will close the tab before JavaScript can intercept it. Alt+W is not browser-reserved and provides consistent behavior.
 
 ### Focus Management
 
-When a terminal tab is focused (iframe has focus), keyboard shortcuts should NOT trigger. The terminal needs full keyboard access.
+Shortcuts should NOT trigger when:
+1. Terminal iframe is focused (terminal needs full keyboard access)
+2. User is typing in an input field (search boxes, dialogs)
+3. User is typing in a textarea
 
-Current implementation already handles this:
+**Focus Detection**:
 ```javascript
-if (document.activeElement?.tagName === 'IFRAME') return;
+function shouldIgnoreShortcut() {
+  const active = document.activeElement;
+  if (!active) return false;
+
+  // Terminal iframe has focus
+  if (active.tagName === 'IFRAME') return true;
+
+  // Input elements have focus
+  if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') return true;
+
+  // Contenteditable elements
+  if (active.isContentEditable) return true;
+
+  return false;
+}
 ```
 
-This will be preserved.
+**Exception**: Escape key always works (to close dialogs/modals even when input is focused).
 
 ## Constraints
 
-1. **Browser sandbox**: Cannot intercept all keyboard shortcuts (some are reserved by browser)
+1. **Browser sandbox**: Cannot intercept all keyboard shortcuts (some are reserved by browser, notably Cmd+W)
 2. **Terminal isolation**: Terminal iframes need full keyboard access; shortcuts only work when dashboard has focus
-3. **Cross-origin**: Terminal content in iframes cannot be accessed for file path extraction
+3. **Input focus**: Shortcuts must not interfere with typing in search boxes or dialogs
 4. **No external dependencies**: Must work with existing dashboard architecture (vanilla JS, no React/Vue)
 
 ## Assumptions
 
 1. Users know common modifier key conventions (Cmd on macOS, Ctrl on Windows)
-2. OSC 8 hyperlinks are sufficient for file path clicking (no need to parse terminal content)
-3. Single-key shortcuts (like "?" or "n") are only acceptable with modifiers to avoid interfering with input
-4. The dashboard is the active browser tab when using shortcuts
+2. Single-key shortcuts (like "?" or "n") are only acceptable with modifiers to avoid interfering with input
+3. The dashboard is the active browser tab when using shortcuts
+4. Modern browser with `navigator.platform` or `navigator.userAgentData` support
 
 ## Open Questions
 
@@ -211,11 +237,8 @@ This will be preserved.
 *None - requirements are clear*
 
 ### Important
-1. **Q**: Should Cmd+W show confirmation before closing architect tab?
+1. **Q**: Should Alt+W show confirmation before closing architect tab?
    **A**: Yes, to prevent accidental loss of architect context.
-
-2. **Q**: Should we preserve Cmd+W for dashboard or let browser handle it?
-   **A**: Override it for dashboard tab management (matches VSCode behavior).
 
 ### Nice-to-know
 1. **Q**: Future iteration: customizable keybindings?
@@ -226,22 +249,22 @@ This will be preserved.
 ### MUST Have
 - [ ] Cmd+? (or Ctrl+?) opens help modal showing all shortcuts
 - [ ] Help modal displays shortcuts in categories
-- [ ] Platform-appropriate modifier display (Cmd vs Ctrl)
-- [ ] Cmd+1-9 jumps to specific tabs
-- [ ] Cmd+Shift+B spawns new builder
-- [ ] Cmd+Shift+S opens new shell
+- [ ] Platform-appropriate modifier display (⌘ on macOS, Ctrl on Windows/Linux)
+- [ ] Cmd+1-8 jumps to specific tabs, Cmd+9 jumps to last tab
+- [ ] Cmd+Shift+B opens spawn builder dialog
+- [ ] Cmd+Shift+S opens new shell dialog
 - [ ] All shortcuts documented in help modal
 - [ ] Shortcuts do not fire when terminal iframe is focused
+- [ ] Shortcuts do not fire when typing in input fields
 
 ### SHOULD Have
-- [ ] Help modal is searchable (type to filter)
+- [ ] Help modal is searchable (prefix matching, arrow key navigation)
 - [ ] Cmd+[ and Cmd+] for prev/next tab
-- [ ] Visual feedback when shortcut triggers action
-- [ ] Confirmation dialog for closing architect tab
+- [ ] Alt+W closes current tab (with confirmation for architect tab)
+- [ ] Toast notification when shortcut triggers action
 
 ### COULD Have
-- [ ] Recent files section in file palette
-- [ ] Shortcut hints in context menus
+- [ ] Shortcut hints in context menus (e.g., "Close Tab Alt+W")
 - [ ] Animated modal transitions
 
 ### WON'T Have (This Iteration)
@@ -249,34 +272,49 @@ This will be preserved.
 - Customizable keybindings
 - Accessibility-focused features (screen reader announcements)
 - Touch/mobile support
+- File path detection from terminal output (rely on existing OSC 8 hyperlinks)
 
 ## Test Scenarios
 
 ### Unit Tests
 1. Shortcut registry correctly matches key combinations
-2. Platform detection returns correct modifier key
+2. Platform detection returns correct modifier key (test `navigator.platform` and `navigator.userAgentData` paths)
 3. Help modal renders all registered shortcuts
 4. Category grouping works correctly
+5. Focus detection correctly identifies iframes, inputs, textareas
 
 ### Integration Tests
 1. Cmd+? opens help modal
 2. Escape closes help modal
 3. Cmd+1 switches to tab 1 (if exists)
-4. Cmd+Shift+B triggers builder spawn dialog
-5. Shortcuts do NOT trigger when terminal has focus
-6. Shortcuts work on both macOS and Windows/Linux
+4. Cmd+1 does nothing if tab 1 doesn't exist (no error)
+5. Cmd+9 switches to last tab
+6. Cmd+Shift+B triggers builder spawn dialog
+7. Shortcuts do NOT trigger when terminal has focus
+8. Shortcuts do NOT trigger when typing in search input
+9. Shortcuts do NOT trigger when typing in file picker dialog
+10. Escape DOES close dialogs even when input is focused
+11. Alt+W closes current tab
+12. Alt+W on architect tab shows confirmation dialog
 
-### Manual Tests
-1. Verify all shortcuts from help modal work as described
-2. Test on macOS and Windows/Linux
-3. Verify no conflicts with browser shortcuts
-4. Verify terminal input not intercepted
+### Cross-Browser Tests (Manual)
+1. Test on Chrome (macOS, Windows, Linux)
+2. Test on Firefox (macOS, Windows, Linux)
+3. Test on Safari (macOS)
+4. Verify modifier key display matches platform
+
+### Negative Tests
+1. Cmd+Shift+B when spawn dialog already open - no-op (don't open second dialog)
+2. Tab shortcuts when no tabs exist - graceful no-op
+3. Help modal search with no matches - show "No matching shortcuts" message
 
 ## Security Considerations
 
-- No security implications for keyboard shortcuts
-- Shortcuts only trigger dashboard UI actions
+- Shortcuts only trigger existing dashboard UI actions (no new privileged operations)
+- Shortcut registry uses static data; no dynamic label injection from untrusted sources
+- Help modal renders shortcut descriptions with text content, not innerHTML
 - No sensitive data exposed through shortcut system
+- Alt+W cannot trap users (browser close still works via Cmd+W)
 
 ## Performance Considerations
 
@@ -288,13 +326,35 @@ This will be preserved.
 
 ## Consultation Log
 
-*To be updated after multi-agent consultation*
-
 ### Round 1 (After Initial Draft)
-- **Date**: TBD
+- **Date**: 2026-01-24
 - **Models consulted**: GPT-5 Codex, Gemini Pro
-- **Key feedback**: TBD
-- **Changes made**: TBD
+- **Verdict**: Both requested changes (HIGH confidence)
+
+**Key feedback from Gemini Pro**:
+1. Cmd+W cannot be reliably overridden in browsers - will close browser tab
+2. Inconsistency between Cmd+Shift+P (text) and Cmd+P (table) for file palette
+3. Cmd+9 behavior unclear (9th tab vs last tab)
+4. "File Path Detection" section overpromises given technical limitations
+
+**Key feedback from GPT-5 Codex**:
+1. File opening requirement is unimplementable as specified
+2. Platform detection mechanism not specified
+3. Focus edge cases not addressed (inputs, textareas, not just iframes)
+4. Tab numbering beyond 9 tabs not addressed
+5. Missing negative tests (dialog already open, no tabs exist)
+6. Security section should address label sanitization
+
+**Changes made in response**:
+1. Changed Cmd+W to Alt+W (browser cannot intercept Cmd+W)
+2. Removed "File Path Detection" component - rely on existing OSC 8 hyperlinks
+3. Clarified Cmd+9 goes to last tab (Chrome/VSCode convention)
+4. Added explicit platform detection code with `navigator.userAgentData` fallback
+5. Expanded focus detection to include INPUT, TEXTAREA, contenteditable
+6. Added edge case handling for missing tabs (no-op)
+7. Added negative tests for error scenarios
+8. Clarified help modal search is prefix matching, not fuzzy
+9. Updated security section to address label rendering
 
 ### Round 2 (After Human Feedback)
 - **Date**: TBD
