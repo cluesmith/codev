@@ -355,13 +355,16 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 ## Test Scenarios
 
 ### Unit Tests
-1. Shortcut registry correctly matches key combinations
+1. Shortcut registry correctly matches key combinations using `event.code` (not `event.key`)
 2. Platform detection returns correct modifier key (test `navigator.platform` and `navigator.userAgentData` paths)
 3. Help modal renders all registered shortcuts
 4. Category grouping works correctly
 5. Focus detection correctly identifies iframes, inputs, textareas
 6. Modifier display shows ⌘ on macOS, Ctrl on Windows/Linux
 7. Help modal menu item exists in dashboard header
+8. Alt+1 matches on macOS despite Option key producing `¡` (tests event.code matching)
+9. Help modal search is case-insensitive
+10. First-time tooltip dismissed state persists to localStorage
 
 ### Integration Tests
 1. F1 opens help modal
@@ -476,3 +479,35 @@ Users with non-US keyboards may need to identify physical key positions. Future 
 7. Added "Direct navigation to tabs 10+" to WON'T Have section
 8. Updated test scenarios to validate discoverability and platform rendering
 9. Updated negative tests to document Windows layout switch limitation
+
+### Round 3 (Addressing Iteration 1 Reviews)
+- **Date**: 2026-01-25
+- **Verdicts from previous round**: Codex COMMENT, Gemini REQUEST_CHANGES, Claude APPROVE
+
+**Key feedback from Gemini Pro (REQUEST_CHANGES)**:
+1. macOS Option key produces special characters (Alt+1 → `¡`, Alt+W → `∑`) - matching on `event.key` would fail
+2. macOS Cmd+? (Cmd+Shift+/) conflicts with system Help menu search
+3. Registry key definition should clarify `event.key` vs `event.code`
+
+**Key feedback from GPT-5 Codex (COMMENT)**:
+1. Success criteria conflict with Windows Alt+Shift limitation (MUST vs "may fail")
+2. Help modal search UX unspecified (case sensitivity, empty state, result ordering)
+3. First-time tooltip persistence rules missing (localStorage key, dismissal behavior)
+4. Focus/ARIA expectations for help modal not described
+
+**Key feedback from Claude (APPROVE)**:
+1. First-time tooltip persistence should be specified
+2. Help modal toggle behavior (F1 when open) undefined
+3. Toast notification design guidance missing
+4. Help modal search Enter behavior with multiple matches unclear
+
+**Changes made in response**:
+1. Changed help shortcut from Cmd+? to F1 and Ctrl+/ (avoids macOS system conflict)
+2. Updated registry structure to use `event.code` for physical key matching (fixes macOS Option key issue)
+3. Added "Key Matching Strategy" section explaining why `event.code` is used
+4. Specified help modal search UX: case-insensitive, ordered by category then shortcut, first match auto-selected, "No matching shortcuts" empty state
+5. Added "First-Time Tooltip Behavior" section with localStorage key and dismissal rules
+6. Added "Focus Management" section for help modal (focus trap, tab order, focus restoration)
+7. Added toggle behavior: F1 when modal open closes modal
+8. Clarified Windows Alt+Shift caveat directly in success criteria (test with single layout)
+9. Added unit tests for event.code matching, case-insensitive search, and tooltip persistence
