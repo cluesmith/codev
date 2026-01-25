@@ -77,9 +77,11 @@ The implementation leverages existing dashboard patterns (modals, toasts, keyboa
   8. Toggle behavior: F1/Ctrl+/ when modal open closes it
   9. **Create header dropdown menu** (currently only `<h1>` exists):
      - Add dropdown button next to title or replace title with dropdown trigger
+     - **Location**: Inside `.header` element, adjacent to or replacing the existing `<h1>`
      - Dropdown contains "Keyboard Shortcuts (F1)" menu item
      - Style dropdown to match existing dashboard aesthetic
-  10. **Add footer link**: "Press F1 for keyboard shortcuts" in status bar area
+  10. **Add footer link**: "Press F1 for keyboard shortcuts"
+     - **Location**: Inside `.status-bar` footer element, as a new `.status-item` on the right side
 
 - **Success Criteria**:
   - Modal displays all registered shortcuts in categories
@@ -102,6 +104,8 @@ The implementation leverages existing dashboard patterns (modals, toasts, keyboa
   - Integration test: Search filters results
   - Integration test: Header menu item opens help modal
   - Integration test: Footer link opens help modal
+  - **Integration test: F1 toggles modal closed when already open**
+  - **Integration test: Ctrl+/ toggles modal closed when already open**
 
 ### Phase 3: First-Time Tooltip
 
@@ -137,6 +141,7 @@ The implementation leverages existing dashboard patterns (modals, toasts, keyboa
   - Integration test: Tooltip appears on fresh session
   - Integration test: Tooltip does not appear when dismissed
   - Integration test: Opening help modal dismisses tooltip
+  - **Integration test: localStorage write failure (simulate Safari private mode) - tooltip appears each session without console errors**
 
 ### Phase 4: Navigation Shortcuts
 
@@ -231,12 +236,20 @@ The implementation leverages existing dashboard patterns (modals, toasts, keyboa
   - Toast notifications appear for action shortcuts (2s duration)
   - Shortcuts suppressed when modal open (except Escape, F1)
 
+- **Toast Copy**:
+  - Alt+Shift+B: "New builder spawned"
+  - Alt+Shift+S: "New shell opened"
+  - Alt+Shift+R: "Dashboard refreshed"
+  - Alt+W: "Tab closed" (or no toast if confirmation dialog shown)
+
 - **Tests**:
   - Integration test: Alt+Shift+B triggers builder spawn
   - Integration test: Alt+Shift+B focuses existing dialog
   - Integration test: Alt+W closes current tab
   - Integration test: Alt+W confirmation for architect
   - Negative test: Shortcuts suppressed during modal
+  - **Negative test: Escape and F1 still work when another modal is open**
+  - **Regression test: Existing showToast callers work with new duration parameter**
 
 ### Phase 6: File Shortcuts
 
@@ -311,6 +324,7 @@ The implementation leverages existing dashboard patterns (modals, toasts, keyboa
 | Focus trap complexity | Simple 3-element cycle instead of generic DOM walker |
 | localStorage unavailable | Graceful degradation to per-session tooltip |
 | No existing header dropdown | Phase 2 explicitly creates dropdown menu infrastructure |
+| Regression from showToast changes | Default duration parameter (3000ms) maintains backward compatibility; regression test added |
 
 ## File Summary
 
@@ -376,3 +390,43 @@ All paths are relative to repository root with full `packages/codev/` prefix:
 
 7. **Added event listener attachment clarification**:
    - Phase 1 now explicitly mentions global keydown listener attachment in `init()` function
+
+### Second Consultation (Iteration 3) - After Addressing Feedback
+
+- **Date**: 2026-01-25
+- **Gemini Feedback**: APPROVE (HIGH confidence)
+  - "Comprehensive, well-structured plan that correctly addresses all specification requirements and technical constraints"
+  - No key issues
+- **Codex Feedback**: COMMENT (HIGH confidence)
+  - Plan aligns closely with spec and is well structured
+  - Suggested refinements (non-blocking):
+    1. Specify UI integration locations for dropdown and footer link
+    2. Add explicit test for F1/Ctrl+/ toggle off behavior
+    3. Add regression test for Escape/F1 when other modal is open
+    4. Add localStorage failure test (Safari private mode)
+    5. Capture toast copy strings for UX consistency
+    6. Add regression test for showToast callers
+  - No key issues
+
+### Changes Made in Response (Iteration 3 Refinements)
+
+1. **Added UI integration locations**:
+   - Header dropdown: Inside `.header` element adjacent to `<h1>`
+   - Footer link: Inside `.status-bar` as a new `.status-item`
+
+2. **Added toggle-off tests**:
+   - Integration test: F1 toggles modal closed when already open
+   - Integration test: Ctrl+/ toggles modal closed when already open
+
+3. **Added localStorage failure test**:
+   - Test simulating Safari private mode to verify graceful degradation
+
+4. **Added toast copy strings**:
+   - Documented exact toast messages for each action shortcut
+
+5. **Added regression tests**:
+   - Test that Escape/F1 work when another modal is open
+   - Test that existing showToast callers work with new duration parameter
+
+6. **Added showToast regression risk**:
+   - Added to Risk Assessment table with mitigation (backward-compatible default)
