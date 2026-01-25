@@ -557,6 +557,15 @@ async function handleGate(
   outputPath: string,
   protocol: Protocol
 ): Promise<void> {
+  // E2E testing: Auto-approve gates when PORCH_AUTO_APPROVE is set
+  if (process.env.PORCH_AUTO_APPROVE === 'true') {
+    console.log(chalk.yellow(`[E2E] Auto-approving gate: ${gateName}`));
+    state.gates[gateName].status = 'approved';
+    state.gates[gateName].approved_at = new Date().toISOString();
+    writeState(statusPath, state);
+    return;
+  }
+
   console.log('');
   console.log(chalk.yellow('═'.repeat(60)));
   console.log(chalk.yellow.bold(`  GATE: ${gateName}`));

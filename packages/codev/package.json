@@ -23,6 +23,8 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
