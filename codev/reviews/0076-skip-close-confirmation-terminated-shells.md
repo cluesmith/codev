@@ -58,15 +58,59 @@ ok 3 running endpoint falls back to isProcessRunning when tmuxSession missing (S
 
 ## Lessons Learned
 
-1. **Check what PID you're actually checking**: The bug was subtle - ttyd's PID staying alive masked the shell exit
-2. **Existing helpers exist**: The `tmuxSessionExists()` function was already in the codebase, just needed to use it in the right place
-3. **Worktree builds need care**: Porch checks fail because they expect `npm run build` at worktree root - may need to configure this for monorepo structure
+### What Went Well
+
+1. **Existing infrastructure**: The `tmuxSessionExists()` helper already existed (line 338) and worked perfectly. No new code needed for the detection logic.
+
+2. **Clear root cause analysis**: The spec's detailed explanation of why `isProcessRunning(ttyd_pid)` fails made the fix obvious.
+
+3. **Minimal change surface**: The entire fix touched only one file with ~25 lines changed, reducing risk.
+
+4. **Multi-agent consultation value**:
+   - Codex identified missing testing strategy and security sections (Iteration 1)
+   - Gemini caught a logical contradiction in fail-open behavior description (Iteration 2)
+
+### Challenges Encountered
+
+1. **Bugfix #132 incompleteness**: The original fix made a reasonable assumption (check if ttyd is running) but didn't account for ttyd's WebSocket-based lifecycle.
+
+2. **tmux vs ttyd mental model**: The architecture has three layers: shell process → tmux session → ttyd WebSocket server. The shell dying destroys the tmux session, but ttyd stays alive.
+
+### What Would Be Done Differently
+
+1. **Test Bugfix #132 before marking complete**: The original fix was merged but never manually tested with the actual workflow.
+
+2. **Document the process lifecycle**: The relationship between shell/tmux/ttyd should be documented in arch.md.
+
+### Methodology Improvements
+
+1. **Add "process lifecycle" to review checklist**: When bugfixes involve process management, require documenting the full chain.
+
+2. **Manual testing gate for UI fixes**: Bugfixes that affect UI behavior should require a screenshot or recording demonstrating the fix works.
 
 ## Commits
 
 1. `[Spec 0076][Phase 1] Fix running status check to use tmux session`
 2. `[Spec 0076][Phase 2] Add E2E tests for terminated shell detection`
 
+## Technical Debt
+
+None introduced. The change is clean and uses existing patterns.
+
+## Follow-up Items
+
+1. **Document tmux/ttyd architecture**: Add a section to `codev/resources/arch.md` explaining the process hierarchy: shell process → tmux session → ttyd WebSocket server.
+
+2. **Consider removing ttyd PID fallback**: The `isProcessRunning(pid)` fallback is only for legacy state files. After a release cycle, consider removing it.
+
+## Spec Compliance
+
+- [x] **MUST #1**: Skip confirmation for terminated shells
+- [x] **MUST #2**: Skip confirmation for terminated builders
+- [x] **MUST #3**: Show confirmation for active shells
+- [x] **MUST #4**: Preserve fallback behavior
+- [x] **SHOULD #1**: Backwards compatibility with pre-existing state files
+
 ## Recommendation
 
-Ready to merge. The fix is minimal (15 lines changed in backend), tests pass, and the solution reuses existing infrastructure.
+Ready to merge. The fix is minimal (25 lines changed in backend), tests pass, and the solution reuses existing infrastructure.
