@@ -329,6 +329,13 @@ exec claude --dangerously-skip-permissions --append-system-prompt "$(cat '${role
   await run('tmux set -g set-clipboard on');
   await run('tmux set -g allow-passthrough on');
 
+  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
+  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
+
+  // Small delay to ensure tmux session is fully initialized before ttyd attaches
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   // Start ttyd
   logger.info('Starting builder terminal...');
   const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
