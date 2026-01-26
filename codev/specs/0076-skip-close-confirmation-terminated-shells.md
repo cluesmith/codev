@@ -81,8 +81,11 @@ The `tmuxSessionExists()` helper:
 ### Fail-Open Behavior
 If tmux is unavailable or the check fails:
 - `tmuxSessionExists()` returns `false` (session treated as not running)
-- Confirmation dialog appears (safe degradation)
+- Tab closes without confirmation (dialog skipped)
+- This is acceptable because: if tmux is broken, the shell is unusable anyway, so closing without confirmation is safe and expected behavior
 - No security exposure from failure mode
+
+**Note**: The fallback to `isProcessRunning(pid)` only applies when `tmuxSession` is unavailable (missing field). If the field exists but tmux has an error, `tmuxSessionExists()` returns `false`.
 
 ### Impact Assessment
 This change only affects UX (confirmation dialog vs immediate close). It does not:
@@ -147,3 +150,25 @@ User clicks X → dialogs.js:closeTab()
 ### Not Incorporated
 
 None - all reviewer feedback was addressed.
+
+### Second Consultation (Iteration 2, 2026-01-26)
+
+**Gemini (REQUEST_CHANGES - HIGH confidence)**:
+- Found logical contradiction in "Fail-Open Behavior" section
+- If `tmuxSessionExists()` returns `false`, dialog is **skipped**, not shown
+- Requested correction to accurately reflect behavior
+
+**Codex (APPROVE - HIGH confidence)**:
+- Spec and plan are complete, feasible, and aligned with project testing/security expectations
+- Ready for implementation
+
+**Claude (APPROVE - HIGH confidence)**:
+- Well-analyzed bugfix spec with clear diagnosis
+- Targeted solution using existing infrastructure
+- Comprehensive coverage of edge cases and security considerations
+
+### Changes Made (Iteration 2 → Final)
+
+1. **Fixed Fail-Open Behavior description**: Corrected the contradiction - when tmux fails, dialog is skipped (not shown). Added explanation that this is acceptable since a broken tmux means the shell is unusable anyway.
+
+2. **Added clarifying note**: Explained distinction between "tmuxSession field missing" (fallback to PID) vs "tmux command fails" (returns false, dialog skipped).
