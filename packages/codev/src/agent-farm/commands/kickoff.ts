@@ -286,7 +286,6 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   logger.info('Creating tmux session...');
 
   // Create tmux session with zsh shell
-  // Human runs claude manually in this shell
   await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" zsh`);
   await run(`tmux set-option -t "${sessionName}" status off`);
   await run('tmux set -g mouse on');
@@ -324,10 +323,19 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
 
   upsertBuilder(builder);
 
+  // Auto-start the porch loop in the tmux session
+  logger.info('Starting porch protocol loop...');
+  const porchRunCmd = `${porchCmd} run ${projectId}`;
+  // Use tmux send-keys to start porch in the builder terminal
+  // The -l flag sends literal keys (no special interpretation)
+  await run(`tmux send-keys -t "${sessionName}" -l '${porchRunCmd}'`);
+  await run(`tmux send-keys -t "${sessionName}" Enter`);
+
   logger.blank();
-  logger.success(`Builder ${builderId} ready!`);
+  logger.success(`Builder ${builderId} started!`);
   logger.kv('Terminal', `http://localhost:${port}`);
   logger.kv('Worktree', worktreePath);
   logger.blank();
-  logger.info('Run claude in the terminal to start working.');
+  logger.info('Porch is now running the protocol loop.');
+  logger.info('Watch the terminal or check status with: af status');
 }
