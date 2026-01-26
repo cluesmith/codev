@@ -179,25 +179,25 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0076"
     title: "Skip close confirmation for terminated shells"
-    summary: "When a shell/terminal is already terminated and user clicks X to close, skip the confirmation dialog - only confirm for active shells"
-    status: conceived
+    summary: "Fix incomplete Bugfix #132 - use tmuxSessionExists instead of isProcessRunning to correctly detect terminated shells"
+    status: specified
     priority: medium
     release: null
     files:
-      spec: null
-      plan: null
+      spec: codev/specs/0076-skip-close-confirmation-terminated-shells.md
+      plan: codev/plans/0076-skip-close-confirmation-terminated-shells.md
       review: null
     dependencies: []
-    tags: [ux, agent-farm]
+    tags: [ux, agent-farm, bugfix]
     timestamps:
       conceived_at: "2026-01-24T00:30:00-08:00"
-      specified_at: null
-      planned_at: null
+      specified_at: "2026-01-26T00:00:00-08:00"
+      planned_at: "2026-01-26T00:00:00-08:00"
       implementing_at: null
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Simple UX improvement for agent-farm dashboard"
+    notes: "Bugfix #132 (PR #138) was incomplete - checks ttyd PID instead of tmux session. This spec fixes the root cause."
 
   - id: "0078"
     title: "Porch E2E Testing Infrastructure"
