@@ -37,9 +37,58 @@ Check if the **tmux session** exists using `tmuxSessionExists(util.tmuxSession)`
 |---|----------|-----------------|
 | 1 | Shell tab, user types `exit`, clicks X | Tab closes immediately, no confirmation |
 | 2 | Shell tab, shell still running, clicks X | Confirmation dialog appears |
-| 3 | Builder tab, Claude exits, clicks X | Tab closes immediately, no confirmation |
+| 3 | Builder tab, Claude exits (normal or crash), clicks X | Tab closes immediately, no confirmation |
 | 4 | Builder tab, Claude still running, clicks X | Confirmation dialog appears |
 | 5 | Shell tab, Shift+click X | Tab closes immediately (existing bypass behavior) |
+
+**Note on #3**: Whether Claude exits normally or crashes, the tmux session is destroyed in both cases, so the behavior is identical.
+
+## Testing Strategy
+
+### Static Verification
+Add E2E tests that grep the compiled JavaScript to verify `tmuxSessionExists` is called for both shell and builder tabs. This matches existing testing patterns in `tests/e2e/dashboard.bats`.
+
+### Manual Testing Checklist
+| Test | Steps | Expected |
+|------|-------|----------|
+| Terminated shell | `af util` → type `exit` → click X | Tab closes without dialog |
+| Active shell | `af util` → run `sleep 100` → click X | Dialog appears |
+| Terminated builder | Spawn builder → type `exit` → click X | Tab closes without dialog |
+| Active builder | Spawn builder → leave running → click X | Dialog appears |
+| Shift+click bypass | Active shell → Shift+click X | Tab closes without dialog |
+
+### Automated Testing
+- Run existing test suite: `npm test` in `packages/codev`
+- Run E2E tests: `bats tests/e2e/dashboard.bats`
+- All existing tests must continue to pass
+
+**Scope Note**: Dynamic API tests with server lifecycle are out of scope for this bugfix. The fix is a single-line change using existing infrastructure; static verification plus manual testing provides adequate coverage.
+
+## Security Considerations
+
+### Session Name Source
+The `tmuxSession` field is:
+- Generated internally by the application (not from user input)
+- Created in controlled code paths (`spawn.ts`, `kickoff.ts`, `start.ts`)
+- Never exposed to or modifiable by external users
+
+### Shell Command Safety
+The `tmuxSessionExists()` helper:
+- Passes the session name to tmux via a properly quoted shell command
+- Does not accept user-controlled input
+- Uses a fixed command template: `tmux has-session -t "${sessionName}"`
+
+### Fail-Open Behavior
+If tmux is unavailable or the check fails:
+- `tmuxSessionExists()` returns `false` (session treated as not running)
+- Confirmation dialog appears (safe degradation)
+- No security exposure from failure mode
+
+### Impact Assessment
+This change only affects UX (confirmation dialog vs immediate close). It does not:
+- Terminate processes without user consent (user explicitly clicked X)
+- Expose internal state or credentials
+- Allow unauthorized access to shells
 
 ## Technical Context
 
@@ -68,8 +117,33 @@ User clicks X → dialogs.js:closeTab()
 
 ## Consultation Log
 
-### Initial Analysis (2026-01-26)
+### First Consultation (Iteration 1, 2026-01-26)
 
-Analysis confirmed the root cause: Bugfix #132's fix checks the wrong process (ttyd instead of tmux). The plan's proposed fix using `tmuxSessionExists` is correct and leverages existing infrastructure.
+**Gemini (APPROVE - HIGH confidence)**:
+- Well-analyzed problem and solution
+- Correctly identifies distinction between ttyd wrapper and actual shell process
+- Approved without changes
 
-No multi-agent consultation needed for this spec - it's a targeted bugfix for an existing but incomplete fix, with clear root cause analysis and straightforward solution.
+**Claude (APPROVE - HIGH confidence)**:
+- Well-written bugfix specification with clear problem statement
+- Architecture diagram helpful
+- Acceptance criteria testable and unambiguous
+- Minor observation: Acceptance criteria #3 should clarify normal vs crash exit
+- All edge cases appropriately covered with fail-open behavior
+
+**Codex (REQUEST_CHANGES - HIGH confidence)**:
+- Solid scope and requirements
+- **Issue 1**: Missing explicit testing strategy describing how acceptance scenarios will be validated
+- **Issue 2**: No discussion of security/safety considerations for the tmux session checks
+
+### Changes Made (Iteration 2)
+
+1. **Added Testing Strategy section**: Explicit testing plan with static verification, manual testing checklist, and automated testing approach. Matches existing project patterns.
+
+2. **Added Security Considerations section**: Documents session name source (internal, not user-controlled), shell command safety, fail-open behavior, and impact assessment.
+
+3. **Clarified acceptance criteria #3**: Added "(normal or crash)" to make explicit that both exit modes result in tmux session destruction. Added explanatory note.
+
+### Not Incorporated
+
+None - all reviewer feedback was addressed.
