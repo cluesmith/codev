@@ -8,7 +8,7 @@
  */
 
 import { resolve, basename } from 'node:path';
-import { existsSync, readFileSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import type { Builder, Config } from '../types.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
@@ -283,10 +283,48 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   const port = await findFreePort(config);
   const sessionName = getSessionName(config, builderId);
 
+  // Create .af directory for launch scripts
+  const afDir = resolve(worktreePath, '.af');
+  if (!existsSync(afDir)) {
+    mkdirSync(afDir, { recursive: true });
+  }
+
+  // Create the builder prompt that instructs Claude to run porch
+  const builderPrompt = `You are a Builder agent working on project ${projectId}.
+
+Your job is to execute the porch protocol loop until completion.
+
+## Instructions
+
+Run this command repeatedly until the protocol is complete:
+
+\`\`\`bash
+${porchCmd} run ${projectId}
+\`\`\`
+
+After each run:
+1. If porch prints "🎉 PROTOCOL COMPLETE" - you're done, exit
+2. If porch is waiting for a gate approval - wait for the architect to approve
+3. Otherwise - run \`${porchCmd} run ${projectId}\` again
+
+Keep running the porch loop. Do not stop until the protocol is complete or you hit a gate that requires approval.
+
+Start now by running: ${porchCmd} run ${projectId}`;
+
+  const promptPath = resolve(afDir, 'builder-prompt.md');
+  writeFileSync(promptPath, builderPrompt);
+
+  // Create launch script that starts Claude with the builder prompt
+  const launchScript = resolve(afDir, 'launch.sh');
+  writeFileSync(launchScript, `#!/bin/bash
+cd "${worktreePath}"
+exec claude --dangerously-skip-permissions -p "$(cat '${promptPath}')"
+`, { mode: 0o755 });
+
   logger.info('Creating tmux session...');
 
-  // Create tmux session with zsh shell
-  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" zsh`);
+  // Create tmux session running the launch script (starts Claude automatically)
+  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${launchScript}"`);
   await run(`tmux set-option -t "${sessionName}" status off`);
   await run('tmux set -g mouse on');
   await run('tmux set -g set-clipboard on');
@@ -323,19 +361,11 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
 
   upsertBuilder(builder);
 
-  // Auto-start the porch loop in the tmux session
-  logger.info('Starting porch protocol loop...');
-  const porchRunCmd = `${porchCmd} run ${projectId}`;
-  // Use tmux send-keys to start porch in the builder terminal
-  // The -l flag sends literal keys (no special interpretation)
-  await run(`tmux send-keys -t "${sessionName}" -l '${porchRunCmd}'`);
-  await run(`tmux send-keys -t "${sessionName}" Enter`);
-
   logger.blank();
   logger.success(`Builder ${builderId} started!`);
   logger.kv('Terminal', `http://localhost:${port}`);
   logger.kv('Worktree', worktreePath);
   logger.blank();
-  logger.info('Porch is now running the protocol loop.');
+  logger.info('Claude is running the porch protocol loop.');
   logger.info('Watch the terminal or check status with: af status');
 }
