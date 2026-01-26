@@ -303,3 +303,25 @@ DASHBOARD_DIR="node_modules/@cluesmith/codev/templates/dashboard"
   run grep -q "!running" "$DASHBOARD_DIR/js/dialogs.js"
   assert_success
 }
+
+# === Spec 0076: Terminated Shell Detection ===
+
+@test "running endpoint uses tmuxSessionExists for shell tabs (Spec 0076)" {
+  # Verify shell path checks tmux session status instead of ttyd PID
+  run grep -q "tmuxSessionExists" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+  run grep -q "util.tmuxSession" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "running endpoint uses tmuxSessionExists for builder tabs (Spec 0076)" {
+  # Verify builder path checks tmux session status instead of ttyd PID
+  run grep -q "builder.tmuxSession" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}
+
+@test "running endpoint falls back to isProcessRunning when tmuxSession missing (Spec 0076)" {
+  # Verify fallback to PID check is preserved for legacy state
+  run grep "isProcessRunning.*\.pid" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+  assert_success
+}

@@ -1505,7 +1505,14 @@ const server = http.createServer(async (req, res) => {
         const util = tabUtils.find((u) => u.id === utilId);
         if (util) {
           found = true;
-          running = isProcessRunning(util.pid);
+          // Check tmux session status instead of ttyd PID (Spec 0076)
+          // ttyd stays alive after shell exits, so checking its PID is wrong
+          if (util.tmuxSession) {
+            running = tmuxSessionExists(util.tmuxSession);
+          } else {
+            // Fallback for shells without tmux session (shouldn't happen in practice)
+            running = isProcessRunning(util.pid);
+          }
         }
       }
 
@@ -1515,7 +1522,13 @@ const server = http.createServer(async (req, res) => {
         const builder = getBuilder(builderId);
         if (builder) {
           found = true;
-          running = isProcessRunning(builder.pid);
+          // Check tmux session status instead of ttyd PID (Spec 0076)
+          if (builder.tmuxSession) {
+            running = tmuxSessionExists(builder.tmuxSession);
+          } else {
+            // Fallback for builders without tmux session (shouldn't happen in practice)
+            running = isProcessRunning(builder.pid);
+          }
         }
       }
 
