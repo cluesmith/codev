@@ -69,12 +69,13 @@ Use the existing `tmuxSessionExists()` helper (line 338) to check tmux session s
 - `tests/e2e/dashboard.bats`
 
 **Implementation Details**:
-Add two new test cases:
+Add three new test cases:
 
 1. Test that shell running check uses `tmuxSessionExists`:
    ```bash
    @test "running endpoint uses tmuxSessionExists for shell tabs (Spec 0076)" {
-     run grep -q "tmuxSessionExists.*tmuxSession" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+     # Verify shell path uses tmuxSessionExists with util.tmuxSession
+     run grep -E "shell-.*tmuxSessionExists.*util\\.tmuxSession|util\\.tmuxSession.*tmuxSessionExists" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
      assert_success
    }
    ```
@@ -82,7 +83,17 @@ Add two new test cases:
 2. Test that builder running check uses `tmuxSessionExists`:
    ```bash
    @test "running endpoint uses tmuxSessionExists for builder tabs (Spec 0076)" {
-     run grep -q "tmuxSessionExists" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+     # Verify builder path uses tmuxSessionExists with builder.tmuxSession
+     run grep -E "builder-.*tmuxSessionExists.*builder\\.tmuxSession|builder\\.tmuxSession.*tmuxSessionExists" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
+     assert_success
+   }
+   ```
+
+3. Test that PID fallback is preserved for legacy state:
+   ```bash
+   @test "running endpoint falls back to isProcessRunning when tmuxSession missing (Spec 0076)" {
+     # Verify fallback to isProcessRunning exists for backwards compatibility
+     run grep -E "isProcessRunning.*\\.pid" node_modules/@cluesmith/codev/dist/agent-farm/servers/dashboard-server.js
      assert_success
    }
    ```
@@ -139,6 +150,13 @@ After implementation, verify:
 5. **Shift+click bypass unchanged**
    - Active shell → Shift+click X → closes without dialog
 
+6. **PID fallback for legacy state (MUST #4)**
+   - Open `.agent-farm/state.db` with sqlite3
+   - Find a util record and note its `tmuxSession` value
+   - Run: `UPDATE utils SET tmuxSession = NULL WHERE id = '<id>'`
+   - Click X on that shell → dialog should appear if PID is running (fallback works)
+   - Restore: `UPDATE utils SET tmuxSession = '<original>' WHERE id = '<id>'`
+
 ### Automated Testing
 - Run `npm test` in packages/codev
 - Run `bats tests/e2e/dashboard.bats`
@@ -180,13 +198,25 @@ After implementation, verify:
 2. "Add changelog entry" - This is part of the Review phase, not Plan phase. Will be addressed when creating the PR.
 3. "Check for tmux session lingering after process exit" - tmux's default behavior destroys the session immediately when the last pane command exits. The `remain-on-exit` option is not used. This is a non-issue.
 
-### Second Consultation (After Human Feedback)
+### Second Consultation (Iteration 2, 2026-01-26)
 
-*Pending - will be filled after human review*
+**Gemini Feedback (APPROVE - HIGH confidence)**:
+- Plan correctly addresses root cause by switching to `tmuxSessionExists` for shell termination checks
+- Aligns perfectly with specification and existing infrastructure
+- No issues identified
+- **Verdict**: APPROVE
 
-- **Gemini Feedback**: [To be completed]
-- **Codex Feedback**: [To be completed]
-- **Changes Made**: [To be completed]
+**Codex Feedback (REQUEST_CHANGES - HIGH confidence)**:
+1. **Insufficient builder-path static test**: The second grep test only asserts `tmuxSessionExists` exists anywhere in the file, not specifically in the builder code path. Could pass even if only shell branch uses the helper.
+2. **No verification of PID fallback**: MUST #4 and SHOULD #1 require preserving behavior when `tmuxSession` is missing, but no test validates this.
+
+**Changes Made**:
+1. **Fixed builder-path static test**: Updated grep pattern to specifically match `builder.tmuxSession` with `tmuxSessionExists`, ensuring the builder code path is verified.
+2. **Added PID fallback static test**: New test verifies `isProcessRunning` with `.pid` pattern exists in the compiled output.
+3. **Added manual PID fallback test**: Added step 6 to manual testing checklist - instructs tester to nullify `tmuxSession` in state.db and verify dialog appears (proving fallback works).
+
+**Not Incorporated**:
+None - all feedback was valid and addressed.
 
 ---
 
@@ -234,4 +264,5 @@ This is tmux's default behavior. The `remain-on-exit` option (which would keep t
 | Date | Author | Changes |
 |------|--------|---------|
 | 2026-01-26 | Claude | Initial implementation plan |
-| 2026-01-26 | Claude | Incorporated Gemini (APPROVE) and Codex (REQUEST_CHANGES) feedback |
+| 2026-01-26 | Claude | Incorporated first Gemini (APPROVE) and Codex (REQUEST_CHANGES) feedback |
+| 2026-01-26 | Claude | Incorporated second Codex feedback: improved builder-path test, added PID fallback verification |
