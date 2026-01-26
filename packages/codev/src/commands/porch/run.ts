@@ -536,6 +536,10 @@ async function runConsultOnce(
  *   VERDICT: REQUEST_CHANGES
  *   VERDICT: COMMENT
  *
+ * Also handles markdown formatting like:
+ *   **VERDICT: APPROVE**
+ *   *VERDICT: APPROVE*
+ *
  * Safety: If no explicit verdict found (empty output, crash, malformed),
  * defaults to REQUEST_CHANGES to prevent proceeding with unverified code.
  */
@@ -546,19 +550,20 @@ function parseVerdict(output: string): Verdict {
   }
 
   // Look for actual verdict line (not template text like "[APPROVE | REQUEST_CHANGES | COMMENT]")
-  // Match lines like "VERDICT: APPROVE" or "VERDICT: REQUEST_CHANGES"
+  // Match lines like "VERDICT: APPROVE" or "**VERDICT: APPROVE**"
   const lines = output.split('\n');
   for (const line of lines) {
-    const trimmed = line.trim().toUpperCase();
+    // Strip markdown formatting (**, *, __, _) and trim
+    const stripped = line.trim().replace(/^[\*_]+|[\*_]+$/g, '').trim().toUpperCase();
     // Match "VERDICT: <value>" but NOT "VERDICT: [APPROVE | ...]"
-    if (trimmed.startsWith('VERDICT:') && !trimmed.includes('[')) {
-      if (trimmed.includes('REQUEST_CHANGES')) {
+    if (stripped.startsWith('VERDICT:') && !stripped.includes('[')) {
+      if (stripped.includes('REQUEST_CHANGES')) {
         return 'REQUEST_CHANGES';
       }
-      if (trimmed.includes('APPROVE')) {
+      if (stripped.includes('APPROVE')) {
         return 'APPROVE';
       }
-      if (trimmed.includes('COMMENT')) {
+      if (stripped.includes('COMMENT')) {
         return 'COMMENT';
       }
     }
