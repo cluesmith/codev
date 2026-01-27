@@ -811,7 +811,10 @@
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
 
-      const portsHtml = instance.ports.map(port => `
+      const portsHtml = instance.ports.map(port => {
+        // Use proxy URL instead of direct port URL
+        const proxyUrl = getProxyUrl(instance, port.type);
+        return `
         <div class="port-item">
           <div class="port-info">
             <span class="port-status ${port.active ? 'active' : 'inactive'}"></span>
@@ -819,12 +822,13 @@
             <span class="port-url">Port ${port.port}</span>
           </div>
           <div class="port-actions">
-            <a href="${escapeHtml(port.url)}" target="_blank" class="${port.active ? '' : 'disabled'}">
+            <a href="${escapeHtml(proxyUrl)}" target="_blank" class="${port.active ? '' : 'disabled'}">
               Open
             </a>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       const lastUsed = instance.lastUsed
         ? formatDate(instance.lastUsed)
@@ -1168,6 +1172,32 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    // Base64URL encoding (RFC 4648) for project paths
+    // IMPORTANT: Use TextEncoder for Unicode support (btoa only handles Latin-1)
+    function toBase64URL(str) {
+      // Encode string to UTF-8 bytes, then to Base64, then to Base64URL
+      const bytes = new TextEncoder().encode(str);
+      const base64 = btoa(String.fromCharCode(...bytes));
+      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    // Generate proxy URL for a terminal
+    function getProxyUrl(instance, portType) {
+      const encodedPath = toBase64URL(instance.projectPath);
+      if (portType === 'Dashboard') {
+        return `/project/${encodedPath}/`;
+      } else if (portType === 'Architect') {
+        return `/project/${encodedPath}/architect/`;
+      } else if (portType.startsWith('Builder')) {
+        // Extract builder number from type (e.g., "Builder 0" -> 0)
+        const match = portType.match(/Builder\s*(\d+)/i);
+        const builderNum = match ? parseInt(match[1], 10) : 0;
+        return `/project/${encodedPath}/builder/${builderNum}/`;
+      }
+      // Fallback to dashboard
+      return `/project/${encodedPath}/`;
     }
 
     // Toast notifications

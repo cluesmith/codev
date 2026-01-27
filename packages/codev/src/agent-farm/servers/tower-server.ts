@@ -137,6 +137,27 @@ function getProjectName(projectPath: string): string {
 }
 
 /**
+ * Get the base port for a project from global.db
+ * Returns null if project not found or not running
+ */
+async function getBasePortForProject(projectPath: string): Promise<number | null> {
+  try {
+    const db = getGlobalDb();
+    const row = db.prepare(
+      'SELECT base_port FROM port_allocations WHERE project_path = ?'
+    ).get(projectPath) as { base_port: number } | undefined;
+
+    if (!row) return null;
+
+    // Check if actually running
+    const isRunning = await isPortListening(row.base_port);
+    return isRunning ? row.base_port : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
@@ -628,6 +649,94 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Reverse proxy: /project/:base64urlPath/:terminalType/* → localhost:calculatedPort/*
+    // Uses Base64URL (RFC 4648) encoding to avoid issues with slashes in paths
+    //
+    // Terminal port routing:
+    //   /project/<path>/              → base_port (project dashboard)
+    //   /project/<path>/architect/    → base_port + 1 (architect terminal)
+    //   /project/<path>/builder/<n>/  → base_port + 2 + n (builder terminals)
+    if (url.pathname.startsWith('/project/')) {
+      const pathParts = url.pathname.split('/');
+      // ['', 'project', base64urlPath, terminalType, ...rest]
+      const encodedPath = pathParts[2];
+      const terminalType = pathParts[3];
+      const rest = pathParts.slice(4);
+
+      if (!encodedPath) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Missing project path');
+        return;
+      }
+
+      // Decode Base64URL (RFC 4648) - NOT URL encoding
+      // Wrap in try/catch to handle malformed Base64 input gracefully
+      let projectPath: string;
+      try {
+        projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+        // Validate decoded path is reasonable (non-empty, looks like absolute path)
+        // Support both POSIX (/) and Windows (C:\) paths
+        if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+          throw new Error('Invalid project path');
+        }
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Invalid project path encoding');
+        return;
+      }
+
+      const basePort = await getBasePortForProject(projectPath);
+
+      if (!basePort) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Project not found or not running');
+        return;
+      }
+
+      // Calculate target port based on terminal type
+      let targetPort = basePort; // Default: project dashboard
+      let proxyPath = rest.join('/');
+
+      if (terminalType === 'architect') {
+        targetPort = basePort + 1; // Architect terminal
+      } else if (terminalType === 'builder' && rest[0]) {
+        const builderNum = parseInt(rest[0], 10);
+        if (!isNaN(builderNum)) {
+          targetPort = basePort + 2 + builderNum; // Builder terminal
+          proxyPath = rest.slice(1).join('/'); // Remove builder number from path
+        }
+      } else if (terminalType) {
+        proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
+      }
+
+      // Proxy the request
+      const proxyReq = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: targetPort,
+          path: '/' + proxyPath + (url.search || ''),
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: `localhost:${targetPort}`,
+          },
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+          proxyRes.pipe(res);
+        }
+      );
+
+      proxyReq.on('error', (err) => {
+        log('ERROR', `Proxy error: ${err.message}`);
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('Proxy error: ' + err.message);
+      });
+
+      req.pipe(proxyReq);
+      return;
+    }
+
     // 404 for everything else
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found');
@@ -641,6 +750,108 @@ const server = http.createServer(async (req, res) => {
 // SECURITY: Bind to localhost only to prevent network exposure
 server.listen(port, '127.0.0.1', () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
+});
+
+// WebSocket upgrade handler for proxying terminal connections
+// Same terminal port routing as HTTP proxy
+server.on('upgrade', async (req, socket, head) => {
+  const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+  if (!reqUrl.pathname.startsWith('/project/')) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const pathParts = reqUrl.pathname.split('/');
+  // ['', 'project', base64urlPath, terminalType, ...rest]
+  const encodedPath = pathParts[2];
+  const terminalType = pathParts[3];
+  const rest = pathParts.slice(4);
+
+  if (!encodedPath) {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Decode Base64URL (RFC 4648) - NOT URL encoding
+  // Wrap in try/catch to handle malformed Base64 input gracefully
+  let projectPath: string;
+  try {
+    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    // Support both POSIX (/) and Windows (C:\) paths
+    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+      throw new Error('Invalid project path');
+    }
+  } catch {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const basePort = await getBasePortForProject(projectPath);
+
+  if (!basePort) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Calculate target port based on terminal type (same logic as HTTP proxy)
+  let targetPort = basePort; // Default: project dashboard
+  let proxyPath = rest.join('/');
+
+  if (terminalType === 'architect') {
+    targetPort = basePort + 1; // Architect terminal
+  } else if (terminalType === 'builder' && rest[0]) {
+    const builderNum = parseInt(rest[0], 10);
+    if (!isNaN(builderNum)) {
+      targetPort = basePort + 2 + builderNum; // Builder terminal
+      proxyPath = rest.slice(1).join('/'); // Remove builder number from path
+    }
+  } else if (terminalType) {
+    proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
+  }
+
+  // Connect to target
+  const proxySocket = net.connect(targetPort, '127.0.0.1', () => {
+    // Rewrite Origin header for ttyd compatibility
+    const headers = { ...req.headers };
+    headers.origin = 'http://localhost';
+    headers.host = `localhost:${targetPort}`;
+
+    // Forward the upgrade request
+    let headerStr = `${req.method} /${proxyPath}${reqUrl.search || ''} HTTP/1.1\r\n`;
+    for (const [key, value] of Object.entries(headers)) {
+      if (value) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            headerStr += `${key}: ${v}\r\n`;
+          }
+        } else {
+          headerStr += `${key}: ${value}\r\n`;
+        }
+      }
+    }
+    headerStr += '\r\n';
+
+    proxySocket.write(headerStr);
+    if (head.length > 0) proxySocket.write(head);
+
+    // Pipe bidirectionally
+    socket.pipe(proxySocket);
+    proxySocket.pipe(socket);
+  });
+
+  proxySocket.on('error', (err) => {
+    log('ERROR', `WebSocket proxy error: ${err.message}`);
+    socket.destroy();
+  });
+
+  socket.on('error', () => {
+    proxySocket.destroy();
+  });
 });
 
 // Handle uncaught errors
