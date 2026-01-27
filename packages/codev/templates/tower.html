@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#252525">
   <title>AF Control Tower</title>
   <style>
     * {
@@ -608,6 +611,132 @@
       .status-dot.running,
       .loading .spinner {
         animation: none;
+      }
+    }
+
+    /* Mobile optimizations */
+    @media (max-width: 600px) {
+      body {
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+
+      .header {
+        padding: 16px;
+        padding-top: calc(16px + env(safe-area-inset-top, 0));
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .header h1 {
+        font-size: 18px;
+        width: 100%;
+      }
+
+      .header h1 .emoji {
+        font-size: 22px;
+      }
+
+      .header-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .main {
+        padding: 16px;
+        padding-left: calc(16px + env(safe-area-inset-left, 0));
+        padding-right: calc(16px + env(safe-area-inset-right, 0));
+      }
+
+      .btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 12px 16px;
+      }
+
+      .btn-small {
+        min-height: 44px;
+        padding: 10px 14px;
+      }
+
+      .instance-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .instance-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .port-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .port-actions {
+        width: 100%;
+      }
+
+      .port-actions a {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+      }
+
+      .launch-section {
+        padding: 16px;
+      }
+
+      .launch-form {
+        flex-direction: column;
+      }
+
+      .launch-form input[type="text"] {
+        min-height: 44px;
+      }
+
+      .btn-launch {
+        width: 100%;
+        min-height: 44px;
+      }
+
+      .recent-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .dialog-box {
+        min-width: auto;
+        width: calc(100% - 32px);
+        margin: 16px;
+      }
+
+      .toast-container {
+        left: 16px;
+        right: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0));
+      }
+    }
+
+    /* Touch-friendly tap targets */
+    @media (pointer: coarse) {
+      .btn, .port-actions a, .autocomplete-item, .recent-item {
+        min-height: 44px;
+      }
+
+      .copy-btn {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
     }
 
