@@ -224,24 +224,24 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0081"
     title: "Web Tower - Mobile Access to All Agent Farms"
     summary: "Reverse proxy for tower-server to access all projects through one port with auth, Cloudflare tunnel, and ntfy.sh notifications"
-    status: planned
+    status: committed
     priority: medium
     release: v2.0.0
     files:
       spec: codev/specs/0081-simple-web-terminal-access.md
       plan: codev/plans/0081-simple-web-terminal-access.md
-      review: null
+      review: codev/reviews/0081-simple-web-terminal-access.md
     dependencies: []
     tags: [tower, remote-access, mobile, v2]
     timestamps:
       conceived_at: "2026-01-27T10:00:00-08:00"
       specified_at: "2026-01-27T12:00:00-08:00"
       planned_at: "2026-01-27T14:00:00-08:00"
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
+      implementing_at: "2026-01-28T01:10:00-08:00"
+      implemented_at: "2026-01-28T01:25:00-08:00"
+      committed_at: "2026-01-28T01:35:00-08:00"
       integrated_at: null
-    notes: "Enables mobile access to check on builders, approve gates, and monitor progress from phone."
+    notes: "PR #169 merged. Reverse proxy, auth, tunnel docs, push notifications, mobile polish."
 
   - id: "0075"
     title: "Porch Minimal Redesign"
@@ -268,7 +268,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
     summary: "Spike to validate CODEV_HQ architecture: WebSocket connection, status sync, remote approvals"
-    status: committed
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -284,8 +284,8 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
-    notes: "Time-boxed spike (4-6h) to validate CODEV_HQ core concepts before full implementation."
+      integrated_at: "2026-01-28T08:00:00-08:00"
+    notes: "Spike complete - validated CODEV_HQ core concepts (WebSocket, status sync)."
 
   - id: "0069"
     title: "Checklister Agent Spike"
@@ -666,7 +666,7 @@ See Active Projects section above for full details and current status.
       implemented_at: null
       committed_at: null
       integrated_at: "2025-12-03T03:46:44-08:00"
-    notes: "Bash CLI implemented, superseded by 0005 TypeScript CLI"
+    notes: "Bash CLI implemented, superseded by 0005 TypeScript CLI. TICK-001: Direct CLI access (af architect). TICK-002: Protocol-agnostic spawn system (planned 2026-01-27)."
 
   - id: "0004"
     title: "Dashboard Nav UI"
@@ -855,9 +855,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ---
 
+  - id: "0083"
+    title: "Protocol-Agnostic Spawn System"
+    summary: "Refactor af spawn to decouple input types from protocols, add --use-protocol flag"
+    status: committed
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0083-protocol-agnostic-spawn.md
+      plan: codev/plans/0083-protocol-agnostic-spawn.md
+      review: null
+    dependencies: []
+    tags: [agent-farm, spawn, refactoring, v2]
+    timestamps:
+      conceived_at: "2026-01-27T12:00:00-08:00"
+      specified_at: "2026-01-27T12:00:00-08:00"
+      planned_at: "2026-01-27T12:00:00-08:00"
+      implementing_at: "2026-01-28T00:30:00-08:00"
+      implemented_at: "2026-01-28T00:45:00-08:00"
+      committed_at: "2026-01-28T01:05:00-08:00"
+      integrated_at: null
+    notes: "PR #168 merged. Adds --use-protocol flag and data-driven hooks."
+
 ## Next Available Number
 
-**0079** - Reserve this number for your next project
+**0084** - Reserve this number for your next project
 
 ---
 
