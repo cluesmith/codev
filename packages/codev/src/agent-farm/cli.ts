@@ -126,6 +126,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--files <files>', 'Context files (comma-separated)')
     .option('--no-comment', 'Skip commenting on issue (bugfix mode only)')
     .option('--force', 'Override collision detection (bugfix mode only)')
+    .option('--use-protocol <name>', 'Override default protocol (e.g., --use-protocol tick)')
     .option('--no-role', 'Skip loading role prompt')
     .action(async (options) => {
       const { spawn } = await import('./commands/spawn.js');
@@ -142,6 +143,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           files,
           noComment: !options.comment,
           force: options.force,
+          useProtocol: options.useProtocol,
           noRole: !options.role,
         });
       } catch (error) {

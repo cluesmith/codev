@@ -1,8 +1,19 @@
 {
   "$schema": "../../protocol-schema.json",
   "name": "bugfix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lightweight protocol for minor bugfixes using GitHub Issues",
+  "input": {
+    "type": "github-issue",
+    "required": false,
+    "default_for": ["--issue", "-i"]
+  },
+  "hooks": {
+    "pre-spawn": {
+      "collision-check": true,
+      "comment-on-issue": "On it! Working on a fix now."
+    }
+  },
   "phases": [
     {
       "id": "investigate",
@@ -114,6 +125,7 @@
     }
   },
   "defaults": {
+    "mode": "soft",
     "consultation": {
       "enabled": true,
       "models": ["gemini", "codex"],
