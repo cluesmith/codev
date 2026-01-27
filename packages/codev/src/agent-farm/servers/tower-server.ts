@@ -227,6 +227,32 @@ function getLoginPageHtml(): string {
 </html>`;
 }
 
+// SSE (Server-Sent Events) infrastructure for push notifications
+interface SSEClient {
+  res: http.ServerResponse;
+  id: string;
+}
+
+const sseClients: SSEClient[] = [];
+let notificationIdCounter = 0;
+
+/**
+ * Broadcast a notification to all connected SSE clients
+ */
+function broadcastNotification(notification: { type: string; title: string; body: string; project?: string }): void {
+  const id = ++notificationIdCounter;
+  const data = JSON.stringify({ ...notification, id });
+  const message = `id: ${id}\ndata: ${data}\n\n`;
+
+  for (const client of sseClients) {
+    try {
+      client.res.write(message);
+    } catch {
+      // Client disconnected, will be cleaned up on next iteration
+    }
+  }
+}
+
 /**
  * Get all instances with their status
  */
@@ -597,6 +623,61 @@ const server = http.createServer(async (req, res) => {
       const instances = await getInstances();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ instances }));
+      return;
+    }
+
+    // API: Server-Sent Events for push notifications
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      const clientId = crypto.randomBytes(8).toString('hex');
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+
+      // Send initial connection event
+      res.write(`data: ${JSON.stringify({ type: 'connected', id: clientId })}\n\n`);
+
+      const client: SSEClient = { res, id: clientId };
+      sseClients.push(client);
+
+      log('INFO', `SSE client connected: ${clientId} (total: ${sseClients.length})`);
+
+      // Clean up on disconnect
+      req.on('close', () => {
+        const index = sseClients.findIndex((c) => c.id === clientId);
+        if (index !== -1) {
+          sseClients.splice(index, 1);
+        }
+        log('INFO', `SSE client disconnected: ${clientId} (total: ${sseClients.length})`);
+      });
+
+      return;
+    }
+
+    // API: Receive notification from builder
+    if (req.method === 'POST' && url.pathname === '/api/notify') {
+      const body = await parseJsonBody(req);
+      const { type, title, body: messageBody, project } = body;
+
+      if (!title || !messageBody) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Missing title or body' }));
+        return;
+      }
+
+      // Broadcast to all connected SSE clients
+      broadcastNotification({
+        type: type || 'info',
+        title,
+        body: messageBody,
+        project,
+      });
+
+      log('INFO', `Notification broadcast: ${title}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
       return;
     }
 

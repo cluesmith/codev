@@ -777,9 +777,108 @@
         document.getElementById('logout-btn').style.display = 'block';
       }
 
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        try {
+          await Notification.requestPermission();
+        } catch (e) {
+          // Ignore errors, notifications are optional
+        }
+      }
+
+      // Subscribe to SSE for push notifications
+      subscribeToEvents();
+
       await refresh();
       // Poll every 5 seconds
       setInterval(refresh, 5000);
+    }
+
+    // SSE subscription for real-time notifications
+    // Uses fetch + ReadableStream to support Authorization header
+    let sseController = null;
+
+    async function subscribeToEvents() {
+      // Abort any existing connection
+      if (sseController) {
+        sseController.abort();
+      }
+
+      sseController = new AbortController();
+
+      try {
+        const response = await fetch('/api/events', {
+          headers: getAuthHeaders(),
+          signal: sseController.signal,
+        });
+
+        if (!response.ok) {
+          console.log('SSE connection failed:', response.status);
+          setTimeout(subscribeToEvents, 5000);
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            console.log('SSE stream ended, reconnecting...');
+            setTimeout(subscribeToEvents, 5000);
+            return;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE format: "data: {...}\n\n"
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete message in buffer
+
+          for (const chunk of lines) {
+            const dataMatch = chunk.match(/^data:\s*(.+)$/m);
+            if (!dataMatch) continue;
+
+            try {
+              const data = JSON.parse(dataMatch[1]);
+
+              if (data.type === 'connected') {
+                console.log('SSE connected:', data.id);
+                continue;
+              }
+
+              // Show browser notification
+              if ('Notification' in window && Notification.permission === 'granted') {
+                const notification = new Notification(data.title, {
+                  body: data.body,
+                  icon: '/favicon.ico',
+                  tag: 'tower-notification-' + data.id,
+                });
+
+                // Auto-close after 5 seconds
+                setTimeout(() => notification.close(), 5000);
+              }
+
+              // Also show in-app toast
+              showToast(`${data.title}: ${data.body}`, data.type || 'info');
+
+              // Refresh to show updated status
+              refresh();
+            } catch (e) {
+              console.error('SSE parse error:', e);
+            }
+          }
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          // Intentional abort, don't reconnect
+          return;
+        }
+        console.error('SSE error:', e);
+        setTimeout(subscribeToEvents, 5000);
+      }
     }
 
     // Refresh data from API
