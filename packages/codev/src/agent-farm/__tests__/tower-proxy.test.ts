@@ -3,6 +3,7 @@
  * Tests Base64URL encoding/decoding and terminal port routing
  */
 import { describe, it, expect } from 'vitest';
+import crypto from 'node:crypto';
 
 // Test helper: Encode string to Base64URL (matching browser implementation)
 function toBase64URL(str: string): string {
@@ -221,5 +222,96 @@ describe('Tower Proxy - URL Path Parsing', () => {
     const result = parseProxyPath('/api/status');
     expect(result.encodedPath).toBeNull();
     expect(result.terminalType).toBeNull();
+  });
+});
+
+describe('Tower Proxy - Auth Helpers', () => {
+  // Test helper: Timing-safe comparison (same as server implementation)
+  function isValidToken(provided: string | undefined, expected: string): boolean {
+    if (!provided) return false;
+
+    const providedBuf = Buffer.from(provided);
+    const expectedBuf = Buffer.from(expected);
+
+    if (providedBuf.length !== expectedBuf.length) {
+      // Still do a comparison to maintain constant time
+      crypto.timingSafeEqual(expectedBuf, expectedBuf);
+      return false;
+    }
+
+    return crypto.timingSafeEqual(providedBuf, expectedBuf);
+  }
+
+  it('should accept valid token', () => {
+    const secret = 'mySecretKey123';
+    expect(isValidToken('mySecretKey123', secret)).toBe(true);
+  });
+
+  it('should reject undefined token', () => {
+    const secret = 'mySecretKey123';
+    expect(isValidToken(undefined, secret)).toBe(false);
+  });
+
+  it('should reject empty token', () => {
+    const secret = 'mySecretKey123';
+    expect(isValidToken('', secret)).toBe(false);
+  });
+
+  it('should reject wrong length token', () => {
+    const secret = 'mySecretKey123';
+    expect(isValidToken('short', secret)).toBe(false);
+    expect(isValidToken('thisIsAMuchLongerTokenThanExpected', secret)).toBe(false);
+  });
+
+  it('should reject wrong token of same length', () => {
+    const secret = 'mySecretKey123';
+    expect(isValidToken('wrongSecret123', secret)).toBe(false);
+  });
+
+  it('should work with base64url encoded keys', () => {
+    const key = crypto.randomBytes(32).toString('base64url');
+    expect(isValidToken(key, key)).toBe(true);
+    expect(isValidToken(key + 'x', key)).toBe(false);
+  });
+});
+
+describe('Tower Proxy - WebSocket Auth Protocol', () => {
+  // Test helper: Extract auth token from Sec-WebSocket-Protocol
+  function extractAuthToken(protocolHeader: string | undefined): string | undefined {
+    if (!protocolHeader) return undefined;
+    const protocols = protocolHeader.split(',').map((s) => s.trim());
+    const authProtocol = protocols.find((p) => p.startsWith('auth-'));
+    return authProtocol?.replace('auth-', '');
+  }
+
+  // Test helper: Strip auth protocol for forwarding
+  function stripAuthProtocol(protocolHeader: string | undefined): string {
+    if (!protocolHeader) return 'tty';
+    const protocols = protocolHeader.split(',').map((s) => s.trim());
+    const cleanProtocols = protocols.filter((p) => !p.startsWith('auth-'));
+    return cleanProtocols.join(', ') || 'tty';
+  }
+
+  it('should extract auth token from protocol header', () => {
+    expect(extractAuthToken('auth-myToken123, tty')).toBe('myToken123');
+    expect(extractAuthToken('tty, auth-secretKey')).toBe('secretKey');
+    expect(extractAuthToken('auth-base64urlKey_abc123')).toBe('base64urlKey_abc123');
+  });
+
+  it('should return undefined for missing auth protocol', () => {
+    expect(extractAuthToken('tty')).toBeUndefined();
+    expect(extractAuthToken(undefined)).toBeUndefined();
+    expect(extractAuthToken('')).toBeUndefined();
+  });
+
+  it('should strip auth protocol from header', () => {
+    expect(stripAuthProtocol('auth-myToken, tty')).toBe('tty');
+    expect(stripAuthProtocol('tty, auth-myToken')).toBe('tty');
+    expect(stripAuthProtocol('binary, auth-key, tty')).toBe('binary, tty');
+  });
+
+  it('should default to tty when only auth protocol present', () => {
+    expect(stripAuthProtocol('auth-myToken')).toBe('tty');
+    expect(stripAuthProtocol(undefined)).toBe('tty');
   });
 });

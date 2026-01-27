@@ -5,6 +5,7 @@
  */
 
 import { Command } from 'commander';
+import crypto from 'node:crypto';
 import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
@@ -116,6 +117,24 @@ towerCmd
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
+  });
+
+// Web command for remote access utilities
+const webCmd = program
+  .command('web')
+  .description('Web access utilities for remote tower dashboard');
+
+webCmd
+  .command('keygen')
+  .description('Generate a secure API key for remote web access')
+  .action(() => {
+    const key = crypto.randomBytes(32).toString('base64url');
+    console.log('\nGenerated API key for CODEV_WEB_KEY:\n');
+    console.log(`  ${key}\n`);
+    console.log('To enable remote access:');
+    console.log(`  export CODEV_WEB_KEY="${key}"`);
+    console.log('  codev tower start\n');
+    console.log('Then expose with a tunnel (e.g., cloudflared, ngrok).\n');
   });
 
 // Consult command

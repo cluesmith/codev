@@ -681,6 +681,7 @@
     </h1>
     <div class="header-actions">
       <button class="btn" onclick="refresh()">Refresh</button>
+      <button class="btn" id="logout-btn" onclick="logout()" style="display: none;">Logout</button>
     </div>
   </header>
 
@@ -742,8 +743,40 @@
     let runningInstances = [];
     let recentInstances = [];
 
+    // Auth helper: get headers with auth token if available
+    function getAuthHeaders() {
+      const key = localStorage.getItem('codev_web_key');
+      return key ? { 'Authorization': `Bearer ${key}` } : {};
+    }
+
+    // Auth helper: make authenticated fetch request
+    async function authFetch(url, options = {}) {
+      const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+      const response = await fetch(url, { ...options, headers });
+
+      // If 401, clear key and redirect to login
+      if (response.status === 401) {
+        localStorage.removeItem('codev_web_key');
+        location.reload();
+        throw new Error('Unauthorized');
+      }
+      return response;
+    }
+
+    // Logout function
+    function logout() {
+      localStorage.removeItem('codev_web_key');
+      window.location.href = '/';
+    }
+
     // Initialize
     async function init() {
+      // Show logout button if we have a key
+      const key = localStorage.getItem('codev_web_key');
+      if (key) {
+        document.getElementById('logout-btn').style.display = 'block';
+      }
+
       await refresh();
       // Poll every 5 seconds
       setInterval(refresh, 5000);
@@ -752,7 +785,7 @@
     // Refresh data from API
     async function refresh() {
       try {
-        const response = await fetch('/api/status');
+        const response = await authFetch('/api/status');
         if (!response.ok) throw new Error('Failed to fetch status');
 
         const data = await response.json();
@@ -956,7 +989,7 @@
       }
 
       try {
-        const response = await fetch('/api/browse?path=' + encodeURIComponent(inputPath));
+        const response = await authFetch('/api/browse?path=' + encodeURIComponent(inputPath));
         const data = await response.json();
         suggestions = data.suggestions || [];
         selectedIndex = -1;
@@ -1011,7 +1044,7 @@
     // Launch a specific path (from recents)
     async function launchPath(projectPath) {
       try {
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1037,7 +1070,7 @@
     // Stop an instance by port
     async function stopInstance(basePort) {
       try {
-        const response = await fetch('/api/stop', {
+        const response = await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ basePort })
@@ -1060,7 +1093,7 @@
     async function restartInstance(basePort, projectPath) {
       try {
         // First stop
-        await fetch('/api/stop', {
+        await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ basePort })
@@ -1070,7 +1103,7 @@
         await new Promise(r => setTimeout(r, 1000));
 
         // Then start
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1100,7 +1133,7 @@
       }
 
       try {
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1249,7 +1282,7 @@
       hideCreateProjectDialog();
 
       try {
-        const response = await fetch('/api/create', {
+        const response = await authFetch('/api/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ parent, name })
