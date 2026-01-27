@@ -27,6 +27,12 @@
       },
       "minItems": 1
     },
+    "input": {
+      "$ref": "#/definitions/protocolInput"
+    },
+    "hooks": {
+      "$ref": "#/definitions/protocolHooks"
+    },
     "signals": {
       "type": "object",
       "description": "Signal definitions for state transitions",
@@ -38,6 +44,11 @@
       "type": "object",
       "description": "Default configuration for the protocol",
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["strict", "soft"],
+          "description": "Default orchestration mode for the protocol"
+        },
         "consultation": {
           "$ref": "#/definitions/consultationDefaults"
         },
@@ -230,6 +241,48 @@
         },
         "requires": {
           "type": "string"
+        }
+      }
+    },
+    "protocolInput": {
+      "type": "object",
+      "description": "Protocol input configuration - defines what input types a protocol accepts",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["spec", "github-issue", "task", "protocol", "shell", "worktree"],
+          "description": "Primary input type for this protocol"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether an input of this type is required"
+        },
+        "default_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CLI flags this protocol is the default for (e.g., ['--issue', '-i'])"
+        }
+      }
+    },
+    "protocolHooks": {
+      "type": "object",
+      "description": "Hooks triggered at various points in the spawn lifecycle",
+      "properties": {
+        "pre-spawn": {
+          "type": "object",
+          "description": "Hooks executed before spawning the builder",
+          "properties": {
+            "collision-check": {
+              "type": "boolean",
+              "description": "Check for worktree/PR collisions before spawning"
+            },
+            "comment-on-issue": {
+              "type": "string",
+              "description": "Comment to post on GitHub issue when spawning"
+            }
+          }
         }
       }
     }
