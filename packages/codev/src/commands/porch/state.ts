@@ -90,12 +90,45 @@ export function writeState(statusPath: string, state: ProjectState): void {
 }
 
 /**
+ * Detect existing artifacts to determine starting phase
+ */
+function detectExistingArtifacts(projectRoot: string, projectId: string): {
+  hasSpec: boolean;
+  hasPlan: boolean;
+} {
+  const specsDir = path.join(projectRoot, 'codev/specs');
+  const plansDir = path.join(projectRoot, 'codev/plans');
+
+  let hasSpec = false;
+  let hasPlan = false;
+
+  // Check for spec file matching NNNN-*.md
+  if (fs.existsSync(specsDir)) {
+    const specFiles = fs.readdirSync(specsDir);
+    hasSpec = specFiles.some(f => f.startsWith(`${projectId}-`) && f.endsWith('.md'));
+  }
+
+  // Check for plan file matching NNNN-*.md
+  if (fs.existsSync(plansDir)) {
+    const planFiles = fs.readdirSync(plansDir);
+    hasPlan = planFiles.some(f => f.startsWith(`${projectId}-`) && f.endsWith('.md'));
+  }
+
+  return { hasSpec, hasPlan };
+}
+
+/**
  * Create initial state for a new project
+ *
+ * IMPORTANT: Detects existing spec/plan artifacts and skips completed phases.
+ * If spec exists → start from plan phase
+ * If plan exists → start from implement phase
  */
 export function createInitialState(
   protocol: Protocol,
   projectId: string,
-  title: string
+  title: string,
+  projectRoot?: string
 ): ProjectState {
   const now = new Date().toISOString();
 
@@ -107,8 +140,31 @@ export function createInitialState(
     }
   }
 
-  // First phase is initial
-  const initialPhase = protocol.phases[0]?.id || 'specify';
+  // Detect existing artifacts to determine starting phase
+  let initialPhase = protocol.phases[0]?.id || 'specify';
+
+  if (projectRoot) {
+    const artifacts = detectExistingArtifacts(projectRoot, projectId);
+
+    if (artifacts.hasPlan) {
+      // Plan exists → start from implement, mark both gates as passed
+      initialPhase = 'implement';
+      if (gates['spec-approval']) {
+        gates['spec-approval'] = { status: 'approved', approved_at: now };
+      }
+      if (gates['plan-approval']) {
+        gates['plan-approval'] = { status: 'approved', approved_at: now };
+      }
+      console.log(`[porch] Detected existing plan - starting from implement phase`);
+    } else if (artifacts.hasSpec) {
+      // Spec exists → start from plan, mark spec gate as passed
+      initialPhase = 'plan';
+      if (gates['spec-approval']) {
+        gates['spec-approval'] = { status: 'approved', approved_at: now };
+      }
+      console.log(`[porch] Detected existing spec - starting from plan phase`);
+    }
+  }
 
   return {
     id: projectId,

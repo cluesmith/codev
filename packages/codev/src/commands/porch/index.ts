@@ -518,13 +518,13 @@ export async function init(
     throw new Error(`Project ${projectId}-${projectName} already exists.`);
   }
 
-  const state = createInitialState(protocol, projectId, projectName);
+  const state = createInitialState(protocol, projectId, projectName, projectRoot);
   writeState(statusPath, state);
 
   console.log('');
   console.log(chalk.green(`Project initialized: ${projectId}-${projectName}`));
   console.log(`  Protocol: ${protocolName}`);
-  console.log(`  Initial phase: ${state.phase}`);
+  console.log(`  Starting phase: ${state.phase}`);
   console.log(`\n  Run: porch status ${projectId}`);
   console.log('');
 }
