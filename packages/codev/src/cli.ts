@@ -137,6 +137,59 @@ webCmd
     console.log('Then expose with a tunnel (e.g., cloudflared, ngrok).\n');
   });
 
+webCmd
+  .command('tunnel')
+  .description('Show tunnel setup instructions for remote access')
+  .action(() => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════════╗
+║                    Tower Remote Access Setup                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+STEP 1: Generate an API key
+────────────────────────────
+  codev web keygen
+
+  Copy the generated key and set it as an environment variable:
+  export CODEV_WEB_KEY="<your-key>"
+
+STEP 2: Start Tower
+────────────────────
+  codev tower start
+
+  Tower will now require authentication for all requests.
+
+STEP 3: Expose with a Tunnel
+────────────────────────────
+Option A: Cloudflare Tunnel (recommended, free)
+  # Install: brew install cloudflared
+  cloudflared tunnel --url http://localhost:4100
+
+Option B: ngrok
+  # Install: brew install ngrok
+  ngrok http 4100
+
+Option C: Tailscale Funnel (if using Tailscale)
+  tailscale funnel --bg 4100
+
+STEP 4: Access from Mobile/Remote
+─────────────────────────────────
+  1. Open the tunnel URL in your browser
+  2. Enter your API key on the login page
+  3. The key is stored in localStorage for future visits
+
+SECURITY NOTES
+──────────────
+• CODEV_WEB_KEY is REQUIRED for tunnel access (no bypass)
+• Always use HTTPS (tunnels provide this automatically)
+• API keys are compared using timing-safe comparison
+• Consider rotating keys periodically
+
+For detailed documentation, see:
+  codev/resources/tunnel-setup.md
+`);
+  });
+
 // Consult command
 program
   .command('consult')
