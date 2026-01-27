@@ -11,7 +11,7 @@
 import { resolve, basename } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, chmodSync, readdirSync, symlinkSync, mkdirSync, type Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import type { SpawnOptions, Builder, Config, BuilderType } from '../types.js';
+import type { SpawnOptions, Builder, Config, BuilderType, ProtocolDefinition } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell.js';
@@ -158,6 +158,102 @@ function validateProtocol(config: Config, protocolName: string): void {
 
   if (!existsSync(protocolFile)) {
     fatal(`Protocol ${protocolName} exists but has no protocol.md file`);
+  }
+}
+
+/**
+ * Load and parse a protocol.json file
+ */
+function loadProtocol(config: Config, protocolName: string): ProtocolDefinition | null {
+  const protocolJsonPath = resolve(config.codevDir, 'protocols', protocolName, 'protocol.json');
+  if (!existsSync(protocolJsonPath)) {
+    return null;
+  }
+  try {
+    const content = readFileSync(protocolJsonPath, 'utf-8');
+    return JSON.parse(content) as ProtocolDefinition;
+  } catch {
+    logger.warn(`Warning: Failed to parse ${protocolJsonPath}`);
+    return null;
+  }
+}
+
+/**
+ * Resolve which protocol to use based on precedence:
+ * 1. Explicit --use-protocol flag (always wins)
+ * 2. Spec file **Protocol**: header (for --project mode)
+ * 3. Hardcoded defaults (spider for specs, bugfix for issues)
+ */
+async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
+  // 1. Explicit --use-protocol override always wins
+  if (options.useProtocol) {
+    validateProtocol(config, options.useProtocol);
+    return options.useProtocol.toLowerCase();
+  }
+
+  // 2. For spec mode, check spec file header (preserves existing behavior)
+  if (options.project) {
+    const specFile = await findSpecFile(config.codevDir, options.project);
+    if (specFile) {
+      const specContent = readFileSync(specFile, 'utf-8');
+      const match = specContent.match(/\*\*Protocol\*\*:\s*(\w+)/i);
+      if (match) {
+        const protocolFromSpec = match[1].toLowerCase();
+        // Validate the protocol exists
+        try {
+          validateProtocol(config, protocolFromSpec);
+          return protocolFromSpec;
+        } catch {
+          // If protocol from spec doesn't exist, fall through to defaults
+          logger.warn(`Warning: Protocol "${match[1]}" from spec not found, using default`);
+        }
+      }
+    }
+  }
+
+  // 3. Hardcoded defaults based on input type
+  if (options.project) return 'spider';
+  if (options.issue) return 'bugfix';
+  if (options.protocol) return options.protocol.toLowerCase();
+  if (options.task) return 'spider';
+
+  return 'spider';  // Final fallback
+}
+
+// Note: GitHubIssue interface is defined later in the file
+
+/**
+ * Execute pre-spawn hooks defined in protocol.json
+ * Hooks are data-driven but reuse existing implementation logic
+ */
+async function executePreSpawnHooks(
+  protocol: ProtocolDefinition | null,
+  context: {
+    issueNumber?: number;
+    issue?: GitHubIssue;
+    worktreePath?: string;
+    force?: boolean;
+    noComment?: boolean;
+  }
+): Promise<void> {
+  if (!protocol?.hooks?.['pre-spawn']) return;
+
+  const hooks = protocol.hooks['pre-spawn'];
+
+  // collision-check: reuses existing checkBugfixCollisions() logic
+  if (hooks['collision-check'] && context.issueNumber && context.issue && context.worktreePath) {
+    await checkBugfixCollisions(context.issueNumber, context.worktreePath, context.issue, !!context.force);
+  }
+
+  // comment-on-issue: posts comment to GitHub issue
+  if (hooks['comment-on-issue'] && context.issueNumber && !context.noComment) {
+    const message = hooks['comment-on-issue'];
+    logger.info('Commenting on issue...');
+    try {
+      await run(`gh issue comment ${context.issueNumber} --body "${message}"`);
+    } catch {
+      logger.warn('Warning: Failed to comment on issue (continuing anyway)');
+    }
   }
 }
 
@@ -391,18 +487,21 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Parse protocol from spec file metadata
-  const specContent = readFileSync(specFile, 'utf-8');
-  const protocolMatch = specContent.match(/\*\*Protocol\*\*:\s*(\w+)/i);
-  const protocol = protocolMatch ? protocolMatch[1].toUpperCase() : 'SPIDER';
-  const protocolPath = `codev/protocols/${protocol.toLowerCase()}/protocol.md`;
+  // Resolve protocol using precedence: --use-protocol > spec header > default
+  const protocol = await resolveProtocol(options, config);
+  const protocolPath = `codev/protocols/${protocol}/protocol.md`;
+
+  // Load protocol definition for potential hooks/config
+  const protocolDef = loadProtocol(config, protocol);
+
+  logger.kv('Protocol', protocol.toUpperCase());
 
   // Build the prompt
   const specRelPath = `codev/specs/${specName}.md`;
   const planRelPath = `codev/plans/${specName}.md`;
 
   let initialPrompt = `## Protocol
-Follow the ${protocol} protocol STRICTLY: ${protocolPath}
+Follow the ${protocol.toUpperCase()} protocol STRICTLY: ${protocolPath}
 Read and internalize the protocol before starting any work.
 
 ## Task
@@ -842,32 +941,48 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   const branchName = `builder/bugfix-${issueNumber}-${slug}`;
   const worktreePath = resolve(config.buildersDir, builderId);
 
+  // Resolve protocol (allows --use-protocol override)
+  const protocol = await resolveProtocol(options, config);
+  const protocolDef = loadProtocol(config, protocol);
+
   logger.kv('Title', issue.title);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
+  logger.kv('Protocol', protocol.toUpperCase());
 
-  // Check for collisions
-  await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+  // Execute pre-spawn hooks from protocol.json (collision check, issue comment)
+  // If protocol has hooks defined, use them; otherwise fall back to hardcoded behavior
+  if (protocolDef?.hooks?.['pre-spawn']) {
+    await executePreSpawnHooks(protocolDef, {
+      issueNumber,
+      issue,
+      worktreePath,
+      force: options.force,
+      noComment: options.noComment,
+    });
+  } else {
+    // Fallback: hardcoded behavior for backwards compatibility
+    await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+    if (!options.noComment) {
+      logger.info('Commenting on issue...');
+      try {
+        await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
+      } catch {
+        logger.warn('Warning: Failed to comment on issue (continuing anyway)');
+      }
+    }
+  }
 
   await ensureDirectories(config);
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Comment on the issue (unless --no-comment)
-  if (!options.noComment) {
-    logger.info('Commenting on issue...');
-    try {
-      await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
-    } catch {
-      logger.warn('Warning: Failed to comment on issue (continuing anyway)');
-    }
-  }
-
   // Build the prompt with issue context
-  const prompt = `You are a Builder working on a BUGFIX task.
+  const protocolPath = `codev/protocols/${protocol}/protocol.md`;
+  const prompt = `You are a Builder working on a ${protocol.toUpperCase()} task.
 
 ## Protocol
-Follow the BUGFIX protocol: codev/protocols/bugfix/protocol.md
+Follow the ${protocol.toUpperCase()} protocol: ${protocolPath}
 
 ## Issue #${issueNumber}
 **Title**: ${issue.title}

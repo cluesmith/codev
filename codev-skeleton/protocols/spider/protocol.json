@@ -2,8 +2,13 @@
   "$schema": "../../protocol-schema.json",
   "name": "spider",
   "alias": "spir",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "SPIR: Specify → Plan → Implement → Review with build-verify cycles",
+  "input": {
+    "type": "spec",
+    "required": false,
+    "default_for": ["--project", "-p"]
+  },
   "phases": [
     {
       "id": "specify",
@@ -137,6 +142,7 @@
     "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
   },
   "defaults": {
+    "mode": "strict",
     "max_iterations": 7,
     "verify": {
       "models": ["gemini", "codex", "claude"],

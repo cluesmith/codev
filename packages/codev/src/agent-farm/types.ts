@@ -102,9 +102,55 @@ export interface SpawnOptions {
   noComment?: boolean;  // Skip "On it" comment on issue: --no-comment
   force?: boolean;      // Override collision detection: --force
 
+  // Protocol override
+  useProtocol?: string; // Override default protocol: --use-protocol
+
   // General options
   noRole?: boolean;
   instruction?: string;
+}
+
+// =============================================================================
+// Protocol Definition Types (for protocol.json)
+// =============================================================================
+
+/**
+ * Protocol input configuration - defines what input types a protocol accepts
+ */
+export interface ProtocolInput {
+  type: 'spec' | 'github-issue' | 'task' | 'protocol' | 'shell' | 'worktree';
+  required: boolean;
+  default_for?: string[];  // CLI flags this protocol is default for, e.g., ["--issue", "-i"]
+}
+
+/**
+ * Protocol hooks - actions triggered at various points in the spawn lifecycle
+ */
+export interface ProtocolHooks {
+  'pre-spawn'?: {
+    'collision-check'?: boolean;      // Check for worktree/PR collisions
+    'comment-on-issue'?: string;      // Comment to post on GitHub issue
+  };
+}
+
+/**
+ * Protocol default settings
+ */
+export interface ProtocolDefaults {
+  mode?: 'strict' | 'soft';  // Default orchestration mode
+}
+
+/**
+ * Full protocol definition as loaded from protocol.json
+ */
+export interface ProtocolDefinition {
+  name: string;
+  version: string;
+  description: string;
+  input?: ProtocolInput;
+  hooks?: ProtocolHooks;
+  defaults?: ProtocolDefaults;
+  phases: unknown[];  // Phase structure varies by protocol
 }
 
 export interface SendOptions {

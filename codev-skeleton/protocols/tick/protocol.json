@@ -1,8 +1,12 @@
 {
   "$schema": "../../protocol-schema.json",
   "name": "tick",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Amendment workflow for existing SPIR specifications",
+  "input": {
+    "type": "spec",
+    "required": false
+  },
   "phases": [
     {
       "id": "identify",
@@ -138,6 +142,7 @@
     }
   },
   "defaults": {
+    "mode": "soft",
     "consultation": {
       "enabled": true,
       "models": ["gemini", "codex"],
