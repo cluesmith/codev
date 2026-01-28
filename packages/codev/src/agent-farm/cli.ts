@@ -117,6 +117,28 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Attach command
+  program
+    .command('attach')
+    .description('Attach to a running builder terminal')
+    .option('-p, --project <id>', 'Builder ID / project ID to attach to')
+    .option('-i, --issue <number>', 'Issue number (for bugfix builders)')
+    .option('-b, --browser', 'Open in browser instead of tmux attach')
+    .action(async (options) => {
+      const { attach } = await import('./commands/attach.js');
+      try {
+        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
+        await attach({
+          project: options.project,
+          issue,
+          browser: options.browser,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Spawn command
   program
     .command('spawn')
