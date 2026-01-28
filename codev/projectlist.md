@@ -877,9 +877,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: null
     notes: "PR #168 merged. Adds --use-protocol flag and data-driven hooks."
 
+  - id: "0084"
+    title: "Tower Mobile-Friendly UI"
+    summary: "Ensure tower dashboard is fully mobile-friendly with touch targets, responsive layout, and QR code sharing"
+    status: conceived
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: ["0081"]
+    tags: [tower, mobile, ui, v2]
+    timestamps:
+      conceived_at: "2026-01-28T10:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Tower has basic mobile CSS but needs full mobile UX audit: touch targets, responsive layout, QR sharing flow, terminal usability on small screens."
+
 ## Next Available Number
 
-**0084** - Reserve this number for your next project
+**0085** - Reserve this number for your next project
 
 ---
 
