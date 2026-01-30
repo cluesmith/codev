@@ -57,22 +57,6 @@ export const CORE_DEPENDENCIES: Dependency[] = [
     required: true,
   },
   {
-    name: 'ttyd',
-    command: 'ttyd',
-    minVersion: '1.7.0',
-    versionCmd: 'ttyd --version',
-    versionParser: (output) => {
-      // ttyd version 1.7.4-... or just 1.7.4
-      const match = output.match(/(\d+\.\d+\.\d+)/);
-      return match ? match[1] : null;
-    },
-    installHint: {
-      macos: 'brew install ttyd',
-      linux: 'Build from source: https://github.com/tsl0922/ttyd',
-    },
-    required: false, // Optional when using node-pty backend (default since 0085)
-  },
-  {
     name: 'git',
     command: 'git',
     minVersion: '2.5.0',

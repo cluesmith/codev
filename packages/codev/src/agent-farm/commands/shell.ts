@@ -2,13 +2,13 @@
  * Shell command - spawns a utility shell terminal
  *
  * When the dashboard is running, this creates a tab in the dashboard.
- * When the dashboard is not running, it spawns the terminal directly.
+ * When the dashboard is not running, it spawns the terminal directly via node-pty.
  */
 
 import type { UtilTerminal } from '../types.js';
 import { getConfig, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, commandExists, findAvailablePort, openBrowser } from '../utils/shell.js';
+import { openBrowser } from '../utils/shell.js';
 import { loadState, addUtil } from '../state.js';
 
 interface UtilOptions {
@@ -64,8 +64,7 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
     return;
   }
 
-  // Fall back to direct spawn
-  // Generate ID and name
+  // Direct spawn via node-pty REST API
   const id = generateUtilId();
   const name = options.name || `util-${id}`;
 
@@ -77,86 +76,34 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
   logger.kv('ID', id);
   logger.kv('Name', name);
 
-  // node-pty backend: create PTY session via REST API
-  if (config.terminalBackend === 'node-pty') {
-    logger.info('Using node-pty terminal backend');
-    try {
-      const dashboardPort = config.dashboardPort;
-      const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: shellCmd, args: [], cwd: config.projectRoot, cols: 200, rows: 50 }),
-      });
-
-      if (!response.ok) {
-        fatal(`Failed to create PTY session: ${response.status} ${await response.text()}`);
-      }
-
-      const result = await response.json() as { id: string };
-      const utilTerminal: UtilTerminal = {
-        id,
-        name,
-        port: 0,
-        pid: 0,
-      };
-      addUtil(utilTerminal);
-
-      logger.blank();
-      logger.success(`Utility terminal spawned via node-pty!`);
-      logger.kv('Terminal ID', result.id);
-
-      // Open dashboard (terminal is accessible via WebSocket)
-      await openBrowser(`http://localhost:${config.dashboardPort}`);
-      return;
-    } catch (error) {
-      logger.warn(`node-pty failed, falling back to ttyd: ${error}`);
-    }
-  }
-
-  // Check for ttyd
-  if (!(await commandExists('ttyd'))) {
-    fatal('ttyd not found. Install with: brew install ttyd');
-  }
-
-  // Find available port
-  const port = await findAvailablePort(config.utilPortRange[0]);
-  logger.kv('Port', port);
-
-  // Start ttyd
-  const ttydArgs = [
-    '-W',
-    '-p', String(port),
-    '-t', `titleFixed=${name}`,
-    '-t', 'fontSize=14',
-    '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-    shellCmd,
-  ];
-
-  const ttydProcess = spawnDetached('ttyd', ttydArgs, {
-    cwd: config.projectRoot,
+  // Create PTY session via REST API (node-pty backend)
+  logger.info('Creating PTY terminal session...');
+  const dashboardPort = config.dashboardPort;
+  const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: shellCmd, args: [], cwd: config.projectRoot, cols: 200, rows: 50 }),
   });
 
-  if (!ttydProcess.pid) {
-    fatal('Failed to start ttyd process for utility terminal');
+  if (!response.ok) {
+    fatal(`Failed to create PTY session: ${response.status} ${await response.text()}`);
   }
 
-  // Create util record
+  const result = await response.json() as { id: string };
   const utilTerminal: UtilTerminal = {
     id,
     name,
-    port,
-    pid: ttydProcess.pid,
+    port: 0,
+    pid: 0,
   };
-
   addUtil(utilTerminal);
 
   logger.blank();
   logger.success(`Utility terminal spawned!`);
-  logger.kv('Terminal', `http://localhost:${port}`);
+  logger.kv('Terminal ID', result.id);
 
-  // Open in browser if not using dashboard
-  const url = `http://localhost:${port}`;
-  await openBrowser(url);
+  // Open dashboard (terminal is accessible via WebSocket)
+  await openBrowser(`http://localhost:${config.dashboardPort}`);
 }
 
 /**

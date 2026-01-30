@@ -1049,7 +1049,7 @@ server.on('upgrade', async (req, socket, head) => {
 
   // Connect to target
   const proxySocket = net.connect(targetPort, '127.0.0.1', () => {
-    // Rewrite Origin header for ttyd compatibility
+    // Rewrite Origin header for WebSocket compatibility
     const headers = { ...req.headers };
     headers.origin = 'http://localhost';
     headers.host = `localhost:${targetPort}`;

@@ -164,7 +164,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // Kill ttyd process if running
+  // Kill terminal process if running
   if (builder.pid) {
     logger.info('Stopping builder terminal...');
     try {

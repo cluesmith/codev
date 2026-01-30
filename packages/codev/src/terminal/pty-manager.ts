@@ -325,7 +325,7 @@ export class TerminalManager {
       const info = await this.createSession(body as CreateTerminalRequest);
       const response = {
         ...info,
-        wsUrl: `ws://localhost:${(req.socket.address() as { port: number }).port}/ws/terminal/${info.id}`,
+        wsPath: `/ws/terminal/${info.id}`,
       };
       this.sendJson(res, 201, response);
     } catch (err) {

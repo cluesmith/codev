@@ -69,8 +69,9 @@ export class RingBuffer {
     return this.count;
   }
 
-  /** Clear the buffer. */
+  /** Clear the buffer and release memory. */
   clear(): void {
+    this.buffer = [];
     this.head = 0;
     this.count = 0;
     // Don't reset seq — it should be monotonic

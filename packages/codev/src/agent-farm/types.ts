@@ -70,7 +70,7 @@ export interface Config {
   builderPortRange: [number, number];
   utilPortRange: [number, number];
   openPortRange: [number, number];
-  terminalBackend: 'ttyd' | 'node-pty';
+  terminalBackend: 'node-pty';
 }
 
 // Session tracking for tmux
@@ -186,7 +186,7 @@ export interface UserConfig {
     dir?: string;
   };
   terminal?: {
-    backend?: 'ttyd' | 'node-pty';
+    backend?: 'node-pty';
   };
   dashboard?: {
     frontend?: 'react' | 'legacy';

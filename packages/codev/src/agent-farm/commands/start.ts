@@ -10,7 +10,7 @@ import type { StartOptions, ArchitectState } from '../types.js';
 import { version as localVersion } from '../../version.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, spawnTtyd, isProcessRunning } from '../utils/shell.js';
+import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, isProcessRunning } from '../utils/shell.js';
 import { checkCoreDependencies } from '../utils/deps.js';
 import { loadState, setArchitect } from '../state.js';
 import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan-handler.js';
@@ -322,7 +322,7 @@ export async function start(options: StartOptions = {}): Promise<void> {
   // Ensure directories exist
   await ensureDirectories(config);
 
-  // Check all core dependencies (node, tmux, ttyd, git)
+  // Check all core dependencies (node, tmux, git)
   await checkCoreDependencies();
 
   // Determine dashboard port early (needed for role prompt and server)
@@ -404,42 +404,18 @@ done
   await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
   await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
 
-  // node-pty backend: skip ttyd, the dashboard server handles terminal WebSocket
-  let architectPid: number;
+  // node-pty backend: the dashboard server handles terminal WebSocket connections
   const bindHost = options.allowInsecureRemote ? '0.0.0.0' : undefined;
 
-  if (config.terminalBackend === 'node-pty') {
-    logger.info('Using node-pty terminal backend (skipping ttyd)');
-    // Use tmux PID as architect PID for state tracking
-    const tmuxPidResult = await run(`tmux list-sessions -F '#{session_name}:#{pid}' | grep '^${sessionName}:' | cut -d: -f2`);
-    architectPid = parseInt(tmuxPidResult.stdout, 10) || 0;
-  } else {
-    // Start ttyd attached to the tmux session
-    const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-    const hasCustomIndex = existsSync(customIndexPath);
-    if (hasCustomIndex) {
-      logger.info('Using custom terminal with file click support');
-    }
-
-    if (options.allowInsecureRemote) {
-      logger.warn('   Running remotely with 0.0.0.0 is INSECURE. Anyone can access your dashboard.');
-      logger.warn('   DEPRECATED: Use `af dash start --remote user@host` for secure remote access instead.');
-      logger.warn('   This option will be removed in a future version.\n');
-    }
-
-    const ttydProcess = spawnTtyd({
-      port: architectPort,
-      sessionName,
-      cwd: config.projectRoot,
-      customIndexPath: hasCustomIndex ? customIndexPath : undefined,
-      bindHost,
-    });
-
-    if (!ttydProcess?.pid) {
-      fatal('Failed to start ttyd process');
-    }
-    architectPid = ttydProcess.pid;
+  if (options.allowInsecureRemote) {
+    logger.warn('   Running remotely with 0.0.0.0 is INSECURE. Anyone can access your dashboard.');
+    logger.warn('   DEPRECATED: Use `af dash start --remote user@host` for secure remote access instead.');
+    logger.warn('   This option will be removed in a future version.\n');
   }
+
+  // Use tmux PID as architect PID for state tracking
+  const tmuxPidResult = await run(`tmux list-sessions -F '#{session_name}:#{pid}' | grep '^${sessionName}:' | cut -d: -f2`);
+  const architectPid = parseInt(tmuxPidResult.stdout, 10) || 0;
 
   // Save architect state
   const architectState: ArchitectState = {
@@ -452,7 +428,7 @@ done
 
   setArchitect(architectState);
 
-  // Wait a moment for ttyd to start
+  // Wait a moment for tmux session to be ready
   await new Promise((resolve) => setTimeout(resolve, 500));
 
   // Start the dashboard server on the main port

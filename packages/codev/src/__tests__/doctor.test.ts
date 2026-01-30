@@ -76,7 +76,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4 - tty.js',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
           'gemini': '0.1.0',
@@ -115,7 +114,6 @@ describe('doctor command', () => {
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
         };
@@ -179,7 +177,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
         };
         return {
@@ -240,7 +237,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
         };
@@ -302,7 +298,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
         };
@@ -355,7 +350,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
         };
@@ -425,7 +419,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
         };
@@ -503,7 +496,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
           'gemini': '0.1.0',
@@ -577,7 +569,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
         };
         return {
@@ -647,7 +638,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
         };
         return {
@@ -705,7 +695,6 @@ describe('doctor command', () => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
-          'ttyd': '1.7.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
           'gemini': '0.1.0',

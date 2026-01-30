@@ -234,6 +234,11 @@ export class PtySession extends EventEmitter {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
     }
+    // Release all WebSocket clients
+    this.clients.clear();
+    // Release ring buffer memory
+    this.ringBuffer.clear();
+    // Close disk log handle
     if (this.logFd !== null) {
       try { fs.closeSync(this.logFd); } catch { /* ignore */ }
       this.logFd = null;

@@ -113,19 +113,10 @@ export async function stopAll(): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
-/** Get terminal URL for a given tab (proxied through dashboard). */
-export function getTerminalUrl(tab: { type: string; id: string; projectId?: string; utilId?: string; annotationId?: string; terminalId?: string }): string {
-  const base = getApiBase();
-  if (tab.type === 'architect') return `${base}terminal/architect`;
-  if (tab.type === 'builder') return `${base}terminal/builder-${tab.projectId}`;
-  if (tab.type === 'shell') return `${base}terminal/util-${tab.utilId}`;
-  if (tab.type === 'file') return `${base}annotation/${tab.annotationId}/`;
-  return '';
-}
-
-/** Get WebSocket URL for a node-pty terminal session. */
-export function getTerminalWsUrl(terminalId: string): string {
-  const base = getApiBase();
-  const wsBase = base.replace(/^http/, 'ws');
-  return `${wsBase}ws/terminal/${terminalId}`;
+/** Get WebSocket path for a terminal tab's node-pty session. */
+export function getTerminalWsPath(tab: { type: string; terminalId?: string }): string | null {
+  if (tab.terminalId) {
+    return `/ws/terminal/${tab.terminalId}`;
+  }
+  return null;
 }

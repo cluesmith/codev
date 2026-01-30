@@ -2,7 +2,7 @@ import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
-import { getTerminalUrl } from '../lib/api.js';
+import { getTerminalWsPath } from '../lib/api.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
 import { Terminal } from './Terminal.js';
@@ -14,6 +14,12 @@ export function App() {
   const { state, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+
+  const renderTerminal = (tab: { type: string; terminalId?: string }) => {
+    const wsPath = getTerminalWsPath(tab);
+    if (!wsPath) return <div className="no-terminal">No terminal session</div>;
+    return <Terminal wsPath={wsPath} />;
+  };
 
   const renderContent = () => {
     if (!activeTab) return null;
@@ -27,7 +33,7 @@ export function App() {
       case 'builder':
       case 'shell':
       case 'file':
-        return <Terminal src={getTerminalUrl(activeTab)} />;
+        return renderTerminal(activeTab);
       default:
         return <div>Unknown tab type</div>;
     }
@@ -49,7 +55,7 @@ export function App() {
   // Desktop: architect terminal on left, tabbed content on right
   const architectTab = tabs.find(t => t.type === 'architect');
   const leftPane = architectTab
-    ? <Terminal src={getTerminalUrl(architectTab)} />
+    ? renderTerminal(architectTab)
     : <div className="no-architect">No architect terminal</div>;
 
   return (

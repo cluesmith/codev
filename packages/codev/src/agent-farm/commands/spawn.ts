@@ -14,7 +14,7 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Builder, Config, BuilderType, ProtocolDefinition } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell.js';
+import { run, commandExists, findAvailablePort } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 
@@ -491,10 +491,6 @@ async function checkDependencies(): Promise<void> {
   if (!(await commandExists('git'))) {
     fatal('git not found');
   }
-
-  if (!(await commandExists('ttyd'))) {
-    fatal('ttyd not found. Install with: brew install ttyd');
-  }
 }
 
 /**
@@ -572,7 +568,7 @@ async function createPtySession(
 }
 
 /**
- * Start tmux session and ttyd for a builder
+ * Start a terminal session for a builder
  */
 async function startBuilderSession(
   config: Config,
@@ -627,61 +623,20 @@ done
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
-  // node-pty backend: create PTY session via REST API instead of tmux+ttyd
-  if (config.terminalBackend === 'node-pty') {
-    logger.info('Using node-pty terminal backend');
-    try {
-      const { terminalId } = await createPtySession(
-        config,
-        '/bin/bash',
-        [scriptPath],
-        worktreePath,
-      );
-      logger.info(`Terminal session created: ${terminalId}`);
-      // Return port=0 and pid=0 since PTY is managed by dashboard server
-      return { port: 0, pid: 0, sessionName, terminalId };
-    } catch (error) {
-      logger.warn(`node-pty session creation failed, falling back to ttyd: ${error}`);
-    }
-  }
-
-  // Create tmux session running the script
-  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${scriptPath}"`);
-  await run(`tmux set-option -t "${sessionName}" status off`);
-
-  // Enable mouse scrolling in tmux
-  await run('tmux set -g mouse on');
-  await run('tmux set -g set-clipboard on');
-  await run('tmux set -g allow-passthrough on');
-
-  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
-  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-
-  // Start ttyd connecting to the tmux session
-  logger.info('Starting builder terminal...');
-  const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-  const hasCustomIndex = existsSync(customIndexPath);
-  if (hasCustomIndex) {
-    logger.info('Using custom terminal with file click support');
-  }
-
-  const ttydProcess = spawnTtyd({
-    port,
-    sessionName,
-    cwd: worktreePath,
-    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
-  });
-
-  if (!ttydProcess?.pid) {
-    fatal('Failed to start ttyd process for builder');
-  }
-
-  return { port, pid: ttydProcess.pid, sessionName };
+  // Create PTY session via REST API (node-pty backend)
+  logger.info('Creating PTY terminal session...');
+  const { terminalId } = await createPtySession(
+    config,
+    '/bin/bash',
+    [scriptPath],
+    worktreePath,
+  );
+  logger.info(`Terminal session created: ${terminalId}`);
+  return { port: 0, pid: 0, sessionName, terminalId };
 }
 
 /**
- * Start a shell session (no worktree, just tmux + ttyd)
+ * Start a shell session (no worktree, just node-pty)
  */
 async function startShellSession(
   config: Config,
@@ -691,55 +646,16 @@ async function startShellSession(
   const port = await findFreePort(config);
   const sessionName = `shell-${shellId}`;
 
-  // node-pty backend: create PTY session via REST API
-  if (config.terminalBackend === 'node-pty') {
-    logger.info('Using node-pty terminal backend for shell');
-    try {
-      const { terminalId } = await createPtySession(
-        config,
-        '/bin/bash',
-        ['-c', baseCmd],
-        config.projectRoot,
-      );
-      logger.info(`Shell terminal session created: ${terminalId}`);
-      return { port: 0, pid: 0, sessionName, terminalId };
-    } catch (error) {
-      logger.warn(`node-pty session creation failed, falling back to ttyd: ${error}`);
-    }
-  }
-
-  logger.info('Creating tmux session...');
-
-  // Shell mode: just launch Claude with no prompt
-  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${config.projectRoot}" "${baseCmd}"`);
-  await run(`tmux set-option -t "${sessionName}" status off`);
-
-  // Enable mouse scrolling in tmux
-  await run('tmux set -g mouse on');
-  await run('tmux set -g set-clipboard on');
-  await run('tmux set -g allow-passthrough on');
-
-  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
-  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-
-  // Start ttyd connecting to the tmux session
-  logger.info('Starting shell terminal...');
-  const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-  const hasCustomIndex = existsSync(customIndexPath);
-
-  const ttydProcess = spawnTtyd({
-    port,
-    sessionName,
-    cwd: config.projectRoot,
-    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
-  });
-
-  if (!ttydProcess?.pid) {
-    fatal('Failed to start ttyd process for shell');
-  }
-
-  return { port, pid: ttydProcess.pid, sessionName };
+  // Create PTY session via REST API (node-pty backend)
+  logger.info('Creating PTY terminal session for shell...');
+  const { terminalId } = await createPtySession(
+    config,
+    '/bin/bash',
+    ['-c', baseCmd],
+    config.projectRoot,
+  );
+  logger.info(`Shell terminal session created: ${terminalId}`);
+  return { port: 0, pid: 0, sessionName, terminalId };
 }
 
 // =============================================================================
@@ -1113,69 +1029,21 @@ done
 
   writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
 
-  // Create tmux session running the launch script
-  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${scriptPath}"`);
-  await run(`tmux set-option -t "${sessionName}" status off`);
-
-  // Enable mouse scrolling in tmux
-  await run('tmux set -g mouse on');
-  await run('tmux set -g set-clipboard on');
-  await run('tmux set -g allow-passthrough on');
-
-  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
-  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
-
-  // node-pty backend: create PTY session via REST API
-  let worktreePid = 0;
-  let worktreeTerminalId: string | undefined;
-
-  if (config.terminalBackend === 'node-pty') {
-    logger.info('Using node-pty terminal backend for worktree');
-    try {
-      const dashboardPort = config.dashboardPort;
-      const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: '/bin/bash', args: [scriptPath], cwd: worktreePath, cols: 200, rows: 50 }),
-      });
-      if (response.ok) {
-        const result = await response.json() as { id: string };
-        worktreeTerminalId = result.id;
-        logger.info(`Worktree terminal session created: ${worktreeTerminalId}`);
-      }
-    } catch (error) {
-      logger.warn(`node-pty failed, falling back to ttyd: ${error}`);
-    }
-  }
-
-  if (!worktreeTerminalId) {
-    // Start ttyd connecting to the tmux session
-    logger.info('Starting worktree terminal...');
-    const customIndexPath = resolve(config.codevDir, 'templates', 'ttyd-index.html');
-    const hasCustomIndex = existsSync(customIndexPath);
-    if (hasCustomIndex) {
-      logger.info('Using custom terminal with file click support');
-    }
-
-    const ttydProcess = spawnTtyd({
-      port,
-      sessionName,
-      cwd: worktreePath,
-      customIndexPath: hasCustomIndex ? customIndexPath : undefined,
-    });
-
-    if (!ttydProcess?.pid) {
-      fatal('Failed to start ttyd process for worktree');
-    }
-    worktreePid = ttydProcess.pid;
-  }
+  // Create PTY session via REST API (node-pty backend)
+  logger.info('Creating PTY terminal session for worktree...');
+  const { terminalId: worktreeTerminalId } = await createPtySession(
+    config,
+    '/bin/bash',
+    [scriptPath],
+    worktreePath,
+  );
+  logger.info(`Worktree terminal session created: ${worktreeTerminalId}`);
 
   const builder: Builder = {
     id: builderId,
     name: 'Worktree session',
-    port: worktreeTerminalId ? 0 : port,
-    pid: worktreePid,
+    port: 0,
+    pid: 0,
     status: 'spawning',
     phase: 'interactive',
     worktree: worktreePath,
@@ -1189,7 +1057,7 @@ done
 
   logger.blank();
   logger.success(`Worktree ${builderId} spawned!`);
-  logger.kv('Terminal', worktreeTerminalId ? `node-pty:${worktreeTerminalId}` : `http://localhost:${port}`);
+  logger.kv('Terminal', `node-pty:${worktreeTerminalId}`);
 }
 
 /**
