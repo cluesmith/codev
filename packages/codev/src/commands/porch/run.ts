@@ -100,7 +100,6 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
   let state = readState(statusPath);
   const singleIteration = options.singleIteration || false;
   const singlePhase = options.singlePhase || false;
-  const startPhase = state.phase;  // Track starting phase for --single-phase
 
   // Ensure project artifacts directory exists
   const porchDir = getPorchDir(projectRoot, state);
@@ -255,6 +254,13 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
 
         // Some reviewers requested changes
         console.log(chalk.yellow('\nChanges requested. Feeding back to Claude...'));
+
+        // --single-phase: return control to Builder with iterating status
+        if (singlePhase) {
+          console.log(chalk.dim(`\n[--single-phase] Changes requested. Returning control to Builder.`));
+          outputSinglePhaseResult(state, 'iterating', undefined, reviews);
+          return;
+        }
 
         if (state.iteration >= maxIterations) {
           // Max iterations reached without unanimity - summarize and interrupt user
@@ -443,6 +449,9 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     } else if (!result.success) {
       console.log(chalk.red('\nWorker failed.'));
       console.log(chalk.dim(`Check output: ${outputPath}`));
+      if (singlePhase) {
+        outputSinglePhaseResult(state, 'failed');
+      }
       return;
     }
   }
@@ -879,7 +888,7 @@ function getArtifactForPhase(state: ProjectState): string | null {
  */
 function outputSinglePhaseResult(
   state: ProjectState,
-  status: 'advanced' | 'gate_needed' | 'verified' | 'iterating',
+  status: 'advanced' | 'gate_needed' | 'verified' | 'iterating' | 'failed',
   gateName?: string,
   reviews?: ReviewResult[]
 ): void {

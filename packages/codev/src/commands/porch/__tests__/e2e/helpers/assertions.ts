@@ -7,21 +7,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { expect } from 'vitest';
-import type { TestContext } from './setup.js';
+import { getTestProjectState, type TestContext } from './setup.js';
 
 /**
  * Assert that a spec file was created for the test project.
  */
 export function assertSpecExists(ctx: TestContext): void {
-  const specPattern = path.join(
-    ctx.tempDir,
-    'codev',
-    'specs',
-    `${ctx.projectId}-*.md`
-  );
-
-  const { globSync } = require('glob');
-  const matches = globSync(specPattern);
+  const specsDir = path.join(ctx.tempDir, 'codev', 'specs');
+  const files = fs.readdirSync(specsDir);
+  const matches = files.filter(f => f.startsWith(`${ctx.projectId}-`) && f.endsWith('.md'));
 
   expect(matches.length).toBeGreaterThan(0);
 }
@@ -30,15 +24,9 @@ export function assertSpecExists(ctx: TestContext): void {
  * Assert that a plan file was created for the test project.
  */
 export function assertPlanExists(ctx: TestContext): void {
-  const planPattern = path.join(
-    ctx.tempDir,
-    'codev',
-    'plans',
-    `${ctx.projectId}-*.md`
-  );
-
-  const { globSync } = require('glob');
-  const matches = globSync(planPattern);
+  const plansDir = path.join(ctx.tempDir, 'codev', 'plans');
+  const files = fs.readdirSync(plansDir);
+  const matches = files.filter(f => f.startsWith(`${ctx.projectId}-`) && f.endsWith('.md'));
 
   expect(matches.length).toBeGreaterThan(0);
 }
@@ -74,7 +62,6 @@ export function assertReviewFilesExist(
  * Assert that porch state is at a specific phase.
  */
 export function assertPhase(ctx: TestContext, expectedPhase: string): void {
-  const { getTestProjectState } = require('./setup.js');
   const state = getTestProjectState(ctx);
 
   expect(state).not.toBeNull();
@@ -85,7 +72,6 @@ export function assertPhase(ctx: TestContext, expectedPhase: string): void {
  * Assert that a gate is pending.
  */
 export function assertGatePending(ctx: TestContext, gateName: string): void {
-  const { getTestProjectState } = require('./setup.js');
   const state = getTestProjectState(ctx);
 
   expect(state).not.toBeNull();
@@ -96,7 +82,6 @@ export function assertGatePending(ctx: TestContext, gateName: string): void {
  * Assert that a gate was approved.
  */
 export function assertGateApproved(ctx: TestContext, gateName: string): void {
-  const { getTestProjectState } = require('./setup.js');
   const state = getTestProjectState(ctx);
 
   expect(state).not.toBeNull();
@@ -107,7 +92,6 @@ export function assertGateApproved(ctx: TestContext, gateName: string): void {
  * Assert iteration count.
  */
 export function assertIteration(ctx: TestContext, expectedIteration: number): void {
-  const { getTestProjectState } = require('./setup.js');
   const state = getTestProjectState(ctx);
 
   expect(state).not.toBeNull();
@@ -118,7 +102,6 @@ export function assertIteration(ctx: TestContext, expectedIteration: number): vo
  * Assert history has entries (feedback loop worked).
  */
 export function assertHistoryNotEmpty(ctx: TestContext): void {
-  const { getTestProjectState } = require('./setup.js');
   const state = getTestProjectState(ctx);
 
   expect(state).not.toBeNull();

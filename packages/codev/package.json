@@ -20,7 +20,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && npm run build:dashboard && npm run copy-skeleton",
-    "build:dashboard": "cd dashboard && npm run build",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
     "dev:dashboard": "cd dashboard && npm run dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",

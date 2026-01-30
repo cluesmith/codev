@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { exec as execCallback } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as yaml from 'js-yaml';
 
 const exec = promisify(execCallback);
 
@@ -136,7 +137,6 @@ export function getTestProjectState(ctx: TestContext): Record<string, unknown> |
     return null;
   }
 
-  const yaml = require('js-yaml');
   const content = fs.readFileSync(statusPath, 'utf-8');
   return yaml.load(content) as Record<string, unknown>;
 }

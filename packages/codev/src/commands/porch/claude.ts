@@ -66,8 +66,18 @@ export async function buildWithSDK(
           if (block.type === 'text') {
             output += block.text + '\n';
             fs.appendFileSync(outputPath, block.text + '\n');
+          } else if (block.type === 'tool_use') {
+            const toolLine = `\n[tool: ${block.name}](${JSON.stringify(block.input).substring(0, 200)})\n`;
+            output += toolLine;
+            fs.appendFileSync(outputPath, toolLine);
           }
         }
+      }
+
+      // Capture tool progress for observability
+      if (message.type === 'tool_progress') {
+        const progressLine = `[tool_progress] ${JSON.stringify(message).substring(0, 500)}\n`;
+        fs.appendFileSync(outputPath, progressLine);
       }
 
       // Capture result

@@ -185,6 +185,103 @@ export async function runPorchWithAutoApprove(
 /**
  * Run a single porch iteration (for testing specific phases).
  */
+/**
+ * Parsed result from __PORCH_RESULT__ JSON output.
+ */
+export interface SinglePhaseResult {
+  phase: string;
+  plan_phase: string | null;
+  iteration: number;
+  status: 'advanced' | 'gate_needed' | 'verified' | 'iterating';
+  gate: string | null;
+  verdicts?: Record<string, string>;
+  artifact?: string;
+}
+
+/**
+ * Run porch in --single-phase mode (Builder/Enforcer pattern).
+ * Returns the structured result JSON.
+ */
+export async function runPorchSinglePhase(
+  ctx: TestContext,
+  timeoutMs: number = 600000
+): Promise<RunResult & { singlePhaseResult: SinglePhaseResult | null }> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let hitGate: string | null = null;
+    let timedOut = false;
+    let singlePhaseResult: SinglePhaseResult | null = null;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      porch.kill('SIGTERM');
+    }, timeoutMs);
+
+    const porchBin = path.resolve(__dirname, '../../../../../bin/porch.js');
+
+    const porch = spawn('node', [porchBin, 'run', ctx.projectId, '--single-phase'], {
+      cwd: ctx.tempDir,
+      env: {
+        ...process.env,
+        PORCH_AUTO_APPROVE: 'false',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    porch.stdout.on('data', (data) => {
+      const text = data.toString();
+      stdout += text;
+
+      // Parse __PORCH_RESULT__ JSON
+      const resultMatch = text.match(/__PORCH_RESULT__({.*})/);
+      if (resultMatch) {
+        try {
+          singlePhaseResult = JSON.parse(resultMatch[1]);
+        } catch { /* ignore parse errors */ }
+      }
+
+      const gateMatch = text.match(/GATE:\s*(\S+)/);
+      if (gateMatch) {
+        hitGate = gateMatch[1];
+      }
+    });
+
+    porch.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    porch.on('close', (code) => {
+      clearTimeout(timeout);
+      resolve({
+        exitCode: code,
+        stdout,
+        stderr,
+        hitGate,
+        completed: false,
+        timedOut,
+        singlePhaseResult,
+      });
+    });
+
+    porch.on('error', (err) => {
+      clearTimeout(timeout);
+      resolve({
+        exitCode: -1,
+        stdout,
+        stderr: stderr + '\n' + err.message,
+        hitGate: null,
+        completed: false,
+        timedOut: false,
+        singlePhaseResult: null,
+      });
+    });
+  });
+}
+
+/**
+ * Run a single porch iteration (for testing specific phases).
+ */
 export async function runPorchOnce(
   ctx: TestContext,
   timeoutMs: number = 300000 // 5 minutes
