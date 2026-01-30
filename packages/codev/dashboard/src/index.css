@@ -1,0 +1,343 @@
+/* Agent Farm Dashboard - React Edition */
+/* Based on existing vanilla CSS variables from Spec 0060 */
+
+:root {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #252525;
+  --bg-tertiary: #2a2a2a;
+  --bg-hover: #333333;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #666666;
+  --border-color: #333333;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --status-active: #22c55e;
+  --status-waiting: #eab308;
+  --status-error: #ef4444;
+  --status-implementing: #f97316;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* App layout */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.header-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.app-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Split pane */
+.split-pane {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+.split-left, .split-right {
+  height: 100%;
+  overflow: hidden;
+}
+
+.split-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--border-color);
+  flex-shrink: 0;
+}
+
+.split-handle:hover {
+  background: var(--accent);
+}
+
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Tab bar */
+.tab-bar {
+  display: flex;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  flex-shrink: 0;
+  height: 34px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab-active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.tab-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.5;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+/* Tab content */
+.tab-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Terminal iframe */
+.terminal-iframe {
+  display: block;
+}
+
+/* Status panel */
+.status-panel {
+  padding: 16px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.status-section {
+  margin-bottom: 24px;
+}
+
+.section-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-small {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-small:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.empty-message {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.item-list {
+  list-style: none;
+}
+
+.item-entry {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 4px;
+}
+
+.item-entry:hover {
+  background: var(--bg-hover);
+}
+
+/* Builder card */
+.builder-card {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.builder-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.builder-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.builder-meta {
+  margin-top: 4px;
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* File tree */
+.file-tree {
+  padding: 8px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.file-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.file-node:hover {
+  background: var(--bg-hover);
+}
+
+.file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-error, .file-tree-loading {
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Status bar (footer) */
+.status-bar {
+  display: flex;
+  gap: 16px;
+  padding: 4px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  height: 24px;
+  align-items: center;
+}
+
+.no-architect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Mobile layout */
+.mobile-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.mobile-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    padding: 6px 12px;
+  }
+
+  .tab {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}

@@ -154,6 +154,31 @@ function loadTerminalBackend(): 'ttyd' | 'node-pty' {
 }
 
 const terminalBackend = loadTerminalBackend();
+
+// Load dashboard frontend preference from config (Spec 0085)
+function loadDashboardFrontend(): 'react' | 'legacy' {
+  const configPath = path.resolve(projectRoot, 'codev', 'config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      return config?.dashboard?.frontend ?? 'legacy';
+    } catch { /* ignore */ }
+  }
+  return 'legacy';
+}
+
+const dashboardFrontend = loadDashboardFrontend();
+
+// React dashboard dist path (built by Vite)
+const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
+const useReactDashboard = dashboardFrontend === 'react' && fs.existsSync(reactDashboardPath);
+if (useReactDashboard) {
+  console.log('Dashboard frontend: React');
+} else if (dashboardFrontend === 'react') {
+  console.log('Dashboard frontend: React (dist not found, falling back to legacy)');
+} else {
+  console.log('Dashboard frontend: legacy');
+}
 let terminalManager: TerminalManager | null = null;
 
 if (terminalBackend === 'node-pty') {
@@ -2301,8 +2326,53 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Serve dashboard
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    // Serve dashboard (Spec 0085: React or legacy based on config)
+    if (useReactDashboard && req.method === 'GET') {
+      // Serve React dashboard static files
+      const filePath = url.pathname === '/' || url.pathname === '/index.html'
+        ? path.join(reactDashboardPath, 'index.html')
+        : path.join(reactDashboardPath, url.pathname);
+
+      // Security: Prevent path traversal
+      const resolved = path.resolve(filePath);
+      if (!resolved.startsWith(reactDashboardPath)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden');
+        return;
+      }
+
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        const ext = path.extname(resolved);
+        const mimeTypes: Record<string, string> = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript',
+          '.css': 'text/css',
+          '.json': 'application/json',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.ico': 'image/x-icon',
+          '.map': 'application/json',
+        };
+        const contentType = mimeTypes[ext] ?? 'application/octet-stream';
+        // Cache static assets (hashed filenames) but not index.html
+        if (ext !== '.html') {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+        res.writeHead(200, { 'Content-Type': contentType });
+        fs.createReadStream(resolved).pipe(res);
+        return;
+      }
+
+      // SPA fallback: serve index.html for client-side routing
+      if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/') && !url.pathname.startsWith('/terminal/') && !url.pathname.startsWith('/annotation/')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        fs.createReadStream(path.join(reactDashboardPath, 'index.html')).pipe(res);
+        return;
+      }
+    }
+
+    if (!useReactDashboard && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      // Legacy vanilla JS dashboard
       try {
         let template = fs.readFileSync(templatePath, 'utf-8');
         const state = loadStateWithCleanup();
