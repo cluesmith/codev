@@ -41,6 +41,7 @@ import {
   getArchitect,
 } from '../state.js';
 import { spawnTtyd } from '../utils/shell.js';
+import { TerminalManager } from '../../terminal/pty-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,6 +139,39 @@ function findTemplatePath(filename: string, required = false): string | null {
 const projectRoot = findProjectRoot();
 // Use modular dashboard template (Spec 0060)
 const templatePath = findTemplatePath('dashboard/index.html', true);
+
+// Initialize node-pty terminal manager (Spec 0085)
+// Reads terminal.backend from codev/config.json; defaults to 'ttyd' during migration
+function loadTerminalBackend(): 'ttyd' | 'node-pty' {
+  const configPath = path.resolve(projectRoot, 'codev', 'config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      return config?.terminal?.backend ?? 'ttyd';
+    } catch { /* ignore */ }
+  }
+  return 'ttyd';
+}
+
+const terminalBackend = loadTerminalBackend();
+let terminalManager: TerminalManager | null = null;
+
+if (terminalBackend === 'node-pty') {
+  terminalManager = new TerminalManager({ projectRoot });
+  console.log('Terminal backend: node-pty');
+  // Log telemetry
+  const metricsPath = path.join(projectRoot, '.agent-farm', 'metrics.log');
+  try {
+    fs.mkdirSync(path.dirname(metricsPath), { recursive: true });
+    fs.appendFileSync(metricsPath, JSON.stringify({
+      event: 'backend_selected',
+      backend: 'node-pty',
+      timestamp: new Date().toISOString(),
+    }) + '\n');
+  } catch { /* ignore */ }
+} else {
+  console.log('Terminal backend: ttyd');
+}
 
 // Clean up dead processes from state (called on state load)
 function cleanupDeadProcesses(): void {
@@ -1287,6 +1321,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${port}`);
 
   try {
+    // Spec 0085: node-pty terminal manager REST API routes
+    if (terminalManager && url.pathname.startsWith('/api/terminals')) {
+      if (terminalManager.handleRequest(req, res)) {
+        return;
+      }
+    }
+
     // API: Get state
     if (req.method === 'GET' && url.pathname === '/api/state') {
       const state = loadStateWithCleanup();
@@ -2296,6 +2337,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Spec 0085: Attach node-pty WebSocket handler for /ws/terminal/:id routes
+if (terminalManager) {
+  terminalManager.attachWebSocket(server);
+}
+
 // WebSocket upgrade handler for terminal proxy (Spec 0062)
 // ttyd uses WebSocket for bidirectional terminal communication
 server.on('upgrade', (req, socket, head) => {
@@ -2376,3 +2422,18 @@ if (bindHost) {
     console.log(`Dashboard: http://localhost:${port}`);
   });
 }
+
+// Spec 0085: Graceful shutdown for node-pty terminal manager
+process.on('SIGTERM', () => {
+  if (terminalManager) {
+    terminalManager.shutdown();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  if (terminalManager) {
+    terminalManager.shutdown();
+  }
+  process.exit(0);
+});

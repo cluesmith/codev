@@ -182,6 +182,12 @@ export interface UserConfig {
   roles?: {
     dir?: string;
   };
+  terminal?: {
+    backend?: 'ttyd' | 'node-pty';
+  };
+  dashboard?: {
+    frontend?: 'react' | 'legacy';
+  };
 }
 
 /**
