@@ -55,13 +55,21 @@ export function findPlanFile(projectRoot: string, projectId: string, projectName
  * Extract phases from plan markdown content
  * Returns phases with status 'pending'
  *
- * Looks for a JSON code block:
+ * Supports two formats:
+ *
+ * 1. JSON code block:
  * ```json
  * {"phases": [{"id": "phase_1", "title": "..."}, ...]}
  * ```
+ *
+ * 2. Markdown headers (fallback):
+ * ## Phase 1: Core Types
+ * ## Phase 2: State Management
+ *
+ * Also matches "---" separated sections with "## Phase N:" headers.
  */
 export function extractPlanPhases(planContent: string): PlanPhase[] {
-  // Look for JSON code block with phases
+  // First, try JSON code block with phases
   const jsonMatch = planContent.match(/```json\s*\n([\s\S]*?)\n```/);
 
   if (jsonMatch) {
@@ -75,12 +83,31 @@ export function extractPlanPhases(planContent: string): PlanPhase[] {
         }));
       }
     } catch (e) {
-      // JSON parse failed, fall through to default
+      // JSON parse failed, fall through to markdown parsing
       console.warn('Failed to parse phases JSON from plan:', e);
     }
   }
 
-  // No JSON block found - return single default phase
+  // Second, try markdown headers: "## Phase N: Title" or "### Phase N: Title"
+  const phaseHeaderRegex = /^#{2,3}\s+Phase\s+(\d+):\s*(.+)$/gm;
+  const phases: PlanPhase[] = [];
+  let match;
+
+  while ((match = phaseHeaderRegex.exec(planContent)) !== null) {
+    const phaseNum = match[1];
+    const title = match[2].trim();
+    phases.push({
+      id: `phase_${phaseNum}`,
+      title,
+      status: phases.length === 0 ? 'in_progress' as const : 'pending' as const,
+    });
+  }
+
+  if (phases.length > 0) {
+    return phases;
+  }
+
+  // No phases found - return single default phase
   return [{
     id: 'phase_1',
     title: 'Implementation',
@@ -174,6 +201,8 @@ export function advancePlanPhase(
 
 /**
  * Get phase content from plan (the text under the phase header)
+ * Matches both ## and ### phase headers, and terminates at the next
+ * phase header of same or higher level, or a "---" separator.
  */
 export function getPhaseContent(planContent: string, phaseId: string): string | null {
   // Extract phase number from id
@@ -181,8 +210,10 @@ export function getPhaseContent(planContent: string, phaseId: string): string | 
   if (!numMatch) return null;
 
   const phaseNum = numMatch[1];
+  // Match ## or ### Phase N: Title
+  // Content ends at: next phase header (## or ### Phase), a --- separator, or end of file
   const regex = new RegExp(
-    `###\\s*Phase\\s+${phaseNum}:\\s*[^\\n]+\\n([\\s\\S]*?)(?=\\n###\\s*Phase|\\n##\\s|$)`,
+    `#{2,3}\\s*Phase\\s+${phaseNum}:\\s*[^\\n]+\\n([\\s\\S]*?)(?=\\n#{2,3}\\s*Phase\\s+\\d|\\n---\\s*\\n|$)`,
     'i'
   );
 

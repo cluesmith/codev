@@ -11,9 +11,16 @@ Write clean, well-structured code AND tests that implement the current plan phas
 - **Project ID**: {{project_id}}
 - **Project Title**: {{title}}
 - **Current State**: {{current_state}}
-- **Plan Phase**: {{plan_phase}} (if applicable)
-- **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
-- **Plan File**: `codev/plans/{{project_id}}-{{title}}.md`
+- **Plan Phase**: {{plan_phase_id}} - {{plan_phase_title}}
+
+## ⚠️ SCOPE RESTRICTION — READ THIS FIRST
+
+**You are implementing ONLY the current plan phase: {{plan_phase_id}} ({{plan_phase_title}}).**
+
+- **DO NOT** implement other phases. Other phases will be handled in subsequent porch iterations.
+- **DO NOT** read the full plan file and implement everything you see.
+- The plan phase details are included below under "Current Plan Phase Details". That is your ONLY scope.
+- If you need to reference the spec for requirements, read `codev/specs/{{project_id}}-*.md` but ONLY implement what the current phase requires.
 
 ## What Happens After You Finish
 

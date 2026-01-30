@@ -75,6 +75,16 @@ FOR EACH PHASE:
 3. For each phase: spawn → review → loop if needed → next
 4. Create PR
 
+**Pre-approved artifact skip:** Porch always runs the full protocol from phase 1. But if a `build_verify` phase's artifact (spec or plan) already exists with YAML frontmatter marking it as `approved` and `validated`, porch skips that phase as a no-op and auto-approves the gate. This lets the architect prepare specs/plans before spawning a builder without porch re-doing that work.
+
+Frontmatter format:
+```yaml
+---
+approved: 2026-01-29
+validated: [gemini, codex, claude]
+---
+```
+
 **Claude's job (per spawn):**
 - Freeform work within the defined scope
 - Emit one signal when done

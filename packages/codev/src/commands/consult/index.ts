@@ -486,35 +486,15 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 }
 
 /**
- * Get git diff of uncommitted changes (staged + unstaged)
- */
-function getGitDiff(): string {
-  try {
-    // Get both staged and unstaged changes
-    const diff = execSync('git diff HEAD', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
-    return diff || '(no changes detected)';
-  } catch {
-    return '(unable to get git diff)';
-  }
-}
-
-/**
  * Build query for implementation review
  */
 function buildImplQuery(projectNumber: number, projectRoot: string): string {
   const specPath = findSpec(projectRoot, projectNumber);
   const planPath = findPlan(projectRoot, projectNumber);
 
-  // Get the git diff
-  const rawDiff = getGitDiff();
-
-  // Truncate diff if too large (keep first 50k chars)
-  const maxDiffSize = 50000;
-  const diff = rawDiff.length > maxDiffSize
-    ? rawDiff.substring(0, maxDiffSize) + '\n\n... (diff truncated, ' + rawDiff.length + ' chars total)'
-    : rawDiff;
-
   let query = `Review Implementation for Project ${projectNumber}
+
+You are in the project working directory. Read the files directly from the filesystem to review the implementation.
 
 ## Context Files
 `;
@@ -527,14 +507,11 @@ function buildImplQuery(projectNumber: number, projectRoot: string): string {
   }
 
   query += `
-## Code Changes (git diff HEAD)
-\`\`\`diff
-${diff}
-\`\`\`
+## Instructions
 
----
+Read the spec and plan files above, then explore the source code to review the implementation. You have full filesystem access — read whatever files you need.
 
-Please review the implementation:
+Please review:
 1. **Spec Adherence**: Does the code fulfill the spec requirements?
 2. **Code Quality**: Is the code readable, maintainable, and bug-free?
 3. **Test Coverage**: Are there adequate tests for the changes?

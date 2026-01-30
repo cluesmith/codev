@@ -20,6 +20,38 @@ import { runRepl } from './repl.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 import { notifyGateHit, notifyBlocked } from '../../agent-farm/utils/notifications.js';
+import { globSync } from 'node:fs';
+
+/**
+ * Check if an artifact file has YAML frontmatter indicating it was
+ * already approved and validated (3-way review).
+ *
+ * Frontmatter format:
+ * ---
+ * approved: 2026-01-29
+ * validated: [gemini, codex, claude]
+ * ---
+ */
+function isArtifactPreApproved(projectRoot: string, artifactGlob: string): boolean {
+  // Resolve glob pattern (e.g., "codev/specs/0085-*.md")
+  const matches = globSync(artifactGlob, { cwd: projectRoot });
+  if (matches.length === 0) return false;
+
+  const filePath = path.join(projectRoot, matches[0]);
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    // Check for YAML frontmatter with approved and validated fields
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!frontmatterMatch) return false;
+
+    const frontmatter = frontmatterMatch[1];
+    const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
+    const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
+    return hasApproved && hasValidated;
+  } catch {
+    return false;
+  }
+}
 
 // Runtime artifacts go in project directory, not a hidden folder
 function getPorchDir(projectRoot: string, state: ProjectState): string {
@@ -102,9 +134,37 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       continue;
     }
 
+    // Gate approved → advance to next phase
+    if (gateName && state.gates[gateName]?.status === 'approved') {
+      const { done } = await import('./index.js');
+      await done(projectRoot, state.id);
+      continue;
+    }
+
     // Handle build_verify phases
     if (isBuildVerify(protocol, state.phase)) {
       const maxIterations = getMaxIterations(protocol, state.phase);
+
+      // Check if artifact already exists and was pre-approved + validated
+      // (e.g., spec/plan created by architect before builder was spawned)
+      if (!state.build_complete && state.iteration === 1) {
+        const buildConfig = getBuildConfig(protocol, state.phase);
+        if (buildConfig?.artifact) {
+          const artifactGlob = buildConfig.artifact.replace('${PROJECT_ID}', state.id);
+          if (isArtifactPreApproved(projectRoot, artifactGlob)) {
+            console.log(chalk.green(`[${state.id}] ${phaseConfig.name}: artifact exists with approval metadata - skipping build+verify`));
+
+            // Auto-approve gate and advance
+            if (gateName) {
+              state.gates[gateName] = { status: 'approved', approved_at: new Date().toISOString() };
+              writeState(statusPath, state);
+            }
+            const { done } = await import('./index.js');
+            await done(projectRoot, state.id);
+            continue;
+          }
+        }
+      }
 
       // Check if we need to run VERIFY (build just completed)
       if (state.build_complete) {

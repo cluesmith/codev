@@ -70,6 +70,8 @@ Build-verify phases are the core pattern in SPIDER v2. Porch orchestrates:
 3. **ITERATE**: If any REQUEST_CHANGES, feed feedback back to Claude
 4. **COMPLETE**: When all APPROVE (or max iterations), commit + push + gate
 
+**Pre-approved artifact skip**: If a `build_verify` artifact already exists with YAML frontmatter (`approved: <date>`, `validated: [models...]`), porch skips that phase entirely and auto-approves the gate. This allows architects to prepare specs/plans before spawning a builder.
+
 ```json
 {
   "id": "specify",

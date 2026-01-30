@@ -141,6 +141,17 @@ Key locations:
 
 AI agents must stop at `conceived` after writing a spec, and stop at `committed` after merging.
 
+**🚨 CRITICAL: Approved specs/plans need YAML frontmatter and must be committed to `main`.**
+When the architect creates and approves a spec or plan before spawning a builder, it must have YAML frontmatter marking it as approved and validated, and be committed to `main`. Porch always runs the full protocol from `specify` — but when it finds an existing artifact with this metadata, it skips that phase as a no-op. If no spec/plan exists, porch drives the builder to create one.
+
+Frontmatter format:
+```yaml
+---
+approved: 2026-01-29
+validated: [gemini, codex, claude]
+---
+```
+
 ## Agent Responsiveness
 
 **Responsiveness is paramount.** The user should never wait for you. Use `run_in_background: true` for any operation that takes more than ~5 seconds.

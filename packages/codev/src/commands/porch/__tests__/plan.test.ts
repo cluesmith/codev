@@ -138,7 +138,73 @@ Implement CLI commands.
       expect(phases[2].status).toBe('pending');
     });
 
-    it('should return default phase if no JSON block', () => {
+    it('should extract phases from markdown headers when no JSON block', () => {
+      const content = `# Plan
+
+## Phase 1: Node-pty Terminal Manager
+
+Build the PTY management layer.
+
+## Phase 2: React Dashboard
+
+Rebuild the dashboard UI.
+
+## Phase 3: WebSocket Multiplexing
+
+All terminals on single port.
+`;
+      const phases = extractPlanPhases(content);
+
+      expect(phases).toHaveLength(3);
+      expect(phases[0].id).toBe('phase_1');
+      expect(phases[0].title).toBe('Node-pty Terminal Manager');
+      expect(phases[0].status).toBe('in_progress');
+      expect(phases[1].id).toBe('phase_2');
+      expect(phases[1].title).toBe('React Dashboard');
+      expect(phases[1].status).toBe('pending');
+      expect(phases[2].id).toBe('phase_3');
+      expect(phases[2].title).toBe('WebSocket Multiplexing');
+      expect(phases[2].status).toBe('pending');
+    });
+
+    it('should extract phases from h3 markdown headers', () => {
+      const content = `# Plan
+
+### Phase 1: Core Types
+
+Type definitions.
+
+### Phase 2: State Management
+
+Persistence layer.
+`;
+      const phases = extractPlanPhases(content);
+
+      expect(phases).toHaveLength(2);
+      expect(phases[0].id).toBe('phase_1');
+      expect(phases[0].title).toBe('Core Types');
+      expect(phases[1].id).toBe('phase_2');
+      expect(phases[1].title).toBe('State Management');
+    });
+
+    it('should prefer JSON block over markdown headers', () => {
+      const content = `# Plan
+
+\`\`\`json
+{"phases": [{"id": "phase_1", "title": "From JSON"}]}
+\`\`\`
+
+## Phase 1: From Markdown
+
+Content here.
+`;
+      const phases = extractPlanPhases(content);
+
+      expect(phases).toHaveLength(1);
+      expect(phases[0].title).toBe('From JSON');
+    });
+
+    it('should return default phase if no JSON block and no markdown headers', () => {
       const content = '# Simple Plan\n\nJust some text.';
       const phases = extractPlanPhases(content);
 

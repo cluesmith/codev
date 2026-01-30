@@ -1,3 +1,7 @@
+---
+approved: 2026-01-29
+validated: [gemini, codex, claude]
+---
 # Implementation Plan: Agent Farm Terminal & Dashboard Rewrite
 
 ## Metadata
