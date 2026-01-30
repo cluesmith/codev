@@ -233,6 +233,12 @@ async function renderDashboardTab() {
     loadFilesTreeIfNeeded()
   ]);
 
+  // Guard against race condition: user may have switched tabs while loading
+  // (Bugfix #170: shells don't start when clicked during dashboard load)
+  if (activeTabId !== 'dashboard') {
+    return;
+  }
+
   // Start auto-polling for file changes
   startFilesPolling();
 
