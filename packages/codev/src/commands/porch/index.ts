@@ -606,7 +606,7 @@ export async function cli(args: string[]): Promise<void> {
       case 'run':
         const { run } = await import('./run.js');
         // Parse options for run command
-        const runOptions: { answer?: string; singleIteration?: boolean } = {};
+        const runOptions: { answer?: string; singleIteration?: boolean; singlePhase?: boolean } = {};
         let runProjectId: string | undefined;
         for (let i = 0; i < rest.length; i++) {
           if (rest[i] === '--answer' && rest[i + 1]) {
@@ -614,6 +614,8 @@ export async function cli(args: string[]): Promise<void> {
             i++; // Skip next arg
           } else if (rest[i] === '--single-iteration' || rest[i] === '-1') {
             runOptions.singleIteration = true;
+          } else if (rest[i] === '--single-phase') {
+            runOptions.singlePhase = true;
           } else if (!rest[i].startsWith('--')) {
             runProjectId = rest[i];
           }
@@ -665,6 +667,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('Run options:');
         console.log('  --answer JSON            Provide answer to AWAITING_INPUT (for automation)');
         console.log('  --single-iteration, -1   Run one build-verify cycle then exit');
+        console.log('  --single-phase           Run one phase then exit (for Builder/Enforcer pattern)');
         console.log('');
         console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');

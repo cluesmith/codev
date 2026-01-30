@@ -14,12 +14,9 @@ import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
 import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig, getBuildConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
-import { spawnClaude, type ClaudeProcess } from './claude.js';
-import { watchForSignal, type Signal } from './signals.js';
-import { runRepl } from './repl.js';
+import { buildWithSDK } from './claude.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
-import { notifyGateHit, notifyBlocked } from '../../agent-farm/utils/notifications.js';
 import { globSync } from 'node:fs';
 
 /**
@@ -80,10 +77,10 @@ function getOutputFileName(state: ProjectState): string {
 }
 
 export interface RunOptions {
-  /** Answer to provide for AWAITING_INPUT (from previous run) */
-  answer?: string;
   /** Run a single build-verify iteration then exit (for step-by-step debugging) */
   singleIteration?: boolean;
+  /** Run a single phase (build-verify + gate) then exit. Used by Builder (outer Claude) to stay in the loop. */
+  singlePhase?: boolean;
 }
 
 /** Exit code when AWAITING_INPUT is detected in non-interactive mode */
@@ -102,7 +99,8 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
   // Read initial state to get project directory
   let state = readState(statusPath);
   const singleIteration = options.singleIteration || false;
-  let iterationCompleted = false;  // Track if we completed a build-verify cycle
+  const singlePhase = options.singlePhase || false;
+  const startPhase = state.phase;  // Track starting phase for --single-phase
 
   // Ensure project artifacts directory exists
   const porchDir = getPorchDir(projectRoot, state);
@@ -129,6 +127,13 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     // Check for pending gate
     const gateName = getPhaseGate(protocol, state.phase);
     if (gateName && state.gates[gateName]?.status === 'pending' && state.gates[gateName]?.requested_at) {
+      // --single-phase: return gate status to Builder, let it handle human interaction
+      if (singlePhase) {
+        console.log(chalk.yellow(`\n[--single-phase] Gate '${gateName}' pending. Needs human approval.`));
+        outputSinglePhaseResult(state, 'gate_needed', gateName);
+        return;
+      }
+
       const outputPath = path.join(porchDir, `${state.id}-gate.txt`);
       await handleGate(state, gateName, statusPath, projectRoot, outputPath, protocol);
       continue;
@@ -138,6 +143,14 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     if (gateName && state.gates[gateName]?.status === 'approved') {
       const { done } = await import('./index.js');
       await done(projectRoot, state.id);
+
+      // --single-phase: exit after phase advances
+      if (singlePhase) {
+        const newState = readState(statusPath);
+        console.log(chalk.dim(`\n[--single-phase] Phase complete. Now at: ${newState.phase}`));
+        outputSinglePhaseResult(newState, 'advanced', undefined, undefined);
+        return;
+      }
       continue;
     }
 
@@ -223,6 +236,18 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
           // Single iteration mode: exit after completing a build-verify cycle
           if (singleIteration) {
             console.log(chalk.dim('\n[--single-iteration] Build-verify cycle complete. Exiting.'));
+            return;
+          }
+
+          // --single-phase: exit after build-verify passes
+          if (singlePhase) {
+            if (gateName) {
+              console.log(chalk.dim(`\n[--single-phase] Build-verify passed. Gate '${gateName}' requested.`));
+              outputSinglePhaseResult(state, 'gate_needed', gateName, reviews);
+            } else {
+              console.log(chalk.dim(`\n[--single-phase] Build-verify passed. No gate needed.`));
+              outputSinglePhaseResult(state, 'verified', undefined, reviews);
+            }
             return;
           }
           continue;
@@ -377,17 +402,15 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     // Build prompt for current phase (includes history file paths if iteration > 1)
     const prompt = buildPhasePrompt(projectRoot, state, protocol);
 
-    // Create output file
-    fs.writeFileSync(outputPath, '');
     console.log(chalk.dim(`Output: ${outputFileName}`));
 
     // Show status
     showStatus(state, protocol);
 
-    // Print the prompt being sent to Claude
+    // Print the prompt being sent to the Worker
     console.log('');
     console.log(chalk.cyan('═'.repeat(60)));
-    console.log(chalk.cyan.bold('  PROMPT TO CLAUDE'));
+    console.log(chalk.cyan.bold('  PROMPT TO WORKER (Agent SDK)'));
     console.log(chalk.cyan('═'.repeat(60)));
     console.log(chalk.dim(prompt.substring(0, 2000)));
     if (prompt.length > 2000) {
@@ -396,51 +419,31 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     console.log(chalk.cyan('═'.repeat(60)));
     console.log('');
 
-    // Spawn Claude
-    console.log(chalk.dim('Starting Claude...'));
-    const claude = spawnClaude(prompt, outputPath, projectRoot);
+    // Run the Worker via Agent SDK
+    console.log(chalk.dim('Starting Worker (Agent SDK)...'));
+    const result = await buildWithSDK(prompt, outputPath, projectRoot);
 
-    // Run REPL while Claude works
-    const action = await runRepl(state, claude, outputPath, statusPath, projectRoot, protocol);
+    if (result.cost) {
+      console.log(chalk.dim(`  Cost: $${result.cost.toFixed(4)}`));
+    }
+    if (result.duration) {
+      console.log(chalk.dim(`  Duration: ${(result.duration / 1000).toFixed(1)}s`));
+    }
 
-    // Handle REPL result
-    switch (action.type) {
-      case 'quit':
-        claude.kill();
-        console.log(chalk.yellow('\nPorch terminated by user.'));
-        return;
-
-      case 'signal':
-        const shouldRespawn = await handleSignal(action.signal, state, statusPath, projectRoot, protocol);
-        if (shouldRespawn) {
-          console.log(chalk.dim('\nRespawning Claude for retry...'));
-          await sleep(1000);
-        }
-        break;
-
-      case 'claude_exit':
-        // For build_verify phases, ANY Claude exit = build complete
-        // Don't respawn - go straight to verification
-        if (isBuildVerify(protocol, state.phase)) {
-          console.log(chalk.dim('\nClaude finished. Moving to verification...'));
-          state.build_complete = true;
-          writeState(statusPath, state);
-          // Continue loop - will hit build_complete check and run verify
-        } else if (action.exitCode !== 0) {
-          console.log(chalk.red(`\nClaude exited with code ${action.exitCode}`));
-          console.log(chalk.dim('Restarting in 3 seconds...'));
-          await sleep(3000);
-        }
-        break;
-
-      case 'approved':
-        // Gate was approved, continue to next phase
-        break;
-
-      case 'manual_claude':
-        // User wants to intervene - just continue loop to respawn
-        console.log(chalk.dim('\nRespawning Claude...'));
-        break;
+    // For build_verify phases, any completion = build done, move to verify
+    if (isBuildVerify(protocol, state.phase)) {
+      if (result.success) {
+        console.log(chalk.dim('\nWorker finished. Moving to verification...'));
+      } else {
+        console.log(chalk.yellow('\nWorker finished with errors. Moving to verification anyway...'));
+      }
+      state.build_complete = true;
+      writeState(statusPath, state);
+      // Continue loop - will hit build_complete check and run verify
+    } else if (!result.success) {
+      console.log(chalk.red('\nWorker failed.'));
+      console.log(chalk.dim(`Check output: ${outputPath}`));
+      return;
     }
   }
 }
@@ -853,96 +856,6 @@ async function handleGate(
   });
 }
 
-/**
- * Handle signal from Claude output.
- * Returns true if should respawn Claude (for build-verify iteration), false otherwise.
- */
-async function handleSignal(
-  signal: Signal,
-  state: ProjectState,
-  statusPath: string,
-  projectRoot: string,
-  protocol: Protocol
-): Promise<boolean> {
-  console.log('');
-
-  switch (signal.type) {
-    case 'PHASE_COMPLETE':
-      console.log(chalk.green('Signal: PHASE_COMPLETE'));
-
-      // For build_verify phases, we'll run verification in the main loop
-      // Mark build as complete so main loop knows to run verify
-      if (isBuildVerify(protocol, state.phase)) {
-        state.build_complete = true;
-        writeState(statusPath, state);
-        return false; // Main loop will handle verify
-      }
-
-      // For non-build_verify phases, advance state directly
-      const { done } = await import('./index.js');
-      await done(projectRoot, state.id);
-      return false;
-
-    case 'GATE_NEEDED':
-      console.log(chalk.yellow('Signal: GATE_NEEDED'));
-      const gateName = getPhaseGate(protocol, state.phase);
-      if (gateName && !state.gates[gateName]) {
-        state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
-        writeState(statusPath, state);
-        // Send push notification to tower
-        await notifyGateHit(projectRoot, state.id, gateName);
-      }
-      return false;
-
-    case 'BLOCKED':
-      console.log(chalk.red(`Signal: BLOCKED - ${signal.reason}`));
-      console.log(chalk.dim('Human intervention required.'));
-      // Send push notification to tower
-      await notifyBlocked(projectRoot, state.id, signal.reason || 'Unknown reason');
-      return false;
-
-    case 'AWAITING_INPUT':
-      console.log(chalk.yellow('═'.repeat(60)));
-      console.log(chalk.yellow.bold('  CLAUDE NEEDS INPUT'));
-      console.log(chalk.yellow('═'.repeat(60)));
-      console.log('');
-      console.log(signal.content);
-      console.log('');
-      console.log(chalk.dim('Answer the questions above, then Claude will be respawned.'));
-      console.log(chalk.dim('Your answers will be included in the next prompt.'));
-      console.log('');
-
-      // Wait for user input
-      const readline = await import('node:readline');
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-
-      const answers = await new Promise<string>((resolve) => {
-        console.log(chalk.cyan('Enter your answers (end with a blank line):'));
-        let input = '';
-        rl.on('line', (line) => {
-          if (line === '') {
-            rl.close();
-            resolve(input.trim());
-          } else {
-            input += line + '\n';
-          }
-        });
-      });
-
-      // Store answers in state for next iteration
-      if (!state.context) state.context = {};
-      state.context.user_answers = answers;
-      writeState(statusPath, state);
-
-      console.log(chalk.green('\nAnswers recorded. Respawning Claude...'));
-      return true; // Respawn Claude
-  }
-
-  return false;
-}
 
 /**
  * Get artifact path for current phase.
@@ -958,6 +871,39 @@ function getArtifactForPhase(state: ProjectState): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * Output structured result for --single-phase mode.
+ * The Builder (outer Claude) parses this to understand what happened.
+ */
+function outputSinglePhaseResult(
+  state: ProjectState,
+  status: 'advanced' | 'gate_needed' | 'verified' | 'iterating',
+  gateName?: string,
+  reviews?: ReviewResult[]
+): void {
+  const result: Record<string, unknown> = {
+    phase: state.phase,
+    plan_phase: state.current_plan_phase,
+    iteration: state.iteration,
+    status,
+    gate: gateName || null,
+  };
+
+  // Include verdicts if reviews were run
+  if (reviews && reviews.length > 0) {
+    result.verdicts = Object.fromEntries(reviews.map(r => [r.model, r.verdict]));
+  }
+
+  // Include artifact path
+  const artifact = getArtifactForPhase(state);
+  if (artifact) {
+    result.artifact = artifact;
+  }
+
+  // Output as JSON on a single line for easy parsing
+  console.log(`\n__PORCH_RESULT__${JSON.stringify(result)}`);
 }
 
 function sleep(ms: number): Promise<void> {

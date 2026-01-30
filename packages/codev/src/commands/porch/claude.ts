@@ -1,116 +1,101 @@
 /**
- * Claude process management for Porch
+ * Claude Worker for Porch (Agent SDK)
  *
- * Spawns Claude with output to a file for monitoring.
+ * Invokes Claude programmatically via the Anthropic Agent SDK.
+ * Replaces the old `claude --print` subprocess approach.
+ *
+ * The Worker has full tool access (Read, Edit, Bash, Glob, Grep)
+ * and runs inside porch's process — no subprocess, no nested CLI.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 
-export interface ClaudeProcess {
-  /**
-   * Kill the Claude process.
-   */
-  kill(): void;
-
-  /**
-   * Check if Claude is still running.
-   */
-  isRunning(): boolean;
-
-  /**
-   * Get the exit code (null if still running).
-   */
-  getExitCode(): number | null;
-
-  /**
-   * Register a callback for when Claude exits.
-   */
-  onExit(callback: (code: number) => void): void;
+export interface BuildResult {
+  /** Whether the build completed successfully */
+  success: boolean;
+  /** Claude's output text */
+  output: string;
+  /** Total cost in USD (if available) */
+  cost?: number;
+  /** Duration in milliseconds (if available) */
+  duration?: number;
 }
 
 /**
- * Spawn Claude with the given prompt.
- * Output goes to the specified file.
+ * Run a build phase using the Agent SDK.
+ *
+ * Porch calls this for each BUILD step. The Worker (Claude via Agent SDK)
+ * receives a prompt, does work with full tools, and returns a result.
+ *
+ * Output is streamed to `outputPath` for debugging/monitoring.
  */
-export function spawnClaude(
+export async function buildWithSDK(
   prompt: string,
   outputPath: string,
   cwd: string
-): ClaudeProcess {
-  // Open file for writing
-  const outputFd = fs.openSync(outputPath, 'w');
-
+): Promise<BuildResult> {
   // Save prompt to file for reference
   const promptFile = outputPath.replace(/\.txt$/, '-prompt.txt');
   fs.writeFileSync(promptFile, prompt);
 
-  // Spawn Claude with prompt as command-line argument
-  // Node's spawn handles escaping correctly for long prompts
-  // Using --print for non-interactive mode, --dangerously-skip-permissions for file writes
-  const proc = spawn('claude', [
-    '--print',
-    '--dangerously-skip-permissions',
-    '-p',
-    prompt,  // Pass prompt directly as argument
-  ], {
-    cwd,
-    stdio: ['ignore', outputFd, outputFd],
-    env: {
-      ...process.env,
-      // Ensure Claude doesn't try to use interactive features
-      CI: '1',
-    },
-  });
+  // Create output file
+  fs.writeFileSync(outputPath, '');
 
-  let exitCode: number | null = null;
-  let running = true;
-  const exitCallbacks: Array<(code: number) => void> = [];
+  // Dynamically import Agent SDK (it's ESM)
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
-  proc.on('close', (code) => {
-    exitCode = code ?? 1;
-    running = false;
-    fs.closeSync(outputFd);
+  let output = '';
+  let cost: number | undefined;
+  let duration: number | undefined;
+  let success = false;
 
-    for (const callback of exitCallbacks) {
-      callback(exitCode);
-    }
-  });
-
-  proc.on('error', (err) => {
-    console.error('Claude spawn error:', err.message);
-    running = false;
-    fs.closeSync(outputFd);
-  });
-
-  return {
-    kill() {
-      if (running) {
-        proc.kill('SIGTERM');
-        // Give it a moment, then force kill if needed
-        setTimeout(() => {
-          if (running) {
-            proc.kill('SIGKILL');
+  try {
+    for await (const message of query({
+      prompt,
+      options: {
+        allowedTools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        cwd,
+        maxTurns: 200,
+      },
+    })) {
+      // Stream assistant messages to output file
+      if (message.type === 'assistant' && message.message?.content) {
+        for (const block of message.message.content) {
+          if (block.type === 'text') {
+            output += block.text + '\n';
+            fs.appendFileSync(outputPath, block.text + '\n');
           }
-        }, 3000);
+        }
       }
-    },
 
-    isRunning() {
-      return running;
-    },
-
-    getExitCode() {
-      return exitCode;
-    },
-
-    onExit(callback) {
-      if (!running && exitCode !== null) {
-        // Already exited, call immediately
-        callback(exitCode);
-      } else {
-        exitCallbacks.push(callback);
+      // Capture result
+      if (message.type === 'result') {
+        if (message.subtype === 'success') {
+          success = true;
+          if (message.result) {
+            output += message.result;
+            fs.appendFileSync(outputPath, message.result);
+          }
+          cost = message.total_cost_usd;
+          duration = message.duration_ms;
+        } else {
+          // Error result
+          success = false;
+          const errorMsg = `\n[Agent SDK error: ${message.subtype}]\n`;
+          output += errorMsg;
+          fs.appendFileSync(outputPath, errorMsg);
+          duration = message.duration_ms;
+        }
       }
-    },
-  };
+    }
+  } catch (err) {
+    const errorMsg = `\n[Agent SDK exception: ${(err as Error).message}]\n`;
+    output += errorMsg;
+    fs.appendFileSync(outputPath, errorMsg);
+    success = false;
+  }
+
+  return { success, output, cost, duration };
 }

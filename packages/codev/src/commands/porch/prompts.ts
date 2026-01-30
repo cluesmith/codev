@@ -228,9 +228,6 @@ export function buildPhasePrompt(
         result = historyHeader + '\n\n---\n\n' + result;
       }
 
-      // Add signal instructions footer
-      result += buildSignalFooter();
-
       return result;
     }
   }
@@ -273,23 +270,6 @@ function addPlanPhaseContext(
   return prompt;
 }
 
-/**
- * Build signal instructions footer.
- */
-function buildSignalFooter(): string {
-  return `
-
-## Completion Signals
-
-When you complete your work, output one of these signals:
-
-- **Phase complete**: \`PHASE_COMPLETE\`
-- **Need human approval**: \`GATE_NEEDED\`
-- **Blocked on something**: \`BLOCKED: <reason>\`
-
-Output the signal on its own line when appropriate.
-`;
-}
 
 /**
  * Build a fallback prompt when no protocol prompt is found.
@@ -326,8 +306,6 @@ You are executing the ${phaseName} phase of the ${state.protocol.toUpperCase()} 
 Complete the work for this phase according to the protocol.
 
 `;
-
-  prompt += buildSignalFooter();
 
   return prompt;
 }
