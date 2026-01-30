@@ -1,6 +1,6 @@
 // Tab Management - Rendering, Selection, Overflow
 
-// Get the base URL for ttyd/server connections (uses current hostname for remote access)
+// Get the base URL for server connections (uses current hostname for remote access)
 // DEPRECATED: Use getTerminalUrl() for terminal tabs (Spec 0062)
 function getBaseUrl(port) {
   return `http://${window.location.hostname}:${port}`;

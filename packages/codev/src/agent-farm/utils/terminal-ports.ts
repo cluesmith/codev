@@ -8,7 +8,7 @@
 import type { DashboardState } from '../types.js';
 
 /**
- * Get the ttyd port for a given terminal ID
+ * Get the port for a given terminal ID
  * Returns null if the terminal is not found
  *
  * Terminal ID formats:

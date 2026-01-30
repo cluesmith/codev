@@ -18,6 +18,7 @@ export interface Builder {
   taskText?: string;      // For task mode (display in dashboard)
   protocolName?: string;  // For protocol mode
   issueNumber?: number;   // For bugfix mode
+  terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
 }
 
 export interface UtilTerminal {
@@ -27,6 +28,7 @@ export interface UtilTerminal {
   pid: number;
   tmuxSession?: string;
   worktreePath?: string;  // For worktree shells - used for cleanup on tab close
+  terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
 }
 
 export interface Annotation {
@@ -68,6 +70,7 @@ export interface Config {
   builderPortRange: [number, number];
   utilPortRange: [number, number];
   openPortRange: [number, number];
+  terminalBackend: 'node-pty';
 }
 
 // Session tracking for tmux
@@ -181,6 +184,12 @@ export interface UserConfig {
   };
   roles?: {
     dir?: string;
+  };
+  terminal?: {
+    backend?: 'node-pty';
+  };
+  dashboard?: {
+    frontend?: 'react' | 'legacy';
   };
 }
 

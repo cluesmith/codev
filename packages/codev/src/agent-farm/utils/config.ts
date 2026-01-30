@@ -270,6 +270,7 @@ export function getConfig(): Config {
     builderPortRange: ports.builderPortRange,
     utilPortRange: ports.utilPortRange,
     openPortRange: ports.openPortRange,
+    terminalBackend: userConfig?.terminal?.backend || 'node-pty',
   };
 }
 

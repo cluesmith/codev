@@ -13,6 +13,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/e2e/**',  // E2E tests excluded by default
+      '**/dashboard/__tests__/**',  // Dashboard tests use their own vitest config
     ],
   },
 });

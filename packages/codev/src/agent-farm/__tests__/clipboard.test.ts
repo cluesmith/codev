@@ -1,6 +1,6 @@
 /**
  * Tests for clipboard functionality in dashboard terminals
- * Ensures iframes have clipboard permissions and ttyd has rightClickSelectsWord
+ * Ensures iframes have clipboard permissions
  */
 
 import { describe, it, expect } from 'vitest';
@@ -46,50 +46,5 @@ describe('Dashboard clipboard permissions', () => {
       expect(iframe).toMatch(/allow="[^"]*clipboard-read[^"]*"/);
       expect(iframe).toMatch(/allow="[^"]*clipboard-write[^"]*"/);
     });
-  });
-});
-
-describe('ttyd rightClickSelectsWord option', () => {
-  const sourceFiles = [
-    'packages/codev/src/agent-farm/commands/start.ts',
-    'packages/codev/src/agent-farm/commands/util.ts',
-    'packages/codev/src/agent-farm/commands/spawn.ts',
-    'packages/codev/src/agent-farm/servers/dashboard-server.ts',
-  ];
-
-  sourceFiles.forEach((filePath) => {
-    it(`${filePath} includes rightClickSelectsWord in ttyd args`, () => {
-      const fullPath = resolve(projectRoot, filePath);
-
-      if (!existsSync(fullPath)) {
-        return;
-      }
-
-      const content = readFileSync(fullPath, 'utf-8');
-
-      // Check if file spawns ttyd (has ttydArgs)
-      if (content.includes('ttydArgs')) {
-        expect(content).toMatch(/rightClickSelectsWord['"=]?.*true/);
-      }
-    });
-  });
-
-  it('spawn.ts has rightClickSelectsWord in all ttyd spawn locations', () => {
-    const spawnPath = resolve(projectRoot, 'packages/codev/src/agent-farm/commands/spawn.ts');
-
-    if (!existsSync(spawnPath)) {
-      return;
-    }
-
-    const content = readFileSync(spawnPath, 'utf-8');
-
-    // Count ttydArgs definitions
-    const ttydArgsCount = (content.match(/const ttydArgs = \[/g) || []).length;
-
-    // Count rightClickSelectsWord occurrences
-    const rightClickCount = (content.match(/rightClickSelectsWord/g) || []).length;
-
-    // Each ttydArgs should have rightClickSelectsWord
-    expect(rightClickCount).toBeGreaterThanOrEqual(ttydArgsCount);
   });
 });

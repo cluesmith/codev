@@ -2,7 +2,7 @@
  * Tests for attach command
  *
  * These are unit tests for the attach command logic. Integration tests
- * that attach to actual builders require git, tmux, and ttyd to be running.
+ * that attach to actual builders require git and tmux to be running.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

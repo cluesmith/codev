@@ -139,21 +139,6 @@ const CORE_DEPENDENCIES: Dependency[] = [
     },
   },
   {
-    name: 'ttyd',
-    command: 'ttyd',
-    versionArg: '--version',
-    versionExtract: (output) => {
-      const match = output.match(/(\d+\.\d+\.\d+)/);
-      return match ? match[1] : null;
-    },
-    minVersion: '1.7.0',
-    required: true,
-    installHint: {
-      macos: 'brew install ttyd',
-      linux: 'build from source',
-    },
-  },
-  {
     name: 'git',
     command: 'git',
     versionArg: '--version',

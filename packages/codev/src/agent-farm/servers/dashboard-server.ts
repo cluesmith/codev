@@ -40,7 +40,7 @@ import {
   clearState,
   getArchitect,
 } from '../state.js';
-import { spawnTtyd } from '../utils/shell.js';
+import { TerminalManager } from '../../terminal/pty-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,6 +138,46 @@ function findTemplatePath(filename: string, required = false): string | null {
 const projectRoot = findProjectRoot();
 // Use modular dashboard template (Spec 0060)
 const templatePath = findTemplatePath('dashboard/index.html', true);
+
+// Terminal backend is always node-pty (Spec 0085)
+const terminalBackend = 'node-pty' as const;
+
+// Load dashboard frontend preference from config (Spec 0085)
+function loadDashboardFrontend(): 'react' | 'legacy' {
+  const configPath = path.resolve(projectRoot, 'codev', 'config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      return config?.dashboard?.frontend ?? 'react';
+    } catch { /* ignore */ }
+  }
+  return 'react';
+}
+
+const dashboardFrontend = loadDashboardFrontend();
+
+// React dashboard dist path (built by Vite)
+const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
+const useReactDashboard = dashboardFrontend === 'react' && fs.existsSync(reactDashboardPath);
+if (useReactDashboard) {
+  console.log('Dashboard frontend: React');
+} else if (dashboardFrontend === 'react') {
+  console.log('Dashboard frontend: React (dist not found, falling back to legacy)');
+} else {
+  console.log('Dashboard frontend: legacy');
+}
+const terminalManager = new TerminalManager({ projectRoot });
+console.log('Terminal backend: node-pty');
+// Log telemetry
+try {
+  const metricsPath = path.join(projectRoot, '.agent-farm', 'metrics.log');
+  fs.mkdirSync(path.dirname(metricsPath), { recursive: true });
+  fs.appendFileSync(metricsPath, JSON.stringify({
+    event: 'backend_selected',
+    backend: 'node-pty',
+    timestamp: new Date().toISOString(),
+  }) + '\n');
+} catch { /* ignore */ }
 
 // Clean up dead processes from state (called on state load)
 function cleanupDeadProcesses(): void {
@@ -344,56 +384,26 @@ function tmuxSessionExists(sessionName: string): boolean {
   }
 }
 
-// Create a persistent tmux session and attach ttyd to it
-// Idempotent: if session exists, just spawn ttyd to attach to it
-function spawnTmuxWithTtyd(
-  sessionName: string,
+// Create a PTY terminal session via the TerminalManager.
+// Returns the terminal session ID, or null on failure.
+async function createTerminalSession(
   shellCommand: string,
-  ttydPort: number,
-  cwd: string
-): number | null {
+  cwd: string,
+  label?: string,
+): Promise<string | null> {
+  if (!terminalManager) return null;
   try {
-    // Only create session if it doesn't exist (idempotent)
-    if (!tmuxSessionExists(sessionName)) {
-      // Create tmux session with the shell command
-      execSync(
-        `tmux new-session -d -s "${sessionName}" -x 200 -y 50 "${shellCommand}"`,
-        { cwd, stdio: 'ignore' }
-      );
-
-      // Hide the tmux status bar (dashboard has its own tabs)
-      execSync(`tmux set-option -t "${sessionName}" status off`, { stdio: 'ignore' });
-
-      // Enable mouse support in the session
-      execSync(`tmux set-option -t "${sessionName}" -g mouse on`, { stdio: 'ignore' });
-
-      // Enable OSC 52 clipboard (allows copy to browser clipboard via ttyd)
-      execSync(`tmux set-option -t "${sessionName}" -g set-clipboard on`, { stdio: 'ignore' });
-
-      // Enable passthrough for hyperlinks and clipboard
-      execSync(`tmux set-option -t "${sessionName}" -g allow-passthrough on`, { stdio: 'ignore' });
-
-      // Copy selection to clipboard when mouse is released
-      // Use copy-pipe-and-cancel with pbcopy to directly copy to system clipboard
-      // (OSC 52 via set-clipboard doesn't work reliably through ttyd/xterm.js)
-      execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
-      execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
-    }
-
-    // Start ttyd to attach to the tmux session
-    const customIndexPath = findTemplatePath('ttyd-index.html');
-    const ttydProcess = spawnTtyd({
-      port: ttydPort,
-      sessionName,
+    const info = await terminalManager.createSession({
+      command: '/bin/bash',
+      args: ['-c', shellCommand],
       cwd,
-      customIndexPath: customIndexPath ?? undefined,
+      cols: 200,
+      rows: 50,
+      label,
     });
-
-    return ttydProcess?.pid ?? null;
+    return info.id;
   } catch (err) {
-    console.error(`Failed to create tmux session ${sessionName}:`, (err as Error).message);
-    // Cleanup any partial session
-    killTmuxSession(sessionName);
+    console.error(`Failed to create terminal session:`, (err as Error).message);
     return null;
   }
 }
@@ -415,10 +425,10 @@ function generateShortId(): string {
  * Spawn a worktree builder - creates git worktree and starts builder CLI
  * Similar to shell spawning but with git worktree isolation
  */
-function spawnWorktreeBuilder(
+async function spawnWorktreeBuilder(
   builderPort: number,
   state: DashboardState
-): { builder: Builder; pid: number } | null {
+): Promise<{ builder: Builder; pid: number } | null> {
   const shortId = generateShortId();
   const builderId = `worktree-${shortId}`;
   const branchName = `builder/worktree-${shortId}`;
@@ -449,38 +459,10 @@ function spawnWorktreeBuilder(
       }
     }
 
-    // Create tmux session with builder command
-    execSync(
-      `tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${builderCommand}"`,
-      { cwd: worktreePath, stdio: 'ignore' }
-    );
-
-    // Hide the tmux status bar (dashboard has its own tabs)
-    execSync(`tmux set-option -t "${sessionName}" status off`, { stdio: 'ignore' });
-
-    // Enable mouse support
-    execSync(`tmux set-option -t "${sessionName}" -g mouse on`, { stdio: 'ignore' });
-    execSync(`tmux set-option -t "${sessionName}" -g set-clipboard on`, { stdio: 'ignore' });
-    execSync(`tmux set-option -t "${sessionName}" -g allow-passthrough on`, { stdio: 'ignore' });
-
-    // Copy selection to clipboard when mouse is released (pbcopy for macOS)
-    execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
-    execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
-
-    // Start ttyd connecting to the tmux session
-    const customIndexPath = findTemplatePath('ttyd-index.html');
-    const ttydProcess = spawnTtyd({
-      port: builderPort,
-      sessionName,
-      cwd: worktreePath,
-      customIndexPath: customIndexPath ?? undefined,
-    });
-
-    const pid = ttydProcess?.pid ?? null;
-
-    if (!pid) {
+    // Create PTY terminal session via node-pty
+    const terminalId = await createTerminalSession(builderCommand, worktreePath, `builder-${builderId}`);
+    if (!terminalId) {
       // Cleanup on failure
-      killTmuxSession(sessionName);
       try {
         execSync(`git worktree remove "${worktreePath}" --force`, { cwd: projectRoot, stdio: 'ignore' });
         execSync(`git branch -D "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
@@ -493,17 +475,18 @@ function spawnWorktreeBuilder(
     const builder: Builder = {
       id: builderId,
       name: `Worktree ${shortId}`,
-      port: builderPort,
-      pid,
+      port: 0,
+      pid: 0,
       status: 'implementing',
       phase: 'interactive',
       worktree: worktreePath,
       branch: branchName,
       tmuxSession: sessionName,
       type: 'worktree',
+      terminalId,
     };
 
-    return { builder, pid };
+    return { builder, pid: 0 };
   } catch (err) {
     console.error(`Failed to spawn worktree builder:`, (err as Error).message);
     // Cleanup any partial state
@@ -1287,6 +1270,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${port}`);
 
   try {
+    // Spec 0085: node-pty terminal manager REST API routes
+    if (terminalManager && url.pathname.startsWith('/api/terminals')) {
+      if (terminalManager.handleRequest(req, res)) {
+        return;
+      }
+    }
+
     // API: Get state
     if (req.method === 'GET' && url.pathname === '/api/state') {
       const state = loadStateWithCleanup();
@@ -1413,15 +1403,12 @@ const server = http.createServer(async (req, res) => {
       const builderPort = await findAvailablePort(CONFIG.builderPortStart, builderState);
 
       // Spawn worktree builder
-      const result = spawnWorktreeBuilder(builderPort, builderState);
+      const result = await spawnWorktreeBuilder(builderPort, builderState);
       if (!result) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('Failed to spawn worktree builder');
         return;
       }
-
-      // Wait for ttyd to be ready
-      await new Promise((resolve) => setTimeout(resolve, 500));
 
       // Save builder to state
       upsertBuilder(result.builder);
@@ -1567,58 +1554,26 @@ const server = http.createServer(async (req, res) => {
         ? `${shell} -c '${command.replace(/'/g, "'\\''")}; exec ${shell}'`
         : shell;
 
-      // Retry loop for concurrent port allocation race conditions
-      const MAX_PORT_RETRIES = 5;
-      let utilPort: number | null = null;
-      let pid: number | null = null;
-
-      for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
-        // Get fresh state on each attempt to see newly allocated ports
-        const currentState = loadState();
-        const candidatePort = await findAvailablePort(CONFIG.utilPortStart, currentState);
-
-        // Start tmux session with ttyd attached (use cwd which may be worktree)
-        const spawnedPid = spawnTmuxWithTtyd(sessionName, shellCommand, candidatePort, cwd);
-
-        if (!spawnedPid) {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Failed to start shell');
-          return;
-        }
-
-        // Wait for ttyd to be ready
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        // Try to add util record - may fail if port was taken by concurrent request
-        const util: UtilTerminal = {
-          id,
-          name: utilName,
-          port: candidatePort,
-          pid: spawnedPid,
-          tmuxSession: sessionName,
-          worktreePath: worktreePath, // Track for cleanup on tab close
-        };
-
-        if (tryAddUtil(util)) {
-          // Success - port reserved
-          utilPort = candidatePort;
-          pid = spawnedPid;
-          break;
-        }
-
-        // Port conflict - kill the spawned process and retry
-        console.log(`[info] Port ${candidatePort} conflict, retrying (attempt ${attempt + 1}/${MAX_PORT_RETRIES})`);
-        await killProcessGracefully(spawnedPid);
-      }
-
-      if (utilPort === null || pid === null) {
+      // Create PTY terminal session via node-pty
+      const terminalId = await createTerminalSession(shellCommand, cwd, `shell-${utilName}`);
+      if (!terminalId) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Failed to allocate port after multiple retries');
+        res.end('Failed to create terminal session');
         return;
       }
 
+      const util: UtilTerminal = {
+        id,
+        name: utilName,
+        port: 0,
+        pid: 0,
+        tmuxSession: sessionName,
+        worktreePath: worktreePath,
+      };
+      addUtil(util);
+
       res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, id, port: utilPort, name: utilName }));
+      res.end(JSON.stringify({ success: true, id, port: 0, name: utilName, terminalId }));
       return;
     }
 
@@ -1641,8 +1596,7 @@ const server = http.createServer(async (req, res) => {
         const util = tabUtils.find((u) => u.id === utilId);
         if (util) {
           found = true;
-          // Check tmux session status instead of ttyd PID (Spec 0076)
-          // ttyd stays alive after shell exits, so checking its PID is wrong
+          // Check tmux session status (Spec 0076)
           if (util.tmuxSession) {
             running = tmuxSessionExists(util.tmuxSession);
           } else {
@@ -1658,7 +1612,7 @@ const server = http.createServer(async (req, res) => {
         const builder = getBuilder(builderId);
         if (builder) {
           found = true;
-          // Check tmux session status instead of ttyd PID (Spec 0076)
+          // Check tmux session status (Spec 0076)
           if (builder.tmuxSession) {
             running = tmuxSessionExists(builder.tmuxSession);
           } else {
@@ -2221,7 +2175,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Terminal proxy route (Spec 0062 - Secure Remote Access)
-    // Routes /terminal/:id to the appropriate ttyd instance
+    // Routes /terminal/:id to the appropriate terminal instance
     const terminalMatch = url.pathname.match(/^\/terminal\/([^/]+)(\/.*)?$/);
     if (terminalMatch) {
       const terminalId = terminalMatch[1];
@@ -2260,8 +2214,53 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Serve dashboard
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    // Serve dashboard (Spec 0085: React or legacy based on config)
+    if (useReactDashboard && req.method === 'GET') {
+      // Serve React dashboard static files
+      const filePath = url.pathname === '/' || url.pathname === '/index.html'
+        ? path.join(reactDashboardPath, 'index.html')
+        : path.join(reactDashboardPath, url.pathname);
+
+      // Security: Prevent path traversal
+      const resolved = path.resolve(filePath);
+      if (!resolved.startsWith(reactDashboardPath)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden');
+        return;
+      }
+
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        const ext = path.extname(resolved);
+        const mimeTypes: Record<string, string> = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript',
+          '.css': 'text/css',
+          '.json': 'application/json',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.ico': 'image/x-icon',
+          '.map': 'application/json',
+        };
+        const contentType = mimeTypes[ext] ?? 'application/octet-stream';
+        // Cache static assets (hashed filenames) but not index.html
+        if (ext !== '.html') {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+        res.writeHead(200, { 'Content-Type': contentType });
+        fs.createReadStream(resolved).pipe(res);
+        return;
+      }
+
+      // SPA fallback: serve index.html for client-side routing
+      if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/') && !url.pathname.startsWith('/terminal/') && !url.pathname.startsWith('/annotation/')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        fs.createReadStream(path.join(reactDashboardPath, 'index.html')).pipe(res);
+        return;
+      }
+    }
+
+    if (!useReactDashboard && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      // Legacy vanilla JS dashboard
       try {
         let template = fs.readFileSync(templatePath, 'utf-8');
         const state = loadStateWithCleanup();
@@ -2296,8 +2295,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Spec 0085: Attach node-pty WebSocket handler for /ws/terminal/:id routes
+if (terminalManager) {
+  terminalManager.attachWebSocket(server);
+}
+
 // WebSocket upgrade handler for terminal proxy (Spec 0062)
-// ttyd uses WebSocket for bidirectional terminal communication
+// WebSocket for bidirectional terminal communication
 server.on('upgrade', (req, socket, head) => {
   // Security check for non-auth mode
   const host = req.headers.host;
@@ -2376,3 +2380,18 @@ if (bindHost) {
     console.log(`Dashboard: http://localhost:${port}`);
   });
 }
+
+// Spec 0085: Graceful shutdown for node-pty terminal manager
+process.on('SIGTERM', () => {
+  if (terminalManager) {
+    terminalManager.shutdown();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  if (terminalManager) {
+    terminalManager.shutdown();
+  }
+  process.exit(0);
+});
