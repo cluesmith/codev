@@ -318,13 +318,10 @@ async function getInstances(): Promise<InstanceStatus[]> {
     }
     const basePort = allocation.base_port;
     const dashboardPort = basePort;
-    const architectPort = basePort + 1;
 
     // Check if dashboard is running (main indicator of running instance)
+    // All terminals are multiplexed on dashboardPort via WebSocket (Spec 0085)
     const dashboardActive = await isPortListening(dashboardPort);
-
-    // Only check architect port if dashboard is active (to avoid unnecessary probing)
-    const architectActive = dashboardActive ? await isPortListening(architectPort) : false;
 
     // Get gate status if running
     const gateStatus = dashboardActive ? await getGateStatusForProject(basePort) : { hasGate: false };
@@ -336,12 +333,6 @@ async function getInstances(): Promise<InstanceStatus[]> {
         url: `http://localhost:${dashboardPort}`,
         active: dashboardActive,
       },
-      {
-        type: 'Architect',
-        port: architectPort,
-        url: `http://localhost:${architectPort}`,
-        active: architectActive,
-      },
     ];
 
     instances.push({
@@ -349,7 +340,7 @@ async function getInstances(): Promise<InstanceStatus[]> {
       projectName: getProjectName(allocation.project_path),
       basePort,
       dashboardPort,
-      architectPort,
+      architectPort: basePort + 1, // Legacy field for backward compat
       registered: allocation.registered_at,
       lastUsed: allocation.last_used_at,
       running: dashboardActive,
@@ -579,9 +570,8 @@ function getProcessOnPort(targetPort: number): number | null {
 async function stopInstance(basePort: number): Promise<{ success: boolean; error?: string; stopped: number[] }> {
   const stopped: number[] = [];
 
-  // Kill processes on the main port range (dashboard, architect, builders)
-  // Dashboard is basePort, architect is basePort+1, builders start at basePort+100
-  const portsToCheck = [basePort, basePort + 1];
+  // Kill the dashboard process (all terminals multiplexed on basePort via Spec 0085)
+  const portsToCheck = [basePort];
 
   for (const p of portsToCheck) {
     const pid = getProcessOnPort(p);
@@ -882,13 +872,9 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Reverse proxy: /project/:base64urlPath/:terminalType/* → localhost:calculatedPort/*
+    // Reverse proxy: /project/:base64urlPath/* → localhost:basePort/*
     // Uses Base64URL (RFC 4648) encoding to avoid issues with slashes in paths
-    //
-    // Terminal port routing:
-    //   /project/<path>/              → base_port (project dashboard)
-    //   /project/<path>/architect/    → base_port + 1 (architect terminal)
-    //   /project/<path>/builder/<n>/  → base_port + 2 + n (builder terminals)
+    // All terminals multiplexed on basePort via WebSocket (Spec 0085)
     if (url.pathname.startsWith('/project/')) {
       const pathParts = url.pathname.split('/');
       // ['', 'project', base64urlPath, terminalType, ...rest]
@@ -926,21 +912,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // Calculate target port based on terminal type
-      let targetPort = basePort; // Default: project dashboard
-      let proxyPath = rest.join('/');
-
-      if (terminalType === 'architect') {
-        targetPort = basePort + 1; // Architect terminal
-      } else if (terminalType === 'builder' && rest[0]) {
-        const builderNum = parseInt(rest[0], 10);
-        if (!isNaN(builderNum)) {
-          targetPort = basePort + 2 + builderNum; // Builder terminal
-          proxyPath = rest.slice(1).join('/'); // Remove builder number from path
-        }
-      } else if (terminalType) {
-        proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
-      }
+      // All terminals now multiplexed on basePort via WebSocket (Spec 0085)
+      // Just pass the path through — the React dashboard handles routing
+      let targetPort = basePort;
+      let proxyPath = terminalType ? [terminalType, ...rest].join('/') : rest.join('/');
 
       // Proxy the request
       const proxyReq = http.request(
@@ -1031,21 +1006,10 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
 
-  // Calculate target port based on terminal type (same logic as HTTP proxy)
-  let targetPort = basePort; // Default: project dashboard
-  let proxyPath = rest.join('/');
-
-  if (terminalType === 'architect') {
-    targetPort = basePort + 1; // Architect terminal
-  } else if (terminalType === 'builder' && rest[0]) {
-    const builderNum = parseInt(rest[0], 10);
-    if (!isNaN(builderNum)) {
-      targetPort = basePort + 2 + builderNum; // Builder terminal
-      proxyPath = rest.slice(1).join('/'); // Remove builder number from path
-    }
-  } else if (terminalType) {
-    proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
-  }
+  // All terminals now multiplexed on basePort via WebSocket (Spec 0085)
+  // Just pass the path through — the React dashboard handles routing
+  let targetPort = basePort;
+  let proxyPath = terminalType ? [terminalType, ...rest].join('/') : rest.join('/');
 
   // Connect to target
   const proxySocket = net.connect(targetPort, '127.0.0.1', () => {

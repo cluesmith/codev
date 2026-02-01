@@ -17,17 +17,13 @@ function fromBase64URL(encoded: string): string {
 }
 
 // Test helper: Calculate terminal port from base port and terminal type
+// After Spec 0085 (node-pty WebSocket multiplexing), all terminals route to basePort
 function calculateTargetPort(
   basePort: number,
-  terminalType: string | undefined,
-  builderNum?: number
+  _terminalType?: string | undefined,
+  _builderNum?: number
 ): number {
-  if (terminalType === 'architect') {
-    return basePort + 1; // Architect terminal
-  } else if (terminalType === 'builder' && builderNum !== undefined && !isNaN(builderNum)) {
-    return basePort + 2 + builderNum; // Builder terminal
-  }
-  return basePort; // Default: project dashboard
+  return basePort; // All terminals multiplexed on basePort via WebSocket
 }
 
 describe('Tower Proxy - Base64URL Encoding', () => {
@@ -85,33 +81,23 @@ describe('Tower Proxy - Terminal Port Routing', () => {
     expect(calculateTargetPort(basePort, '')).toBe(4200);
   });
 
-  it('should route architect to base_port + 1', () => {
-    expect(calculateTargetPort(basePort, 'architect')).toBe(4201);
+  it('should route architect to base_port (all multiplexed after Spec 0085)', () => {
+    expect(calculateTargetPort(basePort, 'architect')).toBe(4200);
   });
 
-  it('should route builder/0 to base_port + 2', () => {
-    expect(calculateTargetPort(basePort, 'builder', 0)).toBe(4202);
-  });
-
-  it('should route builder/5 to base_port + 7', () => {
-    expect(calculateTargetPort(basePort, 'builder', 5)).toBe(4207);
-  });
-
-  it('should route builder/10 to base_port + 12', () => {
-    expect(calculateTargetPort(basePort, 'builder', 10)).toBe(4212);
-  });
-
-  it('should fall through to dashboard for builder without valid number', () => {
-    expect(calculateTargetPort(basePort, 'builder', NaN)).toBe(4200);
+  it('should route builder to base_port (all multiplexed after Spec 0085)', () => {
+    expect(calculateTargetPort(basePort, 'builder', 0)).toBe(4200);
+    expect(calculateTargetPort(basePort, 'builder', 5)).toBe(4200);
+    expect(calculateTargetPort(basePort, 'builder', 10)).toBe(4200);
   });
 
   it('should handle different base ports correctly', () => {
-    expect(calculateTargetPort(4300, 'architect')).toBe(4301);
-    expect(calculateTargetPort(4300, 'builder', 0)).toBe(4302);
-    expect(calculateTargetPort(4400, 'builder', 3)).toBe(4405);
+    expect(calculateTargetPort(4300, 'architect')).toBe(4300);
+    expect(calculateTargetPort(4300, 'builder', 0)).toBe(4300);
+    expect(calculateTargetPort(4400, 'builder', 3)).toBe(4400);
   });
 
-  it('should handle unknown terminal types as dashboard', () => {
+  it('should handle unknown terminal types as base_port', () => {
     expect(calculateTargetPort(basePort, 'unknown')).toBe(4200);
     expect(calculateTargetPort(basePort, 'other')).toBe(4200);
   });

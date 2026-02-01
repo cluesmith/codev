@@ -224,7 +224,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0081"
     title: "Web Tower - Mobile Access to All Agent Farms"
     summary: "Reverse proxy for tower-server to access all projects through one port with auth, Cloudflare tunnel, and ntfy.sh notifications"
-    status: committed
+    status: integrated
     priority: medium
     release: v2.0.0
     files:
@@ -240,8 +240,30 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: "2026-01-28T01:10:00-08:00"
       implemented_at: "2026-01-28T01:25:00-08:00"
       committed_at: "2026-01-28T01:35:00-08:00"
+      integrated_at: "2026-02-01T00:00:00-08:00"
+    notes: "PR #169 merged. Reverse proxy, auth, tunnel docs, push notifications, mobile polish. TICK-001: Updated proxy routing for node-pty WebSocket multiplexing (Spec 0085)."
+
+  - id: "0087"
+    title: "Porch Timeout Termination Retries"
+    summary: "Add timeout logic to porch so that when Claude (as the worker) hangs or fails to respond, porch can terminate and retry the operation"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: ["0073", "0075"]
+    tags: [porch, reliability, timeout, retry]
+    timestamps:
+      conceived_at: "2026-01-31T07:40:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
       integrated_at: null
-    notes: "PR #169 merged. Reverse proxy, auth, tunnel docs, push notifications, mobile polish."
+    notes: "User-requested. Claude workers in porch can hang indefinitely. Need timeout detection, graceful termination, and automatic retry with context preservation."
 
   - id: "0075"
     title: "Porch Minimal Redesign"
@@ -334,9 +356,9 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0067"
     title: "Agent Farm Architecture Rewrite"
     summary: "Replace ttyd/tmux with node-pty, modernize dashboard with React/Svelte"
-    status: conceived
+    status: abandoned
     priority: medium
-    release: v2.0.0
+    release: null
     files:
       spec: codev/specs/0067-agent-farm-architecture-rewrite.md
       plan: null
@@ -351,7 +373,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Subsumed into 0068 (Codev 2.0). Covers Pillar 1: Terminal/Dashboard rewrite."
+    notes: "ABANDONED: Superseded by 0085 (Agent Farm Terminal & Dashboard Rewrite). 0067 was too broad and coupled to 0068. 0085 narrows scope and reconsiders framework choice."
 
   - id: "0066"
     title: "VSCode Companion Extension"
@@ -899,9 +921,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: null
     notes: "Tower has basic mobile CSS but needs full mobile UX audit: touch targets, responsive layout, QR sharing flow, terminal usability on small screens."
 
+  - id: "0085"
+    title: "Agent Farm Terminal & Dashboard Rewrite"
+    summary: "Replace ttyd with node-pty terminal layer and modernize vanilla JS dashboard with a modern framework"
+    status: specified
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0085-agent-farm-terminal-dashboard-rewrite.md
+      plan: codev/plans/0085-agent-farm-terminal-dashboard-rewrite.md
+      review: null
+    dependencies: []
+    tags: [architecture, agent-farm, terminal, dashboard, v2]
+    timestamps:
+      conceived_at: "2026-01-29T00:00:00-08:00"
+      specified_at: "2026-01-29T00:00:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Supersedes 0067. Two pillars: (1) node-pty terminal layer replacing ttyd, (2) dashboard framework selection (React, Svelte, htmx, or enhanced vanilla JS). Triggered by #171 (mobile terminal width control impossible with ttyd)."
+
 ## Next Available Number
 
-**0085** - Reserve this number for your next project
+**0086** - Reserve this number for your next project
 
 ---
 

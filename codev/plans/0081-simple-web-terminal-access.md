@@ -13,13 +13,11 @@ Add reverse proxy to existing tower-server.ts so one port (4100) gives access to
 
 ```
 Tower:     localhost:4100    ← Meta-dashboard showing all projects
-Project A: localhost:4200    ← AF dashboard for project A
-           localhost:4201    ← Architect terminal for project A
-           localhost:4202+   ← Builder terminals for project A
-Project B: localhost:4300    ← AF dashboard for project B
-           localhost:4301    ← Architect terminal for project B
-           ...
+Project A: localhost:4200    ← AF dashboard (React) + all terminals via WebSocket
+Project B: localhost:4300    ← AF dashboard (React) + all terminals via WebSocket
 ```
+
+**TICK-001 update**: Spec 0085 replaced per-terminal ttyd ports with node-pty WebSocket multiplexing. Each project now uses a single port (basePort) for the React dashboard AND all terminal connections via `/ws/terminal/<id>`. Tower proxies everything to basePort.
 
 Tower (4100) is separate from per-project AF dashboards (4200+). This spec adds a reverse proxy to Tower so that one tunneled port (4100) provides access to ALL projects.
 

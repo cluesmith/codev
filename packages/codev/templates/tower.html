@@ -1504,20 +1504,11 @@
       return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
 
-    // Generate proxy URL for a terminal
+    // Generate proxy URL for a project
+    // All terminals are now multiplexed on a single port via WebSocket (Spec 0085)
+    // The React dashboard handles tab selection internally
     function getProxyUrl(instance, portType) {
       const encodedPath = toBase64URL(instance.projectPath);
-      if (portType === 'Dashboard') {
-        return `/project/${encodedPath}/`;
-      } else if (portType === 'Architect') {
-        return `/project/${encodedPath}/architect/`;
-      } else if (portType.startsWith('Builder')) {
-        // Extract builder number from type (e.g., "Builder 0" -> 0)
-        const match = portType.match(/Builder\s*(\d+)/i);
-        const builderNum = match ? parseInt(match[1], 10) : 0;
-        return `/project/${encodedPath}/builder/${builderNum}/`;
-      }
-      // Fallback to dashboard
       return `/project/${encodedPath}/`;
     }
 

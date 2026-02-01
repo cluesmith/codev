@@ -747,3 +747,22 @@ For closed-source hosted version:
 This section tracks all TICK amendments to this specification.
 
 <!-- When adding a TICK amendment, add a new entry below this line in chronological order -->
+
+### TICK-001: Update Proxy Routing for node-pty WebSocket Multiplexing (2026-02-01)
+
+**Context**: Spec 0085 replaced per-terminal ttyd ports with WebSocket multiplexing over a single dashboard port. The tower's reverse proxy was still routing architect/builder requests to separate ports (basePort+1, basePort+2+n) that no longer exist.
+
+**Changes**:
+
+1. **Proxy routing simplified**: All requests now route to `basePort` regardless of terminal type. The path is passed through to the React dashboard, which handles terminal routing internally via `/ws/terminal/<id>`.
+
+2. **`getProxyUrl()` in tower.html simplified**: No longer generates architect/builder-specific URLs. All project links use `/project/<encoded>/` — the React dashboard handles tab selection.
+
+3. **Removed ttyd references**: The proxy no longer rewrites Origin headers for ttyd compatibility or strips `auth-<key>` subprotocols for ttyd. The React dashboard's WebSocket server handles authentication natively.
+
+**Code impact**: ~20 lines removed from `tower-server.ts` (HTTP + WS handlers), ~10 lines simplified in `tower.html`.
+
+**Spec sections affected**:
+- "Core Change" code example (lines 107-109): Per-terminal port routing is now obsolete — all terminals on basePort
+- "Terminal Port Routing" (lines 409-413): All terminals now on single port via WebSocket multiplexing
+- WebSocket proxy comment about ttyd (line 170): No longer relevant — React dashboard handles WebSocket
