@@ -29,7 +29,35 @@ export interface BuildResult {
  *
  * Output is streamed to `outputPath` for debugging/monitoring.
  */
-export async function buildWithSDK(
+/**
+ * Run a build phase with a timeout.
+ *
+ * Wraps buildWithSDK with Promise.race against a timeout.
+ * On timeout, returns a failure result (does not throw).
+ */
+export async function buildWithTimeout(
+  prompt: string,
+  outputPath: string,
+  cwd: string,
+  timeoutMs: number = 15 * 60 * 1000
+): Promise<BuildResult> {
+  const timeoutPromise = new Promise<BuildResult>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        success: false,
+        output: '[TIMEOUT] Build exceeded deadline',
+        duration: timeoutMs,
+      });
+    }, timeoutMs);
+  });
+
+  return Promise.race([buildWithSDK(prompt, outputPath, cwd), timeoutPromise]);
+}
+
+/**
+ * Run a build phase using the Agent SDK (internal — use buildWithTimeout).
+ */
+async function buildWithSDK(
   prompt: string,
   outputPath: string,
   cwd: string

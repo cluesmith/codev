@@ -14,7 +14,7 @@ import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
 import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig, getBuildConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
-import { buildWithSDK } from './claude.js';
+import { buildWithTimeout } from './claude.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 import { globSync } from 'node:fs';
@@ -84,7 +84,7 @@ export interface RunOptions {
 }
 
 /** Exit code when AWAITING_INPUT is detected in non-interactive mode */
-export const EXIT_AWAITING_INPUT = 10;
+export const EXIT_AWAITING_INPUT = 3;
 
 /**
  * Main run loop for porch.
@@ -112,8 +112,25 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
   console.log(chalk.dim('Porch is the outer loop. Claude runs under porch control.'));
   console.log('');
 
+  let consecutiveFailures = 0;
+
   while (true) {
     state = readState(statusPath);
+
+    // AWAITING_INPUT resume guard
+    if (state.awaiting_input) {
+      console.log(chalk.yellow('[PORCH] Resuming from AWAITING_INPUT state'));
+      state.awaiting_input = false;
+      writeState(statusPath, state);
+      // Continue normally — will re-run the build phase
+    }
+
+    // Circuit breaker check
+    if (consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+      console.error(chalk.red(`[PORCH] Circuit breaker: ${consecutiveFailures} consecutive build failures. Halting.`));
+      process.exit(2);
+    }
+
     const protocol = loadProtocol(projectRoot, state.protocol);
     const phaseConfig = getPhaseConfig(protocol, state.phase);
 
@@ -425,9 +442,22 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     console.log(chalk.cyan('═'.repeat(60)));
     console.log('');
 
-    // Run the Worker via Agent SDK
+    // Run the Worker via Agent SDK with retry
     console.log(chalk.dim('Starting Worker (Agent SDK)...'));
-    const result = await buildWithSDK(prompt, outputPath, projectRoot);
+    let result = await buildWithTimeout(prompt, outputPath, projectRoot, BUILD_TIMEOUT_MS);
+
+    // Retry on failure (timeout or SDK error)
+    if (!result.success && isBuildVerify(protocol, state.phase)) {
+      for (let attempt = 1; attempt <= BUILD_MAX_RETRIES && !result.success; attempt++) {
+        const delay = BUILD_RETRY_DELAYS[attempt - 1] || BUILD_RETRY_DELAYS[BUILD_RETRY_DELAYS.length - 1];
+        console.log(chalk.yellow(`\nBuild failed. Retrying in ${delay / 1000}s... (attempt ${attempt + 1}/${BUILD_MAX_RETRIES + 1})`));
+        await sleep(delay);
+
+        // Each retry attempt gets a distinct output file
+        const retryOutputPath = outputPath.replace(/\.txt$/, `-try-${attempt + 1}.txt`);
+        result = await buildWithTimeout(prompt, retryOutputPath, projectRoot, BUILD_TIMEOUT_MS);
+      }
+    }
 
     if (result.cost) {
       console.log(chalk.dim(`  Cost: $${result.cost.toFixed(4)}`));
@@ -436,15 +466,44 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       console.log(chalk.dim(`  Duration: ${(result.duration / 1000).toFixed(1)}s`));
     }
 
-    // For build_verify phases, any completion = build done, move to verify
+    // AWAITING_INPUT detection
+    if (result.output && (/<signal>BLOCKED:/i.test(result.output) || /<signal>AWAITING_INPUT<\/signal>/i.test(result.output))) {
+      console.error(chalk.yellow(`[PORCH] Worker needs human input — check output file: ${outputPath}`));
+      state.awaiting_input = true;
+      writeState(statusPath, state);
+      process.exit(EXIT_AWAITING_INPUT);
+    }
+
+    // For build_verify phases, only proceed to verify on success
     if (isBuildVerify(protocol, state.phase)) {
       if (result.success) {
         console.log(chalk.dim('\nWorker finished. Moving to verification...'));
+        // Update history to point at the actual successful attempt's output file
+        const historyRecord = state.history.find(h => h.iteration === state.iteration);
+        if (historyRecord && result.output) {
+          // If a retry succeeded, the outputPath may differ from the original
+          // Find which file was actually written last
+          const lastOutputPath = historyRecord.build_output;
+          // Check if result came from a retry by scanning for retry files
+          for (let t = BUILD_MAX_RETRIES; t >= 1; t--) {
+            const tryPath = outputPath.replace(/\.txt$/, `-try-${t + 1}.txt`);
+            if (fs.existsSync(tryPath)) {
+              historyRecord.build_output = tryPath;
+              break;
+            }
+          }
+        }
+        state.build_complete = true;
+        consecutiveFailures = 0;
+        writeState(statusPath, state);
       } else {
-        console.log(chalk.yellow('\nWorker finished with errors. Moving to verification anyway...'));
+        // All retries exhausted — increment circuit breaker, do NOT set build_complete
+        console.log(chalk.red('\nWorker failed after all retries.'));
+        console.log(chalk.dim(`Check output: ${outputPath}`));
+        consecutiveFailures++;
+        // Loop back to top where circuit breaker check will halt if threshold reached
+        continue;
       }
-      state.build_complete = true;
-      writeState(statusPath, state);
       // Continue loop - will hit build_complete check and run verify
     } else if (!result.success) {
       console.log(chalk.red('\nWorker failed.'));
@@ -528,6 +587,12 @@ function getConsultArtifactType(phaseId: string): string {
  * - Retry up to 3 times with exponential backoff
  * - If all retries fail, return CONSULT_ERROR (not REQUEST_CHANGES)
  */
+// Build timeout and retry constants (mirrors CONSULT_* pattern)
+const BUILD_TIMEOUT_MS = 15 * 60 * 1000;     // 15 minutes
+const BUILD_MAX_RETRIES = 3;
+const BUILD_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+
 const CONSULT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const CONSULT_MAX_RETRIES = 3;
 const CONSULT_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s

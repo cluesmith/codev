@@ -12,9 +12,9 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn(),
 }));
 
-import { buildWithSDK } from '../claude.js';
+import { buildWithTimeout } from '../claude.js';
 
-describe('buildWithSDK', () => {
+describe('buildWithTimeout', () => {
   let testDir: string;
   let outputPath: string;
 
@@ -49,7 +49,7 @@ describe('buildWithSDK', () => {
       })()
     );
 
-    const result = await buildWithSDK('Write hello world', outputPath, testDir);
+    const result = await buildWithTimeout('Write hello world', outputPath, testDir);
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('Created the file.');
@@ -78,7 +78,7 @@ describe('buildWithSDK', () => {
       })()
     );
 
-    const result = await buildWithSDK('Bad prompt', outputPath, testDir);
+    const result = await buildWithTimeout('Bad prompt', outputPath, testDir);
 
     expect(result.success).toBe(false);
     expect(result.output).toContain('[Agent SDK error: error]');
@@ -93,7 +93,7 @@ describe('buildWithSDK', () => {
       })()
     );
 
-    const result = await buildWithSDK('Prompt', outputPath, testDir);
+    const result = await buildWithTimeout('Prompt', outputPath, testDir);
 
     expect(result.success).toBe(false);
     expect(result.output).toContain('[Agent SDK exception: Network timeout]');
@@ -107,7 +107,7 @@ describe('buildWithSDK', () => {
       })()
     );
 
-    await buildWithSDK('test prompt', outputPath, '/custom/cwd');
+    await buildWithTimeout('test prompt', outputPath, '/custom/cwd');
 
     expect(query).toHaveBeenCalledWith({
       prompt: 'test prompt',
@@ -143,7 +143,7 @@ describe('buildWithSDK', () => {
       })()
     );
 
-    const result = await buildWithSDK('Multi-step', outputPath, testDir);
+    const result = await buildWithTimeout('Multi-step', outputPath, testDir);
 
     expect(result.success).toBe(true);
     const fileContent = fs.readFileSync(outputPath, 'utf-8');
