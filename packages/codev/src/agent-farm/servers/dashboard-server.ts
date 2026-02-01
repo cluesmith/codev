@@ -196,6 +196,15 @@ async function initArchitectTerminal(): Promise<void> {
   if (!architect || !architect.tmuxSession || architect.terminalId) return;
 
   try {
+    // Verify the tmux session actually exists before trying to attach.
+    // If it doesn't exist, tmux attach exits immediately, leaving a dead terminalId.
+    const { spawnSync } = await import('node:child_process');
+    const probe = spawnSync('tmux', ['has-session', '-t', architect.tmuxSession], { stdio: 'ignore' });
+    if (probe.status !== 0) {
+      console.log(`initArchitectTerminal: tmux session '${architect.tmuxSession}' does not exist yet`);
+      return;
+    }
+
     // Use tmux directly (not via bash -c) to avoid DA response chaff.
     // bash -c creates a brief window where readline echoes DA responses as text.
     const info = await terminalManager!.createSession({
@@ -206,10 +215,18 @@ async function initArchitectTerminal(): Promise<void> {
       rows: 50,
       label: 'architect',
     });
-    if (info) {
-      setArchitect({ ...architect, terminalId: info.id });
-      console.log(`Architect terminal session created: ${info.id}`);
+
+    // Wait to detect immediate exit (e.g., tmux session disappeared between check and attach)
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const session = terminalManager!.getSession(info.id);
+    if (!session || session.info.exitCode !== undefined) {
+      console.error(`initArchitectTerminal: PTY exited immediately (exit=${session?.info.exitCode})`);
+      terminalManager!.killSession(info.id);
+      return;
     }
+
+    setArchitect({ ...architect, terminalId: info.id });
+    console.log(`Architect terminal session created: ${info.id}`);
   } catch (err) {
     console.error('Failed to create architect terminal session:', (err as Error).message);
   }
