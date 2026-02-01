@@ -51,3 +51,15 @@ Added timeout, retry, circuit breaker, and AWAITING_INPUT detection to porch's b
 - Monitor memory usage in production to verify abandoned streams don't leak significantly
 - Consider adding per-phase timeout configuration in protocol.json (spec identified this as future work)
 - Add e2e test for timeout/retry behavior with real Agent SDK (currently only unit tested with mocks)
+
+## Final Consultation (PR-Ready)
+
+### Codex (REQUEST_CHANGES)
+Raised two issues, both addressed in implementation but not originally reflected in the plan document:
+1. **Stream termination on timeout**: Plan now documents the Promise.race abandonment strategy as accepted trade-off (distinct output files per attempt prevent overlapping writes).
+2. **AWAITING_INPUT resume guard missing from plan**: Plan updated to include SHA-256 hash-based resume guard that was already implemented in code.
+
+### Gemini (APPROVE)
+- Approved with HIGH confidence
+- Noted resume guard simplification (actually implemented with hash check)
+- Noted output filename changes need downstream tool compatibility (verified — downstream uses `actualOutputPath` from successful attempt)

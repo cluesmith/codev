@@ -29,6 +29,8 @@ Add timeout, retry, and circuit breaker logic to porch's build loop, mirroring t
 
 **No retry logic here** — retry lives in run.ts (caller), matching the runConsult pattern where `runConsultOnce` is the single-attempt function and `runConsult` adds retry.
 
+**Stream abandonment on timeout**: The `Promise.race` approach means the underlying Agent SDK async iterator is abandoned (not explicitly cancelled) when the timeout fires. The spec documents this as an accepted trade-off — the iterator will be garbage collected, and each retry writes to a distinct output file, so there's no risk of overlapping writes.
+
 ## Phase 2: Retry Loop + Circuit Breaker in run.ts
 
 **Files:**
@@ -88,9 +90,14 @@ Scan `result.output` for `<signal>BLOCKED:` or `<signal>AWAITING_INPUT</signal>`
 
 ### run.ts — Resume guard (top of while loop, after state read)
 If `state.awaiting_input === true`:
-- Log: `[PORCH] Resuming from AWAITING_INPUT state`
-- Clear `state.awaiting_input = false`, write state
-- Continue normally (will re-run the build phase)
+1. **Hash comparison**: If `state.awaiting_input_output` and `state.awaiting_input_hash` exist, read the output file and compute its SHA-256 hash. If the hash matches the stored hash, the human hasn't resolved the blocker — log error and `process.exit(3)`.
+2. If hash differs (or no hash stored): Log `[PORCH] Resuming from AWAITING_INPUT state`, clear `state.awaiting_input`, `state.awaiting_input_output`, and `state.awaiting_input_hash`, write state, and continue normally (re-run build phase).
+
+### types.ts — Additional state fields for resume guard
+```typescript
+awaiting_input_output?: string;  // Output file path when AWAITING_INPUT was set
+awaiting_input_hash?: string;    // SHA-256 hash of output for resume guard
+```
 
 ## Phase 4: Tests
 
