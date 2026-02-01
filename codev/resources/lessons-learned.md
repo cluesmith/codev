@@ -15,6 +15,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From bug reports] Tests passing does NOT mean requirements are met - manually verify the actual user experience before marking complete
 - [From 0043] Establish baselines BEFORE optimizing - before/after data makes impact clear
 - [From 0065/PR-133] NEVER skip CMAP reviews - they catch issues manual review misses (e.g., stale commits in PR, scope creep)
+- [From 0085] When guessing fails, build a minimal repro - capturing raw data beats speculation (crab icon fix took 5 failed attempts, then 1 repro solved it)
 
 ## Security
 
@@ -31,6 +32,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0048] Three-container architecture (viewMode, editor, preview) provides clean separation for multi-mode UIs
 - [From 0039] Embedding templates in npm packages ensures offline capability and version consistency
 - [From 0060] When modularizing large files, group by concern (CSS together, JS together) not by feature
+- [From 0085] PTY sessions need full locale environment (LANG=en_US.UTF-8) — tmux uses client locale to decide Unicode vs ASCII rendering
 
 ## Process
 
@@ -53,6 +55,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0055] Be selective about file exclusions - exclude heavyweight directories, not all dotfiles
 - [From 0057] Follow git's branch naming rules - use pattern-based rejection, not whitelist
 - [From 0002-001] Shell escaping in tmux: complex content with backticks/quotes needs launch scripts
+- [From 0085] xterm.js `customGlyphs: true` renders block elements (▀▄█) procedurally — crisp at any size, no font dependency
 
 ## Documentation
 

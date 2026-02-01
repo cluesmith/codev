@@ -57,6 +57,31 @@ Implemented the two-pillar rewrite of Agent Farm's terminal and dashboard infras
 - TypeScript: compiles cleanly
 - Vite build: succeeds (64KB gzip)
 
+## Post-Integration Fixes (2026-02-01)
+
+After the initial PR merged, end-to-end testing through the tower proxy revealed several issues:
+
+### Crab Icon Garbled (Root Cause: Missing LANG)
+The Claude Code crab icon rendered as ASCII underscores instead of Unicode block characters (▐▛███▜▌). **Root cause**: `pty-manager.ts` created PTY sessions without `LANG=en_US.UTF-8` in the environment. Without a UTF-8 locale, tmux re-renders the screen using ASCII fallbacks when a new client attaches. **Fix**: Add `LANG` to baseEnv in pty-manager.
+
+### DA Response Chaff
+Device Attribute response sequences (`ESC[?1;2c`, `ESC[>0;276;0c`) appeared as visible text in the terminal. These are xterm.js responses to DA queries that echo back through tmux. **Fix**: Buffer initial 300ms of WebSocket data in Terminal.tsx and apply regex filter before writing to xterm.js.
+
+### Tab Close Broken
+The TabBar sent raw IDs (e.g., `utilId`) to `DELETE /api/tabs/:id`, but the server expected prefixed IDs like `shell-<utilId>`. **Fix**: Send `tab.id` which already contains the prefix.
+
+### Stale Shell Tabs
+Utils with `pid: 0` and no `terminalId` (leftover from previous sessions) were displayed in the tab list. **Fix**: Filter in `useTabs.ts`.
+
+### StatusPanel Feature Parity
+Initial StatusPanel was a simplified version. Rewrote with full legacy feature parity: YAML project parsing, Active/Completed/Terminal sections with `<details>`, spec/plan/review/PR links in stage cells, furthest-along sorting, doc links.
+
+### node-pty Binary Not Compiled
+`npm install -g` doesn't run native addon compilation for node-pty. Required explicit `npm rebuild node-pty` after global install. The dashboard server would start but fail silently to create PTY sessions.
+
+### Debugging Approach
+The crab icon bug required multiple attempts. The breakthrough came from creating a **minimal repro** — a standalone Playwright script connecting xterm.js to the running dashboard's WebSocket endpoint. This captured raw frame data showing ASCII characters where Unicode was expected, which pointed directly to the locale issue.
+
 ## Lessons Learned
 
 1. **Config flags enable safe migration**: The dual-backend approach (ttyd/node-pty, legacy/react) with config flags allows incremental rollout and instant rollback without code changes.
@@ -66,3 +91,9 @@ Implemented the two-pillar rewrite of Agent Farm's terminal and dashboard infras
 3. **Fallback gracefully**: Every node-pty code path catches errors and falls back to ttyd. This means the feature can ship even if node-pty has platform-specific issues.
 
 4. **Ring buffer with sequence numbers**: Monotonic sequence numbers in the ring buffer enable efficient reconnection - clients send their last sequence number and only receive missed data.
+
+5. **PTY locale is critical**: When spawning PTY sessions that attach to tmux, `LANG=en_US.UTF-8` must be set. Without it, tmux detects a non-Unicode client and falls back to ASCII rendering for block characters, powerline symbols, and emoji — even though xterm.js supports them.
+
+6. **Minimal reproducible examples save hours**: After multiple failed attempts to fix the crab icon by guessing (WebGL addon, customGlyphs, DA interception), a minimal repro capturing raw WebSocket frames immediately revealed the ASCII-vs-Unicode data difference and pointed to tmux locale detection.
+
+7. **Native addons need explicit rebuild**: `npm install -g` with packages containing native addons (node-pty) may not compile the binary. Always run `npm rebuild <addon>` after global install and verify the `build/Release/` directory exists.

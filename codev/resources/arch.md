@@ -27,7 +27,7 @@ For debugging common issues, start here:
 
 | Issue | Entry Point | What to Check |
 |-------|-------------|---------------|
-| **"Dashboard won't start"** | `packages/codev/src/agent-farm/commands/start.ts` | Port conflicts, ttyd/tmux availability |
+| **"Dashboard won't start"** | `packages/codev/src/agent-farm/commands/start.ts` | Port conflicts, node-pty/tmux availability |
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, tmux session, role injection |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
@@ -46,8 +46,8 @@ sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM port_allocations"
 # Verify tmux sessions
 tmux list-sessions
 
-# Check if ttyd is running
-pgrep -f ttyd
+# Check if dashboard server is running
+pgrep -f dashboard-server
 ```
 
 ## Glossary
@@ -66,7 +66,7 @@ pgrep -f ttyd
 | **TICK** | Amendment protocol for extending existing SPIDER specs |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Worktree** | Git worktree providing isolated environment for a builder |
-| **ttyd** | Web-based terminal emulator exposing tmux sessions via HTTP |
+| **node-pty** | Native PTY session manager replacing ttyd, multiplexed over WebSocket |
 | **tmux** | Terminal multiplexer providing session persistence and multiplexing |
 | **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
 | **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
@@ -101,22 +101,25 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Dashboard (HTTP Server)                       │
-│                         http://localhost:4200                        │
+│                   Dashboard (React + Vite on :4200)                  │
+│              HTTP server + WebSocket multiplexer                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
 │  │Architect │  │ Builder  │  │ Builder  │  │  Utils   │            │
 │  │  Tab     │  │  Tab 1   │  │  Tab 2   │  │  Tabs    │            │
+│  │(xterm.js)│  │(xterm.js)│  │(xterm.js)│  │(xterm.js)│            │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
 │       │             │             │             │                   │
-│       ▼             ▼             ▼             ▼                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
-│  │  ttyd    │  │  ttyd    │  │  ttyd    │  │  ttyd    │            │
-│  │ :4201    │  │ :4210    │  │ :4211    │  │ :4230    │            │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
-└───────┼─────────────┼─────────────┼─────────────┼──────────────────┘
-        │             │             │             │
-        ▼             ▼             ▼             ▼
+│       └─────────────┴──────┬──────┴─────────────┘                   │
+│                            ▼                                        │
+│                  ┌───────────────────┐                               │
+│                  │ Terminal Manager  │                               │
+│                  │  (node-pty PTY    │                               │
+│                  │   sessions)       │                               │
+│                  └────────┬──────────┘                               │
+└───────────────────────────┼─────────────────────────────────────────┘
+                            │ WebSocket /ws/terminal/<id>
+                            ▼
    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
    │  tmux    │  │  tmux    │  │  tmux    │  │  tmux    │
    │ session  │  │ session  │  │ session  │  │ session  │
@@ -132,17 +135,17 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 ```
 
 **Key Components**:
-1. **Dashboard Server**: Native Node.js HTTP server (not Express) serving the web UI and REST API
-2. **ttyd**: Web-based terminal emulator exposing tmux sessions via HTTP
+1. **Dashboard Server**: Native Node.js HTTP server serving React SPA and REST API
+2. **Terminal Manager**: node-pty based PTY session manager with WebSocket multiplexing (Spec 0085)
 3. **tmux**: Terminal multiplexer providing session persistence
 4. **Git Worktrees**: Isolated working directories for each builder
 5. **SQLite Databases**: State persistence (local and global)
 
 **Data Flow**:
 1. User opens dashboard at `http://localhost:4200`
-2. Dashboard polls `/api/state` for current state (1-second interval)
-3. Each tab embeds an iframe pointing to its ttyd port
-4. ttyd connects to a tmux session running claude or bash
+2. React dashboard polls `/api/state` for current state (1-second interval)
+3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
+4. Terminal Manager spawns node-pty sessions that attach to tmux sessions
 5. Builders work in isolated git worktrees under `.builders/`
 
 ### Port System
@@ -163,13 +166,10 @@ Given a base port (e.g., 4200), ports are allocated from starting offsets:
 
 | Port Offset | Port (example) | Purpose |
 |-------------|----------------|---------|
-| +0 | 4200 | Dashboard HTTP server |
-| +1 | 4201 | Architect terminal (ttyd) |
-| +10+ | 4210+ | Builder terminals (start offset) |
-| +30+ | 4230+ | Utility terminals (start offset) |
+| +0 | 4200 | Dashboard HTTP + WebSocket server (all terminals multiplexed) |
 | +50+ | 4250+ | Annotation viewers (start offset) |
 
-**Note**: Port ranges are starting points, not hard limits. When spawning terminals, the system starts at the range offset and scans upward for an available port. With many concurrent terminals, ports may extend beyond their nominal ranges within the 100-port block.
+**Note**: As of Spec 0085, all terminal connections are multiplexed over WebSocket at the single dashboard port (4200) using URL path namespaces `/ws/terminal/<id>`. Individual per-terminal ports (ttyd) are no longer used. Annotation viewers still use separate ports.
 
 #### Global Registry (`~/.agent-farm/global.db`)
 
@@ -223,21 +223,36 @@ tmux set-option -t "${sessionName}" -g allow-passthrough on
 tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"
 ```
 
-#### ttyd Integration
+#### node-pty Terminal Manager (Spec 0085)
 
-ttyd exposes tmux sessions over HTTP:
+All terminal sessions are managed by the Terminal Manager (`packages/codev/src/terminal/`), which multiplexes PTY sessions over WebSocket:
 
 ```bash
-ttyd --port {port} --writable tmux attach -t {sessionName}
+# REST API for session management
+POST /api/terminals              # Create PTY session
+GET  /api/terminals              # List sessions
+DELETE /api/terminals/:id        # Kill session
+POST /api/terminals/:id/resize   # Resize (cols, rows)
+
+# WebSocket connection per terminal
+ws://localhost:4200/ws/terminal/<session-id>
 ```
 
-**Custom Index Page** (`ttyd-index.html` - optional):
-If a `ttyd-index.html` template exists, ttyd uses it to provide enhanced features:
-- File path click detection using xterm.js link provider
-- Supports relative paths (`./foo.ts`), src-relative (`src/bar.js:42`), and absolute paths
-- Opens clicked files in the annotation viewer via `/open-file` route
+**Hybrid WebSocket Protocol** (binary frames):
+- Frame prefix `0x00`: Control message (JSON: resize, ping/pong)
+- Frame prefix `0x01`: Data message (raw PTY bytes)
 
-If the template is not present, ttyd falls back to its default UI and file click handling works via the `/open-file` HTTP endpoint with BroadcastChannel messaging to the dashboard.
+**PTY Environment** (critical for Unicode rendering):
+```typescript
+const baseEnv = {
+  TERM: 'xterm-256color',
+  LANG: process.env.LANG ?? 'en_US.UTF-8',  // Required for tmux Unicode rendering
+};
+```
+
+**Ring Buffer**: Each session maintains a 1000-line ring buffer with monotonic sequence numbers for reconnection replay. Clients send `X-Session-Resume` header with their last sequence number to receive only missed data.
+
+**Disk Logging**: Terminal output is logged to `.agent-farm/logs/<session-id>.log` with 50MB rotation.
 
 ### State Management
 
@@ -352,7 +367,7 @@ Builders can run in two modes:
 When cleaning up a builder (`af cleanup -p 0003`):
 
 1. **Check for uncommitted changes**: Refuses if dirty (unless `--force`)
-2. **Kill ttyd process**: `kill(pid, SIGTERM)`
+2. **Kill PTY session**: Terminal Manager kills node-pty session
 3. **Kill tmux session**: `tmux kill-session -t {session}`
 4. **Remove worktree**: `git worktree remove .builders/0003`
 5. **Delete branch**: `git branch -d builder/0003-feature-name`
@@ -387,81 +402,62 @@ The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that prov
 | `GET` | `/api/files` | Get file tree for file browser (v1.5.0+) |
 | `GET` | `/api/activity-summary` | Get daily activity summary (v1.5.0+) |
 | `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
-| `GET` | `/terminal/:id` | Reverse proxy to ttyd terminal (v1.5.2+) |
+| `POST` | `/api/terminals` | Create PTY session (Spec 0085) |
+| `GET` | `/api/terminals` | List PTY sessions (Spec 0085) |
+| `DELETE` | `/api/terminals/:id` | Kill PTY session (Spec 0085) |
+| `POST` | `/api/terminals/:id/resize` | Resize PTY session (Spec 0085) |
+| `WS` | `/ws/terminal/:id` | WebSocket terminal connection (Spec 0085) |
 
-#### Dashboard UI (`templates/dashboard/`)
+#### Dashboard UI (React + Vite, Spec 0085)
 
-As of v1.5.0 (Spec 0060), the dashboard is modularized into separate JS/CSS files:
+As of v2.0.0 (Spec 0085), the dashboard is a React + Vite SPA replacing the vanilla JS implementation:
 
 ```
-templates/dashboard/
-├── index.html         # Main entry point
-├── css/               # Stylesheets (~1900 lines total)
-│   ├── variables.css  # CSS custom properties, reset
-│   ├── layout.css     # Header, main layout, panes
-│   ├── tabs.css       # Tab bar, buttons, status dots
-│   ├── statusbar.css  # Footer status bar
-│   ├── dialogs.css    # Dialog overlays, context menus, toasts
-│   ├── activity.css   # Activity summary modal and tab
-│   ├── projects.css   # Projects kanban grid
-│   ├── files.css      # File tree, Cmd+P palette, search
-│   └── utilities.css  # Hidden, sr-only, scrollbar utilities
-└── js/                # JavaScript (~2700 lines total)
-    ├── state.js       # Global state management
-    ├── utils.js       # escapeHtml, showToast, helpers
-    ├── tabs.js        # Tab rendering, selection, iframe management
-    ├── dialogs.js     # Close dialogs, context menu, file dialog
-    ├── projects.js    # Project list parsing, kanban grid
-    ├── files.js       # File tree browser, search, Cmd+P palette
-    ├── activity.js    # Activity summary tab/modal rendering
-    └── main.js        # init(), polling, keyboard shortcuts, hot reload
+packages/codev/dashboard/
+├── src/
+│   ├── components/
+│   │   ├── App.tsx              # Root layout (split pane desktop, single pane mobile)
+│   │   ├── Terminal.tsx         # xterm.js wrapper with WebSocket client
+│   │   ├── TabBar.tsx           # Tab management (builders, shells, annotations)
+│   │   ├── StatusPanel.tsx      # Project/builder status from projectlist.md
+│   │   ├── FileTree.tsx         # File browser
+│   │   └── SplitPane.tsx        # Resizable panes
+│   ├── hooks/
+│   │   ├── useTabs.ts           # Tab state from /api/state polling
+│   │   ├── useBuilderStatus.ts  # Builder status polling
+│   │   └── useMediaQuery.ts     # Responsive breakpoints
+│   ├── lib/
+│   │   ├── api.ts               # REST client + getTerminalWsUrl() helper
+│   │   └── constants.ts         # Breakpoints, configuration
+│   └── main.tsx
+├── dist/                         # Built assets (served by dashboard-server)
+├── vite.config.ts
+└── package.json
 ```
 
-**Hot Reload (Development)**:
-- Server-side `/api/hot-reload` endpoint returns file modification times
-- Client polls every 2 seconds
-- CSS changes: Instant reload via stylesheet link replacement
-- JS changes: Saves UI state to sessionStorage, reloads page, restores state
+**Building**: `npm run build` in `packages/codev/` includes `build:dashboard`. Output: ~64KB gzipped.
+
+**Terminal Component** (`Terminal.tsx`):
+- xterm.js with `customGlyphs: true` for crisp Unicode block elements (▀▄█)
+- WebSocket connection to `/ws/terminal/<id>` using hybrid binary protocol
+- DA (Device Attribute) response filtering: buffers initial 300ms to catch `ESC[?...c` sequences
+- Canvas renderer with dark theme
 
 **Tab System**:
 - Architect tab (always present when running)
 - Builder tabs (one per spawned builder)
-- Utility tabs (shell terminals)
+- Utility tabs (shell terminals, filtered to exclude stale entries with pid=0)
 - File tabs (annotation viewers)
-- Activity tab (daily summary)
 
-**Dashboard Features** (v1.5.0+):
-- **File Browser** (Spec 0055): VSCode-like collapsible folder tree
-- **File Search** (Spec 0058): Cmd+P palette with fuzzy matching
-- **Daily Activity Summary** (Spec 0059): Clock button showing commits, PRs, active time, AI summary
-- **Two-Column Layout** (Spec 0057): Tabs list + file browser, quick action buttons
+**StatusPanel**:
+- Parses `codev/projectlist.md` YAML entries for stage/priority/dependencies
+- Active/Completed/Terminal sections with collapsible `<details>`
+- Spec/plan/review/PR links in stage cells
+- Sorted by furthest-along stage
 
-**Status Indicators**:
-```javascript
-const STATUS_CONFIG = {
-  'spawning':     { color: 'var(--status-active)',   shape: 'circle',  animation: 'pulse' },
-  'implementing': { color: 'var(--status-active)',   shape: 'circle',  animation: 'pulse' },
-  'blocked':      { color: 'var(--status-error)',    shape: 'diamond', animation: 'blink-fast' },
-  'pr-ready':     { color: 'var(--status-waiting)',  shape: 'ring',    animation: 'blink-slow' },
-  'complete':     { color: 'var(--status-complete)', shape: 'circle',  animation: null }
-};
-```
-
-**Communication**:
-- Polls `/api/state` every 1 second
-- BroadcastChannel for cross-tab communication (file opening)
-- Each terminal iframe loads ttyd at its assigned port
-
-#### File Path Click Handling
-
-When a file path is clicked in a terminal:
-
-1. **xterm.js** detects link pattern via custom link provider
-2. **ttyd-index.html** navigates to `/open-file?path=...&line=...`
-3. **Dashboard server** validates path is within project
-4. **Response page** sends BroadcastChannel message to dashboard
-5. **Dashboard** receives message, opens file via `/api/tabs/file`
-6. **open-server.ts** spawns to serve the annotation viewer
+**Responsive Design**:
+- Desktop (>768px): Split-pane layout with file browser sidebar
+- Mobile (<768px): Single-pane stacked layout, 40-column terminals
 
 ### Error Handling and Recovery
 
@@ -471,7 +467,7 @@ Agent Farm includes several mechanisms for handling failures and recovering from
 
 On startup, `handleOrphanedSessions()` detects and cleans up:
 - tmux sessions from previous crashed runs
-- ttyd processes without parent dashboard
+- node-pty sessions without active WebSocket clients
 - State entries for dead processes
 
 ```typescript
@@ -573,15 +569,14 @@ Agent Farm is designed for local development use only. Understanding the securit
 #### Network Binding
 
 All services bind to `localhost` only:
-- Dashboard server: `127.0.0.1:4200`
-- ttyd terminals: `127.0.0.1:{port}`
+- Dashboard server + WebSocket terminals: `127.0.0.1:4200`
 - No external network exposure
 
 #### Authentication
 
 **Current approach: None (localhost assumption)**
 - Dashboard has no login/password
-- ttyd terminals are directly accessible
+- Terminal WebSocket endpoints have no authentication
 - All processes share the user's permissions
 
 **Justification**: Since all services bind to localhost, only processes running as the same user can connect. External network access is blocked at the binding level.
@@ -713,22 +708,38 @@ const CONFIG = {
 |------|---------|
 | `utils/config.ts` | Configuration loading and port initialization |
 | `utils/port-registry.ts` | Global port allocation |
-| `utils/shell.ts` | Shell command execution, ttyd spawning |
+| `utils/shell.ts` | Shell command execution, tmux session management |
 | `utils/logger.ts` | Formatted console output |
-| `utils/deps.ts` | Dependency checking (git, tmux, ttyd) |
+| `utils/deps.ts` | Dependency checking (git, tmux, node-pty) |
 | `utils/orphan-handler.ts` | Stale session cleanup |
+
+#### Terminal Management (Spec 0085)
+
+| File | Purpose |
+|------|---------|
+| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing |
+| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast |
+| `terminal/ring-buffer.ts` | Fixed-size circular buffer (1000 lines) with monotonic sequence numbers |
+| `terminal/ws-protocol.ts` | WebSocket frame encoding/decoding (hybrid binary protocol) |
+
+#### Dashboard (React + Vite, Spec 0085)
+
+| File | Purpose |
+|------|---------|
+| `dashboard/src/components/App.tsx` | Root layout with split pane |
+| `dashboard/src/components/Terminal.tsx` | xterm.js + WebSocket client with DA filtering |
+| `dashboard/src/components/TabBar.tsx` | Tab bar with close buttons |
+| `dashboard/src/components/StatusPanel.tsx` | Project status from projectlist.md |
+| `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state |
+| `dashboard/src/lib/api.ts` | REST client + getTerminalWsUrl() |
 
 #### Templates
 
 | File | Purpose |
 |------|---------|
-| `templates/dashboard/` | Modular dashboard (v1.5.0+) with JS/CSS split |
-| `templates/dashboard-split.html` | Legacy monolithic dashboard |
-| `templates/dashboard.html` | Legacy basic dashboard (fallback) |
 | `templates/annotate.html` | File annotation viewer |
 | `templates/open.html` | File viewer with image support (v1.5.0+) |
 | `templates/3d-viewer.html` | STL/3MF 3D model viewer (v1.5.0+) |
-| `templates/ttyd-index.html` | Custom terminal with file clicks (optional) |
 | `templates/tower.html` | Multi-project overview |
 
 ---
@@ -748,7 +759,9 @@ const CONFIG = {
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode)
 - **tree-kill**: Process cleanup and termination
 - **tmux**: Session persistence for builder terminals
-- **ttyd**: Web-based terminal interface
+- **node-pty**: Native PTY sessions with WebSocket multiplexing (replaced ttyd in Spec 0085)
+- **React 19 + Vite 6**: Dashboard SPA (replaced vanilla JS in Spec 0085)
+- **xterm.js**: Terminal emulator in the browser (with `customGlyphs: true` for Unicode)
 
 ### Testing Framework
 - **bats-core**: Bash Automated Testing System (vendored in `tests/lib/`)
@@ -769,7 +782,8 @@ const CONFIG = {
 - macOS (Darwin)
 - Linux (GNU/Linux)
 - Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Optional: tmux (session persistence), ttyd (web terminals)
+- Optional: tmux (session persistence)
+- Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
 
 ## Repository Dual Nature
 
