@@ -16,6 +16,7 @@ import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, ge
 import { getCurrentPlanPhase } from './plan.js';
 import { buildWithTimeout } from './claude.js';
 import { buildPhasePrompt } from './prompts.js';
+import { PORCH_VERSION } from './version.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 import { globSync } from 'node:fs';
 
@@ -869,6 +870,7 @@ function showStatus(state: ProjectState, protocol: Protocol): void {
 
   console.log('');
   console.log(chalk.bold(`[${state.id}] ${state.title}`));
+  console.log(`  Porch: v${PORCH_VERSION}`);
   console.log(`  Phase: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
 
   if (isBuildVerify(protocol, state.phase)) {
