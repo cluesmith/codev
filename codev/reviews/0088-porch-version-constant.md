@@ -47,9 +47,11 @@ Added a `PORCH_VERSION` constant (`'1.0.0'`) exported from a new `version.ts` fi
 - **Codex**: REQUEST_CHANGES — same concern repeated
 - **Claude**: APPROVE
 
-### Iteration 3
-- **Codex**: REQUEST_CHANGES — same concern; resolved by updating spec wording
-- Resolution: Updated spec Q&A #2 to explicitly state the version is independent of package.json
+### Iteration 3 (Final)
+- **Gemini**: APPROVE — "straightforward and complete, low risk, high value"
+- **Codex**: REQUEST_CHANGES — same concerns (version bump policy, `.js` import)
+- **Claude**: APPROVE
+- Resolution: Updated spec Q&A #2 to explicitly state version is independent of package.json. Codex's `.js` import concern is incorrect — project uses ESM TypeScript where `.js` extensions are standard. Version bump policy is out of scope for this spec.
 
 ## Follow-up Items
 - Consider exposing `PORCH_VERSION` via a `porch --version` CLI flag in a future spec
