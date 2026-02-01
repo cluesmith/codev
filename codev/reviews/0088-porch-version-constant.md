@@ -1,59 +1,55 @@
 # Review: porch-version-constant
 
 ## Summary
-Added a `PORCH_VERSION` constant (`'1.0.0'`) exported from a new `version.ts` file, displayed in `showStatus()` output, with a unit test verifying semver format.
+Added a `PORCH_VERSION` constant (`'1.0.0'`) exported from a new `version.ts` file, displayed in `showStatus()` output, with a unit test verifying semver format and exact value.
 
 ## Spec Compliance
 - [x] `version.ts` exports `PORCH_VERSION` string constant
 - [x] `showStatus()` in `run.ts` displays the version
 - [x] Existing tests still pass
-- [x] Unit test verifies semver format
+- [x] Unit test verifies semver format and exact value
 
 ## Deviations from Plan
-- Added JSDoc comment to `version.ts` clarifying that `PORCH_VERSION` is a protocol version, not a package version (addressing Codex/Gemini review feedback about drift risk).
+- Updated spec Q&A #2 to clarify `PORCH_VERSION` is an independent protocol version, not derived from `package.json`. Original wording ("matching the package version") caused repeated reviewer confusion across 3 iterations.
+- Added JSDoc comment to `version.ts` making the protocol-version intent explicit.
 
 ## Lessons Learned
 
 ### What Went Well
 - Small, well-scoped spec made implementation straightforward
-- Two-phase plan was appropriate for the scope
+- Two of three reviewers approved on first iteration
+- JSDoc comment preemptively addressed the design rationale
 
 ### Challenges Encountered
-- None significant — this was a clean addition
+- **Codex reviewer fixation**: Codex requested the same change across all 3 iterations (sync with package.json), even after JSDoc was added. Root cause was ambiguous spec wording — resolved by updating the spec itself.
 
 ### What Would Be Done Differently
-- For such a trivial change, a single-phase plan would suffice
+- Clarify spec language before implementation to avoid multi-iteration loops on wording issues
+- When a reviewer repeats the same concern, address the source document (spec) not just the code
+- For trivial changes, a single-phase plan would suffice
 
 ### Methodology Improvements
-- Specs this small could skip the multi-phase plan overhead
+- Spec validation should catch ambiguous requirements before implementation
+- Consider a "design decisions" section in specs for intentional choices that might trigger reviewer concerns
 
 ## Technical Debt
-- Version is hardcoded; could be derived from package.json in the future
+- None — hardcoded version is intentional design, not a shortcut
 
-## Final Consultation (Iteration 1)
+## Final Consultation History
 
-### Gemini Pro
-- **Verdict**: APPROVE (HIGH confidence)
-- Notes: Implementation matches spec, tests pass. Flagged manual version sync as acceptable for v1.
+### Iteration 1
+- **Gemini**: APPROVE — clean implementation
+- **Codex**: REQUEST_CHANGES — wanted package.json sync
+- **Claude**: APPROVE — clean implementation
 
-### GPT-5 Codex
-- **Verdict**: REQUEST_CHANGES (HIGH confidence)
-- Key concerns: hardcoded version risks drift from package.json; regex test rejects pre-release tags
-- Resolution: Spec explicitly requires hardcoded `'1.0.0'` for v1. Pre-release support deferred to follow-up. The `.js` import extension is standard ESM practice in this codebase.
+### Iteration 2
+- **Gemini**: APPROVE
+- **Codex**: REQUEST_CHANGES — same concern repeated
+- **Claude**: APPROVE
 
-## Final Consultation (Iteration 2)
-
-After adding JSDoc comment clarifying protocol version intent:
-
-### Gemini Pro
-- **Verdict**: APPROVE (HIGH confidence)
-- Notes: Spec and plan are clear, complete, and low-risk.
-
-### GPT-5 Codex
-- **Verdict**: REQUEST_CHANGES (HIGH confidence)
-- Same concerns repeated: hardcoded version drift, `.js` import path
-- Resolution: These are spec-level design decisions, not implementation bugs. The `.js` extension is standard ESM in TypeScript (TS compiles to `.js`; imports must reference compiled output). The hardcoded version is intentional — `PORCH_VERSION` tracks the porch protocol version independently of the npm package version, as documented in the JSDoc comment. The spec was approved with this design by all three validators.
+### Iteration 3
+- **Codex**: REQUEST_CHANGES — same concern; resolved by updating spec wording
+- Resolution: Updated spec Q&A #2 to explicitly state the version is independent of package.json
 
 ## Follow-up Items
-- Consider auto-syncing `PORCH_VERSION` with package.json version
-- Consider expanding semver regex to support pre-release tags if RC workflow is adopted for porch
+- Consider exposing `PORCH_VERSION` via a `porch --version` CLI flag in a future spec

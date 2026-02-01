@@ -12,7 +12,7 @@ The porch module lacks a centralized version constant. When porch outputs status
 ## Questions & Answers
 
 1. **Q**: Where should the constant live? **A**: In a new `version.ts` file in the porch directory.
-2. **Q**: What format? **A**: Semantic version string matching the package version.
+2. **Q**: What format? **A**: Semantic version string (independent protocol version, not derived from package.json).
 
 ## Solution
 
