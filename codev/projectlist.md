@@ -202,7 +202,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0078"
     title: "Porch E2E Testing Infrastructure"
     summary: "E2E test harness for porch that validates the full SPIDER protocol lifecycle with real AI interactions"
-    status: committed
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -218,7 +218,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: "2026-01-25T19:30:00-08:00"
       implemented_at: "2026-01-25T20:00:00-08:00"
       committed_at: "2026-01-25T20:30:00-08:00"
-      integrated_at: null
+      integrated_at: "2026-02-01T00:00:00-08:00"
     notes: "E2E test infrastructure for porch. 3-way review (Gemini/Codex/Claude) identified and fixed AWAITING_INPUT gap and git add policy violation."
 
   - id: "0081"
@@ -246,11 +246,11 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0087"
     title: "Porch Timeout Termination Retries"
     summary: "Add timeout logic to porch so that when Claude (as the worker) hangs or fails to respond, porch can terminate and retry the operation"
-    status: conceived
-    priority: medium
-    release: null
+    status: specified
+    priority: high
+    release: v2.0.0
     files:
-      spec: null
+      spec: codev/specs/0087-porch-timeout-termination-retries.md
       plan: null
       review: null
     dependencies: ["0073", "0075"]
@@ -268,7 +268,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0075"
     title: "Porch Minimal Redesign"
     summary: "Redesign porch from 4800 lines to ~500 lines. Claude calls porch as a tool instead of porch spawning Claude."
-    status: implemented
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -283,9 +283,9 @@ Projects currently in development (conceived through committed), sorted by prior
       planned_at: "2026-01-21T12:30:00-08:00"
       implementing_at: "2026-01-21T20:00:00-08:00"
       implemented_at: "2026-01-21T20:25:00-08:00"
-      committed_at: null
-      integrated_at: null
-    notes: "Implemented porch (845 lines code, 79% reduction). All 68 unit tests pass. Integration tested with full SPIDER workflow."
+      committed_at: "2026-01-22T00:00:00-08:00"
+      integrated_at: "2026-02-01T00:00:00-08:00"
+    notes: "Code on main. Porch redesigned to 845 lines (79% reduction). All 68 unit tests pass. Claude→Porch→Claude architecture."
 
   - id: "0070"
     title: "CODEV_HQ Minimal Implementation Spike"
@@ -880,7 +880,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0083"
     title: "Protocol-Agnostic Spawn System"
     summary: "Refactor af spawn to decouple input types from protocols, add --use-protocol flag"
-    status: committed
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -896,7 +896,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       implementing_at: "2026-01-28T00:30:00-08:00"
       implemented_at: "2026-01-28T00:45:00-08:00"
       committed_at: "2026-01-28T01:05:00-08:00"
-      integrated_at: null
+      integrated_at: "2026-02-01T00:00:00-08:00"
     notes: "PR #168 merged. Adds --use-protocol flag and data-driven hooks."
 
   - id: "0084"
@@ -904,7 +904,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     summary: "Ensure tower dashboard is fully mobile-friendly with touch targets, responsive layout, and QR code sharing"
     status: conceived
     priority: medium
-    release: v2.0.0
+    release: v2.1.0
     files:
       spec: null
       plan: null
@@ -919,33 +919,33 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Tower has basic mobile CSS but needs full mobile UX audit: touch targets, responsive layout, QR sharing flow, terminal usability on small screens."
+    notes: "Descoped from v2.0.0 to v2.1.0 — not blocking release. Tower has basic mobile CSS but needs full mobile UX audit: touch targets, responsive layout, QR sharing flow, terminal usability on small screens."
 
   - id: "0085"
     title: "Agent Farm Terminal & Dashboard Rewrite"
-    summary: "Replace ttyd with node-pty terminal layer and modernize vanilla JS dashboard with a modern framework"
-    status: specified
+    summary: "Replace ttyd with node-pty terminal layer and modernize vanilla JS dashboard with React"
+    status: integrated
     priority: high
     release: v2.0.0
     files:
       spec: codev/specs/0085-agent-farm-terminal-dashboard-rewrite.md
       plan: codev/plans/0085-agent-farm-terminal-dashboard-rewrite.md
-      review: null
+      review: codev/reviews/0085-agent-farm-terminal-dashboard-rewrite.md
     dependencies: []
     tags: [architecture, agent-farm, terminal, dashboard, v2]
     timestamps:
       conceived_at: "2026-01-29T00:00:00-08:00"
       specified_at: "2026-01-29T00:00:00-08:00"
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Supersedes 0067. Two pillars: (1) node-pty terminal layer replacing ttyd, (2) dashboard framework selection (React, Svelte, htmx, or enhanced vanilla JS). Triggered by #171 (mobile terminal width control impossible with ttyd)."
+      planned_at: "2026-01-29T12:00:00-08:00"
+      implementing_at: "2026-01-29T14:00:00-08:00"
+      implemented_at: "2026-01-30T00:00:00-08:00"
+      committed_at: "2026-01-30T12:00:00-08:00"
+      integrated_at: "2026-02-01T00:00:00-08:00"
+    notes: "PR #179 merged. node-pty replaces ttyd, React+Vite dashboard replaces vanilla JS. All terminals multiplexed on single port via WebSocket."
 
 ## Next Available Number
 
-**0086** - Reserve this number for your next project
+**0088** - Reserve this number for your next project
 
 ---
 
