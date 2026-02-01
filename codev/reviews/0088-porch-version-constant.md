@@ -10,7 +10,7 @@ Added a `PORCH_VERSION` constant (`'1.0.0'`) exported from a new `version.ts` fi
 - [x] Unit test verifies semver format
 
 ## Deviations from Plan
-None. Implementation matched the plan exactly.
+- Added JSDoc comment to `version.ts` clarifying that `PORCH_VERSION` is a protocol version, not a package version (addressing Codex/Gemini review feedback about drift risk).
 
 ## Lessons Learned
 
