@@ -307,7 +307,7 @@ Use sequential numbering with descriptive names:
 
 **DEFAULT BEHAVIOR**: Consultation is ENABLED by default with:
 - **Gemini 3 Pro** (gemini-3-pro-preview) for deep analysis
-- **GPT-5 Codex** (gpt-5-codex) for coding and architecture perspective
+- **GPT-5.2 Codex** (gpt-5.2-codex) for coding and architecture perspective
 
 To disable: User must explicitly say "without multi-agent consultation"
 
@@ -575,7 +575,7 @@ gh pr merge <number> --squash
 
 When the user requests "Consult" or "consultation" (including variations like "ultrathink and consult"), this specifically means:
 - Use Gemini 3 Pro (gemini-3-pro-preview) for deep analysis
-- Use GPT-5 Codex (gpt-5-codex) for coding and architecture perspective
+- Use GPT-5.2 Codex (gpt-5.2-codex) for coding and architecture perspective
 - Both models should be consulted unless explicitly specified otherwise
 
 ### cmap (Consult Multiple Agents in Parallel)
@@ -683,8 +683,8 @@ consult --model claude pr 95
 |-------|-------------|----------|
 | `gemini` | gemini-3-pro-preview | gemini-cli |
 | `pro` | gemini-3-pro-preview | gemini-cli |
-| `codex` | gpt-5-codex | codex |
-| `gpt` | gpt-5-codex | codex |
+| `codex` | gpt-5.2-codex | codex |
+| `gpt` | gpt-5.2-codex | codex |
 | `claude` | (default model) | claude |
 | `opus` | (default model) | claude |
 

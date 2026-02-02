@@ -311,6 +311,8 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
+    state.phase = 'complete';
+    writeState(statusPath, state);
     console.log('');
     console.log(chalk.green.bold('🎉 PROTOCOL COMPLETE'));
     console.log(`\n  Project ${state.id} has completed the ${state.protocol} protocol.`);

@@ -89,7 +89,6 @@ exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
   await run(`tmux set-option -t "${SESSION_NAME}" status off`);
   await run(`tmux set-option -t "${SESSION_NAME}" -g mouse on`);
   await run(`tmux set-option -t "${SESSION_NAME}" -g set-clipboard on`);
-  await run(`tmux set-option -t "${SESSION_NAME}" -g allow-passthrough on`);
 
   // Copy selection to clipboard when mouse is released (pbcopy for macOS)
   await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
@@ -149,7 +148,6 @@ exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
   await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" status off`);
   await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g mouse on`);
   await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g set-clipboard on`);
-  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g allow-passthrough on`);
 
   // Split right: create utility shell pane (40% width)
   await run(`tmux split-window -h -t "${LAYOUT_SESSION_NAME}" -p 40 -c "${config.projectRoot}"`);

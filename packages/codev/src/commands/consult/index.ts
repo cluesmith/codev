@@ -22,7 +22,7 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   gemini: { cli: 'gemini', args: ['--yolo'], envVar: 'GEMINI_SYSTEM_MD' },
   // Codex uses experimental_instructions_file config flag (not env var)
   // See: https://github.com/openai/codex/discussions/3896
-  codex: { cli: 'codex', args: ['exec', '--full-auto'], envVar: null },
+  codex: { cli: 'codex', args: ['exec', '-m', 'gpt-5.2-codex', '--full-auto'], envVar: null },
   claude: { cli: 'claude', args: ['--print', '-p'], envVar: null },
 };
 

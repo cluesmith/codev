@@ -746,41 +746,29 @@ async function runConsultOnce(
  * Safety: If no explicit verdict found (empty output, crash, malformed),
  * defaults to REQUEST_CHANGES to prevent proceeding with unverified code.
  */
-function parseVerdict(output: string): Verdict {
+export function parseVerdict(output: string): Verdict {
   // Empty or very short output = something went wrong
   if (!output || output.trim().length < 50) {
     return 'REQUEST_CHANGES';
   }
 
-  // Look for actual verdict line (not template text like "[APPROVE | REQUEST_CHANGES | COMMENT]")
-  // Match lines like "VERDICT: APPROVE" or "**VERDICT: APPROVE**"
+  // Scan lines LAST→FIRST so the actual verdict (at the end) takes priority
+  // over template text echoed by codex CLI at the start of output.
+  // Skip template lines containing "[" (e.g., "VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]")
   const lines = output.split('\n');
-  for (const line of lines) {
-    // Strip markdown formatting (**, *, __, _) and trim
-    const stripped = line.trim().replace(/^[\*_]+|[\*_]+$/g, '').trim().toUpperCase();
-    // Match "VERDICT: <value>" but NOT "VERDICT: [APPROVE | ...]"
+  for (let i = lines.length - 1; i >= 0; i--) {
+    // Strip markdown formatting (**, *, __, _, `) and trim
+    const stripped = lines[i].trim().replace(/^[\*_`-]+|[\*_`-]+$/g, '').trim().toUpperCase();
+    // Match "VERDICT: <value>" but NOT template "VERDICT: [APPROVE | ...]"
     if (stripped.startsWith('VERDICT:') && !stripped.includes('[')) {
-      if (stripped.includes('REQUEST_CHANGES')) {
-        return 'REQUEST_CHANGES';
-      }
-      if (stripped.includes('APPROVE')) {
-        return 'APPROVE';
-      }
-      if (stripped.includes('COMMENT')) {
-        return 'COMMENT';
-      }
+      const value = stripped.substring('VERDICT:'.length).trim();
+      if (value.startsWith('REQUEST_CHANGES')) return 'REQUEST_CHANGES';
+      if (value.startsWith('APPROVE')) return 'APPROVE';
+      if (value.startsWith('COMMENT')) return 'COMMENT';
     }
   }
 
-  // Fallback: look anywhere in output (legacy behavior)
-  const upperOutput = output.toUpperCase();
-  if (upperOutput.includes('REQUEST_CHANGES')) {
-    return 'REQUEST_CHANGES';
-  }
-  if (upperOutput.includes('APPROVE')) {
-    return 'APPROVE';
-  }
-  // No explicit verdict = default to REQUEST_CHANGES for safety
+  // No valid VERDICT: line found — default to REQUEST_CHANGES for safety
   return 'REQUEST_CHANGES';
 }
 
