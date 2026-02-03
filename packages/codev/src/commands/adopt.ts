@@ -101,7 +101,7 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   // Ask about permission mode
   let skipPermissions = false;
   if (!yes) {
-    skipPermissions = await confirm('Use --dangerously-skip-permissions for architect and builder?', false);
+    skipPermissions = await confirm('Allow AI agents to run commands without confirmation prompts?', true);
   }
 
   // Create minimal codev structure using shared scaffold utilities

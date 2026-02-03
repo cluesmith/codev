@@ -63,7 +63,7 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
 
   if (!yes) {
     initGit = await confirm('Initialize git repository?', true);
-    skipPermissions = await confirm('Use --dangerously-skip-permissions for architect and builder?', false);
+    skipPermissions = await confirm('Allow AI agents to run commands without confirmation prompts?', true);
   }
 
   // Create directory
