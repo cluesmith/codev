@@ -342,12 +342,13 @@ export async function start(options: StartOptions = {}): Promise<void> {
   if (!options.noRole) {
     const role = loadRolePrompt(config, 'architect');
     if (role) {
-      // Write role to a file and create a launch script to avoid shell escaping issues
-      // The architect.md file contains backticks, $variables, and other shell-sensitive chars
+      // Write a minimal pointer - AI reads the full file
       const roleFile = resolve(config.stateDir, 'architect-role.md');
-      // Inject the actual dashboard port into the role prompt
-      const roleContent = role.content.replace(/\{PORT\}/g, String(dashboardPort));
-      writeFileSync(roleFile, roleContent, 'utf-8');
+      const shortPointer = `You are an Architect. Read codev/roles/architect.md before starting work.
+
+Dashboard: http://localhost:${dashboardPort}
+`;
+      writeFileSync(roleFile, shortPointer, 'utf-8');
 
       const launchScript = resolve(config.stateDir, 'launch-architect.sh');
       writeFileSync(launchScript, `#!/bin/bash

@@ -85,6 +85,15 @@ interface GateStatus {
   timestamp?: number;
 }
 
+// Interface for terminal entry in tower UI
+interface TerminalEntry {
+  type: 'architect' | 'builder' | 'shell' | 'file';
+  id: string;
+  label: string;
+  url: string;
+  active: boolean;
+}
+
 // Interface for instance status returned to UI
 interface InstanceStatus {
   projectPath: string;
@@ -95,6 +104,9 @@ interface InstanceStatus {
   registered: string;
   lastUsed?: string;
   running: boolean;
+  proxyUrl: string; // Tower proxy URL for dashboard
+  architectUrl: string; // Direct URL to architect terminal
+  terminals: TerminalEntry[]; // All available terminals
   ports: {
     type: string;
     port: number;
@@ -305,6 +317,99 @@ async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
 }
 
 /**
+ * Fetch terminal list from a project's dashboard.
+ * Returns architect, builders, and shells with their URLs.
+ */
+async function getTerminalsForProject(
+  basePort: number,
+  proxyUrl: string
+): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+
+  try {
+    const response = await fetch(`http://localhost:${basePort}/api/state`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { terminals: [], gateStatus: { hasGate: false } };
+
+    const state = await response.json() as {
+      architect?: { terminalId?: string };
+      builders?: Array<{
+        id: string;
+        projectId?: string;
+        terminalId?: string;
+        gateStatus?: { waiting?: boolean; gateName?: string; timestamp?: number };
+        status?: string;
+        currentGate?: string;
+      }>;
+      utils?: Array<{ id: string; label?: string; terminalId?: string }>;
+      annotations?: Array<{ id: string; file?: string }>;
+    };
+
+    const terminals: TerminalEntry[] = [];
+
+    // Add architect terminal
+    if (state.architect?.terminalId) {
+      terminals.push({
+        type: 'architect',
+        id: 'architect',
+        label: 'Architect',
+        url: `${proxyUrl}?tab=architect`,
+        active: true,
+      });
+    }
+
+    // Add builder terminals
+    for (const builder of state.builders || []) {
+      if (builder.terminalId) {
+        const label = builder.projectId ? `Builder ${builder.projectId}` : `Builder ${builder.id}`;
+        terminals.push({
+          type: 'builder',
+          id: builder.id,
+          label,
+          url: `${proxyUrl}?tab=builder-${builder.id}`,
+          active: true,
+        });
+      }
+    }
+
+    // Add shell terminals
+    for (const util of state.utils || []) {
+      if (util.terminalId) {
+        terminals.push({
+          type: 'shell',
+          id: util.id,
+          label: util.label || `Shell ${util.id}`,
+          url: `${proxyUrl}?tab=shell-${util.id}`,
+          active: true,
+        });
+      }
+    }
+
+    // Check for pending gates
+    const builderWithGate = state.builders?.find(
+      (b) => b.gateStatus?.waiting || b.status === 'gate-pending'
+    );
+
+    const gateStatus: GateStatus = builderWithGate
+      ? {
+          hasGate: true,
+          gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
+          builderId: builderWithGate.id,
+          timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
+        }
+      : { hasGate: false };
+
+    return { terminals, gateStatus };
+  } catch {
+    // Project dashboard not responding or timeout
+  }
+  return { terminals: [], gateStatus: { hasGate: false } };
+}
+
+/**
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
@@ -323,14 +428,20 @@ async function getInstances(): Promise<InstanceStatus[]> {
     // All terminals are multiplexed on dashboardPort via WebSocket (Spec 0085)
     const dashboardActive = await isPortListening(dashboardPort);
 
-    // Get gate status if running
-    const gateStatus = dashboardActive ? await getGateStatusForProject(basePort) : { hasGate: false };
+    // Encode project path for proxy URL
+    const encodedPath = Buffer.from(allocation.project_path).toString('base64url');
+    const proxyUrl = `/project/${encodedPath}/`;
+
+    // Get terminals and gate status if running
+    const { terminals, gateStatus } = dashboardActive
+      ? await getTerminalsForProject(basePort, proxyUrl)
+      : { terminals: [], gateStatus: { hasGate: false } };
 
     const ports = [
       {
         type: 'Dashboard',
         port: dashboardPort,
-        url: `http://localhost:${dashboardPort}`,
+        url: proxyUrl, // Use tower proxy URL, not raw localhost
         active: dashboardActive,
       },
     ];
@@ -344,6 +455,9 @@ async function getInstances(): Promise<InstanceStatus[]> {
       registered: allocation.registered_at,
       lastUsed: allocation.last_used_at,
       running: dashboardActive,
+      proxyUrl, // Tower proxy URL for dashboard
+      architectUrl: `${proxyUrl}?tab=architect`, // Direct URL to architect terminal
+      terminals, // All available terminals
       ports,
       gateStatus,
     });

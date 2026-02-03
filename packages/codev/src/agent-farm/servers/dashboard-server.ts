@@ -227,6 +227,23 @@ async function initArchitectTerminal(): Promise<void> {
 
     setArchitect({ ...architect, terminalId: info.id });
     console.log(`Architect terminal session created: ${info.id}`);
+
+    // Listen for exit and auto-restart
+    session.on('exit', (exitCode) => {
+      console.log(`Architect terminal exited (code=${exitCode}), will attempt restart...`);
+      // Clear the terminalId so we can recreate
+      const arch = getArchitect();
+      if (arch) {
+        setArchitect({ ...arch, terminalId: undefined });
+      }
+      // Schedule restart after a brief delay
+      setTimeout(() => {
+        console.log('Attempting to restart architect terminal...');
+        initArchitectTerminal().catch((err) => {
+          console.error('Failed to restart architect terminal:', (err as Error).message);
+        });
+      }, 2000);
+    });
   } catch (err) {
     console.error('Failed to create architect terminal session:', (err as Error).message);
   }
@@ -1975,6 +1992,14 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(fullPath)) {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end(`File not found: ${filePath}`);
+        return;
+      }
+
+      // Check if it's a directory
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end(`Cannot read directory as file: ${filePath}`);
         return;
       }
 

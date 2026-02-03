@@ -64,8 +64,13 @@ async function createAndAttach(args: string[]): Promise<void> {
 
   logger.info(`Loaded architect role (${role.source})`);
 
-  // Create a launch script to avoid shell escaping issues
-  // The architect.md file contains backticks, $variables, and other shell-sensitive chars
+  // Write a minimal pointer - AI reads the full file
+  const roleFile = resolve(config.stateDir, 'architect-role.md');
+  const shortPointer = `You are an Architect. Read codev/roles/architect.md before starting work.
+`;
+  writeFileSync(roleFile, shortPointer, 'utf-8');
+
+  // Create a launch script
   const launchScript = resolve(config.stateDir, 'launch-architect-cli.sh');
 
   let argsStr = '';
@@ -75,7 +80,7 @@ async function createAndAttach(args: string[]): Promise<void> {
 
   writeFileSync(launchScript, `#!/bin/bash
 cd "${config.projectRoot}"
-exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
+exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
 `, { mode: 0o755 });
 
   logger.info('Creating new architect session...');
@@ -124,6 +129,12 @@ async function createLayoutAndAttach(args: string[]): Promise<void> {
 
   logger.info(`Loaded architect role (${role.source})`);
 
+  // Write a minimal pointer - AI reads the full file
+  const roleFile = resolve(config.stateDir, 'architect-role.md');
+  const shortPointer = `You are an Architect. Read codev/roles/architect.md before starting work.
+`;
+  writeFileSync(roleFile, shortPointer, 'utf-8');
+
   // Create launch script for architect
   const launchScript = resolve(config.stateDir, 'launch-architect-cli.sh');
 
@@ -134,7 +145,7 @@ async function createLayoutAndAttach(args: string[]): Promise<void> {
 
   writeFileSync(launchScript, `#!/bin/bash
 cd "${config.projectRoot}"
-exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
+exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
 `, { mode: 0o755 });
 
   logger.info('Creating layout session...');

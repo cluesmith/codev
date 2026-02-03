@@ -1125,23 +1125,37 @@
       const statusText = instance.running ? 'Running' : 'Stopped';
       const hasGate = instance.gateStatus?.hasGate;
 
-      const terminalsHtml = instance.ports.map(port => {
-        // Use proxy URL - works both locally and through tunnel
-        const proxyUrl = getProxyUrl(instance, port.type);
-        return `
-        <div class="port-item">
-          <div class="port-info">
-            <span class="port-status ${port.active ? 'active' : 'inactive'}"></span>
-            <span class="port-type">${escapeHtml(port.type)}</span>
+      // Render terminals list (Architect, Builders, Shells)
+      const terminals = instance.terminals || [];
+      let terminalsHtml = '';
+
+      if (instance.running && terminals.length > 0) {
+        // Show each terminal as a link
+        terminalsHtml = terminals.map(terminal => `
+          <div class="port-item">
+            <div class="port-info">
+              <span class="port-status ${terminal.active ? 'active' : 'inactive'}"></span>
+              <span class="port-type">${escapeHtml(terminal.label)}</span>
+            </div>
+            <div class="port-actions">
+              <a href="${escapeHtml(terminal.url)}" target="_blank">Open</a>
+            </div>
           </div>
-          <div class="port-actions">
-            <a href="${escapeHtml(proxyUrl)}" target="_blank" class="${port.active ? '' : 'disabled'}">
-              Open
-            </a>
+        `).join('');
+      } else if (instance.running) {
+        // Fallback to Dashboard link if no terminals available
+        terminalsHtml = `
+          <div class="port-item">
+            <div class="port-info">
+              <span class="port-status active"></span>
+              <span class="port-type">Dashboard</span>
+            </div>
+            <div class="port-actions">
+              <a href="${escapeHtml(instance.proxyUrl)}" target="_blank">Open</a>
+            </div>
           </div>
-        </div>
-      `;
-      }).join('');
+        `;
+      }
 
       const lastUsed = instance.lastUsed
         ? formatDate(instance.lastUsed)

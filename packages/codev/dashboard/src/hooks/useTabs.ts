@@ -64,7 +64,31 @@ function buildTabs(state: DashboardState | null): Tab[] {
 export function useTabs(state: DashboardState | null) {
   const [activeTabId, setActiveTabId] = useState<string>('dashboard');
   const knownTabIds = useRef<Set<string> | null>(null);
+  const urlTabHandled = useRef(false);
   const tabs = buildTabs(state);
+
+  // Handle URL ?tab= parameter on initial load (for deep linking from tower)
+  useEffect(() => {
+    if (urlTabHandled.current || state === null) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+
+    if (tabParam) {
+      // Find matching tab by id or type
+      const matchingTab = tabs.find(t => t.id === tabParam || t.type === tabParam);
+      if (matchingTab) {
+        setActiveTabId(matchingTab.id);
+        urlTabHandled.current = true;
+        // Clean up URL to avoid sticky behavior on refresh
+        const url = new URL(window.location.href);
+        url.searchParams.delete('tab');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } else {
+      urlTabHandled.current = true;
+    }
+  }, [tabs, state]);
 
   // Auto-switch to genuinely new tabs (created after page load).
   // Wait for real state (non-null) before seeding known tabs — otherwise the
