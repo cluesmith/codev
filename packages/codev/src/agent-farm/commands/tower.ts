@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import net from 'node:net';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, openBrowser } from '../utils/shell.js';
+import { spawnDetached } from '../utils/shell.js';
 import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 
@@ -26,7 +26,6 @@ const STARTUP_CHECK_INTERVAL_MS = 200;
 export interface TowerStartOptions {
   port?: number;
   wait?: boolean; // Wait for server to start before returning
-  noBrowser?: boolean; // Don't open browser
 }
 
 export interface TowerStopOptions {
@@ -134,7 +133,6 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
   if (await isServerResponding(port)) {
     const dashboardUrl = `http://localhost:${port}`;
     logger.info(`Tower already running at ${dashboardUrl}`);
-    await openBrowser(dashboardUrl);
     return;
   }
 
@@ -220,11 +218,6 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     logger.success('Tower starting in background...');
     logger.kv('Dashboard', dashboardUrl);
     logger.kv('Logs', `af tower log`);
-  }
-
-  // Open in browser unless disabled
-  if (!options.noBrowser) {
-    await openBrowser(dashboardUrl);
   }
 }
 

@@ -397,13 +397,11 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Start the tower dashboard (daemonizes by default)')
     .option('-p, --port <port>', 'Port to run on (default: 4100)')
     .option('--wait', 'Wait for server to start before returning')
-    .option('--no-browser', 'Don\'t open browser automatically')
     .action(async (options) => {
       try {
         await towerStart({
           port: options.port ? parseInt(options.port, 10) : undefined,
           wait: options.wait,
-          noBrowser: options.browser === false,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
