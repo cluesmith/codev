@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
@@ -13,6 +14,13 @@ export function App() {
   const { state, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+
+  // Check for fullscreen mode from URL
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    setIsFullscreen(urlParams.get('fullscreen') === '1');
+  }, []);
 
   const renderTerminal = (tab: { type: string; terminalId?: string }) => {
     const wsPath = getTerminalWsPath(tab);
@@ -52,6 +60,15 @@ export function App() {
         return <div>Unknown tab type</div>;
     }
   };
+
+  // Fullscreen mode: show only the active terminal, no chrome
+  if (isFullscreen && activeTab && (activeTab.type === 'architect' || activeTab.type === 'builder' || activeTab.type === 'shell')) {
+    return (
+      <div className="fullscreen-terminal">
+        {renderTerminal(activeTab)}
+      </div>
+    );
+  }
 
   if (isMobile) {
     return (

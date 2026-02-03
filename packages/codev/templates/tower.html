@@ -1125,25 +1125,12 @@
       const statusText = instance.running ? 'Running' : 'Stopped';
       const hasGate = instance.gateStatus?.hasGate;
 
-      // Render terminals list (Architect, Builders, Shells)
+      // Render terminals list - always show Dashboard first, then individual terminals
       const terminals = instance.terminals || [];
       let terminalsHtml = '';
 
-      if (instance.running && terminals.length > 0) {
-        // Show each terminal as a link
-        terminalsHtml = terminals.map(terminal => `
-          <div class="port-item">
-            <div class="port-info">
-              <span class="port-status ${terminal.active ? 'active' : 'inactive'}"></span>
-              <span class="port-type">${escapeHtml(terminal.label)}</span>
-            </div>
-            <div class="port-actions">
-              <a href="${escapeHtml(terminal.url)}" target="_blank">Open</a>
-            </div>
-          </div>
-        `).join('');
-      } else if (instance.running) {
-        // Fallback to Dashboard link if no terminals available
+      if (instance.running) {
+        // Always show Dashboard link first (opens normal dashboard view)
         terminalsHtml = `
           <div class="port-item">
             <div class="port-info">
@@ -1155,6 +1142,21 @@
             </div>
           </div>
         `;
+
+        // Then show individual terminals (open full-screen terminal view)
+        if (terminals.length > 0) {
+          terminalsHtml += terminals.map(terminal => `
+            <div class="port-item">
+              <div class="port-info">
+                <span class="port-status ${terminal.active ? 'active' : 'inactive'}"></span>
+                <span class="port-type">${escapeHtml(terminal.label)}</span>
+              </div>
+              <div class="port-actions">
+                <a href="${escapeHtml(terminal.url)}&fullscreen=1" target="_blank">Open</a>
+              </div>
+            </div>
+          `).join('');
+        }
       }
 
       const lastUsed = instance.lastUsed

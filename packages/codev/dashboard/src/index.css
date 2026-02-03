@@ -37,6 +37,18 @@ body {
   font-size: 13px;
 }
 
+/* Fullscreen terminal mode - no chrome, just the terminal */
+.fullscreen-terminal {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.fullscreen-terminal > div {
+  height: 100%;
+  width: 100%;
+}
+
 /* App layout */
 .app {
   display: flex;

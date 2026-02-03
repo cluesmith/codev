@@ -61,6 +61,22 @@ function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
   }
 }
 
+// Global exception handlers to catch uncaught errors
+process.on('uncaughtException', (err) => {
+  log('ERROR', `Uncaught exception: ${err.message}\n${err.stack}`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+  log('ERROR', `Unhandled rejection: ${message}`);
+  process.exit(1);
+});
+
+// Catch signals for clean shutdown
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+
 if (isNaN(port) || port < 1 || port > 65535) {
   log('ERROR', `Invalid port "${portArg}". Must be a number between 1 and 65535.`);
   process.exit(1);
@@ -583,47 +599,65 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     }
   }
 
-  // Use codev af command (avoids npx cache issues)
-  // Falls back to npx codev af if codev not in PATH
+  // Use af command (the Agent Farm CLI)
+  // Resolve absolute path to af to handle daemonized process without PATH
 
   // SECURITY: Use spawn with cwd option to avoid command injection
   // Do NOT use bash -c with string concatenation
   try {
-    // First, stop any existing (possibly stale) instance
-    const stopChild = spawn('codev', ['af', 'dash', 'stop'], {
-      cwd: projectPath,
-      stdio: 'ignore',
-    });
-    // Wait for stop to complete
-    await new Promise<void>((resolve) => {
-      stopChild.on('close', () => resolve());
-      stopChild.on('error', () => resolve());
-      // Timeout after 3 seconds
-      setTimeout(() => resolve(), 3000);
-    });
+    // Resolve af path - needed when tower runs as daemon without full PATH
+    let afPath = 'af';
+    try {
+      afPath = execSync('which af', { encoding: 'utf-8' }).trim();
+    } catch {
+      // Fall back to 'af' and hope it's in PATH
+      log('WARN', 'Could not resolve af path, using "af"');
+    }
 
-    // Small delay to ensure cleanup
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Don't call "af dash stop" from the tower - it can accidentally kill the tower
+    // due to tree-kill or orphan detection. Instead, just clear any stale state file.
+    const stateFile = path.join(projectPath, '.agent-farm', 'state.json');
+    if (fs.existsSync(stateFile)) {
+      try {
+        fs.unlinkSync(stateFile);
+      } catch {
+        // Ignore - file might not exist or be locked
+      }
+    }
 
-    // Now start using codev af dash start (avoids npx caching issues)
+    // Start using af dash start
     // Capture output to detect errors
-    const child = spawn('codev', ['af', 'dash', 'start'], {
+    const child = spawn(afPath, ['dash', 'start'], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: projectPath,
+      env: process.env,
     });
 
-    let stdout = '';
-    let stderr = '';
+    // Handle spawn errors (e.g., ENOENT if af not found)
+    // Use object wrapper to avoid TypeScript narrowing issues
+    const state = { spawnError: null as string | null, stdout: '', stderr: '' };
+    child.on('error', (err) => {
+      state.spawnError = err.message;
+      log('ERROR', `Spawn error: ${err.message}`);
+    });
     child.stdout?.on('data', (data) => {
-      stdout += data.toString();
+      state.stdout += data.toString();
     });
     child.stderr?.on('data', (data) => {
-      stderr += data.toString();
+      state.stderr += data.toString();
     });
 
     // Wait a moment for the process to start (or fail)
     await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check for spawn error first (e.g., codev not found)
+    if (state.spawnError) {
+      return {
+        success: false,
+        error: `Failed to spawn codev: ${state.spawnError}`,
+      };
+    }
 
     // Check if the dashboard port is listening
     // Resolve symlinks (macOS /tmp -> /private/tmp)
@@ -639,7 +673,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
 
       if (!isRunning) {
         // Process failed to start - try to get error info
-        const errorInfo = stderr || stdout || 'Unknown error - check codev installation';
+        const errorInfo = state.stderr || state.stdout || 'Unknown error - check codev installation';
         child.unref();
         return {
           success: false,
@@ -648,8 +682,8 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       }
     } else {
       // No allocation found - process might have failed before registering
-      if (stderr || stdout) {
-        const errorInfo = stderr || stdout;
+      if (state.stderr || state.stdout) {
+        const errorInfo = state.stderr || state.stdout;
         child.unref();
         return {
           success: false,
