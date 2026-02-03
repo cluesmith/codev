@@ -146,17 +146,12 @@ const terminalBackend = 'node-pty' as const;
 
 // Load dashboard frontend preference from config (Spec 0085)
 function loadDashboardFrontend(): 'react' | 'legacy' {
-  // Try af-config.json at project root first, then legacy codev/config.json
-  for (const configPath of [
-    path.resolve(projectRoot, 'af-config.json'),
-    path.resolve(projectRoot, 'codev', 'config.json'),
-  ]) {
-    if (fs.existsSync(configPath)) {
-      try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        return config?.dashboard?.frontend ?? 'react';
-      } catch { /* ignore */ }
-    }
+  const configPath = path.resolve(projectRoot, 'af-config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      return config?.dashboard?.frontend ?? 'react';
+    } catch { /* ignore */ }
   }
   return 'react';
 }
@@ -541,13 +536,13 @@ async function spawnWorktreeBuilder(
     execSync(`git branch "${branchName}" HEAD`, { cwd: projectRoot, stdio: 'ignore' });
     execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
 
-    // Get builder command from config or use default shell
-    const configPath = path.resolve(projectRoot, 'codev', 'config.json');
+    // Get builder command from af-config.json or use default shell
+    const afConfigPath = path.resolve(projectRoot, 'af-config.json');
     const defaultShell = process.env.SHELL || 'bash';
     let builderCommand = defaultShell;
-    if (fs.existsSync(configPath)) {
+    if (fs.existsSync(afConfigPath)) {
       try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const config = JSON.parse(fs.readFileSync(afConfigPath, 'utf-8'));
         builderCommand = config?.shell?.builder || defaultShell;
       } catch {
         // Use default
