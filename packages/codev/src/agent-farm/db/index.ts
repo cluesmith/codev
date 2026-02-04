@@ -165,6 +165,35 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
   }
 
+  // Migration v3: Remove UNIQUE constraint from utils.port (node-pty shells use port=0)
+  const v3 = db.prepare('SELECT version FROM _migrations WHERE version = 3').get();
+  if (!v3) {
+    // Check if utils table has the UNIQUE constraint on port
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='utils'")
+      .get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
+      // SQLite can't drop constraints, so recreate table
+      db.exec(`
+        CREATE TABLE utils_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          tmux_session TEXT,
+          terminal_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO utils_new SELECT id, name, port, pid, tmux_session, terminal_id, started_at FROM utils;
+        DROP TABLE utils;
+        ALTER TABLE utils_new RENAME TO utils;
+      `);
+      console.log('[info] Migrated utils table: removed UNIQUE constraint from port');
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (3)').run();
+  }
+
   return db;
 }
 
