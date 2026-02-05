@@ -1,5 +1,8 @@
 /**
  * Start command - launches the architect dashboard
+ *
+ * Phase 3 (Spec 0090): Uses tower API for project activation.
+ * Tower is the single daemon that manages all projects.
  */
 
 import { resolve, basename } from 'node:path';
@@ -17,6 +20,8 @@ import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan
 import { getPortBlock, cleanupStaleEntries } from '../utils/port-registry.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { initHQConnector, isHQEnabled } from '../hq-connector.js';
+import { TowerClient, encodeProjectPath } from '../lib/tower-client.js';
+import { towerStart } from './tower.js';
 
 /**
  * Parsed remote target
@@ -274,6 +279,72 @@ Then verify with:
 }
 
 /**
+ * Default tower port
+ */
+const DEFAULT_TOWER_PORT = 4100;
+
+/**
+ * Start via tower API (Phase 3 - Spec 0090)
+ *
+ * This is the new way to start projects:
+ * 1. Ensure tower is running
+ * 2. Call tower's activate API
+ * 3. Open browser to tower URL
+ */
+async function startViaTower(options: StartOptions): Promise<void> {
+  const config = getConfig();
+  const projectPath = config.projectRoot;
+
+  logger.header('Starting Agent Farm');
+  logger.kv('Project', projectPath);
+
+  // Create tower client
+  const client = new TowerClient(DEFAULT_TOWER_PORT);
+
+  // Check if tower is running
+  const towerRunning = await client.isRunning();
+
+  if (!towerRunning) {
+    logger.info('Starting tower daemon...');
+    await towerStart({ port: DEFAULT_TOWER_PORT, wait: true });
+
+    // Give tower a moment to fully initialize
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Activate project via tower API
+  logger.info('Activating project...');
+  const result = await client.activateProject(projectPath);
+
+  if (!result.ok) {
+    fatal(`Failed to activate project: ${result.error}`);
+  }
+
+  if (result.adopted) {
+    logger.info('Project auto-adopted (codev/ directory created)');
+  }
+
+  // Get project URL from tower
+  const projectUrl = client.getProjectUrl(projectPath);
+
+  logger.blank();
+  logger.success('Agent Farm started!');
+  logger.kv('Dashboard', projectUrl);
+
+  // Open browser (unless --no-browser)
+  if (!options.noBrowser) {
+    await openBrowser(projectUrl);
+  }
+
+  // For remote mode, keep process alive
+  if (options.noBrowser) {
+    logger.info('Keeping connection alive for remote tunnel...');
+    // Block forever - SSH disconnect will kill us
+    await new Promise(() => {});
+  }
+}
+
+/**
  * Start the architect dashboard
  */
 export async function start(options: StartOptions = {}): Promise<void> {
@@ -282,6 +353,15 @@ export async function start(options: StartOptions = {}): Promise<void> {
     return startRemote(options);
   }
 
+  // Use tower API for local starts (Phase 3 - Spec 0090)
+  return startViaTower(options);
+}
+
+/**
+ * Legacy start function - kept for reference during migration
+ * Will be removed in Phase 4
+ */
+async function startLegacy(options: StartOptions = {}): Promise<void> {
   const config = getConfig();
 
   // Clean up stale port allocations (handles machine restarts, killed processes)

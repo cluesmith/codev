@@ -1,19 +1,86 @@
 /**
  * Status command - shows status of all agents
+ *
+ * Phase 3 (Spec 0090): Uses tower API for project status.
  */
 
 import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { isProcessRunning } from '../utils/shell.js';
+import { getConfig } from '../utils/config.js';
+import { TowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
+
+/**
+ * Default tower port
+ */
+const DEFAULT_TOWER_PORT = 4100;
 
 /**
  * Display status of all agent farm processes
  */
 export async function status(): Promise<void> {
-  const state = loadState();
+  const config = getConfig();
+  const projectPath = config.projectRoot;
 
   logger.header('Agent Farm Status');
+
+  // Try tower API first (Phase 3 - Spec 0090)
+  const client = new TowerClient(DEFAULT_TOWER_PORT);
+  const towerRunning = await client.isRunning();
+
+  if (towerRunning) {
+    // Get health info
+    const health = await client.getHealth();
+    if (health) {
+      logger.kv('Tower', chalk.green('running'));
+      logger.kv('  Uptime', `${Math.floor(health.uptime)}s`);
+      logger.kv('  Active Projects', health.activeProjects);
+      logger.kv('  Memory', `${Math.round(health.memoryUsage / 1024 / 1024)}MB`);
+    }
+
+    logger.blank();
+
+    // Get project status from tower
+    const projectStatus = await client.getProjectStatus(projectPath);
+
+    if (projectStatus) {
+      const statusText = projectStatus.active ? chalk.green('active') : chalk.gray('inactive');
+      logger.kv('Project', projectStatus.name);
+      logger.kv('  Status', statusText);
+      logger.kv('  Port', projectStatus.basePort);
+      logger.kv('  Terminals', projectStatus.terminals.length);
+
+      if (projectStatus.terminals.length > 0) {
+        logger.blank();
+        logger.info('Terminals:');
+        for (const term of projectStatus.terminals) {
+          const typeColor = term.type === 'architect' ? chalk.cyan : term.type === 'builder' ? chalk.blue : chalk.gray;
+          logger.info(`  ${typeColor(term.type)} - ${term.label} (${term.active ? 'active' : 'stopped'})`);
+        }
+      }
+
+      if (projectStatus.gateStatus?.hasGate) {
+        logger.blank();
+        logger.warn(`Gate pending: ${projectStatus.gateStatus.gateName} (builder: ${projectStatus.gateStatus.builderId})`);
+      }
+
+      return;
+    }
+
+    // Project not found in tower, show "not active"
+    logger.kv('Project', chalk.gray('not active in tower'));
+    logger.info(`Run 'af dash start' to activate this project`);
+    return;
+  }
+
+  // Tower not running - show message and fall back to local state
+  logger.kv('Tower', chalk.gray('not running'));
+  logger.info(`Run 'af tower start' to start the tower daemon`);
+  logger.blank();
+
+  // Fall back to local state for legacy display
+  const state = loadState();
 
   // Architect status
   if (state.architect) {

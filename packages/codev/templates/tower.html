@@ -1139,7 +1139,7 @@
               <span class="port-type">Overview</span>
             </div>
             <div class="port-actions">
-              <a href="${escapeHtml(instance.proxyUrl)}">Open</a>
+              <a href="${escapeHtml(instance.proxyUrl)}" target="_blank">Open</a>
             </div>
           </div>
         `;
@@ -1153,7 +1153,7 @@
                 <span class="port-type">${escapeHtml(terminal.label)}</span>
               </div>
               <div class="port-actions">
-                <a href="${escapeHtml(terminal.url)}&fullscreen=1">Open</a>
+                <a href="${escapeHtml(terminal.url)}&fullscreen=1" target="_blank">Open</a>
               </div>
             </div>
           `).join('');

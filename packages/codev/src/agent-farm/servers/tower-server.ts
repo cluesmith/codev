@@ -14,15 +14,210 @@ import { spawn, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+import { WebSocketServer, WebSocket } from 'ws';
 import { getGlobalDb } from '../db/index.js';
 import { cleanupStaleEntries } from '../utils/port-registry.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { TerminalManager } from '../../terminal/pty-manager.js';
+import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Default port for tower dashboard
 const DEFAULT_PORT = 4100;
+
+// Rate limiting for activation requests (Spec 0090 Phase 1)
+// Simple in-memory rate limiter: 10 activations per minute per client
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX = 10;
+
+interface RateLimitEntry {
+  count: number;
+  windowStart: number;
+}
+
+const activationRateLimits = new Map<string, RateLimitEntry>();
+
+/**
+ * Check if a client has exceeded the rate limit for activations
+ * Returns true if rate limit exceeded, false if allowed
+ */
+function isRateLimited(clientIp: string): boolean {
+  const now = Date.now();
+  const entry = activationRateLimits.get(clientIp);
+
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    // New window
+    activationRateLimits.set(clientIp, { count: 1, windowStart: now });
+    return false;
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return true;
+  }
+
+  entry.count++;
+  return false;
+}
+
+/**
+ * Clean up old rate limit entries periodically
+ */
+function cleanupRateLimits(): void {
+  const now = Date.now();
+  for (const [ip, entry] of activationRateLimits.entries()) {
+    if (now - entry.windowStart >= RATE_LIMIT_WINDOW_MS * 2) {
+      activationRateLimits.delete(ip);
+    }
+  }
+}
+
+// Cleanup stale rate limit entries every 5 minutes
+setInterval(cleanupRateLimits, 5 * 60 * 1000);
+
+// ============================================================================
+// PHASE 2 & 4: Terminal Management (Spec 0090)
+// ============================================================================
+
+// Global TerminalManager instance for tower-managed terminals
+// Uses a temporary directory as projectRoot since terminals can be for any project
+let terminalManager: TerminalManager | null = null;
+
+// Project terminal registry - tracks which terminals belong to which project
+// Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
+interface ProjectTerminals {
+  architect?: string;
+  builders: Map<string, string>;
+  shells: Map<string, string>;
+}
+const projectTerminals = new Map<string, ProjectTerminals>();
+
+/**
+ * Get or create project terminal registry entry
+ */
+function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
+  let entry = projectTerminals.get(projectPath);
+  if (!entry) {
+    entry = { builders: new Map(), shells: new Map() };
+    projectTerminals.set(projectPath, entry);
+  }
+  return entry;
+}
+
+/**
+ * Generate next shell ID for a project
+ */
+function getNextShellId(projectPath: string): string {
+  const entry = getProjectTerminalsEntry(projectPath);
+  let maxId = 0;
+  for (const id of entry.shells.keys()) {
+    const num = parseInt(id.replace('shell-', ''), 10);
+    if (!isNaN(num) && num > maxId) maxId = num;
+  }
+  return `shell-${maxId + 1}`;
+}
+
+/**
+ * Get or create the global TerminalManager instance
+ */
+function getTerminalManager(): TerminalManager {
+  if (!terminalManager) {
+    // Use a neutral projectRoot - terminals specify their own cwd
+    const projectRoot = process.env.HOME || '/tmp';
+    terminalManager = new TerminalManager({
+      projectRoot,
+      logDir: path.join(homedir(), '.agent-farm', 'logs'),
+      maxSessions: 100,
+      ringBufferLines: 1000,
+      diskLogEnabled: true,
+      diskLogMaxBytes: 50 * 1024 * 1024,
+      reconnectTimeoutMs: 300_000,
+    });
+  }
+  return terminalManager;
+}
+
+// Import PtySession type for WebSocket handling
+import type { PtySession } from '../../terminal/pty-session.js';
+
+/**
+ * Handle WebSocket connection to a terminal session
+ * Uses hybrid binary protocol (Spec 0085):
+ * - 0x00 prefix: Control frame (JSON)
+ * - 0x01 prefix: Data frame (raw PTY bytes)
+ */
+function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
+  const resumeSeq = req.headers['x-session-resume'];
+
+  // Create a client adapter for the PTY session
+  // Uses binary protocol for data frames
+  const client = {
+    send: (data: Buffer | string) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Encode as binary data frame (0x01 prefix)
+        ws.send(encodeData(data));
+      }
+    },
+  };
+
+  // Attach client to session and get replay data
+  let replayLines: string[];
+  if (resumeSeq && typeof resumeSeq === 'string') {
+    replayLines = session.attachResume(client, parseInt(resumeSeq, 10));
+  } else {
+    replayLines = session.attach(client);
+  }
+
+  // Send replay data as binary data frame
+  if (replayLines.length > 0) {
+    const replayData = replayLines.join('\n');
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(encodeData(replayData));
+    }
+  }
+
+  // Handle incoming messages from client (binary protocol)
+  ws.on('message', (rawData: Buffer) => {
+    try {
+      const frame = decodeFrame(Buffer.from(rawData));
+
+      if (frame.type === 'data') {
+        // Write raw input to terminal
+        session.write(frame.data.toString('utf-8'));
+      } else if (frame.type === 'control') {
+        // Handle control messages
+        const msg = frame.message;
+        if (msg.type === 'resize') {
+          const cols = msg.payload.cols as number;
+          const rows = msg.payload.rows as number;
+          if (typeof cols === 'number' && typeof rows === 'number') {
+            session.resize(cols, rows);
+          }
+        } else if (msg.type === 'ping') {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(encodeControl({ type: 'pong', payload: {} }));
+          }
+        }
+      }
+    } catch {
+      // If decode fails, try treating as raw UTF-8 input (for simpler clients)
+      try {
+        session.write(rawData.toString('utf-8'));
+      } catch {
+        // Ignore malformed input
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    session.detach(client);
+  });
+
+  ws.on('error', () => {
+    session.detach(client);
+  });
+}
 
 // Parse arguments with Commander
 const program = new Command()
@@ -73,9 +268,37 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
+// Graceful shutdown handler (Phase 2 - Spec 0090)
+async function gracefulShutdown(signal: string): Promise<void> {
+  log('INFO', `Received ${signal}, starting graceful shutdown...`);
+
+  // 1. Stop accepting new connections
+  server?.close();
+
+  // 2. Close all WebSocket connections
+  if (terminalWss) {
+    for (const client of terminalWss.clients) {
+      client.close(1001, 'Server shutting down');
+    }
+    terminalWss.close();
+  }
+
+  // 3. Kill all PTY sessions
+  if (terminalManager) {
+    log('INFO', 'Shutting down terminal manager...');
+    terminalManager.shutdown();
+  }
+
+  // 4. Stop cloudflared tunnel if running
+  stopTunnel();
+
+  log('INFO', 'Graceful shutdown complete');
+  process.exit(0);
+}
+
 // Catch signals for clean shutdown
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 if (isNaN(port) || port < 1 || port > 65535) {
   log('ERROR', `Invalid port "${portArg}". Must be a number between 1 and 65535.`);
@@ -333,41 +556,26 @@ async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
 }
 
 /**
- * Fetch terminal list from a project's dashboard.
+ * Get terminal list for a project from tower's registry.
+ * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server fetch.
  * Returns architect, builders, and shells with their URLs.
  */
-async function getTerminalsForProject(
-  basePort: number,
+function getTerminalsForProject(
+  projectPath: string,
   proxyUrl: string
-): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
+): { terminals: TerminalEntry[]; gateStatus: GateStatus } {
+  const entry = projectTerminals.get(projectPath);
+  const manager = getTerminalManager();
+  const terminals: TerminalEntry[] = [];
 
-  try {
-    const response = await fetch(`http://localhost:${basePort}/api/state`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!response.ok) return { terminals: [], gateStatus: { hasGate: false } };
+  if (!entry) {
+    return { terminals: [], gateStatus: { hasGate: false } };
+  }
 
-    const state = await response.json() as {
-      architect?: { terminalId?: string };
-      builders?: Array<{
-        id: string;
-        projectId?: string;
-        terminalId?: string;
-        gateStatus?: { waiting?: boolean; gateName?: string; timestamp?: number };
-        status?: string;
-        currentGate?: string;
-      }>;
-      utils?: Array<{ id: string; name?: string; terminalId?: string }>;
-      annotations?: Array<{ id: string; file?: string }>;
-    };
-
-    const terminals: TerminalEntry[] = [];
-
-    // Add architect terminal
-    if (state.architect?.terminalId) {
+  // Add architect terminal
+  if (entry.architect) {
+    const session = manager.getSession(entry.architect);
+    if (session) {
       terminals.push({
         type: 'architect',
         id: 'architect',
@@ -376,53 +584,47 @@ async function getTerminalsForProject(
         active: true,
       });
     }
+  }
 
-    // Add builder terminals
-    for (const builder of state.builders || []) {
-      if (builder.terminalId) {
-        const label = builder.projectId ? `Builder ${builder.projectId}` : `Builder ${builder.id}`;
+  // Add builder terminals
+  for (const [builderId] of entry.builders) {
+    const terminalId = entry.builders.get(builderId);
+    if (terminalId) {
+      const session = manager.getSession(terminalId);
+      if (session) {
         terminals.push({
           type: 'builder',
-          id: builder.id,
-          label,
-          url: `${proxyUrl}?tab=builder-${builder.id}`,
+          id: builderId,
+          label: `Builder ${builderId}`,
+          url: `${proxyUrl}?tab=builder-${builderId}`,
           active: true,
         });
       }
     }
+  }
 
-    // Add shell terminals
-    for (const util of state.utils || []) {
-      if (util.terminalId) {
+  // Add shell terminals
+  for (const [shellId] of entry.shells) {
+    const terminalId = entry.shells.get(shellId);
+    if (terminalId) {
+      const session = manager.getSession(terminalId);
+      if (session) {
         terminals.push({
           type: 'shell',
-          id: util.id,
-          label: util.name || `Shell ${util.id}`,
-          url: `${proxyUrl}?tab=shell-${util.id}`,
+          id: shellId,
+          label: `Shell ${shellId.replace('shell-', '')}`,
+          url: `${proxyUrl}?tab=shell-${shellId}`,
           active: true,
         });
       }
     }
-
-    // Check for pending gates
-    const builderWithGate = state.builders?.find(
-      (b) => b.gateStatus?.waiting || b.status === 'gate-pending'
-    );
-
-    const gateStatus: GateStatus = builderWithGate
-      ? {
-          hasGate: true,
-          gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
-          builderId: builderWithGate.id,
-          timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
-        }
-      : { hasGate: false };
-
-    return { terminals, gateStatus };
-  } catch {
-    // Project dashboard not responding or timeout
   }
-  return { terminals: [], gateStatus: { hasGate: false } };
+
+  // Gate status - builders don't have gate tracking yet in tower
+  // TODO: Add gate status tracking when porch integration is updated
+  const gateStatus: GateStatus = { hasGate: false };
+
+  return { terminals, gateStatus };
 }
 
 /**
@@ -448,10 +650,9 @@ async function getInstances(): Promise<InstanceStatus[]> {
     const encodedPath = Buffer.from(allocation.project_path).toString('base64url');
     const proxyUrl = `/project/${encodedPath}/`;
 
-    // Get terminals and gate status if running
-    const { terminals, gateStatus } = dashboardActive
-      ? await getTerminalsForProject(basePort, proxyUrl)
-      : { terminals: [], gateStatus: { hasGate: false } };
+    // Get terminals and gate status from tower's registry
+    // Phase 4 (Spec 0090): Tower manages terminals directly
+    const { terminals, gateStatus } = getTerminalsForProject(allocation.project_path, proxyUrl);
 
     const ports = [
       {
@@ -563,8 +764,8 @@ async function getDirectorySuggestions(inputPath: string): Promise<{ path: strin
 
 /**
  * Launch a new agent-farm instance
- * First stops any stale state, then starts fresh
- * Auto-adopts non-codev directories
+ * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server
+ * Auto-adopts non-codev directories and creates architect terminal
  */
 async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
   // Clean up stale port allocations before launching (handles machine restarts)
@@ -599,23 +800,10 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     }
   }
 
-  // Use af command (the Agent Farm CLI)
-  // Resolve absolute path to af to handle daemonized process without PATH
-
-  // SECURITY: Use spawn with cwd option to avoid command injection
-  // Do NOT use bash -c with string concatenation
+  // Phase 4 (Spec 0090): Tower manages terminals directly
+  // No dashboard-server spawning - tower handles everything
   try {
-    // Resolve af path - needed when tower runs as daemon without full PATH
-    let afPath = 'af';
-    try {
-      afPath = execSync('which af', { encoding: 'utf-8' }).trim();
-    } catch {
-      // Fall back to 'af' and hope it's in PATH
-      log('WARN', 'Could not resolve af path, using "af"');
-    }
-
-    // Don't call "af dash stop" from the tower - it can accidentally kill the tower
-    // due to tree-kill or orphan detection. Instead, just clear any stale state file.
+    // Clear any stale state file
     const stateFile = path.join(projectPath, '.agent-farm', 'state.json');
     if (fs.existsSync(stateFile)) {
       try {
@@ -625,74 +813,73 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       }
     }
 
-    // Start using af dash start
-    // Capture output to detect errors
-    const child = spawn(afPath, ['dash', 'start'], {
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: projectPath,
-      env: process.env,
-    });
-
-    // Handle spawn errors (e.g., ENOENT if af not found)
-    // Use object wrapper to avoid TypeScript narrowing issues
-    const state = { spawnError: null as string | null, stdout: '', stderr: '' };
-    child.on('error', (err) => {
-      state.spawnError = err.message;
-      log('ERROR', `Spawn error: ${err.message}`);
-    });
-    child.stdout?.on('data', (data) => {
-      state.stdout += data.toString();
-    });
-    child.stderr?.on('data', (data) => {
-      state.stderr += data.toString();
-    });
-
-    // Wait a moment for the process to start (or fail)
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Check for spawn error first (e.g., codev not found)
-    if (state.spawnError) {
-      return {
-        success: false,
-        error: `Failed to spawn codev: ${state.spawnError}`,
-      };
-    }
-
-    // Check if the dashboard port is listening
-    // Resolve symlinks (macOS /tmp -> /private/tmp)
+    // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
     const db = getGlobalDb();
-    const allocation = db
+    let allocation = db
       .prepare('SELECT base_port FROM port_allocations WHERE project_path = ? OR project_path = ?')
       .get(projectPath, resolvedPath) as { base_port: number } | undefined;
 
-    if (allocation) {
-      const dashboardPort = allocation.base_port;
-      const isRunning = await isPortListening(dashboardPort);
+    if (!allocation) {
+      // Allocate a new port for this project
+      // Find the next available port block (starting at 4200, incrementing by 100)
+      const existingPorts = db
+        .prepare('SELECT base_port FROM port_allocations ORDER BY base_port')
+        .all() as { base_port: number }[];
 
-      if (!isRunning) {
-        // Process failed to start - try to get error info
-        const errorInfo = state.stderr || state.stdout || 'Unknown error - check codev installation';
-        child.unref();
-        return {
-          success: false,
-          error: `Failed to start: ${errorInfo.trim().split('\n')[0]}`,
-        };
+      let nextPort = 4200;
+      for (const { base_port } of existingPorts) {
+        if (base_port >= nextPort) {
+          nextPort = base_port + 100;
+        }
       }
-    } else {
-      // No allocation found - process might have failed before registering
-      if (state.stderr || state.stdout) {
-        const errorInfo = state.stderr || state.stdout;
-        child.unref();
-        return {
-          success: false,
-          error: `Failed to start: ${errorInfo.trim().split('\n')[0]}`,
-        };
+
+      db.prepare(
+        'INSERT INTO port_allocations (project_path, project_name, base_port, created_at) VALUES (?, ?, ?, datetime("now"))'
+      ).run(resolvedPath, path.basename(projectPath), nextPort);
+
+      allocation = { base_port: nextPort };
+      log('INFO', `Allocated port ${nextPort} for project: ${projectPath}`);
+    }
+
+    // Initialize project terminal entry
+    const entry = getProjectTerminalsEntry(resolvedPath);
+
+    // Create architect terminal if not already present
+    if (!entry.architect) {
+      const manager = getTerminalManager();
+
+      // Read af-config.json to get the architect command
+      let architectCmd = 'claude';
+      const configPath = path.join(projectPath, 'af-config.json');
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (config.shell?.architect) {
+            architectCmd = config.shell.architect;
+          }
+        } catch {
+          // Ignore config read errors, use default
+        }
+      }
+
+      try {
+        const session = await manager.createSession({
+          command: architectCmd,
+          args: [],
+          cwd: projectPath,
+          label: 'Architect',
+          env: process.env as Record<string, string>,
+        });
+
+        entry.architect = session.id;
+        log('INFO', `Created architect terminal for project: ${projectPath}`);
+      } catch (err) {
+        log('WARN', `Failed to create architect terminal: ${(err as Error).message}`);
+        // Don't fail the launch - project is still active, just without architect
       }
     }
 
-    child.unref();
     return { success: true, adopted };
   } catch (err) {
     return { success: false, error: `Failed to launch: ${(err as Error).message}` };
@@ -713,28 +900,61 @@ function getProcessOnPort(targetPort: number): number | null {
 }
 
 /**
- * Stop an agent-farm instance by killing processes on its ports
+ * Stop an agent-farm instance by killing all its terminals
+ * Phase 4 (Spec 0090): Tower manages terminals directly
  */
-async function stopInstance(basePort: number): Promise<{ success: boolean; error?: string; stopped: number[] }> {
+async function stopInstance(projectPath: string): Promise<{ success: boolean; error?: string; stopped: number[] }> {
   const stopped: number[] = [];
+  const manager = getTerminalManager();
 
-  // Kill the dashboard process (all terminals multiplexed on basePort via Spec 0085)
-  const portsToCheck = [basePort];
+  // Resolve symlinks for consistent lookup
+  let resolvedPath = projectPath;
+  try {
+    if (fs.existsSync(projectPath)) {
+      resolvedPath = fs.realpathSync(projectPath);
+    }
+  } catch {
+    // Ignore - use original path
+  }
 
-  for (const p of portsToCheck) {
-    const pid = getProcessOnPort(p);
-    if (pid) {
-      try {
-        process.kill(pid, 'SIGTERM');
-        stopped.push(p);
-      } catch {
-        // Process may have already exited
+  // Get project terminals
+  const entry = projectTerminals.get(resolvedPath) || projectTerminals.get(projectPath);
+
+  if (entry) {
+    // Kill architect
+    if (entry.architect) {
+      const session = manager.getSession(entry.architect);
+      if (session) {
+        manager.killSession(entry.architect);
+        stopped.push(session.pid);
       }
     }
+
+    // Kill all shells
+    for (const terminalId of entry.shells.values()) {
+      const session = manager.getSession(terminalId);
+      if (session) {
+        manager.killSession(terminalId);
+        stopped.push(session.pid);
+      }
+    }
+
+    // Kill all builders
+    for (const terminalId of entry.builders.values()) {
+      const session = manager.getSession(terminalId);
+      if (session) {
+        manager.killSession(terminalId);
+        stopped.push(session.pid);
+      }
+    }
+
+    // Clear project from registry
+    projectTerminals.delete(resolvedPath);
+    projectTerminals.delete(projectPath);
   }
 
   if (stopped.length === 0) {
-    return { success: true, error: 'No processes found to stop', stopped };
+    return { success: true, error: 'No terminals found to stop', stopped };
   }
 
   return { success: true, stopped };
@@ -760,6 +980,58 @@ function findTemplatePath(): string | null {
 
 // Find template path
 const templatePath = findTemplatePath();
+
+// WebSocket server for terminal connections (Phase 2 - Spec 0090)
+let terminalWss: WebSocketServer | null = null;
+
+// React dashboard dist path (for serving directly from tower)
+// React dashboard dist path (for serving directly from tower)
+// Phase 4 (Spec 0090): Tower serves everything directly, no dashboard-server
+const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
+const hasReactDashboard = fs.existsSync(reactDashboardPath);
+if (hasReactDashboard) {
+  log('INFO', `React dashboard found at: ${reactDashboardPath}`);
+} else {
+  log('WARN', 'React dashboard not found - project dashboards will not work');
+}
+
+// MIME types for static file serving
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.map': 'application/json',
+};
+
+/**
+ * Serve a static file from the React dashboard dist
+ */
+function serveStaticFile(filePath: string, res: http.ServerResponse): boolean {
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+
+  const ext = path.extname(filePath);
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+  try {
+    const content = fs.readFileSync(filePath);
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(content);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Create server
 const server = http.createServer(async (req, res) => {
@@ -788,7 +1060,243 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://localhost:${port}`);
 
   try {
-    // API: Get status of all instances
+    // =========================================================================
+    // NEW API ENDPOINTS (Spec 0090 - Tower as Single Daemon)
+    // =========================================================================
+
+    // Health check endpoint (Spec 0090 Phase 1)
+    if (req.method === 'GET' && url.pathname === '/health') {
+      const instances = await getInstances();
+      const activeCount = instances.filter((i) => i.running).length;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'healthy',
+          uptime: process.uptime(),
+          activeProjects: activeCount,
+          totalProjects: instances.length,
+          memoryUsage: process.memoryUsage().heapUsed,
+          timestamp: new Date().toISOString(),
+        })
+      );
+      return;
+    }
+
+    // API: List all projects (Spec 0090 Phase 1)
+    if (req.method === 'GET' && url.pathname === '/api/projects') {
+      const instances = await getInstances();
+      const projects = instances.map((i) => ({
+        path: i.projectPath,
+        name: i.projectName,
+        basePort: i.basePort,
+        active: i.running,
+        proxyUrl: i.proxyUrl,
+        terminals: i.terminals.length,
+        lastUsed: i.lastUsed,
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ projects }));
+      return;
+    }
+
+    // API: Project-specific endpoints (Spec 0090 Phase 1)
+    // Routes: /api/projects/:encodedPath/activate, /deactivate, /status
+    const projectApiMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/(activate|deactivate|status)$/);
+    if (projectApiMatch) {
+      const [, encodedPath, action] = projectApiMatch;
+      let projectPath: string;
+      try {
+        projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+        if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+          throw new Error('Invalid path');
+        }
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
+        return;
+      }
+
+      // GET /api/projects/:path/status
+      if (req.method === 'GET' && action === 'status') {
+        const instances = await getInstances();
+        const instance = instances.find((i) => i.projectPath === projectPath);
+        if (!instance) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Project not found' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            path: instance.projectPath,
+            name: instance.projectName,
+            active: instance.running,
+            basePort: instance.basePort,
+            terminals: instance.terminals,
+            gateStatus: instance.gateStatus,
+          })
+        );
+        return;
+      }
+
+      // POST /api/projects/:path/activate
+      if (req.method === 'POST' && action === 'activate') {
+        // Rate limiting: 10 activations per minute per client
+        const clientIp = req.socket.remoteAddress || '127.0.0.1';
+        if (isRateLimited(clientIp)) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Too many activations, try again later' }));
+          return;
+        }
+
+        const result = await launchInstance(projectPath);
+        if (result.success) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, adopted: result.adopted }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: result.error }));
+        }
+        return;
+      }
+
+      // POST /api/projects/:path/deactivate
+      if (req.method === 'POST' && action === 'deactivate') {
+        // Check if project exists in port allocations
+        const allocations = loadPortAllocations();
+        const resolvedPath = fs.existsSync(projectPath) ? fs.realpathSync(projectPath) : projectPath;
+        const allocation = allocations.find(
+          (a) => a.project_path === projectPath || a.project_path === resolvedPath
+        );
+
+        if (!allocation) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Project not found' }));
+          return;
+        }
+
+        // Phase 4: Stop terminals directly via tower
+        const result = await stopInstance(projectPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+    }
+
+    // =========================================================================
+    // TERMINAL API (Phase 2 - Spec 0090)
+    // =========================================================================
+
+    // POST /api/terminals - Create a new terminal
+    if (req.method === 'POST' && url.pathname === '/api/terminals') {
+      try {
+        const body = await parseJsonBody(req);
+        const manager = getTerminalManager();
+        const info = await manager.createSession({
+          command: typeof body.command === 'string' ? body.command : undefined,
+          args: Array.isArray(body.args) ? body.args : undefined,
+          cols: typeof body.cols === 'number' ? body.cols : undefined,
+          rows: typeof body.rows === 'number' ? body.rows : undefined,
+          cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+          env: typeof body.env === 'object' && body.env !== null ? (body.env as Record<string, string>) : undefined,
+          label: typeof body.label === 'string' ? body.label : undefined,
+        });
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}` }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        log('ERROR', `Failed to create terminal: ${message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'INTERNAL_ERROR', message }));
+      }
+      return;
+    }
+
+    // GET /api/terminals - List all terminals
+    if (req.method === 'GET' && url.pathname === '/api/terminals') {
+      const manager = getTerminalManager();
+      const terminals = manager.listSessions();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ terminals }));
+      return;
+    }
+
+    // Terminal-specific routes: /api/terminals/:id/*
+    const terminalRouteMatch = url.pathname.match(/^\/api\/terminals\/([^/]+)(\/.*)?$/);
+    if (terminalRouteMatch) {
+      const [, terminalId, subpath] = terminalRouteMatch;
+      const manager = getTerminalManager();
+
+      // GET /api/terminals/:id - Get terminal info
+      if (req.method === 'GET' && (!subpath || subpath === '')) {
+        const session = manager.getSession(terminalId);
+        if (!session) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(session.info));
+        return;
+      }
+
+      // DELETE /api/terminals/:id - Kill terminal
+      if (req.method === 'DELETE' && (!subpath || subpath === '')) {
+        if (!manager.killSession(terminalId)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+          return;
+        }
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      // POST /api/terminals/:id/resize - Resize terminal
+      if (req.method === 'POST' && subpath === '/resize') {
+        try {
+          const body = await parseJsonBody(req);
+          if (typeof body.cols !== 'number' || typeof body.rows !== 'number') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'cols and rows must be numbers' }));
+            return;
+          }
+          const info = manager.resizeSession(terminalId, body.cols, body.rows);
+          if (!info) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(info));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Invalid JSON body' }));
+        }
+        return;
+      }
+
+      // GET /api/terminals/:id/output - Get terminal output
+      if (req.method === 'GET' && subpath === '/output') {
+        const lines = parseInt(url.searchParams.get('lines') ?? '100', 10);
+        const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+        const output = manager.getOutput(terminalId, lines, offset);
+        if (!output) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(output));
+        return;
+      }
+    }
+
+    // =========================================================================
+    // EXISTING API ENDPOINTS
+    // =========================================================================
+
+    // API: Get status of all instances (legacy - kept for backward compat)
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const instances = await getInstances();
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -985,17 +1493,25 @@ const server = http.createServer(async (req, res) => {
     }
 
     // API: Stop an instance
+    // Phase 4 (Spec 0090): Accept projectPath or basePort for backwards compat
     if (req.method === 'POST' && url.pathname === '/api/stop') {
       const body = await parseJsonBody(req);
-      const basePort = body.basePort as number;
+      let targetPath = body.projectPath as string;
 
-      if (!basePort) {
+      // Backwards compat: if basePort provided, find the project path
+      if (!targetPath && body.basePort) {
+        const allocations = loadPortAllocations();
+        const allocation = allocations.find((a) => a.base_port === body.basePort);
+        targetPath = allocation?.project_path || '';
+      }
+
+      if (!targetPath) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Missing basePort' }));
+        res.end(JSON.stringify({ success: false, error: 'Missing projectPath or basePort' }));
         return;
       }
 
-      const result = await stopInstance(basePort);
+      const result = await stopInstance(targetPath);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
       return;
@@ -1020,15 +1536,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Reverse proxy: /project/:base64urlPath/* → localhost:basePort/*
+    // Project routes: /project/:base64urlPath/*
+    // Phase 4 (Spec 0090): Tower serves React dashboard and handles APIs directly
     // Uses Base64URL (RFC 4648) encoding to avoid issues with slashes in paths
-    // All terminals multiplexed on basePort via WebSocket (Spec 0085)
     if (url.pathname.startsWith('/project/')) {
       const pathParts = url.pathname.split('/');
-      // ['', 'project', base64urlPath, terminalType, ...rest]
+      // ['', 'project', base64urlPath, ...rest]
       const encodedPath = pathParts[2];
-      const terminalType = pathParts[3];
-      const rest = pathParts.slice(4);
+      const subPath = pathParts.slice(3).join('/');
 
       if (!encodedPath) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -1036,12 +1551,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // Decode Base64URL (RFC 4648) - NOT URL encoding
-      // Wrap in try/catch to handle malformed Base64 input gracefully
+      // Decode Base64URL (RFC 4648)
       let projectPath: string;
       try {
         projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
-        // Validate decoded path is reasonable (non-empty, looks like absolute path)
         // Support both POSIX (/) and Windows (C:\) paths
         if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
           throw new Error('Invalid project path');
@@ -1054,42 +1567,225 @@ const server = http.createServer(async (req, res) => {
 
       const basePort = await getBasePortForProject(projectPath);
 
-      if (!basePort) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Project not found or not running');
+      // Phase 4 (Spec 0090): Tower handles everything directly
+      const isApiCall = subPath.startsWith('api/') || subPath === 'api';
+      const isWsPath = subPath.startsWith('ws/') || subPath === 'ws';
+
+      // Serve React dashboard static files directly if:
+      // 1. Not an API call
+      // 2. Not a WebSocket path
+      // 3. React dashboard is available
+      // 4. Project doesn't need to be running for static files
+      if (!isApiCall && !isWsPath && hasReactDashboard) {
+        // Determine which static file to serve
+        let staticPath: string;
+        if (!subPath || subPath === '' || subPath === 'index.html') {
+          staticPath = path.join(reactDashboardPath, 'index.html');
+        } else {
+          // Check if it's a static asset
+          staticPath = path.join(reactDashboardPath, subPath);
+        }
+
+        // Try to serve the static file
+        if (serveStaticFile(staticPath, res)) {
+          return;
+        }
+
+        // SPA fallback: serve index.html for client-side routing
+        const indexPath = path.join(reactDashboardPath, 'index.html');
+        if (serveStaticFile(indexPath, res)) {
+          return;
+        }
+      }
+
+      // Phase 4 (Spec 0090): Handle project APIs directly instead of proxying to dashboard-server
+      if (isApiCall) {
+        const apiPath = subPath.replace(/^api\/?/, '');
+
+        // GET /api/state - Return project state (architect, builders, shells)
+        if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
+          const entry = getProjectTerminalsEntry(projectPath);
+          const manager = getTerminalManager();
+
+          // Build state response compatible with React dashboard
+          const state: {
+            architect: { port: number; pid: number; terminalId?: string } | null;
+            builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string }>;
+            utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string }>;
+            annotations: Array<{ id: string; file: string; port: number; pid: number }>;
+            projectName?: string;
+          } = {
+            architect: null,
+            builders: [],
+            utils: [],
+            annotations: [],
+            projectName: path.basename(projectPath),
+          };
+
+          // Add architect if exists
+          if (entry.architect) {
+            const session = manager.getSession(entry.architect);
+            state.architect = {
+              port: basePort || 0,
+              pid: session?.pid || 0,
+              terminalId: entry.architect,
+            };
+          }
+
+          // Add shells
+          for (const [shellId, terminalId] of entry.shells) {
+            const session = manager.getSession(terminalId);
+            state.utils.push({
+              id: shellId,
+              name: `Shell ${shellId.replace('shell-', '')}`,
+              port: basePort || 0,
+              pid: session?.pid || 0,
+              terminalId,
+            });
+          }
+
+          // Add builders
+          for (const [builderId, terminalId] of entry.builders) {
+            const session = manager.getSession(terminalId);
+            state.builders.push({
+              id: builderId,
+              name: `Builder ${builderId}`,
+              port: basePort || 0,
+              pid: session?.pid || 0,
+              status: 'running',
+              phase: '',
+              worktree: '',
+              branch: '',
+              type: 'spec',
+              terminalId,
+            });
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(state));
+          return;
+        }
+
+        // POST /api/tabs/shell - Create a new shell terminal
+        if (req.method === 'POST' && apiPath === 'tabs/shell') {
+          try {
+            const manager = getTerminalManager();
+            const shellId = getNextShellId(projectPath);
+
+            // Create terminal session
+            const session = await manager.createSession({
+              command: process.env.SHELL || '/bin/bash',
+              args: [],
+              cwd: projectPath,
+              label: `Shell ${shellId.replace('shell-', '')}`,
+              env: process.env as Record<string, string>,
+            });
+
+            // Register terminal with project
+            const entry = getProjectTerminalsEntry(projectPath);
+            entry.shells.set(shellId, session.id);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              id: shellId,
+              port: basePort || 0,
+              name: `Shell ${shellId.replace('shell-', '')}`,
+              terminalId: session.id,
+            }));
+          } catch (err) {
+            log('ERROR', `Failed to create shell: ${(err as Error).message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+          return;
+        }
+
+        // DELETE /api/tabs/:id - Delete a terminal tab
+        const deleteMatch = apiPath.match(/^tabs\/(.+)$/);
+        if (req.method === 'DELETE' && deleteMatch) {
+          const tabId = deleteMatch[1];
+          const entry = getProjectTerminalsEntry(projectPath);
+          const manager = getTerminalManager();
+
+          // Find and delete the terminal
+          let terminalId: string | undefined;
+
+          if (tabId.startsWith('shell-')) {
+            terminalId = entry.shells.get(tabId);
+            if (terminalId) {
+              entry.shells.delete(tabId);
+            }
+          } else if (tabId.startsWith('builder-')) {
+            terminalId = entry.builders.get(tabId);
+            if (terminalId) {
+              entry.builders.delete(tabId);
+            }
+          } else if (tabId === 'architect') {
+            terminalId = entry.architect;
+            if (terminalId) {
+              entry.architect = undefined;
+            }
+          }
+
+          if (terminalId) {
+            manager.killSession(terminalId);
+            res.writeHead(204);
+            res.end();
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Tab not found' }));
+          }
+          return;
+        }
+
+        // POST /api/stop - Stop all terminals for project
+        if (req.method === 'POST' && apiPath === 'stop') {
+          const entry = getProjectTerminalsEntry(projectPath);
+          const manager = getTerminalManager();
+
+          // Kill all terminals
+          if (entry.architect) {
+            manager.killSession(entry.architect);
+          }
+          for (const terminalId of entry.shells.values()) {
+            manager.killSession(terminalId);
+          }
+          for (const terminalId of entry.builders.values()) {
+            manager.killSession(terminalId);
+          }
+
+          // Clear registry
+          projectTerminals.delete(projectPath);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // Unhandled API route
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'API endpoint not found', path: apiPath }));
         return;
       }
 
-      // All terminals now multiplexed on basePort via WebSocket (Spec 0085)
-      // Just pass the path through — the React dashboard handles routing
-      let targetPort = basePort;
-      let proxyPath = terminalType ? [terminalType, ...rest].join('/') : rest.join('/');
+      // For WebSocket paths, let the upgrade handler deal with it
+      if (isWsPath) {
+        // WebSocket paths are handled by the upgrade handler
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('WebSocket connections should use ws:// protocol');
+        return;
+      }
 
-      // Proxy the request
-      const proxyReq = http.request(
-        {
-          hostname: '127.0.0.1',
-          port: targetPort,
-          path: '/' + proxyPath + (url.search || ''),
-          method: req.method,
-          headers: {
-            ...req.headers,
-            host: `localhost:${targetPort}`,
-          },
-        },
-        (proxyRes) => {
-          res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-          proxyRes.pipe(res);
-        }
-      );
+      // If we get here for non-API, non-WS paths and React dashboard is not available
+      if (!hasReactDashboard) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Dashboard not available');
+        return;
+      }
 
-      proxyReq.on('error', (err) => {
-        log('ERROR', `Proxy error: ${err.message}`);
-        res.writeHead(502, { 'Content-Type': 'text/plain' });
-        res.end('Proxy error: ' + err.message);
-      });
-
-      req.pipe(proxyReq);
+      // Fallback for unmatched paths
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
       return;
     }
 
@@ -1108,11 +1804,34 @@ server.listen(port, '127.0.0.1', () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
 });
 
-// WebSocket upgrade handler for proxying terminal connections
-// Same terminal port routing as HTTP proxy
+// Initialize terminal WebSocket server (Phase 2 - Spec 0090)
+terminalWss = new WebSocketServer({ noServer: true });
+
+// WebSocket upgrade handler for terminal connections and proxying
 server.on('upgrade', async (req, socket, head) => {
   const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
 
+  // Phase 2: Handle /ws/terminal/:id routes directly
+  const terminalMatch = reqUrl.pathname.match(/^\/ws\/terminal\/([^/]+)$/);
+  if (terminalMatch) {
+    const terminalId = terminalMatch[1];
+    const manager = getTerminalManager();
+    const session = manager.getSession(terminalId);
+
+    if (!session) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    terminalWss!.handleUpgrade(req, socket, head, (ws) => {
+      handleTerminalWebSocket(ws, session, req);
+    });
+    return;
+  }
+
+  // Phase 4 (Spec 0090): Handle project WebSocket routes directly
+  // Route: /project/:encodedPath/ws/terminal/:terminalId
   if (!reqUrl.pathname.startsWith('/project/')) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.destroy();
@@ -1120,10 +1839,8 @@ server.on('upgrade', async (req, socket, head) => {
   }
 
   const pathParts = reqUrl.pathname.split('/');
-  // ['', 'project', base64urlPath, terminalType, ...rest]
+  // ['', 'project', base64urlPath, 'ws', 'terminal', terminalId]
   const encodedPath = pathParts[2];
-  const terminalType = pathParts[3];
-  const rest = pathParts.slice(4);
 
   if (!encodedPath) {
     socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
@@ -1146,57 +1863,28 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
 
-  const basePort = await getBasePortForProject(projectPath);
+  // Check for terminal WebSocket route: /project/:path/ws/terminal/:id
+  const wsMatch = reqUrl.pathname.match(/^\/project\/[^/]+\/ws\/terminal\/([^/]+)$/);
+  if (wsMatch) {
+    const terminalId = wsMatch[1];
+    const manager = getTerminalManager();
+    const session = manager.getSession(terminalId);
 
-  if (!basePort) {
-    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-    socket.destroy();
+    if (!session) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    terminalWss!.handleUpgrade(req, socket, head, (ws) => {
+      handleTerminalWebSocket(ws, session, req);
+    });
     return;
   }
 
-  // All terminals now multiplexed on basePort via WebSocket (Spec 0085)
-  // Just pass the path through — the React dashboard handles routing
-  let targetPort = basePort;
-  let proxyPath = terminalType ? [terminalType, ...rest].join('/') : rest.join('/');
-
-  // Connect to target
-  const proxySocket = net.connect(targetPort, '127.0.0.1', () => {
-    // Rewrite Origin header for WebSocket compatibility
-    const headers = { ...req.headers };
-    headers.origin = 'http://localhost';
-    headers.host = `localhost:${targetPort}`;
-
-    // Forward the upgrade request
-    let headerStr = `${req.method} /${proxyPath}${reqUrl.search || ''} HTTP/1.1\r\n`;
-    for (const [key, value] of Object.entries(headers)) {
-      if (value) {
-        if (Array.isArray(value)) {
-          for (const v of value) {
-            headerStr += `${key}: ${v}\r\n`;
-          }
-        } else {
-          headerStr += `${key}: ${value}\r\n`;
-        }
-      }
-    }
-    headerStr += '\r\n';
-
-    proxySocket.write(headerStr);
-    if (head.length > 0) proxySocket.write(head);
-
-    // Pipe bidirectionally
-    socket.pipe(proxySocket);
-    proxySocket.pipe(socket);
-  });
-
-  proxySocket.on('error', (err) => {
-    log('ERROR', `WebSocket proxy error: ${err.message}`);
-    socket.destroy();
-  });
-
-  socket.on('error', () => {
-    proxySocket.destroy();
-  });
+  // Unhandled WebSocket route
+  socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+  socket.destroy();
 });
 
 // Handle uncaught errors

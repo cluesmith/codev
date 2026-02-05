@@ -943,9 +943,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: "2026-02-01T00:00:00-08:00"
     notes: "PR #179 merged. node-pty replaces ttyd, React+Vite dashboard replaces vanilla JS. All terminals multiplexed on single port via WebSocket."
 
+  - id: "0090"
+    title: "Tower as Single Daemon Architecture"
+    summary: "Refactor so tower is the single daemon managing all projects. af dash becomes API client, not separate server."
+    status: implemented
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0090-tower-single-daemon.md
+      plan: codev/plans/0090-tower-single-daemon.md
+      review: codev/reviews/0090-tower-single-daemon.md
+    dependencies: ["0085"]
+    tags: [architecture, tower, agent-farm, v2]
+    timestamps:
+      conceived_at: "2026-02-04T00:00:00-08:00"
+      specified_at: "2026-02-04T12:00:00-08:00"
+      planned_at: "2026-02-04T12:00:00-08:00"
+      implementing_at: "2026-02-04T14:00:00-08:00"
+      implemented_at: "2026-02-05T02:30:00-08:00"
+      committed_at: null
+      integrated_at: null
+    notes: "Phase 4 complete. Tower is single daemon, dashboard-server.ts deleted. 641 tests pass. 3-way consultation: 2 APPROVE, 1 COMMENT."
+
 ## Next Available Number
 
-**0088** - Reserve this number for your next project
+**0091** - Reserve this number for your next project
 
 ---
 
