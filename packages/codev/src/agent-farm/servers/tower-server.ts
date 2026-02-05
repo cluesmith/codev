@@ -642,24 +642,23 @@ async function getInstances(): Promise<InstanceStatus[]> {
     const basePort = allocation.base_port;
     const dashboardPort = basePort;
 
-    // Check if dashboard is running (main indicator of running instance)
-    // All terminals are multiplexed on dashboardPort via WebSocket (Spec 0085)
-    const dashboardActive = await isPortListening(dashboardPort);
-
     // Encode project path for proxy URL
     const encodedPath = Buffer.from(allocation.project_path).toString('base64url');
     const proxyUrl = `/project/${encodedPath}/`;
 
     // Get terminals and gate status from tower's registry
-    // Phase 4 (Spec 0090): Tower manages terminals directly
+    // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
     const { terminals, gateStatus } = getTerminalsForProject(allocation.project_path, proxyUrl);
+
+    // Project is active if it has any terminals (Phase 4: no port check needed)
+    const isActive = terminals.length > 0;
 
     const ports = [
       {
         type: 'Dashboard',
         port: dashboardPort,
         url: proxyUrl, // Use tower proxy URL, not raw localhost
-        active: dashboardActive,
+        active: isActive,
       },
     ];
 
@@ -671,7 +670,7 @@ async function getInstances(): Promise<InstanceStatus[]> {
       architectPort: basePort + 1, // Legacy field for backward compat
       registered: allocation.registered_at,
       lastUsed: allocation.last_used_at,
-      running: dashboardActive,
+      running: isActive,
       proxyUrl, // Tower proxy URL for dashboard
       architectUrl: `${proxyUrl}?tab=architect`, // Direct URL to architect terminal
       terminals, // All available terminals
