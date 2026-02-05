@@ -95,6 +95,51 @@ This installs the exact package that would be published, without touching the np
 
 **Do NOT use `npm link`** - it breaks global installs and has weird dependency resolution issues.
 
+### UI Testing with Playwright
+
+**IMPORTANT**: When making changes to UI code (tower, dashboard, terminal), you MUST test using Playwright before claiming the fix works. Do NOT rely solely on curl/API tests - they don't catch UI-level bugs.
+
+**Default to headless mode** for automated testing:
+
+```javascript
+const browser = await chromium.launch({ headless: true });
+```
+
+**Test the actual user flow**, not just the API:
+
+```bash
+# From packages/codev directory
+node test-launch-ui.cjs
+```
+
+Example test pattern:
+```javascript
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto('http://localhost:4100');
+  await page.fill('#project-path', '/path/to/project');
+  await page.click('button:has-text("Launch")');
+
+  // Wait and check for errors
+  const errorToast = await page.$('.toast.error');
+  if (errorToast) {
+    console.error('ERROR:', await errorToast.textContent());
+    process.exit(1);
+  }
+
+  // Take screenshot for verification
+  await page.screenshot({ path: '/tmp/test-result.png' });
+  await browser.close();
+})();
+```
+
+**When to use headed mode**: Only for debugging when you need to see what's happening visually. Add `{ headless: false }` temporarily.
+
 ## Quick Start
 
 > **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.
