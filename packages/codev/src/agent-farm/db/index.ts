@@ -236,6 +236,22 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Created new global.db at', dbPath);
   }
 
+  // Migration v2: Add project_name and created_at columns to port_allocations
+  const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
+  if (!v2) {
+    try {
+      db.exec('ALTER TABLE port_allocations ADD COLUMN project_name TEXT');
+    } catch {
+      // Column already exists
+    }
+    try {
+      db.exec('ALTER TABLE port_allocations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime("now"))');
+    } catch {
+      // Column already exists
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
+  }
+
   return db;
 }
 

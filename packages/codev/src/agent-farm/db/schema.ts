@@ -97,9 +97,11 @@ CREATE TABLE IF NOT EXISTS _migrations (
 -- Port allocations
 CREATE TABLE IF NOT EXISTS port_allocations (
   project_path TEXT PRIMARY KEY,
+  project_name TEXT,
   base_port INTEGER NOT NULL UNIQUE
     CHECK(base_port >= 4200 AND base_port % 100 = 0),
   pid INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
   registered_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
