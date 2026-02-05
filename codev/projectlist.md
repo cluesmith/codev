@@ -133,6 +133,28 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
+  - id: "0091"
+    title: "Tower Mobile UX Refresh"
+    summary: "Refresh the tower UI for better mobile experience - currently needs improvement on mobile devices"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [ui, ux, mobile, tower]
+    timestamps:
+      conceived_at: "2026-02-05T10:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Tower front page and dashboard need mobile-responsive improvements"
+
   - id: "0072"
     title: "Ralph-SPIDER Integration Spike"
     summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
