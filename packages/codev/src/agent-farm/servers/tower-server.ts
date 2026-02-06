@@ -849,7 +849,7 @@ function getTerminalsForProject(
         type: 'builder',
         id: builderId,
         label: `Builder ${builderId}`,
-        url: `${proxyUrl}?tab=builder-${builderId}`,
+        url: `${proxyUrl}?tab=${builderId}`,
         active: true,
       });
     } else if (dbSession.type === 'shell') {
@@ -859,7 +859,7 @@ function getTerminalsForProject(
         type: 'shell',
         id: shellId,
         label: `Shell ${shellId.replace('shell-', '')}`,
-        url: `${proxyUrl}?tab=shell-${shellId}`,
+        url: `${proxyUrl}?tab=${shellId}`,
         active: true,
       });
     }

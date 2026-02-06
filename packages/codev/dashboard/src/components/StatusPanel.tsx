@@ -387,20 +387,20 @@ export function StatusPanel({ state, onRefresh, onSelectTab }: StatusPanelProps)
               </div>
             )}
             {builders.map(b => (
-              <div key={b.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(`builder-${b.id}`)}>
+              <div key={b.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(b.id)}>
                 <span className="tab-icon">🔨</span>
                 <span className="tab-name">{b.name}</span>
                 <span className={`status-dot status-${b.status}`} />
               </div>
             ))}
             {shells.map(s => (
-              <div key={s.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(`shell-${s.id}`)}>
+              <div key={s.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(s.id)}>
                 <span className="tab-icon">💻</span>
                 <span className="tab-name">{s.name}</span>
               </div>
             ))}
             {files.map(f => (
-              <div key={f.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(`file-${f.id}`)}>
+              <div key={f.id} className="dashboard-tab-item" onClick={() => onSelectTab?.(f.id)}>
                 <span className="tab-icon">📄</span>
                 <span className="tab-name">{f.file.split('/').pop()}</span>
               </div>
