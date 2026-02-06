@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { parseFilePath, looksLikeFilePath } from '../lib/filePaths.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -11,13 +13,15 @@ const FRAME_DATA = 0x01;
 interface TerminalProps {
   /** WebSocket path for the terminal session, e.g. /ws/terminal/<id> */
   wsPath: string;
+  /** Callback when user clicks a file path in terminal output (Spec 0092) */
+  onFileOpen?: (path: string, line?: number, column?: number) => void;
 }
 
 /**
  * Terminal component — renders an xterm.js instance connected to the
  * node-pty backend via WebSocket using the hybrid binary protocol.
  */
-export function Terminal({ wsPath }: TerminalProps) {
+export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -59,6 +63,28 @@ export function Terminal({ wsPath }: TerminalProps) {
       term.loadAddon(webglAddon);
     } catch {
       // Canvas renderer is fine as fallback
+    }
+
+    // Spec 0092: Add web links addon for clickable file paths
+    if (onFileOpen) {
+      const webLinksAddon = new WebLinksAddon(
+        (event, uri) => {
+          event.preventDefault();
+          // Check if it looks like a file path (not a URL)
+          if (looksLikeFilePath(uri)) {
+            const parsed = parseFilePath(uri);
+            onFileOpen(parsed.path, parsed.line, parsed.column);
+          } else {
+            // For actual URLs, open in new tab
+            window.open(uri, '_blank');
+          }
+        },
+        {
+          // Enable URL detection (http, https, etc.)
+          urlRegex: undefined, // Use default URL regex
+        }
+      );
+      term.loadAddon(webLinksAddon);
     }
 
     fitAddon.fit();

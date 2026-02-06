@@ -219,7 +219,7 @@ let cachedPorts: {
   architectPort: number;
   builderPortRange: [number, number];
   utilPortRange: [number, number];
-  openPortRange: [number, number];
+  // openPortRange removed - Spec 0092: files served through Tower
 } | null = null;
 
 /**
@@ -233,7 +233,6 @@ export function initializePorts(): void {
     architectPort: ports.architectPort,
     builderPortRange: ports.builderPortRange,
     utilPortRange: ports.utilPortRange,
-    openPortRange: ports.openPortRange,
   };
 }
 
@@ -253,7 +252,6 @@ export function getConfig(): Config {
     architectPort: basePort + 1,
     builderPortRange: [basePort + 10, basePort + 29] as [number, number],
     utilPortRange: [basePort + 30, basePort + 49] as [number, number],
-    openPortRange: [basePort + 50, basePort + 69] as [number, number],
   };
 
   return {
@@ -269,7 +267,7 @@ export function getConfig(): Config {
     architectPort: ports.architectPort,
     builderPortRange: ports.builderPortRange,
     utilPortRange: ports.utilPortRange,
-    openPortRange: ports.openPortRange,
+    // openPortRange removed - Spec 0092: files served through Tower
     terminalBackend: userConfig?.terminal?.backend || 'node-pty',
   };
 }

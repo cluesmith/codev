@@ -83,14 +83,44 @@ export async function createShellTab(): Promise<{ id: string; port: number; name
   return res.json();
 }
 
-export async function createFileTab(filePath: string): Promise<{ id: string; port: number }> {
+export async function createFileTab(filePath: string, line?: number): Promise<{ id: string; existing: boolean; line?: number }> {
   const res = await fetch(apiUrl('api/tabs/file'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ path: filePath }),
+    body: JSON.stringify({ path: filePath, line }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+export interface FileContent {
+  path: string;
+  name: string;
+  content: string | null;
+  language: string;
+  isMarkdown: boolean;
+  isImage: boolean;
+  isVideo: boolean;
+  size?: number;
+}
+
+export async function fetchFileContent(tabId: string): Promise<FileContent> {
+  const res = await fetch(apiUrl(`api/file/${tabId}`), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch file: ${res.status}`);
+  return res.json();
+}
+
+export function getFileRawUrl(tabId: string): string {
+  return apiUrl(`api/file/${tabId}/raw`);
+}
+
+export async function saveFile(tabId: string, content: string): Promise<void> {
+  const res = await fetch(apiUrl(`api/file/${tabId}/save`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 export async function deleteTab(id: string): Promise<void> {
@@ -122,4 +152,32 @@ export function getTerminalWsPath(tab: { type: string; terminalId?: string }): s
     return `${base}ws/terminal/${tab.terminalId}`;
   }
   return null;
+}
+
+// Spec 0092: Git status and recent files APIs for enhanced file browser
+
+export interface GitStatus {
+  modified: string[];
+  staged: string[];
+  untracked: string[];
+  error?: string;
+}
+
+export async function fetchGitStatus(): Promise<GitStatus> {
+  const res = await fetch(apiUrl('api/git/status'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch git status: ${res.status}`);
+  return res.json();
+}
+
+export interface RecentFile {
+  id: string;
+  path: string;
+  name: string;
+  relativePath: string;
+}
+
+export async function fetchRecentFiles(): Promise<RecentFile[]> {
+  const res = await fetch(apiUrl('api/files/recent'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch recent files: ${res.status}`);
+  return res.json();
 }

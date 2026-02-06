@@ -86,10 +86,17 @@ let terminalManager: TerminalManager | null = null;
 
 // Project terminal registry - tracks which terminals belong to which project
 // Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
+interface FileTab {
+  id: string;
+  path: string;
+  createdAt: number;
+}
+
 interface ProjectTerminals {
   architect?: string;
   builders: Map<string, string>;
   shells: Map<string, string>;
+  fileTabs: Map<string, FileTab>;
 }
 const projectTerminals = new Map<string, ProjectTerminals>();
 
@@ -99,10 +106,41 @@ const projectTerminals = new Map<string, ProjectTerminals>();
 function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
   let entry = projectTerminals.get(projectPath);
   if (!entry) {
-    entry = { builders: new Map(), shells: new Map() };
+    entry = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
     projectTerminals.set(projectPath, entry);
   }
+  // Migration: ensure fileTabs exists for older entries
+  if (!entry.fileTabs) {
+    entry.fileTabs = new Map();
+  }
   return entry;
+}
+
+/**
+ * Get language identifier for syntax highlighting
+ */
+function getLanguageForExt(ext: string): string {
+  const langMap: Record<string, string> = {
+    js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+    py: 'python', sh: 'bash', bash: 'bash', md: 'markdown',
+    html: 'markup', css: 'css', json: 'json', yaml: 'yaml', yml: 'yaml',
+    rs: 'rust', go: 'go', java: 'java', c: 'c', cpp: 'cpp', h: 'c',
+  };
+  return langMap[ext] || ext || 'plaintext';
+}
+
+/**
+ * Get MIME type for file
+ */
+function getMimeTypeForFile(filePath: string): string {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    pdf: 'application/pdf', txt: 'text/plain',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
 }
 
 /**
@@ -192,6 +230,7 @@ function saveTerminalSession(
       INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(terminalId, normalizedPath, type, roleId, pid, tmuxSession);
+    log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
   }
@@ -760,18 +799,42 @@ function getTerminalsForProject(
   projectPath: string,
   proxyUrl: string
 ): { terminals: TerminalEntry[]; gateStatus: GateStatus } {
-  const entry = projectTerminals.get(projectPath);
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
-  if (!entry) {
-    return { terminals: [], gateStatus: { hasGate: false } };
+  // SQLite is authoritative - query it first (Spec 0090 requirement)
+  const dbSessions = getTerminalSessionsForProject(projectPath);
+
+  // Use normalized path for cache consistency
+  const normalizedPath = normalizeProjectPath(projectPath);
+
+  // Also ensure in-memory Map stays in sync (cache)
+  let entry = projectTerminals.get(normalizedPath);
+  if (entry) {
+    // CRITICAL: Reset cache to prevent ghost entries (Gemini review finding)
+    // Must clear before repopulating from SQLite to ensure DB is authoritative
+    entry.architect = undefined;
+    entry.builders.clear();
+    entry.shells.clear();
   }
 
-  // Add architect terminal
-  if (entry.architect) {
-    const session = manager.getSession(entry.architect);
-    if (session) {
+  for (const dbSession of dbSessions) {
+    // Verify session still exists in TerminalManager (runtime state)
+    const session = manager.getSession(dbSession.id);
+    if (!session) {
+      // Stale row in SQLite - clean it up
+      deleteTerminalSession(dbSession.id);
+      continue;
+    }
+
+    // Ensure in-memory cache is updated
+    if (!entry) {
+      entry = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
+      projectTerminals.set(normalizedPath, entry);
+    }
+
+    if (dbSession.type === 'architect') {
+      entry.architect = dbSession.id;
       terminals.push({
         type: 'architect',
         id: 'architect',
@@ -779,40 +842,26 @@ function getTerminalsForProject(
         url: `${proxyUrl}?tab=architect`,
         active: true,
       });
-    }
-  }
-
-  // Add builder terminals
-  for (const [builderId] of entry.builders) {
-    const terminalId = entry.builders.get(builderId);
-    if (terminalId) {
-      const session = manager.getSession(terminalId);
-      if (session) {
-        terminals.push({
-          type: 'builder',
-          id: builderId,
-          label: `Builder ${builderId}`,
-          url: `${proxyUrl}?tab=builder-${builderId}`,
-          active: true,
-        });
-      }
-    }
-  }
-
-  // Add shell terminals
-  for (const [shellId] of entry.shells) {
-    const terminalId = entry.shells.get(shellId);
-    if (terminalId) {
-      const session = manager.getSession(terminalId);
-      if (session) {
-        terminals.push({
-          type: 'shell',
-          id: shellId,
-          label: `Shell ${shellId.replace('shell-', '')}`,
-          url: `${proxyUrl}?tab=shell-${shellId}`,
-          active: true,
-        });
-      }
+    } else if (dbSession.type === 'builder') {
+      const builderId = dbSession.role_id || dbSession.id;
+      entry.builders.set(builderId, dbSession.id);
+      terminals.push({
+        type: 'builder',
+        id: builderId,
+        label: `Builder ${builderId}`,
+        url: `${proxyUrl}?tab=builder-${builderId}`,
+        active: true,
+      });
+    } else if (dbSession.type === 'shell') {
+      const shellId = dbSession.role_id || dbSession.id;
+      entry.shells.set(shellId, dbSession.id);
+      terminals.push({
+        type: 'shell',
+        id: shellId,
+        label: `Shell ${shellId.replace('shell-', '')}`,
+        url: `${proxyUrl}?tab=shell-${shellId}`,
+        active: true,
+      });
     }
   }
 
@@ -1875,6 +1924,16 @@ const server = http.createServer(async (req, res) => {
             });
           }
 
+          // Add file tabs (Spec 0092 - served through Tower, no separate ports)
+          for (const [tabId, tab] of entry.fileTabs) {
+            state.annotations.push({
+              id: tabId,
+              file: tab.path,
+              port: 0,  // No separate port - served through Tower
+              pid: 0,   // No separate process
+            });
+          }
+
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(state));
           return;
@@ -1917,12 +1976,211 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        // DELETE /api/tabs/:id - Delete a terminal tab
+        // POST /api/tabs/file - Create a file tab (Spec 0092)
+        if (req.method === 'POST' && apiPath === 'tabs/file') {
+          try {
+            const body = await new Promise<string>((resolve) => {
+              let data = '';
+              req.on('data', (chunk: Buffer) => data += chunk.toString());
+              req.on('end', () => resolve(data));
+            });
+            const { path: filePath, line } = JSON.parse(body || '{}');
+
+            if (!filePath || typeof filePath !== 'string') {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Missing path parameter' }));
+              return;
+            }
+
+            // Resolve path relative to project
+            const fullPath = path.isAbsolute(filePath)
+              ? filePath
+              : path.join(projectPath, filePath);
+
+            // Security: ensure path is within project or is absolute path user provided
+            const normalizedFull = path.normalize(fullPath);
+            const normalizedProject = path.normalize(projectPath);
+            if (!normalizedFull.startsWith(normalizedProject) && !path.isAbsolute(filePath)) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Path outside project' }));
+              return;
+            }
+
+            // Check file exists
+            if (!fs.existsSync(fullPath)) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'File not found' }));
+              return;
+            }
+
+            const entry = getProjectTerminalsEntry(projectPath);
+
+            // Check if already open
+            for (const [id, tab] of entry.fileTabs) {
+              if (tab.path === fullPath) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ id, existing: true, line }));
+                return;
+              }
+            }
+
+            // Create new file tab
+            const id = `file-${Date.now().toString(36)}`;
+            entry.fileTabs.set(id, { id, path: fullPath, createdAt: Date.now() });
+
+            log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ id, existing: false, line }));
+          } catch (err) {
+            log('ERROR', `Failed to create file tab: ${(err as Error).message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+          return;
+        }
+
+        // GET /api/file/:id - Get file content as JSON (Spec 0092)
+        const fileGetMatch = apiPath.match(/^file\/([^/]+)$/);
+        if (req.method === 'GET' && fileGetMatch) {
+          const tabId = fileGetMatch[1];
+          const entry = getProjectTerminalsEntry(projectPath);
+          const tab = entry.fileTabs.get(tabId);
+
+          if (!tab) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
+            return;
+          }
+
+          try {
+            const ext = path.extname(tab.path).slice(1).toLowerCase();
+            const isText = !['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'webm', 'mov', 'pdf'].includes(ext);
+
+            if (isText) {
+              const content = fs.readFileSync(tab.path, 'utf-8');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                path: tab.path,
+                name: path.basename(tab.path),
+                content,
+                language: getLanguageForExt(ext),
+                isMarkdown: ext === 'md',
+                isImage: false,
+                isVideo: false,
+              }));
+            } else {
+              // For binary files, just return metadata
+              const stat = fs.statSync(tab.path);
+              const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+              const isVideo = ['mp4', 'webm', 'mov'].includes(ext);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                path: tab.path,
+                name: path.basename(tab.path),
+                content: null,
+                language: ext,
+                isMarkdown: false,
+                isImage,
+                isVideo,
+                size: stat.size,
+              }));
+            }
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+          return;
+        }
+
+        // GET /api/file/:id/raw - Get raw file content (for images/video) (Spec 0092)
+        const fileRawMatch = apiPath.match(/^file\/([^/]+)\/raw$/);
+        if (req.method === 'GET' && fileRawMatch) {
+          const tabId = fileRawMatch[1];
+          const entry = getProjectTerminalsEntry(projectPath);
+          const tab = entry.fileTabs.get(tabId);
+
+          if (!tab) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('File tab not found');
+            return;
+          }
+
+          try {
+            const data = fs.readFileSync(tab.path);
+            const mimeType = getMimeTypeForFile(tab.path);
+            res.writeHead(200, {
+              'Content-Type': mimeType,
+              'Content-Length': data.length,
+              'Cache-Control': 'no-cache',
+            });
+            res.end(data);
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end((err as Error).message);
+          }
+          return;
+        }
+
+        // POST /api/file/:id/save - Save file content (Spec 0092)
+        const fileSaveMatch = apiPath.match(/^file\/([^/]+)\/save$/);
+        if (req.method === 'POST' && fileSaveMatch) {
+          const tabId = fileSaveMatch[1];
+          const entry = getProjectTerminalsEntry(projectPath);
+          const tab = entry.fileTabs.get(tabId);
+
+          if (!tab) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
+            return;
+          }
+
+          try {
+            const body = await new Promise<string>((resolve) => {
+              let data = '';
+              req.on('data', (chunk: Buffer) => data += chunk.toString());
+              req.on('end', () => resolve(data));
+            });
+            const { content } = JSON.parse(body || '{}');
+
+            if (typeof content !== 'string') {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Missing content parameter' }));
+              return;
+            }
+
+            fs.writeFileSync(tab.path, content, 'utf-8');
+            log('INFO', `Saved file: ${tab.path}`);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+          return;
+        }
+
+        // DELETE /api/tabs/:id - Delete a terminal or file tab
         const deleteMatch = apiPath.match(/^tabs\/(.+)$/);
         if (req.method === 'DELETE' && deleteMatch) {
           const tabId = deleteMatch[1];
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
+
+          // Check if it's a file tab first (Spec 0092)
+          if (tabId.startsWith('file-')) {
+            if (entry.fileTabs.has(tabId)) {
+              entry.fileTabs.delete(tabId);
+              log('INFO', `Deleted file tab: ${tabId}`);
+              res.writeHead(204);
+              res.end();
+            } else {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'File tab not found' }));
+            }
+            return;
+          }
 
           // Find and delete the terminal
           let terminalId: string | undefined;
@@ -1983,6 +2241,70 @@ const server = http.createServer(async (req, res) => {
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // GET /api/git/status - Return git status for file browser (Spec 0092)
+        if (req.method === 'GET' && apiPath === 'git/status') {
+          try {
+            // Get git status in porcelain format for parsing
+            const result = execSync('git status --porcelain', {
+              cwd: projectPath,
+              encoding: 'utf-8',
+              timeout: 5000,
+            });
+
+            // Parse porcelain output: XY filename
+            // X = staging area status, Y = working tree status
+            const modified: string[] = [];
+            const staged: string[] = [];
+            const untracked: string[] = [];
+
+            for (const line of result.split('\n')) {
+              if (!line) continue;
+              const x = line[0]; // staging area
+              const y = line[1]; // working tree
+              const filepath = line.slice(3);
+
+              if (x === '?' && y === '?') {
+                untracked.push(filepath);
+              } else {
+                if (x !== ' ' && x !== '?') {
+                  staged.push(filepath);
+                }
+                if (y !== ' ' && y !== '?') {
+                  modified.push(filepath);
+                }
+              }
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ modified, staged, untracked }));
+          } catch (err) {
+            // Not a git repo or git command failed
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ modified: [], staged: [], untracked: [], error: (err as Error).message }));
+          }
+          return;
+        }
+
+        // GET /api/files/recent - Return recently opened file tabs (Spec 0092)
+        if (req.method === 'GET' && apiPath === 'files/recent') {
+          const entry = getProjectTerminalsEntry(projectPath);
+
+          // Get all file tabs sorted by creation time (most recent first)
+          const recentFiles = Array.from(entry.fileTabs.values())
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 10)  // Limit to 10 most recent
+            .map(tab => ({
+              id: tab.id,
+              path: tab.path,
+              name: path.basename(tab.path),
+              relativePath: path.relative(projectPath, tab.path),
+            }));
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(recentFiles));
           return;
         }
 

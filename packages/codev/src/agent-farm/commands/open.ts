@@ -1,64 +1,68 @@
 /**
  * Open command - opens file annotation viewer
  *
- * When the dashboard is running, this creates a tab in the dashboard.
- * When the dashboard is not running, it opens the annotation viewer directly.
+ * Spec 0092: Files are now served through Tower, no separate ports.
+ * This command creates a file tab via the Tower API.
  */
 
-import { resolve, basename } from 'node:path';
+import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import type { Annotation } from '../types.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, findAvailablePort, openBrowser } from '../utils/shell.js';
-import { addAnnotation, loadState } from '../state.js';
+import { openBrowser } from '../utils/shell.js';
+
+// Tower port is fixed at 4100
+const TOWER_PORT = 4100;
 
 interface OpenOptions {
   file: string;
 }
 
 /**
- * Try to create a file tab via the dashboard API
- * Returns true if successful, false if dashboard not available
+ * Encode project path for Tower URL (base64url)
  */
-async function tryDashboardApi(filePath: string): Promise<boolean> {
-  const state = loadState();
+function encodeProjectPath(projectPath: string): string {
+  return Buffer.from(projectPath).toString('base64url');
+}
 
-  // Dashboard runs on dashboardPort (not architectPort + 1)
-  if (!state.architect) {
-    return false;
-  }
-
-  const config = getConfig();
-  const dashboardPort = config.dashboardPort;
+/**
+ * Try to create a file tab via the Tower API
+ * Returns the file tab ID if successful, null if Tower not available
+ */
+async function tryTowerApi(projectPath: string, filePath: string): Promise<string | null> {
+  const encodedPath = encodeProjectPath(projectPath);
 
   try {
-    const response = await fetch(`http://localhost:${dashboardPort}/api/tabs/file`, {
+    const response = await fetch(`http://localhost:${TOWER_PORT}/project/${encodedPath}/api/tabs/file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: filePath }),
     });
 
     if (response.ok) {
-      const result = (await response.json()) as { existing?: boolean };
+      const result = (await response.json()) as { id: string; existing?: boolean };
       logger.success(`Opened in dashboard tab`);
       logger.kv('File', filePath);
       if (result.existing) {
         logger.info('(File was already open)');
       }
-      return true;
+      return result.id;
     }
 
-    // Dashboard returned an error, fall through to direct open
-    return false;
+    // Tower returned an error
+    const error = await response.text();
+    logger.error(`Tower API error: ${error}`);
+    return null;
   } catch {
-    // Dashboard not available
-    return false;
+    // Tower not available
+    return null;
   }
 }
 
 /**
  * Open file annotation viewer
+ *
+ * Spec 0092: All file viewing goes through Tower. No fallback to separate servers.
  */
 export async function open(options: OpenOptions): Promise<void> {
   const config = getConfig();
@@ -76,70 +80,20 @@ export async function open(options: OpenOptions): Promise<void> {
     fatal(`File not found: ${filePath}`);
   }
 
-  // Try to use dashboard API first (if dashboard is running)
-  const dashboardOpened = await tryDashboardApi(filePath);
-  if (dashboardOpened) {
+  // Try to use Tower API
+  const tabId = await tryTowerApi(config.projectRoot, filePath);
+
+  if (tabId) {
+    // Open the dashboard with the file tab selected
+    const encodedPath = encodeProjectPath(config.projectRoot);
+    const dashboardUrl = `http://localhost:${TOWER_PORT}/project/${encodedPath}/?tab=file-${tabId}`;
+    await openBrowser(dashboardUrl);
     return;
   }
 
-  // Fall back to direct open
-  logger.header('Opening File Viewer');
-  logger.kv('File', filePath);
-
-  // Generate ID
-  const id = generateAnnotationId();
-
-  // Find available port
-  const port = await findAvailablePort(config.openPortRange[0]);
-
-  logger.kv('Port', port);
-
-  // Find open server script (compiled TypeScript)
-  const serverScript = resolve(config.serversDir, 'open-server.js');
-
-  if (!existsSync(serverScript)) {
-    fatal(`Open server not found at ${serverScript}`);
-  }
-
-  // Start open server
-  const serverProcess = spawnDetached('node', [serverScript, String(port), filePath], {
-    cwd: config.projectRoot,
-  });
-
-  if (!serverProcess.pid) {
-    fatal('Failed to start annotation server');
-  }
-
-  // Create annotation record
-  const annotation: Annotation = {
-    id,
-    file: filePath,
-    port,
-    pid: serverProcess.pid,
-    parent: {
-      type: 'architect',
-    },
-  };
-
-  addAnnotation(annotation);
-
-  // Wait a moment for server to start
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
-  // Open in browser
-  const url = `http://localhost:${port}`;
-  await openBrowser(url);
-
-  logger.blank();
-  logger.success('Annotation viewer opened!');
-  logger.kv('URL', url);
-}
-
-/**
- * Generate a unique annotation ID
- */
-function generateAnnotationId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 4);
-  return `A${timestamp.slice(-3)}${random}`.toUpperCase();
+  // Tower not available - tell user to start it
+  logger.error('Tower is not running.');
+  logger.info('Start it with: af tower start');
+  logger.info('Then try again: af open ' + options.file);
+  process.exit(1);
 }

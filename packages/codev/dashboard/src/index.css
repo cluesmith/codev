@@ -619,3 +619,290 @@ body {
     font-size: 11px;
   }
 }
+
+/* FileViewer - Spec 0092 */
+.file-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.file-loading,
+.file-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+}
+
+.file-error {
+  color: var(--status-error);
+}
+
+.file-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.file-path {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-language {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.file-save-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.file-save-btn:hover {
+  background: var(--accent-hover);
+}
+
+.file-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-content {
+  display: flex;
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+.line-numbers {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
+  user-select: none;
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.line-number {
+  padding-right: 8px;
+}
+
+.line-number.highlighted-line {
+  background: rgba(59, 130, 246, 0.3);
+}
+
+.file-text {
+  flex: 1;
+  padding: 12px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: none;
+  outline: none;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-image-container,
+.file-video-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 20px;
+}
+
+.file-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.file-video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Spec 0092: Enhanced FileTree styles */
+
+/* File tree container with search */
+.file-tree-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Search input */
+.file-search {
+  position: relative;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.file-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.file-search-input:focus {
+  border-color: var(--accent);
+}
+
+.file-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Search suggestions dropdown */
+.file-search-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  right: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.file-search-suggestion {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-search-suggestion:last-child {
+  border-bottom: none;
+}
+
+.file-search-suggestion:hover {
+  background: var(--bg-hover);
+}
+
+.suggestion-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.suggestion-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* File tree sections */
+.file-tree-section {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-tree-section:first-of-type {
+  flex-shrink: 0;
+}
+
+.file-tree-section:last-of-type {
+  flex: 1;
+  overflow: hidden;
+}
+
+.file-tree-section-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Recent files */
+.recent-file {
+  color: var(--text-secondary);
+}
+
+.recent-file:hover {
+  color: var(--text-primary);
+}
+
+.file-path-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Git status indicators */
+.git-indicator {
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.git-modified {
+  color: var(--status-implementing);
+  background: rgba(249, 115, 22, 0.15);
+}
+
+.git-staged {
+  color: var(--status-active);
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.git-untracked {
+  color: var(--text-muted);
+  background: rgba(102, 102, 102, 0.15);
+}

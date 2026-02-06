@@ -28,7 +28,7 @@ describe('getConfig', () => {
     expect(config.architectPort).toBe(4201);
     expect(config.builderPortRange).toEqual([4210, 4229]);
     expect(config.utilPortRange).toEqual([4230, 4249]);
-    expect(config.openPortRange).toEqual([4250, 4269]);
+    // openPortRange removed - Spec 0092: files served through Tower
   });
 
   it('should derive paths from projectRoot', () => {

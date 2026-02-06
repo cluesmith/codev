@@ -140,7 +140,7 @@ describe('Type Definitions', () => {
         architectPort: 4201,
         builderPortRange: [4210, 4229],
         utilPortRange: [4230, 4249],
-        openPortRange: [4250, 4269],
+        // openPortRange removed - Spec 0092: files served through Tower
       };
 
       expect(config.dashboardPort).toBe(4200);

@@ -70,7 +70,7 @@ export interface Config {
   architectPort: number;
   builderPortRange: [number, number];
   utilPortRange: [number, number];
-  openPortRange: [number, number];
+  // openPortRange removed - Spec 0092: files served through Tower
   terminalBackend: 'node-pty';
 }
 

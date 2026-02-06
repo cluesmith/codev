@@ -1,19 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
-import { MOBILE_BREAKPOINT, getApiBase } from '../lib/constants.js';
-import { getTerminalWsPath } from '../lib/api.js';
+import { MOBILE_BREAKPOINT } from '../lib/constants.js';
+import { getTerminalWsPath, createFileTab } from '../lib/api.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
 import { Terminal } from './Terminal.js';
 import { StatusPanel } from './StatusPanel.js';
 import { MobileLayout } from './MobileLayout.js';
+import { FileViewer } from './FileViewer.js';
 
 export function App() {
   const { state, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+
+  // Spec 0092: Store pending initial line numbers for file tabs (not persisted server-side)
+  const pendingFileLinesRef = useRef<Map<string, number>>(new Map());
+
+  // Spec 0092: Handle file path clicks from terminal output
+  const handleFileOpen = useCallback(async (path: string, line?: number, _column?: number) => {
+    try {
+      const result = await createFileTab(path, line);
+      // Store the line number for when FileViewer renders
+      if (line && line > 0) {
+        pendingFileLinesRef.current.set(result.id, line);
+      }
+      refresh();
+      // useTabs will auto-select the new tab
+    } catch (err) {
+      console.error('Failed to open file:', err);
+    }
+  }, [refresh]);
 
   // Set document title with project name (no emoji - favicon provides the icon)
   useEffect(() => {
@@ -34,23 +53,21 @@ export function App() {
   const renderTerminal = (tab: { type: string; terminalId?: string }) => {
     const wsPath = getTerminalWsPath(tab);
     if (!wsPath) return <div className="no-terminal">No terminal session</div>;
-    return <Terminal wsPath={wsPath} />;
+    // Spec 0092: Pass file open handler for clickable file paths in terminal
+    return <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />;
   };
 
-  const renderAnnotation = (tab: { annotationId?: string }) => {
+  const renderAnnotation = (tab: { annotationId?: string; initialLine?: number }) => {
     if (!tab.annotationId || !state) return <div className="no-terminal">No file viewer</div>;
     const ann = state.annotations.find(a => a.id === tab.annotationId);
     if (!ann) return <div className="no-terminal">Annotation not found</div>;
-    const src = `${getApiBase()}annotation/${ann.id}/`;
-    return (
-      <iframe
-        src={src}
-        className="terminal-iframe"
-        style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#1a1a1a' }}
-        title={`File: ${ann.file}`}
-        allow="clipboard-read; clipboard-write"
-      />
-    );
+    // Spec 0092: Check for pending line number from terminal file link click
+    const pendingLine = pendingFileLinesRef.current.get(tab.annotationId);
+    if (pendingLine !== undefined) {
+      // Clear after reading (one-time deep link)
+      pendingFileLinesRef.current.delete(tab.annotationId);
+    }
+    return <FileViewer tabId={tab.annotationId} initialLine={pendingLine ?? tab.initialLine} />;
   };
 
   const renderContent = () => {

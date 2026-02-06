@@ -57,8 +57,8 @@ async function findOrphanProcesses(trackedPids: Set<number>): Promise<number[]> 
 
   // Pattern to match agent-farm server processes for this project
   // Matches: node .../dist/agent-farm/servers/dashboard-server.js
-  //          node .../dist/agent-farm/servers/open-server.js
   //          node .../dist/agent-farm/servers/tower-server.js
+  // Note: open-server.js removed in Spec 0092 - files served through Tower
   const orphans: number[] = [];
 
   try {
