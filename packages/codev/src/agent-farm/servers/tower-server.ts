@@ -314,6 +314,11 @@ function createTmuxSession(
       log('WARN', `tmux new-session exited with code ${result.status} for "${sessionName}"`);
       return false;
     }
+
+    // Hide tmux status bar (dashboard has its own tabs) and enable mouse scrolling
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+
     return true;
   } catch (err) {
     log('WARN', `Failed to create tmux session "${sessionName}": ${(err as Error).message}`);

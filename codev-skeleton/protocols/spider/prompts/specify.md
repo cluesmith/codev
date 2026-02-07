@@ -13,10 +13,6 @@ Create a comprehensive specification document that thoroughly explores the probl
 - **Current State**: {{current_state}}
 - **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
 
-## CRITICAL: Multi-Agent Consultation is MANDATORY
-
-The SPIDER protocol **requires** consultation with GPT-5 Codex AND Gemini Pro at specific checkpoints. This is BLOCKING - you cannot proceed without completing consultations.
-
 ## Process
 
 ### 0. Check for Existing Spec (ALWAYS DO THIS FIRST)
@@ -80,45 +76,9 @@ Define measurable acceptance criteria:
 - Non-functional requirements (performance, security)
 - Test scenarios
 
-### 6. MANDATORY: First Consultation (After Draft)
+### 6. Finalize
 
-After completing the initial spec draft:
-
-```bash
-# Run consultations in parallel (REQUIRED)
-consult --model gemini spec {{project_id}} &
-consult --model codex spec {{project_id}} &
-wait
-```
-
-- Review ALL feedback from both models
-- Update the spec with incorporated feedback
-- Add a **Consultation Log** section documenting:
-  - Key feedback received
-  - Changes made in response
-  - Any feedback intentionally not incorporated (with reasoning)
-
-### 7. Human Review
-
-After consultation feedback is incorporated:
-- Present the spec for human review
-- Wait for approval or change requests
-- If changes requested, make them and proceed to Step 8
-
-### 8. MANDATORY: Second Consultation (After Human Feedback)
-
-After incorporating human feedback:
-
-```bash
-# Run consultations again (REQUIRED)
-consult --model gemini spec {{project_id}} &
-consult --model codex spec {{project_id}} &
-wait
-```
-
-- Update Consultation Log with new feedback
-- Incorporate changes
-- Prepare final spec for approval
+After completing the spec draft, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
 
 ## Output
 
@@ -128,8 +88,6 @@ Create or update the specification file at `codev/specs/{{project_id}}-{{title}}
 - Spec: `codev/specs/{{project_id}}-{{title}}.md`
 - Plan: `codev/plans/{{project_id}}-{{title}}.md`
 - Review: `codev/reviews/{{project_id}}-{{title}}.md`
-
-Include a **Consultation Log** section in the spec documenting all consultation feedback.
 
 ## Signals
 
@@ -152,15 +110,6 @@ Emit appropriate signals based on your progress:
   <signal>SPEC_DRAFTED</signal>
   ```
 
-- After incorporating consultation feedback:
-  ```
-  <signal>CONSULTATION_INCORPORATED</signal>
-  ```
-
-- After final spec is ready for human approval:
-  ```
-  <signal>SPEC_READY_FOR_APPROVAL</signal>
-  ```
 
 ## Commit Cadence
 
@@ -177,15 +126,13 @@ git add codev/specs/{{project_id}}-{{title}}.md
 
 ## Important Notes
 
-1. **Consultation is MANDATORY** - Cannot skip GPT-5 + Gemini reviews
-2. **Be thorough** - A good spec prevents implementation problems
+1. **Be thorough** - A good spec prevents implementation problems
 3. **Be specific** - Vague specs lead to wrong implementations
 4. **Include examples** - Concrete examples clarify intent
-5. **Document consultations** - Maintain the Consultation Log section
 
 ## What NOT to Do
 
-- Don't skip consultations (they are BLOCKING)
+- Don't run `consult` commands yourself (porch handles consultations)
 - Don't include implementation details (that's for the Plan phase)
 - Don't estimate time (AI makes time estimates meaningless)
 - Don't start coding (you're in Specify, not Implement)

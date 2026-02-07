@@ -42,24 +42,9 @@ EOF
 )"
 ```
 
-### 2. Run CMAP Review
+### 2. Signal Completion
 
-Run 3-way parallel consultation on the PR:
-
-```bash
-consult --model gemini pr <PR_NUMBER> &
-consult --model codex pr <PR_NUMBER> &
-consult --model claude pr <PR_NUMBER> &
-```
-
-All three should run in the background (`run_in_background: true`).
-
-### 3. Address Feedback
-
-Review the consultation results:
-- Fix any issues identified by reviewers
-- Push updates to the PR branch
-- Re-run CMAP if substantial changes were made
+After the PR is created, signal completion. Porch will run consultation automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
 
 ## Signals
 

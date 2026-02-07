@@ -4,11 +4,7 @@ You are executing the **REVIEW** phase of the SPIDER protocol.
 
 ## Your Goal
 
-Perform a comprehensive review, document lessons learned, run final consultation, and prepare for PR submission.
-
-## CRITICAL: Final Consultation Before PR
-
-The SPIDER protocol **requires** a final consultation with GPT-5 Codex AND Gemini Pro before submitting the PR. This ensures the complete implementation is reviewed.
+Perform a comprehensive review, document lessons learned, and prepare for PR submission.
 
 ## Context
 
@@ -118,22 +114,9 @@ Before PR:
 - [ ] No uncommitted changes: `git status`
 - [ ] Review document complete
 
-### 6. MANDATORY: Final Consultation (PR-Ready Review)
+### 6. Create Pull Request
 
-**Before creating the PR, run final consultation:**
-
-```bash
-# Run consultations in parallel (REQUIRED)
-consult --model gemini --type pr-ready spec {{project_id}} &
-consult --model codex --type pr-ready spec {{project_id}} &
-wait
-```
-
-- Review ALL feedback from both models
-- Address any final issues identified
-- This is the last chance to catch problems before PR
-
-### 7. Create Pull Request
+After the review document is complete, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
 
 Prepare PR with:
 
@@ -187,8 +170,7 @@ Emit appropriate signals based on your progress:
 
 ## Important Notes
 
-1. **Final consultation is MANDATORY** - Cannot skip GPT-5 + Gemini reviews before PR
-2. **Be honest in lessons learned** - Future you will thank present you
+1. **Be honest in lessons learned** - Future you will thank present you
 3. **Document deviations** - They're not failures, they're learnings
 4. **Update methodology** - If you found a better way, document it
 5. **Don't skip the checklist** - It catches last-minute issues
@@ -196,7 +178,7 @@ Emit appropriate signals based on your progress:
 
 ## What NOT to Do
 
-- Don't skip final consultation (it's BLOCKING)
+- Don't run `consult` commands yourself (porch handles consultations)
 - Don't skip lessons learned ("nothing to report")
 - Don't merge your own PR (Architect handles integration)
 - Don't leave uncommitted changes

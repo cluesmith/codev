@@ -14,10 +14,6 @@ Transform the approved specification into an executable implementation plan with
 - **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
 - **Plan File**: `codev/plans/{{project_id}}-{{title}}.md`
 
-## CRITICAL: Multi-Agent Consultation is MANDATORY
-
-The SPIDER protocol **requires** consultation with GPT-5 Codex AND Gemini Pro at specific checkpoints. This is BLOCKING - you cannot proceed without completing consultations.
-
 ## Prerequisites
 
 Before planning, verify:
@@ -72,45 +68,9 @@ Phase 3: API Endpoints (depends on Phase 2)
 Phase 4: Frontend Integration (depends on Phase 3)
 ```
 
-### 5. MANDATORY: First Consultation (After Draft)
+### 5. Finalize
 
-After completing the initial plan draft:
-
-```bash
-# Run consultations in parallel (REQUIRED)
-consult --model gemini plan {{project_id}} &
-consult --model codex plan {{project_id}} &
-wait
-```
-
-- Review ALL feedback from both models
-- Update the plan with incorporated feedback
-- Add a **Consultation Log** section documenting:
-  - Key feedback received
-  - Changes made in response
-  - Any feedback intentionally not incorporated (with reasoning)
-
-### 6. Human Review
-
-After consultation feedback is incorporated:
-- Present the plan for human review
-- Wait for approval or change requests
-- If changes requested, make them and proceed to Step 7
-
-### 7. MANDATORY: Second Consultation (After Human Feedback)
-
-After incorporating human feedback:
-
-```bash
-# Run consultations again (REQUIRED)
-consult --model gemini plan {{project_id}} &
-consult --model codex plan {{project_id}} &
-wait
-```
-
-- Update Consultation Log with new feedback
-- Incorporate changes
-- Prepare final plan for approval
+After completing the plan draft, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
 
 ## Output
 
@@ -148,18 +108,6 @@ Brief summary of what will be implemented.
 - [Risk 1]: [Mitigation]
 - [Risk 2]: [Mitigation]
 
-## Consultation Log
-
-### First Consultation (After Draft)
-- **Gemini Feedback**: [Summary]
-- **Codex Feedback**: [Summary]
-- **Changes Made**: [List]
-- **Not Incorporated**: [List with reasons]
-
-### Second Consultation (After Human Feedback)
-- **Gemini Feedback**: [Summary]
-- **Codex Feedback**: [Summary]
-- **Changes Made**: [List]
 ```
 
 ## Signals
@@ -169,16 +117,6 @@ Emit appropriate signals based on your progress:
 - After completing the plan draft:
   ```
   <signal>PLAN_DRAFTED</signal>
-  ```
-
-- After incorporating consultation feedback:
-  ```
-  <signal>CONSULTATION_INCORPORATED</signal>
-  ```
-
-- After final plan is ready for human approval:
-  ```
-  <signal>PLAN_READY_FOR_APPROVAL</signal>
   ```
 
 ## Commit Cadence
@@ -196,16 +134,14 @@ git add codev/plans/{{project_id}}-{{title}}.md
 
 ## Important Notes
 
-1. **Consultation is MANDATORY** - Cannot skip GPT-5 + Gemini reviews
-2. **No time estimates** - Don't include hours/days/weeks
+1. **No time estimates** - Don't include hours/days/weeks
 3. **Be specific about files** - Exact paths, not "the config file"
 4. **Keep phases small** - 1-3 files per phase is ideal
 5. **Document dependencies clearly** - Prevents blocked work
-6. **Document consultations** - Maintain the Consultation Log section
 
 ## What NOT to Do
 
-- Don't skip consultations (they are BLOCKING)
+- Don't run `consult` commands yourself (porch handles consultations)
 - Don't write code (that's for Implement phase)
 - Don't estimate time (meaningless in AI development)
 - Don't create phases that can't be independently tested

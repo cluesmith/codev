@@ -155,6 +155,50 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Tower front page and dashboard need mobile-responsive improvements"
 
+  - id: "0092"
+    title: "Terminal File Links and File Browser"
+    summary: "Clickable file paths via @xterm/addon-web-links + FileTree enhancement with git status"
+    status: specified
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0092-terminal-file-links.md
+      plan: null
+      review: null
+    dependencies: ["0090", "0085"]
+    tags: [ui, ux, terminal, dashboard]
+    timestamps:
+      conceived_at: "2026-02-05T15:15:00-08:00"
+      specified_at: "2026-02-05T15:15:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Make file paths in terminal clickable, add file browser panel"
+
+  - id: "0093"
+    title: "SPIDER to SPIR Rename"
+    summary: "Complete the rename of SPIDER protocol to SPIR across entire codebase"
+    status: specified
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0093-spider-to-spir-rename.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [refactor, documentation, protocols]
+    timestamps:
+      conceived_at: "2026-02-06T10:00:00-08:00"
+      specified_at: "2026-02-06T10:00:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Rename SPIDER → SPIR (Specify, Plan, Implement, Review). ~250 files affected."
+
   - id: "0072"
     title: "Ralph-SPIDER Integration Spike"
     summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
@@ -989,7 +1033,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0091** - Reserve this number for your next project
+**0093** - Reserve this number for your next project
 
 ---
 
