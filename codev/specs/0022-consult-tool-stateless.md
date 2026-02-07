@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0022-consult-tool-stateless
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: specified
 - **Created**: 2025-12-04
 - **Priority**: high
@@ -16,7 +16,7 @@ Currently, multi-agent consultation uses the zen MCP server, which has several d
 3. **Complexity**: Running a separate MCP server process adds operational overhead
 4. **Capability gap**: gemini-cli and codex have richer capabilities than their APIs (session management, file access, context handling)
 
-The SPIDER protocol requires multi-agent consultation at key checkpoints. A simpler, more capable approach would improve this workflow.
+The SPIR protocol requires multi-agent consultation at key checkpoints. A simpler, more capable approach would improve this workflow.
 
 ## Current State
 

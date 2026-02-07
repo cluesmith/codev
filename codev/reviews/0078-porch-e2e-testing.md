@@ -2,7 +2,7 @@
 
 ## Summary
 
-Implemented E2E testing infrastructure for porch that validates the full SPIDER protocol lifecycle with real AI interactions.
+Implemented E2E testing infrastructure for porch that validates the full SPIR protocol lifecycle with real AI interactions.
 
 ## Implementation Status
 
@@ -75,7 +75,7 @@ Uses PATH manipulation to inject mock consult script for max-iterations testing.
 
 | Scenario | Status | Description |
 |----------|--------|-------------|
-| Happy Path | ✅ | Full SPIDER lifecycle with real AI |
+| Happy Path | ✅ | Full SPIR lifecycle with real AI |
 | Full Lifecycle | ✅ | End-to-end with auto-approve |
 | Feedback Loop | ✅ | Build-verify iterations |
 | Max Iterations | ✅ | Stops at iteration limit |

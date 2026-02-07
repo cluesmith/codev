@@ -1,6 +1,6 @@
 # Spike: Checklister Agent
 
-**Goal**: Build an agent that enforces SPIDER protocol compliance by maintaining a checklist state and blocking progression until all required items are complete.
+**Goal**: Build an agent that enforces SPIR protocol compliance by maintaining a checklist state and blocking progression until all required items are complete.
 
 **Time-box**: 2-4 hours
 **Status**: COMPLETE
@@ -9,7 +9,7 @@
 
 ## Hypothesis
 
-A checklister agent can enforce deterministic SPIDER compliance by:
+A checklister agent can enforce deterministic SPIR compliance by:
 1. Maintaining state about which checklist items are complete
 2. Blocking phase transitions until prerequisites are met
 3. Providing clear feedback about what's missing
@@ -18,7 +18,7 @@ A checklister agent can enforce deterministic SPIDER compliance by:
 
 1. **State Management**: How should checklist state be stored?
    - Option A: In-memory (session-scoped)
-   - Option B: File-based (`.spider-state.json`)
+   - Option B: File-based (`.spir-state.json`)
    - Option C: SQLite (like agent-farm state)
 
 2. **Integration**: How does the checklister interact with the architect/builder?
@@ -32,12 +32,12 @@ A checklister agent can enforce deterministic SPIDER compliance by:
    - Per-phase detailed checklists (all items in protocol.md)
    - Hybrid: phase gates + critical items only
 
-## SPIDER Checklist Model
+## SPIR Checklist Model
 
-Based on `codev/protocols/spider/protocol.md`:
+Based on `codev/protocols/spir/protocol.md`:
 
 ```yaml
-spider_checklist:
+spir_checklist:
   # SPECIFY PHASE
   specify:
     - id: spec_draft
@@ -175,7 +175,7 @@ spider_checklist:
 ```json
 {
   "project_id": "0069",
-  "protocol": "spider",
+  "protocol": "spir",
   "current_phase": "specify",
   "completed": {
     "spec_draft": {
@@ -197,7 +197,7 @@ spider_checklist:
 ### Phase 1: Minimal Viable Checklister
 
 1. Create skill definition in `.claude/skills/checklister.md`
-2. Define state file format (`.spider-state.json`)
+2. Define state file format (`.spir-state.json`)
 3. Implement status command (read-only)
 4. Implement complete command (mark items done)
 5. Implement gate command (check phase transitions)
@@ -205,7 +205,7 @@ spider_checklist:
 ### Phase 2: Integration Test
 
 1. Create test spec 0069 (tower light/dark mode)
-2. Run SPIDER with checklister enforcement
+2. Run SPIR with checklister enforcement
 3. Verify gates block correctly
 4. Document friction points
 
@@ -217,7 +217,7 @@ spider_checklist:
 
 ## Test Case: Spec 0069 - Tower Light/Dark Mode
 
-A minimal SPIDER task to test the checklister:
+A minimal SPIR task to test the checklister:
 
 **Goal**: Add a light mode toggle to `codev tower start` dashboard
 
@@ -249,7 +249,7 @@ This is intentionally small to test the protocol overhead, not implementation co
 
 ### Key Decisions Made
 
-1. **State Management**: File-based (Option B: `.spider-state.json`)
+1. **State Management**: File-based (Option B: `.spir-state.json`)
    - Simple JSON format
    - Persists across sessions
    - Human-readable and editable
@@ -270,7 +270,7 @@ This is intentionally small to test the protocol overhead, not implementation co
 1. **`.claude/commands/checklister.md`** - Skill definition with:
    - Commands: init, status, complete, gate, add-phase, reset, list
    - State file format
-   - Complete checklist item definitions for all SPIDER phases (S, P, IDE, R)
+   - Complete checklist item definitions for all SPIR phases (S, P, IDE, R)
    - Separate I/D/E stage tracking within IDE loop
    - Gate logic rules for phase AND stage transitions
 
@@ -293,7 +293,7 @@ This is intentionally small to test the protocol overhead, not implementation co
 
 ### Protocol Integration
 
-The SPIDER protocol (`codev/protocols/spider/protocol.md`) has been updated with:
+The SPIR protocol (`codev/protocols/spir/protocol.md`) has been updated with:
 - Checklister configuration section
 - `/checklister` commands at each workflow checkpoint
 - Gate commands at all phase/stage transitions
@@ -372,7 +372,7 @@ Claude Code has hooks that intercept tool calls BEFORE they execute. If the hook
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    BUILDER                          │
-│  (maintains full context, executes entire SPIDER)   │
+│  (maintains full context, executes entire SPIR)   │
 └──────────────────────┬──────────────────────────────┘
                        │
                        ▼
@@ -487,16 +487,16 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 │       │                                                         │
 │       ▼                                                         │
 │  ┌──────────────────┐                                          │
-│  │  Builder Role    │ ← "Follow SPIDER protocol"               │
+│  │  Builder Role    │ ← "Follow SPIR protocol"               │
 │  │  (codev/roles/   │                                          │
 │  │   builder.md)    │                                          │
 │  └────────┬─────────┘                                          │
 │           │                                                     │
 │           ▼                                                     │
 │  ┌──────────────────┐                                          │
-│  │  SPIDER Protocol │ ← "Do S, then P, then IDE, then R"       │
+│  │  SPIR Protocol │ ← "Do S, then P, then IDE, then R"       │
 │  │  (codev/proto-   │                                          │
-│  │   cols/spider/)  │                                          │
+│  │   cols/spir/)  │                                          │
 │  └────────┬─────────┘                                          │
 │           │                                                     │
 │           ▼                                                     │
@@ -534,8 +534,8 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 
 | Component | Role | Already Exists? |
 |-----------|------|-----------------|
-| Builder Role | Tells Claude to follow SPIDER | ✓ Yes |
-| SPIDER Protocol | Defines phases and steps | ✓ Yes |
+| Builder Role | Tells Claude to follow SPIR | ✓ Yes |
+| SPIR Protocol | Defines phases and steps | ✓ Yes |
 | Spec File | Defines what to build | ✓ Yes |
 | **Checklister Hooks** | **Prevents deviation** | ✓ New |
 | **Checklister State** | **Tracks progress** | ✓ New |
@@ -545,7 +545,7 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 
 The checklister doesn't need to "induce" anything because:
 1. `af spawn` already loads Builder + Protocol + Spec
-2. The Builder role says "follow SPIDER"
+2. The Builder role says "follow SPIR"
 3. The Protocol defines each phase
 4. The checklister adds **guardrails** - it blocks deviation, doesn't drive execution
 
@@ -573,7 +573,7 @@ This is the right separation of concerns:
 
 ### Architect-Builder Implications
 
-The Architect-Builder pattern splits SPIDER across contexts:
+The Architect-Builder pattern splits SPIR across contexts:
 
 | Phase | Agent | Context | Checklister Scope |
 |-------|-------|---------|-------------------|
@@ -600,7 +600,7 @@ The spike tested enforcement in a builder worktree context, which is correct. Bu
 | Allows transition when complete | **PASS** | Gate returns ALLOWED, updates phase |
 | State persists across sessions | **PASS** | JSON file in codev/checklists/ |
 | Clear feedback about missing items | **PASS** | Lists specific item IDs and labels |
-| Overhead feels reasonable | **TBD** | Needs full SPIDER run to evaluate |
+| Overhead feels reasonable | **TBD** | Needs full SPIR run to evaluate |
 | **Blocks wrong file edits** | **PASS** | Hooks block src/* during Specify phase |
 
 ### Recommendation for Production

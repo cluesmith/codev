@@ -1,7 +1,7 @@
 # Plan 0065: BUGFIX Protocol and CLI Support
 
 **Spec**: `codev/specs/0065-bugfix-protocol.md`
-**Protocol**: SPIDER
+**Protocol**: SPIR
 **Created**: 2026-01-03
 
 ## Overview

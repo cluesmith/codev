@@ -4,7 +4,7 @@
 
 ## Overview
 
-BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Issues. It uses the Architect-Builder pattern with isolated worktrees but skips the heavyweight specification and planning phases of SPIDER.
+BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Issues. It uses the Architect-Builder pattern with isolated worktrees but skips the heavyweight specification and planning phases of SPIR.
 
 **Core Principle**: Bug → Builder → Fix → Review → Merge → Cleanup
 
@@ -14,7 +14,7 @@ BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Is
 - No architectural changes required
 - Fix is straightforward once the bug is understood
 
-**When NOT to Use** (escalate to SPIDER or TICK):
+**When NOT to Use** (escalate to SPIR or TICK):
 - It's a new feature (not a bug)
 - Bug reveals deeper architectural issues
 - Fix requires > 300 lines of code
@@ -80,13 +80,13 @@ BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Is
 1. Read the issue: `gh issue view <N>`
 2. Verify it's a valid bug (not a feature request)
 3. Assess complexity - is it suitable for BUGFIX protocol?
-4. If too complex, escalate to SPIDER instead
+4. If too complex, escalate to SPIR instead
 
 **Example**:
 ```bash
 gh issue view 42
 # Assess: Clear reproduction, simple fix expected → BUGFIX
-# Assess: Unclear cause, architectural implications → SPIDER
+# Assess: Unclear cause, architectural implications → SPIR
 ```
 
 ### Phase 2: Spawn Builder (Architect)
@@ -135,12 +135,12 @@ The `builder/` prefix maintains consistency with Agent Farm tooling.
 **Complexity Check**:
 If during investigation the builder determines the fix is too complex:
 ```bash
-af send architect "Issue #N is more complex than expected. [Reason]. Recommend escalating to SPIDER/TICK."
+af send architect "Issue #N is more complex than expected. [Reason]. Recommend escalating to SPIR/TICK."
 ```
 
 The Architect will then decide whether to:
 - Continue with BUGFIX (provide guidance)
-- Escalate to SPIDER protocol (new feature complexity)
+- Escalate to SPIR protocol (new feature complexity)
 - Escalate to TICK protocol (amends existing spec)
 - Abandon and close the issue with explanation
 
@@ -339,7 +339,7 @@ git diff --stat main | tail -1
 |----------|----------------|
 | Cannot reproduce bug | Document reproduction attempts in issue comment, ask reporter for more details, notify Architect via `af send` |
 | Issue already closed | Check with Architect before starting work (may be duplicate or already fixed) |
-| Fix too complex (> 300 LOC) | Notify Architect with complexity details, recommend escalation to SPIDER |
+| Fix too complex (> 300 LOC) | Notify Architect with complexity details, recommend escalation to SPIR |
 | Architectural changes needed | Notify Architect immediately, do not proceed with BUGFIX |
 | Unrelated test failures | Do NOT fix (out of scope), notify Architect to handle separately |
 | Documentation-only bug | Valid for BUGFIX - fix the docs, add test if applicable |
@@ -356,7 +356,7 @@ git diff --stat main | tail -1
 
 **Architect escalation options**:
 1. **Continue BUGFIX** - Provide guidance, builder continues
-2. **Escalate to SPIDER** - Create proper spec for complex fix
+2. **Escalate to SPIR** - Create proper spec for complex fix
 3. **Close as won't fix** - Document reasoning on issue
 
 ## Git Commit Convention
@@ -367,14 +367,14 @@ git diff --stat main | tail -1
 [Bugfix #N] Docs: <if docs updated>
 ```
 
-**Note**: This differs from SPIDER's `[Spec XXXX][Phase]` format intentionally:
+**Note**: This differs from SPIR's `[Spec XXXX][Phase]` format intentionally:
 - Issue numbers are shorter (no leading zeros)
 - No phase names (BUGFIX is single-phase conceptually)
 - Aligns with GitHub's `Fixes #N` convention in PR bodies
 
 ## Comparison with Other Protocols
 
-| Aspect | BUGFIX | TICK | SPIDER |
+| Aspect | BUGFIX | TICK | SPIR |
 |--------|--------|------|--------|
 | Trigger | GitHub Issue | Amendment need | New feature |
 | Spec required | No | Existing spec | New spec |
@@ -386,7 +386,7 @@ git diff --stat main | tail -1
 
 ## CMAP Review Strategy
 
-BUGFIX uses **PR-only CMAP reviews**, which is intentionally lighter than SPIDER's throughout-consultation approach.
+BUGFIX uses **PR-only CMAP reviews**, which is intentionally lighter than SPIR's throughout-consultation approach.
 
 **Why PR-only?**
 - BUGFIX scope is small (< 300 LOC) - mid-implementation review adds overhead without benefit
@@ -527,7 +527,7 @@ Use these guidelines to determine whether an issue is appropriate for BUGFIX:
 - Fix is straightforward once root cause is understood
 - < 300 LOC expected (net diff)
 
-### Escalate to SPIDER when:
+### Escalate to SPIR when:
 - "Feature request disguised as bug" (e.g., "bug: should support dark mode")
 - Requires new specs or design discussion
 - Affects multiple systems or services
@@ -537,7 +537,7 @@ Use these guidelines to determine whether an issue is appropriate for BUGFIX:
 
 ## Limitations
 
-1. **No spec/plan artifacts** - Less documentation than SPIDER
+1. **No spec/plan artifacts** - Less documentation than SPIR
 2. **Limited scope** - Only for truly minor fixes
 3. **Single builder** - No parallel work on same issue
 4. **Issue dependency** - Requires GitHub Issue to exist first

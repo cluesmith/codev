@@ -51,7 +51,7 @@ Roles → Protocols → Subagents → Skills
 - Purpose: Sequences work, decides *when* to call subagents
 
 **Examples in Codev:**
-- **SPIDER**: Specify → Plan → Implement → Defend → Evaluate → Review (heavy-duty for complex features)
+- **SPIR**: Specify → Plan → Implement → Defend → Evaluate → Review (heavy-duty for complex features)
 - **TICK**: Triage → Implement → Check → Klose (lightweight for quick tasks)
 - **EXPERIMENT**: Hypothesis → Test → Analyze → Conclude (for research spikes)
 
@@ -76,7 +76,7 @@ Roles → Protocols → Subagents → Skills
 
 **Location:** `.claude/agents/` (for custom agents)
 
-**Key Insight:** Subagents are composable - they can be called by multiple protocols. For example, an architecture-documenter subagent could be invoked by SPIDER (in Review phase) AND by a Cleanup protocol (in Sync phase). Codev has moved from bundled agents to CLI commands (like `codev import`) for common workflows, while allowing projects to define custom agents as needed.
+**Key Insight:** Subagents are composable - they can be called by multiple protocols. For example, an architecture-documenter subagent could be invoked by SPIR (in Review phase) AND by a Cleanup protocol (in Sync phase). Codev has moved from bundled agents to CLI commands (like `codev import`) for common workflows, while allowing projects to define custom agents as needed.
 
 ---
 
@@ -110,7 +110,7 @@ The abstractions compose in a clear hierarchy:
 Roles decide which protocol to run based on the situation:
 
 ```
-Architect (Role) → initiates SPIDER (Protocol) for new feature
+Architect (Role) → initiates SPIR (Protocol) for new feature
 Builder (Role) → initiates TICK (Protocol) for quick fix
 Architect (Role) → initiates CLEANUP (Protocol) for maintenance
 ```
@@ -120,7 +120,7 @@ Architect (Role) → initiates CLEANUP (Protocol) for maintenance
 Protocol phases dispatch workers to accomplish phase goals:
 
 ```
-SPIDER Protocol
+SPIR Protocol
   └── Review Phase
         ├── calls: architecture-documenter (Subagent)
         └── calls: run_tests (Skill)
@@ -229,7 +229,7 @@ Phase 4: SYNC
 - Scope: Produces updated architecture documentation (bounded deliverable)
 - Complexity: Requires reading multiple files and synthesizing abstractions (needs reasoning)
 - Lifecycle: Spawned on demand during specific phases
-- Composability: Can be called by SPIDER/Review AND CLEANUP/Sync
+- Composability: Can be called by SPIR/Review AND CLEANUP/Sync
 
 **Decision:** Yes, architecture-documenter is correctly a **Subagent**
 
@@ -283,7 +283,7 @@ Codev uses a **transpilation approach** rather than a runtime wrapper:
 │   ├── architect.md             # Architect persona
 │   └── builder.md               # Builder persona
 ├── protocols/
-│   ├── spider.yaml              # SPIDER workflow definition
+│   ├── spir.yaml                # SPIR workflow definition
 │   ├── tick.yaml                # TICK workflow definition
 │   └── cleanup.yaml             # CLEANUP workflow definition
 └── skills/

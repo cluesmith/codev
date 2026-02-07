@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0031
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: specified
 - **Created**: 2025-12-05
 - **Priority**: high

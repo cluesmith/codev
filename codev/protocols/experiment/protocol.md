@@ -10,7 +10,7 @@ Disciplined experimentation: Each experiment gets its own directory with `notes.
 
 **Use for**: Testing approaches, evaluating models, prototyping, proof-of-concept work, research spikes
 
-**Skip for**: Production code (use SPIDER), simple one-off scripts, well-understood implementations (use TICK)
+**Skip for**: Production code (use SPIR), simple one-off scripts, well-understood implementations (use TICK)
 
 ## Structure
 
@@ -141,7 +141,7 @@ What should be done based on findings?
 
 ## Integration with Other Protocols
 
-### Experiment → SPIDER
+### Experiment → SPIR
 When an experiment validates an approach for production use:
 
 1. Create a specification referencing the experiment
@@ -225,5 +225,5 @@ Determine if Redis caching improves API response times for repeated queries.
 - Memory usage: 50MB for 10k cached responses
 
 ## Next Steps
-Create SPIDER spec for production caching implementation.
+Create SPIR spec for production caching implementation.
 ```

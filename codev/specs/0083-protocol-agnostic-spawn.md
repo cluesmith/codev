@@ -3,7 +3,7 @@
 **Spec ID**: 0083
 **Title**: Protocol-Agnostic Spawn System
 **Status**: Draft
-**Protocol**: SPIDER
+**Protocol**: SPIR
 **Author**: Claude (with human guidance)
 **Date**: 2026-01-27
 
@@ -15,7 +15,7 @@ Refactor `af spawn` to decouple input types from protocols, making the system ex
 
 Currently, specific protocols are deeply baked into `af spawn`:
 - `spawnBugfix()` hardcodes BUGFIX protocol path, collision checks, and issue commenting
-- `spawnSpec()` defaults to SPIDER with protocol-specific prompts
+- `spawnSpec()` defaults to SPIR with protocol-specific prompts
 - `spawnStrict()` ignores protocol metadata in spec files
 - Adding a new protocol requires modifying spawn.ts
 
@@ -23,7 +23,7 @@ This violates the open-closed principle and makes the system harder to extend.
 
 ## Goals
 
-1. **Decouple input types from protocols** - Input (spec, issue, task) and protocol (spider, bugfix, tick) are orthogonal
+1. **Decouple input types from protocols** - Input (spec, issue, task) and protocol (spir, bugfix, tick) are orthogonal
 2. **Universal `--use-protocol` flag** - Override default protocol for any input type
 3. **Protocol-defined behaviors** - Hooks, defaults, and prompts defined in protocol.json
 4. **Protocol prompt templates** - Each protocol can provide builder-prompt.md
@@ -55,13 +55,13 @@ Input Type (what to build from)  ×  Mode (who orchestrates)  ×  Protocol (what
 - `strict`: Porch drives the protocol
 - `soft`: AI reads and follows protocol.md
 
-**Protocols**: spider, bugfix, tick, maintain, experiment, etc.
+**Protocols**: spir, bugfix, tick, maintain, experiment, etc.
 
 ### Protocol Selection
 
 1. Explicit `--use-protocol <name>` takes precedence
 2. Protocol's `default_for` in protocol.json
-3. Hardcoded defaults (spider for specs, bugfix for issues)
+3. Hardcoded defaults (spir for specs, bugfix for issues)
 
 ### Protocol Definition Extensions
 
@@ -126,12 +126,12 @@ Follow: codev/protocols/{{protocol}}/protocol.md
 
 ```bash
 # Standard (unchanged behavior)
-af spawn -p 0001                         # strict, spider
+af spawn -p 0001                         # strict, spir
 af spawn -i 42                           # soft, bugfix
 
 # New flexibility
 af spawn -p 0001 --use-protocol tick     # strict, tick
-af spawn -i 42 --use-protocol spider     # soft, spider (escalate bug)
+af spawn -i 42 --use-protocol spir     # soft, spir (escalate bug)
 af spawn --protocol maintain             # soft, maintain
 ```
 
@@ -160,8 +160,8 @@ af spawn --protocol maintain             # soft, maintain
 
 ### Acceptance Criteria
 
-- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIDER
-- [ ] `af spawn -i 42 --use-protocol spider` uses SPIDER instead of BUGFIX
+- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
+- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
 - [ ] `af spawn --protocol maintain` works
 - [ ] Protocol hooks (collision check, issue comment) are data-driven
 - [ ] Existing commands work unchanged (backwards compatible)

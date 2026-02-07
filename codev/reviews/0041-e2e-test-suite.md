@@ -5,7 +5,7 @@
 - **Plan**: [0041-e2e-test-suite.md](../plans/0041-e2e-test-suite.md)
 - **Status**: complete
 - **Completed**: 2025-12-08
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Implementation Summary
 

@@ -1,7 +1,7 @@
 # Plan 0039: Codev CLI Implementation
 
 **Spec:** codev/specs/0039-codev-cli.md
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Estimated effort:** 3-4 days
 
 ---
@@ -592,7 +592,7 @@ function loadRole(): string {
 Key files that need resolution:
 - `roles/builder.md`
 - `roles/architect.md`
-- `protocols/spider/protocol.md`
+- `protocols/spir/protocol.md`
 - `protocols/tick/protocol.md`
 - `config.json`
 
@@ -884,7 +884,7 @@ Update `tests/e2e/init.bats` and `tests/e2e/adopt.bats`:
 @test "codev init creates protocols directory" {
   ./node_modules/.bin/codev init my-project --yes
   assert_dir_exists "my-project/codev/protocols"
-  assert_dir_exists "my-project/codev/protocols/spider"
+  assert_dir_exists "my-project/codev/protocols/spir"
 }
 
 @test "codev init creates roles directory" {
@@ -895,7 +895,7 @@ Update `tests/e2e/init.bats` and `tests/e2e/adopt.bats`:
 
 @test "codev init adds managed header to framework files" {
   ./node_modules/.bin/codev init my-project --yes
-  run cat my-project/codev/protocols/spider/protocol.md
+  run cat my-project/codev/protocols/spir/protocol.md
   assert_output --partial "MANAGED BY CODEV"
 }
 

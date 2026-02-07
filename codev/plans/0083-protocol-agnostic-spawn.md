@@ -11,8 +11,8 @@
 Refactor `af spawn` to decouple input types from protocols by adding a `--use-protocol` flag and making protocol selection data-driven via protocol.json. This is a single-phase implementation since the scope is well-defined and contained.
 
 ## Success Metrics
-- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIDER
-- [ ] `af spawn -i 42 --use-protocol spider` uses SPIDER instead of BUGFIX
+- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
+- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
 - [ ] `af spawn --protocol maintain` works unchanged (this is the existing protocol-only mode)
 - [ ] Protocol hooks (collision check, issue comment) are data-driven
 - [ ] Existing commands work unchanged (backwards compatible)
@@ -45,7 +45,7 @@ Refactor `af spawn` to decouple input types from protocols by adding a `--use-pr
 - [ ] Updated `packages/codev/src/agent-farm/commands/spawn.ts` with protocol-agnostic helpers
 - [ ] Updated `packages/codev/src/agent-farm/types.ts` with new type definitions
 - [ ] Extended `codev-skeleton/protocols/protocol-schema.json` with input/hooks/defaults
-- [ ] Updated protocol.json files for spider, bugfix, tick with new sections
+- [ ] Updated protocol.json files for spir, bugfix, tick with new sections
 - [ ] Unit tests for `resolveProtocol()` and `loadProtocol()`
 - [ ] Optional: Protocol-specific builder-prompt.md templates
 
@@ -99,7 +99,7 @@ Resolution follows this order (first match wins):
 1. **Explicit `--use-protocol` flag** - Always takes precedence
 2. **Spec file header** - For `--project` mode, parse `**Protocol**: <name>` from spec (existing behavior preserved)
 3. **Protocol `default_for`** - If protocol.json has `default_for: ["--issue"]`, use that protocol for `--issue` flag
-4. **Hardcoded fallbacks** - spider for `--project`, bugfix for `--issue`, etc.
+4. **Hardcoded fallbacks** - spir for `--project`, bugfix for `--issue`, etc.
 
 ```typescript
 async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
@@ -123,12 +123,12 @@ async function resolveProtocol(options: SpawnOptions, config: Config): Promise<s
   // For now, use hardcoded defaults
 
   // 4. Hardcoded fallbacks
-  if (options.project) return 'spider';
+  if (options.project) return 'spir';
   if (options.issue) return 'bugfix';
   if (options.protocol) return options.protocol;  // protocol-only mode uses the specified protocol
-  if (options.task) return 'spider';  // task defaults to spider
+  if (options.task) return 'spir';  // task defaults to spir
 
-  return 'spider';  // final fallback
+  return 'spir';  // final fallback
 }
 ```
 
@@ -229,7 +229,7 @@ Update bugfix/protocol.json:
 }
 ```
 
-Update spider/protocol.json:
+Update spir/protocol.json:
 ```json
 {
   "input": {
@@ -260,7 +260,7 @@ Update tick/protocol.json:
 - [ ] `af spawn -p 0001` works as before (backwards compatible)
 - [ ] `af spawn -i 42` works as before (backwards compatible)
 - [ ] `af spawn -p 0001 --use-protocol tick` uses TICK protocol
-- [ ] `af spawn -i 42 --use-protocol spider` uses SPIDER protocol
+- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR protocol
 - [ ] Collision checks happen when bugfix protocol specifies them
 - [ ] Issue comments happen when bugfix protocol specifies them
 - [ ] Spec file `**Protocol**: TICK` header still works (protocol resolution respects it)
@@ -283,9 +283,9 @@ describe('resolveProtocol', () => {
     expect(result).toBe('tick');
   });
 
-  it('falls back to spider for --project without spec header', async () => {
+  it('falls back to spir for --project without spec header', async () => {
     const result = await resolveProtocol({ project: '0001' }, config);
-    expect(result).toBe('spider');
+    expect(result).toBe('spir');
   });
 
   it('falls back to bugfix for --issue', async () => {
@@ -296,8 +296,8 @@ describe('resolveProtocol', () => {
 
 describe('loadProtocol', () => {
   it('loads and parses valid protocol.json', () => {
-    const result = loadProtocol(config, 'spider');
-    expect(result.name).toBe('spider');
+    const result = loadProtocol(config, 'spir');
+    expect(result.name).toBe('spir');
     expect(result.phases).toBeDefined();
   });
 
@@ -314,7 +314,7 @@ describe('loadProtocol', () => {
 - Verify `af spawn --protocol maintain` works
 - Verify error handling for invalid protocol names
 - Verify spec with `**Protocol**: TICK` header uses tick by default
-- Verify `--use-protocol spider` overrides spec header
+- Verify `--use-protocol spir` overrides spec header
 
 #### Rollback Strategy
 Revert the commit if issues are found. Changes are contained to a few files.

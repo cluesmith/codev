@@ -30,7 +30,7 @@ TICK is appropriate when:
 - [ ] Requirements are clear
 - [ ] No architectural changes needed
 
-If NOT appropriate, signal: `<signal>NEEDS_SPIDER</signal>`
+If NOT appropriate, signal: `<signal>NEEDS_SPIR</signal>`
 
 ### 3. Document Understanding
 
@@ -58,4 +58,4 @@ When understanding is complete:
 
 - DO NOT start implementing
 - DO NOT create new spec files (amend existing)
-- Keep scope small - if > 300 LOC, recommend SPIDER instead
+- Keep scope small - if > 300 LOC, recommend SPIR instead

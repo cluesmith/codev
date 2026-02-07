@@ -1,10 +1,4 @@
-# SPIR Protocol (formerly SPIDER)
-
-> **Also known as**: SPIDER (legacy name)
->
-> **SPIR** = **S**pecify → **P**lan → **I**mplement → **R**eview
->
-> Each phase has one build-verify cycle with 3-way consultation.
+# SPIR Protocol
 
 > **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
 
@@ -17,20 +11,80 @@
 
 ## Protocol Configuration
 
+### Porch Orchestration (RECOMMENDED)
+
+Porch is the protocol orchestrator that enforces phase transitions, manages human approval gates, and coordinates multi-agent consultations. Using porch is the recommended way to execute SPIR.
+
+**HOW IT WORKS:**
+1. Initialize porch for your project: `porch init spir <project-id> <name>`
+2. Run the protocol loop: `porch run <project-id>`
+3. Porch orchestrates Claude sessions for each phase
+4. Human gates block until approved: `porch approve <project-id> <gate-id>`
+
+**STATE FILE LOCATION:**
+`codev/projects/<project-id>-<name>/status.yaml`
+
+**PORCH COMMANDS:**
+```bash
+# Initialize a new SPIR project
+porch init spir 0073 "user-auth"
+
+# Start the protocol loop (orchestrates Claude for each phase)
+porch run 0073
+
+# Check status
+porch status 0073
+
+# Approve a human gate
+porch approve 0073 spec_approval
+
+# List pending gates across all projects
+porch pending
+```
+
+**HUMAN GATES:**
+- `spec_approval`: After specification is ready for planning
+- `plan_approval`: After plan is ready for implementation
+
+When a gate is reached, porch notifies the architect and blocks until approved.
+
+**USING AF SPAWN (Architect-Builder Pattern):**
+```bash
+# Create worktree and start porch-driven builder (default)
+af spawn -p 0073
+
+# Or for flexible, protocol-guided work (soft mode)
+af spawn --soft -p 0073
+
+# Monitor builder status
+af status
+
+# Approve gates via dashboard or CLI
+porch approve 0073 spec_approval
+```
+
+**MANUAL EXECUTION (without porch):**
+You can still execute SPIR manually by following this document. Use signals to communicate phase completion to porch if running in orchestrated mode:
+```
+<signal>SPEC_DRAFTED</signal>
+<signal>PLAN_DRAFTED</signal>
+<signal>PHASE_COMPLETE</signal>
+```
+
 ### Multi-Agent Consultation (ENABLED BY DEFAULT)
 
 **DEFAULT BEHAVIOR:**
-Multi-agent consultation is **ENABLED BY DEFAULT** when using SPIDER protocol.
+Multi-agent consultation is **ENABLED BY DEFAULT** when using SPIR protocol.
 
 **DEFAULT AGENTS:**
 - **GPT-5 Codex**: Primary reviewer for architecture, feasibility, and code quality
 - **Gemini Pro**: Secondary reviewer for completeness, edge cases, and alternative approaches
 
 **DISABLING CONSULTATION:**
-To run SPIDER without consultation, say "without consultation" when starting work.
+To run SPIR without consultation, say "without consultation" when starting work.
 
 **CUSTOM AGENTS:**
-The user can specify different agents by saying: "use SPIDER with consultation from [agent1] and [agent2]"
+The user can specify different agents by saying: "use SPIR with consultation from [agent1] and [agent2]"
 
 **CONSULTATION BEHAVIOR:**
 - DEFAULT: MANDATORY consultation with GPT-5 and Gemini Pro at EVERY checkpoint
@@ -47,14 +101,6 @@ The user can specify different agents by saying: "use SPIDER with consultation f
 
 ## Overview
 SPIR is a structured development protocol that emphasizes specification-driven development with iterative implementation and continuous review. It builds upon the DAPPER methodology with a focus on context-first development and multi-agent collaboration.
-
-**The SPIR Model**:
-- **S - Specify**: Write specification with 3-way review → Gate: `spec-approval`
-- **P - Plan**: Write implementation plan with 3-way review → Gate: `plan-approval`
-- **I - Implement**: Execute each plan phase with build-verify cycle (one cycle per phase)
-- **R - Review**: Final review and PR preparation with 3-way review
-
-Each phase follows a build-verify loop: build the artifact, then verify with 3-way consultation (Gemini, Codex, Claude).
 
 **Core Principle**: Each feature is tracked through exactly THREE documents - a specification, a plan, and a review with lessons learned - all sharing the same filename and sequential identifier.
 
@@ -94,7 +140,13 @@ Each phase follows a build-verify loop: build the artifact, then verify with 3-w
 10. Multi-agent review of updated document
 11. Final updates based on second review
 12. **COMMIT**: "Final approved specification"
-13. Iterate steps 7-12 until user approves and says to proceed to planning
+    - Add YAML frontmatter: `approved: <date>` and `validated: [gemini, codex, claude]`
+    - Commit to `main` so builder worktrees include the artifact
+    - Porch will detect this metadata and skip the specify phase automatically
+13. **GATE CHECK**: Before proceeding to Plan, verify all `spec_*` items complete
+    - If incomplete: Output "⚠️ BLOCKED" with missing items, stop
+    - If complete: Output "✓ Gate passed", update state, proceed
+14. Iterate steps 7-12 until user approves and says to proceed to planning
 
 **Important**: Keep documentation minimal - use only THREE core files with the same name:
 - `specs/####-descriptive-name.md` - The specification
@@ -183,7 +235,14 @@ Each phase follows a build-verify loop: build the artifact, then verify with 3-w
 9. Multi-agent review of updated plan
 10. Final updates based on second review
 11. **COMMIT**: "Final approved plan"
-12. Iterate steps 6-11 until agreement is reached
+    - Add YAML frontmatter: `approved: <date>` and `validated: [gemini, codex, claude]`
+    - Commit to `main` so builder worktrees include the artifact
+    - Porch will detect this metadata and skip the plan phase automatically
+12. **REGISTER PHASES**: For each phase defined in the plan:
+13. **GATE CHECK**: Before proceeding to Implement, verify all `plan_*` items complete
+    - If incomplete: Output "⚠️ BLOCKED" with missing items, stop
+    - If complete: Output "✓ Gate passed", update state, proceed
+14. Iterate steps 6-11 until agreement is reached
 
 **Phase Design Goals**:
 Each phase should be:
@@ -238,21 +297,30 @@ Each phase should be:
 **Template**: `templates/plan.md`
 **Review Required**: Yes - Technical lead approval AFTER consultations
 
-### I - Implement (Per Plan Phase)
+### (IDE) - Implementation Loop
 
-Execute for each phase in the plan. Each phase follows a build-verify cycle.
+Execute for each phase in the plan. This is a strict cycle that must be completed in order.
+
+**⚠️ MANDATORY**: The I-D-E cycle MUST be completed for EACH PHASE, not just at the end of all phases. Skipping D (Defend) or E (Evaluate) for any phase is a PROTOCOL VIOLATION.
 
 **CRITICAL PRECONDITION**: Before starting any phase, verify the previous phase was committed to git. No phase can begin without the prior phase's commit.
 
-**Build-Verify Cycle Per Phase**:
-1. **Build** - Implement code and tests for this phase
-2. **Verify** - 3-way consultation (Gemini, Codex, Claude)
-3. **Iterate** - Address feedback until verification passes
+**Phase Completion Process**:
+1. **Implement** - Build the code for this phase
+   - **GATE CHECK**: Before Defend, verify all Implement items complete
+2. **Defend** - Write comprehensive tests that guard functionality
+   - **GATE CHECK**: Before Evaluate, verify all Defend items complete
+3. **Evaluate** - Assess and discuss with user
 4. **Commit** - Single atomic commit for the phase (MANDATORY before next phase)
 5. **Proceed** - Move to next phase only after commit
+   - **GATE CHECK**: Verify all items for current phase complete
+   - If more phases: Proceed to next phase's Implement stage
+   - If last phase: Proceed to Review
 
 **Handling Failures**:
-- If verification reveals gaps → iterate and fix
+- If **Defend** phase reveals gaps → return to **Implement** to fix
+- If **Evaluation** reveals unmet criteria → return to **Implement**
+- If user requests changes → return to **Implement**
 - If fundamental plan flaws found → mark phase as `blocked` and revise plan
 
 **Commit Requirements**:
@@ -543,6 +611,10 @@ Execute for each phase in the plan. Each phase follows a build-verify cycle.
 - Same filename as spec/plan, captures review and learnings from this feature
 - Methodology improvement proposals (update protocol if needed)
 
+**FINAL GATE CHECK**: Before marking project complete, verify all `review_*` items complete
+- If incomplete: Output "⚠️ BLOCKED" with missing items
+- If complete: Output "✓ SPIR protocol complete for project [id]"
+
 **Review Required**: Yes - Team retrospective recommended
 
 ## File Naming Conventions
@@ -596,12 +668,12 @@ Implements bcrypt-based password hashing with configurable rounds
 
 ### Branch Naming
 ```
-spider/####-<spec-name>/<phase-name>
+spir/####-<spec-name>/<phase-name>
 ```
 
 Example:
 ```
-spider/0001-user-authentication/database-schema
+spir/0001-user-authentication/database-schema
 ```
 
 

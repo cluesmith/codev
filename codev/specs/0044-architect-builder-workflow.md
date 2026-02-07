@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-The architect-builder workflow in SPIDER is not clearly documented. The stages, responsibilities, and handoffs are scattered across multiple documents. Additionally, SPIDER-SOLO exists as a redundant variant (it's just SPIDER with one-way review instead of 3-way).
+The architect-builder workflow in SPIR is not clearly documented. The stages, responsibilities, and handoffs are scattered across multiple documents. Additionally, SPIR-SOLO exists as a redundant variant (it's just SPIR with one-way review instead of 3-way).
 
 This causes:
 1. Confusion about who does what and when
@@ -19,9 +19,9 @@ This causes:
 ## Scope
 
 This spec covers:
-1. **Delete SPIDER-SOLO** - It's redundant (just SPIDER with consultation disabled)
+1. **Delete SPIR-SOLO** - It's redundant (just SPIR with consultation disabled)
 2. **Define the 7-stage workflow** with clear responsibilities
-3. **Update SPIDER protocol** to reference this workflow (other protocols have different lifecycles)
+3. **Update SPIR protocol** to reference this workflow (other protocols have different lifecycles)
 4. **Update projectlist.md states** to match the workflow
 
 **Out of scope:**
@@ -34,7 +34,7 @@ This spec covers:
 ### Scattered Documentation
 - `codev/roles/architect.md` - Partial workflow
 - `codev/roles/builder.md` - Partial workflow
-- `codev/protocols/spider/protocol.md` - Phase definitions
+- `codev/protocols/spir/protocol.md` - Phase definitions
 - `CLAUDE.md` / `AGENTS.md` - Protocol selection guide
 
 ### Projectlist States (Current)
@@ -44,8 +44,8 @@ conceived → specified → planned → implementing → implemented → committ
 
 These don't map cleanly to the actual workflow stages.
 
-### SPIDER-SOLO
-A redundant protocol that's just SPIDER without 3-way consultation. Should be deleted - users can just say "without consultation" when invoking SPIDER.
+### SPIR-SOLO
+A redundant protocol that's just SPIR without 3-way consultation. Should be deleted - users can just say "without consultation" when invoking SPIR.
 
 ## Desired State
 
@@ -285,7 +285,7 @@ status:
 
 ## Solution
 
-### Part 1: Delete SPIDER-SOLO
+### Part 1: Delete SPIR-SOLO
 
 Remove directories:
 - `codev/protocols/spider-solo/`
@@ -301,12 +301,12 @@ Update references in:
 - `codev-skeleton/agents/codev-updater.md` - Updater agent
 - `packages/codev/templates/agents/codev-updater.md` - Template
 - `tests/11_fresh_spider_solo.bats` - Delete this test file
-- `tests/helpers/common.bash` - Remove SPIDER-SOLO helper functions
+- `tests/helpers/common.bash` - Remove SPIR-SOLO helper functions
 - `tests/README.md` - Update test descriptions
 
-**Migration for existing projects**: Any project currently using SPIDER-SOLO should simply use SPIDER. The workflow is identical; SPIDER-SOLO was just SPIDER without 3-way consultation. To skip consultation, users can say "without consultation" when requesting work.
+**Migration for existing projects**: Any project currently using SPIR-SOLO should simply use SPIR. The workflow is identical; SPIR-SOLO was just SPIR without 3-way consultation. To skip consultation, users can say "without consultation" when requesting work.
 
-**No active projects affected**: Search `codev/projectlist.md` for projects referencing SPIDER-SOLO protocol. If any exist, update their notes to indicate they now use SPIDER.
+**No active projects affected**: Search `codev/projectlist.md` for projects referencing SPIR-SOLO protocol. If any exist, update their notes to indicate they now use SPIR.
 
 ### Migration: Existing Projectlist States
 
@@ -329,10 +329,10 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 1. **Create workflow reference doc**:
    - `codev/resources/architect-builder-workflow.md` (our instance)
    - `codev-skeleton/resources/architect-builder-workflow.md` (template for other projects)
-2. **Update SPIDER protocol**: Reference the workflow doc, replace any "use spider-solo" references with "request without consultation"
+2. **Update SPIR protocol**: Reference the workflow doc, replace any "use spider-solo" references with "request without consultation"
 3. **Update role files**: `codev/roles/architect.md`, `codev/roles/builder.md`
 4. **Update CLAUDE.md/AGENTS.md**:
-   - Remove SPIDER-SOLO references
+   - Remove SPIR-SOLO references
    - Update protocol selection guide
    - Emphasize use of `consult` command for reviews
 5. **Add review type prompts**: Create `codev/roles/review-types/` directory with:
@@ -352,13 +352,13 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 
 ## Success Criteria
 
-- [ ] SPIDER-SOLO deleted from all locations
+- [ ] SPIR-SOLO deleted from all locations
 - [ ] Workflow document created with all 7 stages
-- [ ] SPIDER protocol references workflow doc
+- [ ] SPIR protocol references workflow doc
 - [ ] Role files updated with clear responsibilities
 - [ ] CLAUDE.md/AGENTS.md updated
 - [ ] Projectlist states documented (7 states: conceived, specified, planned, implementing, implemented, committed, integrated)
-- [ ] All tests pass (update tests that reference SPIDER-SOLO)
+- [ ] All tests pass (update tests that reference SPIR-SOLO)
 
 ## Constraints
 
@@ -370,8 +370,8 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 
 ### Automated Tests
 
-1. **Delete SPIDER-SOLO test**: Remove `tests/11_fresh_spider_solo.bats`
-2. **Update helpers**: Remove SPIDER-SOLO functions from `tests/helpers/common.bash`
+1. **Delete SPIR-SOLO test**: Remove `tests/11_fresh_spider_solo.bats`
+2. **Update helpers**: Remove SPIR-SOLO functions from `tests/helpers/common.bash`
 3. **Grep verification**: Run `grep -r "spider-solo" --include="*.md" --include="*.ts" --include="*.bats"` and ensure no hits
 
 ### Manual Verification
@@ -384,7 +384,7 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 
 1. **Cross-references**: All links in workflow doc resolve
 2. **State consistency**: All projectlist.md examples use valid states
-3. **CLI help**: `af --help` doesn't reference SPIDER-SOLO
+3. **CLI help**: `af --help` doesn't reference SPIR-SOLO
 
 ### Acceptance Criteria
 
@@ -399,7 +399,7 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 
 ## References
 
-- Current SPIDER protocol: `codev/protocols/spider/protocol.md`
+- Current SPIR protocol: `codev/protocols/spir/protocol.md`
 - Architect role: `codev/roles/architect.md`
 - Builder role: `codev/roles/builder.md`
 - Agent Farm CLI: `codev/resources/agent-farm.md`

@@ -14,12 +14,12 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 **To understand a specific subsystem:**
 - **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
 - **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
-- **Protocols**: Read the relevant protocol in `codev/protocols/{spider,tick,maintain,experiment}/protocol.md`
+- **Protocols**: Read the relevant protocol in `codev/protocols/{spir,tick,maintain,experiment}/protocol.md`
 
 **To add a new feature to Codev:**
 1. Reserve a project number in `codev/projectlist.md`
-2. Create spec using template from `codev/protocols/spider/templates/spec.md`
-3. Follow SPIDER protocol: Specify → Plan → Implement → Defend → Evaluate → Review
+2. Create spec using template from `codev/protocols/spir/templates/spec.md`
+3. Follow SPIR protocol: Specify → Plan → Implement → Review
 
 ## Quick Tracing Guide
 
@@ -70,9 +70,9 @@ tail -f ~/.agent-farm/tower.log
 | **Architect** | The human + primary AI orchestrating builders and reviewing work |
 | **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
 | **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
-| **Protocol** | Defined workflow for a type of work (SPIDER, TICK, MAINTAIN, EXPERIMENT) |
-| **SPIDER** | Multi-phase protocol: Specify → Plan → Implement → Defend → Evaluate → Review |
-| **TICK** | Amendment protocol for extending existing SPIDER specs |
+| **Protocol** | Defined workflow for a type of work (SPIR, TICK, MAINTAIN, EXPERIMENT) |
+| **SPIR** | Multi-phase protocol: Specify → Plan → Implement → Review |
+| **TICK** | Amendment protocol for extending existing SPIR specs |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Worktree** | Git worktree providing isolated environment for a builder |
 | **node-pty** | Native PTY session manager replacing ttyd, multiplexed over WebSocket |
@@ -98,7 +98,7 @@ tail -f ~/.agent-farm/tower.log
 
 7. **Human Approval Gates**: Only humans can transition `conceived → specified` and `committed → integrated`.
 
-8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIDER checkpoints unless explicitly disabled.
+8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIR checkpoints unless explicitly disabled.
 
 ## Agent Farm Internals
 
@@ -915,7 +915,7 @@ This is where the Codev project uses Codev to develop itself:
 This is what gets distributed to users when they install Codev:
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
-  - `protocols/` - Protocol definitions (SPIDER, TICK, EXPERIMENT, MAINTAIN)
+  - `protocols/` - Protocol definitions (SPIR, TICK, EXPERIMENT, MAINTAIN)
   - `specs/` - Empty directory (users create their own)
   - `plans/` - Empty directory (users create their own)
   - `reviews/` - Empty directory (users create their own)
@@ -1012,7 +1012,7 @@ codev/                                  # Project root (git repository)
 │   │   ├── dashboard-split.html        # Split-pane tabbed dashboard
 │   │   └── annotate.html               # File annotation viewer
 │   ├── protocols/                      # Working copies for development
-│   │   ├── spider/                     # Multi-phase with consultation
+│   │   ├── spir/                       # Multi-phase with consultation
 │   │   │   ├── protocol.md
 │   │   │   ├── templates/
 │   │   │   └── manifest.yaml
@@ -1038,7 +1038,7 @@ codev/                                  # Project root (git repository)
 │   │   ├── dashboard-split.html
 │   │   └── annotate.html
 │   ├── protocols/                      # Protocol definitions
-│   │   ├── spider/
+│   │   ├── spir/
 │   │   ├── tick/
 │   │   ├── experiment/
 │   │   └── maintain/
@@ -1078,7 +1078,7 @@ codev/                                  # Project root (git repository)
 
 ### 1. Development Protocols
 
-#### SPIDER Protocol (`codev/protocols/spider/`)
+#### SPIR Protocol (`codev/protocols/spir/`)
 **Purpose**: Multi-phase development with multi-agent consultation
 
 **Phases**:
@@ -1121,7 +1121,7 @@ codev/                                  # Project root (git repository)
 
 **Selection Criteria**:
 - Use TICK for: Simple features, utilities, configuration, amendments to existing specs
-- Use SPIDER for: Complex features, architecture changes, unclear requirements
+- Use SPIR for: Complex features, architecture changes, unclear requirements
 - Use BUGFIX for: Minor bugs reported as GitHub Issues (< 300 LOC)
 
 #### BUGFIX Protocol (`codev/protocols/bugfix/`)
@@ -1138,13 +1138,13 @@ codev/                                  # Project root (git repository)
 **Key Features**:
 - No spec/plan documents required
 - Issue is the source of truth (not projectlist.md)
-- CMAP review at PR stage only (lighter than SPIDER)
+- CMAP review at PR stage only (lighter than SPIR)
 - Branch naming: `builder/bugfix-<N>-<slug>`
 - Worktree: `.builders/bugfix-<N>/`
 
 **Selection Criteria**:
 - Use BUGFIX for: Clear bugs, isolated to single module, < 300 LOC fix
-- Escalate to SPIDER when: Architectural changes needed, > 300 LOC, multiple stakeholders
+- Escalate to SPIR when: Architectural changes needed, > 300 LOC, multiple stakeholders
 
 **Files**:
 - `protocol.md` - Complete protocol specification
@@ -1317,7 +1317,7 @@ af spawn -p 0003 --builder-cmd "claude --model sonnet"
 
 **architect.md** - Comprehensive architect role:
 - Responsibilities: decompose work, spawn builders, monitor progress, review and integrate
-- Execution strategy: Modified SPIDER with delegation
+- Execution strategy: Modified SPIR with delegation
 - Communication patterns with builders
 - Full `af` command reference
 
@@ -1351,7 +1351,7 @@ The `af`, `consult`, and `codev` commands are installed globally via `npm instal
 - Helper function tests
 
 **Protocol Tests (10-19)**:
-- SPIDER protocol installation
+- SPIR protocol installation
 - CLAUDE.md preservation and updates
 - Directory structure validation
 - Protocol content verification
@@ -1374,7 +1374,7 @@ The `af`, `consult`, and `codev` commands are installed globally via `npm instal
 - `install_from_local()` - Installs Codev from local skeleton
 - `create_claude_md()` - Creates CLAUDE.md with specified content
 - `assert_codev_structure()` - Validates directory structure
-- `assert_spider_protocol()` - Validates SPIDER protocol files
+- `assert_spider_protocol()` - Validates SPIR protocol files
 - `file_contains()` - Checks file for literal string match
 
 **Agent Installation Logic**:
@@ -1482,27 +1482,27 @@ claude --strict-mcp-config --mcp-config '[]' --settings '{}'
 1. **Specification** (`codev/specs/####-feature.md`)
    - Defines WHAT to build
    - Created by developer or AI agent
-   - Multi-agent reviewed (SPIDER with consultation)
+   - Multi-agent reviewed (SPIR with consultation)
    - Committed before planning
 
 2. **Plan** (`codev/plans/####-feature.md`)
    - Defines HOW to build
-   - Breaks specification into phases (SPIDER) or single phase (TICK)
+   - Breaks specification into phases (SPIR) or single phase (TICK)
    - Lists files to create/modify
-   - Multi-agent reviewed (SPIDER with consultation)
+   - Multi-agent reviewed (SPIR with consultation)
    - Committed before implementation
 
 3. **Implementation** (actual code in project)
    - Follows plan phases
    - Each phase: Implement → Defend (tests) → Evaluate
-   - Committed per phase (SPIDER) or single commit (TICK)
-   - Multi-agent consultation at checkpoints (SPIDER) or review only (TICK)
+   - Committed per phase (SPIR) or single commit (TICK)
+   - Multi-agent consultation at checkpoints (SPIR) or review only (TICK)
 
 4. **Review** (`codev/reviews/####-feature.md`)
    - Documents lessons learned
    - Identifies systematic issues
    - Updates protocol if needed
-   - Multi-agent reviewed (both SPIDER and TICK)
+   - Multi-agent reviewed (both SPIR and TICK)
    - Triggers architecture documentation update (TICK)
    - Final commit in feature workflow
 
@@ -1648,7 +1648,7 @@ Codev itself follows test-driven development practices:
 - Users of any AI coding assistant get appropriate file format
 
 ### 9. Multi-Agent Consultation by Default
-**Decision**: SPIDER and TICK default to consulting GPT-5 and Gemini 3 Pro
+**Decision**: SPIR and TICK default to consulting GPT-5 and Gemini 3 Pro
 
 **Rationale**:
 - Multiple perspectives catch issues single agent misses
@@ -1660,11 +1660,11 @@ Codev itself follows test-driven development practices:
 **Decision**: Create lightweight protocol for simple tasks
 
 **Rationale**:
-- SPIDER is excellent but heavy for simple tasks
+- SPIR is excellent but heavy for simple tasks
 - Fast iteration needed for bug fixes and utilities
 - Single autonomous execution reduces overhead
 - Multi-agent review at end maintains quality
-- Fills gap between informal changes and full SPIDER
+- Fills gap between informal changes and full SPIR
 
 ### 11. Pre-Commit Hooks for Quality Assurance
 **Decision**: Provide optional pre-commit hooks that run test suite
@@ -1828,7 +1828,7 @@ try {
 ## Development Patterns
 
 ### 1. Protocol-Driven Development
-Every feature follows a protocol (SPIDER, TICK, EXPERIMENT, or MAINTAIN):
+Every feature follows a protocol (SPIR, TICK, EXPERIMENT, or MAINTAIN):
 - Start with specification (WHAT)
 - Create plan (HOW)
 - Implement in phases or single execution
@@ -2063,8 +2063,8 @@ fi
 
 ### Protocol Execution Times
 - **TICK**: ~4 minutes for simple tasks
-- **SPIDER** (without consultation): ~15-30 minutes depending on complexity
-- **SPIDER** (with consultation): ~30-60 minutes depending on complexity
+- **SPIR** (without consultation): ~15-30 minutes depending on complexity
+- **SPIR** (with consultation): ~30-60 minutes depending on complexity
 
 ### Installation
 - **Network**: Not required (uses local skeleton)

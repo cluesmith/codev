@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0020-send-instructions-to-builder
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: specified
 - **Created**: 2025-12-03
 - **Priority**: high

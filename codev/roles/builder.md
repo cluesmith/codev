@@ -60,7 +60,7 @@ You must:
 
 ### What You DON'T Do in Strict Mode
 
-- **Don't manually follow SPIDER steps** - Porch handles this
+- **Don't manually follow SPIR steps** - Porch handles this
 - **Don't run consult directly** - Porch runs 3-way reviews
 - **Don't edit status.yaml phase/iteration** - Only porch modifies state
 - **Don't call porch approve** - Only humans approve gates
@@ -80,7 +80,7 @@ cat codev/specs/XXXX-*.md
 cat codev/plans/XXXX-*.md
 
 # Read the protocol
-cat codev/protocols/spider/protocol.md
+cat codev/protocols/spir/protocol.md
 
 # Start implementing
 ```

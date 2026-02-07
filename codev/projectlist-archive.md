@@ -74,8 +74,8 @@ Projects that have been completed and validated in production.
       integrated_at: "2025-12-09T21:54:55-08:00"
     notes: "PR #84 merged 2025-12-09. TICK-001 (consult TS consolidation) + TICK-002 (embedded skeleton) + TICK-003 (revert to copy-on-init for AI accessibility). TICK-005 (codev import) PR #88 merged 2025-12-11."
   - id: "0040"
-    title: "TICK as SPIDER Amendment"
-    summary: "Rework TICK to be amendments to existing SPIDER specs/plans rather than a separate protocol"
+    title: "TICK as SPIR Amendment"
+    summary: "Rework TICK to be amendments to existing SPIR specs/plans rather than a separate protocol"
     status: integrated
     priority: high
     release: null
@@ -514,7 +514,7 @@ Projects that have been completed and validated in production.
       implemented_at: null
       committed_at: null
       integrated_at: "2025-12-05T15:32:52-08:00"
-    notes: "SPIDER protocol. Fixes race conditions in state.json and ports.json. Uses better-sqlite3 with WAL mode. 3-way reviewed. Merged 2025-12-05."
+    notes: "SPIR protocol. Fixes race conditions in state.json and ports.json. Uses better-sqlite3 with WAL mode. 3-way reviewed. Merged 2025-12-05."
   - id: "0032"
     title: "Consolidate Templates"
     summary: "Move dashboard and annotate templates from codev/ to agent-farm/templates/"

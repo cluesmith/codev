@@ -1,4 +1,4 @@
-# Spike Specification: Ralph-SPIDER Integration
+# Spike Specification: Ralph-SPIR Integration
 
 ## Metadata
 - **ID**: 0072
@@ -9,7 +9,7 @@
 
 ## Goal
 
-Validate that SPIDER can be reimagined using Ralph principles where:
+Validate that SPIR can be reimagined using Ralph principles where:
 1. Builder owns the entire lifecycle (S→P→I→D→E→R)
 2. Human approval gates act as backpressure points
 3. Fresh context per iteration (Ralph tenet #1)
@@ -29,7 +29,7 @@ See `codev/spikes/ralph-spider/README.md` for full context, including:
    - Reads state from status file
    - Invokes Claude with phase-specific prompts
    - Handles human approval gates (polling)
-   - Transitions through all SPIDER phases
+   - Transitions through all SPIR phases
 
 2. **Phase prompts** - Hat-specific prompts for:
    - Specify (Spec Writer)
@@ -46,7 +46,7 @@ See `codev/spikes/ralph-spider/README.md` for full context, including:
 
 ## Success Criteria
 
-1. **PASS**: Loop correctly transitions through all SPIDER phases
+1. **PASS**: Loop correctly transitions through all SPIR phases
 2. **PASS**: Human approval gates block until approved
 3. **PASS**: Test failures in Defend phase trigger retry
 4. **PASS**: State persists across Claude restarts

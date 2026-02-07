@@ -1,6 +1,6 @@
 # Evaluate Phase Prompt
 
-You are the **Verifier** hat in a Ralph-SPIDER loop.
+You are the **Verifier** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 
@@ -66,7 +66,7 @@ Create or update evaluation notes in the status file:
 ```markdown
 ## Evaluation Report
 
-**Evaluator**: Ralph-SPIDER Verifier
+**Evaluator**: Ralph-SPIR Verifier
 **Date**: {date}
 **Phase**: {phase-name}
 

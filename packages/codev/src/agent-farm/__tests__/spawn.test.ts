@@ -427,7 +427,7 @@ describe('Spawn Command', () => {
       });
 
       it('should accept --issue with --use-protocol', () => {
-        const options: SpawnOptions = { issue: 42, useProtocol: 'spider' };
+        const options: SpawnOptions = { issue: 42, useProtocol: 'spir' };
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
@@ -444,13 +444,13 @@ describe('Spawn Command', () => {
 
     describe('invalid combinations', () => {
       it('should reject --shell with --use-protocol', () => {
-        const options: SpawnOptions = { shell: true, useProtocol: 'spider' };
+        const options: SpawnOptions = { shell: true, useProtocol: 'spir' };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
       });
 
       it('should reject --worktree with --use-protocol', () => {
-        const options: SpawnOptions = { worktree: true, useProtocol: 'spider' };
+        const options: SpawnOptions = { worktree: true, useProtocol: 'spir' };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
       });
@@ -521,7 +521,7 @@ describe('Spawn Command', () => {
       });
 
       it('should accept --issue with --protocol override', () => {
-        const options: SpawnOptions = { issue: 42, protocol: 'spider' };
+        const options: SpawnOptions = { issue: 42, protocol: 'spir' };
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
@@ -543,13 +543,13 @@ describe('Spawn Command', () => {
 
     describe('invalid combinations', () => {
       it('should reject --shell with --protocol override', () => {
-        const options: SpawnOptions = { shell: true, protocol: 'spider' };
+        const options: SpawnOptions = { shell: true, protocol: 'spir' };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--protocol cannot be used with --shell or --worktree');
       });
 
       it('should reject --worktree with --protocol override', () => {
-        const options: SpawnOptions = { worktree: true, protocol: 'spider' };
+        const options: SpawnOptions = { worktree: true, protocol: 'spir' };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--protocol cannot be used with --shell or --worktree');
       });
@@ -561,7 +561,7 @@ describe('Spawn Command', () => {
       });
 
       it('--issue + --protocol still returns bugfix mode', () => {
-        expect(getSpawnMode({ issue: 42, protocol: 'spider' })).toBe('bugfix');
+        expect(getSpawnMode({ issue: 42, protocol: 'spir' })).toBe('bugfix');
       });
 
       it('--task + --protocol still returns task mode', () => {

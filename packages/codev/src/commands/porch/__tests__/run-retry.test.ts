@@ -53,7 +53,7 @@ import { buildWithTimeout } from '../claude.js';
 
 function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
-    id: '0099', title: 'test-project', protocol: 'spider', phase: 'implement',
+    id: '0099', title: 'test-project', protocol: 'spir', phase: 'implement',
     plan_phases: [], current_plan_phase: null, gates: {},
     iteration: 1, build_complete: false, history: [],
     started_at: '2026-01-01', updated_at: '2026-01-01',
@@ -62,7 +62,7 @@ function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
 }
 
 const fakeProtocol: Protocol = {
-  name: 'spider',
+  name: 'spir',
   phases: [{ id: 'implement', name: 'Implement', type: 'build_verify' }],
 };
 const implementPhase = { id: 'implement', name: 'Implement', type: 'build_verify' };

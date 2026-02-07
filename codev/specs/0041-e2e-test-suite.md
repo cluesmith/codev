@@ -5,7 +5,7 @@
 - **Title**: E2E Test Suite
 - **Status**: draft
 - **Created**: 2025-12-08
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Problem Statement
 
@@ -151,7 +151,7 @@ teardown() {
   assert_success
 
   # Verify structure
-  assert_file_exists "my-project/codev/protocols/spider/protocol.md"
+  assert_file_exists "my-project/codev/protocols/spir/protocol.md"
   assert_file_exists "my-project/codev/roles/architect.md"
   assert_file_exists "my-project/CLAUDE.md"
   assert_file_exists "my-project/AGENTS.md"
@@ -216,7 +216,7 @@ teardown() {
   assert_success
 
   # Verify codev added
-  assert_file_exists "codev/protocols/spider/protocol.md"
+  assert_file_exists "codev/protocols/spir/protocol.md"
   assert_file_exists "CLAUDE.md"
 
   # Verify existing file preserved

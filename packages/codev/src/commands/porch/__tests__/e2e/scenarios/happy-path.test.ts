@@ -1,7 +1,7 @@
 /**
  * E2E Test: Happy Path
  *
- * Tests the full SPIDER protocol lifecycle with real AI calls.
+ * Tests the full SPIR protocol lifecycle with real AI calls.
  * This is an expensive test (~$4, ~40 minutes).
  *
  * Run with: npm run test:e2e
@@ -46,7 +46,7 @@ describe('Porch E2E: Happy Path', () => {
     expect(state).not.toBeNull();
     expect(state?.id).toBe('9999');
     expect(state?.title).toBe('test-feature');
-    expect(state?.protocol).toBe('spider');
+    expect(state?.protocol).toBe('spir');
     expect(state?.phase).toBe('specify');
     expect(state?.iteration).toBe(1);
   });
@@ -101,7 +101,7 @@ describe('Porch E2E: Happy Path', () => {
 
 /**
  * Full lifecycle test with auto-approve.
- * This runs the entire SPIDER protocol from start to finish.
+ * This runs the entire SPIR protocol from start to finish.
  */
 describe('Porch E2E: Full Lifecycle', () => {
   let ctx: TestContext;
@@ -114,7 +114,7 @@ describe('Porch E2E: Full Lifecycle', () => {
     await cleanupTestProject(ctx);
   }, 60000);
 
-  it('completes full SPIDER protocol with auto-approve', async () => {
+  it('completes full SPIR protocol with auto-approve', async () => {
     const result = await runPorchWithAutoApprove(ctx, 2400000); // 40 minutes
 
     // Should complete successfully

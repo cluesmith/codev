@@ -5,7 +5,7 @@
 - **Status**: specified
 - **Created**: 2026-01-27
 - **Updated**: 2026-01-27
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Inspiration**: Claude Code Remote, [Happy](https://github.com/slopus/happy)
 
 ## Executive Summary

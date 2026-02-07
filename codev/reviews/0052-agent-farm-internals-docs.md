@@ -1,7 +1,7 @@
 # Review: Spec 0052 - Agent Farm Internals Documentation
 
 **Date:** 2024-12-11
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Phase:** Review
 
 ---

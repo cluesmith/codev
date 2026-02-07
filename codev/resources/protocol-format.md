@@ -1,6 +1,6 @@
 # Protocol Definition Format
 
-This document describes the format for defining protocols in Codev. Protocols define the workflow for development tasks (SPIDER, TICK, BUGFIX, etc.).
+This document describes the format for defining protocols in Codev. Protocols define the workflow for development tasks (SPIR, TICK, BUGFIX, etc.).
 
 **JSON Schema**: `codev-skeleton/protocols/protocol-schema.json` — use `"$schema": "../../protocol-schema.json"` in your protocol.json for IDE validation.
 
@@ -10,15 +10,13 @@ Each protocol lives in its own directory:
 
 ```
 protocols/
-└── spider/
+└── spir/
     ├── protocol.json    # Machine-readable protocol definition
     ├── protocol.md      # Human-readable protocol guide
     ├── prompts/         # Phase-specific prompts for AI agents
     │   ├── specify.md
     │   ├── plan.md
     │   ├── implement.md
-    │   ├── defend.md
-    │   ├── evaluate.md
     │   └── review.md
     └── templates/       # Optional templates for artifacts
         ├── spec.md
@@ -33,7 +31,7 @@ The main protocol definition file. Porch reads this to orchestrate phases.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Protocol identifier (e.g., "spider", "tick") |
+| `name` | string | Yes | Protocol identifier (e.g., "spir", "tick") |
 | `version` | string | No | Semantic version |
 | `description` | string | No | Human-readable description |
 | `phases` | array | Yes | List of phase definitions |
@@ -66,7 +64,7 @@ Each phase in the `phases` array:
 
 ### Build-Verify Phases (Recommended)
 
-Build-verify phases are the core pattern in SPIDER v2. Porch orchestrates:
+Build-verify phases are the core pattern in SPIR v2. Porch orchestrates:
 1. **BUILD**: Spawn Claude to create artifact
 2. **VERIFY**: Run 3-way consultation (Gemini, Codex, Claude)
 3. **ITERATE**: If any REQUEST_CHANGES, feed feedback back to Claude
@@ -228,7 +226,7 @@ Use `{{variable}}` syntax:
 ```markdown
 # SPECIFY Phase Prompt
 
-You are executing the **SPECIFY** phase of the SPIDER protocol.
+You are executing the **SPECIFY** phase of the SPIR protocol.
 
 ## Context
 
@@ -262,7 +260,7 @@ For protocols with plan phases, porch adds plan phase context (id, title, conten
 
 ## Complete Example
 
-See `codev-skeleton/protocols/spider/protocol.json` for a complete SPIDER protocol definition.
+See `codev-skeleton/protocols/spir/protocol.json` for a complete SPIR protocol definition.
 
 ## Creating a New Protocol
 
@@ -277,6 +275,6 @@ Porch will automatically discover and use the new protocol when referenced by na
 ## See Also
 
 - `codev-skeleton/protocols/protocol-schema.json` - JSON Schema for validation
-- `codev-skeleton/protocols/spider/protocol.json` - SPIDER protocol (full example)
-- `codev/protocols/spider/protocol.md` - SPIDER human-readable guide
+- `codev-skeleton/protocols/spir/protocol.json` - SPIR protocol (full example)
+- `codev/protocols/spir/protocol.md` - SPIR human-readable guide
 - `codev/protocols/` - All available protocols

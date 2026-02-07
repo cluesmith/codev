@@ -8,7 +8,7 @@ This project uses **Codev** for AI-assisted development.
 
 ## Available Protocols
 
-- **SPIDER**: Multi-phase development with consultation (`codev/protocols/spider/protocol.md`)
+- **SPIR**: Multi-phase development with consultation (`codev/protocols/spir/protocol.md`)
 - **TICK**: Fast autonomous implementation (`codev/protocols/tick/protocol.md`)
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)

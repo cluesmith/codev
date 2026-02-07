@@ -1,7 +1,7 @@
 # Spec 0071: Declarative Protocol Checks (pcheck)
 
 **Status**: Draft
-**Protocol**: SPIDER
+**Protocol**: SPIR
 **Priority**: High
 **Created**: 2026-01-17
 
@@ -19,7 +19,7 @@ We need a way to:
 1. Define protocol requirements declaratively
 2. Evaluate them semantically (understanding intent, not just syntax)
 3. Tell users what to do next based on current state
-4. Work across all protocols (SPIDER, TICK, BUGFIX, custom)
+4. Work across all protocols (SPIR, TICK, BUGFIX, custom)
 
 ## Goals
 
@@ -75,7 +75,7 @@ We need a way to:
 ### Check Definition Format
 
 ```yaml
-# codev/protocols/spider/checks.yaml
+# codev/protocols/spir/checks.yaml
 
 checks:
   # File existence
@@ -223,7 +223,7 @@ Next action: Your plan needs implementation phases.
 
 # List all available checks
 $ codev pcheck --list
-Protocol: spider
+Protocol: spir
 
 Checks:
   spec_exists          - Spec file exists
@@ -284,7 +284,7 @@ Answer YES or NO, followed by a brief explanation.`;
 1. **Check evaluation works** - `codev pcheck <gate> --project <id>` correctly evaluates all check types
 2. **Semantic checks are accurate** - LLM checks correctly interpret human-written content without requiring rigid formats
 3. **Guidance is helpful** - `--next` flag provides actionable guidance
-4. **Protocol-agnostic** - Works with spider, tick, bugfix, and custom protocols
+4. **Protocol-agnostic** - Works with spir, tick, bugfix, and custom protocols
 5. **Performance acceptable** - Cached checks return instantly; uncached LLM checks complete in <2s each
 
 ## Open Questions
@@ -301,4 +301,4 @@ Answer YES or NO, followed by a brief explanation.`;
 ## References
 
 - Spike findings: `codev/spikes/checklister/README.md`
-- SPIDER Protocol: `codev/protocols/spider/protocol.md`
+- SPIR Protocol: `codev/protocols/spir/protocol.md`

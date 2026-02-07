@@ -21,7 +21,7 @@ The solution: rename CLEANUP to MAINTAIN, expand scope to include documentation,
 
 ### MAINTAIN Protocol
 
-A protocol for periodic maintenance of both code and documentation. Unlike SPIDER/TICK, MAINTAIN is a **task list** rather than sequential phases. Tasks can run in parallel and some require human review.
+A protocol for periodic maintenance of both code and documentation. Unlike SPIR/TICK, MAINTAIN is a **task list** rather than sequential phases. Tasks can run in parallel and some require human review.
 
 **Scope** (code + documentation):
 - Code hygiene: dead code, dependencies, flags, tests
@@ -47,7 +47,7 @@ PR with maintenance changes
 Architect reviews → Builder merges
 ```
 
-No new roles. Same Architect/Builder pattern as SPIDER and TICK.
+No new roles. Same Architect/Builder pattern as SPIR and TICK.
 
 ### Triggers
 
@@ -74,7 +74,7 @@ No new roles. Same Architect/Builder pattern as SPIDER and TICK.
 
 ## MAINTAIN Task List
 
-Unlike SPIDER/TICK (which have sequential phases), MAINTAIN is a **task list**. Tasks can be run in parallel where independent, and some require human review.
+Unlike SPIR/TICK (which have sequential phases), MAINTAIN is a **task list**. Tasks can be run in parallel where independent, and some require human review.
 
 ### Code Hygiene Tasks
 
@@ -225,7 +225,7 @@ All existing CLEANUP content is preserved and expanded.
 ## Notes
 
 This spec simplifies the maintenance story:
-- Protocols build things (SPIDER, TICK, EXPERIMENT)
+- Protocols build things (SPIR, TICK, EXPERIMENT)
 - Protocols maintain things (MAINTAIN)
 - Roles execute protocols (Architect orchestrates, Builder executes)
 

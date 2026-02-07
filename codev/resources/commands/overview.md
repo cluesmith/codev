@@ -101,7 +101,7 @@ Customize agent-farm commands via `codev/config.json`:
 
 ## Related Documentation
 
-- [SPIDER Protocol](../protocols/spider/protocol.md) - Multi-phase development workflow
+- [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow
 - [TICK Protocol](../protocols/tick/protocol.md) - Fast amendment workflow
 - [Architect Role](../roles/architect.md) - Architect responsibilities
 - [Builder Role](../roles/builder.md) - Builder responsibilities

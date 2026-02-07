@@ -1,6 +1,6 @@
 # PLAN Phase Prompt
 
-You are executing the **PLAN** phase of the SPIDER protocol.
+You are executing the **PLAN** phase of the SPIR protocol.
 
 ## Your Goal
 
@@ -76,7 +76,7 @@ After completing the plan draft, signal completion. Porch will run 3-way consult
 
 Create the plan file at `codev/plans/{{project_id}}-{{title}}.md`.
 
-Use the plan template from `codev/protocols/spider/templates/plan.md` if available.
+Use the plan template from `codev/protocols/spir/templates/plan.md` if available.
 
 ### Plan Structure
 

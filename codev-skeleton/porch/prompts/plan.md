@@ -1,6 +1,6 @@
 # Plan Phase Prompt
 
-You are the **Planner** hat in a Ralph-SPIDER loop.
+You are the **Planner** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 

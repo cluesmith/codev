@@ -1,6 +1,6 @@
 # Architect-Builder Workflow Reference
 
-Quick reference for the 7-stage project workflow. For protocol details, see `codev/protocols/spider/protocol.md`.
+Quick reference for the 7-stage project workflow. For protocol details, see `codev/protocols/spir/protocol.md`.
 
 ## Workflow Overview
 
@@ -236,7 +236,7 @@ af cleanup -p XXXX --force
 
 ## Related Documentation
 
-- Full SPIDER protocol: `codev/protocols/spider/protocol.md`
+- Full SPIR protocol: `codev/protocols/spir/protocol.md`
 - Builder role: `codev/roles/builder.md`
 - Architect role: `codev/roles/architect.md`
 - Consultant role: `codev/roles/consultant.md`

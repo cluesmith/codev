@@ -82,7 +82,7 @@ The outer builder Claude just runs `porch run` and handles gates. Porch spawns a
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### SPIDER Protocol Flow
+### SPIR Protocol Flow
 
 ```
 SPECIFY (build-verify cycle)
@@ -255,7 +255,7 @@ Porch prioritizes **not proceeding with unverified code** over graceful degradat
 ```yaml
 id: "0075"
 title: "porch-minimal-redesign"
-protocol: "spider"
+protocol: "spir"
 phase: "specify"
 iteration: 2
 build_complete: false

@@ -41,10 +41,10 @@ vi.mock('node:child_process', () => ({
         const tempDir = match[2];
         const codevDir = path.join(tempDir, 'codev');
         fs.mkdirSync(codevDir, { recursive: true });
-        fs.mkdirSync(path.join(codevDir, 'protocols', 'spider'), { recursive: true });
+        fs.mkdirSync(path.join(codevDir, 'protocols', 'spir'), { recursive: true });
         fs.writeFileSync(
-          path.join(codevDir, 'protocols', 'spider', 'protocol.md'),
-          '# SPIDER Protocol\n\nTest protocol content.'
+          path.join(codevDir, 'protocols', 'spir', 'protocol.md'),
+          '# SPIR Protocol\n\nTest protocol content.'
         );
         fs.mkdirSync(path.join(codevDir, 'roles'), { recursive: true });
         fs.writeFileSync(
@@ -72,20 +72,20 @@ describe('import command', () => {
     fs.mkdirSync(targetProjectDir, { recursive: true });
     fs.mkdirSync(path.join(targetProjectDir, 'codev', 'specs'), { recursive: true });
     fs.mkdirSync(path.join(targetProjectDir, 'codev', 'plans'), { recursive: true });
-    fs.mkdirSync(path.join(targetProjectDir, 'codev', 'protocols', 'spider'), { recursive: true });
+    fs.mkdirSync(path.join(targetProjectDir, 'codev', 'protocols', 'spir'), { recursive: true });
     fs.writeFileSync(
-      path.join(targetProjectDir, 'codev', 'protocols', 'spider', 'protocol.md'),
-      '# SPIDER Protocol\n\nOriginal content.'
+      path.join(targetProjectDir, 'codev', 'protocols', 'spir', 'protocol.md'),
+      '# SPIR Protocol\n\nOriginal content.'
     );
 
     // Create source project (the project we're importing from)
     sourceProjectDir = path.join(testBaseDir, 'source-project');
     fs.mkdirSync(sourceProjectDir, { recursive: true });
-    fs.mkdirSync(path.join(sourceProjectDir, 'codev', 'protocols', 'spider'), { recursive: true });
+    fs.mkdirSync(path.join(sourceProjectDir, 'codev', 'protocols', 'spir'), { recursive: true });
     fs.mkdirSync(path.join(sourceProjectDir, 'codev', 'roles'), { recursive: true });
     fs.writeFileSync(
-      path.join(sourceProjectDir, 'codev', 'protocols', 'spider', 'protocol.md'),
-      '# SPIDER Protocol\n\nImproved content with new features.'
+      path.join(sourceProjectDir, 'codev', 'protocols', 'spir', 'protocol.md'),
+      '# SPIR Protocol\n\nImproved content with new features.'
     );
     fs.writeFileSync(
       path.join(sourceProjectDir, 'codev', 'roles', 'consultant.md'),

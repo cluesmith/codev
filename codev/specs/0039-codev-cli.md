@@ -1,7 +1,7 @@
 # Spec 0039: Codev CLI (First-Class Command)
 
 **Status:** integrated
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Amended:** 2025-12-11 (TICK-005)
 **Priority:** High
 **Dependencies:** 0005 (TypeScript CLI), 0022 (Consult Tool)
@@ -362,7 +362,7 @@ The original spec called for porting consult to TypeScript, but the Python imple
 ### Problem
 
 Currently `codev init` copies the entire `codev-skeleton/` into each project, including:
-- `protocols/` (spider, tick, experiment, maintain)
+- `protocols/` (spir, tick, experiment, maintain)
 - `roles/` (architect, builder, consultant)
 - `templates/`
 - `DEPENDENCIES.md`
@@ -391,9 +391,9 @@ This creates problems:
    - Embedded skeleton in npm package (defaults)
 4. **Optional customization**: Users can create local overrides only when needed:
    ```bash
-   # To customize spider protocol:
-   codev eject protocols/spider
-   # Creates codev/protocols/spider/protocol.md from embedded version
+   # To customize spir protocol:
+   codev eject protocols/spir
+   # Creates codev/protocols/spir/protocol.md from embedded version
    ```
 
 ### Benefits
@@ -484,7 +484,7 @@ Key recommendations:
 - [ ] `codev/.framework-version` tracks skeleton version
 - [ ] `codev update` refreshes framework files with merge strategy
 - [ ] E2E tests updated for new directory structure
-- [ ] AI consultants can find `codev/protocols/spider/protocol.md`
+- [ ] AI consultants can find `codev/protocols/spir/protocol.md`
 
 ---
 
@@ -602,7 +602,7 @@ codev import https://github.com/cluesmith/ansari-project
    ```
 
 3. **Interactive merge**: Claude discusses with user:
-   - "Their SPIDER protocol has an additional consultation checkpoint - worth adopting?"
+   - "Their SPIR protocol has an additional consultation checkpoint - worth adopting?"
    - "They've added a lesson about test isolation - want to add to lessons-learned.md?"
    - "Their arch.md has a better structure for documenting utilities - merge this pattern?"
 

@@ -74,7 +74,7 @@ This plan implements a shell-based test suite for validating the Codev installat
 
 ---
 
-### Phase 3: [COMPLETED] Implement SPIDER Test (Zen Present)
+### Phase 3: [COMPLETED] Implement SPIR Test (Zen Present)
 **Objective**: Test fresh installation when Zen MCP is available
 
 **Dependencies**: Phase 2 (Helpers ready)
@@ -83,22 +83,22 @@ This plan implements a shell-based test suite for validating the Codev installat
 1. Create 01_fresh_spider.bats test file
 2. Mock Zen MCP as present
 3. Copy local skeleton to test directory
-4. Create CLAUDE.md with SPIDER protocol
+4. Create CLAUDE.md with SPIR protocol
 5. Assert directory structure and file contents
 
 **Deliverables**:
-- Working test for SPIDER installation
+- Working test for SPIR installation
 - Verifies correct protocol selection
 - Validates all directories created
 
 **Success Criteria**:
 - Test passes consistently
-- Correctly detects SPIDER protocol in CLAUDE.md
+- Correctly detects SPIR protocol in CLAUDE.md
 - All required directories exist
 
 ---
 
-### Phase 4: [COMPLETED] Implement SPIDER-SOLO Test (Zen Absent)
+### Phase 4: [COMPLETED] Implement SPIR-SOLO Test (Zen Absent)
 **Objective**: Test fresh installation when Zen MCP is not available
 
 **Dependencies**: Phase 2 (Helpers ready)
@@ -107,17 +107,17 @@ This plan implements a shell-based test suite for validating the Codev installat
 1. Create 02_fresh_spider_solo.bats test file
 2. Ensure no mcp in PATH
 3. Copy local skeleton to test directory
-4. Create CLAUDE.md with SPIDER-SOLO protocol
+4. Create CLAUDE.md with SPIR-SOLO protocol
 5. Assert correct protocol selection
 
 **Deliverables**:
-- Working test for SPIDER-SOLO installation
+- Working test for SPIR-SOLO installation
 - Verifies fallback behavior
 - Validates directory structure
 
 **Success Criteria**:
 - Test passes consistently
-- Correctly selects SPIDER-SOLO when Zen absent
+- Correctly selects SPIR-SOLO when Zen absent
 - All required directories exist
 
 ---

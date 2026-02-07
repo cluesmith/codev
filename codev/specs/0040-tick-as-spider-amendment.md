@@ -1,20 +1,20 @@
-# Specification: TICK as SPIDER Amendment
+# Specification: TICK as SPIR Amendment
 
 ## Metadata
 - **ID**: 0040-tick-as-spider-amendment
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: draft
 - **Created**: 2025-12-08
 - **Priority**: high
 
 ## Problem Statement
 
-Currently, TICK exists as a separate, standalone protocol alongside SPIDER. This creates conceptual overhead and confusion:
+Currently, TICK exists as a separate, standalone protocol alongside SPIR. This creates conceptual overhead and confusion:
 
-1. **Dual Protocol Management**: Developers must choose between two fundamentally different workflows (TICK's single-pass vs SPIDER's multi-phase), even when the task is just a small enhancement to an existing feature
-2. **Document Fragmentation**: TICK projects create entirely new spec/plan/review files, even when they're just minor modifications to existing SPIDER specs
+1. **Dual Protocol Management**: Developers must choose between two fundamentally different workflows (TICK's single-pass vs SPIR's multi-phase), even when the task is just a small enhancement to an existing feature
+2. **Document Fragmentation**: TICK projects create entirely new spec/plan/review files, even when they're just minor modifications to existing SPIR specs
 3. **Historical Continuity Lost**: Looking at a spec doesn't show its evolution over time - amendments and refinements are scattered across separate numbered specs
-4. **Unnecessary Cognitive Load**: The decision "should I use TICK or SPIDER?" becomes a barrier, when the real question is "is this new work or an amendment?"
+4. **Unnecessary Cognitive Load**: The decision "should I use TICK or SPIR?" becomes a barrier, when the real question is "is this new work or an amendment?"
 
 The core insight: **TICK is not a parallel protocol - it's a lightweight amendment mechanism for existing specs**.
 
@@ -23,18 +23,18 @@ The core insight: **TICK is not a parallel protocol - it's a lightweight amendme
 TICK protocol (`codev-skeleton/protocols/tick/protocol.md`) operates as a standalone workflow:
 - Creates new spec/plan/review files with their own sequential numbers (e.g., 0010, 0011, 0012)
 - Uses its own commit format: `TICK Spec/Plan/Impl/Review: [description]`
-- Maintains complete separation from SPIDER specs, even when work is related
-- Protocol selection happens upfront: "Use TICK" vs "Use SPIDER"
+- Maintains complete separation from SPIR specs, even when work is related
+- Protocol selection happens upfront: "Use TICK" vs "Use SPIR"
 
 Example scenario:
-- SPIDER Spec 0002 implements "User Authentication"
+- SPIR Spec 0002 implements "User Authentication"
 - Later, we need to add "Password reset via email"
 - Currently: Create TICK Spec 0015 as a new project
 - Problem: The connection between 0002 and 0015 is only documented in dependencies or notes
 
 ## Desired State
 
-TICK becomes an **amendment workflow** for existing SPIDER specs:
+TICK becomes an **amendment workflow** for existing SPIR specs:
 - TICK modifies **both spec and plan together** as a single, atomic unit
 - The original spec document gets an **"Amendments" section** at the end, tracking all TICKs chronologically
 - Each TICK entry in the amendments section records:
@@ -46,7 +46,7 @@ TICK becomes an **amendment workflow** for existing SPIDER specs:
 - Sequential numbering is preserved: TICKs don't get new numbers, they extend existing specs
 
 Example scenario (improved):
-- SPIDER Spec 0002 implements "User Authentication"
+- SPIR Spec 0002 implements "User Authentication"
 - Later amendment: Update spec 0002 with new "Password Reset" section
 - Spec 0002 now has an "Amendments" section showing the evolution
 - Plan 0002 updated with password reset implementation steps
@@ -82,8 +82,8 @@ Example scenario (improved):
 
 ## Assumptions
 
-- TICK is only used for **existing** SPIDER specs (never creates new specs from scratch)
-- A single SPIDER spec can have multiple TICKs over its lifetime (TICK-001, TICK-002, etc.)
+- TICK is only used for **existing** SPIR specs (never creates new specs from scratch)
+- A single SPIR spec can have multiple TICKs over its lifetime (TICK-001, TICK-002, etc.)
 - TICK reviews use a distinct naming pattern: `reviews/####-name-tick-NNN.md`
 - The three-file structure (spec/plan/review) is preserved, but spec and plan are **modified in place**
 
@@ -328,28 +328,28 @@ This section tracks all TICK amendments to this plan.
 
 ### Review File Naming Convention
 
-- **Original SPIDER review**: `reviews/0002-user-authentication.md`
+- **Original SPIR review**: `reviews/0002-user-authentication.md`
 - **TICK amendments**: `reviews/0002-user-authentication-tick-001.md`, `reviews/0002-user-authentication-tick-002.md`, etc.
 
-## When to Use TICK vs Full SPIDER
+## When to Use TICK vs Full SPIR
 
 **Updated Decision Framework**:
 
 Use **TICK** when:
-- Making small amendments to an existing design (existing SPIDER spec)
+- Making small amendments to an existing design (existing SPIR spec)
 - < 300 lines of new/changed code
 - No fundamental architecture changes
 - Requirements are clear and well-defined
 - Examples: bug fixes, small feature additions, configuration changes, minor refactoring
 
-Use **SPIDER** when:
+Use **SPIR** when:
 - Creating a **new feature from scratch** (no existing spec to amend)
 - Major architecture changes to an existing feature (scope is too large for amendment)
 - Unclear requirements needing extensive exploration
 - > 300 lines of code
 - Multiple stakeholders need alignment
 
-**Key Mental Model**: TICK is for *refining* existing specs. SPIDER is for *creating* new specs.
+**Key Mental Model**: TICK is for *refining* existing specs. SPIR is for *creating* new specs.
 
 ## Migration Path
 
@@ -377,10 +377,10 @@ All future TICKs MUST use the amendment workflow. The standalone TICK protocol w
    - Document commit message format
    - Update protocol comparison table
 
-2. **codev-skeleton/protocols/spider/templates/spec.md**
+2. **codev-skeleton/protocols/spir/templates/spec.md**
    - Add "Amendments" section template at end
 
-3. **codev-skeleton/protocols/spider/templates/plan.md**
+3. **codev-skeleton/protocols/spir/templates/plan.md**
    - Add "Amendment History" section template at end
 
 4. **codev/CLAUDE.md and codev/AGENTS.md**
@@ -411,19 +411,19 @@ All future TICKs MUST use the amendment workflow. The standalone TICK protocol w
 1. **Spec Discovery**: When user describes an amendment without specifying a spec number, the AI should search and identify the relevant spec/plan to amend
 2. **Spec Doesn't Exist**: Agent should fail gracefully if the target spec cannot be found
 3. **Concurrent TICKs**: What happens if two TICKs are in progress on the same spec? (Git merge conflict resolution)
-4. **TICK on Old TICK**: Can a standalone TICK (from before this change) be amended? (Answer: treat it as a new SPIDER spec)
+4. **TICK on Old TICK**: Can a standalone TICK (from before this change) be amended? (Answer: treat it as a new SPIR spec)
 
 ## Dependencies
 
-- **SPIDER Protocol**: TICK is built on top of SPIDER's spec/plan/review structure
+- **SPIR Protocol**: TICK is built on top of SPIR's spec/plan/review structure
 - **Git Workflow**: Relies on Codev's existing git commit conventions
 
 ## References
 
 - Current TICK Protocol: `codev-skeleton/protocols/tick/protocol.md`
-- Current SPIDER Protocol: `codev-skeleton/protocols/spider/protocol.md`
-- Spec Template: `codev-skeleton/protocols/spider/templates/spec.md`
-- Plan Template: `codev-skeleton/protocols/spider/templates/plan.md`
+- Current SPIR Protocol: `codev-skeleton/protocols/spir/protocol.md`
+- Spec Template: `codev-skeleton/protocols/spir/templates/spec.md`
+- Plan Template: `codev-skeleton/protocols/spir/templates/plan.md`
 
 ## Risks and Mitigation
 
@@ -431,7 +431,7 @@ All future TICKs MUST use the amendment workflow. The standalone TICK protocol w
 |------|------------|--------|-------------------|
 | Specs become too large with many TICKs | Medium | Medium | Document guideline: >5 TICKs suggests need for new spec |
 | Merge conflicts on popular specs | Medium | High | Use clear commit messages, encourage small atomic TICKs |
-| Confusion about when to use TICK vs SPIDER | Low | High | Clear decision framework in docs, examples in protocol |
+| Confusion about when to use TICK vs SPIR | Low | High | Clear decision framework in docs, examples in protocol |
 | Loss of historical standalone TICKs | Low | Low | Grandfather existing TICKs, migration is optional |
 
 ## Notes
@@ -443,10 +443,10 @@ All future TICKs MUST use the amendment workflow. The standalone TICK protocol w
 
 ### Design Rationale
 
-The key insight driving this spec: **TICKs are not small SPIDERs - they're amendments to existing SPIDERs**.
+The key insight driving this spec: **TICKs are not small SPIRs - they're amendments to existing SPIRs**.
 
 This reframing simplifies the mental model:
-- SPIDER = Create new feature
+- SPIR = Create new feature
 - TICK = Refine existing feature
 
 It also aligns with how developers naturally think: "This spec needs a small update" is different from "I need to write a new spec."

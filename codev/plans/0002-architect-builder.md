@@ -49,7 +49,7 @@ codev/
 
 **Tasks**:
 1. Write `builder-prompt.md` template
-2. Include SPIDER protocol reference
+2. Include SPIR protocol reference
 3. Include "proceed autonomously" instructions
 4. Include self-rebase and PR creation instructions
 
@@ -64,7 +64,7 @@ You are implementing:
 
 ## Protocol
 
-Follow SPIDER: Implement → Defend → Evaluate for each phase in the plan.
+Follow SPIR: Implement → Defend → Evaluate for each phase in the plan.
 
 ## Rules
 
@@ -724,7 +724,7 @@ export async function architect(args: string[]): Promise<void> {
    - `resolveProtocolInput()` - protocol name only
 
 6. **Update existing protocols** with protocol.json additions:
-   - `spider/protocol.json` - add input/hooks/defaults
+   - `spir/protocol.json` - add input/hooks/defaults
    - `bugfix/protocol.json` - add input/hooks/defaults (move collision logic here)
    - `tick/protocol.json` - add input/hooks/defaults
    - `maintain/protocol.json` - add input/hooks/defaults
@@ -739,8 +739,8 @@ export async function architect(args: string[]): Promise<void> {
 - `codev-skeleton/protocols/*/builder-prompt.md` - create templates
 
 **Acceptance criteria**:
-- [ ] `af spawn -p 0001 --protocol tick` uses TICK instead of SPIDER
-- [ ] `af spawn -i 42 --protocol spider` uses SPIDER instead of BUGFIX
+- [ ] `af spawn -p 0001 --protocol tick` uses TICK instead of SPIR
+- [ ] `af spawn -i 42 --protocol spir` uses SPIR instead of BUGFIX
 - [ ] `af spawn --protocol maintain` works with soft mode
 - [ ] Protocol-specific hooks (collision check, issue comment) are data-driven
 - [ ] New protocols work by adding protocol.json + builder-prompt.md (no code changes)

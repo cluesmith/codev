@@ -1,7 +1,7 @@
 # Spec 0053: af open Image Support
 
 **Status:** specified
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Priority:** Medium
 
 ---

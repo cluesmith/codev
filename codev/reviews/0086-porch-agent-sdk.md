@@ -3,7 +3,7 @@
 ## Metadata
 - **ID**: 0086
 - **Reviewed**: 2026-01-30
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Commits**: 82d8c7f, 3178b2a
 
 ---

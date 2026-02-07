@@ -6,7 +6,7 @@ validated: [gemini, codex, claude]
 
 ## Metadata
 - **Spec**: `codev/specs/0085-agent-farm-terminal-dashboard-rewrite.md`
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Created**: 2026-01-29
 
 ## Overview

@@ -3,16 +3,16 @@
 
 ## Overview
 
-TICK is an **amendment workflow** for existing SPIDER specifications. Rather than creating new standalone specs, TICK modifies existing spec and plan documents in-place, tracking changes in an "Amendments" section.
+TICK is an **amendment workflow** for existing SPIR specifications. Rather than creating new standalone specs, TICK modifies existing spec and plan documents in-place, tracking changes in an "Amendments" section.
 
-**Core Principle**: TICK is for *refining* existing specs. SPIDER is for *creating* new specs.
+**Core Principle**: TICK is for *refining* existing specs. SPIR is for *creating* new specs.
 
-**Key Insight**: TICKs are not small SPIDERs - they're amendments to existing SPIDERs. This eliminates the "TICK vs SPIDER" decision problem and keeps related work together.
+**Key Insight**: TICKs are not small SPIRs - they're amendments to existing SPIRs. This eliminates the "TICK vs SPIR" decision problem and keeps related work together.
 
 ## When to Use TICK
 
 ### Use TICK when:
-- Making **amendments to an existing SPIDER spec** that is already `integrated`
+- Making **amendments to an existing SPIR spec** that is already `integrated`
 - Small scope (< 300 lines of new/changed code)
 - Requirements are clear and well-defined
 - No fundamental architecture changes
@@ -23,7 +23,7 @@ TICK is an **amendment workflow** for existing SPIDER specifications. Rather tha
   - Utility function additions to existing modules
   - Refactoring within an existing feature
 
-### Use SPIDER instead when:
+### Use SPIR instead when:
 - Creating a **new feature from scratch** (no existing spec to amend)
 - Major architecture changes (scope too large for amendment)
 - Unclear requirements needing exploration
@@ -31,8 +31,8 @@ TICK is an **amendment workflow** for existing SPIDER specifications. Rather tha
 - Multiple stakeholders need alignment
 
 ### Cannot Use TICK when:
-- No relevant SPIDER spec exists (create a new SPIDER spec instead)
-- Target spec is not yet `integrated` (complete the SPIDER cycle first)
+- No relevant SPIR spec exists (create a new SPIR spec instead)
+- Target spec is not yet `integrated` (complete the SPIR cycle first)
 
 ## Amendment Workflow
 
@@ -162,9 +162,9 @@ The format `[TICK ####-NNN]` identifies:
 - `####`: Parent spec number (e.g., 0002)
 - `NNN`: TICK amendment number (e.g., 001, 002, 003)
 
-## Key Differences from SPIDER
+## Key Differences from SPIR
 
-| Aspect | SPIDER | TICK |
+| Aspect | SPIR | TICK |
 |--------|--------|------|
 | Purpose | Create new features | Amend existing features |
 | File creation | Creates new spec/plan/review | Modifies spec/plan, creates review |
@@ -178,16 +178,16 @@ The format `[TICK ####-NNN]` identifies:
 
 ```
 Is there an existing spec to amend?
-├── NO → Use SPIDER (create new spec)
+├── NO → Use SPIR (create new spec)
 └── YES → Is it integrated?
-    ├── NO → Complete SPIDER cycle first
+    ├── NO → Complete SPIR cycle first
     └── YES → Is the change small (<300 LOC)?
         ├── YES → Use TICK (amend existing spec)
-        └── NO → Use SPIDER (scope too large)
+        └── NO → Use SPIR (scope too large)
 ```
 
 **Mental Model**:
-- SPIDER = Create new feature from scratch
+- SPIR = Create new feature from scratch
 - TICK = Refine/extend existing feature
 
 ## Example TICK Workflow
@@ -251,7 +251,7 @@ Existing standalone TICK projects (created before this protocol change) are gran
 1. **Single source of truth**: Spec file shows complete feature evolution
 2. **Clear history**: Amendments section documents all changes chronologically
 3. **Reduced fragmentation**: Related work stays together
-4. **Simpler mental model**: "New vs amendment" is clearer than "SPIDER vs TICK"
+4. **Simpler mental model**: "New vs amendment" is clearer than "SPIR vs TICK"
 5. **Preserved context**: Looking at a spec shows all refinements
 
 ## Limitations
@@ -264,14 +264,14 @@ Existing standalone TICK projects (created before this protocol change) are gran
 ## Best Practices
 
 1. **Verify spec is integrated**: Never TICK a spec that isn't complete
-2. **Keep TICKs small**: If scope grows, consider new SPIDER spec
+2. **Keep TICKs small**: If scope grows, consider new SPIR spec
 3. **Clear summaries**: Amendment entries should be self-explanatory
 4. **Test before review**: Always test functionality before presenting
 5. **Honest documentation**: Document all deviations in review
 
 ## Templates
 
-TICK uses the standard SPIDER templates with amendments sections:
-- Spec template: `codev/protocols/spider/templates/spec.md` (includes Amendments section)
-- Plan template: `codev/protocols/spider/templates/plan.md` (includes Amendment History section)
+TICK uses the standard SPIR templates with amendments sections:
+- Spec template: `codev/protocols/spir/templates/spec.md` (includes Amendments section)
+- Plan template: `codev/protocols/spir/templates/plan.md` (includes Amendment History section)
 - Review template: `codev/protocols/tick/templates/review.md` (TICK-specific)

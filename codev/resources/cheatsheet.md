@@ -41,7 +41,7 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 
 | Component | Purpose |
 |-----------|---------|
-| Protocols | Define HOW work happens (SPIDER, TICK, etc.) |
+| Protocols | Define HOW work happens (SPIR, TICK, etc.) |
 | Roles | Define WHO does what (Architect, Builder, Consultant) |
 | Parallelism | Scale by running multiple builders simultaneously |
 
@@ -60,7 +60,7 @@ A **protocol** is a structured workflow that defines how work progresses from id
 
 | Protocol | Use For | Phases |
 |----------|---------|--------|
-| **SPIDER** | New features | Specify → Plan → Implement → Defend → Evaluate → Review |
+| **SPIR** | New features | Specify → Plan → Implement → Review |
 | **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
@@ -147,15 +147,13 @@ Multi-agent consultation. Used by both humans and agents—**mostly agents** dur
 
 ## Quick Reference
 
-### SPIDER Checklist
+### SPIR Checklist
 
 ```
 [ ] Specify - Write spec in codev/specs/XXXX-name.md
 [ ] Plan - Write plan in codev/plans/XXXX-name.md
     For each phase of the plan:
-      [ ] Implement - Write code following the plan
-      [ ] Defend - Write tests for the implementation
-      [ ] Evaluate - Consult external reviewers, address feedback
+      [ ] Implement - Write code following the plan, write tests, consult reviewers
 [ ] Review - Write review in codev/reviews/XXXX-name.md, create PR
 ```
 

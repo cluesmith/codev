@@ -106,7 +106,7 @@
 
 ## Methodology Feedback
 
-### SP(IDE)R Protocol Effectiveness
+### SPIR Protocol Effectiveness
 - **Specification Phase**: [Was it thorough enough? Too detailed?]
 - **Planning Phase**: [Were estimates accurate? Phases well-sized?]
 - **Implementation Loop**: [Did IDE cycle work well?]

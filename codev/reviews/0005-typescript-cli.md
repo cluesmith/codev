@@ -2,7 +2,7 @@
 
 **Review Date**: 2025-12-02
 **Status**: Complete with fixes
-**Protocol**: SPIDER
+**Protocol**: SPIR
 
 ## Summary
 
@@ -114,7 +114,7 @@ Using `lsof` worked on macOS but would fail on Windows/minimal Linux. Native Nod
 ### 3. Security Requires Explicit Attention
 Shell injection, CORS, input validation - these are easy to overlook when focused on functionality.
 
-**Takeaway**: Add security review as explicit checklist item in SPIDER protocol.
+**Takeaway**: Add security review as explicit checklist item in SPIR protocol.
 
 ### 4. Concurrency is Hard
 State management race conditions weren't obvious until pointed out. Single-user CLI assumptions break down.

@@ -37,17 +37,17 @@ Creating failing shims instead of removing from PATH was brilliant:
 ## What Was Challenging
 
 ### 1. Protocol Compliance
-We violated the SPIDER protocol twice by skipping multi-agent consultation:
+We violated the SPIR protocol twice by skipping multi-agent consultation:
 - **Phase 1**: Presented results without consultation
 - **Phase 3**: Got initial review but not FINAL approval on fixes
 
 **Solution Implemented**: Updated CLAUDE.md with explicit consultation checkpoints and modified protocol to clarify timing.
 
-### 2. SPIDER-SOLO Protocol Content
-Major issue discovered in Phase 4 - the SPIDER-SOLO protocol.md was just a copy of SPIDER with multi-agent consultation still included.
+### 2. SPIR-SOLO Protocol Content
+Major issue discovered in Phase 4 - the SPIR-SOLO protocol.md was just a copy of SPIR with multi-agent consultation still included.
 
 **Root Cause**: Template copying without proper differentiation
-**Solution**: Complete rewrite of SPIDER-SOLO protocol to properly implement self-review variant
+**Solution**: Complete rewrite of SPIR-SOLO protocol to properly implement self-review variant
 
 ### 3. Platform Differences
 Several cross-platform issues emerged:
@@ -80,14 +80,14 @@ Create a checklist or use TodoWrite to track consultation requirements:
 ```
 
 ### 3. Protocol Validation Tests First
-Should have created a test that validates SPIDER-SOLO protocol content before using it, which would have caught the content duplication issue immediately.
+Should have created a test that validates SPIR-SOLO protocol content before using it, which would have caught the content duplication issue immediately.
 
 ### 4. Timeout Utility Detection
 Should have detected timeout utility availability once in setup rather than repeatedly in each test. This was eventually fixed but should have been done initially.
 
 ## Methodology Improvements Needed
 
-### 1. SPIDER Protocol Enhancements
+### 1. SPIR Protocol Enhancements
 
 **Add to protocol.md**:
 - Explicit "FINAL approval required from ALL experts on FIXED version"
@@ -150,7 +150,7 @@ The protocol now correctly states consultation must happen before user evaluatio
 During the Review phase, we identified these recurring patterns:
 
 1. **Protocol Compliance** - Skipped consultation twice, leading to rework
-2. **Template Duplication** - SPIDER-SOLO was incorrectly a copy of SPIDER
+2. **Template Duplication** - SPIR-SOLO was incorrectly a copy of SPIR
 3. **Platform Compatibility** - Recurring BSD/GNU and tool availability issues
 4. **Environment Safety** - Late implementation of sandboxing (should start Phase 1)
 5. **Documentation Gaps** - Review phase wasn't explicit about updating all docs
@@ -159,7 +159,7 @@ These systematic issues have been addressed through protocol updates and documen
 
 ## Summary
 
-The test infrastructure implementation was successful, delivering 52 comprehensive tests that ensure Codev installation reliability. The SPIDER protocol proved valuable, especially the multi-agent consultation which caught critical issues.
+The test infrastructure implementation was successful, delivering 52 comprehensive tests that ensure Codev installation reliability. The SPIR protocol proved valuable, especially the multi-agent consultation which caught critical issues.
 
 Key success factors:
 - **Right technology choice** (shell/bats over Python)

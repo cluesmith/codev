@@ -109,7 +109,7 @@ export async function createTestProject(
 
     // Initialize porch project
     const { init } = await import('../../../index.js');
-    await init(tempDir, 'spider', projectId, projectTitle);
+    await init(tempDir, 'spir', projectId, projectTitle);
 
     return {
       tempDir,

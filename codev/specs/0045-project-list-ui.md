@@ -4,7 +4,7 @@
 - **ID**: 0045-project-list-ui
 - **Status**: conceived
 - **Created**: 2025-12-09
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Priority**: high
 
 ## Problem Statement

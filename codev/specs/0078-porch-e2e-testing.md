@@ -26,13 +26,13 @@ Porch orchestrates a triple-nested AI system (Architect → Builder → Porch �
 Create a test harness that:
 1. Creates a temporary git repository with codev initialized
 2. Runs `porch init` with a test project
-3. Executes `porch run` through the full SPIDER protocol
+3. Executes `porch run` through the full SPIR protocol
 4. Validates state transitions and artifacts at each phase
 5. Cleans up after completion
 
 ### Test Scenarios
 
-#### Scenario 1: Happy Path (Full SPIDER)
+#### Scenario 1: Happy Path (Full SPIR)
 - Initialize project 9999 "test-feature"
 - Run through specify → plan → implement → review
 - Verify all artifacts created (spec, plan, review files)

@@ -22,7 +22,7 @@ Implemented a terminal-based interactive tutorial for new Codev/Agent Farm users
 1. **Welcome** - Project detection (git, Node.js/Python, codev setup)
 2. **Setup** - Creates `codev/` directory structure
 3. **First Spec** - Guides writing a specification
-4. **Planning** - Explains plans and TICK vs SPIDER
+4. **Planning** - Explains plans and TICK vs SPIR
 5. **Implementation** - Shows af commands and Architect/Builder pattern
 6. **Review** - Covers annotation viewer and resources
 

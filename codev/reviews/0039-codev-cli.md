@@ -2,7 +2,7 @@
 
 **Spec:** codev/specs/0039-codev-cli.md
 **Plan:** codev/plans/0039-codev-cli.md
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Implementation Branch:** builder/0039-codev-cli
 
 ---
@@ -102,7 +102,7 @@ packages/codev/
 **Concerns raised were about spec/plan alignment, not implementation:**
 
 1. **Spec-plan `af` aliasing conflict** - The spec says `af` is NOT aliased as `codev af` (separate entry points). The plan shows `.alias('af')` which makes `codev af` ALSO work. Both behaviors are correct and complementary.
-2. **Missing SPIDER consultation checkpoints** - Plan documentation issue, not implementation
+2. **Missing SPIR consultation checkpoints** - Plan documentation issue, not implementation
 3. **Consult history logs risk** - Logs are local to `.consult/` which is gitignored. Acceptable for local dev tooling.
 
 ### Verdict Analysis

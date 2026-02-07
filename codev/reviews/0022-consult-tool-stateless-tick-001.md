@@ -109,4 +109,4 @@ All manual tests passed:
 ## Related
 
 - **Parent**: Spec 0022 (Consult Tool Stateless)
-- **Meta-spec**: Spec 0040 (TICK as SPIDER Amendment)
+- **Meta-spec**: Spec 0040 (TICK as SPIR Amendment)

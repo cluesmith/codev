@@ -9,7 +9,7 @@
 
 ## Implementation Summary
 
-Porch is now a standalone CLI that orchestrates development protocols (SPIDER, TICK, BUGFIX) with state machine enforcement, human approval gates, and multi-agent consultation loops.
+Porch is now a standalone CLI that orchestrates development protocols (SPIR, TICK, BUGFIX) with state machine enforcement, human approval gates, and multi-agent consultation loops.
 
 ### Deliverables
 
@@ -20,7 +20,7 @@ Porch is now a standalone CLI that orchestrates development protocols (SPIDER, T
 | 3 | Plan phase extraction, IDE loop, checks | Complete |
 | 4 | Multi-agent consultation loop | Complete |
 | 5 | AF integration, `af kickoff`, notifications | Complete |
-| 6 | Protocol JSON definitions (SPIDER, TICK, BUGFIX) | Complete |
+| 6 | Protocol JSON definitions (SPIR, TICK, BUGFIX) | Complete |
 | 7 | Documentation updates | Complete |
 | 8 | Test infrastructure (72 tests) | Complete |
 
@@ -36,7 +36,7 @@ Porch is now a standalone CLI that orchestrates development protocols (SPIDER, T
 - `packages/codev/src/commands/porch/protocol-loader.ts` - JSON protocol loading
 
 **Protocol Definitions:**
-- `codev-skeleton/protocols/spider/protocol.json` - Full SPIDER with 6 phases
+- `codev-skeleton/protocols/spir/protocol.json` - Full SPIR with 6 phases
 - `codev-skeleton/protocols/tick/protocol.json` - Amendment workflow (7 phases)
 - `codev-skeleton/protocols/bugfix/protocol.json` - Lightweight issue fixes (5 phases)
 - `codev-skeleton/protocols/protocol-schema.json` - JSON schema for validation
@@ -52,7 +52,7 @@ Porch is now a standalone CLI that orchestrates development protocols (SPIDER, T
 
 ### What Went Well
 
-1. **Spike foundation was solid**: The 0072 Ralph-SPIDER spike provided a good starting point for the state machine logic
+1. **Spike foundation was solid**: The 0072 Ralph-SPIR spike provided a good starting point for the state machine logic
 
 2. **Pure YAML state format**: Choosing pure YAML over markdown-with-frontmatter simplified parsing and serialization
 
@@ -62,7 +62,7 @@ Porch is now a standalone CLI that orchestrates development protocols (SPIDER, T
 
 ### What Could Be Improved
 
-1. **SPIDER protocol compliance**: Initially skipped multi-agent consultation after implementation and tests. The protocol requires consultation checkpoints that should not be bypassed.
+1. **SPIR protocol compliance**: Initially skipped multi-agent consultation after implementation and tests. The protocol requires consultation checkpoints that should not be bypassed.
 
 2. **Test coverage for E2E flows**: Unit tests are comprehensive (72 tests), but full E2E tests with mock Claude/consult would increase confidence
 
@@ -151,7 +151,7 @@ These items are noted in "Recommendations for Future Work" below.
 
 - [x] Unit tests: State machine transitions, signal parsing, plan phase extraction
 - [x] Test coverage >80% for core state machine logic (estimated)
-- [ ] Integration tests: Full SPIDER loop with `--no-claude` flag (deferred)
+- [ ] Integration tests: Full SPIR loop with `--no-claude` flag (deferred)
 - [ ] Crash recovery tests (deferred)
 - [ ] Concurrent access tests (deferred)
 

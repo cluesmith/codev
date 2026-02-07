@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0028-librarian-role
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: abandoned
 - **Created**: 2025-12-04
 - **Priority**: medium
@@ -155,7 +155,7 @@ codev/roles/
 **When invoked**:
 - By Architect after integration: "Invoke the Librarian to update documentation"
 - Ad-hoc by user: "What does the Librarian know about X?"
-- End of SPIDER protocol: Review phase includes Librarian pass
+- End of SPIR protocol: Review phase includes Librarian pass
 
 **Pros**:
 - Minimal infrastructure change (just a new role file)
@@ -301,7 +301,7 @@ See `codev/roles/librarian.md` for full role definition.
 - [ ] Should Librarian be spawnable in worktree? **Defer to later if needed**
 
 ### Important (Affects Design)
-- [ ] How does Librarian integrate with SPIDER Review phase?
+- [ ] How does Librarian integrate with SPIR Review phase?
 - [ ] Should there be a "documentation audit" command/protocol?
 - [ ] How to handle CLAUDE.md/AGENTS.md sync mechanically?
 

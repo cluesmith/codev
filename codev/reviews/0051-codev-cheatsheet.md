@@ -28,7 +28,7 @@ Created a comprehensive cheatsheet documenting Codev's core philosophies, concep
 | Philosophy 1: Natural Language is the Programming Language | Covered with corollaries |
 | Philosophy 2: Multiple Models Outperform a Single Model | Covered with corollaries |
 | Philosophy 3: Human-Agent Work Requires Thoughtful Structure | Covered with corollaries |
-| Protocols (SPIDER, TICK, MAINTAIN, EXPERIMENT) | All listed with descriptions |
+| Protocols (SPIR, TICK, MAINTAIN, EXPERIMENT) | All listed with descriptions |
 | Roles (Architect, Builder, Consultant) | All explained including consultant flavors |
 | Information Hierarchy | ASCII diagram included |
 | Tools: codev | All commands documented |
@@ -76,7 +76,7 @@ Note: Codex also flagged MAINTAIN protocol changes and 0050 plan on this branch,
 
 1. **Comparison tables** - The Traditional vs Codev table format effectively communicates paradigm shifts.
 
-2. **Quick reference sections** - The "SPIDER Checklist" and "Git Workflow" boxes at the end provide actionable quick-start guides.
+2. **Quick reference sections** - The "SPIR Checklist" and "Git Workflow" boxes at the end provide actionable quick-start guides.
 
 3. **Information hierarchy visualization** - ASCII art diagrams work well for showing conceptual relationships in markdown.
 

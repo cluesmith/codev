@@ -167,5 +167,5 @@ The key insight: brittleness came from **architectural fragmentation**, not from
 
 ---
 
-**Reviewed by**: Claude (via SPIDER protocol)
+**Reviewed by**: Claude (via SPIR protocol)
 **Date**: 2024-12-03

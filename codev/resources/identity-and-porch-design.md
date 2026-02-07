@@ -35,7 +35,7 @@ Neither fully works because of the fundamental tension.
 
 ## The Simpler Model
 
-**Key insight:** The problem is too many transitions. SPIDER has ~6 phases with sub-states. Each transition is a failure point.
+**Key insight:** The problem is too many transitions. SPIR has ~6 phases with sub-states. Each transition is a failure point.
 
 **What the user actually wants:**
 1. Gate at spec-ready (human approval)

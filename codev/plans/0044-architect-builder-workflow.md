@@ -4,13 +4,13 @@
 - **Spec**: [0044-architect-builder-workflow.md](../specs/0044-architect-builder-workflow.md)
 - **Status**: draft
 - **Created**: 2025-12-09
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Overview
 
-This plan implements clear documentation of the 7-stage architect-builder workflow, deletes the redundant SPIDER-SOLO protocol, and adds the `--type` parameter to the consult tool for stage-specific review prompts.
+This plan implements clear documentation of the 7-stage architect-builder workflow, deletes the redundant SPIR-SOLO protocol, and adds the `--type` parameter to the consult tool for stage-specific review prompts.
 
-## Phase 1: Delete SPIDER-SOLO Protocol
+## Phase 1: Delete SPIR-SOLO Protocol
 
 **Goal**: Remove redundant protocol variant
 
@@ -25,8 +25,8 @@ This plan implements clear documentation of the 7-stage architect-builder workfl
    - [ ] `rm tests/11_fresh_spider_solo.bats`
 
 3. Update test helpers:
-   - [ ] Remove SPIDER-SOLO functions from `tests/helpers/common.bash`
-   - [ ] Update `tests/README.md` to remove SPIDER-SOLO references
+   - [ ] Remove SPIR-SOLO functions from `tests/helpers/common.bash`
+   - [ ] Update `tests/README.md` to remove SPIR-SOLO references
 
 ### Exit Criteria
 - `grep -r "spider-solo" --include="*.md" --include="*.ts" --include="*.bats"` returns no hits
@@ -135,11 +135,11 @@ if args.type:
 
 ### Tasks
 
-1. Update SPIDER protocol:
-   - [ ] Edit `codev/protocols/spider/protocol.md`
+1. Update SPIR protocol:
+   - [ ] Edit `codev/protocols/spir/protocol.md`
    - [ ] Add reference to workflow doc
    - [ ] Replace any "use spider-solo" with "request without consultation"
-   - [ ] Update `codev-skeleton/protocols/spider/protocol.md` identically
+   - [ ] Update `codev-skeleton/protocols/spir/protocol.md` identically
 
 2. Update role files:
    - [ ] Edit `codev/roles/architect.md` - reference workflow doc, clarify stages 1-5, 7-9
@@ -147,23 +147,23 @@ if args.type:
    - [ ] Update skeleton versions identically
 
 3. Update CLAUDE.md and AGENTS.md:
-   - [ ] Remove SPIDER-SOLO from protocol list
+   - [ ] Remove SPIR-SOLO from protocol list
    - [ ] Update protocol selection guide
    - [ ] Add note about `consult --type` for reviews
    - [ ] Keep both files synchronized
 
 4. Update other docs:
-   - [ ] `README.md` - Remove SPIDER-SOLO from available protocols
-   - [ ] `INSTALL.md` - Remove SPIDER-SOLO setup instructions (if any)
-   - [ ] `codev/resources/arch.md` - Remove SPIDER-SOLO references
+   - [ ] `README.md` - Remove SPIR-SOLO from available protocols
+   - [ ] `INSTALL.md` - Remove SPIR-SOLO setup instructions (if any)
+   - [ ] `codev/resources/arch.md` - Remove SPIR-SOLO references
 
 5. Update codev-updater agents:
-   - [ ] `.claude/agents/codev-updater.md` - Remove SPIDER-SOLO references
-   - [ ] `codev-skeleton/agents/codev-updater.md` - Remove SPIDER-SOLO references
-   - [ ] `packages/codev/templates/agents/codev-updater.md` - Remove SPIDER-SOLO references
+   - [ ] `.claude/agents/codev-updater.md` - Remove SPIR-SOLO references
+   - [ ] `codev-skeleton/agents/codev-updater.md` - Remove SPIR-SOLO references
+   - [ ] `packages/codev/templates/agents/codev-updater.md` - Remove SPIR-SOLO references
 
 ### Exit Criteria
-- No SPIDER-SOLO references remain
+- No SPIR-SOLO references remain
 - All docs reference workflow doc where appropriate
 <!-- REVIEW(@architect): And the Zen mcp server. -->
 - CLAUDE.md and AGENTS.md are identical
@@ -180,7 +180,7 @@ if args.type:
    - [ ] Document state transitions
 
 2. Update live projectlist:
-   - [ ] Scan `codev/projectlist.md` for any SPIDER-SOLO references
+   - [ ] Scan `codev/projectlist.md` for any SPIR-SOLO references
    - [ ] Update protocol references from "spider-solo" to "spider" with note
    - [ ] Add state definitions comment block to match template
 
@@ -191,7 +191,7 @@ if args.type:
 ### Exit Criteria
 - State definitions documented in workflow doc
 - Template includes state guidance
-- Live projectlist has no SPIDER-SOLO references
+- Live projectlist has no SPIR-SOLO references
 
 ## Phase 7: Verification and Cleanup
 
@@ -214,7 +214,7 @@ if args.type:
 4. Manual verification:
    - [ ] `consult --type spec-review spec 44` works with all 3 models
    - [ ] Workflow doc renders correctly
-   - [ ] `af --help` doesn't reference SPIDER-SOLO
+   - [ ] `af --help` doesn't reference SPIR-SOLO
 
 ### Exit Criteria
 - All greps clean
@@ -247,26 +247,26 @@ if args.type:
 | File | Changes |
 |------|---------|
 | `codev/bin/consult` | Add `--type` parameter |
-| `codev/protocols/spider/protocol.md` | Reference workflow, remove spider-solo mention |
+| `codev/protocols/spir/protocol.md` | Reference workflow, remove spider-solo mention |
 | `codev/roles/architect.md` | Reference workflow doc |
 | `codev/roles/builder.md` | Reference workflow doc |
-| `CLAUDE.md` | Remove SPIDER-SOLO, add consult --type |
+| `CLAUDE.md` | Remove SPIR-SOLO, add consult --type |
 | `AGENTS.md` | Same as CLAUDE.md |
-| `README.md` | Remove SPIDER-SOLO |
-| `tests/helpers/common.bash` | Remove SPIDER-SOLO helpers |
+| `README.md` | Remove SPIR-SOLO |
+| `tests/helpers/common.bash` | Remove SPIR-SOLO helpers |
 | `tests/README.md` | Update test descriptions |
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Breaking existing builders mid-flight | No SPIDER-SOLO builders currently active (verified) |
+| Breaking existing builders mid-flight | No SPIR-SOLO builders currently active (verified) |
 | Missing file references | Grep verification in Phase 7 |
 | Inconsistent skeleton vs instance | Create both simultaneously, diff to verify |
 
 ## Success Metrics
 
-- [ ] Zero SPIDER-SOLO references in codebase
+- [ ] Zero SPIR-SOLO references in codebase
 - [ ] Zero zen/mcp references in codebase
 - [ ] `consult --type` works with all 5 review types
 - [ ] All tests pass

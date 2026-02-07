@@ -479,7 +479,7 @@ MAINTAIN is an **operational protocol**, not a feature development protocol:
 | Review | No |
 | 3-Way Consultation | **Yes** (before creating PR) |
 
-**Exception**: If MAINTAIN reveals need for architectural changes, those should follow SPIDER.
+**Exception**: If MAINTAIN reveals need for architectural changes, those should follow SPIR.
 
 ---
 

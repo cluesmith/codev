@@ -1,6 +1,6 @@
 # REVIEW Phase Prompt
 
-You are executing the **REVIEW** phase of the SPIDER protocol.
+You are executing the **REVIEW** phase of the SPIR protocol.
 
 ## Your Goal
 
@@ -88,7 +88,7 @@ Brief description of what was implemented.
 - [Insight 2]
 
 ### Methodology Improvements
-- [Suggested improvement to SPIDER protocol]
+- [Suggested improvement to SPIR protocol]
 - [Suggested improvement to tooling]
 
 ## Technical Debt

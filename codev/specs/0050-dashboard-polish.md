@@ -1,7 +1,7 @@
 # Spec 0050: Dashboard Polish
 
 **Status:** conceived
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Priority:** Medium
 **Dependencies:** None
 **Blocks:** None

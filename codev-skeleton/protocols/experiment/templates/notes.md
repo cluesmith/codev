@@ -88,7 +88,7 @@ Based on these findings:
 
 1. **Immediate**: What should happen right after this experiment?
 2. **Follow-up experiments**: What new questions emerged?
-3. **Production path**: If validated, what's needed for production? (SPIDER spec?)
+3. **Production path**: If validated, what's needed for production? (SPIR spec?)
 
 ## References
 

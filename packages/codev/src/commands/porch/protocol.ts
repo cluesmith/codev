@@ -46,15 +46,38 @@ export function loadProtocol(projectRoot: string, protocolName: string): Protoco
 }
 
 /**
- * Find protocol.json file in {name}/protocol.json format
+ * Find protocol.json file in {name}/protocol.json format.
+ * Falls back to alias lookup: scans all protocol.json files for a matching "alias" field.
  */
 function findProtocolFile(projectRoot: string, protocolName: string): string | null {
+  // Direct lookup first
   for (const basePath of PROTOCOL_PATHS) {
     const fullPath = path.resolve(projectRoot, basePath, protocolName, 'protocol.json');
     if (fs.existsSync(fullPath)) {
       return fullPath;
     }
   }
+
+  // Alias lookup: scan all protocol.json files for matching alias
+  for (const basePath of PROTOCOL_PATHS) {
+    const protocolsDir = path.resolve(projectRoot, basePath);
+    if (!fs.existsSync(protocolsDir)) continue;
+    try {
+      const dirs = fs.readdirSync(protocolsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory());
+      for (const dir of dirs) {
+        const jsonPath = path.join(protocolsDir, dir.name, 'protocol.json');
+        if (!fs.existsSync(jsonPath)) continue;
+        try {
+          const content = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+          if (content.alias === protocolName) {
+            return jsonPath;
+          }
+        } catch { /* skip invalid JSON */ }
+      }
+    } catch { /* skip unreadable dirs */ }
+  }
+
   return null;
 }
 

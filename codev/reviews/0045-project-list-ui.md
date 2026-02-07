@@ -3,7 +3,7 @@
 ## Metadata
 - **Spec**: [0045-project-list-ui.md](../specs/0045-project-list-ui.md)
 - **Plan**: [0045-project-list-ui.md](../plans/0045-project-list-ui.md)
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: committed (PR #85 merged 2025-12-09)
 - **Builder**: builder/0045-project-list-ui
 - **Date**: 2025-12-09
@@ -299,7 +299,7 @@ All 8 phases from the plan were completed:
 
 ## Methodology Feedback
 
-### SPIDER Protocol Effectiveness
+### SPIR Protocol Effectiveness
 
 - **Specification Phase**: Comprehensive and clear. Welcome screen and Kanban grid were well-defined.
 - **Planning Phase**: 8 phases were well-sized. Phase 4 (Status Summary) evolved post-merge but plan was solid.
@@ -335,7 +335,7 @@ All 8 phases from the plan were completed:
 - [ ] Document YAML subset supported by parser
 - [ ] Add screen reader testing to manual test checklist
 - [ ] Create automated sync checker for dual template files
-- [ ] Add integration testing section to SPIDER Defend phase template
+- [ ] Add integration testing section to SPIR Defend phase template
 
 ### Long-term (Future Consideration)
 - [ ] Add virtual scrolling for >100 projects
@@ -405,7 +405,7 @@ All 8 phases from the plan were completed:
 
 ## Conclusion
 
-Project 0045 successfully delivered a high-value feature that transforms project tracking from text editing to visual management. Despite 3 critical bugs found during PR review (all fixed before merge), the implementation demonstrates the value of multi-agent consultation and the SPIDER protocol's iterative approach.
+Project 0045 successfully delivered a high-value feature that transforms project tracking from text editing to visual management. Despite 3 critical bugs found during PR review (all fixed before merge), the implementation demonstrates the value of multi-agent consultation and the SPIR protocol's iterative approach.
 
 **Key Success**: The Projects tab is now the primary navigation surface in the dashboard, making project status visible at a glance and significantly improving developer onboarding.
 

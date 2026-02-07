@@ -95,7 +95,7 @@ The builder stops at gates requiring approval:
 **spec-approval** - After builder writes the spec
 ```bash
 # Review the spec in the builder's worktree
-cat worktrees/spider_0042_user-authentication/codev/specs/0042-user-authentication.md
+cat worktrees/spir_0042_user-authentication/codev/specs/0042-user-authentication.md
 
 # Approve if satisfactory
 porch approve 0042 spec-approval
@@ -104,7 +104,7 @@ porch approve 0042 spec-approval
 **plan-approval** - After builder writes the plan
 ```bash
 # Review the plan
-cat worktrees/spider_0042_user-authentication/codev/plans/0042-user-authentication.md
+cat worktrees/spir_0042_user-authentication/codev/plans/0042-user-authentication.md
 
 # Approve if satisfactory
 porch approve 0042 plan-approval

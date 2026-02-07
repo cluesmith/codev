@@ -77,7 +77,7 @@
 
 ## TICK Protocol Feedback
 - **Autonomous execution**: [Worked well / Issues encountered]
-- **Single-phase approach**: [Appropriate / Should have used SPIDER]
+- **Single-phase approach**: [Appropriate / Should have used SPIR]
 - **Speed vs quality trade-off**: [Balanced / Too fast / Too slow]
 - **End-only consultation**: [Caught issues / Missed opportunities]
 

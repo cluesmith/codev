@@ -8,7 +8,7 @@ validated: [gemini, codex, claude]
 - **ID**: 0085
 - **Status**: specified
 - **Created**: 2026-01-29
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Supersedes**: 0067 (Agent Farm Architecture Rewrite)
 - **Related Issues**: #171 (mobile terminal width), #177 (node-pty proposal)
 

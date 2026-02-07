@@ -7,7 +7,7 @@
 
 Codev is an operating system for structured human-AI collaboration. You write specs and plans that AI agents execute reliably.
 
-> **Results**: In head-to-head comparison, SPIDER scored 92-95 vs VIBE's 12-15 on the same task. [See case study](#-example-implementations)
+> **Results**: In head-to-head comparison, SPIR scored 92-95 vs VIBE's 12-15 on the same task. [See case study](#-example-implementations)
 
 **Quick Links**: [FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md) | [Discord](https://discord.gg/mJ92DhDa6n)
 
@@ -16,7 +16,7 @@ Codev is an operating system for structured human-AI collaboration. You write sp
 - [Quick Start](#quick-start)
 - [Learn About Codev](#learn-about-codev)
 - [What is Codev?](#what-is-codev)
-- [The SPIDER Protocol](#the-spider-protocol)
+- [The SPIR Protocol](#the-spir-protocol)
 - [Agent Farm](#agent-farm-optional)
 - [Example Implementations](#-example-implementations)
 - [Quick Start & Prerequisites](#quick-start)
@@ -39,7 +39,7 @@ codev doctor
 af dash start
 ```
 
-Then tell your AI agent: *"I want to build X using the SPIDER protocol"*
+Then tell your AI agent: *"I want to build X using the SPIR protocol"*
 
 **CLI Commands:**
 - `codev` - Main CLI (init, adopt, doctor, update)
@@ -110,14 +110,14 @@ A comprehensive walkthrough of the Codev methodology and its benefits.
 Watch a real development session using Agent Farm - from spec to merged PR in 30 minutes. Demonstrates the Architect-Builder pattern with multi-model consultation.
 
 ### 🎯 Codev Tour - Building a Conversational Todo Manager
-See Codev in action! Follow along as we use the SPIDER protocol to build a conversational todo list manager from scratch:
+See Codev in action! Follow along as we use the SPIR protocol to build a conversational todo list manager from scratch:
 
 👉 [**Codev Demo Tour**](https://github.com/ansari-project/codev-demo/blob/main/codev-tour.md)
 
 This tour demonstrates:
 - How to write specifications that capture all requirements
 - How the planning phase breaks work into manageable chunks
-- The IDE loop in action (Implement → Defend → Evaluate)
+- The implementation phase in action
 - Multi-agent consultation with GPT-5 and Gemini Pro
 - How lessons learned improve future development
 
@@ -133,16 +133,13 @@ Codev is a development methodology that treats **natural language context as cod
 2. **Human-AI Collaboration** - Designed for seamless cooperation between developers and AI agents
 3. **Evolving Methodology** - The process itself evolves and improves with each project
 
-## The SP(IDE)R Protocol
+## The SPIR Protocol
 
 Our flagship protocol for structured development:
 
 - **S**pecify - Define what to build in clear, unambiguous language
 - **P**lan - Break specifications into executable phases
-- **For each phase:** **I**mplement → **D**efend → **E**valuate
-  - **Implement**: Build the code to meet phase objectives
-  - **Defend**: Write comprehensive tests that protect your code—not just validation, but defensive fortifications against bugs and regressions
-  - **Evaluate**: Verify requirements are met, get user approval, then commit
+- **I**mplement - Build the code, write tests, verify requirements for each phase
 - **R**eview - Capture lessons and improve the methodology
 
 ## Project Structure
@@ -166,7 +163,7 @@ your-project/
 Codev is designed to be customized for your project's needs. The `codev/` directory is yours to extend:
 
 - **Add project-specific protocols** - For example, Codev itself has a `release` protocol specific to npm publishing
-- **Customize existing protocols** - Modify SPIDER phases to match your team's workflow
+- **Customize existing protocols** - Modify SPIR phases to match your team's workflow
 - **Add new roles** - Define specialized consultant or reviewer roles
 
 The framework provides defaults, but your local files always take precedence.
@@ -207,10 +204,10 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 - Demonstrates how a simple prompt can drive development
 - Results in working code through chat-based iteration
 
-### [Todo Manager - SPIDER](https://github.com/ansari-project/codev-demo)
-- Built using the **SPIDER protocol** with full document-driven development
+### [Todo Manager - SPIR](https://github.com/ansari-project/codev-demo)
+- Built using the **SPIR protocol** with full document-driven development
 - Same requirements, but structured through formal specifications and plans
-- Demonstrates all phases: Specify → Plan → (IDE Loop) → Review
+- Demonstrates all phases: Specify → Plan → Implement → Review
 - Complete with specs, plans, and review documents
 - Multi-agent consultation throughout the process
 
@@ -220,7 +217,7 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 **Note**: This comparison was generated through automated analysis by 3 independent AI agents (Claude, GPT-5, and Gemini Pro), not human review.
 
 #### Quality Scores (out of 100)
-| Aspect | VIBE | SPIDER |
+| Aspect | VIBE | SPIR |
 |--------|------|--------|
 | **Overall Score** | **12-15** | **92-95** |
 | Functionality | 0 | 100 |
@@ -233,11 +230,11 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 
 **VIBE**: 3 files (boilerplate only), 0% functionality, 0 tests, no database, no API
 
-**SPIDER**: 32 source files, 100% functionality, 5 test suites, SQLite + Drizzle ORM, complete REST API, full component architecture, MCP integration, TypeScript + Zod validation
+**SPIR**: 32 source files, 100% functionality, 5 test suites, SQLite + Drizzle ORM, complete REST API, full component architecture, MCP integration, TypeScript + Zod validation
 
-#### Why SPIDER Won
+#### Why SPIR Won
 
-As GPT-5 noted: *"SPIDER's methodology clearly outperformed... Plan-first approach with defined scope, iterative verification, and delivery mindset"*
+As GPT-5 noted: *"SPIR's methodology clearly outperformed... Plan-first approach with defined scope, iterative verification, and delivery mindset"*
 
 The verdict: **Context-driven development ensures completeness**, while conversational approaches can miss the mark entirely despite identical prompts and AI models.
 
@@ -248,7 +245,7 @@ The verdict: **Context-driven development ensures completeness**, while conversa
 Codev is **self-hosted** - we use Codev methodology to build Codev itself. This means:
 
 - **Our test infrastructure** is specified in `codev/specs/0001-test-infrastructure.md`
-- **Our development process** follows the SP(IDE)R protocol we advocate
+- **Our development process** follows the SPIR protocol we advocate
 - **Our improvements** come from lessons learned using our own methodology
 
 This self-hosting approach ensures:
@@ -283,7 +280,7 @@ This repository has a dual nature:
 Our comprehensive test suite (64 tests) validates the Codev installation process:
 
 - **Framework**: Shell-based testing with bats-core (zero dependencies)
-- **Coverage**: SPIDER protocol, CLAUDE.md preservation, agent installation
+- **Coverage**: SPIR protocol, CLAUDE.md preservation, agent installation
 - **Isolation**: XDG sandboxing ensures tests never touch real user directories
 - **CI/CD Ready**: Tests run in seconds with clear TAP output
 
@@ -304,14 +301,14 @@ See `tests/README.md` for details.
 See `examples/todo-manager/` for a complete walkthrough showing:
 - How specifications capture all requirements
 - How plans break work into phases
-- How the IDE loop ensures quality
+- How the implementation phase ensures quality
 - How lessons improve future development
 
 ## Configuration
 
 ### Customizing Templates
 
-Templates in `codev/protocols/spider/templates/` can be modified to fit your team's needs:
+Templates in `codev/protocols/spir/templates/` can be modified to fit your team's needs:
 
 - `spec.md` - Specification structure
 - `plan.md` - Planning format
@@ -319,7 +316,7 @@ Templates in `codev/protocols/spider/templates/` can be modified to fit your tea
 
 ## Agent Farm (Optional)
 
-Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIDER, TICK, etc.) work perfectly in any AI coding assistant.
+Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, TICK, etc.) work perfectly in any AI coding assistant.
 
 **Why use Agent Farm?**
 - **Web dashboard** for monitoring multiple builders at once

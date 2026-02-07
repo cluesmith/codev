@@ -50,7 +50,7 @@ Redesign porch to orchestrate **build-verify cycles** where porch runs 3-way con
 | `codev/resources/protocol-format.md` | Update: Document build_verify phase type |
 | `packages/codev/src/commands/porch/types.ts` | Update: Add build_verify types |
 | `packages/codev/src/commands/porch/protocol.ts` | Update: Parse build_verify config |
-| `codev-skeleton/protocols/spider/protocol.json` | Update: Convert to build_verify format |
+| `codev-skeleton/protocols/spir/protocol.json` | Update: Convert to build_verify format |
 
 **New types:**
 
@@ -81,7 +81,7 @@ interface PhaseConfig {
 }
 ```
 
-**Updated spider protocol.json structure:**
+**Updated spir protocol.json structure:**
 
 ```json
 {
@@ -323,7 +323,7 @@ Builder Claude (outer)
 
 **Role separation:**
 - **Builder role (outer)**: `codev-skeleton/roles/builder.md` - Just runs porch, handles gates
-- **Phase prompts (inner)**: `codev-skeleton/protocols/spider/prompts/*.md` - Detailed work instructions
+- **Phase prompts (inner)**: `codev-skeleton/protocols/spir/prompts/*.md` - Detailed work instructions
 - **Spec compliance**: Added to `implement.md` since inner Claude does the coding work
 
 ## REPL Updates

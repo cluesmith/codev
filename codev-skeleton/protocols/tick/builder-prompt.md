@@ -22,7 +22,7 @@ You are running in STRICT mode. This means:
 ## Protocol
 Follow the TICK protocol: `codev/protocols/tick/protocol.md`
 
-TICK is for amendments to existing SPIDER specifications. You will:
+TICK is for amendments to existing SPIR specifications. You will:
 1. Identify the target spec to amend
 2. Update the spec with the amendment
 3. Update the plan

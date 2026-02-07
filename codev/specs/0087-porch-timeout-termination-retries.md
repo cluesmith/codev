@@ -9,7 +9,7 @@ validated: [gemini, codex, claude]
 - **ID**: 0087
 - **Status**: specified
 - **Created**: 2026-02-01
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Clarifying Questions Asked
 

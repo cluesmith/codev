@@ -1,7 +1,7 @@
 # Review: Spec 0039 TICK-005 - codev import command
 
 **Spec:** 0039-codev-cli.md (TICK-005 amendment)
-**Protocol:** SPIDER (via TICK amendment)
+**Protocol:** SPIR (via TICK amendment)
 **Date:** 2025-12-11
 **Branch:** builder/0039-codev-cli
 

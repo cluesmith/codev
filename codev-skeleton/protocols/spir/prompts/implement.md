@@ -1,6 +1,6 @@
 # IMPLEMENT Phase Prompt
 
-You are executing the **IMPLEMENT** phase of the SPIDER protocol.
+You are executing the **IMPLEMENT** phase of the SPIR protocol.
 
 ## Your Goal
 

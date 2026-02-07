@@ -4,12 +4,12 @@
 - **ID**: 0073
 - **Status**: conceived
 - **Created**: 2026-01-19
-- **Protocol**: SPIDER
-- **Depends on**: 0072 (Ralph-SPIDER spike)
+- **Protocol**: SPIR
+- **Depends on**: 0072 (Ralph-SPIR spike)
 
 ## Executive Summary
 
-Porch is a standalone CLI tool that runs development protocols (SPIDER, TICK, BUGFIX) as an interactive REPL with human approval gates. It replaces the current markdown-based protocol system with a state machine that enforces phase transitions and persists state to files.
+Porch is a standalone CLI tool that runs development protocols (SPIR, TICK, BUGFIX) as an interactive REPL with human approval gates. It replaces the current markdown-based protocol system with a state machine that enforces phase transitions and persists state to files.
 
 ## Three Levels of Codev Usage
 
@@ -22,7 +22,7 @@ Porch exists as the middle layer of a three-level architecture:
 | 3 | **af** | UI for managing porch sessions | Multi-project orchestration |
 
 **Level 1: Protocols Only**
-Just tell Claude to follow SPIDER. No tooling required. Useful for simple tasks or when you want full control.
+Just tell Claude to follow SPIR. No tooling required. Useful for simple tasks or when you want full control.
 
 **Level 2: Porch (this spec)**
 Our take on [Ralph](https://www.anthropic.com/engineering/claude-code-best-practices), but as a REPL. Ralph is Anthropic's recommended pattern for long-running agent tasks: fresh context per iteration, state persisted to files. Porch is an interactive state machine that wraps Claude with protocol enforcement. It persists state to YAML files, blocks on human gates, runs defense checks (build/test), and orchestrates multi-agent consultations. You run `porch` directly and interact with it. Each iteration gets fresh context while state persists between iterations.
@@ -97,24 +97,24 @@ ARCHITECT (main)                    PROJECT WORKTREE (projects/0073/)
   ◄──── notification ───────────────
 ```
 
-**Key insight: IDE is a loop.** SPIDER's Implement→Defend→Evaluate phases run once per implementation phase defined in the plan. Porch reads the plan, extracts phases, and loops through them. This is the Ralph principle applied within a protocol.
+**Key insight: IDE is a loop.** SPIR's Implement→Defend→Evaluate phases run once per implementation phase defined in the plan. Porch reads the plan, extracts phases, and loops through them. This is the Ralph principle applied within a protocol.
 
 ## Desired State
 
 ### 1. Protocol Execution Worktrees
 
-Worktrees are tied to **protocol executions**, not just SPIDER projects:
+Worktrees are tied to **protocol executions**, not just SPIR projects:
 
 ```
 codev-project/
 ├── worktrees/                    # Git worktrees for protocol executions
-│   ├── spider_0073_user-auth/    # SPIDER project 0073
-│   ├── spider_0074_billing/      # SPIDER project 0074
+│   ├── spir_0073_user-auth/    # SPIR project 0073
+│   ├── spir_0074_billing/      # SPIR project 0074
 │   ├── tick_0073_add-feature/    # TICK amendment to spec 0073
 │   ├── bugfix_142/               # BUGFIX for GitHub issue #142
 │   └── ...
 ├── codev/
-│   ├── projects/                 # SPIDER project artifacts
+│   ├── projects/                 # SPIR project artifacts
 │   │   ├── 0073-user-auth/
 │   │   │   ├── spec.md
 │   │   │   ├── plan.md
@@ -133,11 +133,11 @@ codev-project/
 ```
 
 **Naming scheme for worktrees:**
-- SPIDER: `spider_<project_id>_<name>`
+- SPIR: `spir_<project_id>_<name>`
 - TICK: `tick_<spec_id>_<amendment_name>`
 - BUGFIX: `bugfix_<issue_number>`
 
-**Project-centric structure**: SPIDER projects get their own directory with spec, plan, status, review. TICK/BUGFIX executions get simpler state in `executions/`.
+**Project-centric structure**: SPIR projects get their own directory with spec, plan, status, review. TICK/BUGFIX executions get simpler state in `executions/`.
 
 **Key changes:**
 - Directory is `projects/` not `.builders/`
@@ -157,11 +157,11 @@ When you kickoff a project, porch becomes the builder:
 
 ```bash
 # Current system
-af kickoff 0073                # Spawns Claude session that follows SPIDER protocol
+af kickoff 0073                # Spawns Claude session that follows SPIR protocol
 
 # New system (porch)
-af kickoff 0073                # Creates worktree at worktrees/spider_0073_*/
-                              # Runs: porch run spider 0073
+af kickoff 0073                # Creates worktree at worktrees/spir_0073_*/
+                              # Runs: porch run spir 0073
                               # Porch orchestrates the entire lifecycle
 ```
 
@@ -171,10 +171,10 @@ Protocols defined declaratively in JSON:
 
 ```
 codev-skeleton/protocols/
-├── spider/
+├── spir/
 │   ├── protocol.json     # Machine-readable protocol definition
 │   ├── protocol.md       # Human-readable protocol documentation (kept for reference)
-│   └── prompts/          # SPIDER-specific prompts
+│   └── prompts/          # SPIR-specific prompts
 │       ├── specify.md
 │       ├── plan.md
 │       ├── implement.md
@@ -269,7 +269,7 @@ The codev ecosystem splits into three distinct commands:
 
 ### Phased Phases (IDE Loop)
 
-SPIDER's IDE phases (Implement, Defend, Evaluate) run as a loop over plan phases:
+SPIR's IDE phases (Implement, Defend, Evaluate) run as a loop over plan phases:
 
 ```
 Plan file defines:
@@ -302,7 +302,7 @@ This is the Ralph principle applied within a protocol: each phase iteration gets
 
 ```json
 {
-  "name": "spider",
+  "name": "spir",
   "version": "2.0.0",
   "description": "Specify → Plan → Implement → Defend → Evaluate → Review",
 
@@ -395,7 +395,7 @@ This is the Ralph principle applied within a protocol: each phase iteration gets
 # codev/projects/0073-user-auth/status.yaml
 id: "0073"
 title: "user-auth"
-protocol: "spider"
+protocol: "spir"
 state: "specify:review"
 worktree: ".worktrees/0073-user-auth"
 
@@ -798,7 +798,7 @@ diagnose → fix → test → pr → complete
 
 **Protocol selection:**
 ```bash
-af kickoff 0073                # SPIDER (new feature)
+af kickoff 0073                # SPIR (new feature)
 af kickoff --tick 0073 name    # TICK (amend existing spec 0073)
 af kickoff --issue 142         # BUGFIX (GitHub issue)
 ```
@@ -847,7 +847,7 @@ af stop 0073                          # Stop porch (worktree persists)
 af resume 0073                        # Resume porch on existing worktree
 
 # Direct porch access (standalone command)
-porch run spider 0073                 # Run protocol REPL
+porch run spir 0073                 # Run protocol REPL
 porch status 0073                     # Show state
 porch approve 0073 <gate>             # Approve gate
 ```
@@ -870,7 +870,7 @@ porch approve 0073 <gate>             # Approve gate
 
 ### Testing Requirements
 - [ ] Unit tests: State machine transitions, signal parsing, plan phase extraction
-- [ ] Integration tests: Full SPIDER loop with `--no-claude` flag
+- [ ] Integration tests: Full SPIR loop with `--no-claude` flag
 - [ ] Integration tests: TICK and BUGFIX protocols with `--no-claude`
 - [ ] Crash recovery tests: Resume from interrupted state
 - [ ] Concurrent access tests: File locking under contention

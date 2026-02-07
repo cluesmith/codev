@@ -1,6 +1,6 @@
 # SPECIFY Phase Prompt
 
-You are executing the **SPECIFY** phase of the SPIDER protocol.
+You are executing the **SPECIFY** phase of the SPIR protocol.
 
 ## Your Goal
 

@@ -2,15 +2,15 @@
 
 ## Summary
 
-This spec consolidated and documented the 7-stage architect-builder workflow, eliminated the redundant SPIDER-SOLO protocol, and added review-type prompts to the consult tool.
+This spec consolidated and documented the 7-stage architect-builder workflow, eliminated the redundant SPIR-SOLO protocol, and added review-type prompts to the consult tool.
 
 ## What Was Delivered
 
-### 1. SPIDER-SOLO Protocol Removed
+### 1. SPIR-SOLO Protocol Removed
 - Deleted `codev/protocols/spider-solo/` and `codev-skeleton/protocols/spider-solo/`
 - Removed from test files (deleted `11_fresh_spider_solo.bats`, updated helpers)
-- Updated all documentation to remove SPIDER-SOLO references
-- Added "without consultation" option to SPIDER for the same use case
+- Updated all documentation to remove SPIR-SOLO references
+- Added "without consultation" option to SPIR for the same use case
 
 ### 2. Workflow Reference Document Created
 - New file: `codev/resources/workflow-reference.md` (and skeleton version)
@@ -34,7 +34,7 @@ Five new prompt files in `codev/roles/review-types/`:
 - Missing type file produces warning but doesn't fail
 
 ### 5. Documentation Updates
-- Added workflow reference links to SPIDER protocol, architect/builder roles
+- Added workflow reference links to SPIR protocol, architect/builder roles
 - Updated CLAUDE.md and AGENTS.md with Review Types section
 - Updated projectlist template with workflow reference link
 - Removed Zen MCP references (replaced with consult CLI checks)
@@ -67,7 +67,7 @@ Five new prompt files in `codev/roles/review-types/`:
 
 All 73 tests pass:
 - Framework tests: OK
-- SPIDER protocol tests: OK
+- SPIR protocol tests: OK
 - CLAUDE.md preservation tests: OK
 - Claude isolation tests: OK (some skipped due to missing timeout utility)
 - Codev updater tests: OK
@@ -95,13 +95,13 @@ All 73 tests pass:
 - `packages/codev/src/cli.ts` - Added --type option
 - `packages/codev/src/commands/consult/index.ts` - Added review type loading
 - `CLAUDE.md` and `AGENTS.md` - Added Review Types section
-- `codev/protocols/spider/protocol.md` - Added workflow reference, updated prerequisites
+- `codev/protocols/spir/protocol.md` - Added workflow reference, updated prerequisites
 - `codev/roles/architect.md` and `builder.md` - Added workflow reference
 - `codev/projectlist.md` and template - Added workflow reference
 - `tests/helpers/mock_mcp.bash` - Fixed is_mcp_available function
 - `tests/10_fresh_spider.bats` - Removed Zen MCP references
-- Various other doc files - Removed SPIDER-SOLO references
+- Various other doc files - Removed SPIR-SOLO references
 
 ## Verdict
 
-Spec requirements fully met. The 7-stage workflow is now clearly documented, SPIDER-SOLO is removed, and the consult tool supports stage-specific review prompts.
+Spec requirements fully met. The 7-stage workflow is now clearly documented, SPIR-SOLO is removed, and the consult tool supports stage-specific review prompts.

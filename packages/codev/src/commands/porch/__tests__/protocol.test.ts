@@ -17,11 +17,11 @@ import {
 
 describe('porch protocol loading', () => {
   const testDir = path.join(tmpdir(), `porch-protocol-test-${Date.now()}`);
-  const protocolsDir = path.join(testDir, 'codev/protocols/spider');
+  const protocolsDir = path.join(testDir, 'codev/protocols/spir');
 
   // Create test protocol JSON
   const spiderProtocol = {
-    name: 'spider',
+    name: 'spir',
     version: '1.0.0',
     description: 'Test protocol',
     phases: [
@@ -80,9 +80,9 @@ describe('porch protocol loading', () => {
 
   describe('loadProtocol', () => {
     it('should load protocol from codev/protocols', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
 
-      expect(protocol.name).toBe('spider');
+      expect(protocol.name).toBe('spir');
       expect(protocol.version).toBe('1.0.0');
       expect(protocol.phases).toHaveLength(4);
     });
@@ -100,7 +100,7 @@ describe('porch protocol loading', () => {
       );
 
       expect(() => {
-        loadProtocol(testDir, 'spider');
+        loadProtocol(testDir, 'spir');
       }).toThrow('JSON parse error');
     });
 
@@ -111,12 +111,12 @@ describe('porch protocol loading', () => {
       );
 
       expect(() => {
-        loadProtocol(testDir, 'spider');
+        loadProtocol(testDir, 'spir');
       }).toThrow('missing "name" field');
     });
 
     it('should collect checks from defaults and phases', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
 
       expect(protocol.checks).toBeDefined();
       expect(protocol.checks?.build).toBe('npm run build');
@@ -125,7 +125,7 @@ describe('porch protocol loading', () => {
     });
 
     it('should normalize phases correctly', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const specifyPhase = protocol.phases.find(p => p.id === 'specify');
 
       expect(specifyPhase).toBeDefined();
@@ -137,7 +137,7 @@ describe('porch protocol loading', () => {
 
   describe('getPhaseConfig', () => {
     it('should return phase by id', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const phase = getPhaseConfig(protocol, 'implement');
 
       expect(phase).not.toBeNull();
@@ -145,7 +145,7 @@ describe('porch protocol loading', () => {
     });
 
     it('should return null for non-existent phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const phase = getPhaseConfig(protocol, 'nonexistent');
 
       expect(phase).toBeNull();
@@ -154,7 +154,7 @@ describe('porch protocol loading', () => {
 
   describe('getNextPhase', () => {
     it('should return next phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const next = getNextPhase(protocol, 'specify');
 
       expect(next).not.toBeNull();
@@ -162,14 +162,14 @@ describe('porch protocol loading', () => {
     });
 
     it('should return null for terminal phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const next = getNextPhase(protocol, 'review');
 
       expect(next).toBeNull();
     });
 
     it('should return null for non-existent phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const next = getNextPhase(protocol, 'nonexistent');
 
       expect(next).toBeNull();
@@ -178,7 +178,7 @@ describe('porch protocol loading', () => {
 
   describe('getPhaseChecks', () => {
     it('should return checks for phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const checks = getPhaseChecks(protocol, 'implement');
 
       expect(checks.build).toBe('npm run build');
@@ -186,7 +186,7 @@ describe('porch protocol loading', () => {
     });
 
     it('should return empty object for phase without checks', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const checks = getPhaseChecks(protocol, 'plan');
 
       expect(checks).toEqual({});
@@ -195,14 +195,14 @@ describe('porch protocol loading', () => {
 
   describe('getPhaseGate', () => {
     it('should return gate name for gated phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const gate = getPhaseGate(protocol, 'specify');
 
       expect(gate).toBe('spec_approval');
     });
 
     it('should return null for phase without gate', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       const gate = getPhaseGate(protocol, 'implement');
 
       expect(gate).toBeNull();
@@ -211,32 +211,46 @@ describe('porch protocol loading', () => {
 
   describe('isPhased', () => {
     it('should return true for per_plan_phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       expect(isPhased(protocol, 'implement')).toBe(true);
     });
 
     it('should return false for once phase', () => {
-      const protocol = loadProtocol(testDir, 'spider');
+      const protocol = loadProtocol(testDir, 'spir');
       expect(isPhased(protocol, 'specify')).toBe(false);
     });
   });
 
   describe('codev-skeleton fallback', () => {
     it('should load from codev-skeleton if not in codev', () => {
-      // Remove from codev/protocols/spider
+      // Remove from codev/protocols/spir
       fs.rmSync(path.join(protocolsDir, 'protocol.json'));
 
-      // Create in codev-skeleton/protocols/spider
-      const skeletonDir = path.join(testDir, 'codev-skeleton/protocols/spider');
+      // Create in codev-skeleton/protocols/spir
+      const skeletonDir = path.join(testDir, 'codev-skeleton/protocols/spir');
       fs.mkdirSync(skeletonDir, { recursive: true });
       fs.writeFileSync(
         path.join(skeletonDir, 'protocol.json'),
         JSON.stringify({ ...spiderProtocol, description: 'From skeleton' })
       );
 
-      const protocol = loadProtocol(testDir, 'spider');
-      expect(protocol.name).toBe('spider');
+      const protocol = loadProtocol(testDir, 'spir');
+      expect(protocol.name).toBe('spir');
       expect(protocol.description).toBe('From skeleton');
+    });
+  });
+
+  describe('alias resolution', () => {
+    it('should resolve "spider" alias to spir protocol', () => {
+      // Add alias field to the protocol
+      const protocolWithAlias = { ...spiderProtocol, alias: 'spider' };
+      fs.writeFileSync(
+        path.join(protocolsDir, 'protocol.json'),
+        JSON.stringify(protocolWithAlias, null, 2)
+      );
+
+      const protocol = loadProtocol(testDir, 'spider');
+      expect(protocol.name).toBe('spir');
     });
   });
 });

@@ -8,7 +8,7 @@
 ## Clarifying Questions Asked
 
 1. **What should the end-of-day reporter summarize?**
-   - Answer: All of the above - Git activity, Claude Code sessions, and SPIDER progress
+   - Answer: All of the above - Git activity, Claude Code sessions, and SPIR progress
 
 2. **How should the report be delivered?**
    - Answer: Terminal output
@@ -24,7 +24,7 @@
 
 ## Problem Statement
 
-Developers using Codev need a way to reflect on their daily progress. Currently, understanding what was accomplished requires manually checking git logs, reviewing file changes, and mentally tracking SPIDER spec/plan status. This friction reduces the value of end-of-day reviews and makes it harder to communicate progress to stakeholders or prepare for the next day.
+Developers using Codev need a way to reflect on their daily progress. Currently, understanding what was accomplished requires manually checking git logs, reviewing file changes, and mentally tracking SPIR spec/plan status. This friction reduces the value of end-of-day reviews and makes it harder to communicate progress to stakeholders or prepare for the next day.
 
 An automated end-of-day reporter would consolidate all development activity into a single, AI-summarized view, making it easy to:
 - See the day's accomplishments at a glance
@@ -48,7 +48,7 @@ This is tedious, error-prone, and rarely done consistently.
 A single command `./codev/bin/eod-report` that:
 1. Gathers all development activity since midnight
 2. Analyzes git commits, changed files, and branch activity
-3. Checks SPIDER spec/plan status changes
+3. Checks SPIR spec/plan status changes
 4. Uses Claude to generate a narrative summary
 5. Outputs a well-formatted report to the terminal
 
@@ -64,13 +64,13 @@ the spec review phase and began implementation, creating the CLI commands for
 spawning and managing builder agents.
 
 ## Git Activity
-- 4 commits on branch `spider/0002-architect-builder/implement`
+- 4 commits on branch `spir/0002-architect-builder/implement`
 - Files changed: 12 (847 lines added, 23 removed)
 - Key commits:
   - "Add architect spawn command with ttyd integration"
   - "Implement builder status tracking in builders.md"
 
-## SPIDER Progress
+## SPIR Progress
 - 0002-architect-builder: Moved from PLAN → IMPLEMENT phase
 - 0003-end-of-day-reporter: Spec created (NEW)
 
@@ -97,7 +97,7 @@ command before moving to the Defend phase.
 ## Success Criteria
 - [ ] Single command generates comprehensive daily report
 - [ ] Git activity (commits, branches, diffs) accurately captured
-- [ ] SPIDER spec/plan/review status changes detected
+- [ ] SPIR spec/plan/review status changes detected
 - [ ] AI narrative summary is coherent and actionable
 - [ ] Report renders cleanly in terminal (80-column compatible)
 - [ ] Execution completes in <30 seconds
@@ -120,7 +120,7 @@ command before moving to the Defend phase.
 ## Assumptions
 - User has git installed and is in a git repository
 - User has Claude Code configured (for AI summary)
-- SPIDER artifacts follow standard naming conventions (0001-name.md)
+- SPIR artifacts follow standard naming conventions (0001-name.md)
 - Terminal supports ANSI colors (with fallback for no-color mode)
 
 ## Solution Approaches
@@ -195,7 +195,7 @@ A thin shell wrapper (`codev/bin/eod-report`) can invoke the Python module for b
 ### Important (Affects Design)
 - [ ] Should previous reports be cached/stored for historical comparison?
 - [ ] How to detect Claude Code session activity? (Investigation needed: check `~/.claude/` for history/logs)
-- [ ] How to detect SPIDER status changes? (Proposed: parse `Status:` field from markdown frontmatter)
+- [ ] How to detect SPIR status changes? (Proposed: parse `Status:` field from markdown frontmatter)
 
 ### Nice-to-Know (Optimization)
 - [ ] Would users want custom report templates?
@@ -235,14 +235,14 @@ USER_CONTEXT = {
         "uncommitted": [...],
         "stashes": [...]
     },
-    "spider_progress": [
+    "spir_progress": [
         {"id": "0002", "title": "...", "phase_before": "PLAN", "phase_after": "IMPLEMENT"}
     ]
 }
 
 INSTRUCTIONS = """
 1. Produce 2-3 paragraph narrative summary
-2. Reference SPIDER IDs explicitly (e.g., "Spec 0002")
+2. Reference SPIR IDs explicitly (e.g., "Spec 0002")
 3. Highlight milestones, blockers, and pending work
 4. Suggest tomorrow's focus as bullet list
 5. Keep under 200 words
@@ -258,13 +258,13 @@ INSTRUCTIONS = """
 ## Test Scenarios
 
 ### Functional Tests
-1. **Happy path**: Repository with commits today, SPIDER specs in progress
+1. **Happy path**: Repository with commits today, SPIR specs in progress
 2. **No activity**: Repository with no commits since midnight
-3. **No SPIDER artifacts**: Plain git repo without codev/ directory
+3. **No SPIR artifacts**: Plain git repo without codev/ directory
 4. **Uncommitted changes**: Modified and untracked files present
 5. **Multiple branches**: Activity across several branches
 6. **Git stashes**: Stashes created today are reported
-7. **SPIDER phase changes**: Status field changes detected in specs/plans
+7. **SPIR phase changes**: Status field changes detected in specs/plans
 8. **`--no-ai` flag**: Raw data output without API call
 
 ### Non-Functional Tests
@@ -286,14 +286,14 @@ INSTRUCTIONS = """
 ## References
 - `codev/bin/architect` - Existing CLI pattern to follow
 - `codev/specs/0002-architect-builder.md` - Similar CLI tool spec
-- SPIDER protocol: `codev/protocols/spider/protocol.md`
+- SPIR protocol: `codev/protocols/spir/protocol.md`
 
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
 | Claude API changes | Low | Medium | Version-pin API, graceful fallback |
 | Large git history slow | Medium | Low | Use --since flag, limit log entries, use --max-count |
-| Inconsistent SPIDER naming | Low | Medium | Document expected format, warn on mismatches |
+| Inconsistent SPIR naming | Low | Medium | Document expected format, warn on mismatches |
 | Terminal width issues | Medium | Low | Detect width, provide --width flag |
 | Token cost on large repos | Medium | Medium | Context budget, truncate with "Plus N other commits" |
 | Privacy concerns | Medium | High | Display warning, provide --no-ai flag |
@@ -324,7 +324,7 @@ INSTRUCTIONS = """
 
 **Sections Updated**:
 - Solution Approaches: Changed recommendation to Python
-- Open Questions: Added `--no-ai` as confirmed, added SPIDER status detection
+- Open Questions: Added `--no-ai` as confirmed, added SPIR status detection
 - Security Considerations: Added privacy warning section
 - AI Prompt Design: New section with structured prompt and token management
 - Test Scenarios: Added stash, phase changes, --no-ai, and narrow terminal tests

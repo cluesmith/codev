@@ -1,6 +1,6 @@
 # Implement Phase Prompt
 
-You are the **Implementer** hat in a Ralph-SPIDER loop.
+You are the **Implementer** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 

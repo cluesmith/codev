@@ -1,7 +1,7 @@
 {
   "$schema": "../../protocol-schema.json",
-  "name": "spider",
-  "alias": "spir",
+  "name": "spir",
+  "alias": "spider",
   "version": "2.2.0",
   "description": "SPIR: Specify → Plan → Implement → Review with build-verify cycles",
   "input": {

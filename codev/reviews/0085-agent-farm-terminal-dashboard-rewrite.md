@@ -3,7 +3,7 @@
 ## Metadata
 - **Spec**: `codev/specs/0085-agent-farm-terminal-dashboard-rewrite.md`
 - **Plan**: `codev/plans/0085-agent-farm-terminal-dashboard-rewrite.md`
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Branch**: `builder/0085-agent-farm-terminal-dashboard-rewrite`
 
 ## Summary

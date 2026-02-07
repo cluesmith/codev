@@ -12,7 +12,7 @@
 
 ## Process
 
-<!-- Lessons about SPIDER/TICK execution, consultation, PR workflow -->
+<!-- Lessons about SPIR/TICK execution, consultation, PR workflow -->
 
 ## Tooling
 

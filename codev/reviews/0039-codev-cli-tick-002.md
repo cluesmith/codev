@@ -44,10 +44,10 @@ TICK-002 implements the "embedded skeleton with local overrides" pattern to redu
 ### File Resolution Pattern
 
 ```
-resolveCodevFile("protocols/spider/protocol.md")
-├── Check: ./codev/protocols/spider/protocol.md (local)
+resolveCodevFile("protocols/spir/protocol.md")
+├── Check: ./codev/protocols/spir/protocol.md (local)
 │   └── If exists → Return local path
-├── Check: <package>/skeleton/protocols/spider/protocol.md (embedded)
+├── Check: <package>/skeleton/protocols/spir/protocol.md (embedded)
 │   └── If exists → Return embedded path
 └── Return null if neither exists
 ```

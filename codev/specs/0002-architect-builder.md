@@ -25,7 +25,7 @@ Current AI-assisted development is typically single-threaded or uses ad-hoc mult
 1. Enable running multiple builder agents in parallel on separate specs (no fixed limit)
 2. Use git as the coordination backbone (fits existing Codev workflow)
 3. Provide simple tooling for spawning and monitoring builders
-4. Integrate with existing Codev protocols (SPIDER, TICK)
+4. Integrate with existing Codev protocols (SPIR, TICK)
 
 ## Non-Goals
 
@@ -256,7 +256,7 @@ You are implementing spec XXXX. Read:
 
 ## Rules
 
-1. **Follow SPIDER protocol** - Implement → Defend → Evaluate for each phase
+1. **Follow SPIR protocol** - Implement → Defend → Evaluate for each phase
 2. **Proceed autonomously** - Don't ask "should I continue?" Just continue.
 3. **Stop only for true blockers** - Missing information, ambiguous requirements, architectural decisions
 4. **Self-rebase if needed** - If main has moved, rebase your branch before PR
@@ -389,11 +389,11 @@ Simple HTML file served locally:
 </html>
 ```
 
-### Workflow Integration with SPIDER
+### Workflow Integration with SPIR
 
-The Architect-Builder pattern sits on top of SPIDER:
+The Architect-Builder pattern sits on top of SPIR:
 
-| SPIDER Phase | Who Does It |
+| SPIR Phase | Who Does It |
 |--------------|-------------|
 | **Specify** | Architect (human + AI) |
 | **Plan** | Architect (human + AI) |
@@ -404,7 +404,7 @@ The Architect-Builder pattern sits on top of SPIDER:
 
 The builder executes the IDE loop (Implement → Defend → Evaluate) autonomously, producing a PR. The architect handles specification, planning, and final review/integration.
 
-See: `codev-skeleton/protocols/spider/protocol.md`
+See: `codev-skeleton/protocols/spir/protocol.md`
 
 ### Integration with projectlist.md
 
@@ -471,13 +471,13 @@ When builder completes (PR merged):
 | Complex inbox protocol? | **No** - architect polls terminals directly |
 | claude.ai/code support? | **No** - focus on local ttyd terminals |
 | Conflict resolution? | **Builders self-rebase** before creating PR |
-| Standard builder prompt? | **Yes** - template enforces SPIDER + autonomous execution |
+| Standard builder prompt? | **Yes** - template enforces SPIR + autonomous execution |
 
 ## References
 
 - [Architect-Builder Pattern Article](/Users/mwk/Development/writing/articles/medium/architecture-builder/article.md)
 - [ttyd - Terminal in browser](https://github.com/tsl0922/ttyd)
-- [SPIDER Protocol](codev-skeleton/protocols/spider/protocol.md)
+- [SPIR Protocol](codev-skeleton/protocols/spir/protocol.md)
 
 ## Appendix: Why These Choices?
 
@@ -534,7 +534,7 @@ Power users prefer direct terminal access without browser overhead. Currently, a
 **Problem Addressed**:
 Currently, specific protocols are deeply baked into `af spawn`:
 - `spawnBugfix()` hardcodes BUGFIX protocol path and instructions
-- `spawnSpec()` defaults to SPIDER with protocol-specific prompts
+- `spawnSpec()` defaults to SPIR with protocol-specific prompts
 - Adding a new protocol requires modifying spawn.ts
 
 This violates the open-closed principle and makes the system harder to extend.
@@ -557,14 +557,14 @@ Separate three orthogonal concerns:
 3. **Protocol** (what workflow to follow):
    - Explicit via `--protocol <name>`
    - From spec metadata if input is spec
-   - Default based on input type (spider for specs, bugfix for issues)
+   - Default based on input type (spir for specs, bugfix for issues)
 
 **Key Changes**:
 
 1. **Add `--protocol` as universal flag** that works with any input type:
    ```bash
    af spawn -p 0001 --protocol tick     # Spec with TICK protocol
-   af spawn -i 42 --protocol spider     # Issue with SPIDER protocol (unusual)
+   af spawn -i 42 --protocol spir     # Issue with SPIR protocol (unusual)
    ```
 
 2. **Protocol-defined prompts**: Each protocol provides `protocols/{name}/builder-prompt.md` template with placeholders:
@@ -631,7 +631,7 @@ Separate three orthogonal concerns:
 
 | Input Type | Default Protocol | Default Mode |
 |------------|------------------|--------------|
-| `--project` | spider (or from spec) | strict |
+| `--project` | spir (or from spec) | strict |
 | `--issue` | bugfix | soft |
 | `--protocol X` | X | soft |
 | `--task` | none | soft |
@@ -640,12 +640,12 @@ Separate three orthogonal concerns:
 
 ```bash
 # Standard usage (unchanged behavior)
-af spawn -p 0001                    # strict, spider
+af spawn -p 0001                    # strict, spir
 af spawn -i 42                      # soft, bugfix
 
 # New flexibility
 af spawn -p 0001 --protocol tick    # strict, tick
-af spawn -i 42 --protocol spider    # soft, spider (escalate bug to full feature)
+af spawn -i 42 --protocol spir    # soft, spir (escalate bug to full feature)
 af spawn --protocol maintain        # soft, maintain
 af spawn --strict --protocol experiment  # strict, experiment via porch
 ```

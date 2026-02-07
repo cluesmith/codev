@@ -1,7 +1,7 @@
 # Spec 0052: Agent Farm Internals Documentation
 
 **Status:** implementing
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Priority:** High
 
 ---

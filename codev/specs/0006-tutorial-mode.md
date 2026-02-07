@@ -107,7 +107,7 @@ agent-farm tutorial --status # Show progress
 
 ### Module 2: Project Setup (5 min)
 - Directory structure
-- Understanding protocols (SPIDER vs TICK)
+- Understanding protocols (SPIR vs TICK)
 - When to use which
 
 ### Module 3: Your First Spec (10 min)
@@ -123,7 +123,7 @@ agent-farm tutorial --status # Show progress
 ### Module 5: Implementation (15 min)
 - Following the TICK protocol
 - Writing tests as you go
-- When to escalate to SPIDER
+- When to escalate to SPIR
 
 ### Module 6: Review & Iterate (5 min)
 - Using the annotation viewer

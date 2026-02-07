@@ -203,8 +203,8 @@ Projects currently in development (conceived through committed), sorted by prior
     notes: "Rename SPIDER → SPIR (Specify, Plan, Implement, Review). ~250 files affected."
 
   - id: "0072"
-    title: "Ralph-SPIDER Integration Spike"
-    summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
+    title: "Ralph-SPIR Integration Spike"
+    summary: "Spike to reimagine SPIR using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
     status: integrated
     priority: high
     release: v2.0.0
@@ -226,7 +226,7 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0073"
     title: "Porch - Protocol Orchestrator"
-    summary: "Standalone CLI that runs SPIDER/TICK/BUGFIX protocols as interactive REPL with state machine enforcement and human approval gates"
+    summary: "Standalone CLI that runs SPIR/TICK/BUGFIX protocols as interactive REPL with state machine enforcement and human approval gates"
     status: integrated
     priority: high
     release: v2.0.0
@@ -244,7 +244,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: "2026-01-20T08:00:00-08:00"
       committed_at: "2026-01-20T09:00:00-08:00"
       integrated_at: "2026-01-20T10:00:00-08:00"
-    notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af. 8 rounds of 3-way review before merge."
+    notes: "Builds on Ralph-SPIR spike (0072). Three-level architecture: protocols → porch → af. 8 rounds of 3-way review before merge."
 
   - id: "0076"
     title: "Skip close confirmation for terminated shells"
@@ -271,7 +271,7 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0078"
     title: "Porch E2E Testing Infrastructure"
-    summary: "E2E test harness for porch that validates the full SPIDER protocol lifecycle with real AI interactions"
+    summary: "E2E test harness for porch that validates the full SPIR protocol lifecycle with real AI interactions"
     status: integrated
     priority: high
     release: v2.0.0
@@ -381,7 +381,7 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0069"
     title: "Checklister Agent Spike"
-    summary: "Spike to build a checklister agent that enforces SPIDER protocol compliance"
+    summary: "Spike to build a checklister agent that enforces SPIR protocol compliance"
     status: integrated
     priority: high
     release: v2.0.0
@@ -403,7 +403,7 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0068"
     title: "Codev 2.0 - Cloud Tower + Deterministic Core"
-    summary: "Major platform rewrite: cloud-hosted tower, mobile access, deterministic SPIDER enforcement"
+    summary: "Major platform rewrite: cloud-hosted tower, mobile access, deterministic SPIR enforcement"
     status: conceived
     priority: high
     release: v2.0.0
@@ -421,7 +421,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Meta-spec for Codev 2.0. Three pillars: (1) Terminal/Dashboard rewrite, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIDER enforcement. Supersedes 0066/0067."
+    notes: "Meta-spec for Codev 2.0. Three pillars: (1) Terminal/Dashboard rewrite, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIR enforcement. Supersedes 0066/0067."
 
   - id: "0067"
     title: "Agent Farm Architecture Rewrite"
@@ -612,7 +612,7 @@ releases:
     name: "TBD"
     status: planning
     target_date: "2026-Q3"
-    notes: "Major platform rewrite. Three pillars: (1) node-pty terminal layer, React dashboard, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIDER enforcement via workflow engine."
+    notes: "Major platform rewrite. Three pillars: (1) node-pty terminal layer, React dashboard, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIR enforcement via workflow engine."
 
   - version: "v1.6.0"
     name: "Gothic"
@@ -1053,6 +1053,6 @@ To see high-priority work, search for `priority: high`.
 Before starting a project, verify its dependencies are at least `implemented`.
 
 ### Protocol Selection
-- **SPIDER**: Most projects (formal spec → plan → implement → review)
+- **SPIR**: Most projects (formal spec → plan → implement → review)
 - **TICK**: Small, well-defined tasks (< 300 lines) or amendments to existing specs
 - **EXPERIMENT**: Research/prototyping before committing to a project

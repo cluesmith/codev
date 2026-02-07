@@ -4,7 +4,7 @@
 - **ID**: 0086
 - **Status**: conceived
 - **Created**: 2026-01-30
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Amends**: 0075 (Porch Minimal Redesign)
 
 ---

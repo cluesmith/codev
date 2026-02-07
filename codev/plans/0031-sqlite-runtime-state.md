@@ -3,7 +3,7 @@
 ## Metadata
 - **ID**: 0031
 - **Spec**: codev/specs/0031-sqlite-runtime-state.md
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Created**: 2025-12-05
 
 ## Overview

@@ -23,7 +23,7 @@ describe('porch state management', () => {
 
   // Sample protocol for testing
   const sampleProtocol: Protocol = {
-    name: 'spider',
+    name: 'spir',
     version: '1.0.0',
     phases: [
       { id: 'specify', name: 'Specification', gate: 'spec_approval', next: 'plan' },
@@ -42,7 +42,7 @@ describe('porch state management', () => {
     return {
       id: '0074',
       title: 'test-feature',
-      protocol: 'spider',
+      protocol: 'spir',
       phase: 'specify',
       plan_phases: [],
       current_plan_phase: null,
@@ -128,7 +128,7 @@ updated_at: "${state.updated_at}"
       const read = readState(statusFile);
       expect(read.id).toBe('0074');
       expect(read.title).toBe('test-feature');
-      expect(read.protocol).toBe('spider');
+      expect(read.protocol).toBe('spir');
       expect(read.phase).toBe('specify');
     });
   });
@@ -192,7 +192,7 @@ updated_at: "${state.updated_at}"
 
       expect(state.id).toBe('0075');
       expect(state.title).toBe('new-feature');
-      expect(state.protocol).toBe('spider');
+      expect(state.protocol).toBe('spir');
       expect(state.phase).toBe('specify');
     });
 
@@ -225,7 +225,7 @@ updated_at: "${state.updated_at}"
       // Create a project
       const projectDir = path.join(projectsDir, '0074-test-feature');
       fs.mkdirSync(projectDir, { recursive: true });
-      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0074"\nprotocol: spider\nphase: specify\n');
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0074"\nprotocol: spir\nphase: specify\n');
 
       const result = findStatusPath(testDir, '0074');
 

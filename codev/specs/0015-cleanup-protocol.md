@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0015-cleanup-protocol
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: specified
 - **Created**: 2025-12-03
 - **Priority**: medium
@@ -132,7 +132,7 @@ Per `codev/resources/conceptual-model.md`, CLEANUP is correctly classified as a 
 ## References
 
 - `codev/resources/conceptual-model.md` - Case study on CLEANUP
-- `codev/protocols/spider/protocol.md` - Protocol structure reference
+- `codev/protocols/spir/protocol.md` - Protocol structure reference
 
 ## Expert Consultation
 **Date**: 2025-12-03

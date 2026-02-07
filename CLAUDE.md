@@ -6,7 +6,7 @@
 
 **THIS IS THE CODEV SOURCE REPOSITORY - WE ARE SELF-HOSTED**
 
-This project IS Codev itself, and we use our own methodology for development. All new features and improvements to Codev should follow the SPIDER protocol defined in `codev/protocols/spider/protocol.md`.
+This project IS Codev itself, and we use our own methodology for development. All new features and improvements to Codev should follow the SPIR protocol defined in `codev/protocols/spir/protocol.md`.
 
 ### Important: Understanding This Repository's Structure
 
@@ -42,7 +42,7 @@ When making changes to UI code (tower, dashboard, terminal), you MUST test using
 You are working in the Codev project itself, with multiple development protocols available:
 
 **Available Protocols**:
-- **SPIDER**: Multi-phase development with consultation - `codev/protocols/spider/protocol.md`
+- **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
 - **TICK**: Amendment workflow for existing specs - `codev/protocols/tick/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
@@ -115,13 +115,13 @@ validated: [gemini, codex, claude]
 **BUGFIX uses GitHub Issues as source of truth**, not projectlist.md. See `codev/protocols/bugfix/protocol.md`.
 
 ### Use TICK for (amendments to existing specs):
-- **Amendments** to an existing SPIDER spec that is already `integrated`
+- **Amendments** to an existing SPIR spec that is already `integrated`
 - Small scope (< 300 lines of new/changed code)
 - Clear requirements that extend existing functionality
 
 **TICK modifies spec/plan in-place** and creates a new review file. Cannot be used for greenfield work.
 
-### Use SPIDER for (new features):
+### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)
 - New protocols or protocol variants
 - Major changes to existing protocols
@@ -149,7 +149,7 @@ validated: [gemini, codex, claude]
 
 1. **When asked to build NEW FEATURES FOR CODEV**: Start with the Specification phase
 2. **Create exactly THREE documents per feature**: spec, plan, and review (all with same filename)
-3. **Follow the SP(IDE)R phases**: Specify → Plan → (Implement → Defend → Evaluate) → Review
+3. **Follow the SPIR phases**: Specify → Plan → Implement → Review
 4. **Use multi-agent consultation by default** unless user says "without consultation"
 
 ## Directory Structure
@@ -157,7 +157,7 @@ validated: [gemini, codex, claude]
 project-root/
 ├── codev/
 │   ├── protocols/           # Development protocols
-│   │   ├── spider/         # Multi-phase development with consultation
+│   │   ├── spir/          # Multi-phase development with consultation
 │   │   ├── tick/           # Fast autonomous implementation
 │   │   ├── experiment/     # Disciplined experimentation
 │   │   └── maintain/       # Codebase maintenance (code + docs)
@@ -252,12 +252,12 @@ Agent Farm is configured via `af-config.json` at the project root. Created durin
 
 ## Porch - Protocol Orchestrator
 
-Porch drives SPIDER, TICK, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
+Porch drives SPIR, TICK, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
 
 ### Key Commands
 
 ```bash
-porch init spider 0073 "feature-name" --worktree .builders/0073
+porch init spir 0073 "feature-name" --worktree .builders/0073
 porch status 0073
 porch run 0073
 porch approve 0073 spec-approval    # Human only
@@ -297,7 +297,7 @@ git add src/components/TodoList.tsx
 
 ### Branch Naming
 ```
-spider/0001-feature-name/phase-name
+spir/0001-feature-name/phase-name
 builder/bugfix-42-description
 ```
 
@@ -357,8 +357,8 @@ git log --oneline --all | grep -i "feature-name"
 
 ## Important Notes
 
-1. **ALWAYS check `codev/protocols/spider/protocol.md`** for detailed phase instructions
-2. **Use provided templates** from `codev/protocols/spider/templates/`
+1. **ALWAYS check `codev/protocols/spir/protocol.md`** for detailed phase instructions
+2. **Use provided templates** from `codev/protocols/spir/templates/`
 3. **Document all deviations** from the plan with reasoning
 4. **Create atomic commits** for each phase completion
 5. **Maintain >90% test coverage** where possible

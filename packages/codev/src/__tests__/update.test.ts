@@ -112,7 +112,7 @@ describe('update command', () => {
       // Create a "user modified" file
       const originalContent = '# Original from template';
       const userContent = '# User modified version';
-      fs.writeFileSync(path.join(codevDir, 'protocols', 'spider.md'), userContent);
+      fs.writeFileSync(path.join(codevDir, 'protocols', 'spir.md'), userContent);
 
       // Create hash store with the original hash (different from current file)
       const { hashFile } = await import('../lib/templates.js');
@@ -122,7 +122,7 @@ describe('update command', () => {
       fs.writeFileSync(tempPath, originalContent);
       const originalHash = hashFile(tempPath);
 
-      const hashStore = { 'protocols/spider.md': originalHash };
+      const hashStore = { 'protocols/spir.md': originalHash };
       fs.writeFileSync(
         path.join(codevDir, '.update-hashes.json'),
         JSON.stringify(hashStore)
@@ -150,7 +150,7 @@ describe('update command', () => {
 
       // Create initial hash store
       const initialHashes = {
-        'protocols/spider.md': 'hash1',
+        'protocols/spir.md': 'hash1',
         'roles/architect.md': 'hash2',
       };
       fs.writeFileSync(

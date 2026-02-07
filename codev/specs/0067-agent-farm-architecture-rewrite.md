@@ -4,7 +4,7 @@
 - **ID**: 0067
 - **Status**: conceived
 - **Created**: 2026-01-12
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Clarifying Questions Asked
 

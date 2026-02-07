@@ -368,7 +368,7 @@ mkdir -p codev/status
 cat > codev/status/test-project.md << 'EOF'
 ---
 id: "test"
-protocol: SPIDER
+protocol: SPIR
 current_phase: specify
 gates:
   specify_to_plan:

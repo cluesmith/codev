@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-This plan implements Porch as a standalone CLI that orchestrates development protocols (SPIDER, TICK, BUGFIX) with state machine enforcement, human approval gates, and multi-agent consultation loops. Building on the spike implementation at `packages/codev/src/commands/porch/`, we will:
+This plan implements Porch as a standalone CLI that orchestrates development protocols (SPIR, TICK, BUGFIX) with state machine enforcement, human approval gates, and multi-agent consultation loops. Building on the spike implementation at `packages/codev/src/commands/porch/`, we will:
 
 1. Extract porch to a standalone binary (`porch` not `codev porch`)
 2. Implement the new project structure (`codev/projects/<id>/` and `worktrees/`)
@@ -30,7 +30,7 @@ This plan implements Porch as a standalone CLI that orchestrates development pro
 
 ### Testing
 - [ ] Unit test coverage >80% for core state machine
-- [ ] E2E tests for SPIDER, TICK, BUGFIX protocols pass
+- [ ] E2E tests for SPIR, TICK, BUGFIX protocols pass
 - [ ] `--dry-run` mode shows accurate execution plan
 - [ ] `--no-claude` mode runs full state machine with mocks
 - [ ] CI pipeline passes all tests before merge
@@ -63,12 +63,12 @@ This plan implements Porch as a standalone CLI that orchestrates development pro
 **New structure (in codev-skeleton, then import to our project):**
 ```
 codev-skeleton/
-├── projects/              # SPIDER projects (empty template)
+├── projects/              # SPIR projects (empty template)
 ├── executions/            # TICK/BUGFIX state (empty template)
 
 # After import, a project looks like:
 codev/
-├── projects/              # SPIDER projects
+├── projects/              # SPIR projects
 │   └── 0073-user-auth/
 │       ├── spec.md
 │       ├── plan.md
@@ -87,9 +87,9 @@ codev/
 ```yaml
 id: "0073"
 title: "user-auth"
-protocol: "spider"
+protocol: "spir"
 state: "specify:review"
-worktree: "worktrees/spider_0073_user-auth"
+worktree: "worktrees/spir_0073_user-auth"
 
 gates:
   specify_approval: { status: pending }
@@ -169,11 +169,11 @@ log:
 ```bash
 # Protocol discovery
 porch list-protocols              # List available protocols
-porch show-protocol spider        # Show protocol definition
+porch show-protocol spir        # Show protocol definition
 
 # Project management
 porch list-projects               # List all projects and their states
-porch init --protocol=spider --project-id=0073   # Initialize project
+porch init --protocol=spir --project-id=0073   # Initialize project
 porch status 0073                 # Show specific project status
 
 # Execution (REPL mode)
@@ -414,7 +414,7 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
 **Worktree naming (extensible for any protocol):**
 - Pattern: `worktrees/<protocol>_<id>_<name>`
 - Examples:
-  - SPIDER: `worktrees/spider_0073_user-auth`
+  - SPIR: `worktrees/spir_0073_user-auth`
   - TICK: `worktrees/tick_0073_add-feature`
   - BUGFIX: `worktrees/bugfix_142`
   - MAINTAIN: `worktrees/maintain_2026-01`
@@ -481,18 +481,18 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
 
 ---
 
-### Phase 6: Protocol JSON Definitions (SPIDER, TICK, BUGFIX)
+### Phase 6: Protocol JSON Definitions (SPIR, TICK, BUGFIX)
 
 **Dependencies**: None (can be done in parallel)
 
 #### Objectives
-- Create protocol.json files for SPIDER, TICK, BUGFIX
+- Create protocol.json files for SPIR, TICK, BUGFIX
 - Keep protocol.md alongside for human reference
 - Update skeleton structure
 - Define distinct behaviors for each protocol
 
 #### Deliverables
-- [ ] `codev-skeleton/protocols/spider/protocol.json`
+- [ ] `codev-skeleton/protocols/spir/protocol.json`
 - [ ] `codev-skeleton/protocols/tick/protocol.json`
 - [ ] `codev-skeleton/protocols/bugfix/protocol.json`
 - [ ] Prompts in protocol-specific directories
@@ -503,7 +503,7 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
 **New structure:**
 ```
 codev-skeleton/protocols/
-├── spider/
+├── spir/
 │   ├── protocol.json
 │   ├── protocol.md      # Human reference (kept)
 │   └── prompts/
@@ -520,10 +520,10 @@ codev-skeleton/protocols/
     └── prompts/
 ```
 
-**SPIDER protocol.json (key parts):**
+**SPIR protocol.json (key parts):**
 ```json
 {
-  "name": "spider",
+  "name": "spir",
   "version": "2.0.0",
   "phases": [
     {
@@ -622,7 +622,7 @@ codev-skeleton/protocols/
 
 **Key differences:**
 
-| Feature | SPIDER | TICK | BUGFIX |
+| Feature | SPIR | TICK | BUGFIX |
 |---------|--------|------|--------|
 | Human gates | Yes (specify, plan) | No | No |
 | Consultation | Yes (3-way) | Optional | No |
@@ -701,7 +701,7 @@ codev-skeleton/protocols/
 packages/codev/src/commands/porch/__tests__/
 ├── fixtures/
 │   ├── protocols/
-│   │   ├── test-spider.json      # Simplified SPIDER for testing
+│   │   ├── test-spir.json      # Simplified SPIR for testing
 │   │   └── test-simple.json      # 2-phase protocol for fast tests
 │   ├── projects/
 │   │   ├── sample-spec.md        # Sample spec for parsing tests
@@ -714,7 +714,7 @@ packages/codev/src/commands/porch/__tests__/
 ├── signal-parser.test.ts         # Signal extraction tests
 ├── consultation.test.ts          # Consultation loop tests
 ├── e2e/
-│   ├── spider-full.test.ts       # Full SPIDER E2E
+│   ├── spir-full.test.ts       # Full SPIR E2E
 │   ├── tick-full.test.ts         # Full TICK E2E
 │   └── dry-run.test.ts           # Dry-run verification
 └── helpers/
@@ -750,18 +750,18 @@ const porch = new Porch({
 **E2E test example:**
 
 ```typescript
-// e2e/spider-full.test.ts
+// e2e/spir-full.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestProject, cleanupTestProject } from '../helpers/test-project';
 import { MockClaude, MockConsult } from '../helpers/mocks';
 import { Porch } from '../../index';
 
-describe('SPIDER E2E', () => {
+describe('SPIR E2E', () => {
   let projectDir: string;
   let porch: Porch;
 
   beforeEach(async () => {
-    projectDir = await createTestProject('spider', '9999');
+    projectDir = await createTestProject('spir', '9999');
     porch = new Porch({
       projectRoot: projectDir,
       claudeAdapter: new MockClaude(),
@@ -773,9 +773,9 @@ describe('SPIDER E2E', () => {
     await cleanupTestProject(projectDir);
   });
 
-  it('follows full SPIDER protocol with mock gates', async () => {
+  it('follows full SPIR protocol with mock gates', async () => {
     // Initialize
-    await porch.init({ protocol: 'spider', projectId: '9999' });
+    await porch.init({ protocol: 'spir', projectId: '9999' });
     expect(porch.getState()).toBe('specify:draft');
 
     // Run specify phase (mock Claude emits SPEC_DRAFTED)
@@ -810,7 +810,7 @@ describe('SPIDER E2E', () => {
     });
 
     // Should require 2 consultation rounds
-    await porch.init({ protocol: 'spider', projectId: '9999' });
+    await porch.init({ protocol: 'spir', projectId: '9999' });
     await porch.runUntilGate();
 
     const status = porch.getStatus();
@@ -852,7 +852,7 @@ npm test -- --coverage packages/codev/src/commands/porch
 
 #### Acceptance Criteria
 - [ ] >80% code coverage on core state machine
-- [ ] E2E tests pass for SPIDER, TICK, BUGFIX protocols
+- [ ] E2E tests pass for SPIR, TICK, BUGFIX protocols
 - [ ] Dry-run mode produces accurate execution plan
 - [ ] Mock infrastructure allows testing without real Claude/consult
 - [ ] Tests run in <30 seconds (unit) and <2 minutes (E2E)
@@ -956,7 +956,7 @@ Testing runs in parallel with development:
    - >80% coverage on core modules
    - E2E tests for all protocols
    - `--dry-run` output verified
-7. **Before Release**: Full SPIDER workflow tested end-to-end
+7. **Before Release**: Full SPIR workflow tested end-to-end
    - Manual test with real Claude on sample project
 
 ## Documentation Updates Required
@@ -968,7 +968,7 @@ Testing runs in parallel with development:
 
 ## Post-Implementation Tasks
 
-- [ ] End-to-end SPIDER protocol test
+- [ ] End-to-end SPIR protocol test
 - [ ] End-to-end TICK protocol test
 - [ ] End-to-end BUGFIX protocol test
 - [ ] Performance validation (consultation timing)

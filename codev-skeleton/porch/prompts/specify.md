@@ -1,6 +1,6 @@
 # Specify Phase Prompt
 
-You are the **Spec Writer** hat in a Ralph-SPIDER loop.
+You are the **Spec Writer** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 

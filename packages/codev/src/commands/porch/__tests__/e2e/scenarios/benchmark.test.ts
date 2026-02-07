@@ -3,7 +3,7 @@
  *
  * Compares execution time and quality between:
  * - Strict mode: porch orchestrates build-verify cycles with 3-way consultation
- * - Soft mode: claude -p follows SPIDER protocol autonomously
+ * - Soft mode: claude -p follows SPIR protocol autonomously
  *
  * Both modes use the same trivial spec (add a version constant).
  * Specs and plans are pre-approved to skip specify/plan phases.
@@ -75,8 +75,8 @@ validated: [gemini, codex, claude]
 - Add \`src/__tests__/version.test.ts\` that imports \`BENCHMARK_VERSION\` and verifies it matches \`/^\\d+\\.\\d+\\.\\d+$/\`
 `;
 
-/** Prompt for soft mode Claude to follow SPIDER protocol */
-const SOFT_MODE_PROMPT = `You are implementing Spec 9990 for a project. Follow the SPIDER protocol:
+/** Prompt for soft mode Claude to follow SPIR protocol */
+const SOFT_MODE_PROMPT = `You are implementing Spec 9990 for a project. Follow the SPIR protocol:
 
 1. Read the spec at codev/specs/9990-benchmark-version-constant.md
 2. Read the plan at codev/plans/9990-benchmark-version-constant.md

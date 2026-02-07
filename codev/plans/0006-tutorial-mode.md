@@ -175,7 +175,7 @@ Each step file implements `StepFunction`:
 - Mention multi-agent consultation (brief)
 
 **Module 5: Implementation Demo** (`implementation.ts`)
-- Explain TICK vs SPIDER choice
+- Explain TICK vs SPIR choice
 - Show how to use `af spawn`
 - Demonstrate basic workflow
 - Point to documentation for more

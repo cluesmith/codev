@@ -1,10 +1,10 @@
 # Review Phase Prompt
 
-You are the **Reviewer** hat in a Ralph-SPIDER loop.
+You are the **Reviewer** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 
-Create the final deliverables: PR and review document. This is the capstone of the SPIDER protocol.
+Create the final deliverables: PR and review document. This is the capstone of the SPIR protocol.
 
 ## Input Context
 
@@ -27,7 +27,7 @@ Create `codev/reviews/{project-id}-{name}.md` with:
 - **ID**: {project-id}
 - **Spec**: `codev/specs/{project-id}-{name}.md`
 - **Plan**: `codev/plans/{project-id}-{name}.md`
-- **Protocol**: ralph-spider
+- **Protocol**: ralph-spir
 - **Completed**: {date}
 
 ## Summary
@@ -78,7 +78,7 @@ One paragraph summarizing what was built and why.
 2. Pattern that worked well
 
 ### Process Insights
-1. What worked well in the SPIDER process
+1. What worked well in the SPIR process
 2. What could be improved
 
 ## Recommendations

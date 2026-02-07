@@ -1,17 +1,17 @@
 # Spec 0065: BUGFIX Protocol and CLI Support
 
 **Status**: Draft
-**Protocol**: SPIDER
+**Protocol**: SPIR
 **Priority**: High
 **Created**: 2026-01-03
 
 ## Problem Statement
 
 Codev currently has two protocols for development work:
-- **SPIDER**: Full specification → planning → implementation cycle for new features
-- **TICK**: Amendments to existing SPIDER specs
+- **SPIR**: Full specification → planning → implementation cycle for new features
+- **TICK**: Amendments to existing SPIR specs
 
-Neither is appropriate for **minor bugfixes** reported as GitHub Issues. SPIDER is too heavyweight (specs, plans, reviews), and TICK requires an existing spec to amend.
+Neither is appropriate for **minor bugfixes** reported as GitHub Issues. SPIR is too heavyweight (specs, plans, reviews), and TICK requires an existing spec to amend.
 
 We need a lightweight protocol for bug fixes that:
 1. Integrates with GitHub Issues as the trigger
@@ -24,9 +24,9 @@ We need a lightweight protocol for bug fixes that:
 ### Must Have
 
 1. **BUGFIX Protocol** - A documented protocol for handling minor bugs
-   - Clear scope boundaries (when to use vs. escalate to SPIDER)
+   - Clear scope boundaries (when to use vs. escalate to SPIR)
    - Defined workflow from issue → fix → merge → cleanup
-   - CMAP review at PR stage (intentionally lighter than SPIDER's throughout-consultation)
+   - CMAP review at PR stage (intentionally lighter than SPIR's throughout-consultation)
    - Success criteria checklist for builders
    - Edge case handling (can't reproduce, too complex, etc.)
 
@@ -44,7 +44,7 @@ We need a lightweight protocol for bug fixes that:
 
 4. **Builder Role Clarity**
    - Builder knows they're in BUGFIX mode (via task context)
-   - Clear differences from SPIDER builder workflow
+   - Clear differences from SPIR builder workflow
    - No spec/plan artifacts to produce
 
 ### Should Have
@@ -148,7 +148,7 @@ Builder escalates to Architect when:
 |----------|--------|
 | Cannot reproduce | Document attempts in issue, ask for more details, notify Architect |
 | Issue already closed | Check with Architect before starting |
-| Fix too complex | Notify Architect with details, recommend SPIDER |
+| Fix too complex | Notify Architect with details, recommend SPIR |
 | Unrelated test failures | Do NOT fix (out of scope), notify Architect |
 | Documentation-only bug | Use BUGFIX (still a valid bug) |
 | Stale "On it" comment | If no PR after 24h, comment "Stalled - clearing lock" and continue |
@@ -157,7 +157,7 @@ Builder escalates to Architect when:
 
 #### CMAP Review Strategy
 
-BUGFIX uses **PR-only CMAP reviews** (not throughout like SPIDER). This is intentional:
+BUGFIX uses **PR-only CMAP reviews** (not throughout like SPIR). This is intentional:
 
 - **Why**: BUGFIX scope is small enough that mid-implementation review adds overhead without benefit
 - **When**: Builder runs 3-way CMAP before marking PR ready; Architect runs 3-way integration review
@@ -241,7 +241,7 @@ Bugfix builders appear with:
 [Bugfix #N] Test: <what test was added>
 ```
 
-This differs from SPIDER's `[Spec XXXX][Phase]` format intentionally:
+This differs from SPIR's `[Spec XXXX][Phase]` format intentionally:
 - Issue numbers are shorter (no leading zeros)
 - No phase names (BUGFIX is single-phase conceptually)
 - Aligns with GitHub's `Fixes #N` convention
@@ -456,7 +456,7 @@ Add `tests/e2e/bugfix.bats` for full workflow testing:
 
 ## Triage Guidelines
 
-Use these guidelines to determine whether an issue is appropriate for BUGFIX or should escalate to SPIDER:
+Use these guidelines to determine whether an issue is appropriate for BUGFIX or should escalate to SPIR:
 
 ### Use BUGFIX when:
 - Clear reproduction steps provided
@@ -465,7 +465,7 @@ Use these guidelines to determine whether an issue is appropriate for BUGFIX or 
 - Fix is straightforward once root cause is understood
 - < 300 LOC expected (net diff)
 
-### Escalate to SPIDER when:
+### Escalate to SPIR when:
 - "Feature request disguised as bug" (e.g., "bug: should support dark mode")
 - Requires new specs or design discussion
 - Affects multiple systems or services
@@ -479,17 +479,17 @@ Use these guidelines to determine whether an issue is appropriate for BUGFIX or 
 Is there a GitHub Issue?
 ├── NO → Create issue first, then continue
 └── YES → Is it actually a bug (not feature request)?
-    ├── NO → Create SPIDER spec for the feature
+    ├── NO → Create SPIR spec for the feature
     └── YES → Is it isolated to one module?
-        ├── NO → Escalate to SPIDER
+        ├── NO → Escalate to SPIR
         └── YES → Is fix expected < 300 LOC?
-            ├── NO → Escalate to SPIDER
+            ├── NO → Escalate to SPIR
             └── YES → Use BUGFIX ✓
 ```
 
 ## Appendix: Comparison with Other Protocols
 
-| Aspect | BUGFIX | TICK | SPIDER |
+| Aspect | BUGFIX | TICK | SPIR |
 |--------|--------|------|--------|
 | **Trigger** | GitHub Issue | Amendment need | New feature |
 | **Spec required** | No | Existing spec | New spec |

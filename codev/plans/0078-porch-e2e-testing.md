@@ -2,7 +2,7 @@
 
 ## Overview
 
-Build an E2E test harness for porch that runs real AI interactions through the full SPIDER protocol lifecycle.
+Build an E2E test harness for porch that runs real AI interactions through the full SPIR protocol lifecycle.
 
 ## Dependencies
 
@@ -24,7 +24,7 @@ Build an E2E test harness for porch that runs real AI interactions through the f
     {
       "id": "phase_2",
       "title": "Happy Path Scenario",
-      "description": "Implement the full SPIDER lifecycle test with real AI calls"
+      "description": "Implement the full SPIR lifecycle test with real AI calls"
     },
     {
       "id": "phase_3",
@@ -77,7 +77,7 @@ export async function createTestProject(): Promise<TestContext> {
   await exec('git commit -m "Initial commit"', { cwd: tempDir });
 
   // 5. Initialize porch project
-  await exec(`porch init spider 9999 "test-feature"`, { cwd: tempDir });
+  await exec(`porch init spir 9999 "test-feature"`, { cwd: tempDir });
 
   return { tempDir, projectId: '9999' };
 }
@@ -97,7 +97,7 @@ if (process.env.PORCH_AUTO_APPROVE === 'true') {
 
 ### Phase 2: Happy Path Scenario
 
-**Goal:** Test the full SPIDER lifecycle with real AI.
+**Goal:** Test the full SPIR lifecycle with real AI.
 
 **Files to create:**
 
@@ -265,7 +265,7 @@ export default defineConfig({
 | Phase | Deliverable | Verification |
 |-------|-------------|--------------|
 | 1 | Test harness runs | `npm run test:e2e` executes without crash |
-| 2 | Happy path passes | Full SPIDER lifecycle completes |
+| 2 | Happy path passes | Full SPIR lifecycle completes |
 | 3 | Edge cases pass | Feedback loop and max iterations work |
 
 ## Estimated Scope

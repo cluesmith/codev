@@ -33,7 +33,7 @@ Currently, there is no automated way to verify that the Codev installation proce
 - [ ] Test suite can simulate a fresh installation
 - [ ] Tests verify all files are created in correct locations
 - [ ] Tests validate file contents match expected templates
-- [ ] Tests handle both SPIDER and SPIDER-SOLO installation paths
+- [ ] Tests handle both SPIR and SPIR-SOLO installation paths
 - [ ] Tests can simulate presence/absence of Zen MCP server
 - [ ] Tests can verify CLAUDE.md updates (both new and existing files)
 - [ ] Test suite can be run with a single command
@@ -162,7 +162,7 @@ Currently, there is no automated way to verify that the Codev installation proce
 1. Fresh installation with no existing files
 2. Installation with existing CLAUDE.md file
 3. Installation with Zen MCP server available
-4. Installation without Zen MCP server (falls back to SPIDER-SOLO)
+4. Installation without Zen MCP server (falls back to SPIR-SOLO)
 5. Verify all directories are created (specs/, plans/, reviews/, resources/, protocols/)
 6. Verify protocol files are copied correctly
 7. Verify llms.txt is created in resources/
@@ -204,8 +204,8 @@ Edge case testing deferred per user feedback - focusing on happy path for v1.
    - Tests on Unix-like systems only
 
 2. **Core "happy path" tests**:
-   - Fresh installation with SPIDER protocol (Zen present)
-   - Fresh installation with SPIDER-SOLO (Zen absent)
+   - Fresh installation with SPIR protocol (Zen present)
+   - Fresh installation with SPIR-SOLO (Zen absent)
    - Basic file structure validation
    - CLAUDE.md creation verification
    - **Existing CLAUDE.md updates** (common case, per user feedback)

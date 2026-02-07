@@ -71,23 +71,23 @@ Keep Codev as the engine. Add Skills as a natural language interface.
 ├── review/
 │   └── SKILL.md       # Run 3-way consultation
 ├── plan/
-│   └── SKILL.md       # Create spec and plan (SPIDER S+P)
+│   └── SKILL.md       # Create spec and plan (SPIR S+P)
 └── maintain/
 │   └── SKILL.md       # Run MAINTAIN protocol
 ```
 
-## How to Represent SPIDER in Skills
+## How to Represent SPIR in Skills
 
-SPIDER has 6 phases: Specify → Plan → Implement → Defend → Evaluate → Review
+SPIR has 6 phases: Specify → Plan → Implement → Defend → Evaluate → Review
 
-**You cannot represent the full SPIDER loop in Skills** because:
+**You cannot represent the full SPIR loop in Skills** because:
 - Implement/Defend/Evaluate run in a builder (separate process)
 - Skills cannot spawn builders
 - Skills cannot wait for async completion
 
 **What you CAN do**: Create skills for the phases the Architect controls:
 
-| SPIDER Phase | Who Does It | Skill? |
+| SPIR Phase | Who Does It | Skill? |
 |--------------|-------------|--------|
 | **Specify** | Architect | ✅ `/plan` skill guides spec creation |
 | **Plan** | Architect | ✅ `/plan` skill guides plan creation |
@@ -96,16 +96,16 @@ SPIDER has 6 phases: Specify → Plan → Implement → Defend → Evaluate → 
 | **Evaluate** | Builder | ❌ Builder does this |
 | **Review** | Architect | ✅ `/review` skill runs 3-way consultation |
 
-### The `/plan` Skill (SPIDER S+P)
+### The `/plan` Skill (SPIR S+P)
 
 ```yaml
 ---
 name: plan
-description: Create a new feature spec and plan following SPIDER protocol. Use when starting new work.
+description: Create a new feature spec and plan following SPIR protocol. Use when starting new work.
 allowed-tools: Read, Write, Edit, Glob, Grep
 ---
 
-# Plan Skill - SPIDER Specify + Plan
+# Plan Skill - SPIR Specify + Plan
 
 ## When to Use
 User wants to start new work: "Let's implement X", "I need to build Y"
@@ -113,16 +113,16 @@ User wants to start new work: "Let's implement X", "I need to build Y"
 ## Workflow
 
 1. **Check projectlist.md** for next available spec number
-2. **Create spec** using template from codev/protocols/spider/templates/spec.md
+2. **Create spec** using template from codev/protocols/spir/templates/spec.md
 3. **Consult** (remind user to run: consult --model gemini spec XXXX)
-4. **Create plan** using template from codev/protocols/spider/templates/plan.md
+4. **Create plan** using template from codev/protocols/spir/templates/plan.md
 5. **Consult** (remind user to run: consult --model codex plan XXXX)
 6. **Commit** spec and plan
 7. **Ready to spawn**: Tell user to run `af spawn -p XXXX`
 
 ## Templates
-- Spec: [codev/protocols/spider/templates/spec.md](../../protocols/spider/templates/spec.md)
-- Plan: [codev/protocols/spider/templates/plan.md](../../protocols/spider/templates/plan.md)
+- Spec: [codev/protocols/spir/templates/spec.md](../../protocols/spir/templates/spec.md)
+- Plan: [codev/protocols/spir/templates/plan.md](../../protocols/spir/templates/plan.md)
 ```
 
 ### The `/implement` Skill
@@ -242,7 +242,7 @@ Tell user: http://localhost:4200
 ### Don't: Create a "builder" skill
 Skills cannot BE a builder. A builder is a separate Claude instance in a worktree.
 
-### Don't: Try to run SPIDER entirely in Skills
+### Don't: Try to run SPIR entirely in Skills
 The I-D-E phases require an autonomous agent. Skills can't do that.
 
 ### Don't: Put Codev's internal logic in Skills
@@ -272,6 +272,6 @@ Add auto-discovery so Claude suggests skills at right moments.
 | Replace Codev with Skills? | **No** |
 | Wrap Codev with Skills? | **Yes**, for UX improvement |
 | One skill or many? | **Many**, organized by user intent |
-| Represent SPIDER in Skills? | **Partially** - only Architect phases |
+| Represent SPIR in Skills? | **Partially** - only Architect phases |
 
 Skills are a **UI layer**, not a replacement for the **orchestration engine**.

@@ -4,7 +4,7 @@
 - **Spec**: [0043-codex-reliability.md](../specs/0043-codex-reliability.md)
 - **Status**: draft
 - **Created**: 2025-12-08
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Overview
 

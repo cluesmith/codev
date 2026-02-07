@@ -4,7 +4,7 @@
 - **Spec**: [0041-e2e-test-suite.md](../specs/0041-e2e-test-suite.md)
 - **Status**: draft
 - **Created**: 2025-12-08
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Overview
 

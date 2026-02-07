@@ -96,7 +96,7 @@ Implement a Python CLI wrapper that invokes gemini-cli or codex with a consultan
 - [ ] Update `CLAUDE.md` - Add consult tool to available commands
 - [ ] Update `codev-skeleton/CLAUDE.md` template
 - [ ] Update `codev/roles/architect.md` - Note consult as consultation method
-- [ ] Update SPIDER protocol docs if they reference mcp__zen__*
+- [ ] Update SPIR protocol docs if they reference mcp__zen__*
 
 ### Exit Criteria
 - Documentation mentions `consult` command

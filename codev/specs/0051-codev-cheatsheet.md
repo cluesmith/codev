@@ -1,7 +1,7 @@
 # Spec 0051: Codev Cheatsheet
 
 **Status:** planned
-**Protocol:** SPIDER
+**Protocol:** SPIR
 **Priority:** High
 **Dependencies:** None
 
@@ -34,7 +34,7 @@ Create a comprehensive cheatsheet documenting Codev's philosophies, concepts, an
 #### Philosophy 3: Human-Agent Work Requires Thoughtful Structure
 
 - Just like structuring a human team
-- Well-defined protocols (SPIDER, TICK, MAINTAIN, EXPERIMENT)
+- Well-defined protocols (SPIR, TICK, MAINTAIN, EXPERIMENT)
 - Clear roles (Architect, Builder, Consultant)
 - Leverage parallelism to scale (multiple builders, parallel reviews)
 
@@ -42,7 +42,7 @@ Create a comprehensive cheatsheet documenting Codev's philosophies, concepts, an
 
 #### Protocols
 Bullet points for each:
-- **SPIDER**: Full development cycle (Specify → Plan → Implement → Defend → Evaluate → Review)
+- **SPIR**: Full development cycle (Specify → Plan → Implement → Defend → Evaluate → Review)
 - **TICK**: Amendments to existing specs (fast, lightweight)
 - **MAINTAIN**: Periodic maintenance (code hygiene, documentation sync)
 - **EXPERIMENT**: Disciplined experimentation with clear hypotheses

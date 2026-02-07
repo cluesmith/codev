@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: 0017-platform-portability-layer
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 - **Status**: specified
 - **Created**: 2025-12-03
 - **Priority**: low
@@ -69,7 +69,7 @@ AGENTS.md                        # Generated for Codex CLI
 name: "My Project"
 default_target: claude
 protocols:
-  - spider
+  - spir
   - tick
   - cleanup
 

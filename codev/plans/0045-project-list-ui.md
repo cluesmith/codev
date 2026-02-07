@@ -4,7 +4,7 @@
 - **Spec**: [0045-project-list-ui.md](../specs/0045-project-list-ui.md)
 - **Status**: approved
 - **Created**: 2025-12-09
-- **Protocol**: SPIDER
+- **Protocol**: SPIR
 
 ## Overview
 
@@ -387,7 +387,7 @@ Based on 3-way consultation (Gemini, Codex, Claude): **Keep projectlist.md as th
 1. Add visual indicator for TICK protocol projects:
    - Check `protocol: tick` in project data
    - Show small badge or icon (🔧) next to project ID
-   - TICK projects appear in same grid as SPIDER (same lifecycle stages)
+   - TICK projects appear in same grid as SPIR (same lifecycle stages)
    - Tooltip or expansion shows "TICK amendment to spec XXXX"
 
 2. Add `renderTerminalProjects(projects)` function:

@@ -88,7 +88,7 @@ describe('template utilities', () => {
 
   describe('saveHashStore', () => {
     it('should create codev directory and save hashes', () => {
-      const hashes = { 'protocols/spider/protocol.md': 'hash123' };
+      const hashes = { 'protocols/spir/protocol.md': 'hash123' };
       saveHashStore(testDir, hashes);
 
       const savedPath = path.join(testDir, 'codev', '.update-hashes.json');
@@ -109,7 +109,7 @@ describe('template utilities', () => {
     });
 
     it('should not match non-user data paths', () => {
-      expect(isUserDataPath('protocols/spider/protocol.md')).toBe(false);
+      expect(isUserDataPath('protocols/spir/protocol.md')).toBe(false);
       expect(isUserDataPath('roles/architect.md')).toBe(false);
       expect(isUserDataPath('agents/builder.md')).toBe(false);
       expect(isUserDataPath('resources/commands/codev.md')).toBe(false);
@@ -120,7 +120,7 @@ describe('template utilities', () => {
 
   describe('isUpdatableFile', () => {
     it('should identify updatable files', () => {
-      expect(isUpdatableFile('protocols/spider/protocol.md')).toBe(true);
+      expect(isUpdatableFile('protocols/spir/protocol.md')).toBe(true);
       expect(isUpdatableFile('roles/architect.md')).toBe(true);
       expect(isUpdatableFile('agents/builder.md')).toBe(true);
       expect(isUpdatableFile('bin/agent-farm')).toBe(true);
@@ -220,12 +220,12 @@ describe('template utilities', () => {
       const srcDir = path.join(testDir, 'templates');
       fs.mkdirSync(path.join(srcDir, 'protocols'), { recursive: true });
       fs.writeFileSync(path.join(srcDir, 'root.txt'), 'root');
-      fs.writeFileSync(path.join(srcDir, 'protocols', 'spider.md'), 'spider');
+      fs.writeFileSync(path.join(srcDir, 'protocols', 'spir.md'), 'spir');
 
       const files = getTemplateFiles(srcDir);
 
       expect(files).toContain('root.txt');
-      expect(files).toContain(path.join('protocols', 'spider.md'));
+      expect(files).toContain(path.join('protocols', 'spir.md'));
     });
 
     it('should exclude .gitkeep files', () => {
@@ -247,7 +247,7 @@ describe('path validation', () => {
     it('should accept valid relative paths', () => {
       expect(isValidRelativePath('file.txt')).toBe(true);
       expect(isValidRelativePath('dir/file.txt')).toBe(true);
-      expect(isValidRelativePath('protocols/spider/protocol.md')).toBe(true);
+      expect(isValidRelativePath('protocols/spir/protocol.md')).toBe(true);
       expect(isValidRelativePath('deep/nested/path/file.md')).toBe(true);
     });
 

@@ -1,6 +1,6 @@
 # Defend Phase Prompt
 
-You are the **Tester** hat in a Ralph-SPIDER loop.
+You are the **Tester** hat in a Ralph-SPIR loop.
 
 ## Your Mission
 

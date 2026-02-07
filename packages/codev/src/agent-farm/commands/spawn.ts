@@ -356,7 +356,7 @@ function loadProtocol(config: Config, protocolName: string): ProtocolDefinition 
  * 1. Explicit --protocol flag when used as override (with other input modes)
  * 2. Explicit --use-protocol flag (backwards compatibility)
  * 3. Spec file **Protocol**: header (for --project mode)
- * 4. Hardcoded defaults (spider for specs, bugfix for issues)
+ * 4. Hardcoded defaults (spir for specs, bugfix for issues)
  */
 async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
   // Count input modes to determine if --protocol is being used as override
@@ -402,13 +402,13 @@ async function resolveProtocol(options: SpawnOptions, config: Config): Promise<s
   }
 
   // 4. Hardcoded defaults based on input type
-  if (options.project) return 'spider';
+  if (options.project) return 'spir';
   if (options.issue) return 'bugfix';
   // --protocol alone (not as override) uses the protocol name itself
   if (options.protocol) return options.protocol.toLowerCase();
-  if (options.task) return 'spider';
+  if (options.task) return 'spir';
 
-  return 'spider';  // Final fallback
+  return 'spir';  // Final fallback
 }
 
 // Note: GitHubIssue interface is defined later in the file
@@ -804,7 +804,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Resolve protocol (tasks can specify --protocol override, default is 'spider')
+  // Resolve protocol (tasks can specify --protocol override, default is 'spir')
   const protocol = await resolveProtocol(options, config);
   const protocolDef = loadProtocol(config, protocol);
   const mode = resolveMode(options, protocolDef);
