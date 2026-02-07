@@ -88,6 +88,8 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     }
 
     fitAddon.fit();
+    // Re-fit after a short delay to catch CSS layout settling
+    const refitTimer = setTimeout(() => fitAddon.fit(), 100);
 
     // Build WebSocket URL from the relative path
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -181,6 +183,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      clearTimeout(refitTimer);
       if (flushTimer) clearTimeout(flushTimer);
       resizeObserver.disconnect();
       ws.close();

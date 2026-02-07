@@ -24,7 +24,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
 
   for (const builder of state?.builders ?? []) {
     tabs.push({
-      id: `builder-${builder.id}`,
+      id: builder.id,
       type: 'builder',
       label: builder.name || `Builder ${builder.id}`,
       closable: true,
@@ -37,7 +37,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
     // Skip stale utils with no running process and no terminal session
     if (!util.terminalId && (!util.pid || util.pid === 0)) continue;
     tabs.push({
-      id: `shell-${util.id}`,
+      id: util.id,
       type: 'shell',
       label: util.name || `Shell ${util.id}`,
       closable: true,
@@ -49,7 +49,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
   for (const ann of state?.annotations ?? []) {
     const fileName = ann.file.split('/').pop() ?? ann.file;
     tabs.push({
-      id: `file-${ann.id}`,
+      id: ann.id,
       type: 'file',
       label: fileName,
       closable: true,

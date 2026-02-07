@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename, resolve, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -139,6 +139,56 @@ async function sendToBuilder(
 }
 
 /**
+ * Detect project root from CWD by walking up to find .git or af-config.json.
+ * Builder worktrees are at .builders/<id>/ which is inside the project root.
+ */
+function detectProjectRoot(): string | null {
+  let dir = process.cwd();
+  // If inside .builders/<id>/, the project root is two levels up
+  const buildersMatch = dir.match(/^(.+?)\/\.builders\/[^/]+/);
+  if (buildersMatch) return buildersMatch[1];
+  // Walk up looking for markers
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(dir, 'af-config.json')) || existsSync(join(dir, '.git'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Find the architect tmux session name.
+ * Checks state.db first (legacy), then falls back to Tower naming convention.
+ */
+async function findArchitectTmuxSession(): Promise<string> {
+  // Try legacy state.db first
+  const architect = getArchitect();
+  if (architect?.tmuxSession) {
+    try {
+      await run(`tmux has-session -t "${architect.tmuxSession}" 2>/dev/null`);
+      return architect.tmuxSession;
+    } catch {
+      // Session recorded but no longer exists — fall through
+    }
+  }
+
+  // Fallback: Tower creates architect sessions as "architect-<project-basename>"
+  const projectRoot = detectProjectRoot();
+  if (projectRoot) {
+    const candidateSession = `architect-${basename(projectRoot)}`;
+    try {
+      await run(`tmux has-session -t "${candidateSession}" 2>/dev/null`);
+      return candidateSession;
+    } catch {
+      // Session doesn't exist
+    }
+  }
+
+  throw new Error('Architect not running. Use "af status" to check.');
+}
+
+/**
  * Send a message to the architect (from a builder)
  */
 async function sendToArchitect(
@@ -146,28 +196,11 @@ async function sendToArchitect(
   message: string,
   options: SendOptions
 ): Promise<void> {
-  const architect = getArchitect();
-
-  if (!architect) {
-    throw new Error('Architect not running. Use "af status" to check.');
-  }
-
-  if (!architect.tmuxSession) {
-    throw new Error('Architect has no tmux session recorded.');
-  }
-
-  // Verify session exists
-  try {
-    await run(`tmux has-session -t "${architect.tmuxSession}" 2>/dev/null`);
-  } catch {
-    throw new Error(
-      `tmux session "${architect.tmuxSession}" not found (architect may have exited). Use 'af status' to check.`
-    );
-  }
+  const tmuxSession = await findArchitectTmuxSession();
 
   // Optional: Send Ctrl+C first to interrupt any running process
   if (options.interrupt) {
-    await run(`tmux send-keys -t "${architect.tmuxSession}" C-c`);
+    await run(`tmux send-keys -t "${tmuxSession}" C-c`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
@@ -197,14 +230,14 @@ async function sendToArchitect(
     // Load into tmux buffer and paste
     const bufferName = `builder-${fromBuilderId}`;
     await run(`tmux load-buffer -b "${bufferName}" "${tempFile}"`);
-    await run(`tmux paste-buffer -b "${bufferName}" -t "${architect.tmuxSession}"`);
+    await run(`tmux paste-buffer -b "${bufferName}" -t "${tmuxSession}"`);
 
     // Clean up tmux buffer
     await run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
 
     // Send Enter to submit (unless --no-enter)
     if (!options.noEnter) {
-      await run(`tmux send-keys -t "${architect.tmuxSession}" Enter`);
+      await run(`tmux send-keys -t "${tmuxSession}" Enter`);
     }
 
     logger.debug(`Sent to architect from ${fromBuilderId}: ${message.substring(0, 50)}...`);

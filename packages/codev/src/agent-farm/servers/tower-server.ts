@@ -315,9 +315,11 @@ function createTmuxSession(
       return false;
     }
 
-    // Hide tmux status bar (dashboard has its own tabs) and enable mouse scrolling
+    // Hide tmux status bar (dashboard has its own tabs), enable mouse, and
+    // use aggressive-resize so tmux sizes to the largest client (not smallest)
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'aggressive-resize', 'on'], { stdio: 'ignore' });
 
     return true;
   } catch (err) {
@@ -2064,6 +2066,27 @@ const server = http.createServer(async (req, res) => {
       const isApiCall = subPath.startsWith('api/') || subPath === 'api';
       const isWsPath = subPath.startsWith('ws/') || subPath === 'ws';
 
+      // GET /file?path=<relative-path> — Read project file by path (for StatusPanel project list)
+      if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
+        const relPath = url.searchParams.get('path')!;
+        const fullPath = path.resolve(projectPath, relPath);
+        // Security: ensure resolved path stays within project directory
+        if (!fullPath.startsWith(projectPath + path.sep) && fullPath !== projectPath) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('Forbidden');
+          return;
+        }
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end(content);
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Not found');
+        }
+        return;
+      }
+
       // Serve React dashboard static files directly if:
       // 1. Not an API call
       // 2. Not a WebSocket path
@@ -2489,6 +2512,43 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        // GET /api/files - Return project directory tree for file browser (Spec 0092)
+        if (req.method === 'GET' && apiPath === 'files') {
+          const maxDepth = parseInt(url.searchParams.get('depth') || '3', 10);
+          const ignore = new Set(['.git', 'node_modules', '.builders', 'dist', '.agent-farm', '.next', '.cache', '__pycache__']);
+
+          function readTree(dir: string, depth: number): Array<{ name: string; path: string; type: 'file' | 'directory'; children?: Array<unknown> }> {
+            if (depth <= 0) return [];
+            try {
+              const entries = fs.readdirSync(dir, { withFileTypes: true });
+              return entries
+                .filter(e => !e.name.startsWith('.') || e.name === '.env.example')
+                .filter(e => !ignore.has(e.name))
+                .sort((a, b) => {
+                  // Directories first, then alphabetical
+                  if (a.isDirectory() && !b.isDirectory()) return -1;
+                  if (!a.isDirectory() && b.isDirectory()) return 1;
+                  return a.name.localeCompare(b.name);
+                })
+                .map(e => {
+                  const fullPath = path.join(dir, e.name);
+                  const relativePath = path.relative(projectPath, fullPath);
+                  if (e.isDirectory()) {
+                    return { name: e.name, path: relativePath, type: 'directory' as const, children: readTree(fullPath, depth - 1) };
+                  }
+                  return { name: e.name, path: relativePath, type: 'file' as const };
+                });
+            } catch {
+              return [];
+            }
+          }
+
+          const tree = readTree(projectPath, maxDepth);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(tree));
+          return;
+        }
+
         // GET /api/git/status - Return git status for file browser (Spec 0092)
         if (req.method === 'GET' && apiPath === 'git/status') {
           try {
@@ -2551,6 +2611,149 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(recentFiles));
           return;
+        }
+
+        // GET /api/annotate/:tabId/* — Serve rich annotator template and sub-APIs
+        const annotateMatch = apiPath.match(/^annotate\/([^/]+)(\/(.*))?$/);
+        if (annotateMatch) {
+          const tabId = annotateMatch[1];
+          const subRoute = annotateMatch[3] || '';
+          const entry = getProjectTerminalsEntry(projectPath);
+          const tab = entry.fileTabs.get(tabId);
+
+          if (!tab) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('File tab not found');
+            return;
+          }
+
+          const filePath = tab.path;
+          const ext = path.extname(filePath).slice(1).toLowerCase();
+          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+          const isVideo = ['mp4', 'webm', 'mov'].includes(ext);
+          const is3D = ['stl', '3mf'].includes(ext);
+          const isMarkdown = ext === 'md';
+
+          // Sub-route: GET /file — re-read file content from disk
+          if (req.method === 'GET' && subRoute === 'file') {
+            try {
+              const content = fs.readFileSync(filePath, 'utf-8');
+              res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+              res.end(content);
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end((err as Error).message);
+            }
+            return;
+          }
+
+          // Sub-route: POST /save — save file content
+          if (req.method === 'POST' && subRoute === 'save') {
+            try {
+              const body = await new Promise<string>((resolve) => {
+                let data = '';
+                req.on('data', (chunk: Buffer) => data += chunk.toString());
+                req.on('end', () => resolve(data));
+              });
+              const parsed = JSON.parse(body || '{}');
+              const fileContent = parsed.content;
+              if (typeof fileContent !== 'string') {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Missing content');
+                return;
+              }
+              fs.writeFileSync(filePath, fileContent, 'utf-8');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: true }));
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end((err as Error).message);
+            }
+            return;
+          }
+
+          // Sub-route: GET /api/mtime — file modification time
+          if (req.method === 'GET' && subRoute === 'api/mtime') {
+            try {
+              const stat = fs.statSync(filePath);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ mtime: stat.mtimeMs }));
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end((err as Error).message);
+            }
+            return;
+          }
+
+          // Sub-route: GET /api/image, /api/video, /api/model — raw binary content
+          if (req.method === 'GET' && (subRoute === 'api/image' || subRoute === 'api/video' || subRoute === 'api/model')) {
+            try {
+              const data = fs.readFileSync(filePath);
+              const mimeType = getMimeTypeForFile(filePath);
+              res.writeHead(200, {
+                'Content-Type': mimeType,
+                'Content-Length': data.length,
+                'Cache-Control': 'no-cache',
+              });
+              res.end(data);
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end((err as Error).message);
+            }
+            return;
+          }
+
+          // Default: serve the annotator HTML template
+          if (req.method === 'GET' && (subRoute === '' || subRoute === undefined)) {
+            try {
+              const templateFile = is3D ? '3d-viewer.html' : 'open.html';
+              const tplPath = path.resolve(__dirname, `../../../templates/${templateFile}`);
+              let html = fs.readFileSync(tplPath, 'utf-8');
+
+              const fileName = path.basename(filePath);
+              const fileSize = fs.statSync(filePath).size;
+
+              if (is3D) {
+                html = html.replace(/\{\{FILE\}\}/g, fileName);
+                html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, JSON.stringify(filePath));
+                html = html.replace(/\{\{FORMAT\}\}/g, ext);
+              } else {
+                html = html.replace(/\{\{FILE\}\}/g, fileName);
+                html = html.replace(/\{\{FILE_PATH\}\}/g, filePath);
+                html = html.replace(/\{\{BUILDER_ID\}\}/g, '');
+                html = html.replace(/\{\{LANG\}\}/g, getLanguageForExt(ext));
+                html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
+                html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
+                html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
+                html = html.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
+
+                // Inject initialization script (template loads content via fetch)
+                let initScript: string;
+                if (isImage) {
+                  initScript = `initImage(${fileSize});`;
+                } else if (isVideo) {
+                  initScript = `initVideo(${fileSize});`;
+                } else {
+                  initScript = `fetch('file').then(r=>r.text()).then(init);`;
+                }
+                html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
+              }
+
+              // Handle ?line= query param for scroll-to-line
+              const lineParam = url.searchParams.get('line');
+              if (lineParam) {
+                const scrollScript = `<script>window.addEventListener('load',()=>{setTimeout(()=>{const el=document.querySelector('[data-line="${lineParam}"]');if(el){el.scrollIntoView({block:'center'});el.classList.add('highlighted-line');}},200);})</script>`;
+                html = html.replace('</body>', `${scrollScript}</body>`);
+              }
+
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+              res.end(html);
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' });
+              res.end(`Failed to serve annotator: ${(err as Error).message}`);
+            }
+            return;
+          }
         }
 
         // Unhandled API route
