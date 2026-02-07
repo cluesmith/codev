@@ -7,6 +7,19 @@ Three-phase implementation:
 2. **Terminal Links** - Clickable file paths via @xterm/addon-web-links
 3. **File Browser** - Git status integration, Recent view, autocomplete search
 
+## Phases (Machine Readable)
+
+<!-- Required for porch phase tracking -->
+```json
+{
+  "phases": [
+    {"id": "phase_1", "title": "Port Consolidation"},
+    {"id": "phase_2", "title": "Terminal Links"},
+    {"id": "phase_3", "title": "File Browser Enhancement"}
+  ]
+}
+```
+
 ---
 
 ## Phase 1: Port Consolidation (~4h)
