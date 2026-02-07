@@ -158,14 +158,17 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0092"
     title: "Terminal File Links and File Browser"
     summary: "Clickable file paths via @xterm/addon-web-links + FileTree enhancement with git status"
-    status: specified
+    status: integrated
     priority: medium
     release: null
+    notes: "PR #189"
     files:
       spec: codev/specs/0092-terminal-file-links.md
-      plan: null
-      review: null
+      plan: codev/plans/0092-terminal-file-links.md
+      review: codev/reviews/0092-terminal-file-links.md
     dependencies: ["0090", "0085"]
+    timestamps:
+      integrated_at: "2026-02-06"
     tags: [ui, ux, terminal, dashboard]
     timestamps:
       conceived_at: "2026-02-05T15:15:00-08:00"
@@ -246,9 +249,10 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0076"
     title: "Skip close confirmation for terminated shells"
     summary: "Fix incomplete Bugfix #132 - use tmuxSessionExists instead of isProcessRunning to correctly detect terminated shells"
-    status: specified
+    status: abandoned
     priority: medium
     release: null
+    notes: "Obsolete - terminal lifecycle completely replaced by Tower Single Daemon (Spec 0090)"
     files:
       spec: codev/specs/0076-skip-close-confirmation-terminated-shells.md
       plan: codev/plans/0076-skip-close-confirmation-terminated-shells.md
