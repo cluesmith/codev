@@ -422,6 +422,11 @@
       gap: 24px;
     }
 
+    .new-shell-row {
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+
     /* Recents section */
     .recents-section {
       margin-top: 32px;
@@ -732,12 +737,12 @@
       }
 
       .port-actions a {
-        min-height: 36px;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 6px 12px;
         flex: 0;
+        /* min-height handled by @media (pointer: coarse) at 44px */
       }
 
       .instance-body {
@@ -1212,7 +1217,7 @@
 
         // Add "New Shell" button for this instance
         terminalsHtml += `
-          <div class="port-item new-shell-row" style="border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px;">
+          <div class="port-item new-shell-row" style="border-top: 1px dashed var(--border);">
             <div class="port-info">
               <span class="port-status" style="background: var(--accent);"></span>
               <span class="port-type">New Shell</span>
