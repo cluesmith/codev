@@ -145,7 +145,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 ```
 
 **Key Components**:
-1. **Dashboard Server**: Native Node.js HTTP server serving React SPA and REST API
+1. **Tower Server**: Single daemon HTTP server (port 4100) serving React SPA and REST API for all projects
 2. **Terminal Manager**: node-pty based PTY session manager with WebSocket multiplexing (Spec 0085)
 3. **tmux**: Terminal multiplexer providing session persistence
 4. **Git Worktrees**: Isolated working directories for each builder
@@ -534,7 +534,7 @@ packages/codev/dashboard/
 │   │   ├── api.ts               # REST client + getTerminalWsPath() helper
 │   │   └── constants.ts         # Breakpoints, configuration
 │   └── main.tsx
-├── dist/                         # Built assets (served by dashboard-server)
+├── dist/                         # Built assets (served by tower-server)
 ├── vite.config.ts
 └── package.json
 ```
@@ -588,7 +588,7 @@ export async function handleOrphanedSessions(options: { kill: boolean }): Promis
 When multiple builders spawn simultaneously:
 
 ```typescript
-// Retry loop in dashboard-server.ts
+// Retry loop in tower-server.ts
 const MAX_PORT_RETRIES = 5;
 for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
   const currentState = loadState();
@@ -978,8 +978,7 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── send.ts             # Send message to builder
 │   │   │   │   └── rename.ts           # Rename builder/util
 │   │   │   ├── servers/                # Web servers
-│   │   │   │   ├── dashboard-server.ts # Dashboard HTTP server
-│   │   │   │   ├── tower-server.ts     # Multi-project overview
+│   │   │   │   ├── tower-server.ts     # Single daemon: serves all projects, terminals, REST API
 │   │   │   │   └── open-server.ts      # File annotation viewer
 │   │   │   ├── db/                     # SQLite database layer
 │   │   │   │   ├── index.ts            # Database operations
