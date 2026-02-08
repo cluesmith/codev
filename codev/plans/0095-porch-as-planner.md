@@ -72,23 +72,62 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
 6. Check gate status:
    - If gate exists and is pending+requested → return `{ status: 'gate_pending', gate: gateName }`
    - If gate exists and is approved → advance phase via `done()`, recurse to compute next tasks
-7. For `build_verify` / `per_plan_phase` phases:
-   - If `build_complete` is false and `iteration === 1` → emit BUILD tasks (phase prompt in description)
-   - If `build_complete` is false and `iteration > 1` → emit FIX tasks (history header + phase prompt)
-   - If `build_complete` is true → check for review files on filesystem:
-     - No review files → emit VERIFY tasks (run consultation commands)
-     - Review files exist → parse verdicts:
-       - All APPROVE/COMMENT → run on_complete, request gate or advance plan phase, emit next
-       - Some REQUEST_CHANGES → increment iteration, emit FIX tasks
-       - Max iterations reached → emit gate_pending with note
-8. For `once` phases (TICK, BUGFIX) → emit single BUILD task with phase prompt
+7. For `build_verify` / `per_plan_phase` phases — determine current step in the build-verify cycle:
+   - **Need BUILD**: `build_complete === false` → emit BUILD tasks
+     - If `iteration === 1` → phase prompt in description
+     - If `iteration > 1` → history header + feedback injection + phase prompt
+     - Include check commands as inline tasks (e.g., "Run `npm run build`", "Run `npm test`")
+     - Final task: "Call `porch next <id>` to get next step"
+   - **Need VERIFY**: `build_complete === true` AND no review files for current iteration → emit VERIFY tasks
+     - Tasks: run 3-way consultation commands in parallel
+     - Final task: "Call `porch next <id>` to get next step"
+   - **VERIFY COMPLETE**: `build_complete === true` AND review files exist → parse verdicts, then:
+     - All APPROVE/COMMENT → advance: request gate (emit gate notification task) or advance plan phase; update state; recurse for next tasks
+     - Some REQUEST_CHANGES → increment iteration, reset `build_complete`, emit FIX tasks with feedback
+     - Max iterations reached → request gate anyway (emit gate notification task with max-iterations note)
+8. For `once` phases (TICK, BUGFIX) → emit single task with phase steps from protocol.json listed in description (or phase prompt if a prompt file exists)
 9. For `per_plan_phase` → scope tasks to `current_plan_phase` only
 
-**State mutation:**
-- `porch next` performs read-modify-write on status.yaml
-- Advances `iteration`, `build_complete`, `phase`, `current_plan_phase` as needed
-- Writes history records
-- Idempotent when no artifacts change between calls
+**State mutation rules (addressing consultation feedback):**
+- `porch next` ONLY mutates state when it **detects completed work** via filesystem-as-truth:
+  - Review files exist for current iteration → parse and decide (advance or iterate)
+  - Gate status changed (approved) → advance phase
+  - Pre-approved artifact detected → skip phase
+- `porch next` does NOT mutate state when merely emitting tasks. If Claude crashes before executing tasks and calls `porch next` again, the same tasks are emitted (idempotency).
+- Exception: when advancing from VERIFY COMPLETE (all approve), porch updates state (resets iteration, advances phase) and then emits the NEXT batch of tasks. This is a single atomic transition — the state reflects "ready for next step."
+
+**Build completion detection (filesystem-as-truth):**
+- `build_complete` is NOT set by `porch next`. The builder sets it by calling `porch done <id>` after completing build work and checks.
+- `porch done` validates checks (build, test), and if passed, sets `build_complete = true` in status.yaml.
+- `porch next` reads `build_complete` to decide whether to emit BUILD or VERIFY tasks.
+- This preserves the existing `done()` → `next()` separation. `done()` handles completion signaling + checks. `next()` handles planning.
+
+**`done()` and `next()` coexistence:**
+- `done()` remains as the command Claude calls to signal work completion. It runs checks, sets `build_complete`, and can advance plan phases.
+- `next()` is the planning command that reads state and emits tasks. It does NOT replace `done()`.
+- The builder loop is: `porch next` → execute tasks → `porch done` → `porch next` → ...
+- For gate advancement: `porch approve` (human) → `porch next` (detects approved gate, advances)
+
+**Checks become tasks:**
+- `porch next` does NOT call `runPhaseChecks()` directly. Instead, it emits check commands as tasks for Claude to execute.
+- Example tasks: "Run `npm run build`", "Run `npm test -- --exclude='**/e2e/**'`"
+- `porch done` still runs checks as validation before setting `build_complete`. This provides a safety gate.
+- `checks.ts` is preserved and used by `done()`, not by `next()`.
+
+**Gate notification tasks:**
+- When a build-verify cycle completes (all approve) and a gate is needed, `porch next` emits a gate notification task alongside the `gate_pending` status:
+  ```json
+  {
+    "status": "gate_pending",
+    "gate": "spec-approval",
+    "tasks": [{
+      "subject": "Request human approval for spec",
+      "activeForm": "Requesting spec approval",
+      "description": "Run: porch gate 0094\nThis will open the artifact for human review.\nSTOP and wait for human approval."
+    }]
+  }
+  ```
+- This gives the builder an actionable task to execute when a gate is needed.
 
 **New types in `types.ts`:**
 ```typescript
@@ -217,7 +256,7 @@ Revert the commit. Restores `run.ts` and `claude.ts`.
 - Comprehensive unit tests for `porch next` covering all branches
 - Golden JSON files for SPIR protocol at each phase transition
 - Update/remove obsolete tests (claude.test.ts, run-retry.test.ts, timeout.test.ts, timeout-retry.test.ts)
-- Verify existing e2e tests still pass or update them
+- Update e2e tests to use `porch next` instead of `porch run` (explicit deliverable — 4 scenarios affected)
 
 #### Deliverables
 - [ ] `packages/codev/src/commands/porch/__tests__/next.test.ts` — unit tests
@@ -225,7 +264,9 @@ Revert the commit. Restores `run.ts` and `claude.ts`.
 - [ ] Golden test fixtures in `packages/codev/src/commands/porch/__tests__/golden/` for SPIR protocol transitions
 - [ ] Obsolete tests deleted: `claude.test.ts`, `run-retry.test.ts`, `timeout.test.ts`, `timeout-retry.test.ts`
 - [ ] `parse-verdict.test.ts` updated or replaced by `verdict.test.ts`
+- [ ] E2e test runner (`runner.ts`) updated to drive `porch next` loop (affects: happy-path, feedback-loop, single-phase, benchmark scenarios)
 - [ ] All tests pass: `npm test`
+- [ ] E2e tests pass or are updated: `npm run test:e2e`
 
 #### Implementation Details
 
@@ -269,6 +310,7 @@ Revert the commit. Restores `run.ts` and `claude.ts`.
 - **Delete**: `packages/codev/src/commands/porch/__tests__/timeout.test.ts`
 - **Delete**: `packages/codev/src/commands/porch/__tests__/timeout-retry.test.ts`
 - **Modify**: `packages/codev/src/commands/porch/__tests__/parse-verdict.test.ts` → rename/update imports
+- **Modify**: E2e test runner and scenarios that reference `porch run`
 
 #### Acceptance Criteria
 - [ ] `npm test` passes with zero failures
@@ -276,6 +318,7 @@ Revert the commit. Restores `run.ts` and `claude.ts`.
 - [ ] Golden file tests compare actual output against expected JSON for each SPIR transition
 - [ ] No references to deleted test files in the codebase
 - [ ] Build counter test still passes (build-counter.test.ts unchanged)
+- [ ] E2e test runner uses `porch next` loop (not `porch run`)
 
 #### Test Plan
 - **Unit Tests**: Run `npm test` — all porch tests must pass
@@ -312,6 +355,8 @@ Phase 1 ──→ Phase 2 ──→ Phase 3
 | Review file detection pattern doesn't match existing files | Medium | High | Check actual file naming in porch project dirs |
 | `once` phase types (TICK, BUGFIX) don't have build/verify config | Medium | Medium | Handle gracefully — emit single task with prompt or steps |
 | Removing Agent SDK breaks other importers | Low | High | Search entire codebase for imports before removing |
+| E2e test rework larger than expected (4 scenarios use `porch run`) | Medium | Medium | Explicit Phase 3 deliverable; may temporarily disable if blocking |
+| `done()` and `next()` state transitions conflict | Low | High | Clear separation: `done()` = completion signal, `next()` = planning only |
 
 ## Validation Checkpoints
 1. **After Phase 1**: `porch next` outputs valid JSON for fresh SPIR project
@@ -322,12 +367,31 @@ Phase 1 ──→ Phase 2 ──→ Phase 3
 - [ ] Update `codev/resources/commands/overview.md` with `porch next` command
 - [ ] Update `codev/roles/builder.md` to reference `porch next` instead of `porch run`
 - [ ] Update `codev/resources/protocol-format.md` if needed
+- [ ] Update `CLAUDE.md` / `AGENTS.md` porch section to reference `porch next`
+- [ ] Update builder prompt templates that reference `porch run`
 
 ## Notes
 
-The TICK and BUGFIX protocols use `type: "once"` phases (not `build_verify`). These don't have `build` or `verify` config. `porch next` should handle them by emitting a single task with the phase steps listed in the description, since there's no prompt file to load. However, the current `run.ts` orchestrator doesn't actually handle `once` phases differently — it treats everything as build_verify. So `porch next` should similarly focus on `build_verify` and `per_plan_phase` phases first, with `once` phases as a simple passthrough.
+**`once` phase handling (TICK, BUGFIX):** These protocols use `type: "once"` phases without `build`/`verify` config. `porch next` handles them by: (1) checking if a prompt file exists in the protocol's `prompts/` directory for that phase — if so, use `buildPhasePrompt()` to generate the task description; (2) if no prompt file, list the phase `steps` from protocol.json in the task description. The current `run.ts` doesn't distinguish `once` phases either — they're a passthrough. Same approach here.
 
-The `isArtifactPreApproved()` function uses `globSync` to find artifact files. This import needs to work correctly in the new location.
+**`isArtifactPreApproved()` and `globSync`:** This function uses Node.js `globSync` to find artifact files. When extracted to `next.ts`, ensure the import works correctly (`import { globSync } from 'node:fs'`).
+
+**Builder loop pattern:** The expected calling pattern for builders:
+```
+porch next <id>  → emits BUILD tasks
+  Claude executes tasks (writes code, runs checks)
+porch done <id>  → validates checks, sets build_complete
+porch next <id>  → emits VERIFY tasks (consultation)
+  Claude executes tasks (runs consult commands)
+porch next <id>  → reads review files, decides:
+  - all approve → advances, emits next BUILD tasks (or gate)
+  - request changes → emits FIX tasks
+```
+
+**Consultation feedback addressed (2026-02-08):**
+- Gemini: APPROVE — noted e2e test driver need (addressed in Phase 3) and `once` phase content (addressed above)
+- Codex: REQUEST_CHANGES — (1) state mutation path clarified: `done()` handles completion, `next()` handles planning; (2) build completion detection: `porch done` sets `build_complete`; (3) gate handling: now emits actionable gate task
+- Claude: COMMENT — (1) e2e test rework now explicit Phase 3 deliverable; (2) idempotency semantics clarified; (3) `checks.ts` integration clarified: used by `done()`, not `next()`; (4) `done()` coexistence documented; (5) documentation scope expanded
 
 ---
 
