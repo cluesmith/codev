@@ -2157,9 +2157,14 @@ const server = http.createServer(async (req, res) => {
             };
           }
 
-          // Add shells
+          // Add shells (skip stale entries whose terminal session is gone or exited)
+          const staleShellIds: string[] = [];
           for (const [shellId, terminalId] of entry.shells) {
             const session = manager.getSession(terminalId);
+            if (!session || session.status === 'exited') {
+              staleShellIds.push(shellId);
+              continue;
+            }
             state.utils.push({
               id: shellId,
               name: `Shell ${shellId.replace('shell-', '')}`,
@@ -2168,10 +2173,16 @@ const server = http.createServer(async (req, res) => {
               terminalId,
             });
           }
+          for (const id of staleShellIds) entry.shells.delete(id);
 
-          // Add builders
+          // Add builders (skip stale entries whose terminal session is gone or exited)
+          const staleBuilderIds: string[] = [];
           for (const [builderId, terminalId] of entry.builders) {
             const session = manager.getSession(terminalId);
+            if (!session || session.status === 'exited') {
+              staleBuilderIds.push(builderId);
+              continue;
+            }
             state.builders.push({
               id: builderId,
               name: `Builder ${builderId}`,
@@ -2185,6 +2196,7 @@ const server = http.createServer(async (req, res) => {
               terminalId,
             });
           }
+          for (const id of staleBuilderIds) entry.builders.delete(id);
 
           // Add file tabs (Spec 0092 - served through Tower, no separate ports)
           for (const [tabId, tab] of entry.fileTabs) {
