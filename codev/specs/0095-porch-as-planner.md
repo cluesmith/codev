@@ -187,93 +187,130 @@ Tasks emitted:
 
 ## Solution Approaches
 
-### Approach 1: Structured JSON Output
+### Chosen Approach: Structured JSON Output
 
-Porch outputs task definitions as structured JSON. Claude Code reads the output and creates tasks.
+Porch outputs task definitions as structured JSON to stdout. The builder's Claude reads the output and creates tasks via TaskCreate, then executes them. No skill wrapper needed — Claude can interpret JSON directly.
 
+### `porch next` Output Schema
+
+```typescript
+interface PorchNextResponse {
+  status: 'tasks' | 'gate_pending' | 'complete' | 'error';
+  phase: string;              // Current protocol phase name
+  iteration: number;          // Current build-verify iteration (1-based)
+  plan_phase?: string;        // Current plan phase (for per_plan_phase protocols)
+
+  // Present when status === 'tasks'
+  tasks?: PorchTask[];
+
+  // Present when status === 'gate_pending'
+  gate?: string;              // Gate name (e.g., "spec-approval")
+
+  // Present when status === 'error'
+  error?: string;             // Error message
+
+  // Present when status === 'complete'
+  summary?: string;           // Protocol completion summary
+}
+
+interface PorchTask {
+  subject: string;            // Imperative title (e.g., "Run 3-way consultation on spec")
+  activeForm: string;         // Present continuous (e.g., "Running spec consultation")
+  description: string;        // Full instructions for Claude to execute
+  sequential?: boolean;       // If true, must complete before next task starts (default: false)
+}
 ```
-$ porch next 0094
+
+Tasks are ordered — Claude executes them in array order. Tasks with `sequential: true` must complete before the next task begins. Tasks without it can be parallelized at Claude's discretion. This replaces the invalid `blockedBy` indices from the draft (Claude Code's TaskUpdate uses `addBlockedBy` with task IDs, not creation-time indices).
+
+### Example Responses
+
+**Tasks to execute:**
+```json
 {
+  "status": "tasks",
+  "phase": "specify",
+  "iteration": 1,
   "tasks": [
     {
       "subject": "Run 3-way consultation on spec",
       "activeForm": "Running spec consultation",
-      "description": "Run: consult spec 0094 --model gemini && consult spec 0094 --model codex && consult spec 0094 --model claude\n\nRun all three in parallel in the background."
-    },
-    {
-      "subject": "Incorporate consultation feedback",
-      "activeForm": "Incorporating reviewer feedback",
-      "description": "Read consultation output files. If any REQUEST_CHANGES, update the spec to address feedback. Re-commit.",
-      "blockedBy": [0]
+      "description": "Run these three commands in parallel in the background:\n\nconsult spec 0094 --model gemini\nconsult spec 0094 --model codex\nconsult spec 0094 --model claude\n\nWait for all three to complete, then call `porch next 0094` again."
     }
-  ],
-  "gate": "spec-approval",
-  "phase": "specify",
-  "iteration": 1
+  ]
 }
 ```
 
-**Pros**:
-- Porch stays a simple CLI tool, no dependency on Claude Code internals
-- Output is testable and inspectable
-- Works with any executor that can read JSON
+**Gate pending (waiting for human approval):**
+```json
+{
+  "status": "gate_pending",
+  "phase": "specify",
+  "iteration": 1,
+  "gate": "spec-approval"
+}
+```
 
-**Cons**:
-- Requires Claude to interpret JSON and call TaskCreate — an extra translation layer
-- Task descriptions must be comprehensive enough for Claude to execute without further context
+**Protocol complete:**
+```json
+{
+  "status": "complete",
+  "phase": "review",
+  "iteration": 1,
+  "summary": "All phases complete. PR merged."
+}
+```
 
-**Estimated Complexity**: Medium
-**Risk Level**: Low
+### State Mutation Rules
 
-### Approach 2: Claude Code Skill
+`porch next` is a **read-modify-write** operation:
+1. **Reads** status.yaml, protocol.json, and filesystem artifacts
+2. **Infers** what has happened since the last call (filesystem-as-truth):
+   - Review files exist → consultation completed
+   - Review verdicts are all APPROVE → verification passed
+   - Gate status changed → approval granted
+   - Build artifacts updated → build completed
+3. **Updates** status.yaml if state transitions are warranted (e.g., advance phase, increment iteration)
+4. **Emits** tasks for the next step based on the new state
 
-Porch is wrapped as a Claude Code skill (`/porch 0094`). The skill reads porch output and directly calls TaskCreate.
+This makes `porch next` idempotent when called without intervening work — if no artifacts changed, it emits the same tasks.
 
-**Pros**:
-- Seamless UX — user just types `/porch 0094`
-- No JSON interpretation needed — skill handles the translation
-- Can directly access TaskCreate/TaskUpdate APIs
+### Task Description Content
 
-**Cons**:
-- Tighter coupling to Claude Code's skill system
-- Skill code needs to understand task API
-- Harder to test in isolation
+Phase prompts (100+ lines with variable substitution and history injection) are embedded directly in the task `description` field. The existing `buildPhasePrompt()` function in `prompts.ts` generates these — `porch next` reuses it. The description includes:
+- The full phase prompt with all variables resolved
+- Previous iteration feedback (if iterating after REQUEST_CHANGES)
+- Plan phase context (for per_plan_phase protocols)
+- File paths to relevant artifacts (spec, plan, review files)
 
-**Estimated Complexity**: Medium
-**Risk Level**: Medium
+### `porch run` Coexistence
 
-### Approach 3: Hybrid (Recommended)
+`porch run` (orchestrator mode) and `porch next` (planner mode) share:
+- State machine logic (phase transitions, gate checks, artifact detection)
+- State persistence (status.yaml read/write via state.ts)
+- Prompt generation (prompts.ts)
+- Protocol loading (protocol.ts)
 
-Porch outputs structured JSON (Approach 1). A thin Claude Code skill (`/porch`) calls `porch next`, parses the JSON, and creates tasks. This separates concerns:
-- Porch: state machine logic, protocol knowledge
-- Skill: translation layer between porch JSON and Claude Code tasks
+They differ only in execution:
+- `porch run`: spawns Claude via Agent SDK, manages the while loop
+- `porch next`: emits JSON, returns immediately
 
-**Pros**:
-- Clean separation of concerns
-- Porch remains independently testable
-- Skill is thin and simple
-- Both pieces can evolve independently
+No flags or migration needed. Users choose by calling the appropriate command.
 
-**Cons**:
-- Two things to maintain (porch CLI + skill wrapper)
+## Resolved Questions
 
-**Estimated Complexity**: Medium
-**Risk Level**: Low
+### Critical
+- [x] **Does status.yaml stay?** Yes — tasks are session-scoped, need persistent state.
+- [x] **How does Claude signal task completion back to porch?** Filesystem-as-truth. Porch infers completion from artifacts on disk when `porch next` is called. No explicit "done" signal needed. If the review files exist, the consultation step is done. If the spec file has been updated since the last iteration, the build step is done. This makes the system robust to crashes — `porch next` is idempotent.
+- [x] **Should `porch run` be kept?** Yes, kept as-is. `porch run` remains the orchestrator mode for non-Claude-Code environments. `porch next` is the new planner mode. They share the same state machine logic but differ in execution model. No migration needed — they coexist.
 
-## Open Questions
+### Important
+- [x] **How are iteration failures communicated?** Porch reads review files directly on next `porch next` call. If reviews contain REQUEST_CHANGES verdicts, porch emits "fix and re-consult" tasks with the feedback content injected into the task description. No explicit failure signal from Claude is needed.
+- [x] **Per-plan-phase granularity?** One phase at a time. Porch emits tasks for the current `plan_phase` only. After that phase's build-verify loop completes, the next `porch next` call advances `current_plan_phase` and emits tasks for the next one. This gives porch control over sequencing and keeps task batches focused.
+- [x] **AWAITING_INPUT signal?** Removed in task mode. Tasks make it redundant — the user can see task status directly in the Claude Code UI. `porch run` retains AWAITING_INPUT for backward compatibility.
 
-### Critical (Blocks Progress)
-- [x] Does status.yaml stay? **Yes** — tasks are session-scoped, need persistent state.
-- [ ] How does Claude signal task completion back to porch? Options: (a) Claude calls `porch done <id>` after each batch, (b) porch infers from filesystem on next `porch next` call, (c) hybrid.
-- [ ] Should `porch run` (the current orchestrator mode) be kept as a fallback, or removed?
-
-### Important (Affects Design)
-- [ ] How should iteration failures be communicated? If consultation returns REQUEST_CHANGES, the next `porch next` call should emit "fix and re-consult" tasks. Does porch need to be told the consultation failed, or does it read the review files directly?
-- [ ] For `per_plan_phase` protocols, does porch emit tasks for ALL plan phases at once, or one phase at a time?
-- [ ] Should the AWAITING_INPUT signal still exist, or do tasks make it redundant (user can see the task is stuck)?
-
-### Nice-to-Know (Optimization)
-- [ ] Could porch directly output Claude Code TaskCreate tool-call JSON, avoiding the need for a separate skill?
+### Nice-to-Know
+- [x] **Could porch output TaskCreate JSON directly?** No — Claude Code's task API is tool-call based, not stdin-parseable. Porch outputs its own schema; the builder's Claude interprets it and calls TaskCreate.
 
 ## Performance Requirements
 - `porch next` should complete in <2 seconds (it's a read + compute, no network)
@@ -283,14 +320,24 @@ Porch outputs structured JSON (Approach 1). A thin Claude Code skill (`/porch`) 
 - Gate approval must still require `--a-human-explicitly-approved-this` flag
 - No change to authentication model
 
-## Test Scenarios
+## Test Strategy
 
-### Functional Tests
-1. **Happy path**: `porch next` on a fresh project emits specify tasks; after spec approval, emits plan tasks; after plan approval, emits implement tasks
-2. **Resume after crash**: Builder dies mid-implementation. New session calls `porch next`. Porch reads status.yaml, emits remaining tasks for current phase.
-3. **Pre-approved artifact**: Spec has `approved:` frontmatter. `porch next` skips specify, emits plan tasks directly.
-4. **Iteration loop**: Consultation returns REQUEST_CHANGES. Next `porch next` call emits "fix and re-consult" tasks with previous feedback injected.
-5. **Gate blocking**: `porch next` after verify-approve emits gate task. Until `porch approve` is called, subsequent `porch next` calls emit "waiting for approval" status.
+### Unit Tests (automated, run via `npm test`)
+1. **Schema validation**: `porch next` output conforms to `PorchNextResponse` schema for every protocol phase
+2. **Happy path**: Fresh project → specify tasks; after spec approval → plan tasks; after plan approval → implement tasks
+3. **Pre-approved artifact**: Spec with `approved:` frontmatter → skips specify, emits plan tasks
+4. **Iteration loop**: Create review files with REQUEST_CHANGES verdicts → next call emits fix tasks with feedback injected
+5. **Gate pending**: After verify-approve → `status: "gate_pending"`. After `porch approve` → next tasks
+6. **Idempotency**: Call `porch next` twice without changing filesystem → same output both times
+7. **Per-plan-phase**: Protocol with 3 plan phases → emits one phase at a time, advances on each call
+8. **Protocol complete**: All phases done → `status: "complete"`
+
+### Golden Tests
+For each protocol (SPIR, MAINTAIN, TICK), maintain golden JSON files of expected `porch next` output at each phase transition. Compare actual output against golden files.
+
+### Integration Tests (run via `npm run test:e2e`)
+1. **Full loop**: Set up a test project, call `porch next` repeatedly, simulate artifact creation between calls, verify state advances correctly through all phases
+2. **Regression**: `porch run` and `porch next` produce equivalent state transitions for the same protocol
 
 ### Non-Functional Tests
 1. `porch next` completes in <2s on a project with 10+ iterations of history
@@ -325,3 +372,17 @@ The Protocol to Task Conversion algorithm documented in `protocol-format.md` pro
 ---
 
 ## Amendments
+
+### Amendment 1 (2026-02-08): Address 3-way consultation feedback
+
+**Consultation**: Gemini, Codex, Claude — all REQUEST_CHANGES (HIGH confidence)
+
+**Changes made:**
+1. **Defined formal output schema** (`PorchNextResponse`, `PorchTask`) with all response types (tasks, gate_pending, complete, error)
+2. **Resolved completion signaling**: Filesystem-as-truth — porch infers completion from artifacts on disk, no explicit "done" signal needed
+3. **Fixed `blockedBy`**: Replaced invalid index-based dependency with `sequential` boolean flag. Claude Code's TaskUpdate uses `addBlockedBy` with task IDs, not creation-time indices
+4. **Clarified `porch run` coexistence**: Both modes share state machine logic, differ only in execution model. No migration needed
+5. **Specified task description content**: Full phase prompts with variable substitution embedded in description field, reusing existing `buildPhasePrompt()`
+6. **Defined state mutation rules**: `porch next` is read-modify-write, idempotent when no artifacts change
+7. **Added automated test strategy**: Unit tests, golden tests, integration tests, regression test against `porch run`
+8. **Resolved all open questions**: Per-plan-phase (one at a time), AWAITING_INPUT (removed in task mode), iteration failures (read review files directly)

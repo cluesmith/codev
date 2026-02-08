@@ -2641,6 +2641,7 @@ const server = http.createServer(async (req, res) => {
           const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
           const isVideo = ['mp4', 'webm', 'mov'].includes(ext);
           const is3D = ['stl', '3mf'].includes(ext);
+          const isPdf = ext === 'pdf';
           const isMarkdown = ext === 'md';
 
           // Sub-route: GET /file — re-read file content from disk
@@ -2694,8 +2695,8 @@ const server = http.createServer(async (req, res) => {
             return;
           }
 
-          // Sub-route: GET /api/image, /api/video, /api/model — raw binary content
-          if (req.method === 'GET' && (subRoute === 'api/image' || subRoute === 'api/video' || subRoute === 'api/model')) {
+          // Sub-route: GET /api/image, /api/video, /api/model, /api/pdf — raw binary content
+          if (req.method === 'GET' && (subRoute === 'api/image' || subRoute === 'api/video' || subRoute === 'api/model' || subRoute === 'api/pdf')) {
             try {
               const data = fs.readFileSync(filePath);
               const mimeType = getMimeTypeForFile(filePath);
@@ -2734,6 +2735,7 @@ const server = http.createServer(async (req, res) => {
                 html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
                 html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
                 html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
+                html = html.replace(/\{\{IS_PDF\}\}/g, String(isPdf));
                 html = html.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
 
                 // Inject initialization script (template loads content via fetch)
@@ -2742,6 +2744,8 @@ const server = http.createServer(async (req, res) => {
                   initScript = `initImage(${fileSize});`;
                 } else if (isVideo) {
                   initScript = `initVideo(${fileSize});`;
+                } else if (isPdf) {
+                  initScript = `initPdf(${fileSize});`;
                 } else {
                   initScript = `fetch('file').then(r=>r.text()).then(init);`;
                 }

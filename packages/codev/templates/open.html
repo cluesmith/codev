@@ -502,6 +502,12 @@
     </div>
   </div>
 
+  <!-- PDF viewer mode -->
+  <div id="pdf-viewer" style="display: none; height: calc(100vh - 80px);">
+    <embed id="pdf-display" type="application/pdf" style="width: 100%; height: 100%; border: none;">
+    <div id="pdf-error" style="display: none; color: #ef4444; text-align: center; padding: 40px;"></div>
+  </div>
+
   <!-- Editor mode with line numbers -->
   <div id="editor-container">
     <div id="editor-line-numbers"></div>
@@ -689,6 +695,26 @@
 
       // Add cache-busting query param to allow reload
       video.src = 'api/video?t=' + Date.now();
+    }
+
+    // Initialize PDF viewer
+    function initPdf(fileSize) {
+      // Hide code view elements
+      document.getElementById('viewMode').style.display = 'none';
+      document.getElementById('editBtn').style.display = 'none';
+      document.getElementById('togglePreviewBtn').style.display = 'none';
+
+      // Update subtitle
+      const sizeStr = formatFileSize(fileSize);
+      document.querySelector('.subtitle').textContent = 'PDF viewer · ' + sizeStr;
+
+      // Show PDF viewer
+      const pdfViewer = document.getElementById('pdf-viewer');
+      pdfViewer.style.display = 'block';
+
+      // Load PDF via raw endpoint
+      const embed = document.getElementById('pdf-display');
+      embed.src = 'api/pdf?t=' + Date.now();
     }
 
     // Update image info display (in both header and controls)
