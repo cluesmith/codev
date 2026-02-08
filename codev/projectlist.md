@@ -135,16 +135,16 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0091"
     title: "Tower Mobile UX Refresh"
-    summary: "Refresh the tower UI for better mobile experience - currently needs improvement on mobile devices"
-    status: conceived
+    summary: "Full mobile UX for tower: responsive layout, touch targets, QR code sharing, terminal usability on small screens"
+    status: abandoned
     priority: medium
-    release: null
+    release: v2.1.0
     files:
       spec: null
       plan: null
       review: null
     dependencies: ["0090"]
-    tags: [ui, ux, mobile, tower]
+    tags: [ui, ux, mobile, tower, v2]
     timestamps:
       conceived_at: "2026-02-05T10:00:00-08:00"
       specified_at: null
@@ -153,7 +153,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Tower front page and dashboard need mobile-responsive improvements"
+    notes: "Abandoned. Audit showed mobile UX is already in good shape (MobileLayout component, responsive breakpoints, touch targets, safe area handling). No significant work needed."
 
   - id: "0092"
     title: "Terminal File Links and File Browser"
@@ -183,7 +183,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0093"
     title: "SPIDER to SPIR Rename"
     summary: "Complete the rename of SPIDER protocol to SPIR across entire codebase"
-    status: specified
+    status: integrated
     priority: medium
     release: null
     files:
@@ -198,9 +198,9 @@ Projects currently in development (conceived through committed), sorted by prior
       planned_at: null
       implementing_at: null
       implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Rename SPIDER → SPIR (Specify, Plan, Implement, Review). ~250 files affected."
+      committed_at: "2026-02-07"
+      integrated_at: "2026-02-07"
+    notes: "Rename SPIDER → SPIR (Specify, Plan, Implement, Review). ~250 files affected. Commit 4330cc8."
 
   - id: "0072"
     title: "Ralph-SPIR Integration Spike"
@@ -470,7 +470,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0063"
     title: "Tower Dashboard Improvements"
     summary: "Better project management UI with tools for starting local/remote services"
-    status: conceived
+    status: abandoned
     priority: high
     release: v1.6.0
     files:
@@ -487,7 +487,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Single row per dashboard, action buttons for local/remote start, init/adopt/update commands with terminal output."
+    notes: "Abandoned - superseded by React dashboard rewrite (0085), Tower single daemon (0090), and terminal file links (0092)."
 
 
 
@@ -572,7 +572,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0064"
     title: "Dashboard Tab State Preservation"
     summary: "Cache iframes instead of recreating them to preserve scroll position and edit mode when switching tabs"
-    status: conceived
+    status: abandoned
     priority: medium
     release: null
     files:
@@ -589,7 +589,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Annotation tabs lose state when switching tabs. Need iframe caching with LRU eviction."
+    notes: "Abandoned - iframe architecture replaced by React dashboard (0085). React manages component state natively."
 
 
 
@@ -972,7 +972,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0084"
     title: "Tower Mobile-Friendly UI"
     summary: "Ensure tower dashboard is fully mobile-friendly with touch targets, responsive layout, and QR code sharing"
-    status: conceived
+    status: abandoned
     priority: medium
     release: v2.1.0
     files:
@@ -989,7 +989,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Descoped from v2.0.0 to v2.1.0 — not blocking release. Tower has basic mobile CSS but needs full mobile UX audit: touch targets, responsive layout, QR sharing flow, terminal usability on small screens."
+    notes: "Abandoned - merged into 0091 (Tower Mobile UX Refresh) which is now the canonical mobile UX project."
 
   - id: "0085"
     title: "Agent Farm Terminal & Dashboard Rewrite"
@@ -1037,7 +1037,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0093** - Reserve this number for your next project
+**0094** - Reserve this number for your next project
 
 ---
 
