@@ -194,6 +194,53 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (3)').run();
   }
 
+  // Migration v4: Remove UNIQUE constraint from builders.port (PTY-backed builders use port=0)
+  const v4 = db.prepare('SELECT version FROM _migrations WHERE version = 4').get();
+  if (!v4) {
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
+      .get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
+      // SQLite can't drop constraints, so recreate table
+      db.exec(`
+        CREATE TABLE builders_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'spawning'
+            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr-ready', 'complete')),
+          phase TEXT NOT NULL DEFAULT '',
+          worktree TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          tmux_session TEXT,
+          type TEXT NOT NULL DEFAULT 'spec'
+            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
+          task_text TEXT,
+          protocol_name TEXT,
+          issue_number INTEGER,
+          terminal_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO builders_new SELECT * FROM builders;
+        DROP TABLE builders;
+        ALTER TABLE builders_new RENAME TO builders;
+        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
+        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
+        CREATE TRIGGER IF NOT EXISTS builders_updated_at
+          AFTER UPDATE ON builders
+          FOR EACH ROW
+          BEGIN
+            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
+          END;
+      `);
+      console.log('[info] Migrated builders table: removed UNIQUE constraint from port');
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
+  }
+
   return db;
 }
 

@@ -104,7 +104,10 @@ export async function status(): Promise<void> {
     logger.row(['──', '────', '────', '──────', '─────', '────'], widths);
 
     for (const builder of state.builders) {
-      const running = await isProcessRunning(builder.pid);
+      // pid=0 means PTY-backed terminal; assume running if tmux session or terminalId exists
+      const running = builder.pid > 0
+        ? await isProcessRunning(builder.pid)
+        : !!(builder.tmuxSession || builder.terminalId);
       const statusColor = getStatusColor(builder.status, running);
       const typeColor = getTypeColor(builder.type || 'spec');
 
@@ -114,7 +117,7 @@ export async function status(): Promise<void> {
         typeColor(builder.type || 'spec'),
         statusColor(builder.status),
         builder.phase.substring(0, 8),
-        String(builder.port),
+        builder.port > 0 ? String(builder.port) : '-',
       ], widths);
     }
   } else {

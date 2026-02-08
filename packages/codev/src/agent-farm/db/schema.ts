@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS architect (
 CREATE TABLE IF NOT EXISTS builders (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  port INTEGER NOT NULL UNIQUE,
-  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'spawning'
     CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr-ready', 'complete')),
   phase TEXT NOT NULL DEFAULT '',

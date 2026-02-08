@@ -500,7 +500,7 @@ async function findFreePort(config: Config): Promise<number> {
   const state = loadState();
   const usedPorts = new Set<number>();
   for (const b of state.builders || []) {
-    if (b.port) usedPorts.add(b.port);
+    if (b.port > 0) usedPorts.add(b.port);
   }
   let port = config.builderPortRange[0];
   while (usedPorts.has(port)) {
@@ -760,7 +760,7 @@ ${initialPrompt}`;
     name: specName,
     port,
     pid,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'init',
     worktree: worktreePath,
     branch: branchName,
@@ -857,7 +857,7 @@ ${taskDescription}`;
     name: `Task: ${taskText.substring(0, 30)}${taskText.length > 30 ? '...' : ''}`,
     port,
     pid,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'init',
     worktree: worktreePath,
     branch: branchName,
@@ -932,7 +932,7 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
     name: `Protocol: ${protocolName}`,
     port,
     pid,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'init',
     worktree: worktreePath,
     branch: branchName,
@@ -976,7 +976,7 @@ async function spawnShell(options: SpawnOptions, config: Config): Promise<void> 
     name: 'Shell session',
     port,
     pid,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'interactive',
     worktree: '',
     branch: '',
@@ -1069,7 +1069,7 @@ done
     name: 'Worktree session',
     port: 0,
     pid: 0,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'interactive',
     worktree: worktreePath,
     branch: branchName,
@@ -1272,7 +1272,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     name: `Bugfix #${issueNumber}: ${issue.title.substring(0, 40)}${issue.title.length > 40 ? '...' : ''}`,
     port,
     pid,
-    status: 'spawning',
+    status: 'implementing',
     phase: 'init',
     worktree: worktreePath,
     branch: branchName,
