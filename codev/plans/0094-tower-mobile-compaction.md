@@ -4,7 +4,7 @@
 
 Single-file CSS changes to `packages/codev/templates/tower.html` to reduce vertical space waste on mobile viewports (<=600px). One minor JS change to add a semantic class.
 
-## Phase 1: Mobile CSS Compaction (Single Phase)
+## Phase 1: Mobile CSS Compaction (Single Phase) — COMPLETED
 
 **Objective**: Apply all 7 mobile compaction changes from the spec in a single phase since they're all CSS-only changes to one file.
 
