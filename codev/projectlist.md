@@ -947,6 +947,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ---
 
+```yaml
   - id: "0083"
     title: "Protocol-Agnostic Spawn System"
     summary: "Refactor af spawn to decouple input types from protocols, add --use-protocol flag"
@@ -1016,7 +1017,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0090"
     title: "Tower as Single Daemon Architecture"
     summary: "Refactor so tower is the single daemon managing all projects. af dash becomes API client, not separate server."
-    status: implemented
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -1031,14 +1032,14 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       planned_at: "2026-02-04T12:00:00-08:00"
       implementing_at: "2026-02-04T14:00:00-08:00"
       implemented_at: "2026-02-05T02:30:00-08:00"
-      committed_at: null
-      integrated_at: null
+      committed_at: "2026-02-05T02:30:00-08:00"
+      integrated_at: "2026-02-07T00:00:00-08:00"
     notes: "Phase 4 complete. Tower is single daemon, dashboard-server.ts deleted. 641 tests pass. 3-way consultation: 2 APPROVE, 1 COMMENT."
 
   - id: "0094"
     title: "Tower Mobile Compaction"
     summary: "Compact the tower overview page for mobile: inline buttons, hide paths, remove Share button, reduce vertical spacing"
-    status: conceived
+    status: specified
     priority: high
     release: v2.1.0
     files:
@@ -1049,7 +1050,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [ui, ux, mobile, tower]
     timestamps:
       conceived_at: "2026-02-08T03:00:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-08T03:00:00-08:00"
       planned_at: null
       implementing_at: null
       implemented_at: null
@@ -1060,7 +1061,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0095"
     title: "Porch as Planner (Task Integration)"
     summary: "Invert porch execution model: porch generates Claude Code tasks instead of spawning Claude. Claude Code becomes the executor, porch becomes a stateless planner called between task batches."
-    status: conceived
+    status: specified
     priority: high
     release: v2.1.0
     files:
@@ -1071,13 +1072,14 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [porch, architecture, claude-code, tasks]
     timestamps:
       conceived_at: "2026-02-08T03:30:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-08T03:30:00-08:00"
       planned_at: null
       implementing_at: null
       implemented_at: null
       committed_at: null
       integrated_at: null
     notes: "Architectural redesign. Porch currently spawns Claude via Agent SDK and manages build-verify loop. Proposal: porch emits task definitions, Claude Code executes. status.yaml remains for cross-session persistence."
+```
 
 ## Next Available Number
 
