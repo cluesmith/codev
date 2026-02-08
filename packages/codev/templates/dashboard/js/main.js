@@ -99,7 +99,7 @@ function renderInfoHeader() {
     <div class="projects-info">
       <h1 style="font-size: 20px; margin-bottom: 12px; color: var(--text-primary);">Agent Farm Dashboard</h1>
       <p>Coordinate AI builders working on your codebase. The left panel shows the Architect terminal – tell it what you want to build. <strong>Tabs</strong> shows open terminals (Architect, Builders, utility shells). <strong>Files</strong> lets you browse and open project files. <strong>Projects</strong> tracks work as it moves from conception to integration.</p>
-      <p>Docs: <a href="#" onclick="openProjectFile('codev/resources/cheatsheet.md'); return false;">Cheatsheet</a> · <a href="#" onclick="openProjectFile('codev/resources/lifecycle.md'); return false;">Lifecycle</a> · <a href="#" onclick="openProjectFile('codev/resources/commands/overview.md'); return false;">CLI Reference</a> · <a href="#" onclick="openProjectFile('codev/protocols/spider/protocol.md'); return false;">SPIDER Protocol</a> · <a href="https://github.com/cluesmith/codev#readme" target="_blank">README</a> · <a href="https://discord.gg/mJ92DhDa6n" target="_blank">Discord</a></p>
+      <p>Docs: <a href="#" onclick="openProjectFile('codev/resources/cheatsheet.md'); return false;">Cheatsheet</a> · <a href="#" onclick="openProjectFile('codev/resources/lifecycle.md'); return false;">Lifecycle</a> · <a href="#" onclick="openProjectFile('codev/resources/commands/overview.md'); return false;">CLI Reference</a> · <a href="#" onclick="openProjectFile('codev/protocols/spir/protocol.md'); return false;">SPIR Protocol</a> · <a href="https://github.com/cluesmith/codev#readme" target="_blank">README</a> · <a href="https://discord.gg/mJ92DhDa6n" target="_blank">Discord</a></p>
     </div>
   `;
 }

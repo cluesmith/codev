@@ -804,29 +804,39 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Resolve protocol (tasks can specify --protocol override, default is 'spir')
-  const protocol = await resolveProtocol(options, config);
-  const protocolDef = loadProtocol(config, protocol);
-  const mode = resolveMode(options, protocolDef);
-
-  // Build the prompt using template
+  // Build the prompt — only include protocol if explicitly requested
   let taskDescription = taskText;
   if (options.files && options.files.length > 0) {
     taskDescription += `\n\nRelevant files to consider:\n${options.files.map(f => `- ${f}`).join('\n')}`;
   }
 
-  const templateContext: TemplateContext = {
-    protocol_name: protocol.toUpperCase(),
-    mode,
-    mode_soft: mode === 'soft',
-    mode_strict: mode === 'strict',
-    project_id: builderId,
-    input_description: 'an ad-hoc task',
-    task_text: taskDescription,
-  };
+  const hasExplicitProtocol = options.protocol || options.useProtocol;
+  let builderPrompt: string;
 
-  const prompt = buildPromptFromTemplate(config, protocol, templateContext);
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
+  if (hasExplicitProtocol) {
+    const protocol = await resolveProtocol(options, config);
+    const protocolDef = loadProtocol(config, protocol);
+    const mode = resolveMode(options, protocolDef);
+
+    const templateContext: TemplateContext = {
+      protocol_name: protocol.toUpperCase(),
+      mode,
+      mode_soft: mode === 'soft',
+      mode_strict: mode === 'strict',
+      project_id: builderId,
+      input_description: 'an ad-hoc task',
+      task_text: taskDescription,
+    };
+
+    const prompt = buildPromptFromTemplate(config, protocol, templateContext);
+    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
+  } else {
+    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
+
+# Task
+
+${taskDescription}`;
+  }
 
   // Load role
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');

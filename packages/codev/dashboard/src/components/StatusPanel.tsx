@@ -366,7 +366,7 @@ export function StatusPanel({ state, onRefresh, onSelectTab }: StatusPanelProps)
           <a href="#" onClick={e => { e.preventDefault(); openFile('codev/resources/cheatsheet.md'); }}>Cheatsheet</a> ·{' '}
           <a href="#" onClick={e => { e.preventDefault(); openFile('codev/resources/lifecycle.md'); }}>Lifecycle</a> ·{' '}
           <a href="#" onClick={e => { e.preventDefault(); openFile('codev/resources/commands/overview.md'); }}>CLI Reference</a> ·{' '}
-          <a href="#" onClick={e => { e.preventDefault(); openFile('codev/protocols/spider/protocol.md'); }}>SPIDER Protocol</a> ·{' '}
+          <a href="#" onClick={e => { e.preventDefault(); openFile('codev/protocols/spir/protocol.md'); }}>SPIR Protocol</a> ·{' '}
           <a href="https://github.com/cluesmith/codev#readme" target="_blank" rel="noreferrer">README</a> ·{' '}
           <a href="https://discord.gg/mJ92DhDa6n" target="_blank" rel="noreferrer">Discord</a>
         </p>
