@@ -107,6 +107,10 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       // Only intercept keydown events
       if (event.type !== 'keydown') return true;
 
+      // Clipboard API requires secure context (HTTPS or localhost).
+      // If unavailable, fall back to xterm's native hidden-textarea handling.
+      if (!navigator.clipboard) return true;
+
       const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
       if (!modKey) return true;
 
@@ -115,7 +119,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         navigator.clipboard.readText().then((text) => {
           if (text) term.paste(text);
         }).catch(() => {
-          // Clipboard permission denied — let browser handle natively
+          // Clipboard permission denied — paste will be silently dropped
         });
         return false;
       }
@@ -125,7 +129,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         const selection = term.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection).catch(() => {
-            // Clipboard permission denied
+            // Clipboard permission denied — copy will be silently dropped
           });
           return false;
         }
