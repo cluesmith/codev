@@ -1039,7 +1039,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0094"
     title: "Tower Mobile Compaction"
     summary: "Compact the tower overview page for mobile: inline buttons, hide paths, remove Share button, reduce vertical spacing"
-    status: specified
+    status: integrated
     priority: high
     release: v2.1.0
     files:
@@ -1055,7 +1055,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
+      integrated_at: "2026-02-09"
     notes: "Based on real mobile screenshot showing excessive vertical spacing. Single file change (tower.html)."
 
   - id: "0095"
