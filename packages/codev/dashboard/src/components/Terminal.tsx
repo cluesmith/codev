@@ -76,6 +76,39 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       loadCanvasFallback();
     }
 
+    // Explicit clipboard handling via navigator.clipboard API.
+    // xterm.js relies on the browser firing native paste events on a hidden
+    // textarea (zero-size, opacity 0, positioned off-screen), which doesn't
+    // work reliably in all browser contexts. Handle copy/paste explicitly.
+    const isMac = navigator.platform.includes('Mac');
+    term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+      if (ev.type !== 'keydown') return true;
+
+      // Paste: Cmd+V (Mac) or Ctrl+Shift+V (other platforms)
+      const isPaste = isMac
+        ? ev.metaKey && ev.key === 'v' && !ev.ctrlKey && !ev.altKey
+        : ev.ctrlKey && ev.shiftKey && ev.key === 'V' && !ev.altKey && !ev.metaKey;
+      if (isPaste) {
+        ev.preventDefault();
+        navigator.clipboard.readText().then(text => {
+          if (text) term.paste(text);
+        }).catch(() => { /* clipboard not available */ });
+        return false;
+      }
+
+      // Copy: Cmd+C (Mac) or Ctrl+Shift+C (other platforms)
+      const isCopy = isMac
+        ? ev.metaKey && ev.key === 'c' && !ev.ctrlKey && !ev.altKey
+        : ev.ctrlKey && ev.shiftKey && ev.key === 'C' && !ev.altKey && !ev.metaKey;
+      if (isCopy && term.hasSelection()) {
+        ev.preventDefault();
+        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+
+      return true;
+    });
+
     // Spec 0092: Add web links addon for clickable file paths
     if (onFileOpen) {
       const webLinksAddon = new WebLinksAddon(
