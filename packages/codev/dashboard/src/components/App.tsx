@@ -16,6 +16,11 @@ export function App() {
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
+  // Bugfix #205: Track which terminal tabs have been visited at least once.
+  // Terminals are only mounted on first visit, then kept alive (hidden via CSS)
+  // to avoid WebSocket reconnection and ring-buffer replay on tab switches.
+  const [activatedTerminals, setActivatedTerminals] = useState<Set<string>>(new Set());
+
   // Spec 0092: Store pending initial line numbers for file tabs (not persisted server-side)
   const pendingFileLinesRef = useRef<Map<string, number>>(new Map());
 
@@ -50,6 +55,20 @@ export function App() {
     setIsFullscreen(urlParams.get('fullscreen') === '1');
   }, []);
 
+  // Bugfix #205: Mark terminal tabs as activated when first selected
+  useEffect(() => {
+    if (!activeTab) return;
+    const isTerminal = activeTab.type === 'architect' || activeTab.type === 'builder' || activeTab.type === 'shell';
+    if (isTerminal) {
+      setActivatedTerminals(prev => {
+        if (prev.has(activeTab.id)) return prev;
+        const next = new Set(prev);
+        next.add(activeTab.id);
+        return next;
+      });
+    }
+  }, [activeTab?.id, activeTab?.type]);
+
   const renderTerminal = (tab: { type: string; terminalId?: string }) => {
     const wsPath = getTerminalWsPath(tab);
     if (!wsPath) return <div className="no-terminal">No terminal session</div>;
@@ -70,21 +89,37 @@ export function App() {
     return <FileViewer tabId={tab.annotationId} initialLine={pendingLine ?? tab.initialLine} />;
   };
 
-  const renderContent = () => {
-    if (!activeTab) return null;
+  // Bugfix #205: Render persistent terminal tabs (kept mounted, shown/hidden via CSS)
+  // plus the active non-terminal content. terminalTypes specifies which tab types
+  // to persist (desktop right panel excludes 'architect' since it's in the left pane).
+  const renderPersistentContent = (terminalTypes: string[]) => {
+    const persistentTabs = tabs.filter(t =>
+      terminalTypes.includes(t.type) && activatedTerminals.has(t.id)
+    );
 
-    switch (activeTab.type) {
-      case 'dashboard':
-        return <StatusPanel state={state} onRefresh={refresh} onSelectTab={selectTab} />;
-      case 'architect':
-      case 'builder':
-      case 'shell':
-        return renderTerminal(activeTab);
-      case 'file':
-        return renderAnnotation(activeTab);
-      default:
-        return <div>Unknown tab type</div>;
-    }
+    return (
+      <>
+        {persistentTabs.map(tab => {
+          const wsPath = getTerminalWsPath(tab);
+          return (
+            <div
+              key={tab.id}
+              className="terminal-tab-pane"
+              style={{ display: activeTabId === tab.id ? undefined : 'none' }}
+            >
+              {wsPath
+                ? <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />
+                : <div className="no-terminal">No terminal session</div>
+              }
+            </div>
+          );
+        })}
+        {activeTab?.type === 'dashboard' && (
+          <StatusPanel state={state} onRefresh={refresh} onSelectTab={selectTab} />
+        )}
+        {activeTab?.type === 'file' && renderAnnotation(activeTab)}
+      </>
+    );
   };
 
   // Fullscreen mode: show only the active terminal, no chrome
@@ -104,7 +139,7 @@ export function App() {
         onSelectTab={selectTab}
         onRefresh={refresh}
       >
-        {renderContent()}
+        {renderPersistentContent(['architect', 'builder', 'shell'])}
       </MobileLayout>
     );
   }
@@ -137,7 +172,7 @@ export function App() {
                 onRefresh={refresh}
               />
               <div className="tab-content" role="tabpanel">
-                {renderContent()}
+                {renderPersistentContent(['builder', 'shell'])}
               </div>
             </div>
           }

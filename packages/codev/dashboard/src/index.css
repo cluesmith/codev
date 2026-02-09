@@ -172,6 +172,12 @@ body {
   overflow: hidden;
 }
 
+/* Bugfix #205: Persistent terminal tab wrapper — fills parent when visible */
+.terminal-tab-pane {
+  width: 100%;
+  height: 100%;
+}
+
 /* Terminal iframe */
 .terminal-iframe {
   display: block;
