@@ -898,10 +898,10 @@ async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server fetch.
  * Returns architect, builders, and shells with their URLs.
  */
-function getTerminalsForProject(
+async function getTerminalsForProject(
   projectPath: string,
   proxyUrl: string
-): { terminals: TerminalEntry[]; gateStatus: GateStatus } {
+): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
@@ -925,9 +925,30 @@ function getTerminalsForProject(
 
   for (const dbSession of dbSessions) {
     // Verify session still exists in TerminalManager (runtime state)
-    const session = manager.getSession(dbSession.id);
-    if (!session) {
-      // Stale row in SQLite - clean it up
+    let session = manager.getSession(dbSession.id);
+    if (!session && dbSession.tmux_session && tmuxAvailable && tmuxSessionExists(dbSession.tmux_session)) {
+      // PTY session gone but tmux session survives — reconnect on-the-fly
+      try {
+        const newSession = await manager.createSession({
+          command: 'tmux',
+          args: ['attach-session', '-t', dbSession.tmux_session],
+          cwd: dbSession.project_path,
+          label: dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`,
+          env: process.env as Record<string, string>,
+        });
+        // Update SQLite with new terminal ID
+        deleteTerminalSession(dbSession.id);
+        saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, newSession.pid, dbSession.tmux_session);
+        dbSession.id = newSession.id;
+        session = manager.getSession(newSession.id);
+        log('INFO', `Reconnected to tmux "${dbSession.tmux_session}" on-the-fly → ${newSession.id}`);
+      } catch (err) {
+        log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message}`);
+        deleteTerminalSession(dbSession.id);
+        continue;
+      }
+    } else if (!session) {
+      // Stale row in SQLite, no tmux to reconnect — clean it up
       deleteTerminalSession(dbSession.id);
       continue;
     }
@@ -1043,7 +1064,7 @@ async function getInstances(): Promise<InstanceStatus[]> {
 
     // Get terminals and gate status from tower's registry
     // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
-    const { terminals, gateStatus } = getTerminalsForProject(allocation.project_path, proxyUrl);
+    const { terminals, gateStatus } = await getTerminalsForProject(allocation.project_path, proxyUrl);
 
     // Project is active if it has any terminals (Phase 4: no port check needed)
     const isActive = terminals.length > 0;
