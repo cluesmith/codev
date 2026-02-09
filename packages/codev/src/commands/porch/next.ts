@@ -282,11 +282,12 @@ async function handleBuildVerify(
 
     // Add check tasks
     const checks = getPhaseChecks(protocol, state.phase);
-    for (const [name, command] of Object.entries(checks)) {
+    for (const [name, checkDef] of Object.entries(checks)) {
+      const cwdNote = checkDef.cwd ? `\n\nIMPORTANT: Run this from the \`${checkDef.cwd}\` subdirectory (relative to project root).` : '';
       tasks.push({
         subject: `Run check: ${name}`,
         activeForm: `Running ${name} check`,
-        description: `Run: ${command}\n\nFix any failures before proceeding.`,
+        description: `Run: ${checkDef.command}${cwdNote}\n\nFix any failures before proceeding.`,
         sequential: true,
       });
     }

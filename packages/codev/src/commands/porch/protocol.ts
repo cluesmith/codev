@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef } from './types.js';
 
 /** Known protocol locations (relative to project root) */
 const PROTOCOL_PATHS = [
@@ -105,20 +105,28 @@ function normalizeProtocol(json: unknown): Protocol {
   }
 
   // Extract default checks
-  const checks: Record<string, string> = {};
+  const checks: Record<string, CheckDef> = {};
   const defaults = obj.defaults as Record<string, unknown> | undefined;
   if (defaults?.checks) {
-    Object.assign(checks, defaults.checks);
+    for (const [name, val] of Object.entries(defaults.checks as Record<string, unknown>)) {
+      if (typeof val === 'string') {
+        checks[name] = { command: val };
+      } else if (typeof val === 'object' && val !== null && 'command' in val) {
+        const checkObj = val as Record<string, unknown>;
+        checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
+      }
+    }
   }
 
-  // Also collect per-phase checks
+  // Also collect per-phase checks (override defaults)
   for (const phase of obj.phases as Array<Record<string, unknown>>) {
     if (phase.checks && typeof phase.checks === 'object') {
       for (const [name, check] of Object.entries(phase.checks as Record<string, unknown>)) {
         if (typeof check === 'object' && check !== null && 'command' in check) {
-          checks[name] = (check as { command: string }).command;
+          const checkObj = check as Record<string, unknown>;
+          checks[name] = { command: checkObj.command as string, cwd: checkObj.cwd as string | undefined };
         } else if (typeof check === 'string') {
-          checks[name] = check;
+          checks[name] = { command: check };
         }
       }
     }
@@ -237,15 +245,15 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
 }
 
 /**
- * Get check commands for a phase
+ * Get check definitions for a phase
  */
-export function getPhaseChecks(protocol: Protocol, phaseId: string): Record<string, string> {
+export function getPhaseChecks(protocol: Protocol, phaseId: string): Record<string, CheckDef> {
   const phase = getPhaseConfig(protocol, phaseId);
   if (!phase || !phase.checks) {
     return {};
   }
 
-  const result: Record<string, string> = {};
+  const result: Record<string, CheckDef> = {};
   for (const checkName of phase.checks) {
     if (protocol.checks?.[checkName]) {
       result[checkName] = protocol.checks[checkName];

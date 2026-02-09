@@ -119,9 +119,9 @@ describe('porch protocol loading', () => {
       const protocol = loadProtocol(testDir, 'spir');
 
       expect(protocol.checks).toBeDefined();
-      expect(protocol.checks?.build).toBe('npm run build');
-      expect(protocol.checks?.test).toBe('npm test');
-      expect(protocol.checks?.lint).toBe('npm run lint');
+      expect(protocol.checks?.build).toEqual({ command: 'npm run build' });
+      expect(protocol.checks?.test).toEqual({ command: 'npm test' });
+      expect(protocol.checks?.lint).toEqual({ command: 'npm run lint' });
     });
 
     it('should normalize phases correctly', () => {
@@ -181,8 +181,8 @@ describe('porch protocol loading', () => {
       const protocol = loadProtocol(testDir, 'spir');
       const checks = getPhaseChecks(protocol, 'implement');
 
-      expect(checks.build).toBe('npm run build');
-      expect(checks.test).toBe('npm test');
+      expect(checks.build).toEqual({ command: 'npm run build' });
+      expect(checks.test).toEqual({ command: 'npm test' });
     });
 
     it('should return empty object for phase without checks', () => {

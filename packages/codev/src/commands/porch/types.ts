@@ -51,6 +51,14 @@ export interface ProtocolPhase {
 }
 
 /**
+ * Check definition with optional working directory
+ */
+export interface CheckDef {
+  command: string;             // Command to run (e.g., "npm run build")
+  cwd?: string;               // Working directory relative to project root (e.g., "packages/codev")
+}
+
+/**
  * Protocol definition (loaded from protocol.json)
  */
 export interface Protocol {
@@ -58,7 +66,7 @@ export interface Protocol {
   version?: string;
   description?: string;
   phases: ProtocolPhase[];
-  checks?: Record<string, string>;           // Check name -> command (e.g., "build": "npm run build")
+  checks?: Record<string, CheckDef>;           // Check name -> definition
   phase_completion?: Record<string, string>; // Checks run when a plan phase completes (after evaluate)
 }
 

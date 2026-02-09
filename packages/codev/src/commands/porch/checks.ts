@@ -6,7 +6,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import type { CheckResult } from './types.js';
+import * as path from 'node:path';
+import type { CheckResult, CheckDef } from './types.js';
 
 /** Default timeout for checks: 5 minutes */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -120,17 +121,22 @@ export async function runCheck(
 
 /**
  * Run multiple checks for a phase
+ * Accepts either Record<string, string> (legacy) or Record<string, CheckDef>
  */
 export async function runPhaseChecks(
-  checks: Record<string, string>,
+  checks: Record<string, string | CheckDef>,
   cwd: string,
   env: CheckEnv,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
-  for (const [name, command] of Object.entries(checks)) {
-    const result = await runCheck(name, command, cwd, env, timeoutMs);
+  for (const [name, checkVal] of Object.entries(checks)) {
+    const command = typeof checkVal === 'string' ? checkVal : checkVal.command;
+    const checkCwd = typeof checkVal === 'object' && checkVal.cwd
+      ? path.resolve(cwd, checkVal.cwd)
+      : cwd;
+    const result = await runCheck(name, command, checkCwd, env, timeoutMs);
     results.push(result);
 
     // Stop on first failure

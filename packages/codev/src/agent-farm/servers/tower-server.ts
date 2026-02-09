@@ -1296,6 +1296,15 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
           const startedAt = Date.now();
           ptySession.on('exit', () => {
             entry.architect = undefined;
+            deleteTerminalSession(session.id);
+
+            // Kill stale tmux session so restart can create a fresh one
+            if (activeTmuxSession) {
+              try {
+                execSync(`tmux kill-session -t "${activeTmuxSession}" 2>/dev/null`, { stdio: 'ignore' });
+              } catch { /* already gone */ }
+            }
+
             // Only restart if the architect ran for at least 5s (prevents crash loops)
             const uptime = Date.now() - startedAt;
             if (uptime < 5000) {
@@ -1303,10 +1312,9 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
               return;
             }
             log('INFO', `Architect exited for ${projectPath}, restarting in 2s...`);
-            deleteTerminalSession(session.id);
             setTimeout(() => {
               launchInstance(projectPath).catch((err) => {
-                log('WARN', `Failed to restart architect: ${(err as Error).message}`);
+                log('WARN', `Failed to restart architect for ${projectPath}: ${(err as Error).message}`);
               });
             }, 2000);
           });
