@@ -98,6 +98,44 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       term.loadAddon(webLinksAddon);
     }
 
+    // Clipboard handling: xterm.js relies on a hidden textarea for native
+    // paste events, which doesn't work reliably in all browser contexts.
+    // Use attachCustomKeyEventHandler + navigator.clipboard for explicit handling.
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      // Only intercept keydown events
+      if (event.type !== 'keydown') return true;
+
+      const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
+      if (!modKey) return true;
+
+      // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
+      if (event.key === 'v' || event.key === 'V') {
+        navigator.clipboard.readText().then((text) => {
+          if (text) term.paste(text);
+        }).catch(() => {
+          // Clipboard permission denied — let browser handle natively
+        });
+        return false;
+      }
+
+      // Copy: Cmd+C (Mac) or Ctrl+Shift+C (Linux/Windows)
+      if (event.key === 'c' || event.key === 'C') {
+        const selection = term.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(() => {
+            // Clipboard permission denied
+          });
+          return false;
+        }
+        // No selection: let xterm handle it (sends ^C / SIGINT)
+        return true;
+      }
+
+      return true;
+    });
+
     fitAddon.fit();
     // Re-fit after delays to catch CSS layout settling and late paints
     const refitTimer1 = setTimeout(() => fitAddon.fit(), 100);
