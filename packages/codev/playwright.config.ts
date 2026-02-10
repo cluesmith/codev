@@ -9,16 +9,18 @@
 
 import { defineConfig } from '@playwright/test';
 
+const port = Number(process.env.TOWER_TEST_PORT || '4100');
+
 export default defineConfig({
   testDir: './src/agent-farm/__tests__/e2e',
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:4100',
+    baseURL: `http://localhost:${port}`,
   },
   webServer: {
-    command: 'node dist/agent-farm/servers/tower-server.js 4100',
-    port: 4100,
+    command: `node dist/agent-farm/servers/tower-server.js ${port}`,
+    port,
     reuseExistingServer: true,
     timeout: 30_000,
   },

@@ -50,6 +50,30 @@ jobs:
         working-directory: packages/codev
         run: npx vitest run --config vitest.e2e.config.ts --exclude 'src/commands/porch/__tests__/e2e/**'
 
+  cli:
+    name: CLI Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: packages/codev
+        run: npm install
+
+      - name: Build package
+        working-directory: packages/codev
+        run: npm run build
+
+      - name: Run CLI integration tests
+        working-directory: packages/codev
+        run: npx vitest run --config vitest.cli.config.ts
+
   playwright:
     name: Dashboard Tests
     runs-on: ubuntu-latest

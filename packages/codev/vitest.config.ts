@@ -22,8 +22,8 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       thresholds: {
-        lines: 60,
-        branches: 50,
+        lines: 62,
+        branches: 55,
       },
       exclude: [
         '**/dist/**',
