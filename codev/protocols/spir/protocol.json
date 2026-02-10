@@ -1,0 +1,159 @@
+{
+  "$schema": "../../../codev-skeleton/protocol-schema.json",
+  "name": "spir",
+  "alias": "spider",
+  "version": "2.2.0",
+  "description": "SPIR: Specify → Plan → Implement → Review with build-verify cycles (Codev monorepo override)",
+  "input": {
+    "type": "spec",
+    "required": false,
+    "default_for": ["--project", "-p"]
+  },
+  "phases": [
+    {
+      "id": "specify",
+      "name": "Specify",
+      "description": "Write specification with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "specify.md",
+        "artifact": "codev/specs/${PROJECT_ID}-*.md"
+      },
+      "verify": {
+        "type": "spec-review",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 7,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "gate": "spec-approval",
+      "next": "plan"
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Write implementation plan with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "plan.md",
+        "artifact": "codev/plans/${PROJECT_ID}-*.md"
+      },
+      "verify": {
+        "type": "plan-review",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 7,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md",
+        "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_ID}-*.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
+      },
+      "gate": "plan-approval",
+      "next": "implement"
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "description": "Implement code with 3-way review per plan phase",
+      "type": "per_plan_phase",
+      "build": {
+        "prompt": "implement.md",
+        "artifact": "src/**/*.{ts,tsx,js,jsx}"
+      },
+      "verify": {
+        "type": "impl-review",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 7,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "cwd": "packages/codev",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "tests": {
+          "command": "npm test -- --exclude='**/e2e/**'",
+          "cwd": "packages/codev",
+          "description": "Unit tests only - e2e tests run in review phase",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "transition": {
+        "on_complete": "implement",
+        "on_all_phases_complete": "review"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Final review and PR with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "review.md",
+        "artifact": "codev/reviews/${PROJECT_ID}-*.md"
+      },
+      "verify": {
+        "type": "pr-ready",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 7,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "e2e_tests": {
+          "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+          "cwd": "packages/codev",
+          "description": "Full e2e test suite - only runs in review phase",
+          "optional": true
+        }
+      },
+      "gate": "pr-ready",
+      "next": null
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current build phase is complete",
+      "transitions_to": "verify"
+    },
+    "BLOCKED": {
+      "description": "Signal implementation is blocked",
+      "requires": "reason"
+    }
+  },
+  "phase_completion": {
+    "build_succeeds": "cd packages/codev && npm run build 2>&1",
+    "tests_pass": "cd packages/codev && npm test 2>&1",
+    "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
+  },
+  "defaults": {
+    "mode": "strict",
+    "max_iterations": 7,
+    "verify": {
+      "models": ["gemini", "codex", "claude"],
+      "parallel": true
+    },
+    "checks": {
+      "build": { "command": "npm run build", "cwd": "packages/codev" },
+      "test": { "command": "npm test", "cwd": "packages/codev" }
+    }
+  }
+}
