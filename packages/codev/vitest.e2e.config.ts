@@ -15,10 +15,7 @@ export default defineConfig({
   test: {
     include: [
       'src/commands/porch/__tests__/e2e/**/*.test.ts',
-      'src/agent-farm/__tests__/tower-baseline.test.ts',
-      'src/agent-farm/__tests__/tower-api.test.ts',
-      'src/agent-farm/__tests__/tower-terminals.test.ts',
-      'src/agent-farm/__tests__/cli-tower-mode.test.ts',
+      'src/**/*.e2e.test.ts',  // All server-spawning / integration tests
     ],
     testTimeout: 1200000, // 20 minutes per test
     hookTimeout: 300000,  // 5 minutes for setup/teardown

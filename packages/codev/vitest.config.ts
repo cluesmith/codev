@@ -12,14 +12,11 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/e2e/**',  // E2E tests excluded by default
-      '**/dashboard/__tests__/**',  // Dashboard tests use their own vitest config
-      '**/worktrees/**',   // Git worktrees have their own test files
-      '**/.builders/**',   // Builder worktrees
-      '**/tower-baseline.test.ts',  // Integration tests - spawn real servers, need built dist/
-      '**/tower-api.test.ts',       // Run these via: npm run test:e2e
-      '**/tower-terminals.test.ts',
-      '**/cli-tower-mode.test.ts',
+      '**/e2e/**',                   // E2E tests excluded by default
+      '**/*.e2e.test.ts',            // Convention: server-spawning / integration tests
+      '**/dashboard/__tests__/**',   // Dashboard tests use their own vitest config
+      '**/worktrees/**',             // Git worktrees have their own test files
+      '**/.builders/**',             // Builder worktrees
     ],
   },
 });
