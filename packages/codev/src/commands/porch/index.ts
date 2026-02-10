@@ -26,14 +26,12 @@ import {
   getPhaseGate,
   isPhased,
   isBuildVerify,
-  getPhaseCompletionChecks,
 } from './protocol.js';
 import {
   findPlanFile,
   extractPhasesFromFile,
   getCurrentPlanPhase,
   getPhaseContent,
-  advancePlanPhase,
   allPlanPhasesComplete,
   isPlanPhaseComplete,
 } from './plan.js';
@@ -251,65 +249,15 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     return;
   }
 
-  // Handle phased protocols (plan phases with checks at completion)
+  // For phased protocols: plan phase advancement requires 3-way review.
+  // The isBuildVerify block above already marked build_complete=true.
+  // Redirect to porch next for verification (3-way review + unanimous verdict).
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
-
     if (currentPlanPhase && !allPlanPhasesComplete(state.plan_phases)) {
-      // Run phase completion checks (implement + defend + evaluate all at once)
-      const completionChecks = getPhaseCompletionChecks(protocol);
-      if (Object.keys(completionChecks).length > 0) {
-        const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
-
-        console.log('');
-        console.log(chalk.bold(`RUNNING PHASE COMPLETION CHECKS (${currentPlanPhase.id})...`));
-
-        const results = await runPhaseChecks(completionChecks, projectRoot, checkEnv);
-        console.log(formatCheckResults(results));
-
-        if (!allChecksPassed(results)) {
-          console.log('');
-          console.log(chalk.red('PHASE COMPLETION CHECKS FAILED. Cannot advance.'));
-          console.log(`\n  Ensure your commit includes:`);
-          console.log(`    - Implementation code`);
-          console.log(`    - Tests`);
-          console.log(`    - 3-way review results in commit message`);
-          console.log(`\n  Then try again.`);
-          process.exit(1);
-        }
-      }
-
-      // Advance to next plan phase
-      const { phases: updatedPhases, moveToReview } = advancePlanPhase(
-        state.plan_phases,
-        currentPlanPhase.id
-      );
-
-      state.plan_phases = updatedPhases;
-
       console.log('');
-      console.log(chalk.green(`PLAN PHASE COMPLETE: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
-
-      // Check if moving to review (all plan phases done)
-      if (moveToReview) {
-        state.phase = 'review';
-        state.current_plan_phase = null;
-        writeState(statusPath, state);
-        console.log(chalk.cyan('All plan phases complete. Moving to REVIEW phase.'));
-        console.log(`\n  Run: porch status ${state.id}`);
-        return;
-      }
-
-      // Update current plan phase tracker
-      const newCurrentPhase = getCurrentPlanPhase(state.plan_phases);
-      state.current_plan_phase = newCurrentPhase?.id || null;
-
-      writeState(statusPath, state);
-
-      if (newCurrentPhase) {
-        console.log(chalk.cyan(`NEXT: ${newCurrentPhase.id} - ${newCurrentPhase.title}`));
-      }
-      console.log(`\n  Run: porch status ${state.id}`);
+      console.log(chalk.green('BUILD COMPLETE. Ready for 3-way review.'));
+      console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
       return;
     }
   }

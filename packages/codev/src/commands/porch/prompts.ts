@@ -186,9 +186,16 @@ export function buildPhasePrompt(
   }
 
   // Build history header if this is a retry iteration
+  // Filter history by current plan phase to avoid mixing context from other phases
   let historyHeader = '';
   if (isBuildVerify(protocol, state.phase) && state.iteration > 1 && state.history.length > 0) {
-    historyHeader = buildHistoryHeader(state.history, state.iteration);
+    const currentPhase = state.current_plan_phase || undefined;
+    const phaseHistory = state.history.filter(
+      h => (h.plan_phase || undefined) === currentPhase
+    );
+    if (phaseHistory.length > 0) {
+      historyHeader = buildHistoryHeader(phaseHistory, state.iteration);
+    }
   }
 
   // Build user answers section if they asked clarifying questions

@@ -405,13 +405,18 @@ async function handleBuildVerify(
     state.iteration++;
     state.build_complete = false;
 
-    // Record reviews in history
-    const existingRecord = state.history.find(h => h.iteration === state.iteration - 1);
+    // Record reviews in history (scoped by plan_phase for disambiguation)
+    const currentPhase = state.current_plan_phase || undefined;
+    const existingRecord = state.history.find(
+      h => h.iteration === state.iteration - 1 &&
+           (h.plan_phase || undefined) === currentPhase
+    );
     if (existingRecord) {
       existingRecord.reviews = reviews;
     } else {
       state.history.push({
         iteration: state.iteration - 1,
+        plan_phase: currentPhase,
         build_output: '',
         reviews,
       });
@@ -478,7 +483,8 @@ async function handleVerifyApproved(
       state.plan_phases = updatedPhases;
       state.build_complete = false;
       state.iteration = 1;
-      state.history = [];
+      // Preserve history across plan phases for audit trail
+      // (plan_phase field on each entry disambiguates iterations)
 
       if (moveToReview) {
         // All plan phases done — move to review

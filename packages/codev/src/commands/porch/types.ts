@@ -120,8 +120,9 @@ export interface ReviewResult {
  */
 export interface IterationRecord {
   iteration: number;
-  build_output: string;   // Path to Claude's build output file
-  reviews: ReviewResult[]; // Reviews from verification
+  plan_phase?: string;      // Which plan phase this belongs to (for per_plan_phase protocols)
+  build_output: string;     // Path to Claude's build output file
+  reviews: ReviewResult[];  // Reviews from verification
 }
 
 /**

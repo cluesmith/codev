@@ -246,6 +246,10 @@ For detailed commands, configuration, and architecture, see:
 - `codev/resources/arch.md` - Terminal architecture, state management
 - `codev/resources/workflow-reference.md` - Stage-by-stage workflow
 
+### Pre-Spawn Rule
+
+**Commit all local changes before `af spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).
+
 ### Key Commands
 
 ```bash

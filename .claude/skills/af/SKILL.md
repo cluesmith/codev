@@ -59,8 +59,16 @@ Edit `af-config.json` at project root to customize shell commands.
 }
 ```
 
+## Pre-Spawn Checklist
+
+**Before `af spawn`, commit all local changes.** Builders work in git worktrees
+branched from HEAD — uncommitted files (specs, plans, codev updates) are invisible
+to the builder. The spawn command will refuse if the worktree is dirty (override
+with `--force`).
+
 ## Common Mistakes
 
+- **Spawning with uncommitted changes** — builder won't see specs, plans, or codev updates
 - There is NO `codev tower` command — Tower is managed via `af tower`
 - There is NO `restart` subcommand — stop then start
 - There is NO `af start` for Tower — use `af tower start` or `af dash start`

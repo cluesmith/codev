@@ -1306,6 +1306,26 @@ export async function spawn(options: SpawnOptions): Promise<void> {
 
   const config = getConfig();
 
+  // Refuse to spawn if the main worktree has uncommitted changes.
+  // Builders work in git worktrees branched from HEAD — uncommitted changes
+  // (specs, plans, codev updates) won't be visible to the builder.
+  if (!options.force) {
+    try {
+      const { stdout } = await run('git status --porcelain', { cwd: config.projectRoot });
+      if (stdout.trim().length > 0) {
+        fatal(
+          'Uncommitted changes detected in main worktree.\n\n' +
+          '  Builders branch from HEAD, so uncommitted files (specs, plans,\n' +
+          '  codev updates) will NOT be visible to the builder.\n\n' +
+          '  Please commit or stash your changes first, then retry.\n' +
+          '  Use --force to skip this check.'
+        );
+      }
+    } catch {
+      // Non-fatal — if git status fails, allow spawn to continue
+    }
+  }
+
   // Prune stale worktrees before spawning to prevent "can't find session" errors
   // This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups
   try {

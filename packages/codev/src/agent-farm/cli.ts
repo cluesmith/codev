@@ -151,7 +151,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--worktree', 'Spawn worktree session')
     .option('--files <files>', 'Context files (comma-separated)')
     .option('--no-comment', 'Skip commenting on issue (bugfix mode only)')
-    .option('--force', 'Override collision detection (bugfix mode only)')
+    .option('--force', 'Skip safety checks (dirty worktree, collision detection)')
     .option('--use-protocol <name>', 'Override default protocol (e.g., --use-protocol tick)')
     .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
     .option('--strict', 'Use strict mode (porch orchestrates)')
