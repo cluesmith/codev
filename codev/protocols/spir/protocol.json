@@ -118,11 +118,18 @@
         "push": true
       },
       "checks": {
-        "e2e_tests": {
-          "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+        "build": {
+          "command": "npm run build",
+          "cwd": "packages/codev"
+        },
+        "tests": {
+          "command": "npm test",
+          "cwd": "packages/codev"
+        },
+        "cli_tests": {
+          "command": "npx vitest run --config vitest.cli.config.ts",
           "cwd": "packages/codev",
-          "description": "Full e2e test suite - only runs in review phase",
-          "optional": true
+          "description": "CLI integration tests"
         }
       },
       "gate": "pr-ready",
