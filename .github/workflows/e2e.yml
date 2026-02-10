@@ -1,4 +1,4 @@
-name: E2E Tests
+name: CLI Integration Tests
 
 on:
   pull_request:
@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  e2e:
-    name: E2E Tests (${{ matrix.os }})
+  cli:
+    name: CLI Tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -27,15 +27,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install BATS
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y bats
-          else
-            brew install bats-core
-          fi
-
       - name: Install package dependencies
         working-directory: packages/codev
         run: npm install
@@ -44,27 +35,13 @@ jobs:
         working-directory: packages/codev
         run: npm run build
 
-      - name: Create tarball
+      - name: Run CLI integration tests
         working-directory: packages/codev
-        run: npm pack
-
-      - name: Run E2E tests
-        env:
-          E2E_TARBALL: ${{ github.workspace }}/packages/codev/cluesmith-codev-*.tgz
-        run: bats tests/e2e/
-
-      - name: Upload test artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-test-logs-${{ matrix.os }}
-          path: |
-            packages/codev/*.tgz
-          retention-days: 7
+        run: npx vitest run --config vitest.cli.config.ts
 
   notify:
     name: Discord Notification
-    needs: e2e
+    needs: cli
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -72,7 +49,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          if [ "${{ needs.e2e.result }}" == "success" ]; then
+          if [ "${{ needs.cli.result }}" == "success" ]; then
             COLOR=3066993  # Green
             STATUS="✅ Passed"
           else
@@ -81,5 +58,5 @@ jobs:
           fi
 
           curl -H "Content-Type: application/json" \
-            -d "{\"embeds\": [{\"title\": \"Codev E2E Tests - ${STATUS}\", \"description\": \"Scheduled daily E2E test run completed.\", \"color\": ${COLOR}, \"fields\": [{\"name\": \"Result\", \"value\": \"${{ needs.e2e.result }}\", \"inline\": true}, {\"name\": \"Run\", \"value\": \"[View Workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}], \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+            -d "{\"embeds\": [{\"title\": \"Codev CLI Tests - ${STATUS}\", \"description\": \"Scheduled daily CLI integration test run completed.\", \"color\": ${COLOR}, \"fields\": [{\"name\": \"Result\", \"value\": \"${{ needs.cli.result }}\", \"inline\": true}, {\"name\": \"Run\", \"value\": \"[View Workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}], \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
             $DISCORD_WEBHOOK
