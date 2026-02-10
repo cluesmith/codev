@@ -331,6 +331,8 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
   }
 
   state.phase = nextPhase.id;
+  state.build_complete = false;
+  state.iteration = 1;
 
   // If entering a phased phase (implement), extract plan phases
   if (isPhased(protocol, nextPhase.id)) {
