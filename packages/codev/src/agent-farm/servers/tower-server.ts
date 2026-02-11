@@ -94,6 +94,12 @@ let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 /** Default tunnel port for codevos.ai */
 const DEFAULT_TUNNEL_PORT = 4200;
 
+/** Periodic metadata refresh interval (re-sends metadata to codevos.ai) */
+let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Metadata refresh period in milliseconds (30 seconds) */
+const METADATA_REFRESH_MS = 30_000;
+
 /**
  * Gather current tower metadata (projects + terminals) for codevos.ai.
  */
@@ -127,6 +133,30 @@ async function gatherMetadata(): Promise<TowerMetadata> {
 }
 
 /**
+ * Start periodic metadata refresh — re-gathers metadata and pushes to codevos.ai
+ * every METADATA_REFRESH_MS while the tunnel is connected.
+ */
+function startMetadataRefresh(): void {
+  stopMetadataRefresh();
+  metadataRefreshInterval = setInterval(async () => {
+    if (tunnelClient && tunnelClient.getState() === 'connected') {
+      const metadata = await gatherMetadata();
+      tunnelClient.sendMetadata(metadata);
+    }
+  }, METADATA_REFRESH_MS);
+}
+
+/**
+ * Stop the periodic metadata refresh.
+ */
+function stopMetadataRefresh(): void {
+  if (metadataRefreshInterval) {
+    clearInterval(metadataRefreshInterval);
+    metadataRefreshInterval = null;
+  }
+}
+
+/**
  * Create or reconnect the tunnel client using the given config.
  * Sets up state change listeners and sends initial metadata.
  */
@@ -146,6 +176,11 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
 
   client.onStateChange((state: TunnelState, prev: TunnelState) => {
     log('INFO', `Tunnel: ${prev} → ${state}`);
+    if (state === 'connected') {
+      startMetadataRefresh();
+    } else if (prev === 'connected') {
+      stopMetadataRefresh();
+    }
     if (state === 'auth_failed') {
       log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower register --reauth\' to update credentials.');
     }
@@ -942,6 +977,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }
 
   // 4. Disconnect tunnel (Spec 0097 Phase 4)
+  stopMetadataRefresh();
   stopConfigWatcher();
   if (tunnelClient) {
     log('INFO', 'Disconnecting tunnel...');

@@ -479,6 +479,53 @@ describe('tunnel integration (Phase 4)', () => {
 
       client.disconnect();
     });
+
+    it('metadata updates when sendMetadata is called again after connection', async () => {
+      const config = createTestConfig();
+      const client = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: 4100,
+        usePlainTcp: true,
+      });
+
+      // Set initial metadata with 1 project
+      client.sendMetadata({
+        projects: [{ path: '/test', name: 'initial-proj' }],
+        terminals: [],
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Verify initial metadata
+      const res1 = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
+      expect(res1.status).toBe(200);
+      const body1 = JSON.parse(res1.body);
+      expect(body1.projects).toHaveLength(1);
+      expect(body1.projects[0].name).toBe('initial-proj');
+
+      // Update metadata with 2 projects (simulates periodic refresh)
+      client.sendMetadata({
+        projects: [
+          { path: '/test', name: 'initial-proj' },
+          { path: '/test2', name: 'new-proj' },
+        ],
+        terminals: [{ id: 'term-1', projectPath: '/test2' }],
+      });
+
+      // Verify updated metadata via GET
+      const res2 = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
+      expect(res2.status).toBe(200);
+      const body2 = JSON.parse(res2.body);
+      expect(body2.projects).toHaveLength(2);
+      expect(body2.terminals).toHaveLength(1);
+      expect(body2.terminals[0].projectPath).toBe('/test2');
+
+      client.disconnect();
+    });
   });
 
   describe('config file watcher', () => {
