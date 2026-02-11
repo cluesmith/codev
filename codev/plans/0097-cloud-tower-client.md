@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Replace cloudflared integration with a built-in HTTP/2 role-reversal tunnel client that connects to codevos.ai. The implementation is split into 6 phases: cloud config management, cloudflared removal, tunnel client core, tower integration, CLI commands, and integration tests. Each phase is independently testable and builds on the previous.
+Replace cloudflared integration with a built-in HTTP/2 role-reversal tunnel client that connects to codevos.ai. The implementation is split into 7 phases: cloud config management, cloudflared removal, tunnel client core, tower integration, CLI commands, Tower dashboard UI, and E2E tests. Each phase is independently testable and builds on the previous.
 
 All tunnel logic uses Node.js built-in modules only (`node:http2`, `node:net`, `node:tls`, `node:http`). No third-party tunnel dependencies.
 
@@ -24,6 +24,8 @@ All tunnel logic uses Node.js built-in modules only (`node:http2`, `node:net`, `
 - [ ] Tower works normally without registration (local-only mode)
 - [ ] All existing tests pass; new tests cover tunnel client
 - [ ] Test coverage >90% for new modules
+- [ ] Tower dashboard shows cloud connection status and connect/disconnect controls
+- [ ] E2E tests pass against local codevos.ai instance
 
 ## Phases (Machine Readable)
 
@@ -37,7 +39,8 @@ All tunnel logic uses Node.js built-in modules only (`node:http2`, `node:net`, `
     {"id": "phase_3", "title": "HTTP/2 Tunnel Client Core"},
     {"id": "phase_4", "title": "Tower-Tunnel Integration"},
     {"id": "phase_5", "title": "CLI Commands"},
-    {"id": "phase_6", "title": "Integration Tests"}
+    {"id": "phase_6", "title": "Tower Dashboard UI"},
+    {"id": "phase_7", "title": "E2E Tests"}
   ]
 }
 ```
@@ -171,11 +174,13 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 - `onStateChange(callback): void` — State change listener
 - `sendMetadata(metadata): void` — Send project/terminal lists to server
 
-**Connection flow:**
-1. Open TLS connection to `serverUrl` (port derived from URL)
-2. Send auth frame: `AUTH <towerId> <apiKey>\n`
-3. Wait for `AUTH_OK\n` response
-4. On `AUTH_OK`: Create `http2.createServer()`, emit `'connection'` with the socket
+**Connection flow (matches codevos.ai tunnel server protocol):**
+1. Open TCP connection to tunnel server (port 4200, or from config). If TLS certs configured on server, use TLS; otherwise plain TCP.
+2. Send auth frame: `AUTH <apiKey>\n` (max 256 bytes, 5s timeout on server side)
+3. Wait for response:
+   - Success: `OK <towerId>\n` — server confirms tower identity
+   - Failure: `ERR <reason>\n` where reason is `invalid_api_key`, `rate_limited`, `invalid_auth_frame`, or `internal_error`
+4. On `OK`: Create `http2.createServer()`, emit `'connection'` with the socket
 5. H2 stream handler: for each incoming request:
    a. Check path against blocklist (`/api/tunnel/*`) → 403
    b. Proxy to `http://localhost:<localPort>` via `node:http`
@@ -183,8 +188,8 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 
 **Reconnection:**
 - `calculateBackoff(attempt: number): number` — Exponential with jitter: `min(1000 * 2^attempt + jitter, 60000)`. After 10 consecutive failures: 300000ms (5 min).
-- Circuit breaker: On auth failure (`AUTH_FAIL` or HTTP 401/403), set state to `auth_failed`, stop retrying, log clear error message.
-- On transient failure: schedule reconnect with backoff.
+- Circuit breaker: On `ERR invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."`
+- On transient failure (`ERR rate_limited`, `ERR internal_error`, connection reset, timeout): schedule reconnect with backoff.
 
 **Hop-by-hop headers to filter:**
 `connection`, `keep-alive`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailers`, `transfer-encoding`, `upgrade`
@@ -306,15 +311,9 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 - If not registered: `"Cloud Registration: not registered. Run 'af tower register' to connect to codevos.ai."`.
 
 **CLI registration in `cli.ts`:**
-```
-towerCmd.command('register')
-towerCmd.command('deregister')
-```
-`af tower status` doesn't need a separate command — it's already handled by `af status`.
-
-Wait — looking at `cli.ts`, there's no `af tower status` command currently. The `af status` command (in `commands/status.ts`) shows tower info. Need to check if `af tower status` should be a separate subcommand or if we extend `af status`.
-
-Per the spec: `af tower status` **extends** the existing output. I'll add a `status` subcommand to `towerCmd` that queries both local tower info and cloud status, with output matching the spec's format exactly.
+- Add `towerCmd.command('register')` with `--reauth` option
+- Add `towerCmd.command('deregister')`
+- Add `towerCmd.command('status')` — new subcommand that shows daemon info + cloud connection status, matching the spec's output format exactly
 
 #### Acceptance Criteria
 - [ ] `af tower register` opens browser and completes registration
@@ -335,37 +334,107 @@ Per the spec: `af tower status` **extends** the existing output. I'll add a `sta
 
 ---
 
-### Phase 6: Integration Tests
-**Dependencies**: Phases 1-5
+### Phase 6: Tower Dashboard UI
+**Dependencies**: Phase 4 (tunnel endpoints exist)
 
 #### Objectives
-- Create a mock tunnel server for integration testing
-- Write integration tests covering full flows
-- Write edge case and negative tests
+- Add cloud connection controls to the Tower React dashboard (connect/disconnect buttons)
+- Show real-time tunnel connection status (disconnected/connecting/connected/auth_failed)
+- Display what's being accessed remotely (tower name, access URL, connection uptime)
+
+#### Deliverables
+- [ ] `packages/codev/dashboard/src/components/CloudStatus.tsx`
+- [ ] Modified `packages/codev/dashboard/src/lib/api.ts` (add tunnel API functions)
+- [ ] Modified `packages/codev/dashboard/src/hooks/useBuilderStatus.ts` (poll tunnel status)
+- [ ] Modified `packages/codev/dashboard/src/components/App.tsx` (render CloudStatus)
+- [ ] Modified `packages/codev/dashboard/src/index.css` (cloud status styling)
+
+#### Implementation Details
+
+**API functions** (`api.ts`):
+- `getTunnelStatus(): Promise<TunnelStatus>` — calls `GET /api/tunnel/status`
+- `connectTunnel(): Promise<void>` — calls `POST /api/tunnel/connect`
+- `disconnectTunnel(): Promise<void>` — calls `POST /api/tunnel/disconnect`
+
+**Polling** (`useBuilderStatus.ts`):
+- Extend the existing 1-second poll to also fetch `/api/tunnel/status`
+- Add `tunnelStatus` to the hook's return value
+
+**`CloudStatus.tsx`** component:
+- Renders in the dashboard header area (alongside existing builder count)
+- **Not registered**: Shows "Cloud: not registered" in muted text
+- **Disconnected**: Shows "Cloud: disconnected" with a "Connect" button
+- **Connecting**: Shows "Cloud: connecting..." with a spinner
+- **Connected**: Shows "Cloud: connected" with a green indicator, tower name, access URL (clickable link), uptime. Shows a "Disconnect" button.
+- **Auth failed**: Shows "Cloud: auth failed" in red with message to run `--reauth`
+- Connect/Disconnect buttons call the tunnel API endpoints
+
+**Styling**:
+- Connection status indicator: colored dot (green=connected, yellow=connecting, red=auth_failed, gray=disconnected)
+- Compact layout in header — doesn't take significant space
+- Access URL shown as a clickable external link
+
+#### Acceptance Criteria
+- [ ] CloudStatus component renders correctly in all states
+- [ ] Connect button triggers tunnel connection
+- [ ] Disconnect button closes tunnel
+- [ ] Status updates in real-time via polling
+- [ ] Access URL is clickable and opens in new tab
+- [ ] Component gracefully handles API errors
+- [ ] Dashboard works normally when not registered (no visual clutter)
+
+#### Test Plan
+- **Manual Testing**: Visual verification of all states, button interactions
+- **Unit Tests**: Component renders correct state for each tunnel status
+
+#### Risks
+- **Risk**: Polling frequency adds load
+  - **Mitigation**: Tunnel status piggybacked on existing 1s poll; single extra field in response
+
+---
+
+### Phase 7: E2E Tests
+**Dependencies**: Phases 1-6
+
+#### Objectives
+- Create a mock tunnel server for unit/integration testing of the tunnel client
+- Write E2E tests against a real local codevos.ai instance for full-stack validation
+- Cover edge cases and negative scenarios
 - Ensure all existing tests still pass
 
 #### Deliverables
 - [ ] `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`
 - [ ] `packages/codev/src/agent-farm/__tests__/tunnel-client.integration.test.ts`
-- [ ] `packages/codev/src/agent-farm/__tests__/cloud-config.test.ts` (extended)
+- [ ] `packages/codev/src/agent-farm/__tests__/tunnel-e2e.test.ts`
 - [ ] All existing tests pass
 
 #### Implementation Details
 
 **Mock tunnel server** (`mock-tunnel-server.ts`):
-- Lightweight TLS server that accepts tunnel connections
-- Validates auth handshake (configurable: accept, reject, timeout)
+- Lightweight TCP server implementing the codevos.ai tunnel protocol (`AUTH <key>\n` → `OK <id>\n`)
+- Configurable behaviors: accept auth, reject auth, timeout, disconnect after N requests
 - Runs H2 client over the connection to send requests to the tower
-- Supports: GET, POST, WebSocket upgrade simulation
-- Configurable behaviors: disconnect after N requests, rate limit, slow responses
+- Used for fast, isolated unit/integration tests that don't need a database
 
-**Integration tests:**
+**Integration tests** (using mock server):
 - Full auth handshake → tunnel connected
 - HTTP GET/POST proxied correctly (status codes, headers, body)
 - Streaming response (chunked) flows correctly
 - Tower reconnects after simulated disconnect
-- Auth failure triggers circuit breaker
+- Auth failure triggers circuit breaker (`ERR invalid_api_key` → state `auth_failed`)
 - Path blocklist enforced (`/api/tunnel/disconnect` → 403)
+
+**E2E tests against local codevos.ai** (`tunnel-e2e.test.ts`):
+- Uses the real codevos.ai server from `../codevos.ai` (relative to project root)
+- codevos.ai server: Next.js on port 3000, tunnel server on port 4200
+- Test setup: start local codevos.ai instance, create test user, generate registration token
+- Leverages existing codevos.ai test helpers (`tests/e2e/helpers/test-server.ts`, `db-setup.ts`)
+- Test scenarios:
+  - Register tower via API → tower connects via tunnel → proxy HTTP request → verify response
+  - Tower reconnects after server restart
+  - Deregister tower → tunnel disconnects
+  - Rate limiting behavior
+  - WebSocket/terminal proxy through tunnel
 
 **Negative/edge case tests:**
 - Malformed auth response from server (no crash, clean error)
@@ -373,32 +442,37 @@ Per the spec: `af tower status` **extends** the existing output. I'll add a `sta
 - Config deleted while connected (disconnect on next reconnect)
 - Config with missing fields (local-only with warning)
 - Multiple rapid connect/disconnect cycles (no resource leaks)
+- Request to `/api/tunnel/disconnect` through tunnel → 403
 
 #### Acceptance Criteria
 - [ ] Mock tunnel server works reliably in test environment
-- [ ] All integration tests pass
+- [ ] All integration tests pass (mock server)
+- [ ] All E2E tests pass (local codevos.ai)
 - [ ] All edge case tests pass
 - [ ] All existing tower tests pass
 - [ ] No resource leaks (sockets, timers)
 
 #### Test Plan
-- **Integration Tests**: All scenarios above
-- **Manual Testing**: Real connection to codevos.ai (if available)
+- **Integration Tests**: Mock server scenarios (fast, no external deps)
+- **E2E Tests**: Full stack with local codevos.ai (slower, requires PostgreSQL)
+- **Manual Testing**: Real connection to production codevos.ai
 
 #### Risks
-- **Risk**: Mock server complexity
-  - **Mitigation**: Keep mock minimal; only implement behaviors needed for tests
+- **Risk**: E2E test setup complexity (codevos.ai + PostgreSQL)
+  - **Mitigation**: Reuse existing codevos.ai test helpers; document setup clearly
+- **Risk**: codevos.ai server API changes break E2E tests
+  - **Mitigation**: Pin to specific codevos.ai commit or branch for tests
 
 ---
 
 ## Dependency Map
 ```
-Phase 1 (Config) ──→ Phase 3 (Tunnel Client) ──→ Phase 4 (Integration) ──→ Phase 5 (CLI) ──→ Phase 6 (Tests)
-                                                        ↑
-Phase 2 (Remove Cloudflared) ──────────────────────────┘
+Phase 1 (Config) ──→ Phase 3 (Tunnel Client) ──→ Phase 4 (Tower Integration) ──→ Phase 5 (CLI) ──→ Phase 7 (Tests)
+                                                        ↑                              ↓
+Phase 2 (Remove Cloudflared) ──────────────────────────┘                    Phase 6 (Dashboard UI)
 ```
 
-Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4 depends on both Phase 2 and Phase 3. Phase 5 depends on Phase 1 and Phase 4. Phase 6 depends on all previous phases.
+Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4 depends on both Phase 2 and Phase 3. Phase 5 depends on Phase 1 and Phase 4. Phase 6 depends on Phase 4 (tunnel endpoints). Phase 7 depends on all previous phases.
 
 ## Resource Requirements
 ### Development Resources
@@ -421,6 +495,8 @@ Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4
   - **Phase**: Phase 2 (removal), Phase 4 (integration)
 - **AF CLI** (`cli.ts`): New subcommands added
   - **Phase**: Phase 5
+- **Tower Dashboard** (`packages/codev/dashboard/`): Cloud status UI
+  - **Phase**: Phase 6
 
 ## Risk Analysis
 ### Technical Risks
@@ -429,12 +505,14 @@ Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4
 | HTTP/2 role reversal edge cases | Low | Medium | Validated in spike; same as cloudflared approach |
 | Terminal latency through tunnel | Low | High | H2 streams lightweight; profile in Phase 6 |
 | `fs.watch()` reliability | Medium | Low | Debounce events; manual endpoint always works |
-| Mock server complexity | Medium | Low | Keep minimal; test real server separately |
+| E2E test setup complexity | Medium | Low | Reuse codevos.ai test helpers; document setup |
+| codevos.ai API drift | Low | Medium | Pin to commit; auth protocol is stable |
 
 ## Validation Checkpoints
 1. **After Phase 2**: Tower starts and runs with cloudflared removed; all existing tests pass
 2. **After Phase 4**: Tunnel connects to mock server; requests proxied correctly
-3. **After Phase 6**: Full test suite passes; edge cases covered
+3. **After Phase 6**: Dashboard shows cloud connection status; connect/disconnect buttons work
+4. **After Phase 7**: Full test suite passes; E2E tests pass against local codevos.ai
 
 ## Documentation Updates Required
 - [ ] Remove `tunnel-setup.md` references
