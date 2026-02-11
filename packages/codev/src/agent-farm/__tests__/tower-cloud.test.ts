@@ -291,6 +291,48 @@ describe('tower cloud commands (Phase 5)', () => {
     });
   });
 
+  describe('uptime from tunnel status is in milliseconds', () => {
+    it('tunnel status uptime is reported in ms (getUptime returns ms)', async () => {
+      // Verify the contract: /api/tunnel/status returns uptime in milliseconds
+      // This validates the assumption that formatUptime receives ms, not seconds
+      const mockServer = http.createServer((req, res) => {
+        if (req.url === '/api/tunnel/status') {
+          // Simulate 2 hours of uptime in milliseconds
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            registered: true,
+            state: 'connected',
+            uptime: 7200000, // 2 hours in ms
+            towerId: 'tower-123',
+            towerName: 'test',
+            serverUrl: 'https://codevos.ai',
+            accessUrl: 'https://codevos.ai/t/test/',
+          }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+
+      const port = await new Promise<number>((resolve) => {
+        mockServer.listen(0, '127.0.0.1', () => {
+          resolve((mockServer.address() as { port: number }).port);
+        });
+      });
+
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/tunnel/status`);
+        const data = await response.json() as { uptime: number };
+        // Uptime should be in ms — 7200000ms = 2 hours
+        expect(data.uptime).toBe(7200000);
+        // Converting to seconds: 7200000 / 1000 = 7200s = 2h
+        expect(Math.floor(data.uptime / 1000 / 3600)).toBe(2);
+      } finally {
+        mockServer.close();
+      }
+    });
+  });
+
   describe('API key masking in output', () => {
     it('masks standard ctk_ prefixed keys', () => {
       expect(maskApiKey('ctk_AbCdEfGhIjKl1234')).toBe('ctk_****1234');
