@@ -912,3 +912,86 @@ body {
   color: var(--text-muted);
   background: rgba(102, 102, 102, 0.15);
 }
+
+/* Cloud status indicator (Spec 0097) */
+.cloud-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 12px;
+}
+
+.cloud-status--none {
+  color: var(--text-muted);
+}
+
+.cloud-status--error {
+  color: var(--status-error);
+}
+
+.cloud-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cloud-dot--green {
+  background: var(--status-active);
+}
+
+.cloud-dot--yellow {
+  background: var(--status-waiting);
+}
+
+.cloud-dot--red {
+  background: var(--status-error);
+}
+
+.cloud-dot--gray {
+  background: var(--text-muted);
+}
+
+.cloud-uptime {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.cloud-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.cloud-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 11px;
+}
+
+.cloud-link:hover {
+  text-decoration: underline;
+}
+
+.cloud-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cloud-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.cloud-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

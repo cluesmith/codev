@@ -181,3 +181,39 @@ export async function fetchRecentFiles(): Promise<RecentFile[]> {
   if (!res.ok) throw new Error(`Failed to fetch recent files: ${res.status}`);
   return res.json();
 }
+
+// Spec 0097: Tunnel status and control APIs for cloud connection
+
+export interface TunnelStatus {
+  registered: boolean;
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
+  uptime: number | null;
+  towerId: string | null;
+  towerName: string | null;
+  serverUrl: string | null;
+  accessUrl: string | null;
+}
+
+export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
+  try {
+    const res = await fetch(apiUrl('api/tunnel/status'), { headers: getAuthHeaders() });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function connectTunnel(): Promise<void> {
+  await fetch(apiUrl('api/tunnel/connect'), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function disconnectTunnel(): Promise<void> {
+  await fetch(apiUrl('api/tunnel/disconnect'), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+}
