@@ -105,10 +105,12 @@ Functions:
 - Remove all cloudflared-related code from tower-server.ts
 - Remove cloudflared API endpoints
 - Update graceful shutdown to remove tunnel stop
+- Remove deprecated documentation (`tunnel-setup.md`)
 - Ensure all existing tests still pass
 
 #### Deliverables
 - [ ] Modified `packages/codev/src/agent-farm/servers/tower-server.ts`
+- [ ] Deleted `codev/resources/tunnel-setup.md`
 - [ ] All existing tests pass
 
 #### Implementation Details
@@ -118,13 +120,21 @@ Functions:
 - Lines 2271-2292: API endpoints `/api/tunnel/status` (GET), `/api/tunnel/start` (POST), `/api/tunnel/stop` (POST)
 - Line 800: `stopTunnel()` call in `gracefulShutdown()`
 
+**Remove deprecated documentation:**
+- Delete `codev/resources/tunnel-setup.md` (references `af web keygen` and cloudflared setup)
+- Grep for any remaining references to `af web keygen`, `cloudflared`, or `tunnel-setup.md` across the codebase and remove them
+
 **Note**: The `/api/tunnel/*` path namespace will be reused in Phase 4 for the new tunnel management endpoints (`/api/tunnel/connect`, `/api/tunnel/disconnect`, `/api/tunnel/status`).
+
+**Note**: `af web keygen` does not exist as a CLI command in the current codebase (it was planned in Spec 0081 but never implemented). Only documentation references need removal. QR code generation code does not exist in the codebase either — only documentation references.
 
 **Check for any tower-client.ts references** to tunnel endpoints and update if needed.
 
 #### Acceptance Criteria
 - [ ] No cloudflared references remain in tower-server.ts
 - [ ] Graceful shutdown no longer calls `stopTunnel()`
+- [ ] `tunnel-setup.md` deleted
+- [ ] No remaining references to `af web keygen` or `cloudflared` in documentation
 - [ ] All existing tests pass (tower-baseline, tower-api, tower-terminals, tower-proxy)
 - [ ] Tower starts and serves local requests normally
 
@@ -149,6 +159,8 @@ Revert the single commit touching tower-server.ts
 #### Deliverables
 - [ ] `packages/codev/src/agent-farm/lib/tunnel-client.ts`
 - [ ] `packages/codev/src/agent-farm/__tests__/tunnel-client.test.ts`
+- [ ] `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`
+- [ ] `packages/codev/src/agent-farm/__tests__/tunnel-client.integration.test.ts`
 
 #### Implementation Details
 
@@ -156,9 +168,10 @@ Revert the single commit touching tower-server.ts
 
 ```typescript
 interface TunnelClientOptions {
-  serverUrl: string;      // codevos.ai URL
-  apiKey: string;         // Tower API key
-  towerId: string;        // Tower ID
+  serverUrl: string;      // codevos.ai URL (e.g. "https://codevos.ai")
+  tunnelPort: number;     // Tunnel server port (default: 4200)
+  apiKey: string;         // Tower API key (ctk_...)
+  towerId: string;        // Tower ID (set after auth handshake)
   localPort: number;      // localhost port to proxy to (4100)
 }
 
@@ -172,13 +185,13 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 - `getState(): TunnelState` — Returns current state
 - `getUptime(): number | null` — Returns ms since connected, or null
 - `onStateChange(callback): void` — State change listener
-- `sendMetadata(metadata): void` — Send project/terminal lists to server
+- `sendMetadata(metadata: TowerMetadata): void` — Send project/terminal lists as an H2 request (see Metadata Protocol below)
 
 **Connection flow (matches codevos.ai tunnel server protocol):**
-1. Open TCP connection to tunnel server (port 4200, or from config). If TLS certs configured on server, use TLS; otherwise plain TCP.
+1. Open TLS connection to tunnel server via `tls.connect()` to `serverUrl` hostname on `tunnelPort` (default 4200). **TLS is mandatory** — the spec requires transport security. The tower validates the server certificate (default Node.js TLS behavior). For local development/testing, the mock tunnel server uses plain TCP (tests only).
 2. Send auth frame: `AUTH <apiKey>\n` (max 256 bytes, 5s timeout on server side)
 3. Wait for response:
-   - Success: `OK <towerId>\n` — server confirms tower identity
+   - Success: `OK <towerId>\n` — server confirms tower identity. Tower stores `towerId` for subsequent use.
    - Failure: `ERR <reason>\n` where reason is `invalid_api_key`, `rate_limited`, `invalid_auth_frame`, or `internal_error`
 4. On `OK`: Create `http2.createServer()`, emit `'connection'` with the socket
 5. H2 stream handler: for each incoming request:
@@ -186,8 +199,18 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
    b. Proxy to `http://localhost:<localPort>` via `node:http`
    c. Pipe response back, filtering hop-by-hop headers
 
+**WebSocket proxying through H2:**
+codevos.ai proxies browser WebSocket connections to the tower via HTTP/2 CONNECT method (RFC 8441 — WebSockets over HTTP/2). The tower's H2 stream handler detects `:method` = `CONNECT` with `:protocol` = `websocket`, makes a regular HTTP/1.1 WebSocket upgrade request to `localhost:<localPort>`, and bidirectionally pipes the H2 stream data to the raw socket. This is how terminal I/O (xterm.js) flows through the tunnel. The codevos.ai server already implements this via its `handleUpgrade()` function.
+
+**Metadata protocol:**
+After tunnel connects, the tower sends metadata to codevos.ai as a special H2 request on a reserved path. The tower makes an outbound H2 request (from the tower's H2 server session) to codevos.ai's H2 client with:
+- Method: `POST`
+- Path: `/__tower/metadata`
+- Body: JSON `{ projects: [...], terminals: [...] }`
+This is a convention — codevos.ai's H2 client handles this path specially. Metadata is re-sent whenever projects or terminals change (debounced).
+
 **Reconnection:**
-- `calculateBackoff(attempt: number): number` — Exponential with jitter: `min(1000 * 2^attempt + jitter, 60000)`. After 10 consecutive failures: 300000ms (5 min).
+- `calculateBackoff(attempt: number): number` — Exponential with jitter: `min(1000 * 2^attempt + random(0, 1000), 60000)`. Jitter is a random value between 0 and 1000ms added to the base delay. After 10 consecutive failures: 300000ms (5 min).
 - Circuit breaker: On `ERR invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."`
 - On transient failure (`ERR rate_limited`, `ERR internal_error`, connection reset, timeout): schedule reconnect with backoff.
 
@@ -197,24 +220,41 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 **Path blocklist:**
 Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tunnel management endpoints are local-only"}`.
 
+**Mock tunnel server** (`mock-tunnel-server.ts`):
+Created in this phase to enable integration testing alongside the client. Lightweight TCP server implementing the codevos.ai tunnel protocol:
+- Accepts `AUTH <key>\n`, responds with `OK <id>\n` or `ERR <reason>\n`
+- Configurable: accept/reject auth, timeout, disconnect after N requests
+- Runs H2 client over the connection to send requests to the tower
+- Plain TCP (no TLS) for test simplicity
+
 #### Acceptance Criteria
-- [ ] TLS connection opens to server
+- [ ] TLS connection opens to server (mandatory, not optional)
 - [ ] Auth handshake succeeds with valid key
 - [ ] H2 server runs over outbound socket
 - [ ] HTTP requests proxied to localhost correctly
+- [ ] WebSocket CONNECT requests proxied correctly (bidirectional pipe)
 - [ ] `/api/tunnel/*` paths return 403
-- [ ] Exponential backoff calculated correctly
+- [ ] Exponential backoff calculated correctly (with 0-1000ms jitter)
 - [ ] Circuit breaker activates on auth failure
 - [ ] Reconnection works after transient disconnect
 - [ ] Hop-by-hop headers filtered from proxied requests
+- [ ] Metadata sent to server after connection
+- [ ] Mock tunnel server passes integration tests
 
 #### Test Plan
-- **Unit Tests**: Backoff calculation (values, jitter, cap, 5-min fallback), circuit breaker state transitions (closed→open on auth fail, reset), path blocklist matching, hop-by-hop header filtering
-- **Integration Tests**: Deferred to Phase 6 (requires mock tunnel server)
+- **Unit Tests**: Backoff calculation (values, jitter range 0-1000ms, cap at 60s, 5-min fallback after 10 failures), circuit breaker state transitions (closed→open on auth fail, reset on config change), path blocklist matching, hop-by-hop header filtering
+- **Integration Tests** (using mock tunnel server, in this phase):
+  - Full auth handshake → tunnel connected
+  - HTTP GET/POST proxied correctly (status codes, headers, body)
+  - Auth failure triggers circuit breaker (`ERR invalid_api_key` → state `auth_failed`)
+  - Path blocklist enforced (`/api/tunnel/disconnect` → 403)
+  - Tower reconnects after simulated disconnect
 
 #### Risks
 - **Risk**: HTTP/2 role reversal edge cases
   - **Mitigation**: Technique validated in spike; same approach used by cloudflared; Node.js `node:http2` supports this via `createServer` + manual socket emission
+- **Risk**: WebSocket over H2 via RFC 8441 CONNECT
+  - **Mitigation**: codevos.ai already implements `handleUpgrade()` for this; Node.js `node:http2` supports extended CONNECT since v12
 
 ---
 
@@ -241,7 +281,7 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 2. **New API endpoints:**
    - `POST /api/tunnel/connect` — Read config, create/reconnect tunnel client. Response: `{success, state}`.
    - `POST /api/tunnel/disconnect` — Disconnect tunnel client. Response: `{success}`.
-   - `GET /api/tunnel/status` — Return `{registered, state, uptime, towerId, towerName, serverUrl, accessUrl}`.
+   - `GET /api/tunnel/status` — Return `{registered, state, uptime, towerId, towerName, serverUrl, accessUrl}`. The `accessUrl` is constructed as `${serverUrl}/t/${towerName}/` from the stored config.
 
 3. **Graceful shutdown** (add after terminal manager shutdown): Call `tunnelClient.disconnect()`.
 
@@ -292,7 +332,7 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 3. Open browser to `https://codevos.ai/towers/register?callback=http://localhost:<port>/callback` (or reauth URL).
 4. Set 2-minute timeout. If callback received → proceed. If timeout → prompt `"Paste registration token from browser:"`.
 5. Prompt for tower name: `"Tower name (e.g. my-macbook):"` (default: `os.hostname()`). Skip for `--reauth`.
-6. Exchange token + tower name for API key and tower ID via `POST https://codevos.ai/api/towers/register`.
+6. Exchange token + tower name for API key and tower ID via `POST https://codevos.ai/api/towers/register/redeem` with body `{token, name, machineId}`. Response: `{towerId: string, apiKey: string}` where `apiKey` is prefixed `ctk_`.
 7. Write `cloud-config.json` via `writeCloudConfig()`.
 8. If tower daemon running, signal: `POST localhost:4100/api/tunnel/connect`.
 9. Print success: `"Tower '<name>' registered successfully. Access URL: https://codevos.ai/t/<name>/"`.
@@ -344,10 +384,12 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 
 #### Deliverables
 - [ ] `packages/codev/dashboard/src/components/CloudStatus.tsx`
+- [ ] `packages/codev/dashboard/src/components/__tests__/CloudStatus.test.tsx`
 - [ ] Modified `packages/codev/dashboard/src/lib/api.ts` (add tunnel API functions)
 - [ ] Modified `packages/codev/dashboard/src/hooks/useBuilderStatus.ts` (poll tunnel status)
 - [ ] Modified `packages/codev/dashboard/src/components/App.tsx` (render CloudStatus)
 - [ ] Modified `packages/codev/dashboard/src/index.css` (cloud status styling)
+- [ ] `packages/codev/tests/e2e/cloud-status.e2e.test.ts` (Playwright test)
 
 #### Implementation Details
 
@@ -384,8 +426,9 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 - [ ] Dashboard works normally when not registered (no visual clutter)
 
 #### Test Plan
-- **Manual Testing**: Visual verification of all states, button interactions
-- **Unit Tests**: Component renders correct state for each tunnel status
+- **Unit Tests** (`CloudStatus.test.tsx`): Component renders correct state for each tunnel status (disconnected, connecting, connected, auth_failed, not registered), button click handlers fire correctly
+- **Playwright Tests** (`cloud-status.e2e.test.ts`): Visual verification of all states using mock tunnel status API responses, connect/disconnect button interaction, access URL link opens correctly
+- **Manual Testing**: Visual verification in live tower dashboard
 
 #### Risks
 - **Risk**: Polling frequency adds load
@@ -403,26 +446,13 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 - Ensure all existing tests still pass
 
 #### Deliverables
-- [ ] `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`
-- [ ] `packages/codev/src/agent-farm/__tests__/tunnel-client.integration.test.ts`
 - [ ] `packages/codev/src/agent-farm/__tests__/tunnel-e2e.test.ts`
+- [ ] `packages/codev/src/agent-farm/__tests__/tunnel-edge-cases.test.ts`
 - [ ] All existing tests pass
 
 #### Implementation Details
 
-**Mock tunnel server** (`mock-tunnel-server.ts`):
-- Lightweight TCP server implementing the codevos.ai tunnel protocol (`AUTH <key>\n` → `OK <id>\n`)
-- Configurable behaviors: accept auth, reject auth, timeout, disconnect after N requests
-- Runs H2 client over the connection to send requests to the tower
-- Used for fast, isolated unit/integration tests that don't need a database
-
-**Integration tests** (using mock server):
-- Full auth handshake → tunnel connected
-- HTTP GET/POST proxied correctly (status codes, headers, body)
-- Streaming response (chunked) flows correctly
-- Tower reconnects after simulated disconnect
-- Auth failure triggers circuit breaker (`ERR invalid_api_key` → state `auth_failed`)
-- Path blocklist enforced (`/api/tunnel/disconnect` → 403)
+**Note**: The mock tunnel server and basic integration tests are created in Phase 3. This phase extends them with E2E tests against real codevos.ai, edge cases, and non-functional validation.
 
 **E2E tests against local codevos.ai** (`tunnel-e2e.test.ts`):
 - Uses the real codevos.ai server from `../codevos.ai` (relative to project root)
@@ -434,9 +464,10 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
   - Tower reconnects after server restart
   - Deregister tower → tunnel disconnects
   - Rate limiting behavior
-  - WebSocket/terminal proxy through tunnel
+  - WebSocket/terminal proxy through tunnel (xterm.js bidirectional)
+  - Streaming response (chunked/SSE) flows correctly through tunnel
 
-**Negative/edge case tests:**
+**Negative/edge case tests** (`tunnel-edge-cases.test.ts`, using mock server from Phase 3):
 - Malformed auth response from server (no crash, clean error)
 - Connection close mid-request (graceful cleanup)
 - Config deleted while connected (disconnect on next reconnect)
@@ -444,24 +475,35 @@ Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tu
 - Multiple rapid connect/disconnect cycles (no resource leaks)
 - Request to `/api/tunnel/disconnect` through tunnel → 403
 
+**Non-functional validation** (from spec — deferred items documented):
+- Tunnel latency measurement: p50/p95/p99 for proxied HTTP requests (target: <100ms overhead)
+- Terminal keystroke-to-echo overhead (target: <50ms p95) — measured during WebSocket E2E test
+- 50 concurrent proxied connections without degradation — stress test via mock server
+- Memory within bounds under sustained traffic (target: <50MB additional)
+- Long-lived connection stability test deferred to manual testing (24h test impractical in CI)
+
 #### Acceptance Criteria
-- [ ] Mock tunnel server works reliably in test environment
-- [ ] All integration tests pass (mock server)
 - [ ] All E2E tests pass (local codevos.ai)
 - [ ] All edge case tests pass
 - [ ] All existing tower tests pass
-- [ ] No resource leaks (sockets, timers)
+- [ ] No resource leaks (sockets, timers) verified by explicit cleanup checks
+- [ ] Tunnel latency overhead <100ms p95 (measured)
+- [ ] Terminal keystroke overhead <50ms p95 (measured)
+- [ ] 50 concurrent connections handled without errors
 
 #### Test Plan
-- **Integration Tests**: Mock server scenarios (fast, no external deps)
 - **E2E Tests**: Full stack with local codevos.ai (slower, requires PostgreSQL)
-- **Manual Testing**: Real connection to production codevos.ai
+- **Edge Case Tests**: Using mock tunnel server from Phase 3 (fast, no external deps)
+- **Non-Functional Tests**: Latency benchmarks, concurrency stress, memory measurement
+- **Manual Testing**: Real connection to production codevos.ai; 24h stability soak
 
 #### Risks
 - **Risk**: E2E test setup complexity (codevos.ai + PostgreSQL)
   - **Mitigation**: Reuse existing codevos.ai test helpers; document setup clearly
 - **Risk**: codevos.ai server API changes break E2E tests
   - **Mitigation**: Pin to specific codevos.ai commit or branch for tests
+- **Risk**: Non-functional benchmarks flaky in CI
+  - **Mitigation**: Use generous thresholds (2x spec targets); mark as advisory, not blocking
 
 ---
 
@@ -519,9 +561,10 @@ Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4
 - [ ] Update tower server documentation with cloud registration info
 
 ## Notes
-- No `af web keygen` command exists in current CLI — nothing to remove there
+- `af web keygen` was planned in Spec 0081 but never implemented as a CLI command — only documentation references exist (cleaned up in Phase 2)
+- QR code generation was never implemented in the codebase — only documentation references exist (cleaned up in Phase 2)
 - The `codev-web-key` local auth header (in `tower-client.ts`) is unrelated to cloud auth and stays unchanged
-- The spec mentions removing QR code generation — need to locate and remove if it exists in the codebase
+- The mock tunnel server (Phase 3) uses plain TCP for test simplicity; production always uses TLS
 
 ---
 
