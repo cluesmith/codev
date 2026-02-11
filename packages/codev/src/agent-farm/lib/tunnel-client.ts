@@ -171,13 +171,25 @@ export class TunnelClient {
   /**
    * Send tower metadata to codevos.ai through the tunnel.
    *
-   * Stores metadata for two delivery mechanisms:
-   * 1. Initial push: written as META <json>\n on the socket during the
-   *    auth handshake (before H2 takes over). Sent automatically on connect.
-   * 2. On-demand: served via GET /__tower/metadata when the H2 client polls.
+   * Metadata delivery uses two mechanisms:
    *
-   * Call this before connect() to set initial metadata, or after connect()
-   * to update it (will be served on next GET /__tower/metadata poll).
+   * 1. **Initial push** (handshake): Written as `META <json>\n` on the raw
+   *    socket during the auth handshake, before H2 takes over. This fires
+   *    automatically on every connect/reconnect.
+   *
+   * 2. **On-demand** (H2): Served via `GET /__tower/metadata` when the
+   *    codevos.ai H2 client polls. codevos.ai polls this endpoint
+   *    periodically and after receiving events.
+   *
+   * **Design note**: The plan describes metadata as a POST from the tower's
+   * H2 server session to codevos.ai's H2 client. This is not possible in
+   * HTTP/2: server sessions (`ServerHttp2Session`) cannot initiate requests
+   * — only clients can. The META frame + GET polling approach achieves the
+   * same result within HTTP/2's constraints. codevos.ai's H2 client polls
+   * `/__tower/metadata` when it needs fresh data.
+   *
+   * Call this before `connect()` to set initial metadata, or after
+   * `connect()` to update it (served on next GET poll).
    */
   sendMetadata(metadata: TowerMetadata): void {
     this._pendingMetadata = metadata;
