@@ -98,6 +98,7 @@ export class TunnelClient {
   private h2Session: http2.ServerHttp2Session | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private consecutiveFailures = 0;
+  private rateLimitCount = 0;
   private destroyed = false;
 
   constructor(options: TunnelClientOptions) {
@@ -124,6 +125,7 @@ export class TunnelClient {
     if (newState === 'connected') {
       this.connectedAt = Date.now();
       this.consecutiveFailures = 0;
+      this.rateLimitCount = 0;
     } else if (newState === 'disconnected' || newState === 'auth_failed') {
       this.connectedAt = null;
     }
@@ -164,6 +166,7 @@ export class TunnelClient {
     if (this.state === 'auth_failed') {
       this.destroyed = false;
       this.consecutiveFailures = 0;
+      this.rateLimitCount = 0;
       this.setState('disconnected');
     }
   }
@@ -319,11 +322,13 @@ export class TunnelClient {
     this.setState('disconnected');
 
     if (reason === 'rate_limited') {
-      // Wait 60 seconds for rate limiting
+      this.rateLimitCount++;
+      // First rate limit: 60s. Subsequent: 5 minutes (per spec).
+      const delay = this.rateLimitCount <= 1 ? 60_000 : 300_000;
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         if (!this.destroyed) this.doConnect();
-      }, 60_000);
+      }, delay);
     } else {
       this.scheduleReconnect();
     }
