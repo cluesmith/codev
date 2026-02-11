@@ -483,9 +483,6 @@ On Tower restart, `projectTerminals` is empty but SQLite may show projects as "a
 | `POST` | `/api/create` | Create new project (codev init + activate) |
 | `GET` | `/api/events` | SSE stream for push notifications |
 | `POST` | `/api/notify` | Broadcast notification to SSE clients |
-| `GET` | `/api/tunnel/status` | Get cloud tunnel connection status |
-| `POST` | `/api/tunnel/connect` | Connect cloud tunnel to codevos.ai |
-| `POST` | `/api/tunnel/disconnect` | Disconnect cloud tunnel |
 
 **Project-scoped APIs (via Tower proxy):**
 
