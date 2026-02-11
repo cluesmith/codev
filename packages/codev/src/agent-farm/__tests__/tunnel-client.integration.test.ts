@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import net from 'node:net';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 import { TunnelClient, type TunnelState } from '../lib/tunnel-client.js';
 
@@ -349,15 +350,47 @@ describe('tunnel-client integration', () => {
   });
 
   describe('metadata', () => {
-    it('serves metadata via /__tower/metadata endpoint', async () => {
+    it('pushes initial metadata during auth handshake', async () => {
+      await setupTunnel();
+
+      // Set metadata before connecting — it gets pushed as META frame
+      client.sendMetadata({
+        projects: [{ path: '/test/project', name: 'test' }],
+        terminals: [{ id: 'term-1', projectPath: '/test/project' }],
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Mock server should have received metadata via pre-H2 META frame
+      expect(mockServer.lastMetadata).not.toBeNull();
+      expect(mockServer.lastMetadata!.projects).toHaveLength(1);
+      expect(mockServer.lastMetadata!.projects[0].name).toBe('test');
+      expect(mockServer.lastMetadata!.terminals).toHaveLength(1);
+    });
+
+    it('pushes empty metadata when none is set', async () => {
       await setupTunnel();
 
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
+      // Should have pushed empty metadata during handshake
+      expect(mockServer.lastMetadata).not.toBeNull();
+      expect(mockServer.lastMetadata!.projects).toEqual([]);
+      expect(mockServer.lastMetadata!.terminals).toEqual([]);
+    });
+
+    it('serves metadata via GET /__tower/metadata for polling', async () => {
+      await setupTunnel();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Update metadata after connection (will be served on GET poll)
       client.sendMetadata({
-        projects: [{ path: '/test/project', name: 'test' }],
-        terminals: [{ id: 'term-1', projectPath: '/test/project' }],
+        projects: [{ path: '/updated', name: 'updated' }],
+        terminals: [],
       });
 
       const response = await mockServer.sendRequest({
@@ -367,24 +400,91 @@ describe('tunnel-client integration', () => {
       expect(response.status).toBe(200);
       const body = JSON.parse(response.body);
       expect(body.projects).toHaveLength(1);
-      expect(body.projects[0].name).toBe('test');
-      expect(body.terminals).toHaveLength(1);
+      expect(body.projects[0].name).toBe('updated');
+    });
+  });
+
+  describe('WebSocket CONNECT proxy', () => {
+    let wsServer: http.Server;
+    let wsPort: number;
+    let upgradeSockets: net.Socket[];
+
+    beforeEach(async () => {
+      upgradeSockets = [];
+      // Create a simple WebSocket-like echo server using raw HTTP upgrade
+      wsServer = http.createServer();
+      wsServer.on('upgrade', (req, socket, head) => {
+        upgradeSockets.push(socket);
+        // Accept the WebSocket upgrade with a minimal response
+        socket.write(
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          '\r\n',
+        );
+
+        // Echo back any data received
+        socket.on('data', (data) => {
+          socket.write(data);
+        });
+
+        socket.on('error', () => {
+          // Ignore errors
+        });
+      });
+
+      wsPort = await startServer(wsServer);
     });
 
-    it('returns empty metadata when none is set', async () => {
-      await setupTunnel();
+    afterEach(async () => {
+      // Destroy upgrade sockets first (they keep the server alive)
+      for (const s of upgradeSockets) {
+        if (!s.destroyed) s.destroy();
+      }
+      await stopServer(wsServer);
+    });
+
+    it('proxies WebSocket CONNECT with bidirectional data', async () => {
+      // Use the WebSocket server port as the local port for this test
+      mockServer = new MockTunnelServer();
+      const tunnelPort = await mockServer.start();
+
+      client = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort,
+        apiKey: 'ctk_test_key',
+        towerId: '',
+        localPort: wsPort,
+        usePlainTcp: true,
+      });
 
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      const response = await mockServer.sendRequest({
-        path: '/__tower/metadata',
+      // Send a CONNECT request through the tunnel
+      const stream = mockServer.sendConnect('/ws/terminal/test');
+
+      // Wait for the 200 response
+      await new Promise<void>((resolve, reject) => {
+        stream.on('response', (headers) => {
+          expect(headers[':status']).toBe(200);
+          resolve();
+        });
+        stream.on('error', reject);
+        setTimeout(() => reject(new Error('CONNECT timeout')), 5000);
       });
 
-      expect(response.status).toBe(200);
-      const body = JSON.parse(response.body);
-      expect(body.projects).toEqual([]);
-      expect(body.terminals).toEqual([]);
+      // Send data through the stream and expect echo
+      const echoed = await new Promise<string>((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+          resolve(chunk.toString('utf-8'));
+        });
+        stream.write('hello tunnel');
+        setTimeout(() => reject(new Error('Echo timeout')), 5000);
+      });
+
+      expect(echoed).toBe('hello tunnel');
+      stream.destroy();
     });
   });
 });

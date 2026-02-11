@@ -11,6 +11,7 @@
 
 import net from 'node:net';
 import http2 from 'node:http2';
+import type { TowerMetadata } from '../../lib/tunnel-client.js';
 
 export interface MockTunnelServerOptions {
   /** API key to accept. If not set, accepts any key. */
@@ -226,14 +227,73 @@ export class MockTunnelServer {
       return;
     }
 
-    // Push back any remaining data
-    if (remaining.length > 0) {
-      socket.unshift(Buffer.from(remaining, 'utf-8'));
+    // Read the META frame that the tower sends after auth
+    this.readMetaFrame(socket, remaining);
+  }
+
+  /** Last received metadata from the tower */
+  lastMetadata: TowerMetadata | null = null;
+
+  private readMetaFrame(socket: net.Socket, initial: string): void {
+    let buffer = initial;
+
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString('utf-8');
+      const newlineIdx = buffer.indexOf('\n');
+      if (newlineIdx === -1) return;
+
+      socket.removeListener('data', onData);
+      const line = buffer.slice(0, newlineIdx).trim();
+      const remaining = buffer.slice(newlineIdx + 1);
+
+      // Parse META <json>
+      if (line.startsWith('META ')) {
+        try {
+          this.lastMetadata = JSON.parse(line.slice(5)) as TowerMetadata;
+        } catch {
+          // Ignore parse errors in tests
+        }
+      }
+
+      // Push back remaining data for H2
+      if (remaining.length > 0) {
+        socket.unshift(Buffer.from(remaining, 'utf-8'));
+      }
+
+      this.startH2Client(socket);
+    };
+
+    // Check if META is already in buffer
+    const newlineIdx = buffer.indexOf('\n');
+    if (newlineIdx !== -1) {
+      const line = buffer.slice(0, newlineIdx).trim();
+      const remaining = buffer.slice(newlineIdx + 1);
+
+      if (line.startsWith('META ')) {
+        try {
+          this.lastMetadata = JSON.parse(line.slice(5)) as TowerMetadata;
+        } catch {
+          // Ignore
+        }
+      }
+
+      if (remaining.length > 0) {
+        socket.unshift(Buffer.from(remaining, 'utf-8'));
+      }
+
+      this.startH2Client(socket);
+      return;
     }
 
+    socket.on('data', onData);
+  }
+
+  private startH2Client(socket: net.Socket): void {
     // Start H2 client over the connection
+    // Enable extended CONNECT protocol (RFC 8441) for WebSocket proxying
     const h2Session = http2.connect('http://localhost', {
       createConnection: () => socket,
+      settings: { enableConnectProtocol: true },
     });
 
     h2Session.on('error', () => {

@@ -170,22 +170,20 @@ export class TunnelClient {
 
   /**
    * Send tower metadata to codevos.ai through the tunnel.
-   * This uses the H2 session to make a POST to /__tower/metadata.
+   *
+   * Stores metadata for two delivery mechanisms:
+   * 1. Initial push: written as META <json>\n on the socket during the
+   *    auth handshake (before H2 takes over). Sent automatically on connect.
+   * 2. On-demand: served via GET /__tower/metadata when the H2 client polls.
+   *
+   * Call this before connect() to set initial metadata, or after connect()
+   * to update it (will be served on next GET /__tower/metadata poll).
    */
   sendMetadata(metadata: TowerMetadata): void {
-    if (!this.h2Session || this.h2Session.destroyed || this.state !== 'connected') return;
-
-    // The tower's H2 server session can also initiate streams to the H2 client.
-    // We use a server push-like mechanism by writing a metadata frame.
-    // However, HTTP/2 servers can't initiate requests to clients normally.
-    // Instead, the metadata is sent as a response to a special request from the client,
-    // or we use a GOAWAY-free approach. For simplicity, we store metadata and
-    // send it when the client requests it via /__tower/metadata GET.
-    // The actual sending is handled in the stream handler.
     this._pendingMetadata = metadata;
   }
 
-  /** Stored metadata for the next /__tower/metadata request */
+  /** Stored metadata for serving via GET /__tower/metadata and initial push */
   private _pendingMetadata: TowerMetadata | null = null;
 
   private clearReconnectTimer(): void {
@@ -251,8 +249,8 @@ export class TunnelClient {
       if (this.state === 'connected' || this.state === 'connecting') {
         this.cleanup();
         this.setState('disconnected');
-        this.consecutiveFailures++;
         this.scheduleReconnect();
+        this.consecutiveFailures++;
       }
     });
   }
@@ -276,6 +274,11 @@ export class TunnelClient {
       if (response.startsWith('OK ')) {
         const towerId = response.slice(3);
         this.options.towerId = towerId;
+        // Push initial metadata before H2 takes over the socket.
+        // Protocol: META <json>\n — consumed by tunnel server before
+        // it starts the H2 client session.
+        const metadata = this._pendingMetadata ?? { projects: [], terminals: [] };
+        socket.write(`META ${JSON.stringify(metadata)}\n`);
         this.startH2Server(socket, remaining);
       } else if (response.startsWith('ERR ')) {
         const reason = response.slice(4);
@@ -302,7 +305,6 @@ export class TunnelClient {
 
     // Transient errors: rate_limited, internal_error, etc.
     this.setState('disconnected');
-    this.consecutiveFailures++;
 
     if (reason === 'rate_limited') {
       // Wait 60 seconds for rate limiting
@@ -313,19 +315,23 @@ export class TunnelClient {
     } else {
       this.scheduleReconnect();
     }
+    this.consecutiveFailures++;
   }
 
   private handleConnectionError(_err: Error): void {
     this.cleanup();
     if (this.state === 'auth_failed') return; // Don't override circuit breaker
     this.setState('disconnected');
-    this.consecutiveFailures++;
     this.scheduleReconnect();
+    this.consecutiveFailures++;
   }
 
   private startH2Server(socket: net.Socket | tls.TLSSocket, extraData: string): void {
     // Create an HTTP/2 server (without TLS — TLS is on the outer socket)
-    const h2Server = http2.createServer();
+    // Enable extended CONNECT for WebSocket proxying (RFC 8441)
+    const h2Server = http2.createServer({
+      settings: { enableConnectProtocol: true },
+    });
     this.h2Server = h2Server;
 
     h2Server.on('session', (session: http2.ServerHttp2Session) => {
