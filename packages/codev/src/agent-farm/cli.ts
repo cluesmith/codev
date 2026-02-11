@@ -21,13 +21,22 @@ async function towerStatus(port?: number): Promise<void> {
 
   logger.header('Tower Status');
 
-  // Check if daemon is running
+  // Check if daemon is running and show instance details
   try {
     const response = await fetch(`http://127.0.0.1:${towerPort}/api/status`, {
       signal: AbortSignal.timeout(3_000),
     });
     if (response.ok) {
       logger.kv('Daemon', `running on port ${towerPort}`);
+      const data = (await response.json()) as {
+        instances?: Array<{ projectName: string; running: boolean; terminals: unknown[] }>;
+      };
+      if (data.instances) {
+        const running = data.instances.filter((i) => i.running);
+        const totalTerminals = data.instances.reduce((sum, i) => sum + (i.terminals?.length || 0), 0);
+        logger.kv('Projects', `${running.length} active / ${data.instances.length} total`);
+        logger.kv('Terminals', `${totalTerminals}`);
+      }
     } else {
       logger.kv('Daemon', 'not responding');
     }
