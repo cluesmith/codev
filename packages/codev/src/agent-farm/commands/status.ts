@@ -48,7 +48,6 @@ export async function status(): Promise<void> {
       const statusText = projectStatus.active ? chalk.green('active') : chalk.gray('inactive');
       logger.kv('Project', projectStatus.name);
       logger.kv('  Status', statusText);
-      logger.kv('  Port', projectStatus.basePort);
       logger.kv('  Terminals', projectStatus.terminals.length);
 
       if (projectStatus.terminals.length > 0) {

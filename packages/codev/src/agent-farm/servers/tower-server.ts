@@ -8,7 +8,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn, execSync, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
@@ -16,7 +15,6 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getGlobalDb } from '../db/index.js';
-import { cleanupStaleEntries } from '../utils/port-registry.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
@@ -481,21 +479,14 @@ function findSqliteRowForTmuxSession(tmuxName: string): DbTerminalSession | null
 
 /**
  * Find the full project path for a tmux session's project basename.
- * Checks active port allocations (which have full paths) for a matching basename.
+ * Checks known projects (terminal_sessions + in-memory cache) for a matching basename.
  * Returns null if no match found.
  */
 function resolveProjectPathFromBasename(projectBasename: string): string | null {
-  const allocations = loadPortAllocations();
-  for (const alloc of allocations) {
-    if (path.basename(alloc.project_path) === projectBasename) {
-      return normalizeProjectPath(alloc.project_path);
-    }
-  }
-
-  // Also check projectTerminals cache (may have entries not yet in allocations)
-  for (const [projectPath] of projectTerminals) {
+  const knownPaths = getKnownProjectPaths();
+  for (const projectPath of knownPaths) {
     if (path.basename(projectPath) === projectBasename) {
-      return projectPath;
+      return normalizeProjectPath(projectPath);
     }
   }
 
@@ -832,15 +823,6 @@ if (isNaN(port) || port < 1 || port > 65535) {
 
 log('INFO', `Tower server starting on port ${port}`);
 
-// Interface for port registry entries (from SQLite)
-interface PortAllocation {
-  project_path: string;
-  base_port: number;
-  pid: number | null;
-  registered_at: string;
-  last_used_at: string;
-}
-
 // Interface for gate status
 interface GateStatus {
   hasGate: boolean;
@@ -862,57 +844,36 @@ interface TerminalEntry {
 interface InstanceStatus {
   projectPath: string;
   projectName: string;
-  basePort: number;
-  dashboardPort: number;
-  architectPort: number;
-  registered: string;
-  lastUsed?: string;
   running: boolean;
   proxyUrl: string; // Tower proxy URL for dashboard
   architectUrl: string; // Direct URL to architect terminal
   terminals: TerminalEntry[]; // All available terminals
-  ports: {
-    type: string;
-    port: number;
-    url: string;
-    active: boolean;
-  }[];
   gateStatus?: GateStatus;
 }
 
 /**
- * Load port allocations from SQLite database
+ * Get all known project paths from terminal_sessions and in-memory cache
  */
-function loadPortAllocations(): PortAllocation[] {
+function getKnownProjectPaths(): string[] {
+  const projectPaths = new Set<string>();
+
+  // From terminal_sessions table (persists across Tower restarts)
   try {
     const db = getGlobalDb();
-    return db.prepare('SELECT * FROM port_allocations ORDER BY last_used_at DESC').all() as PortAllocation[];
-  } catch (err) {
-    log('ERROR', `Error loading port allocations: ${(err as Error).message}`);
-    return [];
+    const sessions = db.prepare('SELECT DISTINCT project_path FROM terminal_sessions').all() as { project_path: string }[];
+    for (const s of sessions) {
+      projectPaths.add(s.project_path);
+    }
+  } catch {
+    // Table may not exist yet
   }
-}
 
-/**
- * Check if a port is listening
- */
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
-    socket.connect(port, '127.0.0.1');
-  });
+  // From in-memory cache (includes projects activated this session)
+  for (const [projectPath] of projectTerminals) {
+    projectPaths.add(projectPath);
+  }
+
+  return Array.from(projectPaths);
 }
 
 /**
@@ -920,27 +881,6 @@ async function isPortListening(port: number): Promise<boolean> {
  */
 function getProjectName(projectPath: string): string {
   return path.basename(projectPath);
-}
-
-/**
- * Get the base port for a project from global.db
- * Returns null if project not found or not running
- */
-async function getBasePortForProject(projectPath: string): Promise<number | null> {
-  try {
-    const db = getGlobalDb();
-    const row = db.prepare(
-      'SELECT base_port FROM port_allocations WHERE project_path = ?'
-    ).get(projectPath) as { base_port: number } | undefined;
-
-    if (!row) return null;
-
-    // Check if actually running
-    const isRunning = await isPortListening(row.base_port);
-    return isRunning ? row.base_port : null;
-  } catch {
-    return null;
-  }
 }
 
 // Cloudflared tunnel management
@@ -1042,42 +982,6 @@ function broadcastNotification(notification: { type: string; title: string; body
       // Client disconnected, will be cleaned up on next iteration
     }
   }
-}
-
-/**
- * Get gate status for a project by querying its dashboard API.
- * Uses timeout to prevent hung projects from stalling tower status.
- */
-async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000); // 2-second timeout
-
-  try {
-    const response = await fetch(`http://localhost:${basePort}/api/status`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!response.ok) return { hasGate: false };
-
-    const projectStatus = await response.json();
-    // Check if any builder has a pending gate
-    const builderWithGate = projectStatus.builders?.find(
-      (b: { gateStatus?: { waiting?: boolean }; status?: string; currentGate?: string; id?: string }) =>
-        b.gateStatus?.waiting || b.status === 'gate-pending'
-    );
-
-    if (builderWithGate) {
-      return {
-        hasGate: true,
-        gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
-        builderId: builderWithGate.id,
-        timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
-      };
-    }
-  } catch {
-    // Project dashboard not responding or timeout
-  }
-  return { hasGate: false };
 }
 
 /**
@@ -1300,72 +1204,53 @@ function isTempDirectory(projectPath: string): boolean {
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
-  const allocations = loadPortAllocations();
+  const knownPaths = getKnownProjectPaths();
   const instances: InstanceStatus[] = [];
 
-  for (const allocation of allocations) {
+  for (const projectPath of knownPaths) {
     // Skip builder worktrees - they're managed by their parent project
-    if (allocation.project_path.includes('/.builders/')) {
+    if (projectPath.includes('/.builders/')) {
       continue;
     }
 
     // Skip projects in temp directories (e.g. test artifacts) or whose directories no longer exist
-    if (!allocation.project_path.startsWith('remote:')) {
-      if (!fs.existsSync(allocation.project_path)) {
+    if (!projectPath.startsWith('remote:')) {
+      if (!fs.existsSync(projectPath)) {
         continue;
       }
-      if (isTempDirectory(allocation.project_path)) {
+      if (isTempDirectory(projectPath)) {
         continue;
       }
     }
-    const basePort = allocation.base_port;
-    const dashboardPort = basePort;
 
     // Encode project path for proxy URL
-    const encodedPath = Buffer.from(allocation.project_path).toString('base64url');
+    const encodedPath = Buffer.from(projectPath).toString('base64url');
     const proxyUrl = `/project/${encodedPath}/`;
 
     // Get terminals and gate status from tower's registry
     // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
-    const { terminals, gateStatus } = await getTerminalsForProject(allocation.project_path, proxyUrl);
+    const { terminals, gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
 
     // Project is active if it has any terminals (Phase 4: no port check needed)
     const isActive = terminals.length > 0;
 
-    const ports = [
-      {
-        type: 'Dashboard',
-        port: dashboardPort,
-        url: proxyUrl, // Use tower proxy URL, not raw localhost
-        active: isActive,
-      },
-    ];
-
     instances.push({
-      projectPath: allocation.project_path,
-      projectName: getProjectName(allocation.project_path),
-      basePort,
-      dashboardPort,
-      architectPort: basePort + 1, // Legacy field for backward compat
-      registered: allocation.registered_at,
-      lastUsed: allocation.last_used_at,
+      projectPath,
+      projectName: getProjectName(projectPath),
       running: isActive,
-      proxyUrl, // Tower proxy URL for dashboard
-      architectUrl: `${proxyUrl}?tab=architect`, // Direct URL to architect terminal
-      terminals, // All available terminals
-      ports,
+      proxyUrl,
+      architectUrl: `${proxyUrl}?tab=architect`,
+      terminals,
       gateStatus,
     });
   }
 
-  // Sort: running first, then by last used (most recent first)
+  // Sort: running first, then by project name
   instances.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
-    const aTime = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
-    const bTime = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
-    return bTime - aTime;
+    return a.projectName.localeCompare(b.projectName);
   });
 
   return instances;
@@ -1451,9 +1336,6 @@ async function getDirectorySuggestions(inputPath: string): Promise<{ path: strin
  * Auto-adopts non-codev directories and creates architect terminal
  */
 async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
-  // Clean up stale port allocations before launching (handles machine restarts)
-  cleanupStaleEntries();
-
   // Validate path exists
   if (!fs.existsSync(projectPath)) {
     return { success: false, error: `Path does not exist: ${projectPath}` };
@@ -1496,34 +1378,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       }
     }
 
-    // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
-    const db = getGlobalDb();
-    let allocation = db
-      .prepare('SELECT base_port FROM port_allocations WHERE project_path = ? OR project_path = ?')
-      .get(projectPath, resolvedPath) as { base_port: number } | undefined;
-
-    if (!allocation) {
-      // Allocate a new port for this project
-      // Find the next available port block (starting at 4200, incrementing by 100)
-      const existingPorts = db
-        .prepare('SELECT base_port FROM port_allocations ORDER BY base_port')
-        .all() as { base_port: number }[];
-
-      let nextPort = 4200;
-      for (const { base_port } of existingPorts) {
-        if (base_port >= nextPort) {
-          nextPort = base_port + 100;
-        }
-      }
-
-      db.prepare(
-        "INSERT INTO port_allocations (project_path, project_name, base_port, created_at) VALUES (?, ?, ?, datetime('now'))"
-      ).run(resolvedPath, path.basename(projectPath), nextPort);
-
-      allocation = { base_port: nextPort };
-      log('INFO', `Allocated port ${nextPort} for project: ${projectPath}`);
-    }
 
     // Initialize project terminal entry
     const entry = getProjectTerminalsEntry(resolvedPath);
@@ -1844,11 +1699,9 @@ const server = http.createServer(async (req, res) => {
       const projects = instances.map((i) => ({
         path: i.projectPath,
         name: i.projectName,
-        basePort: i.basePort,
         active: i.running,
         proxyUrl: i.proxyUrl,
         terminals: i.terminals.length,
-        lastUsed: i.lastUsed,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ projects }));
@@ -1889,7 +1742,6 @@ const server = http.createServer(async (req, res) => {
             path: instance.projectPath,
             name: instance.projectName,
             active: instance.running,
-            basePort: instance.basePort,
             terminals: instance.terminals,
             gateStatus: instance.gateStatus,
           })
@@ -1920,14 +1772,14 @@ const server = http.createServer(async (req, res) => {
 
       // POST /api/projects/:path/deactivate
       if (req.method === 'POST' && action === 'deactivate') {
-        // Check if project exists in port allocations
-        const allocations = loadPortAllocations();
+        // Check if project is known (has terminals or sessions)
+        const knownPaths = getKnownProjectPaths();
         const resolvedPath = fs.existsSync(projectPath) ? fs.realpathSync(projectPath) : projectPath;
-        const allocation = allocations.find(
-          (a) => a.project_path === projectPath || a.project_path === resolvedPath
+        const isKnown = knownPaths.some(
+          (p) => p === projectPath || p === resolvedPath
         );
 
-        if (!allocation) {
+        if (!isKnown) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Project not found' }));
           return;
@@ -2326,21 +2178,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     // API: Stop an instance
-    // Phase 4 (Spec 0090): Accept projectPath or basePort for backwards compat
     if (req.method === 'POST' && url.pathname === '/api/stop') {
       const body = await parseJsonBody(req);
-      let targetPath = body.projectPath as string;
-
-      // Backwards compat: if basePort provided, find the project path
-      if (!targetPath && body.basePort) {
-        const allocations = loadPortAllocations();
-        const allocation = allocations.find((a) => a.base_port === body.basePort);
-        targetPath = allocation?.project_path || '';
-      }
+      const targetPath = body.projectPath as string;
 
       if (!targetPath) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Missing projectPath or basePort' }));
+        res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
         return;
       }
 
@@ -2399,8 +2243,6 @@ const server = http.createServer(async (req, res) => {
         res.end('Invalid project path encoding');
         return;
       }
-
-      const basePort = await getBasePortForProject(projectPath);
 
       // Phase 4 (Spec 0090): Tower handles everything directly
       const isApiCall = subPath.startsWith('api/') || subPath === 'api';
@@ -2490,7 +2332,7 @@ const server = http.createServer(async (req, res) => {
             const session = manager.getSession(entry.architect);
             if (session) {
               state.architect = {
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 terminalId: entry.architect,
               };
@@ -2504,7 +2346,7 @@ const server = http.createServer(async (req, res) => {
               state.utils.push({
                 id: shellId,
                 name: `Shell ${shellId.replace('shell-', '')}`,
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 terminalId,
               });
@@ -2518,7 +2360,7 @@ const server = http.createServer(async (req, res) => {
               state.builders.push({
                 id: builderId,
                 name: `Builder ${builderId}`,
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 status: 'running',
                 phase: '',
@@ -2585,7 +2427,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               id: shellId,
-              port: basePort || 0,
+              port: 0,
               name: `Shell ${shellId.replace('shell-', '')}`,
               terminalId: session.id,
             }));

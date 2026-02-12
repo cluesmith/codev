@@ -13,7 +13,6 @@ import { version as localVersion } from '../../version.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
-import { getPortBlock, cleanupStaleEntries } from '../utils/port-registry.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { towerStart } from './tower.js';
 
@@ -183,19 +182,8 @@ async function startRemote(options: StartOptions): Promise<void> {
   const config = getConfig();
   const { user, host, remotePath } = parseRemote(options.remote!);
 
-  // Clean up stale port allocations (handles machine restarts, killed processes)
-  cleanupStaleEntries();
-
-  // Determine local port - use specified, or get from port registry
-  // Use a synthetic path for remote connections so they get their own port block
-  let localPort: number;
-  if (options.port) {
-    localPort = Number(options.port);
-  } else {
-    // Register with a unique key for this remote target
-    const remoteKey = `remote:${user}@${host}:${remotePath || 'default'}`;
-    localPort = getPortBlock(remoteKey);
-  }
+  // Use specified port or Tower default port
+  const localPort = options.port ? Number(options.port) : DEFAULT_TOWER_PORT;
 
   logger.header('Starting Remote Agent Farm');
   logger.kv('Host', `${user}@${host}`);

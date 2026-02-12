@@ -14,7 +14,7 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Builder, Config, BuilderType, ProtocolDefinition } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, commandExists, findAvailablePort } from '../utils/shell.js';
+import { run, commandExists } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 
@@ -497,19 +497,11 @@ async function checkDependencies(): Promise<void> {
 }
 
 /**
- * Find an available port, avoiding ports already in use by other builders
+ * Port is no longer needed for PTY-backed sessions (Tower handles all routing).
+ * Returns 0 — builder state tracks terminals via terminalId, not ports.
  */
-async function findFreePort(config: Config): Promise<number> {
-  const state = loadState();
-  const usedPorts = new Set<number>();
-  for (const b of state.builders || []) {
-    if (b.port > 0) usedPorts.add(b.port);
-  }
-  let port = config.builderPortRange[0];
-  while (usedPorts.has(port)) {
-    port++;
-  }
-  return findAvailablePort(port);
+function findFreePort(): number {
+  return 0;
 }
 
 /**
@@ -591,7 +583,7 @@ async function startBuilderSession(
   roleContent: string | null,
   roleSource: string | null,
 ): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const sessionName = getSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
@@ -657,7 +649,7 @@ async function startShellSession(
   shellId: string,
   baseCmd: string,
 ): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const tmuxName = `shell-${getProjectName(config)}-${shellId}`;
   const sessionName = tmuxName;
 
@@ -1017,7 +1009,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   const commands = getResolvedCommands();
 
   // Worktree mode: launch Claude with no prompt, but in the worktree directory
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const sessionName = getSessionName(config, builderId);
 
   logger.info('Creating tmux session...');

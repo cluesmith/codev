@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from './schema.js';
-import { migrateLocalFromJson, migrateGlobalFromJson } from './migrate.js';
+import { migrateLocalFromJson } from './migrate.js';
 import { getConfig } from '../utils/index.js';
 
 // Singleton instances
@@ -258,7 +258,6 @@ function ensureLocalDatabase(): Database.Database {
 function ensureGlobalDatabase(): Database.Database {
   const dbPath = getGlobalDbPath();
   const globalDir = dirname(dbPath);
-  const jsonPath = resolve(globalDir, 'ports.json');
 
   // Ensure directory exists
   ensureDir(globalDir);
@@ -273,37 +272,15 @@ function ensureGlobalDatabase(): Database.Database {
   // Check if migration is needed
   const migrated = db.prepare('SELECT version FROM _migrations WHERE version = 1').get();
 
-  if (!migrated && existsSync(jsonPath)) {
-    // Migrate from JSON
-    migrateGlobalFromJson(db, jsonPath);
-
-    // Record migration
-    db.prepare('INSERT INTO _migrations (version) VALUES (1)').run();
-
-    // Backup original JSON and remove it
-    copyFileSync(jsonPath, jsonPath + '.bak');
-    unlinkSync(jsonPath);
-
-    console.log('[info] Migrated ports.json to global.db (backup at ports.json.bak)');
-  } else if (!migrated) {
+  if (!migrated) {
     // Fresh install, just mark migration as done
     db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (1)').run();
     console.log('[info] Created new global.db at', dbPath);
   }
 
-  // Migration v2: Add project_name and created_at columns to port_allocations
+  // Migration v2: No-op (previously added columns to port_allocations, now removed by Spec 0098)
   const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
   if (!v2) {
-    try {
-      db.exec('ALTER TABLE port_allocations ADD COLUMN project_name TEXT');
-    } catch {
-      // Column already exists
-    }
-    try {
-      db.exec("ALTER TABLE port_allocations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
-    } catch {
-      // Column already exists
-    }
     db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
   }
 
@@ -339,5 +316,4 @@ export type {
   DbBuilder,
   DbUtil,
   DbAnnotation,
-  DbPortAllocation,
 } from './types.js';

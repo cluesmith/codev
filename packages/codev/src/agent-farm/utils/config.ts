@@ -7,7 +7,6 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import type { Config, UserConfig, ResolvedCommands } from '../types.js';
-import { getProjectPorts } from './port-registry.js';
 import { getSkeletonDir } from '../../lib/skeleton.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -213,46 +212,13 @@ export function getResolvedCommands(projectRoot?: string): ResolvedCommands {
   };
 }
 
-// Cached port allocation (set during initialization)
-let cachedPorts: {
-  dashboardPort: number;
-  architectPort: number;
-  builderPortRange: [number, number];
-  utilPortRange: [number, number];
-  // openPortRange removed - Spec 0092: files served through Tower
-} | null = null;
-
-/**
- * Initialize port allocation (must be called once at startup)
- */
-export function initializePorts(): void {
-  const projectRoot = findProjectRoot();
-  const ports = getProjectPorts(projectRoot);
-  cachedPorts = {
-    dashboardPort: ports.dashboardPort,
-    architectPort: ports.architectPort,
-    builderPortRange: ports.builderPortRange,
-    utilPortRange: ports.utilPortRange,
-  };
-}
-
 /**
  * Build configuration for the current project
- * Note: initializePorts() must be called before using this function
  */
 export function getConfig(): Config {
   const projectRoot = findProjectRoot();
   const codevDir = resolve(projectRoot, 'codev');
   const userConfig = loadUserConfig(projectRoot);
-
-  // Use cached ports or fallback to defaults if not initialized
-  const basePort = parseInt(process.env.AF_BASE_PORT || '4200', 10);
-  const ports = cachedPorts || {
-    dashboardPort: basePort,
-    architectPort: basePort + 1,
-    builderPortRange: [basePort + 10, basePort + 29] as [number, number],
-    utilPortRange: [basePort + 30, basePort + 49] as [number, number],
-  };
 
   return {
     projectRoot,
@@ -262,12 +228,6 @@ export function getConfig(): Config {
     templatesDir: getTemplatesDir(),
     serversDir: getServersDir(),
     bundledRolesDir: getRolesDir(projectRoot, userConfig),
-    // Ports from global registry (prevents cross-project conflicts)
-    dashboardPort: ports.dashboardPort,
-    architectPort: ports.architectPort,
-    builderPortRange: ports.builderPortRange,
-    utilPortRange: ports.utilPortRange,
-    // openPortRange removed - Spec 0092: files served through Tower
     terminalBackend: userConfig?.terminal?.backend || 'node-pty',
   };
 }
