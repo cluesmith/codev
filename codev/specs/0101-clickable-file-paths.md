@@ -29,18 +29,22 @@ The gap is: the terminal never recognizes file paths as clickable links.
 ### Visual Indicator
 
 File paths in terminal output are visually distinct from plain text:
-- Dotted underline (distinct from the solid underline used for URLs)
-- Subtle color change on hover (e.g., slightly brighter or a link color)
-- Cursor changes to pointer on hover
+- Dotted underline via CSS `text-decoration: underline dotted` (distinct from the solid underline used for URLs)
+- Subtle color change on hover using existing dashboard CSS variables (e.g., `--link-hover-color` or a brightness filter)
+- Cursor changes to `pointer` on hover
+- The link decoration is applied by the `ILinkProvider` via the `decorations` property on returned `ILink` objects
 
 This is consistent with how IDEs (VS Code, IntelliJ) display clickable file paths in their integrated terminals.
 
 ### Click Behavior
 
-Clicking a file path:
-1. Extracts the path, line number, and column number
-2. Calls `onFileOpen(path, line, column)` which opens the file in the dashboard viewer
+Cmd+Click (macOS) or Ctrl+Click (Linux/Windows) on a file path:
+1. Extracts the path and line number (column is parsed but not used by the file viewer in v1)
+2. Calls `onFileOpen(path, line)` which opens the file in the dashboard viewer
 3. Scrolls to the indicated line if present
+4. Plain clicks are reserved for text selection — no interference with drag-to-select
+
+**Modifier key detection**: The `ILinkProvider` `activate` callback receives the `MouseEvent`. Check `event.metaKey` (macOS) or `event.ctrlKey` (others). If the modifier is not held, the activate callback returns without action, preserving normal text selection behavior.
 
 ### Path Patterns Recognized
 
@@ -135,19 +139,22 @@ interface CreateFileTabRequest {
 ```
 
 When `terminalId` is provided and `path` is relative:
-1. Tower looks up the terminal session's cwd from pty session metadata (`PtySession.config.cwd`)
-2. Resolves `path` relative to that cwd
+1. Tower looks up the terminal session via `TerminalManager.getSession(terminalId)` — the `terminalId` on the dashboard side is the same string as `PtySession.id` on the server side (both are the session ID assigned at pty creation)
+2. Resolves `path` relative to `session.config.cwd`
 3. Validates the resolved absolute path is within the project root or a known worktree (`.builders/`)
 4. Rejects with 403 if the resolved path escapes the project tree
-5. Follows symlinks via `fs.realpathSync()` before the containment check
+5. For symlink resolution: uses `fs.realpathSync()` before the containment check. If the file doesn't exist (e.g., path from a compilation error for a deleted file), falls back to `path.resolve()` without symlink resolution — the containment check still applies
+
+**Fallback when `terminalId` is invalid**: If the terminal session cannot be found (e.g., historical session, tab restored after reconnect), the Tower falls back to resolving relative to the project root. This is the same behavior as when `terminalId` is omitted.
 
 When `terminalId` is omitted, existing behavior is unchanged (resolves relative to project root).
 
 ### Security
 
 - **Path containment**: All resolved paths must be within the project root directory or a `.builders/` worktree. Symlinks are resolved before checking containment. Paths that escape (e.g., `../../.ssh/id_rsa`) return 403.
-- **Path normalization**: `path.resolve()` + `fs.realpathSync()` to collapse `..`, `.`, and symlinks before validation.
+- **Path normalization**: `path.resolve()` + `fs.realpathSync()` to collapse `..`, `.`, and symlinks before validation. If `realpathSync` fails (file doesn't exist), fall back to `path.resolve()` alone.
 - **No shell execution**: File opening reads file content directly — no shell commands are invoked from user-provided paths.
+- **File size limit**: The existing file tab endpoint already reads file content for the annotator. No additional size limit is needed here — the annotator handles large files by streaming. If a file is extremely large, the browser's rendering is the bottleneck, not the click-to-open pipeline.
 
 ## Test Scenarios
 
@@ -159,28 +166,46 @@ When `terminalId` is omitted, existing behavior is unchanged (resolves relative 
 4. **`looksLikeFilePath` filters**: Rejects URLs and domains, accepts valid paths
 5. **Path containment**: Resolved path within project → allowed; path escaping project → 403
 6. **`terminalId` resolution**: Relative path + terminal cwd → correct absolute path
+7. **`terminalId` fallback**: Invalid/missing terminal session falls back to project root resolution
+8. **`realpathSync` failure**: Non-existent file path still gets containment check via `path.resolve()`
+9. **Multiple paths in one line**: `error in src/a.ts:1 and src/b.ts:2` — both detected as separate links
 
 ### Playwright E2E Tests
 
-7. **Basic file path clickable**: Terminal outputs `src/foo.ts`, Cmd+Click opens file viewer
-8. **Path with line**: `src/foo.ts:42` opens file and scrolls to line 42
-9. **Absolute path**: `/path/to/project/foo.ts` works regardless of terminal context
-10. **URL still works**: `https://example.com` opens in new tab (not file viewer)
-11. **No false positives**: `github.com`, `@xterm/xterm`, `v2.0.0` are NOT clickable
-12. **Non-existent file**: Click a path to a missing file, verify error indicator shown in viewer
+10. **Basic file path clickable**: Terminal outputs `src/foo.ts`, Cmd+Click opens file viewer
+11. **Path with line**: `src/foo.ts:42` opens file and scrolls to line 42
+12. **Absolute path**: `/path/to/project/foo.ts` works regardless of terminal context
+13. **URL still works**: `https://example.com` opens in new tab (not file viewer)
+14. **No false positives**: `github.com`, `@xterm/xterm`, `v2.0.0` are NOT clickable
+15. **Non-existent file**: Click a path to a missing file, verify error indicator shown in viewer
+16. **Plain click ignored**: Clicking a file path without Cmd/Ctrl does NOT open the file (text selection works normally)
 
 ### Visual Tests (Playwright screenshot comparison)
 
-13. **Dotted underline**: File paths have dotted underline (distinct from URL solid underline)
-14. **Hover cursor**: Pointer cursor on hover over file path
-15. **No visual noise**: Plain text with dots (sentences, config values) not underlined
+17. **Dotted underline**: File paths have dotted underline (distinct from URL solid underline)
+18. **Hover cursor**: Pointer cursor on hover over file path
+19. **No visual noise**: Plain text with dots (sentences, config values) not underlined
+
+## Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| File doesn't exist | File viewer shows "File not found" indicator |
+| `terminalId` not found (expired/reconnected session) | Falls back to project-root-relative resolution |
+| Path escapes project tree | Tower returns 403; dashboard shows error toast |
+| Tower unreachable | Dashboard shows connection error toast |
+| `realpathSync` throws (non-existent file) | Falls back to `path.resolve()` for containment check |
 
 ## Design Decisions
 
-- **Cmd/Ctrl+Click required** — Cmd+Click on macOS, Ctrl+Click on Linux/Windows. Plain click is reserved for text selection. This matches VS Code's integrated terminal behavior.
+- **Cmd/Ctrl+Click required** — Cmd+Click on macOS, Ctrl+Click on Linux/Windows. Plain click is reserved for text selection. This matches VS Code's integrated terminal behavior. The `ILinkProvider.activate` callback checks `event.metaKey || event.ctrlKey` and returns early without action if neither is held.
 - **Non-existent files are still clickable** — all file path patterns are marked as links. When clicked, if the file doesn't exist, the file viewer shows a visual error indicator (e.g., a cross icon or "File not found" message) rather than silently failing. This avoids the performance cost of checking file existence for every detected path on every terminal render.
 - **macOS-only for now** — Codev currently targets macOS. Windows drive-letter paths (`C:\foo\bar.ts`) are out of scope but the regex can be extended later.
 - **No quoted/bracketed path support in v1** — paths inside quotes (`"foo/bar.ts"`) or brackets (`[foo/bar.ts]`) are matched by the inner content only. Wrapper characters are not included in the link. This can be refined if false negatives are reported.
+- **ANSI escape codes** — xterm.js `ILinkProvider.provideLinks` receives the **text content** of each buffer line (after ANSI parsing), not raw escape sequences. The regex runs against clean text, so ANSI codes don't interfere with matching.
+- **Multi-line wrapped paths** — Paths that wrap across terminal lines are not matched in v1. The `ILinkProvider` operates per-line. This is a reasonable limitation since most tool output keeps file paths on a single line. Can be revisited if wrapped paths are a common issue.
+- **Column support deferred** — `parseFilePath` extracts column numbers, but the file viewer doesn't support column-level scrolling. Column is parsed and passed through the pipeline but not acted upon in v1. This keeps the data available for future use without adding viewer complexity now.
+- **Regex `/g` flag handling** — `FILE_PATH_REGEX` uses the global flag. The link provider must create a new regex instance (or reset `lastIndex` to 0) for each `provideLinks` call to avoid stateful match/miss alternation.
 
 ## Notes
 
