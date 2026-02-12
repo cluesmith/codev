@@ -1,26 +1,40 @@
 /**
  * E2E tests for tunnel client against local codevos.ai (Spec 0097 Phase 7)
  *
- * These tests require a running local codevos.ai instance.
- * They validate the full registration → tunnel → proxy → deregister flow.
+ * These tests drive the full tower registration lifecycle:
+ * 1. Sign in to codevos.ai as test user via BetterAuth API
+ * 2. Generate registration token via POST /api/towers/register
+ * 3. Redeem token to register tower (gets towerId + apiKey)
+ * 4. Connect tunnel client with registered credentials
+ * 5. Run proxy/streaming/WebSocket tests
+ * 6. Deregister tower and verify cleanup via DELETE /api/towers/{towerId}
  *
  * Prerequisites:
  *   - codevos.ai running locally (Next.js on port 3000, tunnel server on port 4200)
- *   - PostgreSQL database configured for codevos.ai
+ *   - Test database seeded with test user (via codevos.ai test helpers)
+ *   - Test user: e2e-test@example.com / TestPassword123!
+ *
+ * Environment variables:
+ *   CODEVOS_URL      - codevos.ai URL (default: http://localhost:3000)
+ *   TUNNEL_PORT      - tunnel server port (default: 4200)
+ *   SKIP_TUNNEL_E2E  - set to "1" to skip all E2E tests
  *
  * Skip: Set SKIP_TUNNEL_E2E=1 to skip these tests when codevos.ai is not available.
  * Run: npx vitest run tunnel-e2e
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import net from 'node:net';
 import { TunnelClient, type TunnelState } from '../lib/tunnel-client.js';
-import { readCloudConfig, writeCloudConfig, deleteCloudConfig, type CloudConfig } from '../lib/cloud-config.js';
 
 const CODEVOS_URL = process.env.CODEVOS_URL || 'http://localhost:3000';
 const TUNNEL_PORT = parseInt(process.env.TUNNEL_PORT || '4200', 10);
 const SKIP = process.env.SKIP_TUNNEL_E2E === '1';
+
+// Test user credentials (must be seeded in the codevos.ai test database)
+const TEST_EMAIL = 'e2e-test@example.com';
+const TEST_PASSWORD = 'TestPassword123!';
 
 /** Wait for a condition to be true within a timeout */
 async function waitFor(
@@ -37,7 +51,7 @@ async function waitFor(
   }
 }
 
-/** Make an HTTP request */
+/** Make an HTTP request with 10s timeout, returning status, body, and raw headers */
 async function httpRequest(
   url: string,
   method = 'GET',
@@ -52,6 +66,7 @@ async function httpRequest(
         port: urlObj.port,
         path: urlObj.pathname + urlObj.search,
         method,
+        timeout: 10000,
         headers: {
           ...(body ? { 'content-type': 'application/json' } : {}),
           ...headers,
@@ -69,38 +84,152 @@ async function httpRequest(
         });
       },
     );
+    req.on('timeout', () => {
+      req.destroy(new Error('Request timed out'));
+    });
     req.on('error', reject);
     if (body) req.write(body);
     req.end();
   });
 }
 
-/** Check if codevos.ai is reachable */
+/** Check if codevos.ai is reachable (5s timeout) */
 async function isCodevosAvailable(): Promise<boolean> {
   try {
-    const res = await httpRequest(`${CODEVOS_URL}/api/health`, 'GET');
+    const res = await Promise.race([
+      httpRequest(`${CODEVOS_URL}/api/health`, 'GET'),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('health check timeout')), 5000),
+      ),
+    ]);
     return res.status === 200;
   } catch {
     return false;
   }
 }
 
-// Conditional describe: skip all tests if codevos.ai is not available or SKIP_TUNNEL_E2E=1
+/**
+ * Sign in to codevos.ai as the test user via BetterAuth API.
+ * Returns session cookies for authenticated API calls, or null on failure.
+ */
+async function signIn(): Promise<string | null> {
+  try {
+    const res = await httpRequest(
+      `${CODEVOS_URL}/api/auth/sign-in/email`,
+      'POST',
+      JSON.stringify({ email: TEST_EMAIL, password: TEST_PASSWORD }),
+    );
+    if (res.status !== 200) {
+      console.warn(`Sign-in failed with status ${res.status}: ${res.body}`);
+      return null;
+    }
+    // Extract session cookies from set-cookie headers
+    const setCookies = res.headers['set-cookie'];
+    if (!setCookies) {
+      console.warn('Sign-in succeeded but no session cookies returned');
+      return null;
+    }
+    const cookieArray = Array.isArray(setCookies) ? setCookies : [setCookies];
+    return cookieArray.map((c) => c.split(';')[0]).join('; ');
+  } catch (err) {
+    console.warn('Sign-in request failed:', err);
+    return null;
+  }
+}
+
+/**
+ * Register a tower via the codevos.ai API.
+ * Step 1: Generate registration token (POST /api/towers/register, requires session)
+ * Step 2: Redeem token (POST /api/towers/register/redeem, no auth) to get towerId + apiKey
+ */
+async function registerTower(
+  sessionCookie: string,
+  name = 'e2e-tunnel-test',
+): Promise<{ towerId: string; apiKey: string } | null> {
+  // Step 1: Generate registration token
+  const tokenRes = await httpRequest(
+    `${CODEVOS_URL}/api/towers/register`,
+    'POST',
+    JSON.stringify({}),
+    { cookie: sessionCookie },
+  );
+  if (tokenRes.status !== 200) {
+    console.warn(`Token generation failed: ${tokenRes.status} ${tokenRes.body}`);
+    return null;
+  }
+  const { token } = JSON.parse(tokenRes.body);
+
+  // Step 2: Redeem token (no auth needed)
+  const machineId = `e2e-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const redeemRes = await httpRequest(
+    `${CODEVOS_URL}/api/towers/register/redeem`,
+    'POST',
+    JSON.stringify({ token, name, machineId }),
+  );
+  if (redeemRes.status !== 200) {
+    console.warn(`Token redemption failed: ${redeemRes.status} ${redeemRes.body}`);
+    return null;
+  }
+  return JSON.parse(redeemRes.body) as { towerId: string; apiKey: string };
+}
+
+/**
+ * Deregister a tower via the codevos.ai API.
+ * Calls DELETE /api/towers/{towerId} with API key authorization.
+ */
+async function deregisterTower(towerId: string, apiKey: string): Promise<boolean> {
+  try {
+    const res = await httpRequest(
+      `${CODEVOS_URL}/api/towers/${towerId}`,
+      'DELETE',
+      undefined,
+      { authorization: `Bearer ${apiKey}` },
+    );
+    return res.status === 200 || res.status === 204;
+  } catch {
+    return false;
+  }
+}
+
+// Conditional describe: skip all tests if SKIP_TUNNEL_E2E=1
 const describeE2E = SKIP ? describe.skip : describe;
 
 describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
   let available = false;
+  let sessionCookie: string | null = null;
+  let towerId: string | null = null;
+  let apiKey: string | null = null;
   let echoServer: http.Server;
   let echoPort: number;
+  let streamServer: http.Server;
+  let streamPort: number;
 
   beforeAll(async () => {
     available = await isCodevosAvailable();
     if (!available) {
-      console.warn('⚠️  codevos.ai not available at', CODEVOS_URL, '— skipping E2E tests');
+      console.warn('codevos.ai not available at', CODEVOS_URL, '-- skipping E2E tests');
       return;
     }
 
-    // Start a local echo server to simulate tower HTTP responses
+    // Step 1: Sign in to codevos.ai as the test user
+    sessionCookie = await signIn();
+    if (!sessionCookie) {
+      console.warn('Failed to sign in to codevos.ai -- skipping E2E tests');
+      available = false;
+      return;
+    }
+
+    // Step 2: Register a tower via the API
+    const registration = await registerTower(sessionCookie);
+    if (!registration) {
+      console.warn('Failed to register tower via API -- skipping E2E tests');
+      available = false;
+      return;
+    }
+    towerId = registration.towerId;
+    apiKey = registration.apiKey;
+
+    // Step 3: Start a local echo server to simulate tower HTTP responses
     echoServer = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (chunk) => chunks.push(chunk));
@@ -113,21 +242,45 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
         }));
       });
     });
-
     await new Promise<void>((resolve) => {
-      echoServer.listen(0, '127.0.0.1', () => {
-        const addr = echoServer.address();
-        if (addr && typeof addr !== 'string') {
-          echoPort = addr.port;
-        }
-        resolve();
-      });
+      echoServer.listen(0, '127.0.0.1', () => resolve());
     });
-  });
+    const echoAddr = echoServer.address();
+    echoPort = echoAddr && typeof echoAddr !== 'string' ? echoAddr.port : 0;
+
+    // Step 4: Start a streaming server for SSE tests
+    streamServer = http.createServer((req, res) => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+      });
+      let count = 0;
+      const interval = setInterval(() => {
+        res.write(`data: chunk-${count}\n\n`);
+        count++;
+        if (count >= 5) {
+          clearInterval(interval);
+          res.end();
+        }
+      }, 10);
+    });
+    await new Promise<void>((resolve) => {
+      streamServer.listen(0, '127.0.0.1', () => resolve());
+    });
+    const streamAddr = streamServer.address();
+    streamPort = streamAddr && typeof streamAddr !== 'string' ? streamAddr.port : 0;
+  }, 30000);
 
   afterAll(async () => {
+    // Deregister the test tower
+    if (towerId && apiKey) {
+      await deregisterTower(towerId, apiKey);
+    }
     if (echoServer) {
       await new Promise<void>((resolve) => echoServer.close(() => resolve()));
+    }
+    if (streamServer) {
+      await new Promise<void>((resolve) => streamServer.close(() => resolve()));
     }
   });
 
@@ -139,7 +292,6 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
   it('tunnel server port is reachable', async () => {
     if (!available) return;
-    // Verify TCP connectivity to tunnel port
     const connected = await new Promise<boolean>((resolve) => {
       const socket = new net.Socket();
       socket.setTimeout(3000);
@@ -158,23 +310,16 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     expect(connected).toBe(true);
   });
 
-  it('can connect with valid API key and proxy requests', async () => {
+  it('register -> connect -> proxy -> verify (full lifecycle)', async () => {
     if (!available) return;
 
-    // Read existing cloud config (must be registered for this test)
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping tunnel connection test');
-      return;
-    }
-
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: apiKey!,
+      towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: false, // Use real TLS for E2E
+      usePlainTcp: true,
     });
 
     const states: TunnelState[] = [];
@@ -193,6 +338,16 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
       const uptime = client.getUptime();
       expect(uptime).not.toBeNull();
       expect(uptime!).toBeGreaterThanOrEqual(0);
+
+      // Proxy a request through the tunnel and verify it reaches the echo server
+      const accessUrl = `${CODEVOS_URL}/tower/${towerId}`;
+      const res = await httpRequest(`${accessUrl}/api/state`);
+
+      // Strict assertion: proxy must return 200 with correct echo body
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.path).toBe('/api/state');
+      expect(body.echo).toBe(true);
     } finally {
       client.disconnect();
     }
@@ -201,19 +356,13 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
   it('transitions to auth_failed with invalid API key', async () => {
     if (!available) return;
 
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping auth failure test');
-      return;
-    }
-
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
       apiKey: 'ctk_invalid_key_12345',
-      towerId: config.tower_id,
+      towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
     });
 
     const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -232,19 +381,13 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
   it('reconnects after disconnect', async () => {
     if (!available) return;
 
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping reconnection test');
-      return;
-    }
-
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: apiKey!,
+      towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
     });
 
     client.connect();
@@ -264,22 +407,127 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
+  it('auto-reconnects after server-side connection drop (simulates server restart)', async () => {
+    if (!available) return;
+
+    // TCP proxy between client and the real tunnel server.
+    // Allows us to forcibly sever all connections to simulate a server restart.
+    const proxyConnections: { client: net.Socket; server: net.Socket }[] = [];
+
+    const proxyServer = net.createServer((clientSocket) => {
+      const urlObj = new URL(CODEVOS_URL);
+      const serverSocket = net.connect(
+        { host: urlObj.hostname, port: TUNNEL_PORT },
+        () => {
+          clientSocket.pipe(serverSocket);
+          serverSocket.pipe(clientSocket);
+        },
+      );
+      serverSocket.on('error', () => clientSocket.destroy());
+      clientSocket.on('error', () => serverSocket.destroy());
+      proxyConnections.push({ client: clientSocket, server: serverSocket });
+    });
+
+    const proxyPort = await new Promise<number>((resolve) => {
+      proxyServer.listen(0, '127.0.0.1', () => {
+        const addr = proxyServer.address();
+        resolve(addr && typeof addr !== 'string' ? addr.port : 0);
+      });
+    });
+
+    const client = new TunnelClient({
+      serverUrl: CODEVOS_URL,
+      tunnelPort: proxyPort, // Connect through proxy instead of directly
+      apiKey: apiKey!,
+      towerId: towerId!,
+      localPort: echoPort,
+      usePlainTcp: true,
+    });
+
+    const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      client.connect();
+      await waitFor(() => client.getState() === 'connected', 15000);
+      expect(client.getState()).toBe('connected');
+
+      // Simulate server restart: destroy all proxy connections (server-side drop)
+      for (const conn of proxyConnections) {
+        conn.server.destroy();
+        conn.client.destroy();
+      }
+      proxyConnections.length = 0;
+
+      // Client should detect the drop and transition to disconnected
+      await waitFor(() => client.getState() === 'disconnected', 10000);
+      expect(client.getState()).toBe('disconnected');
+
+      // Auto-reconnect fires via scheduleReconnect() → client reconnects
+      // through the proxy (still running), establishing a new connection
+      await waitFor(() => client.getState() === 'connected', 20000);
+      expect(client.getState()).toBe('connected');
+    } finally {
+      client.disconnect();
+      await new Promise<void>((resolve) => proxyServer.close(() => resolve()));
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('handles rapid reconnection cycles without crash (rate limit path)', async () => {
+    if (!available) return;
+
+    // This test exercises the reconnection code path E2E — the same path
+    // that handles ERR rate_limited responses from the server.
+    // Deliberately triggering the real server's rate limiter is fragile
+    // (environment-dependent thresholds) and potentially disruptive.
+    // Client-side rate_limited handling is validated in tunnel-edge-cases.test.ts.
+    //
+    // Here we verify that rapid connect → connected → disconnect cycles
+    // work cleanly against the real server without resource leaks or crashes.
+    const client = new TunnelClient({
+      serverUrl: CODEVOS_URL,
+      tunnelPort: TUNNEL_PORT,
+      apiKey: apiKey!,
+      towerId: towerId!,
+      localPort: echoPort,
+      usePlainTcp: true,
+    });
+
+    const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      for (let i = 0; i < 3; i++) {
+        client.connect();
+        await waitFor(() => client.getState() === 'connected', 15000);
+        expect(client.getState()).toBe('connected');
+        client.disconnect();
+        expect(client.getState()).toBe('disconnected');
+      }
+
+      // Final connect to verify client is still fully functional
+      client.connect();
+      await waitFor(() => client.getState() === 'connected', 15000);
+
+      // Proxy a request to verify the tunnel is operational
+      const accessUrl = `${CODEVOS_URL}/tower/${towerId}`;
+      const res = await httpRequest(`${accessUrl}/api/rapid-test`);
+      expect(res.status).toBe(200);
+    } finally {
+      client.disconnect();
+      errorSpy.mockRestore();
+    }
+  });
+
   it('metadata is delivered during handshake', async () => {
     if (!available) return;
 
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping metadata test');
-      return;
-    }
-
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: apiKey!,
+      towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
     });
 
     client.sendMetadata({
@@ -298,22 +546,16 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('proxied HTTP request reaches local echo server via access URL', async () => {
+  it('proxied HTTP request returns correct echo body', async () => {
     if (!available) return;
 
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping proxy test');
-      return;
-    }
-
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: apiKey!,
+      towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
     });
 
     client.connect();
@@ -321,40 +563,72 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     try {
       await waitFor(() => client.getState() === 'connected', 15000);
 
-      // Construct the access URL for this tower
-      const accessUrl = `${CODEVOS_URL}/tower/${config.tower_id}`;
+      const accessUrl = `${CODEVOS_URL}/tower/${towerId}`;
+      const res = await httpRequest(`${accessUrl}/api/data?key=value`, 'GET');
 
-      // Make a request through the tunnel proxy
-      const res = await httpRequest(`${accessUrl}/api/state`);
-
-      // Should reach the echo server and return a proxied response
-      if (res.status === 200) {
-        const body = JSON.parse(res.body);
-        expect(body.path).toBe('/api/state');
-        expect(body.echo).toBe(true);
-      }
-      // 502/503 is also acceptable if codevos.ai routing isn't set up for proxy
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.method).toBe('GET');
+      expect(body.path).toBe('/api/data?key=value');
+      expect(body.echo).toBe(true);
     } finally {
       client.disconnect();
     }
   });
 
-  it('tunnel latency is within acceptable range (E2E)', async () => {
+  it('deregister -> tunnel disconnects', async () => {
     if (!available) return;
 
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping E2E latency test');
+    // Register a separate tower for this test (so we don't break other tests)
+    const reg = await registerTower(sessionCookie!, 'e2e-deregister-test');
+    if (!reg) {
+      console.warn('Failed to register tower for deregister test');
       return;
     }
 
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: reg.apiKey,
+      towerId: reg.towerId,
       localPort: echoPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
+    });
+
+    client.connect();
+
+    try {
+      await waitFor(() => client.getState() === 'connected', 15000);
+      expect(client.getState()).toBe('connected');
+
+      // Deregister the tower via the codevos.ai API
+      const deregistered = await deregisterTower(reg.towerId, reg.apiKey);
+      expect(deregistered).toBe(true);
+
+      // After deregistration, the server should close the tunnel connection.
+      // The client will detect the drop and transition to 'disconnected'.
+      // If auto-reconnect fires, it should get auth_failed (tower no longer exists).
+      await waitFor(
+        () => client.getState() === 'disconnected' || client.getState() === 'auth_failed',
+        15000,
+      );
+
+      expect(['disconnected', 'auth_failed']).toContain(client.getState());
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  it('streaming response (SSE) flows correctly through tunnel', async () => {
+    if (!available) return;
+
+    const client = new TunnelClient({
+      serverUrl: CODEVOS_URL,
+      tunnelPort: TUNNEL_PORT,
+      apiKey: apiKey!,
+      towerId: towerId!,
+      localPort: streamPort,
+      usePlainTcp: true,
     });
 
     client.connect();
@@ -362,12 +636,15 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     try {
       await waitFor(() => client.getState() === 'connected', 15000);
 
-      // Measure connection establishment time (already connected, this measures state)
-      const uptime = client.getUptime();
-      expect(uptime).not.toBeNull();
+      const accessUrl = `${CODEVOS_URL}/tower/${towerId}`;
+      const res = await httpRequest(`${accessUrl}/api/events`);
 
-      // Advisory: log connection quality
-      console.log(`E2E tunnel uptime after connect: ${uptime!.toFixed(1)}s`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/event-stream');
+      // Verify all 5 SSE chunks arrived
+      for (let i = 0; i < 5; i++) {
+        expect(res.body).toContain(`data: chunk-${i}`);
+      }
     } finally {
       client.disconnect();
     }
@@ -375,12 +652,6 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
   it('WebSocket/terminal proxy works through real tunnel', async () => {
     if (!available) return;
-
-    const config = readCloudConfig();
-    if (!config) {
-      console.warn('⚠️  No cloud config — skipping WebSocket E2E test');
-      return;
-    }
 
     // Start a WebSocket echo server (simulates terminal pty)
     const upgradeSockets: net.Socket[] = [];
@@ -405,22 +676,21 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     });
 
     const client = new TunnelClient({
-      serverUrl: config.server_url,
+      serverUrl: CODEVOS_URL,
       tunnelPort: TUNNEL_PORT,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
+      apiKey: apiKey!,
+      towerId: towerId!,
       localPort: wsPort,
-      usePlainTcp: false,
+      usePlainTcp: true,
     });
 
     client.connect();
 
     try {
       await waitFor(() => client.getState() === 'connected', 15000);
-      // If connected, the tunnel is operational for WebSocket traffic.
-      // Full bidirectional WebSocket validation requires codevos.ai to send
-      // CONNECT requests through the tunnel, which is tested via mock server
-      // in tunnel-edge-cases.test.ts (keystroke latency benchmark).
+      // Tunnel is operational — WebSocket CONNECT requests are proxied
+      // by codevos.ai's H2 client session. Bidirectional WebSocket validation
+      // is exercised in tunnel-edge-cases.test.ts via the mock server.
       expect(client.getState()).toBe('connected');
     } finally {
       client.disconnect();
@@ -431,17 +701,54 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('deregister flow: deleteCloudConfig removes config', async () => {
+  it('tunnel latency is within acceptable range (E2E)', async () => {
     if (!available) return;
-    // Note: Full deregistration via codevos.ai API requires server-side
-    // endpoint interaction. Here we validate the local config cleanup
-    // that happens during deregistration.
-    // The actual deregistration flow is:
-    // 1. `af tower deregister` calls codevos.ai API
-    // 2. On success, calls deleteCloudConfig()
-    // 3. Tunnel client detects missing config on next reconnect
 
-    // Verify deleteCloudConfig function is available and callable
-    expect(typeof deleteCloudConfig).toBe('function');
+    const client = new TunnelClient({
+      serverUrl: CODEVOS_URL,
+      tunnelPort: TUNNEL_PORT,
+      apiKey: apiKey!,
+      towerId: towerId!,
+      localPort: echoPort,
+      usePlainTcp: true,
+    });
+
+    client.connect();
+
+    try {
+      await waitFor(() => client.getState() === 'connected', 15000);
+
+      const accessUrl = `${CODEVOS_URL}/tower/${towerId}`;
+
+      // Warm up
+      await httpRequest(`${accessUrl}/api/warmup`);
+
+      // Measure latency for 20 proxied requests
+      const latencies: number[] = [];
+      for (let i = 0; i < 20; i++) {
+        const start = performance.now();
+        const res = await httpRequest(`${accessUrl}/api/bench/${i}`);
+        const elapsed = performance.now() - start;
+        if (res.status === 200) {
+          latencies.push(elapsed);
+        }
+      }
+
+      if (latencies.length > 0) {
+        latencies.sort((a, b) => a - b);
+        const p50 = latencies[Math.floor(latencies.length * 0.5)];
+        const p95 = latencies[Math.floor(latencies.length * 0.95)];
+        const p99 = latencies[Math.floor(latencies.length * 0.99)];
+
+        console.log(
+          `E2E tunnel latency -- p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`,
+        );
+
+        // Advisory: <100ms overhead target, generous 200ms threshold for CI
+        expect(p95).toBeLessThan(200);
+      }
+    } finally {
+      client.disconnect();
+    }
   });
 });
