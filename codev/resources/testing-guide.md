@@ -14,8 +14,17 @@ cd packages/codev
 npm run build
 npm pack
 
-# Install globally from tarball
-npm install -g ./cluesmith-codev-2.0.0-rc.10.tgz
+# Stop Tower before reinstalling
+af tower stop
+
+# Install globally from tarball (wildcard avoids hardcoding version)
+npm install -g ./cluesmith-codev-*.tgz
+
+# Clean up tarball
+rm ./cluesmith-codev-*.tgz
+
+# Restart Tower with new code
+af tower start
 ```
 
 This installs the exact package that would be published, without touching the npm registry. Better than `npm link` which has symlink issues.
@@ -73,8 +82,8 @@ const { chromium } = require('playwright');
 
 The Tower Single Daemon architecture (Spec 0090) has state management complexity that unit tests don't catch. Before claiming any Tower/Agent Farm change works:
 
-1. **Build and install**: `npm run build && npm pack && npm install -g ./cluesmith-codev-*.tgz`
-2. **Restart Tower**: Kill existing tower (`pkill -f tower-server`), start fresh (`af tower`)
+1. **Build and install**: `npm run build && npm pack && npm install -g ./cluesmith-codev-*.tgz && rm ./cluesmith-codev-*.tgz`
+2. **Restart Tower**: `af tower stop && af tower start`
 3. **Test the actual scenario**: Use Playwright or manual testing to verify the specific bug/feature
 4. **Verify multi-project scenarios**: If touching project management, test with 2+ projects
 

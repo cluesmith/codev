@@ -27,6 +27,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const lastSelectionRef = useRef('');
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -98,46 +99,56 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       term.loadAddon(webLinksAddon);
     }
 
-    // Clipboard handling: xterm.js relies on a hidden textarea for native
-    // paste events, which doesn't work reliably in all browser contexts.
-    // Use attachCustomKeyEventHandler + navigator.clipboard for explicit handling.
+    // Clipboard handling
     const isMac = navigator.platform.toUpperCase().includes('MAC');
 
-    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-      // Only intercept keydown events
-      if (event.type !== 'keydown') return true;
+    // copyToClipboard: use a hidden textarea + execCommand('copy') as the
+    // primary method because navigator.clipboard.writeText() silently fails
+    // in many contexts (non-focused windows, missing transient activation).
+    function copyToClipboard(text: string): void {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
 
-      // Clipboard API requires secure context (HTTPS or localhost).
-      // If unavailable, fall back to xterm's native hidden-textarea handling.
-      if (!navigator.clipboard) return true;
+    // Auto-copy on select: track selection text as it changes during drag,
+    // then copy to clipboard on mouseup (which qualifies as user activation).
+    // Both navigator.clipboard.writeText and document.execCommand('copy')
+    // silently fail without a user activation event like mouseup.
+    const selectionDisposable = term.onSelectionChange(() => {
+      const sel = term.getSelection();
+      if (sel) lastSelectionRef.current = sel;
+    });
+
+    const container = containerRef.current;
+    const handleMouseUp = () => {
+      const sel = lastSelectionRef.current;
+      if (sel) {
+        copyToClipboard(sel);
+        // Reset after copy so stale text isn't re-copied on clicks
+        lastSelectionRef.current = '';
+      }
+    };
+    container.addEventListener('mouseup', handleMouseUp);
+
+    // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (event.type !== 'keydown') return true;
 
       const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
       if (!modKey) return true;
 
-      // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
       if (event.key === 'v' || event.key === 'V') {
-        // preventDefault stops the browser from ALSO firing a native paste
-        // event on xterm's hidden textarea, which would double-paste.
         event.preventDefault();
-        navigator.clipboard.readText().then((text) => {
+        navigator.clipboard?.readText().then((text) => {
           if (text) term.paste(text);
-        }).catch(() => {
-          // Clipboard permission denied — paste will be silently dropped
-        });
+        }).catch(() => {});
         return false;
-      }
-
-      // Copy: Cmd+C (Mac) or Ctrl+Shift+C (Linux/Windows)
-      if (event.key === 'c' || event.key === 'C') {
-        const selection = term.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection).catch(() => {
-            // Clipboard permission denied — copy will be silently dropped
-          });
-          return false;
-        }
-        // No selection: let xterm handle it (sends ^C / SIGINT)
-        return true;
       }
 
       return true;
@@ -262,6 +273,8 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
+      selectionDisposable.dispose();
+      container.removeEventListener('mouseup', handleMouseUp);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();

@@ -1101,7 +1101,6 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       committed_at: null
       integrated_at: null
     notes: "Client-side companion to codevos.ai server spec 0001. Replaces cloudflared with native tunnel. Written by codevos.ai builder agent."
-```
 
   - id: "0098"
     title: "Per-Project Port Registry Removal"
@@ -1147,9 +1146,54 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: "2026-02-12T00:00:00-08:00"
     notes: "Tower hygiene: dead code removal, TowerClient consolidation, file-tab persistence, path traversal fix. PR #212 merged."
 
+  - id: "0100"
+    title: "Porch Gate Notifications"
+    summary: "Tower dashboard shows pending gates, sends af-send message to architect when builder is blocked, auto-clears on unblock"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0100-porch-gate-notifications.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [tower, dashboard, porch, notifications, agent-farm]
+    timestamps:
+      conceived_at: "2026-02-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Builder gates are currently silent. Wire existing gate detection + af send + dashboard rendering."
+
+  - id: "0101"
+    title: "Clickable File Paths in Terminal"
+    summary: "File paths displayed in xterm.js terminals become clickable links that invoke af open, with dotted underline visual indicator"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0101-clickable-file-paths.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [tower, dashboard, terminal, xterm, ux]
+    timestamps:
+      conceived_at: "2026-02-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Extend xterm.js WebLinksAddon to detect file paths (not just URLs). Must work in architect and builder worktrees."
+```
+
 ## Next Available Number
 
-**0100** - Reserve this number for your next project
+**0102** - Reserve this number for your next project
 
 ---
 
