@@ -101,12 +101,14 @@ interface ProjectTerminals {
 const projectTerminals = new Map<string, ProjectTerminals>();
 
 /**
- * Get or create project terminal registry entry
+ * Get or create project terminal registry entry.
+ * On first access for a project, hydrates file tabs from SQLite so
+ * persisted tabs are available immediately (not just after /api/state).
  */
 function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
   let entry = projectTerminals.get(projectPath);
   if (!entry) {
-    entry = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
+    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForProject(projectPath) };
     projectTerminals.set(projectPath, entry);
   }
   // Migration: ensure fileTabs exists for older entries
