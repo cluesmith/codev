@@ -32,8 +32,9 @@ interface OrphanedSession {
 }
 
 /**
- * Find tmux sessions that match THIS project's agent-farm patterns
- * Only matches sessions with this project's port to avoid killing other projects
+ * Find tmux sessions that match agent-farm architect patterns.
+ * Matches current naming (af-architect) and legacy port-based (af-architect-XXXX).
+ * PID liveness check prevents killing active sessions.
  */
 async function findOrphanedSessions(): Promise<OrphanedSession[]> {
   const state = loadState();

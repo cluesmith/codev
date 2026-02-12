@@ -5,11 +5,19 @@
  * terminal open after completion for review.
  */
 
+import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 
 // Tower port — the single HTTP server since Spec 0090
 const DEFAULT_TOWER_PORT = 4100;
+
+/**
+ * Encode project path for Tower URL (base64url)
+ */
+function encodeProjectPath(projectPath: string): string {
+  return Buffer.from(projectPath).toString('base64url');
+}
 
 interface ConsultOptions {
   model: string;
@@ -30,6 +38,9 @@ export async function consult(
     fatal('Dashboard not running. Start with: af dash start');
   }
 
+  const config = getConfig();
+  const encodedPath = encodeProjectPath(config.projectRoot);
+
   // Build the consult command (consult is now a proper CLI binary)
   let cmd = `consult --model ${options.model}`;
   if (options.type) {
@@ -41,7 +52,7 @@ export async function consult(
   const name = `${options.model}-${subcommand}${target}`;
 
   try {
-    const response = await fetch(`http://localhost:${DEFAULT_TOWER_PORT}/api/tabs/shell`, {
+    const response = await fetch(`http://localhost:${DEFAULT_TOWER_PORT}/project/${encodedPath}/api/tabs/shell`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, command: cmd }),
