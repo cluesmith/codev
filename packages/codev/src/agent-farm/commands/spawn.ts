@@ -172,6 +172,25 @@ ${context.issue.body || '(No description provided)'}
 }
 
 // =============================================================================
+// Resume Context
+// =============================================================================
+
+/**
+ * Build a resume notice to prepend to the builder prompt.
+ * Tells the builder this is a resumed session and to check existing porch state.
+ */
+function buildResumeNotice(projectId: string): string {
+  return `## RESUME SESSION
+
+This is a **resumed** builder session. A previous session was working in this worktree.
+
+**IMPORTANT**: Do NOT run \`porch init\` — porch state may already exist from the previous session.
+Instead, start by running \`porch next ${projectId}\` to check your current state and get next tasks.
+If porch state exists, continue from where the previous session left off.
+`;
+}
+
+// =============================================================================
 // ID and Session Management
 // =============================================================================
 
@@ -726,8 +745,9 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   const initialPrompt = buildPromptFromTemplate(config, protocol, templateContext);
+  const resumeNotice = options.resume ? `\n${buildResumeNotice(projectId)}\n` : '';
   const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
-
+${resumeNotice}
 ${initialPrompt}`;
 
   // Load role
@@ -809,6 +829,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   const hasExplicitProtocol = options.protocol || options.useProtocol;
+  const resumeNotice = options.resume ? `\n${buildResumeNotice(builderId)}\n` : '';
   let builderPrompt: string;
 
   if (hasExplicitProtocol) {
@@ -827,10 +848,10 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
     };
 
     const prompt = buildPromptFromTemplate(config, protocol, templateContext);
-    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
+    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${prompt}`;
   } else {
     builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
-
+${resumeNotice}
 # Task
 
 ${taskDescription}`;
@@ -918,7 +939,9 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
     input_description: `running the ${protocolName.toUpperCase()} protocol`,
   };
 
-  const prompt = buildPromptFromTemplate(config, protocolName, templateContext);
+  const promptContent = buildPromptFromTemplate(config, protocolName, templateContext);
+  const resumeNotice = options.resume ? `\n${buildResumeNotice(builderId)}\n` : '';
+  const prompt = resumeNotice ? `${resumeNotice}\n${promptContent}` : promptContent;
 
   // Load protocol-specific role or fall back to builder role
   const role = options.noRole ? null : loadProtocolRole(config, protocolName);
@@ -1275,7 +1298,8 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   };
 
   const prompt = buildPromptFromTemplate(config, protocol, templateContext);
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
+  const resumeNotice = options.resume ? `\n${buildResumeNotice(builderId)}\n` : '';
+  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${prompt}`;
 
   // Load role
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');

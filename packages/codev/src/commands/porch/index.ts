@@ -493,6 +493,10 @@ export async function approve(
 /**
  * porch init <protocol> <id> <name>
  * Initialize a new project.
+ *
+ * Idempotent: if status.yaml already exists, preserves it and reports
+ * current state. This supports `af spawn --resume` where the builder
+ * may re-run `porch init` after a session restart.
  */
 export async function init(
   projectRoot: string,
@@ -503,9 +507,35 @@ export async function init(
   const protocol = loadProtocol(projectRoot, protocolName);
   const statusPath = getStatusPath(projectRoot, projectId, projectName);
 
-  // Check if already exists
+  // If status.yaml already exists, preserve it (idempotent for resume)
   if (fs.existsSync(statusPath)) {
-    throw new Error(`Project ${projectId}-${projectName} already exists.`);
+    const existingState = readState(statusPath);
+    console.log('');
+    console.log(chalk.yellow(`Project ${projectId}-${projectName} already exists. Preserving existing state.`));
+    console.log(`  Protocol: ${existingState.protocol}`);
+    console.log(`  Current phase: ${existingState.phase}`);
+    if (existingState.current_plan_phase) {
+      console.log(`  Plan phase: ${existingState.current_plan_phase}`);
+    }
+    console.log(`\n  Run: porch next ${projectId}`);
+    console.log('');
+    return;
+  }
+
+  // Also check if a project with this ID exists under a different name
+  const existingPath = findStatusPath(projectRoot, projectId);
+  if (existingPath) {
+    const existingState = readState(existingPath);
+    console.log('');
+    console.log(chalk.yellow(`Project ${projectId} already exists (as ${existingState.id}-${existingState.title}). Preserving existing state.`));
+    console.log(`  Protocol: ${existingState.protocol}`);
+    console.log(`  Current phase: ${existingState.phase}`);
+    if (existingState.current_plan_phase) {
+      console.log(`  Plan phase: ${existingState.current_plan_phase}`);
+    }
+    console.log(`\n  Run: porch next ${projectId}`);
+    console.log('');
+    return;
   }
 
   const state = createInitialState(protocol, projectId, projectName, projectRoot);
