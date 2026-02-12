@@ -85,7 +85,7 @@ CREATE TRIGGER IF NOT EXISTS builders_updated_at
 
 /**
  * Global registry schema (global.db)
- * Stores port allocations across all projects
+ * Stores terminal sessions and migrations across all projects
  */
 export const GLOBAL_SCHEMA = `
 -- Schema versioning

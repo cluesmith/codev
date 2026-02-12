@@ -136,16 +136,11 @@ describe('Type Definitions', () => {
         templatesDir: '/path/to/templates',
         serversDir: '/path/to/servers',
         bundledRolesDir: '/path/to/roles',
-        dashboardPort: 4200,
-        architectPort: 4201,
-        builderPortRange: [4210, 4229],
-        utilPortRange: [4230, 4249],
-        // openPortRange removed - Spec 0092: files served through Tower
       };
 
-      expect(config.dashboardPort).toBe(4200);
-      expect(config.architectPort).toBe(4201);
-      expect(config.builderPortRange).toEqual([4210, 4229]);
+      expect(config.projectRoot).toBe('/path/to/project');
+      expect(config.codevDir).toBe('/path/to/project/codev');
+      expect(config.buildersDir).toBe('/path/to/project/.builders');
     });
   });
 
