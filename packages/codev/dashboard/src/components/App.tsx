@@ -10,9 +10,10 @@ import { Terminal } from './Terminal.js';
 import { StatusPanel } from './StatusPanel.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
+import { CloudStatus } from './CloudStatus.js';
 
 export function App() {
-  const { state, refresh } = useBuilderStatus();
+  const { state, tunnelStatus, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
@@ -133,14 +134,19 @@ export function App() {
 
   if (isMobile) {
     return (
-      <MobileLayout
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={selectTab}
-        onRefresh={refresh}
-      >
-        {renderPersistentContent(['architect', 'builder', 'shell'])}
-      </MobileLayout>
+      <div className="mobile-wrapper">
+        <div className="mobile-header">
+          <CloudStatus tunnelStatus={tunnelStatus} onRefresh={refresh} />
+        </div>
+        <MobileLayout
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelectTab={selectTab}
+          onRefresh={refresh}
+        >
+          {renderPersistentContent(['architect', 'builder', 'shell'])}
+        </MobileLayout>
+      </div>
     );
   }
 
@@ -155,6 +161,7 @@ export function App() {
       <header className="app-header">
         <h1 className="app-title">Agent Farm</h1>
         <div className="header-meta">
+          <CloudStatus tunnelStatus={tunnelStatus} onRefresh={refresh} />
           <span className="builder-count">
             {state?.builders?.length ?? 0} builder(s)
           </span>

@@ -181,3 +181,48 @@ export async function fetchRecentFiles(): Promise<RecentFile[]> {
   if (!res.ok) throw new Error(`Failed to fetch recent files: ${res.status}`);
   return res.json();
 }
+
+// Spec 0097: Tunnel status and control APIs for cloud connection
+
+export interface TunnelStatus {
+  registered: boolean;
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'error';
+  uptime: number | null;
+  towerId: string | null;
+  towerName: string | null;
+  serverUrl: string | null;
+  accessUrl: string | null;
+}
+
+const ERROR_STATUS: TunnelStatus = {
+  registered: false, state: 'error', uptime: null,
+  towerId: null, towerName: null, serverUrl: null, accessUrl: null,
+};
+
+export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
+  try {
+    // Tunnel endpoints are tower-level (root), not project-scoped — use absolute path
+    const res = await fetch('/api/tunnel/status', { headers: getAuthHeaders() });
+    if (res.status === 404) return null; // Tunnel not configured
+    if (!res.ok) return ERROR_STATUS; // Server error — distinct from not-registered
+    return res.json();
+  } catch {
+    return ERROR_STATUS; // Network error
+  }
+}
+
+export async function connectTunnel(): Promise<void> {
+  const res = await fetch('/api/tunnel/connect', {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`Connect failed: ${res.status}`);
+}
+
+export async function disconnectTunnel(): Promise<void> {
+  const res = await fetch('/api/tunnel/disconnect', {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`Disconnect failed: ${res.status}`);
+}
