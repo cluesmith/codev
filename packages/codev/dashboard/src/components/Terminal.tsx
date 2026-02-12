@@ -102,24 +102,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     // Clipboard handling
     const isMac = navigator.platform.toUpperCase().includes('MAC');
 
-    // copyToClipboard: use a hidden textarea + execCommand('copy') as the
-    // primary method because navigator.clipboard.writeText() silently fails
-    // in many contexts (non-focused windows, missing transient activation).
-    function copyToClipboard(text: string): void {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-
     // Auto-copy on select: track selection text as it changes during drag,
-    // then copy to clipboard on mouseup (which qualifies as user activation).
-    // Both navigator.clipboard.writeText and document.execCommand('copy')
-    // silently fail without a user activation event like mouseup.
+    // then copy to clipboard on mouseup (which qualifies as user activation
+    // for the Clipboard API).
     const selectionDisposable = term.onSelectionChange(() => {
       const sel = term.getSelection();
       if (sel) lastSelectionRef.current = sel;
@@ -129,8 +114,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     const handleMouseUp = () => {
       const sel = lastSelectionRef.current;
       if (sel) {
-        copyToClipboard(sel);
-        // Reset after copy so stale text isn't re-copied on clicks
+        navigator.clipboard.writeText(sel).catch(() => {});
         lastSelectionRef.current = '';
       }
     };
