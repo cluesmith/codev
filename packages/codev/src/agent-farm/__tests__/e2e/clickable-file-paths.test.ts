@@ -375,7 +375,13 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
     });
 
     test('builder worktree resolution via shell tab cwd', async ({ request }) => {
-      // Create a shell tab — its terminal session will have a cwd in the project
+      // This E2E suite runs against a tower whose project root is a builder
+      // worktree (.builders/0101/). The tower assigns this worktree path as the
+      // cwd for all shell tabs. This test verifies that terminalId-based
+      // resolution works correctly in the builder worktree context.
+      expect(PROJECT_PATH).toContain('.builders');
+
+      // Create a shell tab — its cwd is the builder worktree
       const shellResp = await request.post(`${BASE_URL}/api/tabs/shell`, {
         data: { name: 'e2e-worktree-test' },
       });
@@ -383,9 +389,9 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       const shell = await shellResp.json();
       expect(shell.terminalId).toBeTruthy();
 
-      // Use the shell's terminalId to resolve a relative path.
-      // The shell's cwd is the project root, so resolving "package.json"
-      // should find the file within the project tree.
+      // Resolve a relative path using the shell's terminalId.
+      // The shell's cwd is the builder worktree, so "package.json" resolves
+      // to .builders/0101/package.json, not the parent project's package.json.
       const fileResp = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json', terminalId: shell.terminalId },
       });
