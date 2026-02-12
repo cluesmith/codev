@@ -267,6 +267,53 @@ function deleteProjectTerminalSessions(projectPath: string): void {
   }
 }
 
+/**
+ * Save a file tab to SQLite for persistence across Tower restarts.
+ */
+function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    const db = getGlobalDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO file_tabs (id, project_path, file_path, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, normalizedPath, filePath, createdAt);
+  } catch (err) {
+    log('WARN', `Failed to save file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete a file tab from SQLite.
+ */
+function deleteFileTab(id: string): void {
+  try {
+    const db = getGlobalDb();
+    db.prepare('DELETE FROM file_tabs WHERE id = ?').run(id);
+  } catch (err) {
+    log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Load file tabs for a project from SQLite.
+ */
+function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
+  const tabs = new Map<string, FileTab>();
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    const db = getGlobalDb();
+    const rows = db.prepare('SELECT id, file_path, created_at FROM file_tabs WHERE project_path = ?')
+      .all(normalizedPath) as Array<{ id: string; file_path: string; created_at: number }>;
+    for (const row of rows) {
+      tabs.set(row.id, { id: row.id, path: row.file_path, createdAt: row.created_at });
+    }
+  } catch (err) {
+    log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
+  }
+  return tabs;
+}
+
 // Whether tmux is available on this system (checked once at startup)
 let tmuxAvailable = false;
 
@@ -498,7 +545,20 @@ function resolveProjectPathFromBasename(projectBasename: string): string | null 
 /**
  * Reconcile terminal sessions on startup.
  *
- * STRATEGY: tmux is the source of truth for existence.
+ * DUAL-SOURCE STRATEGY (tmux + SQLite):
+ *
+ * tmux is the source of truth for LIVENESS (process existence).
+ * SQLite is the source of truth for METADATA (project association, type, role ID).
+ *
+ * This is intentional: tmux sessions survive Tower restarts because they are
+ * OS-level processes independent of Tower. SQLite rows, on the other hand,
+ * cannot track process liveness — a row may exist for a terminal whose process
+ * has long since exited. Therefore:
+ *   - We NEVER trust SQLite alone to determine if a terminal is running.
+ *   - We ALWAYS check tmux for liveness, then use SQLite for enrichment.
+ *
+ * File tabs are the exception: they have no backing process, so SQLite is
+ * the sole source of truth for their persistence (see file_tabs table).
  *
  * Phase 1 — tmux-first discovery:
  *   List all codev tmux sessions. For each, look up SQLite for metadata.
@@ -1004,10 +1064,13 @@ async function getTerminalsForProject(
   // if their SQLite rows were deleted by external interference (e.g., tests).
   const freshEntry: ProjectTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
 
-  // Preserve file tabs from existing entry (not stored in SQLite)
+  // Load file tabs from SQLite (persisted across restarts)
   const existingEntry = projectTerminals.get(normalizedPath);
-  if (existingEntry) {
+  if (existingEntry && existingEntry.fileTabs.size > 0) {
+    // Use in-memory state if already populated (avoids redundant DB reads)
     freshEntry.fileTabs = existingEntry.fileTabs;
+  } else {
+    freshEntry.fileTabs = loadFileTabsForProject(projectPath);
   }
 
   for (const dbSession of dbSessions) {
@@ -2472,9 +2535,11 @@ const server = http.createServer(async (req, res) => {
               }
             }
 
-            // Create new file tab
+            // Create new file tab (write-through: in-memory + SQLite)
             const id = `file-${Date.now().toString(36)}`;
-            entry.fileTabs.set(id, { id, path: fullPath, createdAt: Date.now() });
+            const createdAt = Date.now();
+            entry.fileTabs.set(id, { id, path: fullPath, createdAt });
+            saveFileTab(id, projectPath, fullPath, createdAt);
 
             log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
 
@@ -2616,10 +2681,11 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
-          // Check if it's a file tab first (Spec 0092)
+          // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
           if (tabId.startsWith('file-')) {
             if (entry.fileTabs.has(tabId)) {
               entry.fileTabs.delete(tabId);
+              deleteFileTab(tabId);
               log('INFO', `Deleted file tab: ${tabId}`);
               res.writeHead(204);
               res.end();

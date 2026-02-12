@@ -332,6 +332,22 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Created terminal_sessions table (Spec 0090 TICK-001)');
   }
 
+  // Migration v4: Add file_tabs table (Spec 0099 Phase 4)
+  const v4 = db.prepare('SELECT version FROM _migrations WHERE version = 4').get();
+  if (!v4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS file_tabs (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
+    console.log('[info] Created file_tabs table (Spec 0099 Phase 4)');
+  }
+
   return db;
 }
 
