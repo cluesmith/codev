@@ -219,6 +219,22 @@ body {
   height: 100%;
 }
 
+/* Spec 0101: Persistent dotted underline for file-path links (distinct from URL solid underline).
+ * FilePathDecorationManager creates overlay elements via xterm.js registerDecoration API
+ * for each detected file path. Underline is always visible (not just on hover).
+ * Per-link hover: FilePathLinkProvider calls decorationManager.highlightAt() to
+ * add .file-path-decoration-hover to only the specific hovered decoration. */
+.file-path-decoration {
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.3) !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+
+/* Per-link hover brightness shift (applied to individual decoration, not all) */
+.file-path-decoration-hover {
+  border-bottom-color: rgba(255, 255, 255, 0.7) !important;
+}
+
 /* Terminal iframe */
 .terminal-iframe {
   display: block;

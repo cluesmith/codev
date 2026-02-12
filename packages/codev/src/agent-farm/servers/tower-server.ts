@@ -2695,7 +2695,7 @@ const server = http.createServer(async (req, res) => {
               req.on('data', (chunk: Buffer) => data += chunk.toString());
               req.on('end', () => resolve(data));
             });
-            const { path: filePath, line } = JSON.parse(body || '{}');
+            const { path: filePath, line, terminalId } = JSON.parse(body || '{}');
 
             if (!filePath || typeof filePath !== 'string') {
               res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -2703,26 +2703,55 @@ const server = http.createServer(async (req, res) => {
               return;
             }
 
-            // Resolve path relative to project
-            const fullPath = path.isAbsolute(filePath)
-              ? filePath
-              : path.join(projectPath, filePath);
+            // Resolve path: use terminal's cwd for relative paths when terminalId is provided
+            let fullPath: string;
+            if (path.isAbsolute(filePath)) {
+              fullPath = filePath;
+            } else if (terminalId) {
+              const manager = getTerminalManager();
+              const session = manager.getSession(terminalId);
+              if (session) {
+                fullPath = path.join(session.cwd, filePath);
+              } else {
+                log('WARN', `Terminal session ${terminalId} not found, falling back to project root`);
+                fullPath = path.join(projectPath, filePath);
+              }
+            } else {
+              fullPath = path.join(projectPath, filePath);
+            }
 
-            // Security: ensure resolved path is within project root
-            const normalizedFull = path.normalize(fullPath);
-            const normalizedProject = path.normalize(projectPath);
-            if (!normalizedFull.startsWith(normalizedProject + path.sep) && normalizedFull !== normalizedProject) {
+            // Security: symlink-aware containment check
+            // For non-existent files, resolve the parent directory to handle
+            // intermediate symlinks (e.g., /tmp -> /private/tmp on macOS).
+            let resolvedPath: string;
+            try {
+              resolvedPath = fs.realpathSync(fullPath);
+            } catch {
+              try {
+                resolvedPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
+              } catch {
+                resolvedPath = path.resolve(fullPath);
+              }
+            }
+
+            let normalizedProject: string;
+            try {
+              normalizedProject = fs.realpathSync(projectPath);
+            } catch {
+              normalizedProject = path.resolve(projectPath);
+            }
+
+            const isWithinProject = resolvedPath.startsWith(normalizedProject + path.sep)
+              || resolvedPath === normalizedProject;
+
+            if (!isWithinProject) {
               res.writeHead(403, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Path outside project' }));
               return;
             }
 
-            // Check file exists
-            if (!fs.existsSync(fullPath)) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'File not found' }));
-              return;
-            }
+            // Non-existent files still create a tab (spec 0101: file viewer shows "File not found")
+            const fileExists = fs.existsSync(fullPath);
 
             const entry = getProjectTerminalsEntry(projectPath);
 
@@ -2730,7 +2759,7 @@ const server = http.createServer(async (req, res) => {
             for (const [id, tab] of entry.fileTabs) {
               if (tab.path === fullPath) {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ id, existing: true, line }));
+                res.end(JSON.stringify({ id, existing: true, line, notFound: !fileExists }));
                 return;
               }
             }
@@ -2744,7 +2773,7 @@ const server = http.createServer(async (req, res) => {
             log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ id, existing: false, line }));
+            res.end(JSON.stringify({ id, existing: false, line, notFound: !fileExists }));
           } catch (err) {
             log('ERROR', `Failed to create file tab: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });

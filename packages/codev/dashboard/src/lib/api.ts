@@ -92,11 +92,11 @@ export async function createShellTab(): Promise<{ id: string; port: number; name
   return res.json();
 }
 
-export async function createFileTab(filePath: string, line?: number): Promise<{ id: string; existing: boolean; line?: number }> {
+export async function createFileTab(filePath: string, line?: number, terminalId?: string): Promise<{ id: string; existing: boolean; line?: number }> {
   const res = await fetch(apiUrl('api/tabs/file'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ path: filePath, line }),
+    body: JSON.stringify({ path: filePath, line, terminalId }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
