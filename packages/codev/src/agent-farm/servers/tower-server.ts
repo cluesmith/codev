@@ -1486,16 +1486,6 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   // Phase 4 (Spec 0090): Tower manages terminals directly
   // No dashboard-server spawning - tower handles everything
   try {
-    // Clear any stale state file
-    const stateFile = path.join(projectPath, '.agent-farm', 'state.json');
-    if (fs.existsSync(stateFile)) {
-      try {
-        fs.unlinkSync(stateFile);
-      } catch {
-        // Ignore - file might not exist or be locked
-      }
-    }
-
     // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
     const db = getGlobalDb();

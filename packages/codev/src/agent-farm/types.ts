@@ -7,8 +7,6 @@ export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 
 export interface Builder {
   id: string;
   name: string;
-  port: number;
-  pid: number;
   status: 'spawning' | 'implementing' | 'blocked' | 'pr-ready' | 'complete';
   phase: string;
   worktree: string;
@@ -24,8 +22,6 @@ export interface Builder {
 export interface UtilTerminal {
   id: string;
   name: string;
-  port: number;
-  pid: number;
   tmuxSession?: string;
   worktreePath?: string;  // For worktree shells - used for cleanup on tab close
   terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
@@ -34,8 +30,6 @@ export interface UtilTerminal {
 export interface Annotation {
   id: string;
   file: string;
-  port: number;
-  pid: number;
   parent: {
     type: 'architect' | 'builder' | 'util';
     id?: string;
@@ -43,8 +37,6 @@ export interface Annotation {
 }
 
 export interface ArchitectState {
-  port: number;
-  pid: number;
   cmd: string;
   startedAt: string;
   tmuxSession?: string;
