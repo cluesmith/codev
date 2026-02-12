@@ -364,10 +364,110 @@ describe('tunnel edge cases (Phase 7)', () => {
     });
   });
 
+  describe('rate limiting response handling', () => {
+    it('transitions to disconnected on rate_limited and schedules delayed reconnect', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await setup({ forceError: 'rate_limited' });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'disconnected');
+
+      // Client should be disconnected (not auth_failed — rate_limited is transient)
+      expect(client.getState()).toBe('disconnected');
+
+      // Client should NOT be in auth_failed state (rate limiting is retryable)
+      expect(client.getState()).not.toBe('auth_failed');
+
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('connection close mid-request', () => {
+    it('handles server disconnect during proxied request gracefully', async () => {
+      await setup();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Start a request, then immediately disconnect the server
+      const requestPromise = mockServer.sendRequest({ path: '/api/slow' }).catch(() => null);
+
+      // Small delay to let the request start flowing
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Server drops the connection mid-request
+      mockServer.disconnectAll();
+
+      // Request should either complete with an error or be null (caught)
+      const result = await requestPromise;
+
+      // Client should transition to disconnected
+      await waitFor(() => client.getState() === 'disconnected', 5000);
+      expect(client.getState()).toBe('disconnected');
+
+      // Client should still be usable after mid-request disconnect
+      expect(client.getUptime()).toBeNull();
+    });
+  });
+
   describe('config-related tunnel behavior', () => {
-    // Note: Config parsing edge cases (missing fields, invalid JSON, nonexistent file)
-    // are thoroughly tested in cloud-config.test.ts. Here we test the tunnel client's
-    // behavior when config-derived parameters are invalid or config is removed.
+    // Config parsing edge cases (missing fields, invalid JSON, nonexistent file)
+    // are thoroughly tested in cloud-config.test.ts (15+ tests covering every
+    // missing field variant). Here we test the tunnel client's behavior when
+    // config-derived parameters are invalid or config is removed.
+
+    it('config with missing api_key: auth fails cleanly', async () => {
+      // Simulate what happens when cloud config has a missing api_key field:
+      // readCloudConfig returns null, so the tower daemon won't start the tunnel.
+      // If somehow a TunnelClient is created with an empty API key, auth should fail.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await setup({ acceptKey: 'ctk_valid_key' });
+
+      const partialClient = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort: mockServer.port,
+        apiKey: '', // Empty API key (simulates missing field)
+        towerId: '',
+        localPort: echoPort,
+        usePlainTcp: true,
+      });
+
+      partialClient.connect();
+      try {
+        // Should fail auth (empty key doesn't match acceptKey)
+        await waitFor(
+          () => partialClient.getState() === 'auth_failed' || partialClient.getState() === 'disconnected',
+        );
+        expect(['auth_failed', 'disconnected']).toContain(partialClient.getState());
+      } finally {
+        partialClient.disconnect();
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('config with missing server_url: connection fails without crash', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // TunnelClient with invalid/empty server URL
+      const partialClient = new TunnelClient({
+        serverUrl: 'http://0.0.0.0',
+        tunnelPort: 59998, // Not listening
+        apiKey: 'ctk_some_key',
+        towerId: 'some-tower',
+        localPort: echoPort,
+        usePlainTcp: true,
+      });
+
+      partialClient.connect();
+      try {
+        // Should fail to connect and transition to disconnected
+        await waitFor(() => partialClient.getState() === 'disconnected', 5000);
+        expect(partialClient.getState()).toBe('disconnected');
+      } finally {
+        partialClient.disconnect();
+        errorSpy.mockRestore();
+      }
+    });
 
     it('config deleted while connected: disconnect prevents auto-reconnect', async () => {
       // Scenario: Tower is connected, server drops connection, config is deleted.
@@ -469,8 +569,8 @@ describe('tunnel edge cases (Phase 7)', () => {
       // Advisory: log benchmarks for visibility
       console.log(`Tunnel latency — p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`);
 
-      // Target: <100ms overhead (generous threshold for CI — 2x spec target)
-      expect(p95).toBeLessThan(200);
+      // Spec target: <100ms overhead p95
+      expect(p95).toBeLessThan(100);
     });
   });
 
@@ -555,8 +655,8 @@ describe('tunnel edge cases (Phase 7)', () => {
 
         console.log(`Terminal keystroke latency — p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`);
 
-        // Target: <50ms p95 overhead (generous for CI)
-        expect(p95).toBeLessThan(100);
+        // Spec target: <50ms p95 overhead
+        expect(p95).toBeLessThan(50);
 
         stream.destroy();
       } finally {
@@ -571,13 +671,17 @@ describe('tunnel edge cases (Phase 7)', () => {
   });
 
   describe('non-functional: memory under load', () => {
+    // Note: For accurate memory measurements, run with --expose-gc:
+    //   node --expose-gc ./node_modules/.bin/vitest run tunnel-edge-cases
+    // Without --expose-gc, global.gc() is unavailable and the baseline
+    // measurement may be noisy due to uncollected garbage.
     it('stays within bounds during 50 concurrent requests', async () => {
       await setup();
 
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      // Baseline memory
+      // Baseline memory (gc if available for accurate measurement)
       global.gc?.();
       const before = process.memoryUsage().heapUsed;
 

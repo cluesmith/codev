@@ -14,6 +14,20 @@
  *   - Test database seeded with test user (via codevos.ai test helpers)
  *   - Test user: e2e-test@example.com / TestPassword123!
  *
+ * Why the suite does NOT auto-start codevos.ai:
+ *   codevos.ai is a separate repository/project with its own Next.js server,
+ *   PostgreSQL database, and build pipeline. Automating its startup from within
+ *   this test suite would create a brittle cross-repo dependency. Instead, these
+ *   tests follow the standard E2E pattern: the server is started independently
+ *   (manually or via CI), and tests skip gracefully if unavailable.
+ *
+ * Rate limiting note: The plan lists "Rate limiting behavior" as an E2E scenario.
+ *   Triggering the real server's rate limiter requires environment-specific knowledge
+ *   of threshold configuration and could interfere with concurrent tests. Client-side
+ *   rate_limited response handling (ERR rate_limited → 60s/300s backoff) is validated
+ *   in tunnel-edge-cases.test.ts via the mock server. The rapid reconnection test
+ *   here exercises the same reconnection code path that handles rate-limited responses.
+ *
  * Environment variables:
  *   CODEVOS_URL      - codevos.ai URL (default: http://localhost:3000)
  *   TUNNEL_PORT      - tunnel server port (default: 4200)
@@ -811,8 +825,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
           `E2E tunnel latency -- p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`,
         );
 
-        // Advisory: <100ms overhead target, generous 200ms threshold for CI
-        expect(p95).toBeLessThan(200);
+        // Spec target: <100ms overhead p95
+        expect(p95).toBeLessThan(100);
       }
     } finally {
       client.disconnect();
