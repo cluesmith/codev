@@ -840,7 +840,6 @@
       Agent Farm Control Tower
     </h1>
     <div class="header-actions">
-      <button class="btn" id="share-btn" onclick="showShareDialog()" style="display: none;" title="Share via QR code">📱 Share</button>
       <button class="btn" onclick="refresh()">Refresh</button>
     </div>
   </header>
@@ -895,22 +894,6 @@
       </div>
     </div>
 
-    <!-- Share Dialog (QR Code) -->
-    <div class="dialog-overlay" id="share-dialog" style="display: none;">
-      <div class="dialog-box" style="text-align: center;">
-        <h3>📱 Share via QR Code</h3>
-        <div id="share-content">
-          <div class="loading">
-            <div class="spinner"></div>
-            <p>Starting tunnel...</p>
-          </div>
-        </div>
-        <div class="dialog-actions" style="margin-top: 16px;">
-          <button class="btn" onclick="hideShareDialog()">Close</button>
-          <button class="btn" id="stop-tunnel-btn" onclick="stopTunnelAndClose()" style="display: none;">Stop Tunnel</button>
-        </div>
-      </div>
-    </div>
   </main>
 
   <div class="toast-container" id="toast-container"></div>
@@ -948,17 +931,6 @@
 
     // Initialize
     async function init() {
-      // Check if cloudflared is available and show share button
-      try {
-        const tunnelRes = await fetch('/api/tunnel/status');
-        const tunnelStatus = await tunnelRes.json();
-        if (tunnelStatus.available) {
-          document.getElementById('share-btn').style.display = 'inline-block';
-        }
-      } catch (e) {
-        // Tunnel not available, button stays hidden
-      }
-
       // Request notification permission
       if ('Notification' in window && Notification.permission === 'default') {
         try {
@@ -1581,121 +1553,6 @@
       setTimeout(() => {
         toast.remove();
       }, 4000);
-    }
-
-    // Share dialog functions (QR code for mobile access)
-    let tunnelAbortController = null;
-
-    async function showShareDialog() {
-      const dialog = document.getElementById('share-dialog');
-      const content = document.getElementById('share-content');
-      const stopBtn = document.getElementById('stop-tunnel-btn');
-
-      dialog.style.display = 'flex';
-      stopBtn.style.display = 'none';
-
-      // Create abort controller for cancellation
-      tunnelAbortController = new AbortController();
-
-      content.innerHTML = `
-        <div class="loading">
-          <div class="spinner"></div>
-          <p>Starting tunnel...</p>
-          <p style="font-size: 12px; color: var(--muted); margin-top: 8px;">This may take up to 30 seconds</p>
-          <button class="btn" style="margin-top: 16px;" onclick="cancelTunnelStart()">Cancel</button>
-        </div>
-      `;
-
-      try {
-        // Check if tunnel is already running
-        const statusRes = await fetch('/api/tunnel/status', { signal: tunnelAbortController.signal });
-        const status = await statusRes.json();
-
-        if (status.running && status.url) {
-          showQRCode(status.url);
-          return;
-        }
-
-        // Start tunnel
-        const res = await fetch('/api/tunnel/start', { method: 'POST', signal: tunnelAbortController.signal });
-        const result = await res.json();
-
-        if (result.success && result.url) {
-          showQRCode(result.url);
-        } else {
-          content.innerHTML = `<p style="color: var(--danger);">Failed to start tunnel: ${result.error || 'Unknown error'}</p>`;
-        }
-      } catch (e) {
-        if (e.name === 'AbortError') {
-          content.innerHTML = '<p>Tunnel start cancelled.</p>';
-        } else {
-          content.innerHTML = `<p style="color: var(--danger);">Error: ${e.message}</p>`;
-        }
-      } finally {
-        tunnelAbortController = null;
-      }
-    }
-
-    function cancelTunnelStart() {
-      if (tunnelAbortController) {
-        tunnelAbortController.abort();
-      }
-      // Also stop any tunnel that might have started
-      fetch('/api/tunnel/stop', { method: 'POST' }).catch(() => {});
-    }
-
-    function showQRCode(tunnelUrl) {
-      const content = document.getElementById('share-content');
-      const stopBtn = document.getElementById('stop-tunnel-btn');
-
-      // Generate QR code using qrcode.js (loaded from CDN)
-      content.innerHTML = `
-        <p style="margin-bottom: 16px;">Scan to access from mobile:</p>
-        <div id="qrcode" style="display: inline-block; padding: 16px; background: white; border-radius: 8px;"></div>
-        <p style="margin-top: 16px; font-size: 12px; color: var(--muted);">
-          <a href="${tunnelUrl}" target="_blank" style="color: var(--primary);">${tunnelUrl}</a>
-        </p>
-      `;
-
-      // Load QRCode library and generate
-      if (!window.QRCode) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
-        script.onload = () => generateQR(tunnelUrl);
-        document.head.appendChild(script);
-      } else {
-        generateQR(tunnelUrl);
-      }
-
-      stopBtn.style.display = 'inline-block';
-    }
-
-    function generateQR(url) {
-      const container = document.getElementById('qrcode');
-      if (container && window.QRCode) {
-        container.innerHTML = '';
-        new QRCode(container, {
-          text: url,
-          width: 200,
-          height: 200,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-        });
-      }
-    }
-
-    function hideShareDialog() {
-      document.getElementById('share-dialog').style.display = 'none';
-    }
-
-    async function stopTunnelAndClose() {
-      try {
-        await fetch('/api/tunnel/stop', { method: 'POST' });
-      } catch (e) {
-        // Ignore
-      }
-      hideShareDialog();
-      showToast('Tunnel stopped', 'success');
     }
 
     // Create project dialog functions
