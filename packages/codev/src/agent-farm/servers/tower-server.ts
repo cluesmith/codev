@@ -18,6 +18,12 @@ import { getGlobalDb } from '../db/index.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 import { getGateStatusForProject } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
+import {
+  saveFileTab as saveFileTabToDb,
+  deleteFileTab as deleteFileTabFromDb,
+  loadFileTabsForProject as loadFileTabsFromDb,
+} from '../utils/file-tabs.js';
+import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 
@@ -86,11 +92,7 @@ let terminalManager: TerminalManager | null = null;
 
 // Project terminal registry - tracks which terminals belong to which project
 // Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
-interface FileTab {
-  id: string;
-  path: string;
-  createdAt: number;
-}
+// FileTab type is imported from utils/file-tabs.ts
 
 interface ProjectTerminals {
   architect?: string;
@@ -271,15 +273,12 @@ function deleteProjectTerminalSessions(projectPath: string): void {
 
 /**
  * Save a file tab to SQLite for persistence across Tower restarts.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
  */
 function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
   try {
     const normalizedPath = normalizeProjectPath(projectPath);
-    const db = getGlobalDb();
-    db.prepare(`
-      INSERT OR REPLACE INTO file_tabs (id, project_path, file_path, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(id, normalizedPath, filePath, createdAt);
+    saveFileTabToDb(getGlobalDb(), id, normalizedPath, filePath, createdAt);
   } catch (err) {
     log('WARN', `Failed to save file tab: ${(err as Error).message}`);
   }
@@ -287,11 +286,11 @@ function saveFileTab(id: string, projectPath: string, filePath: string, createdA
 
 /**
  * Delete a file tab from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling.
  */
 function deleteFileTab(id: string): void {
   try {
-    const db = getGlobalDb();
-    db.prepare('DELETE FROM file_tabs WHERE id = ?').run(id);
+    deleteFileTabFromDb(getGlobalDb(), id);
   } catch (err) {
     log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
   }
@@ -299,21 +298,16 @@ function deleteFileTab(id: string): void {
 
 /**
  * Load file tabs for a project from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
  */
 function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
-  const tabs = new Map<string, FileTab>();
   try {
     const normalizedPath = normalizeProjectPath(projectPath);
-    const db = getGlobalDb();
-    const rows = db.prepare('SELECT id, file_path, created_at FROM file_tabs WHERE project_path = ?')
-      .all(normalizedPath) as Array<{ id: string; file_path: string; created_at: number }>;
-    for (const row of rows) {
-      tabs.set(row.id, { id: row.id, path: row.file_path, createdAt: row.created_at });
-    }
+    return loadFileTabsFromDb(getGlobalDb(), normalizedPath);
   } catch (err) {
     log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
   }
-  return tabs;
+  return new Map<string, FileTab>();
 }
 
 // Whether tmux is available on this system (checked once at startup)
