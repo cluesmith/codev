@@ -82,7 +82,7 @@ async function httpRequest(
  * This mirrors the actual endpoint code to validate the contract.
  */
 function createTunnelEndpointServer(opts: {
-  tunnelPort: number;
+  mockServerPort: number;
   readConfig: () => CloudConfig | null;
 }): {
   server: http.Server;
@@ -111,12 +111,10 @@ function createTunnelEndpointServer(opts: {
       }
 
       tunnelClient = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort: opts.tunnelPort,
+        serverUrl: `http://127.0.0.1:${opts.mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: parseInt(new URL(`http://localhost`).port || '0'),
-        usePlainTcp: true,
       });
 
       tunnelClient.connect();
@@ -197,11 +195,11 @@ describe('tunnel integration (Phase 4)', () => {
   const TEST_SERVER_URL = 'http://127.0.0.1';
 
   let mockTunnelServer: MockTunnelServer;
-  let tunnelPort: number;
+  let mockServerPort: number;
 
   beforeEach(async () => {
     mockTunnelServer = new MockTunnelServer({ acceptKey: TEST_API_KEY });
-    tunnelPort = await mockTunnelServer.start();
+    mockServerPort = await mockTunnelServer.start();
   });
 
   afterEach(async () => {
@@ -220,7 +218,7 @@ describe('tunnel integration (Phase 4)', () => {
   describe('POST /api/tunnel/connect endpoint', () => {
     it('returns 400 when no config exists', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => null,
       });
       const port = await endpoint.start();
@@ -236,7 +234,7 @@ describe('tunnel integration (Phase 4)', () => {
 
     it('returns 200 with state when config is valid', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => createTestConfig(),
       });
       const port = await endpoint.start();
@@ -254,7 +252,7 @@ describe('tunnel integration (Phase 4)', () => {
   describe('POST /api/tunnel/disconnect endpoint', () => {
     it('returns 200 success even when no client exists', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => createTestConfig(),
       });
       const port = await endpoint.start();
@@ -269,7 +267,7 @@ describe('tunnel integration (Phase 4)', () => {
 
     it('disconnects active tunnel client', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => createTestConfig(),
       });
       const port = await endpoint.start();
@@ -290,7 +288,7 @@ describe('tunnel integration (Phase 4)', () => {
   describe('GET /api/tunnel/status endpoint', () => {
     it('returns disconnected when not registered', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => null,
       });
       const port = await endpoint.start();
@@ -310,7 +308,7 @@ describe('tunnel integration (Phase 4)', () => {
 
     it('returns registered status with config details', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => createTestConfig(),
       });
       const port = await endpoint.start();
@@ -330,7 +328,7 @@ describe('tunnel integration (Phase 4)', () => {
 
     it('returns connected state with uptime after connect', async () => {
       const endpoint = createTunnelEndpointServer({
-        tunnelPort,
+        mockServerPort,
         readConfig: () => createTestConfig(),
       });
       const port = await endpoint.start();
@@ -355,12 +353,10 @@ describe('tunnel integration (Phase 4)', () => {
 
       // Simulate startup: create client from config
       const client = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       client.connect();
@@ -388,12 +384,10 @@ describe('tunnel integration (Phase 4)', () => {
     it('disconnect stops the tunnel client cleanly', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       client.connect();
@@ -410,12 +404,10 @@ describe('tunnel integration (Phase 4)', () => {
     it('sends metadata including terminal projectPath', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       // Simulate gatherMetadata() output with project associations
@@ -435,15 +427,16 @@ describe('tunnel integration (Phase 4)', () => {
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      // Verify metadata was received by mock server
-      expect(mockTunnelServer.lastMetadata).not.toBeNull();
-      expect(mockTunnelServer.lastMetadata!.projects).toHaveLength(2);
-      expect(mockTunnelServer.lastMetadata!.terminals).toHaveLength(3);
+      // Verify metadata is served via H2 GET poll (TICK-001: no more META frame)
+      const res = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
+      const receivedMetadata = JSON.parse(res.body);
+      expect(receivedMetadata.projects).toHaveLength(2);
+      expect(receivedMetadata.terminals).toHaveLength(3);
 
       // Verify terminal-project associations
-      const term1 = mockTunnelServer.lastMetadata!.terminals.find(t => t.id === 'term-1');
+      const term1 = receivedMetadata.terminals.find((t: { id: string }) => t.id === 'term-1');
       expect(term1?.projectPath).toBe('/home/user/project-a');
-      const term3 = mockTunnelServer.lastMetadata!.terminals.find(t => t.id === 'term-3');
+      const term3 = receivedMetadata.terminals.find((t: { id: string }) => t.id === 'term-3');
       expect(term3?.projectPath).toBe('/home/user/project-b');
 
       client.disconnect();
@@ -452,12 +445,10 @@ describe('tunnel integration (Phase 4)', () => {
     it('metadata served via GET /__tower/metadata includes projects', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       client.sendMetadata({
@@ -483,12 +474,10 @@ describe('tunnel integration (Phase 4)', () => {
     it('metadata updates when sendMetadata is called again after connection', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
-        serverUrl: config.server_url,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: config.api_key,
         towerId: config.tower_id,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       // Set initial metadata with 1 project
@@ -576,15 +565,13 @@ describe('tunnel integration (Phase 4)', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       await mockTunnelServer.stop();
       mockTunnelServer = new MockTunnelServer({ forceError: 'invalid_api_key' });
-      tunnelPort = await mockTunnelServer.start();
+      mockServerPort = await mockTunnelServer.start();
 
       const client = new TunnelClient({
-        serverUrl: TEST_SERVER_URL,
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${mockServerPort}`,
         apiKey: TEST_API_KEY,
         towerId: TEST_TOWER_ID,
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       client.connect();

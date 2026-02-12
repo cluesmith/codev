@@ -68,15 +68,13 @@ describe('tunnel edge cases (Phase 7)', () => {
     echoServer = createEchoServer();
     echoPort = await startServer(echoServer);
     mockServer = new MockTunnelServer(serverOpts);
-    const tunnelPort = await mockServer.start();
+    const port = await mockServer.start();
 
     client = new TunnelClient({
-      serverUrl: 'http://127.0.0.1',
-      tunnelPort,
+      serverUrl: `http://127.0.0.1:${port}`,
       apiKey: serverOpts.acceptKey ?? 'ctk_test_key',
       towerId: '',
       localPort: echoPort,
-      usePlainTcp: true,
     });
   }
 
@@ -255,12 +253,10 @@ describe('tunnel edge cases (Phase 7)', () => {
     it('handles disconnect when already disconnected', () => {
       // No setup needed - test disconnecting without ever connecting
       const localClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort: 9999,
+        serverUrl: 'http://127.0.0.1:9999',
         apiKey: 'ctk_test',
         towerId: '',
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       // Should not throw
@@ -331,15 +327,13 @@ describe('tunnel edge cases (Phase 7)', () => {
       const streamPort = await startServer(streamServer);
 
       const localMockServer = new MockTunnelServer();
-      const tunnelPort = await localMockServer.start();
+      const localMockPort = await localMockServer.start();
 
       const streamClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${localMockPort}`,
         apiKey: 'ctk_test_key',
         towerId: '',
         localPort: streamPort,
-        usePlainTcp: true,
       });
 
       streamClient.connect();
@@ -424,12 +418,10 @@ describe('tunnel edge cases (Phase 7)', () => {
       await setup({ acceptKey: 'ctk_valid_key' });
 
       const partialClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort: mockServer.port,
+        serverUrl: `http://127.0.0.1:${mockServer.port}`,
         apiKey: '', // Empty API key (simulates missing field)
         towerId: '',
         localPort: echoPort,
-        usePlainTcp: true,
       });
 
       partialClient.connect();
@@ -450,12 +442,10 @@ describe('tunnel edge cases (Phase 7)', () => {
 
       // TunnelClient with invalid/empty server URL
       const partialClient = new TunnelClient({
-        serverUrl: 'http://0.0.0.0',
-        tunnelPort: 59998, // Not listening
+        serverUrl: 'http://0.0.0.0:59998', // Not listening
         apiKey: 'ctk_some_key',
         towerId: 'some-tower',
         localPort: echoPort,
-        usePlainTcp: true,
       });
 
       partialClient.connect();
@@ -502,12 +492,10 @@ describe('tunnel edge cases (Phase 7)', () => {
 
       // TunnelClient with empty towerId (as would happen with partial config)
       const localClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort: mockServer.port,
+        serverUrl: `http://127.0.0.1:${mockServer.port}`,
         apiKey: 'ctk_test_key',
         towerId: '', // Empty tower ID
         localPort: echoPort,
-        usePlainTcp: true,
       });
 
       localClient.connect();
@@ -524,12 +512,10 @@ describe('tunnel edge cases (Phase 7)', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       // Point to a port that's not listening
       const localClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort: 59999, // Not listening
+        serverUrl: 'http://127.0.0.1:59999', // Not listening
         apiKey: 'ctk_test_key',
         towerId: 'test-tower',
         localPort: 4100,
-        usePlainTcp: true,
       });
 
       localClient.connect();
@@ -598,15 +584,13 @@ describe('tunnel edge cases (Phase 7)', () => {
 
       // Create tunnel client pointing at ws echo server
       const localMockServer = new MockTunnelServer();
-      const tunnelPort = await localMockServer.start();
+      const localMockPort = await localMockServer.start();
 
       const wsClient = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${localMockPort}`,
         apiKey: 'ctk_test_key',
         towerId: '',
         localPort: wsPort,
-        usePlainTcp: true,
       });
 
       wsClient.connect();

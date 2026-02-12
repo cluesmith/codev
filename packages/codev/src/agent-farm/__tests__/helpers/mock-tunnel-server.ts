@@ -1,16 +1,19 @@
 /**
- * Mock Tunnel Server for testing (Spec 0097 Phase 3)
+ * Mock Tunnel Server for testing (Spec 0097 Phase 3, TICK-001)
  *
- * Lightweight TCP server that implements the codevos.ai tunnel protocol:
- * 1. Accepts AUTH <key>\n
- * 2. Responds with OK <id>\n or ERR <reason>\n
- * 3. Runs H2 client over the connection to send requests to the tower
+ * Lightweight WebSocket server that implements the codevos.ai tunnel protocol:
+ * 1. Accepts WebSocket connections on /tunnel
+ * 2. Waits for JSON auth message: { type: "auth", apiKey: "ctk_..." }
+ * 3. Responds with { type: "auth_ok", towerId: "..." } or { type: "auth_error", reason: "..." }
+ * 4. Converts WebSocket to duplex stream and runs H2 client over it
  *
- * Uses plain TCP (no TLS) for test simplicity.
+ * TICK-001: Rewritten from TCP to WebSocket to match codevos.ai server.
  */
 
-import net from 'node:net';
+import http from 'node:http';
 import http2 from 'node:http2';
+import { Duplex } from 'node:stream';
+import { WebSocketServer, WebSocket, createWebSocketStream } from 'ws';
 import type { TowerMetadata } from '../../lib/tunnel-client.js';
 
 export interface MockTunnelServerOptions {
@@ -38,9 +41,10 @@ export interface MockResponse {
 }
 
 export class MockTunnelServer {
-  private server: net.Server;
+  private httpServer: http.Server;
+  private wss: WebSocketServer;
   private options: MockTunnelServerOptions;
-  private connections: net.Socket[] = [];
+  private wsConnections: WebSocket[] = [];
   private h2Sessions: http2.ClientHttp2Session[] = [];
   port = 0;
 
@@ -49,13 +53,25 @@ export class MockTunnelServer {
       towerId: 'test-tower-id',
       ...options,
     };
-    this.server = net.createServer((socket) => this.handleConnection(socket));
+    // Create an HTTP server for WebSocket upgrade
+    this.httpServer = http.createServer();
+    this.wss = new WebSocketServer({ noServer: true });
+
+    this.httpServer.on('upgrade', (req, socket, head) => {
+      if (req.url === '/tunnel') {
+        this.wss.handleUpgrade(req, socket, head, (ws) => {
+          this.handleConnection(ws);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
   }
 
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server.listen(0, '127.0.0.1', () => {
-        const addr = this.server.address();
+      this.httpServer.listen(0, '127.0.0.1', () => {
+        const addr = this.httpServer.address();
         if (addr && typeof addr !== 'string') {
           this.port = addr.port;
           resolve(this.port);
@@ -63,7 +79,7 @@ export class MockTunnelServer {
           reject(new Error('Failed to get server address'));
         }
       });
-      this.server.on('error', reject);
+      this.httpServer.on('error', reject);
     });
   }
 
@@ -74,20 +90,22 @@ export class MockTunnelServer {
     }
     this.h2Sessions = [];
 
-    // Destroy all connections
-    for (const conn of this.connections) {
-      if (!conn.destroyed) conn.destroy();
+    // Close all WebSocket connections
+    for (const ws of this.wsConnections) {
+      if (ws.readyState !== WebSocket.CLOSED) ws.close();
     }
-    this.connections = [];
+    this.wsConnections = [];
 
     return new Promise((resolve) => {
-      this.server.close(() => resolve());
+      this.wss.close(() => {
+        this.httpServer.close(() => resolve());
+      });
     });
   }
 
   /**
    * Send an HTTP request through the tunnel to the tower.
-   * Uses the H2 client session established over the first connection.
+   * Uses the H2 client session established over the last connection.
    */
   async sendRequest(opts: MockRequestOptions): Promise<MockResponse> {
     const session = this.h2Sessions[this.h2Sessions.length - 1];
@@ -156,10 +174,10 @@ export class MockTunnelServer {
 
   /** Forcibly disconnect the tunnel (simulates network failure) */
   disconnectAll(): void {
-    for (const conn of this.connections) {
-      if (!conn.destroyed) conn.destroy();
+    for (const ws of this.wsConnections) {
+      if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
     }
-    this.connections = [];
+    this.wsConnections = [];
     for (const session of this.h2Sessions) {
       if (!session.destroyed) session.destroy();
     }
@@ -171,128 +189,76 @@ export class MockTunnelServer {
     return this.h2Sessions.filter((s) => !s.destroyed).length;
   }
 
-  private handleConnection(socket: net.Socket): void {
-    this.connections.push(socket);
+  /** Last received metadata from the tower (fetched via H2 GET /__tower/metadata) */
+  lastMetadata: TowerMetadata | null = null;
 
-    let buffer = '';
-    const onData = (chunk: Buffer) => {
-      buffer += chunk.toString('utf-8');
-      const newlineIdx = buffer.indexOf('\n');
-      if (newlineIdx === -1) return;
+  private handleConnection(ws: WebSocket): void {
+    this.wsConnections.push(ws);
 
-      socket.removeListener('data', onData);
-      const line = buffer.slice(0, newlineIdx).trim();
-      const remaining = buffer.slice(newlineIdx + 1);
+    // Wait for auth message
+    const onMessage = (data: WebSocket.RawData) => {
+      ws.removeListener('message', onMessage);
 
-      this.handleAuth(socket, line, remaining);
+      let msg: { type?: string; apiKey?: string };
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        ws.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_json' }));
+        ws.close();
+        return;
+      }
+
+      if (msg.type !== 'auth' || !msg.apiKey) {
+        ws.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_auth_message' }));
+        ws.close();
+        return;
+      }
+
+      this.handleAuth(ws, msg.apiKey);
     };
 
-    socket.on('data', onData);
-    socket.on('error', () => {
+    ws.on('message', onMessage);
+    ws.on('error', () => {
       // Ignore connection errors in tests
     });
   }
 
-  private handleAuth(socket: net.Socket, authLine: string, remaining: string): void {
-    // Parse AUTH <key>
-    if (!authLine.startsWith('AUTH ')) {
-      socket.write('ERR invalid_auth_frame\n');
-      socket.destroy();
-      return;
-    }
-
-    const apiKey = authLine.slice(5);
-
+  private handleAuth(ws: WebSocket, apiKey: string): void {
     // Check forced error
     if (this.options.forceError) {
-      socket.write(`ERR ${this.options.forceError}\n`);
+      ws.send(JSON.stringify({ type: 'auth_error', reason: this.options.forceError }));
       if (this.options.forceError !== 'rate_limited') {
-        socket.destroy();
+        ws.close();
       }
       return;
     }
 
     // Check API key
     if (this.options.acceptKey && apiKey !== this.options.acceptKey) {
-      socket.write('ERR invalid_api_key\n');
-      socket.destroy();
+      ws.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_api_key' }));
+      ws.close();
       return;
     }
 
     // Auth success
-    socket.write(`OK ${this.options.towerId}\n`);
+    ws.send(JSON.stringify({ type: 'auth_ok', towerId: this.options.towerId }));
 
     if (this.options.disconnectAfterAuth) {
-      socket.destroy();
+      ws.close();
       return;
     }
 
-    // Read the META frame that the tower sends after auth
-    this.readMetaFrame(socket, remaining);
+    // Convert WebSocket to duplex stream and start H2 client
+    this.startH2Client(ws);
   }
 
-  /** Last received metadata from the tower */
-  lastMetadata: TowerMetadata | null = null;
+  private startH2Client(ws: WebSocket): void {
+    const wsStream = createWebSocketStream(ws);
 
-  private readMetaFrame(socket: net.Socket, initial: string): void {
-    let buffer = initial;
-
-    const onData = (chunk: Buffer) => {
-      buffer += chunk.toString('utf-8');
-      const newlineIdx = buffer.indexOf('\n');
-      if (newlineIdx === -1) return;
-
-      socket.removeListener('data', onData);
-      const line = buffer.slice(0, newlineIdx).trim();
-      const remaining = buffer.slice(newlineIdx + 1);
-
-      // Parse META <json>
-      if (line.startsWith('META ')) {
-        try {
-          this.lastMetadata = JSON.parse(line.slice(5)) as TowerMetadata;
-        } catch {
-          // Ignore parse errors in tests
-        }
-      }
-
-      // Push back remaining data for H2
-      if (remaining.length > 0) {
-        socket.unshift(Buffer.from(remaining, 'utf-8'));
-      }
-
-      this.startH2Client(socket);
-    };
-
-    // Check if META is already in buffer
-    const newlineIdx = buffer.indexOf('\n');
-    if (newlineIdx !== -1) {
-      const line = buffer.slice(0, newlineIdx).trim();
-      const remaining = buffer.slice(newlineIdx + 1);
-
-      if (line.startsWith('META ')) {
-        try {
-          this.lastMetadata = JSON.parse(line.slice(5)) as TowerMetadata;
-        } catch {
-          // Ignore
-        }
-      }
-
-      if (remaining.length > 0) {
-        socket.unshift(Buffer.from(remaining, 'utf-8'));
-      }
-
-      this.startH2Client(socket);
-      return;
-    }
-
-    socket.on('data', onData);
-  }
-
-  private startH2Client(socket: net.Socket): void {
-    // Start H2 client over the connection
+    // Start H2 client over the WebSocket stream
     // Enable extended CONNECT protocol (RFC 8441) for WebSocket proxying
     const h2Session = http2.connect('http://localhost', {
-      createConnection: () => socket,
+      createConnection: () => wsStream as unknown as Duplex,
       settings: { enableConnectProtocol: true },
     });
 

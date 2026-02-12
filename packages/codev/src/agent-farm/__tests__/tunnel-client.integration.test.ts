@@ -89,15 +89,13 @@ describe('tunnel-client integration', () => {
 
   async function setupTunnel(serverOpts: ConstructorParameters<typeof MockTunnelServer>[0] = {}): Promise<void> {
     mockServer = new MockTunnelServer(serverOpts);
-    const tunnelPort = await mockServer.start();
+    const port = await mockServer.start();
 
     client = new TunnelClient({
-      serverUrl: 'http://127.0.0.1',
-      tunnelPort,
+      serverUrl: `http://127.0.0.1:${port}`,
       apiKey: serverOpts.acceptKey ?? 'ctk_test_key',
       towerId: '',
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.onStateChange((state, prev) => {
@@ -330,8 +328,8 @@ describe('tunnel-client integration', () => {
       await mockServer.stop();
       mockServer = new MockTunnelServer();
       await new Promise<void>((resolve, reject) => {
-        (mockServer as any).server.listen(oldPort, '127.0.0.1', () => resolve());
-        (mockServer as any).server.on('error', reject);
+        (mockServer as any).httpServer.listen(oldPort, '127.0.0.1', () => resolve());
+        (mockServer as any).httpServer.on('error', reject);
       });
       mockServer.port = oldPort;
 
@@ -383,10 +381,10 @@ describe('tunnel-client integration', () => {
   });
 
   describe('metadata', () => {
-    it('pushes initial metadata during auth handshake', async () => {
+    it('serves initial metadata via GET /__tower/metadata after connect', async () => {
       await setupTunnel();
 
-      // Set metadata before connecting — it gets pushed as META frame
+      // Set metadata before connecting — served via H2 GET poll
       client.sendMetadata({
         projects: [{ path: '/test/project', name: 'test' }],
         terminals: [{ id: 'term-1', projectPath: '/test/project' }],
@@ -395,23 +393,25 @@ describe('tunnel-client integration', () => {
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      // Mock server should have received metadata via pre-H2 META frame
-      expect(mockServer.lastMetadata).not.toBeNull();
-      expect(mockServer.lastMetadata!.projects).toHaveLength(1);
-      expect(mockServer.lastMetadata!.projects[0].name).toBe('test');
-      expect(mockServer.lastMetadata!.terminals).toHaveLength(1);
+      // Fetch metadata via H2 GET (how codevos.ai polls)
+      const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
+      const metadata = JSON.parse(res.body);
+      expect(metadata.projects).toHaveLength(1);
+      expect(metadata.projects[0].name).toBe('test');
+      expect(metadata.terminals).toHaveLength(1);
     });
 
-    it('pushes empty metadata when none is set', async () => {
+    it('serves empty metadata when none is set', async () => {
       await setupTunnel();
 
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      // Should have pushed empty metadata during handshake
-      expect(mockServer.lastMetadata).not.toBeNull();
-      expect(mockServer.lastMetadata!.projects).toEqual([]);
-      expect(mockServer.lastMetadata!.terminals).toEqual([]);
+      // Fetch metadata — should be empty defaults
+      const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
+      const metadata = JSON.parse(res.body);
+      expect(metadata.projects).toEqual([]);
+      expect(metadata.terminals).toEqual([]);
     });
 
     it('serves metadata via GET /__tower/metadata for polling', async () => {
@@ -480,15 +480,13 @@ describe('tunnel-client integration', () => {
     it('proxies WebSocket CONNECT with bidirectional data', async () => {
       // Use the WebSocket server port as the local port for this test
       mockServer = new MockTunnelServer();
-      const tunnelPort = await mockServer.start();
+      const port = await mockServer.start();
 
       client = new TunnelClient({
-        serverUrl: 'http://127.0.0.1',
-        tunnelPort,
+        serverUrl: `http://127.0.0.1:${port}`,
         apiKey: 'ctk_test_key',
         towerId: '',
         localPort: wsPort,
-        usePlainTcp: true,
       });
 
       client.connect();

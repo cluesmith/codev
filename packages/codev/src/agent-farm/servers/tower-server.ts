@@ -98,7 +98,7 @@ let configWatcher: fs.FSWatcher | null = null;
 let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 
 /** Default tunnel port for codevos.ai */
-const DEFAULT_TUNNEL_PORT = 4200;
+// TICK-001: tunnelPort is no longer needed — WebSocket connects on the same port
 
 /** Periodic metadata refresh interval (re-sends metadata to codevos.ai) */
 let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -178,7 +178,6 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
 
   const client = new TunnelClient({
     serverUrl: config.server_url,
-    tunnelPort: DEFAULT_TUNNEL_PORT,
     apiKey: config.api_key,
     towerId: config.tower_id,
     localPort: port,

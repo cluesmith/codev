@@ -1,27 +1,29 @@
 /**
- * HTTP/2 Role-Reversal Tunnel Client (Spec 0097 Phase 3)
+ * HTTP/2 Role-Reversal Tunnel Client (Spec 0097 Phase 3, TICK-001)
  *
- * Opens an outbound TLS connection to codevos.ai, authenticates,
- * then runs an HTTP/2 *server* over that connection. codevos.ai
- * acts as the HTTP/2 *client*, sending requests through the tunnel.
- * The tower proxies those requests to localhost.
+ * Opens a WebSocket connection to codevos.ai/tunnel, authenticates
+ * with JSON messages, then runs an HTTP/2 *server* over the WebSocket
+ * stream. codevos.ai acts as the HTTP/2 *client*, sending requests
+ * through the tunnel. The tower proxies those requests to localhost.
  *
- * Uses only Node.js built-in modules: node:http2, node:tls, node:net, node:http
+ * TICK-001: Transport changed from raw TCP/TLS to WebSocket.
+ * The H2 role-reversal is transport-agnostic — it works over any duplex stream.
  */
 
 import http2 from 'node:http2';
-import tls from 'node:tls';
-import net from 'node:net';
 import http from 'node:http';
+import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
+import WebSocket, { createWebSocketStream } from 'ws';
 
 export interface TunnelClientOptions {
   serverUrl: string;      // codevos.ai URL (e.g. "https://codevos.ai")
-  tunnelPort: number;     // Tunnel server port (default: 4200)
   apiKey: string;         // Tower API key (ctk_...)
   towerId: string;        // Tower ID (confirmed after auth handshake)
   localPort: number;      // localhost port to proxy to (4100)
-  /** Use plain TCP instead of TLS (for tests only) */
+  /** @deprecated Use serverUrl protocol (ws:// vs wss://) instead */
+  tunnelPort?: number;
+  /** @deprecated No longer needed — WebSocket handles TLS via wss:// */
   usePlainTcp?: boolean;
 }
 
@@ -88,12 +90,23 @@ export function filterHopByHopHeaders(
   return result;
 }
 
+/**
+ * Build the WebSocket tunnel URL from the server URL.
+ * https:// → wss://, http:// → ws://
+ */
+function buildTunnelWsUrl(serverUrl: string): string {
+  const parsed = new URL(serverUrl);
+  const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${parsed.host}/tunnel`;
+}
+
 export class TunnelClient {
   private options: TunnelClientOptions;
   private state: TunnelState = 'disconnected';
   private connectedAt: number | null = null;
   private stateListeners: StateChangeCallback[] = [];
-  private socket: net.Socket | tls.TLSSocket | null = null;
+  private ws: WebSocket | null = null;
+  private wsStream: Duplex | null = null;
   private h2Server: http2.Http2Server | null = null;
   private h2Session: http2.ServerHttp2Session | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -174,31 +187,15 @@ export class TunnelClient {
   /**
    * Send tower metadata to codevos.ai through the tunnel.
    *
-   * Metadata delivery uses two mechanisms:
-   *
-   * 1. **Initial push** (handshake): Written as `META <json>\n` on the raw
-   *    socket during the auth handshake, before H2 takes over. This fires
-   *    automatically on every connect/reconnect.
-   *
-   * 2. **On-demand** (H2): Served via `GET /__tower/metadata` when the
-   *    codevos.ai H2 client polls. codevos.ai polls this endpoint
-   *    periodically and after receiving events.
-   *
-   * **Design note**: The plan describes metadata as a POST from the tower's
-   * H2 server session to codevos.ai's H2 client. This is not possible in
-   * HTTP/2: server sessions (`ServerHttp2Session`) cannot initiate requests
-   * — only clients can. The META frame + GET polling approach achieves the
-   * same result within HTTP/2's constraints. codevos.ai's H2 client polls
-   * `/__tower/metadata` when it needs fresh data.
-   *
-   * Call this before `connect()` to set initial metadata, or after
-   * `connect()` to update it (served on next GET poll).
+   * Metadata is served via `GET /__tower/metadata` when the codevos.ai
+   * H2 client polls. Call before `connect()` to set initial metadata,
+   * or after `connect()` to update it (served on next GET poll).
    */
   sendMetadata(metadata: TowerMetadata): void {
     this._pendingMetadata = metadata;
   }
 
-  /** Stored metadata for serving via GET /__tower/metadata and initial push */
+  /** Stored metadata for serving via GET /__tower/metadata */
   private _pendingMetadata: TowerMetadata | null = null;
 
   private clearReconnectTimer(): void {
@@ -230,80 +227,68 @@ export class TunnelClient {
     }
     this.h2Server = null;
 
-    if (this.socket && !this.socket.destroyed) {
-      this.socket.destroy();
+    if (this.wsStream) {
+      this.wsStream.destroy();
     }
-    this.socket = null;
+    this.wsStream = null;
+
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.ws.close();
+    }
+    this.ws = null;
   }
 
   private doConnect(): void {
     this.setState('connecting');
 
-    const hostname = new URL(this.options.serverUrl).hostname;
-    const port = this.options.tunnelPort;
+    const wsUrl = buildTunnelWsUrl(this.options.serverUrl);
 
-    let socket: net.Socket | tls.TLSSocket;
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
 
-    if (this.options.usePlainTcp) {
-      socket = net.connect({ host: hostname, port }, () => {
-        this.onSocketConnected(socket);
-      });
-    } else {
-      socket = tls.connect({ host: hostname, port, servername: hostname }, () => {
-        this.onSocketConnected(socket);
-      });
-    }
+    ws.on('open', () => {
+      this.onWsOpen(ws);
+    });
 
-    this.socket = socket;
-
-    socket.on('error', (err: Error) => {
+    ws.on('error', (err: Error) => {
       this.handleConnectionError(err);
     });
 
-    socket.on('close', () => {
+    ws.on('close', () => {
       if (this.state === 'connected' || this.state === 'connecting') {
         this.cleanup();
         this.setState('disconnected');
-        this.scheduleReconnect();
         this.consecutiveFailures++;
+        this.scheduleReconnect();
       }
     });
   }
 
-  private onSocketConnected(socket: net.Socket | tls.TLSSocket): void {
-    // Send auth frame: AUTH <apiKey>\n
-    const authFrame = `AUTH ${this.options.apiKey}\n`;
-    socket.write(authFrame);
+  private onWsOpen(ws: WebSocket): void {
+    // Send JSON auth message (TICK-001 protocol)
+    ws.send(JSON.stringify({ type: 'auth', apiKey: this.options.apiKey }));
 
-    // Wait for response line
-    let buffer = '';
-    const onData = (chunk: Buffer) => {
-      buffer += chunk.toString('utf-8');
-      const newlineIdx = buffer.indexOf('\n');
-      if (newlineIdx === -1) return; // Wait for complete line
+    // Wait for auth response
+    const onMessage = (data: WebSocket.RawData) => {
+      ws.removeListener('message', onMessage);
 
-      socket.removeListener('data', onData);
-      const response = buffer.slice(0, newlineIdx).trim();
-      const remaining = buffer.slice(newlineIdx + 1);
+      try {
+        const msg = JSON.parse(data.toString());
 
-      if (response.startsWith('OK ')) {
-        const towerId = response.slice(3);
-        this.options.towerId = towerId;
-        // Push initial metadata before H2 takes over the socket.
-        // Protocol: META <json>\n — consumed by tunnel server before
-        // it starts the H2 client session.
-        const metadata = this._pendingMetadata ?? { projects: [], terminals: [] };
-        socket.write(`META ${JSON.stringify(metadata)}\n`);
-        this.startH2Server(socket, remaining);
-      } else if (response.startsWith('ERR ')) {
-        const reason = response.slice(4);
-        this.handleAuthError(reason);
-      } else {
-        this.handleConnectionError(new Error(`Unexpected auth response: ${response}`));
+        if (msg.type === 'auth_ok') {
+          this.options.towerId = msg.towerId;
+          this.startH2Server(ws);
+        } else if (msg.type === 'auth_error') {
+          this.handleAuthError(msg.reason || 'unknown');
+        } else {
+          this.handleConnectionError(new Error(`Unexpected auth response type: ${msg.type}`));
+        }
+      } catch (err) {
+        this.handleConnectionError(new Error(`Invalid auth response: ${data.toString()}`));
       }
     };
 
-    socket.on('data', onData);
+    ws.on('message', onMessage);
   }
 
   private handleAuthError(reason: string): void {
@@ -343,8 +328,12 @@ export class TunnelClient {
     this.consecutiveFailures++;
   }
 
-  private startH2Server(socket: net.Socket | tls.TLSSocket, extraData: string): void {
-    // Create an HTTP/2 server (without TLS — TLS is on the outer socket)
+  private startH2Server(ws: WebSocket): void {
+    // Convert WebSocket to a Node.js duplex stream
+    const wsStream = createWebSocketStream(ws);
+    this.wsStream = wsStream;
+
+    // Create an HTTP/2 server (plaintext — TLS is handled by the WebSocket layer)
     // Enable extended CONNECT for WebSocket proxying (RFC 8441)
     const h2Server = http2.createServer({
       settings: { enableConnectProtocol: true },
@@ -361,17 +350,12 @@ export class TunnelClient {
     });
 
     h2Server.on('error', () => {
-      // H2 server error — will be handled by socket close
+      // H2 server error — will be handled by ws close
     });
 
-    // Emit the socket as a connection to the H2 server
-    // This is the "role reversal" — the H2 server runs over an outbound socket
-    h2Server.emit('connection', socket);
-
-    // If there was any extra data after the auth response, push it back
-    if (extraData.length > 0) {
-      socket.unshift(Buffer.from(extraData, 'utf-8'));
-    }
+    // Emit the duplex stream as a connection to the H2 server
+    // This is the "role reversal" — the H2 server runs over an outbound WebSocket
+    h2Server.emit('connection', wsStream);
   }
 
   private handleH2Stream(stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders): void {

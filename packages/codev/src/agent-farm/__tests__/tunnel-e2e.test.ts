@@ -30,15 +30,7 @@
  *
  * Environment variables:
  *   CODEVOS_URL      - codevos.ai URL (default: http://localhost:3000)
- *   TUNNEL_PORT      - tunnel server port (default: 4200)
  *   SKIP_TUNNEL_E2E  - set to "1" to skip all E2E tests
- *
- * TLS note: All E2E tests use `usePlainTcp: true` because the local codevos.ai
- * development tunnel server (port 4200) speaks plain TCP, not TLS. Production
- * codevos.ai uses TLS, but testing against production is not feasible in CI.
- * TLS handshake/certificate behavior is tested at the transport layer by the
- * Node.js TLS implementation; the tunnel client's TLS code path is exercised
- * in tunnel-client.test.ts unit tests. Only the `usePlainTcp` flag differs.
  *
  * Skip: Set SKIP_TUNNEL_E2E=1 to skip these tests when codevos.ai is not available.
  * Run: npx vitest run tunnel-e2e
@@ -50,7 +42,6 @@ import net from 'node:net';
 import { TunnelClient, type TunnelState } from '../lib/tunnel-client.js';
 
 const CODEVOS_URL = process.env.CODEVOS_URL || 'http://localhost:3000';
-const TUNNEL_PORT = parseInt(process.env.TUNNEL_PORT || '4200', 10);
 const SKIP = process.env.SKIP_TUNNEL_E2E === '1';
 
 // Test user credentials (must be seeded in the codevos.ai test database)
@@ -313,6 +304,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
   it('tunnel server port is reachable', async (ctx) => {
     if (!available) ctx.skip();
+    const urlObj = new URL(CODEVOS_URL);
+    const port = parseInt(urlObj.port || '80', 10);
     const connected = await new Promise<boolean>((resolve) => {
       const socket = new net.Socket();
       socket.setTimeout(3000);
@@ -325,8 +318,7 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
         socket.destroy();
         resolve(false);
       });
-      const urlObj = new URL(CODEVOS_URL);
-      socket.connect(TUNNEL_PORT, urlObj.hostname);
+      socket.connect(port, urlObj.hostname);
     });
     expect(connected).toBe(true);
   });
@@ -336,11 +328,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     const states: TunnelState[] = [];
@@ -379,11 +369,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: 'ctk_invalid_key_12345',
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -404,11 +392,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.connect();
@@ -435,10 +421,12 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     // Allows us to forcibly sever all connections to simulate a server restart.
     const proxyConnections: { client: net.Socket; server: net.Socket }[] = [];
 
+    const codevosUrl = new URL(CODEVOS_URL);
+    const codevosPort = parseInt(codevosUrl.port || '80', 10);
+
     const proxyServer = net.createServer((clientSocket) => {
-      const urlObj = new URL(CODEVOS_URL);
       const serverSocket = net.connect(
-        { host: urlObj.hostname, port: TUNNEL_PORT },
+        { host: codevosUrl.hostname, port: codevosPort },
         () => {
           clientSocket.pipe(serverSocket);
           serverSocket.pipe(clientSocket);
@@ -457,12 +445,10 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     });
 
     const client = new TunnelClient({
-      serverUrl: CODEVOS_URL,
-      tunnelPort: proxyPort, // Connect through proxy instead of directly
+      serverUrl: `http://127.0.0.1:${proxyPort}`, // Connect through proxy instead of directly
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -507,11 +493,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     // work cleanly against the real server without resource leaks or crashes.
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     const errorSpy = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -544,11 +528,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.sendMetadata({
@@ -572,11 +554,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.connect();
@@ -609,11 +589,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: reg.apiKey,
       towerId: reg.towerId,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.connect();
@@ -645,11 +623,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: streamPort,
-      usePlainTcp: true,
     });
 
     client.connect();
@@ -700,11 +676,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: wsPort,
-      usePlainTcp: true,
     });
 
     client.connect();
@@ -856,11 +830,9 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
-      tunnelPort: TUNNEL_PORT,
       apiKey: apiKey!,
       towerId: towerId!,
       localPort: echoPort,
-      usePlainTcp: true,
     });
 
     client.connect();
