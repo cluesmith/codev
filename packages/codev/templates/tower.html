@@ -1197,8 +1197,8 @@
             </div>
             <div class="instance-actions">
               ${instance.running ? `
-                <button class="btn btn-small" onclick="restartInstance(${instance.basePort}, '${escapeHtml(instance.projectPath)}')">Restart</button>
-                <button class="btn btn-small btn-danger" onclick="stopInstance(${instance.basePort})">Stop</button>
+                <button class="btn btn-small" onclick="restartInstance('${escapeHtml(instance.projectPath)}')">Restart</button>
+                <button class="btn btn-small btn-danger" onclick="stopInstance('${escapeHtml(instance.projectPath)}')">Stop</button>
               ` : `
                 <button class="btn btn-small btn-primary" onclick="launchPath('${escapeHtml(instance.projectPath)}')">Start</button>
               `}
@@ -1385,13 +1385,13 @@
       }
     }
 
-    // Stop an instance by port
-    async function stopInstance(basePort) {
+    // Stop an instance by project path
+    async function stopInstance(projectPath) {
       try {
         const response = await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ basePort })
+          body: JSON.stringify({ projectPath })
         });
 
         const result = await response.json();
@@ -1408,13 +1408,13 @@
     }
 
     // Restart an instance
-    async function restartInstance(basePort, projectPath) {
+    async function restartInstance(projectPath) {
       try {
         // First stop
         await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ basePort })
+          body: JSON.stringify({ projectPath })
         });
 
         // Wait a moment for processes to die
