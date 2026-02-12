@@ -133,6 +133,7 @@ Revert the three files to their previous versions. No schema migration needed.
 - Import `GateBanner`
 - Place `<GateBanner gateStatus={state?.gateStatus} />` immediately before the `<div className="app-body">` in the desktop layout (after the header, before the SplitPane)
 - Also add it in the mobile layout above the content area
+- **Note**: The banner is scoped to the current project instance. Each project's dashboard view (`/project/<encoded>/`) has its own `/api/state` endpoint that returns `gateStatus` for that project only. The banner renders within the per-project instance, not the Tower overall. No cross-project aggregation needed.
 
 **File: `packages/codev/dashboard/src/index.css`**
 - Add `.gate-banner` styles: amber/yellow background (#FFF3CD or similar), dark text, full width, padding, flex layout, z-index above content
