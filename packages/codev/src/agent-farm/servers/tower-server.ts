@@ -830,6 +830,9 @@ async function reconcileTerminalSessions(): Promise<void> {
       saveTerminalSession(newSession.id, projectPath, type, roleId, newSession.pid, tmuxName);
       registerKnownProject(projectPath);
 
+      // Ensure mouse off on reconnected sessions (old sessions may have mouse on)
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
+
       if (dbRow) {
         log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);
         reconnected++;
