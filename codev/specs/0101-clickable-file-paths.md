@@ -142,12 +142,14 @@ This requires a small API addition: `POST /api/tabs/file` accepts an optional `t
 2. **Hover cursor**: Pointer cursor on hover over file path
 3. **No visual noise**: Plain text with dots (sentences, config values) not underlined
 
+## Design Decisions
+
+- **Cmd/Ctrl+Click required** — plain click is reserved for text selection. This matches VS Code's integrated terminal behavior.
+
 ## Open Questions
 
 ### Important (Affects Design)
 
-- [ ] Should clicking require Cmd/Ctrl modifier (like VS Code) or be a plain click? Plain click could interfere with text selection.
-<!-- REVIEW(@architect): Ctrl/Cmd click -->
 - [ ] Should non-existent files still be clickable (and show an error), or should we verify existence before marking as a link?
 
 ## Notes
