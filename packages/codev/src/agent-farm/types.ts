@@ -7,8 +7,6 @@ export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 
 export interface Builder {
   id: string;
   name: string;
-  port: number;
-  pid: number;
   status: 'spawning' | 'implementing' | 'blocked' | 'pr-ready' | 'complete';
   phase: string;
   worktree: string;
@@ -24,8 +22,6 @@ export interface Builder {
 export interface UtilTerminal {
   id: string;
   name: string;
-  port: number;
-  pid: number;
   tmuxSession?: string;
   worktreePath?: string;  // For worktree shells - used for cleanup on tab close
   terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
@@ -34,8 +30,6 @@ export interface UtilTerminal {
 export interface Annotation {
   id: string;
   file: string;
-  port: number;
-  pid: number;
   parent: {
     type: 'architect' | 'builder' | 'util';
     id?: string;
@@ -43,8 +37,6 @@ export interface Annotation {
 }
 
 export interface ArchitectState {
-  port: number;
-  pid: number;
   cmd: string;
   startedAt: string;
   tmuxSession?: string;
@@ -66,11 +58,6 @@ export interface Config {
   templatesDir: string;
   serversDir: string;
   bundledRolesDir: string;
-  dashboardPort: number;
-  architectPort: number;
-  builderPortRange: [number, number];
-  utilPortRange: [number, number];
-  // openPortRange removed - Spec 0092: files served through Tower
   terminalBackend: 'node-pty';
 }
 
@@ -81,13 +68,7 @@ export interface TmuxSession {
 }
 
 export interface StartOptions {
-  cmd?: string;
-  port?: number;
-  noRole?: boolean;
   noBrowser?: boolean;  // Skip opening browser after start
-  allowInsecureRemote?: boolean;  // Bind to 0.0.0.0 instead of localhost
-  remote?: string;  // user@host or user@host:/path for remote access
-  attach?: boolean;  // Stay attached (default is to detach for remote mode)
 }
 
 export interface SpawnOptions {

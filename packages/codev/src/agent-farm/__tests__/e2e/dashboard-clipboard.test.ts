@@ -15,9 +15,10 @@
  */
 
 import { test, expect, type BrowserContext } from '@playwright/test';
+import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
+const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
 const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
 const PAGE_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
 

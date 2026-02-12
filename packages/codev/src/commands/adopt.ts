@@ -228,7 +228,7 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   console.log(chalk.bold('Next steps:'));
   console.log('');
   console.log('  consult plan                 # Review the plan with an architect');
-  console.log('  af dash start                # Start the architect dashboard');
+  console.log('  af tower start               # Start the Tower daemon');
   console.log('  af spawn                     # Spawn a builder to implement the plan');
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));

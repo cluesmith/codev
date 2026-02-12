@@ -76,8 +76,6 @@ describe('State Management', () => {
   describe('setArchitect', () => {
     it('should set architect state', () => {
       const architect = {
-        pid: 1234,
-        port: 4201,
         cmd: 'claude',
         startedAt: new Date().toISOString(),
       };
@@ -85,14 +83,12 @@ describe('State Management', () => {
       state.setArchitect(architect);
 
       const result = state.loadState();
-      expect(result.architect).toEqual(architect);
+      expect(result.architect?.cmd).toBe('claude');
     });
 
     it('should clear architect when set to null', () => {
       // Set architect first
       state.setArchitect({
-        pid: 1234,
-        port: 4201,
         cmd: 'claude',
         startedAt: new Date().toISOString(),
       });
@@ -106,21 +102,17 @@ describe('State Management', () => {
 
     it('should replace existing architect (singleton)', () => {
       state.setArchitect({
-        pid: 1234,
-        port: 4201,
         cmd: 'claude',
         startedAt: new Date().toISOString(),
       });
 
       state.setArchitect({
-        pid: 5678,
-        port: 4201,
         cmd: 'claude --dangerously-skip-permissions',
         startedAt: new Date().toISOString(),
       });
 
       const result = state.loadState();
-      expect(result.architect?.pid).toBe(5678);
+      expect(result.architect?.cmd).toBe('claude --dangerously-skip-permissions');
     });
   });
 
@@ -129,8 +121,6 @@ describe('State Management', () => {
       const builder = {
         id: 'B001',
         name: 'test-builder',
-        port: 4210,
-        pid: 1234,
         status: 'implementing' as const,
         phase: 'init',
         worktree: '/tmp/worktree',
@@ -150,8 +140,6 @@ describe('State Management', () => {
       const builder = {
         id: 'B001',
         name: 'test-builder',
-        port: 4210,
-        pid: 1234,
         status: 'implementing' as const,
         phase: 'init',
         worktree: '/tmp/worktree',
@@ -175,8 +163,6 @@ describe('State Management', () => {
       state.upsertBuilder({
         id: 'B001',
         name: 'test-builder',
-        port: 4210,
-        pid: 1234,
         status: 'implementing' as const,
         phase: 'init',
         worktree: '/tmp/worktree',
@@ -196,8 +182,6 @@ describe('State Management', () => {
       state.upsertBuilder({
         id: 'B001',
         name: 'test-builder',
-        port: 4210,
-        pid: 1234,
         status: 'implementing' as const,
         phase: 'init',
         worktree: '/tmp/worktree',
@@ -220,8 +204,6 @@ describe('State Management', () => {
       const util = {
         id: 'U001',
         name: 'test-util',
-        port: 4230,
-        pid: 1234,
       };
 
       state.addUtil(util);
@@ -242,8 +224,6 @@ describe('State Management', () => {
       const annotation = {
         id: 'A001',
         file: '/path/to/file.ts',
-        port: 4250,
-        pid: 1234,
         parent: {
           type: 'architect' as const,
         },
@@ -266,8 +246,6 @@ describe('State Management', () => {
     it('should reset all state', () => {
       // Add some state
       state.setArchitect({
-        pid: 1234,
-        port: 4201,
         cmd: 'claude',
         startedAt: new Date().toISOString(),
       });
@@ -275,8 +253,6 @@ describe('State Management', () => {
       state.upsertBuilder({
         id: 'B001',
         name: 'test-builder',
-        port: 4210,
-        pid: 1234,
         status: 'implementing' as const,
         phase: 'init',
         worktree: '/tmp/worktree',

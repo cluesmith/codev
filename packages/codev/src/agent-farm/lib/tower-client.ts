@@ -24,11 +24,9 @@ const REQUEST_TIMEOUT_MS = 10000;
 export interface TowerProject {
   path: string;
   name: string;
-  basePort: number;
   active: boolean;
   proxyUrl: string;
   terminals: number;
-  lastUsed?: string;
 }
 
 /**
@@ -38,7 +36,6 @@ export interface TowerProjectStatus {
   path: string;
   name: string;
   active: boolean;
-  basePort: number;
   terminals: Array<{
     type: 'architect' | 'builder' | 'shell';
     id: string;
@@ -126,7 +123,7 @@ export class TowerClient {
   /**
    * Make a request to the tower API
    */
-  private async request<T>(
+  async request<T>(
     path: string,
     options: RequestInit = {}
   ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {

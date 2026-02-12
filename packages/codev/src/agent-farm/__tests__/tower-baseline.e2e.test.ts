@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 
 // Test configuration - use high ports to avoid conflicts
@@ -69,7 +69,7 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test' },
+    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
   });
 
   let stderr = '';
@@ -234,6 +234,9 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
     afterAll(async () => {
       await stopServer(towerProc);
       towerProc = null;
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
     });
 
     beforeEach(() => {
@@ -297,6 +300,9 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
     afterAll(async () => {
       await stopServer(towerProc);
       towerProc = null;
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
     });
 
     beforeEach(() => {
@@ -342,6 +348,9 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
     afterAll(async () => {
       await stopServer(towerProc);
       towerProc = null;
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
     });
 
     beforeEach(() => {
@@ -360,12 +369,14 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       // Activate project
       await activateProject(towerPort, testProjectPath);
 
-      // Wait a bit for registration
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Get tower status to see if project appears
-      const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
-      const status = await statusRes.json();
+      // Poll for project to appear in tower status
+      let status: any;
+      for (let i = 0; i < 20; i++) {
+        const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
+        status = await statusRes.json();
+        if (status.instances?.length > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
 
       // Project should appear in instances
       expect(status.instances).toBeDefined();
@@ -399,6 +410,9 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
     afterAll(async () => {
       await stopServer(towerProc);
       towerProc = null;
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
+      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
     });
 
     beforeEach(() => {

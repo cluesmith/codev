@@ -10,6 +10,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { rmSync } from 'node:fs';
 import net from 'node:net';
 import WebSocket from 'ws';
 
@@ -67,7 +69,7 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test' },
+    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
   });
 
   let stderr = '';
@@ -109,6 +111,9 @@ describe('Tower Terminal Management (Phase 2)', () => {
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
   });
 
   describe('POST /api/terminals', () => {

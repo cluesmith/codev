@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS utils (
 CREATE TABLE IF NOT EXISTS annotations (
   id TEXT PRIMARY KEY,
   file TEXT NOT NULL,
-  port INTEGER NOT NULL UNIQUE,
-  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
   parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
   parent_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -85,7 +85,7 @@ CREATE TRIGGER IF NOT EXISTS builders_updated_at
 
 /**
  * Global registry schema (global.db)
- * Stores port allocations across all projects
+ * Stores terminal sessions and migrations across all projects
  */
 export const GLOBAL_SCHEMA = `
 -- Schema versioning
@@ -93,20 +93,6 @@ CREATE TABLE IF NOT EXISTS _migrations (
   version INTEGER PRIMARY KEY,
   applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-
--- Port allocations
-CREATE TABLE IF NOT EXISTS port_allocations (
-  project_path TEXT PRIMARY KEY,
-  project_name TEXT,
-  base_port INTEGER NOT NULL UNIQUE
-    CHECK(base_port >= 4200 AND base_port % 100 = 0),
-  pid INTEGER,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  registered_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_port_allocations_base_port ON port_allocations(base_port);
 
 -- Terminal sessions (Spec 0090 TICK-001)
 -- Tracks all terminal sessions across all projects for persistence and reconciliation

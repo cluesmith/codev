@@ -113,50 +113,22 @@ describe('Database Schema', () => {
       db.exec(GLOBAL_SCHEMA);
     });
 
-    it('should create port_allocations table', () => {
+    it('should create terminal_sessions table', () => {
       const tables = db.prepare(`
         SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
       `).all() as Array<{ name: string }>;
 
-      expect(tables.map(t => t.name)).toContain('port_allocations');
+      expect(tables.map(t => t.name)).toContain('terminal_sessions');
     });
 
-    it('should enforce base_port constraint', () => {
-      // Valid port (4200, divisible by 100)
-      db.prepare(`
-        INSERT INTO port_allocations (project_path, base_port, pid)
-        VALUES ('/test/project', 4200, 1234)
-      `).run();
+    it('should create terminal_sessions indexes', () => {
+      const indexes = db.prepare(`
+        SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'
+      `).all() as Array<{ name: string }>;
 
-      // Invalid port (4250, not divisible by 100)
-      expect(() => {
-        db.prepare(`
-          INSERT INTO port_allocations (project_path, base_port, pid)
-          VALUES ('/test/project2', 4250, 5678)
-        `).run();
-      }).toThrow();
-
-      // Invalid port (too low)
-      expect(() => {
-        db.prepare(`
-          INSERT INTO port_allocations (project_path, base_port, pid)
-          VALUES ('/test/project3', 4100, 5678)
-        `).run();
-      }).toThrow();
-    });
-
-    it('should enforce unique base_port', () => {
-      db.prepare(`
-        INSERT INTO port_allocations (project_path, base_port, pid)
-        VALUES ('/test/project1', 4200, 1234)
-      `).run();
-
-      expect(() => {
-        db.prepare(`
-          INSERT INTO port_allocations (project_path, base_port, pid)
-          VALUES ('/test/project2', 4200, 5678)
-        `).run();
-      }).toThrow();
+      const indexNames = indexes.map(i => i.name);
+      expect(indexNames).toContain('idx_terminal_sessions_project');
+      expect(indexNames).toContain('idx_terminal_sessions_type');
     });
   });
 });

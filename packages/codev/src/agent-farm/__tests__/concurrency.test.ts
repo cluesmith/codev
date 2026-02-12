@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from '../db/schema.js';
+import { LOCAL_SCHEMA } from '../db/schema.js';
 
 describe('Concurrency', () => {
   const testDir = resolve(process.cwd(), '.test-concurrency');
@@ -96,94 +96,6 @@ describe('Concurrency', () => {
 
       const builder = db.prepare('SELECT * FROM builders WHERE id = ?').get('B001') as any;
       expect(builder.status).toBe('pr-ready');
-    });
-  });
-
-  describe('Port allocation race', () => {
-    it('should not allocate duplicate ports', () => {
-      const dbPath = resolve(testDir, 'global.db');
-      db = new Database(dbPath);
-      db.pragma('journal_mode = WAL');
-      db.pragma('busy_timeout = 5000');
-      db.exec(GLOBAL_SCHEMA);
-
-      const allocate = db.transaction((projectPath: string) => {
-        // Check if already allocated
-        const existing = db.prepare('SELECT * FROM port_allocations WHERE project_path = ?')
-          .get(projectPath) as any;
-
-        if (existing) {
-          return existing.base_port;
-        }
-
-        // Find next available port
-        const maxPort = db.prepare('SELECT MAX(base_port) as max FROM port_allocations').get() as { max: number | null };
-        const nextPort = (maxPort.max ?? 4100) + 100;
-
-        // Insert new allocation
-        db.prepare(`
-          INSERT INTO port_allocations (project_path, base_port, pid)
-          VALUES (?, ?, ?)
-        `).run(projectPath, nextPort, process.pid);
-
-        return nextPort;
-      });
-
-      // Allocate ports for 5 projects
-      const projects = ['/proj/a', '/proj/b', '/proj/c', '/proj/d', '/proj/e'];
-      const allocatedPorts: number[] = [];
-
-      for (const project of projects) {
-        const port = allocate(project);
-        allocatedPorts.push(port);
-      }
-
-      // All ports should be unique
-      const uniquePorts = new Set(allocatedPorts);
-      expect(uniquePorts.size).toBe(5);
-
-      // Ports should be in sequence: 4200, 4300, 4400, 4500, 4600
-      expect(allocatedPorts).toEqual([4200, 4300, 4400, 4500, 4600]);
-    });
-
-    it('should return existing allocation for same project', () => {
-      const dbPath = resolve(testDir, 'global.db');
-      db = new Database(dbPath);
-      db.pragma('journal_mode = WAL');
-      db.pragma('busy_timeout = 5000');
-      db.exec(GLOBAL_SCHEMA);
-
-      const allocate = db.transaction((projectPath: string) => {
-        const existing = db.prepare('SELECT * FROM port_allocations WHERE project_path = ?')
-          .get(projectPath) as any;
-
-        if (existing) {
-          return existing.base_port;
-        }
-
-        const maxPort = db.prepare('SELECT MAX(base_port) as max FROM port_allocations').get() as { max: number | null };
-        const nextPort = (maxPort.max ?? 4100) + 100;
-
-        db.prepare(`
-          INSERT INTO port_allocations (project_path, base_port, pid)
-          VALUES (?, ?, ?)
-        `).run(projectPath, nextPort, process.pid);
-
-        return nextPort;
-      });
-
-      // Same project should get same port
-      const port1 = allocate('/same/project');
-      const port2 = allocate('/same/project');
-      const port3 = allocate('/same/project');
-
-      expect(port1).toBe(4200);
-      expect(port2).toBe(4200);
-      expect(port3).toBe(4200);
-
-      // Only one allocation should exist
-      const count = db.prepare('SELECT COUNT(*) as count FROM port_allocations').get() as { count: number };
-      expect(count.count).toBe(1);
     });
   });
 

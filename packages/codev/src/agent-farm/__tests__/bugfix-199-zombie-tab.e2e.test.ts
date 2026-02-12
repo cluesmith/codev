@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { spawn, ChildProcess, execSync } from 'node:child_process';
+import { resolve, basename } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 
 const TEST_TOWER_PORT = 14500;
@@ -52,7 +52,7 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test' },
+    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
   });
 
   let stderr = '';
@@ -94,8 +94,16 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
-    // Clean up temp dir
+    // Kill tmux session created by Tower's launchInstance for this temp project
+    if (testProjectDir) {
+      const tmuxName = `architect-${basename(testProjectDir)}`;
+      try { execSync(`tmux kill-session -t "${tmuxName}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
+    }
+    // Clean up temp dir and test DB
     try { rmSync(testProjectDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
   });
 
   it('removes stale builder from /api/state after terminal exits', async () => {

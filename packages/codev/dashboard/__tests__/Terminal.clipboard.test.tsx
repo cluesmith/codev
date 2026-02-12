@@ -97,7 +97,7 @@ describe('Terminal clipboard handling (Issue #203)', () => {
   }
 
   function makeKeyEvent(key: string, opts: Partial<KeyboardEvent> = {}): KeyboardEvent {
-    return { type: 'keydown', key, metaKey: false, ctrlKey: false, shiftKey: false, ...opts } as unknown as KeyboardEvent;
+    return { type: 'keydown', key, metaKey: false, ctrlKey: false, shiftKey: false, preventDefault: vi.fn(), ...opts } as unknown as KeyboardEvent;
   }
 
   it('registers attachCustomKeyEventHandler on the xterm instance', () => {
@@ -112,9 +112,11 @@ describe('Terminal clipboard handling (Issue #203)', () => {
 
     it('reads clipboard and calls term.paste() on Cmd+V', async () => {
       const handler = renderTerminal();
-      const result = handler(makeKeyEvent('v', { metaKey: true }));
+      const event = makeKeyEvent('v', { metaKey: true });
+      const result = handler(event);
 
       expect(result).toBe(false); // Prevent xterm default handling
+      expect(event.preventDefault).toHaveBeenCalled(); // Prevent native paste (double-paste fix)
       await vi.waitFor(() => {
         expect(clipboardReadText).toHaveBeenCalled();
       });
@@ -131,9 +133,11 @@ describe('Terminal clipboard handling (Issue #203)', () => {
 
     it('reads clipboard and calls term.paste() on Ctrl+Shift+V', async () => {
       const handler = renderTerminal();
-      const result = handler(makeKeyEvent('V', { ctrlKey: true, shiftKey: true }));
+      const event = makeKeyEvent('V', { ctrlKey: true, shiftKey: true });
+      const result = handler(event);
 
       expect(result).toBe(false);
+      expect(event.preventDefault).toHaveBeenCalled(); // Prevent native paste (double-paste fix)
       await vi.waitFor(() => {
         expect(clipboardReadText).toHaveBeenCalled();
       });

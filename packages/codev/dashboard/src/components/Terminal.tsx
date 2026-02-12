@@ -116,6 +116,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
 
       // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
       if (event.key === 'v' || event.key === 'V') {
+        // preventDefault stops the browser from ALSO firing a native paste
+        // event on xterm's hidden textarea, which would double-paste.
+        event.preventDefault();
         navigator.clipboard.readText().then((text) => {
           if (text) term.paste(text);
         }).catch(() => {
@@ -140,10 +143,21 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       return true;
     });
 
+    // Debounced fit: coalesce multiple fit() triggers into one resize event.
+    // This prevents resize storms from multiple sources (initial fit, CSS
+    // layout settling, ResizeObserver, visibility change, buffer flush).
+    let fitTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedFit = () => {
+      if (fitTimer) clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitTimer = null;
+        fitAddon.fit();
+      }, 150);
+    };
+
     fitAddon.fit();
-    // Re-fit after delays to catch CSS layout settling and late paints
-    const refitTimer1 = setTimeout(() => fitAddon.fit(), 100);
-    const refitTimer2 = setTimeout(() => fitAddon.fit(), 300);
+    // Single delayed re-fit to catch CSS layout settling
+    const refitTimer1 = setTimeout(debouncedFit, 300);
 
     // Build WebSocket URL from the relative path
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -176,9 +190,8 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         initialBuffer = '';
       }
       // Re-fit after buffer flush — CSS layout may have settled since
-      // the initial fit(). If dimensions changed, triggers PTY resize
-      // which causes the shell to redraw at the correct size.
-      fitAddon.fit();
+      // the initial fit(). Uses debounced fit to avoid resize storms.
+      debouncedFit();
     };
 
     ws.onopen = () => {
@@ -235,20 +248,19 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       }
     });
 
-    // Handle window resize
-    const handleResize = () => fitAddon.fit();
-    const resizeObserver = new ResizeObserver(handleResize);
+    // Handle window resize (debounced to prevent resize storms)
+    const resizeObserver = new ResizeObserver(debouncedFit);
     resizeObserver.observe(containerRef.current);
 
     // Re-fit when browser tab becomes visible again
     const handleVisibility = () => {
-      if (!document.hidden) fitAddon.fit();
+      if (!document.hidden) debouncedFit();
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       clearTimeout(refitTimer1);
-      clearTimeout(refitTimer2);
+      if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);

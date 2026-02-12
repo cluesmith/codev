@@ -59,10 +59,8 @@ export function setArchitect(architect: ArchitectState | null): void {
   } else {
     db.prepare(`
       INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session, terminal_id)
-      VALUES (1, @pid, @port, @cmd, @startedAt, @tmuxSession, @terminalId)
+      VALUES (1, 0, 0, @cmd, @startedAt, @tmuxSession, @terminalId)
     `).run({
-      pid: architect.pid,
-      port: architect.port,
       cmd: architect.cmd,
       startedAt: architect.startedAt,
       tmuxSession: architect.tmuxSession ?? null,
@@ -84,13 +82,11 @@ export function upsertBuilder(builder: Builder): void {
       tmux_session, type, task_text, protocol_name, issue_number, terminal_id
     )
     VALUES (
-      @id, @name, @port, @pid, @status, @phase, @worktree, @branch,
+      @id, @name, 0, 0, @status, @phase, @worktree, @branch,
       @tmuxSession, @type, @taskText, @protocolName, @issueNumber, @terminalId
     )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
-      port = excluded.port,
-      pid = excluded.pid,
       status = excluded.status,
       phase = excluded.phase,
       worktree = excluded.worktree,
@@ -104,8 +100,6 @@ export function upsertBuilder(builder: Builder): void {
   `).run({
     id: builder.id,
     name: builder.name,
-    port: builder.port,
-    pid: builder.pid,
     status: builder.status,
     phase: builder.phase,
     worktree: builder.worktree,
@@ -164,20 +158,18 @@ export function addUtil(util: UtilTerminal): void {
 
   db.prepare(`
     INSERT INTO utils (id, name, port, pid, tmux_session, terminal_id)
-    VALUES (@id, @name, @port, @pid, @tmuxSession, @terminalId)
+    VALUES (@id, @name, 0, 0, @tmuxSession, @terminalId)
   `).run({
     id: util.id,
     name: util.name,
-    port: util.port,
-    pid: util.pid,
     tmuxSession: util.tmuxSession ?? null,
     terminalId: util.terminalId ?? null,
   });
 }
 
 /**
- * Try to add a utility terminal, returning false on port conflict
- * Used to handle concurrent port allocation race conditions
+ * Try to add a utility terminal, returning false on ID conflict
+ * Used to handle concurrent insertion race conditions
  */
 export function tryAddUtil(util: UtilTerminal): boolean {
   try {
@@ -249,12 +241,10 @@ export function addAnnotation(annotation: Annotation): void {
 
   db.prepare(`
     INSERT INTO annotations (id, file, port, pid, parent_type, parent_id)
-    VALUES (@id, @file, @port, @pid, @parentType, @parentId)
+    VALUES (@id, @file, 0, 0, @parentType, @parentId)
   `).run({
     id: annotation.id,
     file: annotation.file,
-    port: annotation.port,
-    pid: annotation.pid,
     parentType: annotation.parent.type,
     parentId: annotation.parent.id ?? null,
   });

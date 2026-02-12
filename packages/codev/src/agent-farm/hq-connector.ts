@@ -407,7 +407,7 @@ function cleanup(): void {
 
 /**
  * Connect to HQ and register this agent farm instance
- * Called from af dash start when CODEV_HQ_URL is set
+ * Called during project activation when CODEV_HQ_URL is set
  */
 export function initHQConnector(root: string): void {
   const hqUrl = process.env.CODEV_HQ_URL;

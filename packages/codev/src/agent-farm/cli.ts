@@ -10,7 +10,7 @@ import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
-import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
+import { setCliOverrides } from './utils/config.js';
 import { version } from '../version.js';
 
 /**
@@ -77,8 +77,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     if (Object.keys(overrides).length > 0) {
       setCliOverrides(overrides);
     }
-
-    initializePorts();
   });
 
   // Dashboard command group (project-level dashboard)
@@ -89,22 +87,11 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   dashCmd
     .command('start')
     .description('Start the architect dashboard')
-    .option('-c, --cmd <command>', 'Command to run in architect terminal')
-    .option('-p, --port <port>', 'Port for architect terminal')
-    .option('--no-role', 'Skip loading architect role prompt')
     .option('--no-browser', 'Skip opening browser after start')
-    .option('--allow-insecure-remote', 'Bind to 0.0.0.0 for remote access (WARNING: no auth)')
-    .option('-r, --remote <target>', 'Start Agent Farm on remote machine (user@host or user@host:/path)')
     .action(async (options) => {
       try {
-        const commands = getResolvedCommands();
         await start({
-          cmd: options.cmd || commands.architect,
-          port: options.port ? parseInt(options.port, 10) : undefined,
-          noRole: !options.role,
           noBrowser: !options.browser,
-          allowInsecureRemote: options.allowInsecureRemote,
-          remote: options.remote,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
@@ -317,48 +304,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-    });
-
-  // Ports command
-  const portsCmd = program
-    .command('ports')
-    .description('Manage global port registry');
-
-  portsCmd
-    .command('list')
-    .description('List all port allocations')
-    .action(async () => {
-      const { listAllocations } = await import('./utils/port-registry.js');
-      const allocations = listAllocations();
-
-      if (allocations.length === 0) {
-        logger.info('No port allocations found.');
-        return;
-      }
-
-      logger.header('Port Allocations');
-      for (const alloc of allocations) {
-        const status = alloc.exists ? '' : ' (missing)';
-        logger.info(`${alloc.basePort}-${alloc.basePort + 99}: ${alloc.path}${status}`);
-      }
-    });
-
-  portsCmd
-    .command('cleanup')
-    .description('Remove stale port allocations')
-    .action(async () => {
-      const { cleanupStaleEntries } = await import('./utils/port-registry.js');
-      const result = cleanupStaleEntries();
-
-      if (result.removed.length === 0) {
-        logger.info('No stale entries found.');
-      } else {
-        logger.success(`Removed ${result.removed.length} stale entries:`);
-        for (const path of result.removed) {
-          logger.info(`  - ${path}`);
-        }
-      }
-      logger.info(`Remaining allocations: ${result.remaining}`);
     });
 
   // Database commands

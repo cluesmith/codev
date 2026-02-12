@@ -14,7 +14,7 @@ function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
 }
 
-const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
+const PROJECT_PATH = path.resolve(import.meta.dirname, '../../../../../');
 const ENCODED_PATH = toBase64URL(PROJECT_PATH);
 
 test.describe('Tower Desktop', () => {

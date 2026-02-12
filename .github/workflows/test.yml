@@ -22,6 +22,10 @@ jobs:
         working-directory: packages/codev
         run: npm install
 
+      - name: Copy skeleton for unit tests
+        working-directory: packages/codev
+        run: npm run copy-skeleton
+
       - name: Run unit tests with coverage
         working-directory: packages/codev
         run: npx vitest run --coverage

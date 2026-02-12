@@ -19,8 +19,23 @@ vi.mock('../state.js', () => ({
 // Mock shell utilities
 vi.mock('../utils/shell.js', () => ({
   run: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
-  isProcessRunning: vi.fn().mockResolvedValue(true),
   openBrowser: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock config
+vi.mock('../utils/config.js', () => ({
+  getConfig: () => ({
+    projectRoot: '/test/project',
+  }),
+}));
+
+// Mock TowerClient (constructor reads local-key file)
+vi.mock('../lib/tower-client.js', () => ({
+  TowerClient: class {
+    getProjectUrl(path: string) {
+      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    }
+  },
 }));
 
 // Mock logger
@@ -55,8 +70,6 @@ describe('attach command', () => {
       mockBuilders.push({
         id: 'bugfix-42',
         name: 'Bugfix #42: Test issue',
-        port: 4210,
-        pid: 12345,
         status: 'implementing',
         phase: 'init',
         worktree: '/path/to/.builders/bugfix-42',
@@ -70,10 +83,10 @@ describe('attach command', () => {
       const { attach } = await import('../commands/attach.js');
       const { openBrowser } = await import('../utils/shell.js');
 
-      // Attach with --browser to avoid actually attaching to tmux
+      // Attach with --browser opens Tower dashboard
       await attach({ issue: 42, browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4210');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should error when issue not found', async () => {
@@ -90,8 +103,6 @@ describe('attach command', () => {
       mockBuilders.push({
         id: '0073',
         name: '0073-feature',
-        port: 4211,
-        pid: 12346,
         status: 'implementing',
         phase: 'init',
         worktree: '/path/to/.builders/0073',
@@ -105,15 +116,13 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4211');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should find builder by prefix match', async () => {
       mockBuilders.push({
         id: 'bugfix-173',
         name: 'Bugfix #173: Test',
-        port: 4212,
-        pid: 12347,
         status: 'implementing',
         phase: 'init',
         worktree: '/path/to/.builders/bugfix-173',
@@ -129,7 +138,7 @@ describe('attach command', () => {
       // Use partial match
       await attach({ project: 'bugfix-173', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4212');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should error when builder not found', async () => {
@@ -146,8 +155,6 @@ describe('attach command', () => {
       mockBuilders.push({
         id: 'bugfix-42',
         name: 'Bugfix #42: Test',
-        port: 4210,
-        pid: 12345,
         status: 'implementing',
         phase: 'init',
         worktree: '/path',
@@ -182,8 +189,6 @@ describe('attach command', () => {
       mockBuilders.push({
         id: '0073',
         name: 'Test',
-        port: 4211,
-        pid: 12346,
         status: 'implementing',
         phase: 'init',
         worktree: '/path',
@@ -197,7 +202,7 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4211');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
   });
 });

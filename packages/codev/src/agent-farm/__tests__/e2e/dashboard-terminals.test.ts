@@ -10,9 +10,10 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
+const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
 const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
 // BASE_URL without trailing slash for API calls
 const BASE_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;
@@ -46,9 +47,7 @@ test.describe('Dashboard Terminals E2E', () => {
     expect(state.architect).toBeTruthy();
     expect(typeof state.architect.terminalId).toBe('string');
     expect(state.architect.terminalId.length).toBeGreaterThan(0);
-    // port and pid are returned but may be 0 for the simplified Tower API
-    expect(state.architect.port).toBeDefined();
-    expect(state.architect.pid).toBeDefined();
+    // port and pid exist in SQLite but are always 0 (vestigial columns)
   });
 
   test('shell tab creation returns terminalId and WebSocket works', async ({ page, request }) => {
@@ -130,7 +129,7 @@ test.describe('Dashboard Terminals E2E', () => {
   test('npm pack includes dashboard/dist', async () => {
     const { execSync } = await import('node:child_process');
     const output = execSync('npm pack --dry-run 2>&1', {
-      cwd: '/Users/mwk/Development/cluesmith/codev-public/packages/codev',
+      cwd: resolve(PROJECT_PATH, 'packages/codev'),
       encoding: 'utf-8',
     });
     expect(output).toContain('dashboard/dist/index.html');

@@ -17,6 +17,7 @@ These belong in codev/plans/0097-*.md
 - **ID**: 0097-cloud-tower-client
 - **Status**: draft
 - **Created**: 2026-02-10
+- **Updated**: 2026-02-11 (TICK-001: WebSocket tunnel transport)
 - **Companion Spec**: `codevos.ai/codev/specs/0001-cloud-tower-registration.md` (server side)
 
 ## Problem Statement
@@ -50,12 +51,12 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
    - Tower gets a unique ID tied to the user's account
    - Credentials stored in `~/.agent-farm/cloud-config.json`
 
-2. **Built-in Tunnel Client (HTTP/2 Role Reversal)**
-   - On tower startup, if registered, tower opens an outbound TCP connection to codevos.ai and authenticates with its API key
-   - Over that TCP connection, the tower runs an HTTP/2 **server** (roles are reversed)
+2. **Built-in Tunnel Client (HTTP/2 Role Reversal over WebSocket)**
+   - On tower startup, if registered, tower opens a **WebSocket** connection to `wss://codevos.ai/tunnel` and authenticates with a JSON message containing its API key (TICK-001)
+   - After auth, the WebSocket is converted to a duplex stream. The tower runs an HTTP/2 **server** over it (roles are reversed)
    - codevos.ai acts as the HTTP/2 **client**, making requests to the tower through the reversed connection
    - The tower's H2 handler proxies incoming requests to `localhost:4100` via standard `node:http`
-   - HTTP/2 provides multiplexing, flow control, and streaming natively — no third-party tunnel library needed
+   - HTTP/2 provides multiplexing, flow control, and streaming natively — no external tunnel software needed
 
 3. **Automatic Reconnection**
    - Exponential backoff with jitter (1s → 60s cap) for transient failures
@@ -95,7 +96,7 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
 
 ### Technical Constraints
 - Tower server is a single Node.js process (Spec 0090) — tunnel client must not block the event loop
-- Must work behind NAT, corporate firewalls, and proxies (outbound HTTPS only)
+- Must work behind NAT, corporate firewalls, and HTTP proxies (outbound HTTPS/WSS only)
 - `~/.agent-farm/cloud-config.json` permissions must be owner-only (0600)
 - **SSRF Prevention**: Tunnel client ONLY proxies to `localhost:4100`. Target host/port is hardcoded, never derived from incoming tunnel messages.
 - **Tunnel Path Blocking**: The H2 handler MUST reject requests to `/api/tunnel/*` before proxying to localhost:4100. These are local-only management endpoints (connect, disconnect, status). Without this blocklist, a remote user hitting `codevos.ai/t/<tower>/api/tunnel/disconnect` could kill the tunnel.
@@ -107,33 +108,35 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
 
 ## Assumptions
 - codevos.ai tunnel server is operational
-- Node.js `node:http2` module supports role reversal (spiked and validated — see `codevos.ai/codev/resources/tunnel-architecture.md`)
+- Node.js `node:http2` module supports role reversal over any duplex stream (spiked and validated — see `codevos.ai/codev/resources/tunnel-architecture.md`)
 - Users have internet access for the tunnel (offline use remains local-only)
 
 ## Solution Approach
 
-### Tunnel Client (HTTP/2 Role Reversal)
+### Tunnel Client (HTTP/2 Role Reversal over WebSocket)
 
-The tunnel uses HTTP/2 with reversed roles — the same technique used by cloudflared. Built entirely on Node.js standard library modules (`node:http2`, `node:net`, `node:http`). No third-party tunnel dependencies.
+The tunnel uses HTTP/2 with reversed roles — the same technique used by cloudflared. **TICK-001**: Transport changed from raw TCP (`node:net`) to **WebSocket** (`ws` library), enabling the server to run on a single port. No external tunnel software required.
 
 **How it works on the tower side:**
-1. Tower opens an outbound TCP connection to codevos.ai (works through NAT and firewalls — it's just an outbound connection)
-2. Tower sends its API key for authentication over the connection
-3. Tower runs an HTTP/2 **server** over the outbound socket: `h2server.emit('connection', outboundSocket)`
-4. codevos.ai runs an HTTP/2 **client** over its end of the same socket
-5. When codevos.ai receives a browser request for this tower, it makes an H2 request through the tunnel
-6. The tower's H2 stream handler proxies the request to `localhost:4100` via standard `node:http` and pipes the response back
+1. Tower opens a **WebSocket** connection to `wss://codevos.ai/tunnel` (works through NAT, firewalls, and HTTP proxies — it's a standard HTTPS upgrade)
+2. Tower sends a JSON auth message: `{ "type": "auth", "apiKey": "ctk_..." }`
+3. Server responds with `{ "type": "auth_ok", "towerId": "..." }` or `{ "type": "auth_error", "reason": "..." }`
+4. After auth, the WebSocket is converted to a duplex stream. Tower runs an HTTP/2 **server** over it: `h2server.emit('connection', wsStream)`
+5. codevos.ai runs an HTTP/2 **client** over its end of the same stream
+6. When codevos.ai receives a browser request for this tower, it makes an H2 request through the tunnel
+7. The tower's H2 stream handler proxies the request to `localhost:4100` via standard `node:http` and pipes the response back
 
 **What HTTP/2 gives us for free:**
-- Multiplexing (many concurrent requests over one TCP connection)
+- Multiplexing (many concurrent requests over one WebSocket connection)
 - Flow control (backpressure — prevents OOM)
 - Bidirectional streaming (for terminal I/O)
 - Header compression
 
 **The tower's responsibility is:**
 - Reading credentials from `cloud-config.json`
-- Opening and maintaining the outbound TCP connection
-- Running the H2 server over the connection
+- Opening and maintaining the WebSocket connection to `wss://<server_url>/tunnel`
+- Converting the WebSocket to a duplex stream after auth
+- Running the H2 server over the stream
 - Proxying H2 requests to `localhost:4100` (filtering hop-by-hop headers)
 - Reconnection logic (exponential backoff, circuit breaker)
 - Sending metadata (project list, terminal list) after connection
@@ -231,7 +234,7 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 
 ## Security Considerations
 - **API Key Storage**: `cloud-config.json` with 0600 permissions. Keys masked in logs (show last 4 chars only).
-- **Transport Security**: Outbound TCP connection wrapped in TLS. Tower validates codevos.ai server certificate.
+- **Transport Security**: WebSocket over HTTPS (WSS). TLS handled by the HTTPS upgrade — tower validates codevos.ai server certificate automatically.
 - **SSRF Prevention**: Proxy target hardcoded to `localhost:4100`. Never derived from tunnel messages.
 - **Local Auth Unchanged**: localhost:4100 remains unauthenticated (same as current). Auth handled by codevos.ai.
 - **Tunnel Isolation**: No new listening ports opened. Tower only accepts proxied requests from its authenticated tunnel connection.
@@ -277,7 +280,7 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 ## Dependencies
 - **External Services**: codevos.ai (tunnel server)
 - **Internal Systems**: Tower server (Spec 0090), `af` CLI
-- **Libraries**: Node.js built-in only — `node:http2`, `node:net`, `node:http`, `node:tls` (no third-party tunnel library)
+- **Libraries**: `node:http2`, `node:http`, `ws` (WebSocket client — TICK-001). No external tunnel software.
 
 ## References
 - Companion spec (server side): `codevos.ai/codev/specs/0001-cloud-tower-registration.md`
@@ -313,7 +316,7 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 - `tunnel-setup.md` documentation
 
 **What gets added:**
-- Tunnel client (HTTP/2 role reversal — outbound TCP, H2 server, proxy to localhost:4100)
+- Tunnel client (HTTP/2 role reversal over WebSocket — connect to `wss://server/tunnel`, H2 server over duplex stream, proxy to localhost:4100)
 - `af tower register` / `register --reauth` / `deregister` / `status` CLI commands
 - Tower HTTP endpoints: `/api/tunnel/connect`, `/api/tunnel/disconnect`, `/api/tunnel/status`
 - `cloud-config.json` management with validation
@@ -326,3 +329,34 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 This section tracks all TICK amendments to this specification.
 
 <!-- When adding a TICK amendment, add a new entry below this line in chronological order -->
+
+### TICK-001: WebSocket Tunnel Transport (2026-02-11)
+
+**Summary**: Change tunnel transport from raw TCP to WebSocket for compatibility with single-port PaaS deployments.
+
+**Problem Addressed**:
+The companion server (codevos.ai, spec 0001) originally used a separate TCP port for tunnel connections. Railway and most PaaS platforms only expose one port per service, making the two-port design undeployable. The server is switching to WebSocket-based tunnel connections on the same HTTP port. The tower client must match.
+
+**Spec Changes**:
+- **Desired State #2**: Transport changed from "outbound TCP connection" to "WebSocket connection to `wss://codevos.ai/tunnel`". Auth changed from line protocol to JSON messages over WebSocket.
+- **Solution Approach**: Rewritten for WebSocket transport. Tower connects via `wss://server/tunnel`, authenticates with JSON message, then converts WebSocket to duplex stream for H2 role reversal. Steps updated from 6 to 7 (auth is now a separate request/response exchange).
+- **Constraints**: Updated from "outbound HTTPS only" to "outbound HTTPS/WSS only".
+- **Security - Transport**: Updated from "TLS over outbound TCP" to "WSS" (TLS handled by HTTPS upgrade).
+- **Dependencies - Libraries**: Changed from `node:http2`, `node:net`, `node:http`, `node:tls` to `node:http2`, `node:http`, `ws`.
+- **Notes - What gets added**: Updated tunnel client description.
+
+**Rationale**:
+- The H2 role reversal is transport-agnostic — it works over any duplex stream (raw TCP socket or WebSocket stream)
+- WebSocket connects over HTTPS, so TLS is handled automatically (no manual `node:tls` wrapping)
+- WebSocket works better through corporate HTTP proxies than raw TCP connections
+- `ws` is a zero-dependency, battle-tested WebSocket library
+- JSON auth messages are more debuggable and extensible than the line protocol
+
+**Plan Changes**:
+- Tunnel client: `ws.WebSocket` connection instead of `net.connect()` + `tls.connect()`
+- Auth handshake: JSON messages instead of `AUTH <key>\n` / `OK <id>\n` line protocol
+- Stream conversion: WebSocket → duplex stream → H2 server session
+- Remove `node:net` and `node:tls` imports
+- Connection URL: `wss://<server_url>/tunnel` instead of `<host>:<tunnel_port>`
+
+**Review**: See `reviews/0097-cloud-tower-client-tick-001.md`

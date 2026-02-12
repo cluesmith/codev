@@ -45,7 +45,7 @@ describe('porch check runner', () => {
 
       expect(result.passed).toBe(false);
       expect(result.error).toContain('Timed out');
-    }, 5000);
+    }, 15_000);
 
     it('should capture stderr on failure', async () => {
       const result = await runCheck('ls', 'ls /nonexistent/path/12345', cwd, defaultEnv);

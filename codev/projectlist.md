@@ -1103,9 +1103,53 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     notes: "Client-side companion to codevos.ai server spec 0001. Replaces cloudflared with native tunnel. Written by codevos.ai builder agent."
 ```
 
+  - id: "0098"
+    title: "Per-Project Port Registry Removal"
+    summary: "Remove vestigial per-project port allocation system. Tower at 4100 is the only server; port blocks are dead code."
+    status: integrated
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0098-port-registry-removal.md
+      plan: codev/plans/0098-port-registry-removal.md
+      review: codev/reviews/0098-port-registry-removal.md
+    dependencies: ["0090"]
+    tags: [architecture, cleanup, agent-farm]
+    timestamps:
+      conceived_at: "2026-02-11T00:00:00-08:00"
+      specified_at: "2026-02-11T00:00:00-08:00"
+      planned_at: "2026-02-12T00:00:00-08:00"
+      implementing_at: "2026-02-12T00:00:00-08:00"
+      implemented_at: "2026-02-12T00:00:00-08:00"
+      committed_at: "2026-02-12T00:00:00-08:00"
+      integrated_at: "2026-02-12T00:00:00-08:00"
+    notes: "Removed 220 lines of dead port-registry code. Fixed broken consult routing. PR #211 merged."
+
+  - id: "0099"
+    title: "Tower Codebase Hygiene"
+    summary: "Dead code removal, naming drift fixes, CLI consolidation onto TowerClient, state management fixes, error handling, dedup"
+    status: integrated
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0099-tower-codebase-hygiene.md
+      plan: codev/plans/0099-tower-codebase-hygiene.md
+      review: codev/reviews/0099-tower-codebase-hygiene.md
+    dependencies: ["0098"]
+    tags: [architecture, cleanup, agent-farm, maintenance]
+    timestamps:
+      conceived_at: "2026-02-11T00:00:00-08:00"
+      specified_at: "2026-02-11T00:00:00-08:00"
+      planned_at: "2026-02-12T00:00:00-08:00"
+      implementing_at: "2026-02-12T00:00:00-08:00"
+      implemented_at: "2026-02-12T00:00:00-08:00"
+      committed_at: "2026-02-12T00:00:00-08:00"
+      integrated_at: "2026-02-12T00:00:00-08:00"
+    notes: "Tower hygiene: dead code removal, TowerClient consolidation, file-tab persistence, path traversal fix. PR #212 merged."
+
 ## Next Available Number
 
-**0098** - Reserve this number for your next project
+**0100** - Reserve this number for your next project
 
 ---
 

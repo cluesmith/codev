@@ -1,7 +1,8 @@
 /**
  * Regression tests for Bugfix #195 - attach command with PTY-backed builders
  *
- * Tests that af attach properly handles port=0/pid=0 builders (PTY-backed).
+ * Tests that af attach properly handles PTY-backed builders (no port/pid).
+ * Updated for Spec 0099: port/pid removed from Builder type entirely.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -16,12 +17,26 @@ vi.mock('../state.js', () => ({
   getBuilders: () => mockBuilders,
 }));
 
-const mockIsProcessRunning = vi.fn().mockResolvedValue(true);
 const mockRun = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
 vi.mock('../utils/shell.js', () => ({
   run: (...args: any[]) => mockRun(...args),
-  isProcessRunning: (...args: any[]) => mockIsProcessRunning(...args),
   openBrowser: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock config
+vi.mock('../utils/config.js', () => ({
+  getConfig: () => ({
+    projectRoot: '/test/project',
+  }),
+}));
+
+// Mock TowerClient (constructor reads local-key file)
+vi.mock('../lib/tower-client.js', () => ({
+  TowerClient: class {
+    getProjectUrl(path: string) {
+      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    }
+  },
 }));
 
 const mockFatal = vi.fn((msg: string) => { throw new Error(msg || 'Fatal error'); });
@@ -51,12 +66,10 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     vi.clearAllMocks();
   });
 
-  it('should display PTY-backed builders (port=0) with dash instead of 0', async () => {
+  it('should display PTY-backed builders in list', async () => {
     mockBuilders.push({
       id: 'task-AAAA',
       name: 'Task: First builder',
-      port: 0,
-      pid: 0,
       status: 'implementing',
       phase: 'init',
       worktree: '/tmp/1',
@@ -71,19 +84,15 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
 
     await attach({});
 
-    // Should show builder list with '-' for port instead of '0'
-    expect(logger.row).toHaveBeenCalledWith(
-      expect.arrayContaining(['-']),
-      expect.any(Array),
-    );
+    // Should show builder list
+    expect(logger.header).toHaveBeenCalledWith('Running Builders');
+    expect(logger.row).toHaveBeenCalled();
   });
 
-  it('should not call isProcessRunning when pid=0', async () => {
+  it('should open Tower dashboard with --browser flag', async () => {
     mockBuilders.push({
       id: 'task-AAAA',
       name: 'Task: Test',
-      port: 0,
-      pid: 0,
       status: 'implementing',
       phase: 'init',
       worktree: '/tmp/1',
@@ -94,41 +103,18 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     });
 
     const { attach } = await import('../commands/attach.js');
+    const { openBrowser } = await import('../utils/shell.js');
 
-    // Attach to tmux session — will throw when trying execSync in test
-    await attach({ project: 'task-AAAA' }).catch(() => {});
+    await attach({ project: 'task-AAAA', browser: true });
 
-    // isProcessRunning should NOT have been called with pid=0
-    expect(mockIsProcessRunning).not.toHaveBeenCalledWith(0);
-  });
-
-  it('should error when trying --browser with port=0 builder', async () => {
-    mockBuilders.push({
-      id: 'task-AAAA',
-      name: 'Task: Test',
-      port: 0,
-      pid: 0,
-      status: 'implementing',
-      phase: 'init',
-      worktree: '/tmp/1',
-      branch: 'builder/task-AAAA',
-      tmuxSession: 'builder-proj-task-AAAA',
-      type: 'task',
-      terminalId: 'term-001',
-    });
-
-    const { attach } = await import('../commands/attach.js');
-
-    await expect(attach({ project: 'task-AAAA', browser: true })).rejects.toThrow();
-    expect(mockFatal).toHaveBeenCalledWith(expect.stringContaining('no direct port'));
+    // Should open Tower dashboard, not a per-builder port
+    expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
   });
 
   it('should attach via tmux for PTY-backed builders', async () => {
     mockBuilders.push({
       id: 'task-BBBB',
       name: 'Task: Test',
-      port: 0,
-      pid: 0,
       status: 'implementing',
       phase: 'init',
       worktree: '/tmp/1',
@@ -153,12 +139,10 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Attaching to builder task-BBBB'));
   });
 
-  it('should show Tower dashboard message when tmux session not found and port=0', async () => {
+  it('should show Tower dashboard message when tmux session not found', async () => {
     mockBuilders.push({
       id: 'task-CCCC',
       name: 'Task: Test',
-      port: 0,
-      pid: 0,
       status: 'implementing',
       phase: 'init',
       worktree: '/tmp/1',
@@ -175,7 +159,7 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
 
     await expect(attach({ project: 'task-CCCC' })).rejects.toThrow();
 
-    // Should show Tower dashboard message, not http://localhost:0
+    // Should show Tower dashboard message
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Tower dashboard'));
   });
 });

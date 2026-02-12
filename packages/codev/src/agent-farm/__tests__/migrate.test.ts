@@ -4,10 +4,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from '../db/schema.js';
-import { migrateLocalFromJson, migrateGlobalFromJson } from '../db/migrate.js';
+import { LOCAL_SCHEMA } from '../db/schema.js';
+import { migrateLocalFromJson } from '../db/migrate.js';
 
 describe('Migration', () => {
   const testDir = resolve(process.cwd(), '.test-migrate');
@@ -215,62 +215,4 @@ describe('Migration', () => {
     });
   });
 
-  describe('migrateGlobalFromJson', () => {
-    beforeEach(() => {
-      db = new Database(resolve(testDir, 'global.db'));
-      db.pragma('journal_mode = WAL');
-      db.exec(GLOBAL_SCHEMA);
-    });
-
-    it('should migrate versioned port registry', () => {
-      const registry = {
-        version: 1,
-        entries: {
-          '/project/one': {
-            basePort: 4200,
-            registered: '2024-01-01T00:00:00.000Z',
-            lastUsed: '2024-01-02T00:00:00.000Z',
-            pid: 1234,
-          },
-          '/project/two': {
-            basePort: 4300,
-            registered: '2024-01-01T00:00:00.000Z',
-            pid: null,
-          },
-        },
-      };
-
-      const jsonPath = resolve(testDir, 'ports.json');
-      writeFileSync(jsonPath, JSON.stringify(registry));
-
-      migrateGlobalFromJson(db, jsonPath);
-
-      const allocations = db.prepare('SELECT * FROM port_allocations ORDER BY base_port').all() as any[];
-      expect(allocations).toHaveLength(2);
-      expect(allocations[0].project_path).toBe('/project/one');
-      expect(allocations[0].base_port).toBe(4200);
-      expect(allocations[0].pid).toBe(1234);
-      expect(allocations[1].project_path).toBe('/project/two');
-      expect(allocations[1].base_port).toBe(4300);
-    });
-
-    it('should migrate legacy port registry (no version field)', () => {
-      // Legacy format - just the entries directly
-      const registry = {
-        '/project/legacy': {
-          basePort: 4200,
-          registered: '2024-01-01T00:00:00.000Z',
-        },
-      };
-
-      const jsonPath = resolve(testDir, 'ports.json');
-      writeFileSync(jsonPath, JSON.stringify(registry));
-
-      migrateGlobalFromJson(db, jsonPath);
-
-      const allocations = db.prepare('SELECT * FROM port_allocations').all() as any[];
-      expect(allocations).toHaveLength(1);
-      expect(allocations[0].project_path).toBe('/project/legacy');
-    });
-  });
 });

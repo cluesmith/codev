@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from './schema.js';
-import { migrateLocalFromJson, migrateGlobalFromJson } from './migrate.js';
+import { migrateLocalFromJson } from './migrate.js';
 import { getConfig } from '../utils/index.js';
 
 // Singleton instances
@@ -105,10 +105,18 @@ export function getDbPath(): string {
 }
 
 /**
- * Get the path to the global database
+ * Get the path to the global database.
+ * Uses per-test isolation when NODE_ENV=test:
+ *   - AF_TEST_DB env var → custom DB name (e.g., "test-14500.db")
+ *   - NODE_ENV=test without AF_TEST_DB → "test.db"
+ *   - Production → "global.db"
  */
 export function getGlobalDbPath(): string {
-  return resolve(homedir(), '.agent-farm', 'global.db');
+  let dbName = 'global.db';
+  if (process.env.NODE_ENV === 'test') {
+    dbName = process.env.AF_TEST_DB || 'test.db';
+  }
+  return resolve(homedir(), '.agent-farm', dbName);
 }
 
 /**
@@ -241,6 +249,33 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
   }
 
+  // Migration v5: Remove UNIQUE constraint from annotations.port (all annotations use port=0)
+  const v5 = db.prepare('SELECT version FROM _migrations WHERE version = 5').get();
+  if (!v5) {
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='annotations'")
+      .get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
+      db.exec(`
+        CREATE TABLE annotations_new (
+          id TEXT PRIMARY KEY,
+          file TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
+          parent_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO annotations_new SELECT id, file, port, pid, parent_type, parent_id, started_at FROM annotations;
+        DROP TABLE annotations;
+        ALTER TABLE annotations_new RENAME TO annotations;
+      `);
+      console.log('[info] Migrated annotations table: removed UNIQUE constraint from port');
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (5)').run();
+  }
+
   return db;
 }
 
@@ -248,9 +283,8 @@ function ensureLocalDatabase(): Database.Database {
  * Initialize the global database (global.db)
  */
 function ensureGlobalDatabase(): Database.Database {
-  const globalDir = resolve(homedir(), '.agent-farm');
-  const dbPath = resolve(globalDir, 'global.db');
-  const jsonPath = resolve(globalDir, 'ports.json');
+  const dbPath = getGlobalDbPath();
+  const globalDir = dirname(dbPath);
 
   // Ensure directory exists
   ensureDir(globalDir);
@@ -265,37 +299,15 @@ function ensureGlobalDatabase(): Database.Database {
   // Check if migration is needed
   const migrated = db.prepare('SELECT version FROM _migrations WHERE version = 1').get();
 
-  if (!migrated && existsSync(jsonPath)) {
-    // Migrate from JSON
-    migrateGlobalFromJson(db, jsonPath);
-
-    // Record migration
-    db.prepare('INSERT INTO _migrations (version) VALUES (1)').run();
-
-    // Backup original JSON and remove it
-    copyFileSync(jsonPath, jsonPath + '.bak');
-    unlinkSync(jsonPath);
-
-    console.log('[info] Migrated ports.json to global.db (backup at ports.json.bak)');
-  } else if (!migrated) {
+  if (!migrated) {
     // Fresh install, just mark migration as done
     db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (1)').run();
     console.log('[info] Created new global.db at', dbPath);
   }
 
-  // Migration v2: Add project_name and created_at columns to port_allocations
+  // Migration v2: No-op (previously added columns to port_allocations, now removed by Spec 0098)
   const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
   if (!v2) {
-    try {
-      db.exec('ALTER TABLE port_allocations ADD COLUMN project_name TEXT');
-    } catch {
-      // Column already exists
-    }
-    try {
-      db.exec("ALTER TABLE port_allocations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
-    } catch {
-      // Column already exists
-    }
     db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
   }
 
@@ -320,6 +332,22 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Created terminal_sessions table (Spec 0090 TICK-001)');
   }
 
+  // Migration v4: Add file_tabs table (Spec 0099 Phase 4)
+  const v4 = db.prepare('SELECT version FROM _migrations WHERE version = 4').get();
+  if (!v4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS file_tabs (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
+    console.log('[info] Created file_tabs table (Spec 0099 Phase 4)');
+  }
+
   return db;
 }
 
@@ -331,5 +359,4 @@ export type {
   DbBuilder,
   DbUtil,
   DbAnnotation,
-  DbPortAllocation,
 } from './types.js';

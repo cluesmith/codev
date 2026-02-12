@@ -6,16 +6,28 @@
  */
 
 import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run, commandExists } from '../utils/shell.js';
 import { findRolePromptPath } from '../utils/roles.js';
 
-const SESSION_NAME = 'af-architect';
+/**
+ * Get session name based on project basename (matches Tower convention)
+ */
+function getSessionName(): string {
+  const config = getConfig();
+  return `architect-${basename(config.projectRoot)}`;
+}
 
-// findRolePromptPath imported from ../utils/roles.js
+/**
+ * Get layout session name based on project basename
+ */
+function getLayoutSessionName(): string {
+  const config = getConfig();
+  return `architect-layout-${basename(config.projectRoot)}`;
+}
 
 /**
  * Check if a tmux session exists
@@ -48,9 +60,10 @@ function attachToSession(sessionName: string): void {
 }
 
 /**
- * Create a new tmux session with the architect role and attach to it
+ * Shared session setup: write role file, create launch script, create tmux session, configure it.
+ * Returns the launch script path for callers that need it.
  */
-async function createAndAttach(args: string[]): Promise<void> {
+async function createSession(sessionName: string, args: string[]): Promise<void> {
   const config = getConfig();
 
   // Ensure state directory exists for launch script
@@ -83,27 +96,30 @@ cd "${config.projectRoot}"
 exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
 `, { mode: 0o755 });
 
-  logger.info('Creating new architect session...');
-
   // Create tmux session running the launch script
   await run(
-    `tmux new-session -d -s "${SESSION_NAME}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
+    `tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
   );
 
-  // Configure tmux session (same settings as start.ts)
-  await run(`tmux set-option -t "${SESSION_NAME}" status off`);
-  await run(`tmux set-option -t "${SESSION_NAME}" -g mouse on`);
-  await run(`tmux set-option -t "${SESSION_NAME}" -g set-clipboard on`);
+  // Configure tmux session
+  await run(`tmux set-option -t "${sessionName}" status off`);
+  await run(`tmux set-option -t "${sessionName}" -g mouse on`);
+  await run(`tmux set-option -t "${sessionName}" -g set-clipboard on`);
 
   // Copy selection to clipboard when mouse is released (pbcopy for macOS)
   await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
   await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
-
-  // Attach to the session
-  attachToSession(SESSION_NAME);
 }
 
-const LAYOUT_SESSION_NAME = 'af-layout';
+/**
+ * Create a new tmux session with the architect role and attach to it
+ */
+async function createAndAttach(args: string[]): Promise<void> {
+  const sessionName = getSessionName();
+  logger.info('Creating new architect session...');
+  await createSession(sessionName, args);
+  attachToSession(sessionName);
+}
 
 /**
  * Create a two-pane tmux layout with architect and utility shell
@@ -117,60 +133,20 @@ const LAYOUT_SESSION_NAME = 'af-layout';
  */
 async function createLayoutAndAttach(args: string[]): Promise<void> {
   const config = getConfig();
-
-  // Ensure state directory exists for launch script
-  await ensureDirectories(config);
-
-  // Load architect role
-  const role = findRolePromptPath(config, 'architect');
-  if (!role) {
-    fatal('Architect role not found. Expected at: codev/roles/architect.md');
-  }
-
-  logger.info(`Loaded architect role (${role.source})`);
-
-  // Write a minimal pointer - AI reads the full file
-  const roleFile = resolve(config.stateDir, 'architect-role.md');
-  const shortPointer = `You are an Architect. Read codev/roles/architect.md before starting work.
-`;
-  writeFileSync(roleFile, shortPointer, 'utf-8');
-
-  // Create launch script for architect
-  const launchScript = resolve(config.stateDir, 'launch-architect-cli.sh');
-
-  let argsStr = '';
-  if (args.length > 0) {
-    argsStr = ' ' + args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-  }
-
-  writeFileSync(launchScript, `#!/bin/bash
-cd "${config.projectRoot}"
-exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
-`, { mode: 0o755 });
-
+  const layoutName = getLayoutSessionName();
   logger.info('Creating layout session...');
-
-  // Create main session with architect pane (left, 70% width)
-  await run(
-    `tmux new-session -d -s "${LAYOUT_SESSION_NAME}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
-  );
-
-  // Configure tmux session
-  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" status off`);
-  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g mouse on`);
-  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g set-clipboard on`);
+  await createSession(layoutName, args);
 
   // Split right: create utility shell pane (40% width)
-  await run(`tmux split-window -h -t "${LAYOUT_SESSION_NAME}" -p 40 -c "${config.projectRoot}"`);
+  await run(`tmux split-window -h -t "${layoutName}" -p 40 -c "${config.projectRoot}"`);
 
   // Focus back on architect pane (left)
-  await run(`tmux select-pane -t "${LAYOUT_SESSION_NAME}:0.0"`);
+  await run(`tmux select-pane -t "${layoutName}:0.0"`);
 
   logger.info('Layout: Architect (left) | Shell (right)');
   logger.info('Navigation: Ctrl+B ←/→ | Detach: Ctrl+B d');
 
-  // Attach to the session
-  attachToSession(LAYOUT_SESSION_NAME);
+  attachToSession(layoutName);
 }
 
 export interface ArchitectOptions {
@@ -194,7 +170,7 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
   }
 
   // Determine which session to use
-  const sessionName = useLayout ? LAYOUT_SESSION_NAME : SESSION_NAME;
+  const sessionName = useLayout ? getLayoutSessionName() : getSessionName();
   const sessionExists = await tmuxSessionExists(sessionName);
 
   if (sessionExists) {

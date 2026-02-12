@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
+import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import {
   readState,
@@ -26,6 +27,7 @@ import {
   getPhaseGate,
   isPhased,
   isBuildVerify,
+  getVerifyConfig,
 } from './protocol.js';
 import {
   findPlanFile,
@@ -229,16 +231,6 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     }
   }
 
-  // Check for gate
-  const gate = getPhaseGate(protocol, state.phase);
-  if (gate && state.gates[gate]?.status !== 'approved') {
-    console.log('');
-    console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
-    console.log(`\n  Run: porch gate ${state.id}`);
-    console.log('  Wait for human approval before advancing.');
-    return;
-  }
-
   // For build_verify phases: mark build as complete for verification
   if (isBuildVerify(protocol, state.phase) && !state.build_complete) {
     state.build_complete = true;
@@ -246,6 +238,41 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     console.log('');
     console.log(chalk.green('BUILD COMPLETE. Ready for verification.'));
     console.log(`\n  Run: porch next ${state.id} (to get verification tasks)`);
+    return;
+  }
+
+  // Enforce 3-way verification for build_verify phases
+  const verifyConfig = getVerifyConfig(protocol, state.phase);
+  if (verifyConfig) {
+    const projectDir = getProjectDir(projectRoot, state.id, state.title);
+    const phase = state.current_plan_phase || state.phase;
+    const missingModels: string[] = [];
+
+    for (const model of verifyConfig.models) {
+      // Look for any review file for this model+phase (any iteration)
+      const pattern = path.join(projectDir, `${state.id}-${phase}-iter*-${model}.txt`);
+      const matches = globSync(pattern);
+      if (matches.length === 0) {
+        missingModels.push(model);
+      }
+    }
+
+    if (missingModels.length > 0) {
+      console.log('');
+      console.log(chalk.red('VERIFICATION REQUIRED'));
+      console.log(`\n  3-way review not completed. Missing: ${missingModels.join(', ')}`);
+      console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
+      process.exit(1);
+    }
+  }
+
+  // Check for gate
+  const gate = getPhaseGate(protocol, state.phase);
+  if (gate && state.gates[gate]?.status !== 'approved') {
+    console.log('');
+    console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
+    console.log(`\n  Run: porch gate ${state.id}`);
+    console.log('  Wait for human approval before advancing.');
     return;
   }
 
@@ -622,7 +649,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('');
         console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');
-        process.exit(command ? 1 : 0);
+        process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
     }
   } catch (err) {
     console.error(chalk.red(`Error: ${(err as Error).message}`));

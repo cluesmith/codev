@@ -94,7 +94,7 @@ export async function sendPushNotification(payload: NotificationPayload): Promis
     });
 
     if (!response.ok) {
-      // Tower may not be running - silently ignore
+      console.warn(`[notifications] Tower responded ${response.status} for ${payload.type} notification (project ${payload.projectId})`);
     }
   } catch {
     // Tower may not be running - silently ignore

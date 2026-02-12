@@ -6,7 +6,6 @@
 
 import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
-import { isProcessRunning } from '../utils/shell.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
@@ -48,7 +47,6 @@ export async function status(): Promise<void> {
       const statusText = projectStatus.active ? chalk.green('active') : chalk.gray('inactive');
       logger.kv('Project', projectStatus.name);
       logger.kv('  Status', statusText);
-      logger.kv('  Port', projectStatus.basePort);
       logger.kv('  Terminals', projectStatus.terminals.length);
 
       if (projectStatus.terminals.length > 0) {
@@ -70,7 +68,7 @@ export async function status(): Promise<void> {
 
     // Project not found in tower, show "not active"
     logger.kv('Project', chalk.gray('not active in tower'));
-    logger.info(`Run 'af dash start' to activate this project`);
+    logger.info(`Run 'af tower start' to activate this project`);
     return;
   }
 
@@ -84,9 +82,7 @@ export async function status(): Promise<void> {
 
   // Architect status
   if (state.architect) {
-    const running = await isProcessRunning(state.architect.pid);
-    const statusText = running ? chalk.green('running') : chalk.red('stopped');
-    logger.kv('Architect', `${statusText} (PID: ${state.architect.pid}, port: ${state.architect.port})`);
+    logger.kv('Architect', chalk.green('registered'));
     logger.kv('  Command', state.architect.cmd);
     logger.kv('  Started', state.architect.startedAt);
   } else {
@@ -98,16 +94,13 @@ export async function status(): Promise<void> {
   // Builders
   if (state.builders.length > 0) {
     logger.info('Builders:');
-    const widths = [12, 20, 10, 12, 10, 6];
+    const widths = [12, 20, 10, 12, 10];
 
-    logger.row(['ID', 'Name', 'Type', 'Status', 'Phase', 'Port'], widths);
-    logger.row(['──', '────', '────', '──────', '─────', '────'], widths);
+    logger.row(['ID', 'Name', 'Type', 'Status', 'Phase'], widths);
+    logger.row(['──', '────', '────', '──────', '─────'], widths);
 
     for (const builder of state.builders) {
-      // pid=0 means PTY-backed terminal; assume running if tmux session or terminalId exists
-      const running = builder.pid > 0
-        ? await isProcessRunning(builder.pid)
-        : !!(builder.tmuxSession || builder.terminalId);
+      const running = !!(builder.tmuxSession || builder.terminalId);
       const statusColor = getStatusColor(builder.status, running);
       const typeColor = getTypeColor(builder.type || 'spec');
 
@@ -117,7 +110,6 @@ export async function status(): Promise<void> {
         typeColor(builder.type || 'spec'),
         statusColor(builder.status),
         builder.phase.substring(0, 8),
-        builder.port > 0 ? String(builder.port) : '-',
       ], widths);
     }
   } else {
@@ -129,19 +121,15 @@ export async function status(): Promise<void> {
   // Utils
   if (state.utils.length > 0) {
     logger.info('Utility Terminals:');
-    const widths = [8, 20, 8];
+    const widths = [8, 20];
 
-    logger.row(['ID', 'Name', 'Port'], widths);
-    logger.row(['──', '────', '────'], widths);
+    logger.row(['ID', 'Name'], widths);
+    logger.row(['──', '────'], widths);
 
     for (const util of state.utils) {
-      const running = await isProcessRunning(util.pid);
-      const name = running ? util.name : chalk.gray(util.name + ' (stopped)');
-
       logger.row([
         util.id,
-        name.substring(0, 18),
-        String(util.port),
+        util.name.substring(0, 18),
       ], widths);
     }
   } else {
@@ -153,19 +141,15 @@ export async function status(): Promise<void> {
   // Annotations
   if (state.annotations.length > 0) {
     logger.info('Annotations:');
-    const widths = [8, 30, 8];
+    const widths = [8, 30];
 
-    logger.row(['ID', 'File', 'Port'], widths);
-    logger.row(['──', '────', '────'], widths);
+    logger.row(['ID', 'File'], widths);
+    logger.row(['──', '────'], widths);
 
     for (const annotation of state.annotations) {
-      const running = await isProcessRunning(annotation.pid);
-      const file = running ? annotation.file : chalk.gray(annotation.file + ' (stopped)');
-
       logger.row([
         annotation.id,
-        file.substring(0, 28),
-        String(annotation.port),
+        annotation.file.substring(0, 28),
       ], widths);
     }
   } else {

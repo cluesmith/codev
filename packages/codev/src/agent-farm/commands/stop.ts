@@ -9,7 +9,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { loadState, clearState } from '../state.js';
 import { logger } from '../utils/logger.js';
-import { killProcess, killProcessTree, isProcessRunning, run } from '../utils/shell.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 
@@ -20,85 +19,9 @@ const execFileAsync = promisify(execFile);
  */
 const DEFAULT_TOWER_PORT = 4100;
 
-/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection.
- *  If expectedPid is provided, verifies the session's PID matches before killing
- *  to prevent cross-project kills when two projects share the same basename.
- */
-async function killTmuxSession(sessionName: string, expectedPid?: number): Promise<void> {
-  if (expectedPid && expectedPid > 0) {
-    // Verify the session belongs to this project by checking its PID
-    try {
-      const { stdout } = await execFileAsync('tmux', [
-        'list-sessions', '-F', '#{session_name} #{session_pid}',
-      ]);
-      const line = stdout.trim().split('\n').find(l => l.startsWith(sessionName + ' '));
-      if (line) {
-        const sessionPid = parseInt(line.split(' ')[1], 10);
-        if (sessionPid !== expectedPid && !isNaN(sessionPid)) {
-          // PID mismatch — this session belongs to a different project
-          throw new Error(`Session ${sessionName} PID ${sessionPid} != expected ${expectedPid}`);
-        }
-      }
-    } catch (err) {
-      if ((err as Error).message?.includes('PID')) throw err;
-      // tmux command failed — fall through to kill attempt
-    }
-  }
+/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection. */
+async function killTmuxSession(sessionName: string): Promise<void> {
   await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
-}
-
-/**
- * Find orphan agent-farm processes for this project that aren't in state
- * Returns PIDs of orphaned processes
- */
-async function findOrphanProcesses(trackedPids: Set<number>): Promise<number[]> {
-  const config = getConfig();
-  const projectRoot = config.projectRoot;
-
-  // Pattern to match agent-farm server processes for this project
-  // Matches: node .../dist/agent-farm/servers/dashboard-server.js
-  //          node .../dist/agent-farm/servers/tower-server.js
-  // Note: open-server.js removed in Spec 0092 - files served through Tower
-  const orphans: number[] = [];
-
-  try {
-    // Use ps to find node processes, then filter by our project path
-    const result = await run('ps -eo pid,command');
-    const lines = result.stdout.split('\n');
-
-    for (const line of lines) {
-      // Skip tower-server entirely - it's a global service, not per-project
-      if (line.includes('tower-server')) {
-        continue;
-      }
-
-      // Only match processes that belong to THIS project
-      // Must contain projectRoot to be considered for orphan cleanup
-      const isProjectProcess = line.includes(projectRoot) && line.includes('agent-farm');
-
-      if (!isProjectProcess) {
-        continue;
-      }
-
-      // Extract PID (first number in the line)
-      const match = line.trim().match(/^(\d+)/);
-      if (!match) continue;
-
-      const pid = parseInt(match[1], 10);
-
-      // Skip if this PID is tracked in state
-      if (trackedPids.has(pid)) {
-        continue;
-      }
-
-      // This is an orphan
-      orphans.push(pid);
-    }
-  } catch {
-    // ps command failed - ignore
-  }
-
-  return orphans;
 }
 
 /**
@@ -143,117 +66,62 @@ export async function stop(): Promise<void> {
 
   let stopped = 0;
 
-  // Collect all tracked PIDs for orphan detection
-  const trackedPids = new Set<number>();
-  if (state.architect) trackedPids.add(state.architect.pid);
-  for (const builder of state.builders) trackedPids.add(builder.pid);
-  for (const util of state.utils) trackedPids.add(util.pid);
-  for (const annotation of state.annotations) trackedPids.add(annotation.pid);
-
-  // Stop architect — kill tmux session by name (safer than tree-kill)
-  if (state.architect) {
-    logger.info(`Stopping architect (PID: ${state.architect.pid})`);
+  // Stop architect — kill tmux session by name, then Tower terminal
+  if (state.architect?.tmuxSession) {
+    logger.info('Stopping architect...');
     try {
-      // Kill tmux session by name — this cleanly terminates the session and its processes
-      if (state.architect.tmuxSession) {
-        try {
-          await killTmuxSession(state.architect.tmuxSession, state.architect.pid);
-          stopped++;
-        } catch {
-          // Session may already be gone, try PID fallback
-          if (await isProcessRunning(state.architect.pid)) {
-            await killProcess(state.architect.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(state.architect.pid)) {
-        await killProcess(state.architect.pid);
-        stopped++;
-      }
-    } catch (error) {
-      logger.warn(`Failed to stop architect: ${error}`);
+      await killTmuxSession(state.architect.tmuxSession);
+      stopped++;
+    } catch {
+      // Session may already be gone
     }
   }
+  if (towerRunning && state.architect?.terminalId) {
+    try {
+      await client.killTerminal(state.architect.terminalId);
+    } catch { /* best-effort */ }
+  }
 
-  // Stop all builders — prefer tmux kill-session over PID kill
+  // Stop all builders — kill tmux sessions, then Tower terminals
   for (const builder of state.builders) {
-    logger.info(`Stopping builder ${builder.id} (PID: ${builder.pid})`);
-    try {
-      if (builder.tmuxSession) {
-        try {
-          await killTmuxSession(builder.tmuxSession, builder.pid);
-          stopped++;
-        } catch {
-          if (await isProcessRunning(builder.pid)) {
-            await killProcess(builder.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(builder.pid)) {
-        await killProcess(builder.pid);
+    if (builder.tmuxSession) {
+      logger.info(`Stopping builder ${builder.id}...`);
+      try {
+        await killTmuxSession(builder.tmuxSession);
         stopped++;
+      } catch {
+        // Session may already be gone
       }
-    } catch (error) {
-      logger.warn(`Failed to stop builder ${builder.id}: ${error}`);
+    }
+    if (towerRunning && builder.terminalId) {
+      try {
+        await client.killTerminal(builder.terminalId);
+        if (!builder.tmuxSession) stopped++;
+      } catch { /* best-effort */ }
     }
   }
 
-  // Stop all utils — prefer tmux kill-session over PID kill
+  // Stop all utils — kill tmux sessions, then Tower terminals
   for (const util of state.utils) {
-    logger.info(`Stopping util ${util.id} (PID: ${util.pid})`);
-    try {
-      if (util.tmuxSession) {
-        try {
-          await killTmuxSession(util.tmuxSession, util.pid);
-          stopped++;
-        } catch {
-          if (await isProcessRunning(util.pid)) {
-            await killProcess(util.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(util.pid)) {
-        await killProcess(util.pid);
+    if (util.tmuxSession) {
+      logger.info(`Stopping util ${util.id}...`);
+      try {
+        await killTmuxSession(util.tmuxSession);
         stopped++;
+      } catch {
+        // Session may already be gone
       }
-    } catch (error) {
-      logger.warn(`Failed to stop util ${util.id}: ${error}`);
     }
-  }
-
-  // Stop all annotations — use tree-kill since these are standalone node servers
-  for (const annotation of state.annotations) {
-    logger.info(`Stopping annotation ${annotation.id} (PID: ${annotation.pid})`);
-    try {
-      if (await isProcessRunning(annotation.pid)) {
-        await killProcessTree(annotation.pid);
-        stopped++;
-      }
-    } catch (error) {
-      logger.warn(`Failed to stop annotation ${annotation.id}: ${error}`);
+    if (towerRunning && util.terminalId) {
+      try {
+        await client.killTerminal(util.terminalId);
+        if (!util.tmuxSession) stopped++;
+      } catch { /* best-effort */ }
     }
   }
 
   // Clear state
   clearState();
-
-  // Find and kill orphan processes (not in state but running for this project)
-  const orphans = await findOrphanProcesses(trackedPids);
-  if (orphans.length > 0) {
-    logger.blank();
-    logger.info(`Found ${orphans.length} orphan process(es)`);
-    for (const pid of orphans) {
-      try {
-        if (await isProcessRunning(pid)) {
-          logger.info(`  Killing orphan PID ${pid}`);
-          await killProcessTree(pid);
-          stopped++;
-        }
-      } catch (error) {
-        logger.warn(`  Failed to kill orphan ${pid}: ${error}`);
-      }
-    }
-  }
 
   logger.blank();
   if (stopped > 0) {

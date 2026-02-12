@@ -4,12 +4,14 @@
 
 import { existsSync, readdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import type { Builder, Config } from '../types.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { loadState, removeBuilder } from '../state.js';
+import { TowerClient } from '../lib/tower-client.js';
+import { getBuilderSessionName } from '../utils/session.js';
 
 /**
  * Remove porch state for a project from codev/projects/
@@ -34,13 +36,6 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
   } catch (error) {
     logger.warn(`Warning: Failed to cleanup porch state: ${error}`);
   }
-}
-
-/**
- * Get a namespaced tmux session name: builder-{project}-{id}
- */
-function getSessionName(config: Config, builderId: string): string {
-  return `builder-${basename(config.projectRoot)}-${builderId}`;
 }
 
 export interface CleanupOptions {
@@ -164,23 +159,26 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // Kill terminal process if running
-  if (builder.pid) {
-    logger.info('Stopping builder terminal...');
-    try {
-      process.kill(builder.pid, 'SIGTERM');
-    } catch {
-      // Process may already be dead
-    }
-  }
-
   // Kill tmux session if exists (use stored session name for correct shell/builder naming)
-  const sessionName = builder.tmuxSession || getSessionName(config, builder.id);
+  const sessionName = builder.tmuxSession || getBuilderSessionName(config, builder.id);
   try {
     await run(`tmux kill-session -t "${sessionName}" 2>/dev/null`);
     logger.info('Killed tmux session');
   } catch {
     // Session may not exist
+  }
+
+  // Kill Tower terminal if exists (node-pty terminals without tmux)
+  if (builder.terminalId) {
+    try {
+      const client = new TowerClient();
+      const killed = await client.killTerminal(builder.terminalId);
+      if (killed) {
+        logger.info('Killed Tower terminal');
+      }
+    } catch {
+      // Tower may not be running
+    }
   }
 
   // For bugfix mode: actually remove worktree and delete remote branch

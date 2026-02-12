@@ -69,23 +69,10 @@ export interface DbAnnotation {
 }
 
 /**
- * Database row type for port_allocations table
- */
-export interface DbPortAllocation {
-  project_path: string;
-  base_port: number;
-  pid: number | null;
-  registered_at: string;
-  last_used_at: string;
-}
-
-/**
  * Convert database architect row to application type
  */
 export function dbArchitectToArchitectState(row: DbArchitect): ArchitectState {
   return {
-    pid: row.pid,
-    port: row.port,
     cmd: row.cmd,
     startedAt: row.started_at,
     tmuxSession: row.tmux_session ?? undefined,
@@ -100,8 +87,6 @@ export function dbBuilderToBuilder(row: DbBuilder): Builder {
   return {
     id: row.id,
     name: row.name,
-    port: row.port,
-    pid: row.pid,
     status: row.status as Builder['status'],
     phase: row.phase,
     worktree: row.worktree,
@@ -122,8 +107,6 @@ export function dbUtilToUtilTerminal(row: DbUtil): UtilTerminal {
   return {
     id: row.id,
     name: row.name,
-    port: row.port,
-    pid: row.pid,
     tmuxSession: row.tmux_session ?? undefined,
     terminalId: row.terminal_id ?? undefined,
   };
@@ -136,8 +119,6 @@ export function dbAnnotationToAnnotation(row: DbAnnotation): Annotation {
   return {
     id: row.id,
     file: row.file,
-    port: row.port,
-    pid: row.pid,
     parent: {
       type: row.parent_type as Annotation['parent']['type'],
       id: row.parent_id ?? undefined,

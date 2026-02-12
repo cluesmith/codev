@@ -1,13 +1,11 @@
 /**
- * Consult command - runs a consult command in a dashboard terminal
+ * Consult command - runs a consult command as a subprocess
  *
- * Opens a terminal tab that runs the consult command and keeps the
- * terminal open after completion for review.
+ * Spawns the consult CLI directly, independent of Tower.
  */
 
-import { getConfig } from '../utils/index.js';
+import { spawn } from 'node:child_process';
 import { logger, fatal } from '../utils/logger.js';
-import { loadState } from '../state.js';
 
 interface ConsultOptions {
   model: string;
@@ -15,49 +13,40 @@ interface ConsultOptions {
 }
 
 /**
- * Run a consult command in a dashboard terminal
+ * Run a consult command as a direct subprocess
  */
 export async function consult(
   subcommand: string,
   target: string,
   options: ConsultOptions
 ): Promise<void> {
-  const state = loadState();
-
-  if (!state.architect) {
-    fatal('Dashboard not running. Start with: af dash start');
-  }
-
-  const config = getConfig();
-  const dashboardPort = config.dashboardPort;
-
-  // Build the consult command (consult is now a proper CLI binary)
-  let cmd = `consult --model ${options.model}`;
+  // Build the consult command arguments
+  const args = ['--model', options.model];
   if (options.type) {
-    cmd += ` --type ${options.type}`;
+    args.push('--type', options.type);
   }
-  cmd += ` ${subcommand} ${target}`;
+  args.push(subcommand, target);
 
-  // Generate a name for the terminal (e.g., "gemini-pr87")
-  const name = `${options.model}-${subcommand}${target}`;
+  logger.info(`Running: consult ${args.join(' ')}`);
 
-  try {
-    const response = await fetch(`http://localhost:${dashboardPort}/api/tabs/shell`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, command: cmd }),
+  return new Promise((resolve, reject) => {
+    const child = spawn('consult', args, {
+      stdio: 'inherit',
     });
 
-    if (response.ok) {
-      const result = (await response.json()) as { name: string; port: number };
-      logger.success(`Consult opened in dashboard tab`);
-      logger.kv('Name', result.name);
-      logger.kv('Command', cmd);
-    } else {
-      const error = await response.text();
-      fatal(`Failed to open consult terminal: ${error}`);
-    }
-  } catch (err) {
-    fatal(`Dashboard not available: ${err}`);
-  }
+    child.on('error', (err) => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        fatal('consult CLI not found. Install with: npm install -g @cluesmith/codev');
+      }
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`consult exited with code ${code}`));
+      }
+    });
+  });
 }

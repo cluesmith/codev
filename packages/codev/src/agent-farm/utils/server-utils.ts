@@ -1,6 +1,6 @@
 /**
  * Shared server utilities
- * Extracted from dashboard-server.ts, tower-server.ts, open-server.ts
+ * Extracted from tower-server.ts and open-server.ts
  * to eliminate code duplication (Maintenance Run 0004)
  */
 

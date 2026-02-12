@@ -13,9 +13,10 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
+const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
 
 function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
@@ -70,7 +71,7 @@ test.describe('Bug #1: Tower proxy for projects', () => {
 
   test('tower proxy serves React dashboard with working CSS/JS', async ({ page }) => {
     // Test with codev-public project through proxy
-    const encoded = toBase64URL('/Users/mwk/Development/cluesmith/codev-public');
+    const encoded = toBase64URL(PROJECT_PATH);
     const proxyUrl = `${TOWER_URL}/project/${encoded}/`;
 
     await page.goto(proxyUrl);
@@ -92,7 +93,7 @@ test.describe('Bug #1: Tower proxy for projects', () => {
   });
 
   test('tower proxy API endpoint works', async ({ request }) => {
-    const encoded = toBase64URL('/Users/mwk/Development/cluesmith/codev-public');
+    const encoded = toBase64URL(PROJECT_PATH);
     const res = await request.get(`${TOWER_URL}/project/${encoded}/api/state`);
     expect(res.ok()).toBe(true);
     const state = await res.json();
@@ -308,7 +309,7 @@ test.describe('Bug #3: Layout matches legacy dashboard', () => {
 
 test.describe('Bug #3 via Tower Proxy', () => {
   test('layout works through tower proxy', async ({ page }) => {
-    const encoded = toBase64URL('/Users/mwk/Development/cluesmith/codev-public');
+    const encoded = toBase64URL(PROJECT_PATH);
     await page.goto(`${TOWER_URL}/project/${encoded}/`);
     // Wait for state to load
     await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });

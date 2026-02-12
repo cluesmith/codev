@@ -8,7 +8,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import net from 'node:net';
 import crypto from 'node:crypto';
 import { execSync, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
@@ -16,8 +15,15 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getGlobalDb } from '../db/index.js';
-import { cleanupStaleEntries } from '../utils/port-registry.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { getGateStatusForProject } from '../utils/gate-status.js';
+import type { GateStatus } from '../utils/gate-status.js';
+import {
+  saveFileTab as saveFileTabToDb,
+  deleteFileTab as deleteFileTabFromDb,
+  loadFileTabsForProject as loadFileTabsFromDb,
+} from '../utils/file-tabs.js';
+import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
@@ -270,11 +276,7 @@ let terminalManager: TerminalManager | null = null;
 
 // Project terminal registry - tracks which terminals belong to which project
 // Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
-interface FileTab {
-  id: string;
-  path: string;
-  createdAt: number;
-}
+// FileTab type is imported from utils/file-tabs.ts
 
 interface ProjectTerminals {
   architect?: string;
@@ -285,12 +287,14 @@ interface ProjectTerminals {
 const projectTerminals = new Map<string, ProjectTerminals>();
 
 /**
- * Get or create project terminal registry entry
+ * Get or create project terminal registry entry.
+ * On first access for a project, hydrates file tabs from SQLite so
+ * persisted tabs are available immediately (not just after /api/state).
  */
 function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
   let entry = projectTerminals.get(projectPath);
   if (!entry) {
-    entry = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
+    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForProject(projectPath) };
     projectTerminals.set(projectPath, entry);
   }
   // Migration: ensure fileTabs exists for older entries
@@ -451,6 +455,45 @@ function deleteProjectTerminalSessions(projectPath: string): void {
   }
 }
 
+/**
+ * Save a file tab to SQLite for persistence across Tower restarts.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
+ */
+function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    saveFileTabToDb(getGlobalDb(), id, normalizedPath, filePath, createdAt);
+  } catch (err) {
+    log('WARN', `Failed to save file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete a file tab from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling.
+ */
+function deleteFileTab(id: string): void {
+  try {
+    deleteFileTabFromDb(getGlobalDb(), id);
+  } catch (err) {
+    log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Load file tabs for a project from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
+ */
+function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    return loadFileTabsFromDb(getGlobalDb(), normalizedPath);
+  } catch (err) {
+    log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
+  }
+  return new Map<string, FileTab>();
+}
+
 // Whether tmux is available on this system (checked once at startup)
 let tmuxAvailable = false;
 
@@ -513,11 +556,13 @@ function createTmuxSession(
       return null;
     }
 
-    // Hide tmux status bar (dashboard has its own tabs), enable mouse, and
-    // use aggressive-resize so tmux sizes to the largest client (not smallest)
+    // Hide tmux status bar (dashboard has its own tabs) and enable mouse.
+    // NOTE: aggressive-resize was removed — it caused resize bouncing and
+    // visual flashing (dots/redraws) when the dashboard sent multiple resize
+    // events during layout settling. Default tmux behavior (size to smallest
+    // client) is more stable since we only have one client per session.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'aggressive-resize', 'on'], { stdio: 'ignore' });
 
     return sessionName;
   } catch (err) {
@@ -663,21 +708,14 @@ function findSqliteRowForTmuxSession(tmuxName: string): DbTerminalSession | null
 
 /**
  * Find the full project path for a tmux session's project basename.
- * Checks active port allocations (which have full paths) for a matching basename.
+ * Checks known projects (terminal_sessions + in-memory cache) for a matching basename.
  * Returns null if no match found.
  */
 function resolveProjectPathFromBasename(projectBasename: string): string | null {
-  const allocations = loadPortAllocations();
-  for (const alloc of allocations) {
-    if (path.basename(alloc.project_path) === projectBasename) {
-      return normalizeProjectPath(alloc.project_path);
-    }
-  }
-
-  // Also check projectTerminals cache (may have entries not yet in allocations)
-  for (const [projectPath] of projectTerminals) {
+  const knownPaths = getKnownProjectPaths();
+  for (const projectPath of knownPaths) {
     if (path.basename(projectPath) === projectBasename) {
-      return projectPath;
+      return normalizeProjectPath(projectPath);
     }
   }
 
@@ -687,7 +725,20 @@ function resolveProjectPathFromBasename(projectBasename: string): string | null 
 /**
  * Reconcile terminal sessions on startup.
  *
- * STRATEGY: tmux is the source of truth for existence.
+ * DUAL-SOURCE STRATEGY (tmux + SQLite):
+ *
+ * tmux is the source of truth for LIVENESS (process existence).
+ * SQLite is the source of truth for METADATA (project association, type, role ID).
+ *
+ * This is intentional: tmux sessions survive Tower restarts because they are
+ * OS-level processes independent of Tower. SQLite rows, on the other hand,
+ * cannot track process liveness — a row may exist for a terminal whose process
+ * has long since exited. Therefore:
+ *   - We NEVER trust SQLite alone to determine if a terminal is running.
+ *   - We ALWAYS check tmux for liveness, then use SQLite for enrichment.
+ *
+ * File tabs are the exception: they have no backing process, so SQLite is
+ * the sole source of truth for their persistence (see file_tabs table).
  *
  * Phase 1 — tmux-first discovery:
  *   List all codev tmux sessions. For each, look up SQLite for metadata.
@@ -727,6 +778,22 @@ async function reconcileTerminalSessions(): Promise<void> {
 
     if (!projectPath) {
       log('WARN', `Cannot resolve project path for tmux session "${tmuxName}" (basename: ${parsed.projectBasename}) — skipping`);
+      continue;
+    }
+
+    // Skip sessions whose project path doesn't exist on disk or is in a
+    // temp directory (left over from E2E tests that share global.db/tmux).
+    if (!fs.existsSync(projectPath)) {
+      log('INFO', `Skipping tmux "${tmuxName}" — project path no longer exists: ${projectPath}`);
+      killTmuxSession(tmuxName);
+      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
+      continue;
+    }
+    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+    if (tmpDirs.some(d => projectPath.startsWith(d))) {
+      log('INFO', `Skipping tmux "${tmuxName}" — project is in temp directory: ${projectPath}`);
+      killTmuxSession(tmuxName);
+      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
       continue;
     }
 
@@ -1004,22 +1071,7 @@ if (isNaN(port) || port < 1 || port > 65535) {
 
 log('INFO', `Tower server starting on port ${port}`);
 
-// Interface for port registry entries (from SQLite)
-interface PortAllocation {
-  project_path: string;
-  base_port: number;
-  pid: number | null;
-  registered_at: string;
-  last_used_at: string;
-}
-
-// Interface for gate status
-interface GateStatus {
-  hasGate: boolean;
-  gateName?: string;
-  builderId?: string;
-  timestamp?: number;
-}
+// GateStatus type is imported from utils/gate-status.ts
 
 // Interface for terminal entry in tower UI
 interface TerminalEntry {
@@ -1034,57 +1086,36 @@ interface TerminalEntry {
 interface InstanceStatus {
   projectPath: string;
   projectName: string;
-  basePort: number;
-  dashboardPort: number;
-  architectPort: number;
-  registered: string;
-  lastUsed?: string;
   running: boolean;
   proxyUrl: string; // Tower proxy URL for dashboard
   architectUrl: string; // Direct URL to architect terminal
   terminals: TerminalEntry[]; // All available terminals
-  ports: {
-    type: string;
-    port: number;
-    url: string;
-    active: boolean;
-  }[];
   gateStatus?: GateStatus;
 }
 
 /**
- * Load port allocations from SQLite database
+ * Get all known project paths from terminal_sessions and in-memory cache
  */
-function loadPortAllocations(): PortAllocation[] {
+function getKnownProjectPaths(): string[] {
+  const projectPaths = new Set<string>();
+
+  // From terminal_sessions table (persists across Tower restarts)
   try {
     const db = getGlobalDb();
-    return db.prepare('SELECT * FROM port_allocations ORDER BY last_used_at DESC').all() as PortAllocation[];
-  } catch (err) {
-    log('ERROR', `Error loading port allocations: ${(err as Error).message}`);
-    return [];
+    const sessions = db.prepare('SELECT DISTINCT project_path FROM terminal_sessions').all() as { project_path: string }[];
+    for (const s of sessions) {
+      projectPaths.add(s.project_path);
+    }
+  } catch {
+    // Table may not exist yet
   }
-}
 
-/**
- * Check if a port is listening
- */
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
-    socket.connect(port, '127.0.0.1');
-  });
+  // From in-memory cache (includes projects activated this session)
+  for (const [projectPath] of projectTerminals) {
+    projectPaths.add(projectPath);
+  }
+
+  return Array.from(projectPaths);
 }
 
 /**
@@ -1115,6 +1146,80 @@ async function getBasePortForProject(projectPath: string): Promise<number | null
   }
 }
 
+// Cloudflared tunnel management
+let tunnelProcess: ReturnType<typeof spawn> | null = null;
+let tunnelUrl: string | null = null;
+
+function isCloudflaredInstalled(): boolean {
+  try {
+    execSync('which cloudflared', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getTunnelStatus(): { available: boolean; running: boolean; url: string | null } {
+  return {
+    available: isCloudflaredInstalled(),
+    running: tunnelProcess !== null && tunnelUrl !== null,
+    url: tunnelUrl,
+  };
+}
+
+async function startTunnel(port: number): Promise<{ success: boolean; url?: string; error?: string }> {
+  if (!isCloudflaredInstalled()) {
+    return { success: false, error: 'cloudflared not installed. Install with: brew install cloudflared' };
+  }
+
+  if (tunnelProcess) {
+    return { success: true, url: tunnelUrl || undefined };
+  }
+
+  return new Promise((resolve) => {
+    tunnelProcess = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const handleOutput = (data: Buffer) => {
+      const text = data.toString();
+      const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (match && !tunnelUrl) {
+        tunnelUrl = match[0];
+        log('INFO', `Cloudflared tunnel started: ${tunnelUrl}`);
+        resolve({ success: true, url: tunnelUrl });
+      }
+    };
+
+    tunnelProcess.stdout?.on('data', handleOutput);
+    tunnelProcess.stderr?.on('data', handleOutput);
+
+    tunnelProcess.on('close', (code) => {
+      log('INFO', `Cloudflared tunnel closed with code ${code}`);
+      tunnelProcess = null;
+      tunnelUrl = null;
+    });
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      if (!tunnelUrl) {
+        tunnelProcess?.kill();
+        tunnelProcess = null;
+        resolve({ success: false, error: 'Tunnel startup timed out' });
+      }
+    }, 30000);
+  });
+}
+
+function stopTunnel(): { success: boolean } {
+  if (tunnelProcess) {
+    tunnelProcess.kill();
+    tunnelProcess = null;
+    tunnelUrl = null;
+    log('INFO', 'Cloudflared tunnel stopped');
+  }
+  return { success: true };
+}
 // SSE (Server-Sent Events) infrastructure for push notifications
 interface SSEClient {
   res: http.ServerResponse;
@@ -1142,42 +1247,6 @@ function broadcastNotification(notification: { type: string; title: string; body
 }
 
 /**
- * Get gate status for a project by querying its dashboard API.
- * Uses timeout to prevent hung projects from stalling tower status.
- */
-async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000); // 2-second timeout
-
-  try {
-    const response = await fetch(`http://localhost:${basePort}/api/status`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!response.ok) return { hasGate: false };
-
-    const projectStatus = await response.json();
-    // Check if any builder has a pending gate
-    const builderWithGate = projectStatus.builders?.find(
-      (b: { gateStatus?: { waiting?: boolean }; status?: string; currentGate?: string; id?: string }) =>
-        b.gateStatus?.waiting || b.status === 'gate-pending'
-    );
-
-    if (builderWithGate) {
-      return {
-        hasGate: true,
-        gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
-        builderId: builderWithGate.id,
-        timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
-      };
-    }
-  } catch {
-    // Project dashboard not responding or timeout
-  }
-  return { hasGate: false };
-}
-
-/**
  * Get terminal list for a project from tower's registry.
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server fetch.
  * Returns architect, builders, and shells with their URLs.
@@ -1201,10 +1270,13 @@ async function getTerminalsForProject(
   // if their SQLite rows were deleted by external interference (e.g., tests).
   const freshEntry: ProjectTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
 
-  // Preserve file tabs from existing entry (not stored in SQLite)
+  // Load file tabs from SQLite (persisted across restarts)
   const existingEntry = projectTerminals.get(normalizedPath);
-  if (existingEntry) {
+  if (existingEntry && existingEntry.fileTabs.size > 0) {
+    // Use in-memory state if already populated (avoids redundant DB reads)
     freshEntry.fileTabs = existingEntry.fileTabs;
+  } else {
+    freshEntry.fileTabs = loadFileTabsForProject(projectPath);
   }
 
   for (const dbSession of dbSessions) {
@@ -1274,7 +1346,7 @@ async function getTerminalsForProject(
   if (existingEntry) {
     if (existingEntry.architect && !freshEntry.architect) {
       const session = manager.getSession(existingEntry.architect);
-      if (session) {
+      if (session && session.status === 'running') {
         freshEntry.architect = existingEntry.architect;
         terminals.push({
           type: 'architect',
@@ -1288,7 +1360,7 @@ async function getTerminalsForProject(
     for (const [builderId, terminalId] of existingEntry.builders) {
       if (!freshEntry.builders.has(builderId)) {
         const session = manager.getSession(terminalId);
-        if (session) {
+        if (session && session.status === 'running') {
           freshEntry.builders.set(builderId, terminalId);
           terminals.push({
             type: 'builder',
@@ -1303,7 +1375,7 @@ async function getTerminalsForProject(
     for (const [shellId, terminalId] of existingEntry.shells) {
       if (!freshEntry.shells.has(shellId)) {
         const session = manager.getSession(terminalId);
-        if (session) {
+        if (session && session.status === 'running') {
           freshEntry.shells.set(shellId, terminalId);
           terminals.push({
             type: 'shell',
@@ -1367,9 +1439,8 @@ async function getTerminalsForProject(
   // Atomically replace the cache entry
   projectTerminals.set(normalizedPath, freshEntry);
 
-  // Gate status - builders don't have gate tracking yet in tower
-  // TODO: Add gate status tracking when porch integration is updated
-  const gateStatus: GateStatus = { hasGate: false };
+  // Read gate status from porch YAML files
+  const gateStatus = getGateStatusForProject(projectPath);
 
   return { terminals, gateStatus };
 }
@@ -1397,72 +1468,53 @@ function isTempDirectory(projectPath: string): boolean {
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
-  const allocations = loadPortAllocations();
+  const knownPaths = getKnownProjectPaths();
   const instances: InstanceStatus[] = [];
 
-  for (const allocation of allocations) {
+  for (const projectPath of knownPaths) {
     // Skip builder worktrees - they're managed by their parent project
-    if (allocation.project_path.includes('/.builders/')) {
+    if (projectPath.includes('/.builders/')) {
       continue;
     }
 
     // Skip projects in temp directories (e.g. test artifacts) or whose directories no longer exist
-    if (!allocation.project_path.startsWith('remote:')) {
-      if (!fs.existsSync(allocation.project_path)) {
+    if (!projectPath.startsWith('remote:')) {
+      if (!fs.existsSync(projectPath)) {
         continue;
       }
-      if (isTempDirectory(allocation.project_path)) {
+      if (isTempDirectory(projectPath)) {
         continue;
       }
     }
-    const basePort = allocation.base_port;
-    const dashboardPort = basePort;
 
     // Encode project path for proxy URL
-    const encodedPath = Buffer.from(allocation.project_path).toString('base64url');
+    const encodedPath = Buffer.from(projectPath).toString('base64url');
     const proxyUrl = `/project/${encodedPath}/`;
 
     // Get terminals and gate status from tower's registry
     // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
-    const { terminals, gateStatus } = await getTerminalsForProject(allocation.project_path, proxyUrl);
+    const { terminals, gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
 
     // Project is active if it has any terminals (Phase 4: no port check needed)
     const isActive = terminals.length > 0;
 
-    const ports = [
-      {
-        type: 'Dashboard',
-        port: dashboardPort,
-        url: proxyUrl, // Use tower proxy URL, not raw localhost
-        active: isActive,
-      },
-    ];
-
     instances.push({
-      projectPath: allocation.project_path,
-      projectName: getProjectName(allocation.project_path),
-      basePort,
-      dashboardPort,
-      architectPort: basePort + 1, // Legacy field for backward compat
-      registered: allocation.registered_at,
-      lastUsed: allocation.last_used_at,
+      projectPath,
+      projectName: getProjectName(projectPath),
       running: isActive,
-      proxyUrl, // Tower proxy URL for dashboard
-      architectUrl: `${proxyUrl}?tab=architect`, // Direct URL to architect terminal
-      terminals, // All available terminals
-      ports,
+      proxyUrl,
+      architectUrl: `${proxyUrl}?tab=architect`,
+      terminals,
       gateStatus,
     });
   }
 
-  // Sort: running first, then by last used (most recent first)
+  // Sort: running first, then by project name
   instances.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
-    const aTime = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
-    const bTime = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
-    return bTime - aTime;
+    return a.projectName.localeCompare(b.projectName);
   });
 
   return instances;
@@ -1548,9 +1600,6 @@ async function getDirectorySuggestions(inputPath: string): Promise<{ path: strin
  * Auto-adopts non-codev directories and creates architect terminal
  */
 async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
-  // Clean up stale port allocations before launching (handles machine restarts)
-  cleanupStaleEntries();
-
   // Validate path exists
   if (!fs.existsSync(projectPath)) {
     return { success: false, error: `Path does not exist: ${projectPath}` };
@@ -1583,44 +1632,8 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   // Phase 4 (Spec 0090): Tower manages terminals directly
   // No dashboard-server spawning - tower handles everything
   try {
-    // Clear any stale state file
-    const stateFile = path.join(projectPath, '.agent-farm', 'state.json');
-    if (fs.existsSync(stateFile)) {
-      try {
-        fs.unlinkSync(stateFile);
-      } catch {
-        // Ignore - file might not exist or be locked
-      }
-    }
-
     // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
-    const db = getGlobalDb();
-    let allocation = db
-      .prepare('SELECT base_port FROM port_allocations WHERE project_path = ? OR project_path = ?')
-      .get(projectPath, resolvedPath) as { base_port: number } | undefined;
-
-    if (!allocation) {
-      // Allocate a new port for this project
-      // Find the next available port block (starting at 4200, incrementing by 100)
-      const existingPorts = db
-        .prepare('SELECT base_port FROM port_allocations ORDER BY base_port')
-        .all() as { base_port: number }[];
-
-      let nextPort = 4200;
-      for (const { base_port } of existingPorts) {
-        if (base_port >= nextPort) {
-          nextPort = base_port + 100;
-        }
-      }
-
-      db.prepare(
-        "INSERT INTO port_allocations (project_path, project_name, base_port, created_at) VALUES (?, ?, ?, datetime('now'))"
-      ).run(resolvedPath, path.basename(projectPath), nextPort);
-
-      allocation = { base_port: nextPort };
-      log('INFO', `Allocated port ${nextPort} for project: ${projectPath}`);
-    }
 
     // Initialize project terminal entry
     const entry = getProjectTerminalsEntry(resolvedPath);
@@ -1651,15 +1664,26 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
 
         // Wrap in tmux for session persistence across Tower restarts
         const tmuxName = `architect-${path.basename(projectPath)}`;
+        const sanitizedTmuxName = sanitizeTmuxSessionName(tmuxName);
         let activeTmuxSession: string | null = null;
 
         if (tmuxAvailable) {
-          const sanitizedName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
-          if (sanitizedName) {
+          // Reuse existing tmux session if it's still alive (e.g., after
+          // disconnect timeout killed the `tmux attach` process but the
+          // architect process inside tmux kept running).
+          if (tmuxSessionExists(sanitizedTmuxName)) {
             cmd = 'tmux';
-            cmdArgs = ['attach-session', '-t', sanitizedName];
-            activeTmuxSession = sanitizedName;
-            log('INFO', `Created tmux session "${sanitizedName}" for architect`);
+            cmdArgs = ['attach-session', '-t', sanitizedTmuxName];
+            activeTmuxSession = sanitizedTmuxName;
+            log('INFO', `Reconnecting to existing tmux session "${sanitizedTmuxName}" for architect`);
+          } else {
+            const createdName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
+            if (createdName) {
+              cmd = 'tmux';
+              cmdArgs = ['attach-session', '-t', createdName];
+              activeTmuxSession = createdName;
+              log('INFO', `Created tmux session "${createdName}" for architect`);
+            }
           }
         }
 
@@ -1676,19 +1700,30 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         // TICK-001: Save to SQLite for persistence (with tmux session name)
         saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
 
-        // Auto-restart architect on exit (restored from pre-Phase 4 dashboard-server.ts)
+        // Auto-restart architect on exit
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
           const startedAt = Date.now();
           ptySession.on('exit', () => {
-            entry.architect = undefined;
+            // Re-read entry from the Map — getTerminalsForProject() periodically
+            // replaces the Map entry with a fresh object, so the `entry` captured
+            // in the closure may be stale.
+            const currentEntry = getProjectTerminalsEntry(resolvedPath);
+            if (currentEntry.architect === session.id) {
+              currentEntry.architect = undefined;
+            }
             deleteTerminalSession(session.id);
 
-            // Kill stale tmux session so restart can create a fresh one
-            if (activeTmuxSession) {
-              try {
-                execSync(`tmux kill-session -t "${activeTmuxSession}" 2>/dev/null`, { stdio: 'ignore' });
-              } catch { /* already gone */ }
+            // Check if the tmux session's inner process is still alive.
+            // The node-pty process is `tmux attach` — it exits on disconnect
+            // timeout, but the tmux session (and the architect process inside
+            // it) may still be running. Only kill tmux if the inner process
+            // has also exited (e.g., user typed "exit" or process crashed).
+            const tmuxAlive = activeTmuxSession && tmuxSessionExists(activeTmuxSession);
+            if (activeTmuxSession && !tmuxAlive) {
+              log('INFO', `Tmux session "${activeTmuxSession}" already gone for ${projectPath}`);
+            } else if (tmuxAlive) {
+              log('INFO', `Tmux session "${activeTmuxSession}" still alive for ${projectPath}, preserving for reconnect`);
             }
 
             // Only restart if the architect ran for at least 5s (prevents crash loops)
@@ -1821,7 +1856,6 @@ const templatePath = findTemplatePath();
 // WebSocket server for terminal connections (Phase 2 - Spec 0090)
 let terminalWss: WebSocketServer | null = null;
 
-// React dashboard dist path (for serving directly from tower)
 // React dashboard dist path (for serving directly from tower)
 // Phase 4 (Spec 0090): Tower serves everything directly, no dashboard-server
 const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
@@ -1994,11 +2028,9 @@ const server = http.createServer(async (req, res) => {
       const projects = instances.map((i) => ({
         path: i.projectPath,
         name: i.projectName,
-        basePort: i.basePort,
         active: i.running,
         proxyUrl: i.proxyUrl,
         terminals: i.terminals.length,
-        lastUsed: i.lastUsed,
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ projects }));
@@ -2039,7 +2071,6 @@ const server = http.createServer(async (req, res) => {
             path: instance.projectPath,
             name: instance.projectName,
             active: instance.running,
-            basePort: instance.basePort,
             terminals: instance.terminals,
             gateStatus: instance.gateStatus,
           })
@@ -2070,14 +2101,14 @@ const server = http.createServer(async (req, res) => {
 
       // POST /api/projects/:path/deactivate
       if (req.method === 'POST' && action === 'deactivate') {
-        // Check if project exists in port allocations
-        const allocations = loadPortAllocations();
+        // Check if project is known (has terminals or sessions)
+        const knownPaths = getKnownProjectPaths();
         const resolvedPath = fs.existsSync(projectPath) ? fs.realpathSync(projectPath) : projectPath;
-        const allocation = allocations.find(
-          (a) => a.project_path === projectPath || a.project_path === resolvedPath
+        const isKnown = knownPaths.some(
+          (p) => p === projectPath || p === resolvedPath
         );
 
-        if (!allocation) {
+        if (!isKnown) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Project not found' }));
           return;
@@ -2452,21 +2483,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     // API: Stop an instance
-    // Phase 4 (Spec 0090): Accept projectPath or basePort for backwards compat
     if (req.method === 'POST' && url.pathname === '/api/stop') {
       const body = await parseJsonBody(req);
-      let targetPath = body.projectPath as string;
-
-      // Backwards compat: if basePort provided, find the project path
-      if (!targetPath && body.basePort) {
-        const allocations = loadPortAllocations();
-        const allocation = allocations.find((a) => a.base_port === body.basePort);
-        targetPath = allocation?.project_path || '';
-      }
+      const targetPath = body.projectPath as string;
 
       if (!targetPath) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Missing projectPath or basePort' }));
+        res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
         return;
       }
 
@@ -2505,8 +2528,8 @@ const server = http.createServer(async (req, res) => {
       const subPath = pathParts.slice(3).join('/');
 
       if (!encodedPath) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Missing project path');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing project path' }));
         return;
       }
 
@@ -2521,12 +2544,10 @@ const server = http.createServer(async (req, res) => {
         // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
         projectPath = normalizeProjectPath(projectPath);
       } catch {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Invalid project path encoding');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
         return;
       }
-
-      const basePort = await getBasePortForProject(projectPath);
 
       // Phase 4 (Spec 0090): Tower handles everything directly
       const isApiCall = subPath.startsWith('api/') || subPath === 'api';
@@ -2616,7 +2637,7 @@ const server = http.createServer(async (req, res) => {
             const session = manager.getSession(entry.architect);
             if (session) {
               state.architect = {
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 terminalId: entry.architect,
               };
@@ -2630,7 +2651,7 @@ const server = http.createServer(async (req, res) => {
               state.utils.push({
                 id: shellId,
                 name: `Shell ${shellId.replace('shell-', '')}`,
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 terminalId,
               });
@@ -2644,7 +2665,7 @@ const server = http.createServer(async (req, res) => {
               state.builders.push({
                 id: builderId,
                 name: `Builder ${builderId}`,
-                port: basePort || 0,
+                port: 0,
                 pid: session.pid || 0,
                 status: 'running',
                 phase: '',
@@ -2711,7 +2732,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               id: shellId,
-              port: basePort || 0,
+              port: 0,
               name: `Shell ${shellId.replace('shell-', '')}`,
               terminalId: session.id,
             }));
@@ -2744,10 +2765,10 @@ const server = http.createServer(async (req, res) => {
               ? filePath
               : path.join(projectPath, filePath);
 
-            // Security: ensure path is within project or is absolute path user provided
+            // Security: ensure resolved path is within project root
             const normalizedFull = path.normalize(fullPath);
             const normalizedProject = path.normalize(projectPath);
-            if (!normalizedFull.startsWith(normalizedProject) && !path.isAbsolute(filePath)) {
+            if (!normalizedFull.startsWith(normalizedProject + path.sep) && normalizedFull !== normalizedProject) {
               res.writeHead(403, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Path outside project' }));
               return;
@@ -2771,9 +2792,11 @@ const server = http.createServer(async (req, res) => {
               }
             }
 
-            // Create new file tab
-            const id = `file-${Date.now().toString(36)}`;
-            entry.fileTabs.set(id, { id, path: fullPath, createdAt: Date.now() });
+            // Create new file tab (write-through: in-memory + SQLite)
+            const id = `file-${crypto.randomUUID()}`;
+            const createdAt = Date.now();
+            entry.fileTabs.set(id, { id, path: fullPath, createdAt });
+            saveFileTab(id, projectPath, fullPath, createdAt);
 
             log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
 
@@ -2834,6 +2857,7 @@ const server = http.createServer(async (req, res) => {
               }));
             }
           } catch (err) {
+            log('ERROR', `GET /api/file/:id failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2848,8 +2872,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -2863,8 +2887,9 @@ const server = http.createServer(async (req, res) => {
             });
             res.end(data);
           } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end((err as Error).message);
+            log('ERROR', `GET /api/file/:id/raw failed: ${(err as Error).message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
           }
           return;
         }
@@ -2902,6 +2927,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
           } catch (err) {
+            log('ERROR', `POST /api/file/:id/save failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2915,10 +2941,11 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
-          // Check if it's a file tab first (Spec 0092)
+          // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
           if (tabId.startsWith('file-')) {
             if (entry.fileTabs.has(tabId)) {
               entry.fileTabs.delete(tabId);
+              deleteFileTab(tabId);
               log('INFO', `Deleted file tab: ${tabId}`);
               res.writeHead(204);
               res.end();
@@ -3065,7 +3092,8 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified, staged, untracked }));
           } catch (err) {
-            // Not a git repo or git command failed
+            // Not a git repo or git command failed — return graceful degradation with error field
+            log('WARN', `GET /api/git/status failed: ${(err as Error).message}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified: [], staged: [], untracked: [], error: (err as Error).message }));
           }
@@ -3101,8 +3129,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -3121,8 +3149,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
               res.end(content);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/file failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -3146,8 +3175,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ ok: true }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `POST /api/annotate/:id/save failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -3159,8 +3189,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ mtime: stat.mtimeMs }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/api/mtime failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -3177,8 +3208,9 @@ const server = http.createServer(async (req, res) => {
               });
               res.end(data);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/${subRoute} failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -3271,8 +3303,8 @@ const server = http.createServer(async (req, res) => {
     res.end('Not found');
   } catch (err) {
     log('ERROR', `Request error: ${(err as Error).message}`);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Internal server error: ' + (err as Error).message);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
   }
 });
 

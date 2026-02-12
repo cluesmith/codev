@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 
 // Test configuration
@@ -70,7 +70,7 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test' },
+    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
   });
 
   let stderr = '';
@@ -144,6 +144,9 @@ describe('Tower API (Phase 1)', () => {
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
   });
 
   describe('GET /health', () => {
@@ -283,16 +286,18 @@ describe('Tower API (Phase 1)', () => {
       const activateData = await activateRes.json();
       expect(activateData.success).toBe(true);
 
-      // Give time for terminal to be created and saved to SQLite
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Verify project now appears in the projects list with terminals
-      const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
-      expect(listRes.ok).toBe(true);
-      const listData = await listRes.json();
-      const project = listData.projects.find((p: { path: string }) =>
-        p.path === testProjectDir || p.path.includes('tower-sqlite-test')
-      );
+      // Poll for project to appear in the projects list with terminals
+      let project: any;
+      for (let i = 0; i < 20; i++) {
+        const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
+        expect(listRes.ok).toBe(true);
+        const listData = await listRes.json();
+        project = listData.projects.find((p: { path: string }) =>
+          p.path === testProjectDir || p.path.includes('tower-sqlite-test')
+        );
+        if (project?.terminals > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
       expect(project).toBeDefined();
       expect(project.terminals).toBeGreaterThan(0);
 
@@ -310,7 +315,7 @@ describe('Tower API (Phase 1)', () => {
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
 
       // Deactivate project
       const deactivateRes = await fetch(
@@ -348,7 +353,7 @@ describe('Tower API (Phase 1)', () => {
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
     });
 
     afterEach(async () => {
