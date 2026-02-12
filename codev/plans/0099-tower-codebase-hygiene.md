@@ -48,7 +48,7 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 - `packages/codev/src/agent-farm/commands/status.ts` — remove port display column, use `terminalId` for status
 - `packages/codev/src/agent-farm/commands/spawn.ts` — update `startBuilderSession` return type, remove `port: 0, pid: 0` returns
 - `packages/codev/src/agent-farm/state.ts` — update serialization if it reads/writes port/pid
-- `packages/codev/src/agent-farm/db/index.ts` — check if SQLite `builders` table has port/pid columns
+- `packages/codev/src/agent-farm/db/index.ts` — SQLite migration: the `builders` table likely has `port`/`pid` columns. Strategy: SQLite doesn't support `DROP COLUMN` in older versions. Instead, keep columns in the schema but stop writing them (set to 0/null). Update queries to not select them. This is safe because `port` and `pid` are always 0 for Tower-backed terminals anyway. No data migration needed — existing rows already have `port=0, pid=0`
 
 #### Acceptance Criteria
 - [ ] `orphan-handler.ts` no longer exists on disk
@@ -101,23 +101,25 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 
 #### Objectives
 - Make `consult.ts` work standalone without Tower dependency
-- Route `open.ts` through TowerClient (remove duplicate `encodeProjectPath`)
+- Route `shell.ts` and `open.ts` through TowerClient (remove duplicate `encodeProjectPath`, add auth headers)
 - Fix `attach.ts` URL construction
 - Fix `getGateStatusForProject()` to read porch YAML instead of dead HTTP fetch
 - Remove `af start --remote` and all associated code
 
 #### Files to Modify
-- `packages/codev/src/agent-farm/commands/consult.ts` — rewrite to spawn consult process directly instead of opening a dashboard shell tab; remove raw fetch
-- `packages/codev/src/agent-farm/commands/open.ts` — import `encodeProjectPath` from `tower-client.ts` instead of local duplicate; add auth header via TowerClient
+- `packages/codev/src/agent-farm/commands/consult.ts` — rewrite: remove dashboard shell tab creation entirely. Use `child_process.spawn` with `{ stdio: 'inherit' }` to run the consult command directly as a subprocess. This makes `consult` work with or without Tower
+- `packages/codev/src/agent-farm/commands/open.ts` — import `encodeProjectPath` from `tower-client.ts` instead of local duplicate; use TowerClient for API calls (gets auth header automatically)
+- `packages/codev/src/agent-farm/utils/shell.ts` — replace local `encodeProjectPath` (if present) with import from `tower-client.ts`; route Tower API calls through TowerClient for auth headers. Note: the spec's "shell.ts" refers to the `af shell` command behavior, which may live in a different file — verify and update the correct file
 - `packages/codev/src/agent-farm/commands/attach.ts` — remove `builder.port` URL construction; use `TowerClient.getProjectUrl()` for browser mode
-- `packages/codev/src/agent-farm/servers/tower-server.ts` — rewrite `getGateStatusForProject()` to read porch YAML files from project path
+- `packages/codev/src/agent-farm/servers/tower-server.ts` — rewrite `getGateStatusForProject()` to read porch YAML files from the project path. Use `fs.readFileSync` and simple YAML key extraction (porch status files are simple enough to parse without a YAML library — look for `gate:` and `status:` lines)
 - `packages/codev/src/agent-farm/commands/start.ts` — remove `startRemote()`, `parseRemote()`, `checkPasswordlessSSH()`, `checkRemoteVersions()`, `--remote` option from `StartOptions`
 - `packages/codev/src/agent-farm/types.ts` — remove `remote` and `allowInsecureRemote` from `StartOptions`
 
 #### Acceptance Criteria
-- [ ] `consult.ts` works without Tower running (spawns process directly)
+- [ ] `consult.ts` works without Tower running (spawns process via `child_process.spawn`)
 - [ ] `open.ts` imports `encodeProjectPath` from `tower-client.ts`, no local duplicate
 - [ ] `open.ts` sends auth header (`codev-web-key`) via TowerClient
+- [ ] `shell.ts` / `af shell` uses TowerClient, no duplicate `encodeProjectPath`
 - [ ] `attach.ts --browser` generates Tower dashboard URL via `TowerClient.getProjectUrl()`
 - [ ] `getGateStatusForProject()` reads porch YAML, no HTTP fetch
 - [ ] `--remote` flag and all SSH code removed from start.ts
@@ -127,6 +129,7 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 - **Unit Tests**: Test that `consult.ts` spawns process correctly without Tower
 - **Unit Tests**: Test `getGateStatusForProject()` reads YAML from filesystem
 - **Build Test**: TypeScript compilation succeeds
+- **Grep verification**: No duplicate `encodeProjectPath` definitions outside `tower-client.ts`
 - **Grep verification**: No references to `localhost:${dashboardPort}` in consult.ts
 
 ---
@@ -175,6 +178,7 @@ CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
 - **Unit Tests**: Test file tab persistence round-trip (create → restart → load)
 - **Unit Tests**: Test tab deletion removes from SQLite
 - **Integration Test**: Verify `file_tabs` table is created on startup
+- **E2E/Playwright**: Run existing Tower baseline tests to verify no regressions in tab API behavior
 
 ---
 
@@ -218,7 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| Removing port/pid breaks serialized state | Medium | Medium | Check SQLite schema, handle missing columns gracefully |
+| Removing port/pid from TypeScript types | Medium | Medium | Keep SQLite columns but stop writing them; existing rows already have 0 values. TypeScript compiler catches all missed references |
 | Spec 0098 merge conflicts on shared files | Medium | Low | 0098 should land first; resolve at merge time |
 | File tab persistence edge cases | Low | Low | Simple write-through pattern, no complex sync |
 | Tower route changes break dashboard UI | Low | Medium | Test with Playwright if UI changes are affected |
