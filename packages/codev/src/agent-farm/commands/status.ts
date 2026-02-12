@@ -68,7 +68,7 @@ export async function status(): Promise<void> {
 
     // Project not found in tower, show "not active"
     logger.kv('Project', chalk.gray('not active in tower'));
-    logger.info(`Run 'af dash start' to activate this project in Tower`);
+    logger.info(`Run 'af tower start' to activate this project`);
     return;
   }
 
