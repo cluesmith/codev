@@ -122,40 +122,71 @@ When a file path link is clicked:
 3. Tower resolves relative to the terminal's cwd (available from pty session metadata)
 4. Tower validates the resolved path exists and is within the project tree
 
-This requires a small API addition: `POST /api/tabs/file` accepts an optional `terminalId` field for cwd-relative resolution.
+### API Contract
+
+`POST /project/:encodedPath/api/tabs/file` — extended payload:
+
+```typescript
+interface CreateFileTabRequest {
+  path: string;          // File path (absolute or relative)
+  line?: number;         // Line to scroll to
+  terminalId?: string;   // Terminal session ID for cwd-relative resolution
+}
+```
+
+When `terminalId` is provided and `path` is relative:
+1. Tower looks up the terminal session's cwd from pty session metadata (`PtySession.config.cwd`)
+2. Resolves `path` relative to that cwd
+3. Validates the resolved absolute path is within the project root or a known worktree (`.builders/`)
+4. Rejects with 403 if the resolved path escapes the project tree
+5. Follows symlinks via `fs.realpathSync()` before the containment check
+
+When `terminalId` is omitted, existing behavior is unchanged (resolves relative to project root).
+
+### Security
+
+- **Path containment**: All resolved paths must be within the project root directory or a `.builders/` worktree. Symlinks are resolved before checking containment. Paths that escape (e.g., `../../.ssh/id_rsa`) return 403.
+- **Path normalization**: `path.resolve()` + `fs.realpathSync()` to collapse `..`, `.`, and symlinks before validation.
+- **No shell execution**: File opening reads file content directly — no shell commands are invoked from user-provided paths.
 
 ## Test Scenarios
 
-### Functional Tests
+### Unit Tests (vitest)
 
-1. **Basic file path**: Terminal outputs `src/foo.ts`, verify it's underlined and clickable
-2. **Path with line**: `src/foo.ts:42` opens file and scrolls to line 42
-3. **Path with line+col**: `src/foo.ts:42:15` passes both through
-4. **Absolute path**: `/Users/mwk/project/foo.ts` works regardless of cwd
-5. **Builder terminal**: Relative path in builder resolves to worktree file
-6. **URL still works**: `https://example.com` opens in new tab (not file viewer)
-7. **No false positives**: `github.com`, `@xterm/xterm`, `v2.0.0` are NOT clickable
+1. **`FILE_PATH_REGEX` matches**: Test all pattern types (relative, absolute, with line, with line+col, VS Code style, dot-relative, parent-relative)
+2. **`FILE_PATH_REGEX` rejects**: URLs, domains, package specifiers, version strings
+3. **`parseFilePath` extracts correctly**: Colon format, parenthesis format, bare path
+4. **`looksLikeFilePath` filters**: Rejects URLs and domains, accepts valid paths
+5. **Path containment**: Resolved path within project → allowed; path escaping project → 403
+6. **`terminalId` resolution**: Relative path + terminal cwd → correct absolute path
 
-### Visual Tests
+### Playwright E2E Tests
 
-1. **Dotted underline**: File paths have dotted underline (distinct from URL solid underline)
-2. **Hover cursor**: Pointer cursor on hover over file path
-3. **No visual noise**: Plain text with dots (sentences, config values) not underlined
+7. **Basic file path clickable**: Terminal outputs `src/foo.ts`, Cmd+Click opens file viewer
+8. **Path with line**: `src/foo.ts:42` opens file and scrolls to line 42
+9. **Absolute path**: `/path/to/project/foo.ts` works regardless of terminal context
+10. **URL still works**: `https://example.com` opens in new tab (not file viewer)
+11. **No false positives**: `github.com`, `@xterm/xterm`, `v2.0.0` are NOT clickable
+12. **Non-existent file**: Click a path to a missing file, verify error indicator shown in viewer
+
+### Visual Tests (Playwright screenshot comparison)
+
+13. **Dotted underline**: File paths have dotted underline (distinct from URL solid underline)
+14. **Hover cursor**: Pointer cursor on hover over file path
+15. **No visual noise**: Plain text with dots (sentences, config values) not underlined
 
 ## Design Decisions
 
-- **Cmd/Ctrl+Click required** — plain click is reserved for text selection. This matches VS Code's integrated terminal behavior.
-
-## Open Questions
-
-### Important (Affects Design)
-
-- [ ] Should non-existent files still be clickable (and show an error), or should we verify existence before marking as a link?
+- **Cmd/Ctrl+Click required** — Cmd+Click on macOS, Ctrl+Click on Linux/Windows. Plain click is reserved for text selection. This matches VS Code's integrated terminal behavior.
+- **Non-existent files are still clickable** — all file path patterns are marked as links. When clicked, if the file doesn't exist, the file viewer shows a visual error indicator (e.g., a cross icon or "File not found" message) rather than silently failing. This avoids the performance cost of checking file existence for every detected path on every terminal render.
+- **macOS-only for now** — Codev currently targets macOS. Windows drive-letter paths (`C:\foo\bar.ts`) are out of scope but the regex can be extended later.
+- **No quoted/bracketed path support in v1** — paths inside quotes (`"foo/bar.ts"`) or brackets (`[foo/bar.ts]`) are matched by the inner content only. Wrapper characters are not included in the link. This can be refined if false negatives are reported.
 
 ## Notes
 
 Most of the code exists. The main implementation work is:
 1. Create a custom `ILinkProvider` for file paths using the existing `FILE_PATH_REGEX` and `parseFilePath`
-2. Add dotted underline decoration
+2. Add dotted underline decoration (use existing dashboard CSS variables for colors)
 3. Wire into `onFileOpen` (already connected to `createFileTab`)
 4. Add optional `terminalId` to the file tab API for cwd resolution
+5. Add path containment validation in the Tower's file tab endpoint

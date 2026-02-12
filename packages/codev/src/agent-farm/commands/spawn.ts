@@ -674,14 +674,25 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
   const hasPlan = existsSync(planFile);
 
-  logger.header(`Spawning Builder ${builderId} (spec)`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (spec)`);
   logger.kv('Spec', specFile);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
 
   await ensureDirectories(config);
   await checkDependencies();
-  await createWorktree(config, branchName, worktreePath);
+
+  if (options.resume) {
+    if (!existsSync(worktreePath)) {
+      fatal(`Cannot resume: worktree does not exist at ${worktreePath}`);
+    }
+    if (!existsSync(resolve(worktreePath, '.git'))) {
+      fatal(`Cannot resume: ${worktreePath} is not a valid git worktree`);
+    }
+    logger.info('Resuming existing worktree (skipping creation)');
+  } else {
+    await createWorktree(config, branchName, worktreePath);
+  }
 
   // Resolve protocol using precedence: --use-protocol > spec header > default
   const protocol = await resolveProtocol(options, config);
@@ -767,7 +778,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   const branchName = `builder/task-${shortId}`;
   const worktreePath = resolve(config.buildersDir, builderId);
 
-  logger.header(`Spawning Builder ${builderId} (task)`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (task)`);
   logger.kv('Task', taskText.substring(0, 60) + (taskText.length > 60 ? '...' : ''));
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
@@ -778,7 +789,18 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
 
   await ensureDirectories(config);
   await checkDependencies();
-  await createWorktree(config, branchName, worktreePath);
+
+  if (options.resume) {
+    if (!existsSync(worktreePath)) {
+      fatal(`Cannot resume: worktree does not exist at ${worktreePath}`);
+    }
+    if (!existsSync(resolve(worktreePath, '.git'))) {
+      fatal(`Cannot resume: ${worktreePath} is not a valid git worktree`);
+    }
+    logger.info('Resuming existing worktree (skipping creation)');
+  } else {
+    await createWorktree(config, branchName, worktreePath);
+  }
 
   // Build the prompt — only include protocol if explicitly requested
   let taskDescription = taskText;
@@ -860,14 +882,25 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
   const branchName = `builder/${protocolName}-${shortId}`;
   const worktreePath = resolve(config.buildersDir, builderId);
 
-  logger.header(`Spawning Builder ${builderId} (protocol)`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (protocol)`);
   logger.kv('Protocol', protocolName);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
 
   await ensureDirectories(config);
   await checkDependencies();
-  await createWorktree(config, branchName, worktreePath);
+
+  if (options.resume) {
+    if (!existsSync(worktreePath)) {
+      fatal(`Cannot resume: worktree does not exist at ${worktreePath}`);
+    }
+    if (!existsSync(resolve(worktreePath, '.git'))) {
+      fatal(`Cannot resume: ${worktreePath} is not a valid git worktree`);
+    }
+    logger.info('Resuming existing worktree (skipping creation)');
+  } else {
+    await createWorktree(config, branchName, worktreePath);
+  }
 
   // Load protocol definition and resolve mode
   const protocolDef = loadProtocol(config, protocolName);
@@ -972,13 +1005,24 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   const branchName = `builder/worktree-${shortId}`;
   const worktreePath = resolve(config.buildersDir, builderId);
 
-  logger.header(`Spawning Worktree ${builderId}`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Worktree ${builderId}`);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
 
   await ensureDirectories(config);
   await checkDependencies();
-  await createWorktree(config, branchName, worktreePath);
+
+  if (options.resume) {
+    if (!existsSync(worktreePath)) {
+      fatal(`Cannot resume: worktree does not exist at ${worktreePath}`);
+    }
+    if (!existsSync(resolve(worktreePath, '.git'))) {
+      fatal(`Cannot resume: ${worktreePath} is not a valid git worktree`);
+    }
+    logger.info('Resuming existing worktree (skipping creation)');
+  } else {
+    await createWorktree(config, branchName, worktreePath);
+  }
 
   // Load builder role
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
@@ -1151,7 +1195,7 @@ async function checkBugfixCollisions(
 async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issue!;
 
-  logger.header(`Spawning Bugfix Builder for Issue #${issueNumber}`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Bugfix Builder for Issue #${issueNumber}`);
 
   // Fetch issue from GitHub
   logger.info('Fetching issue from GitHub...');
@@ -1176,31 +1220,44 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   logger.kv('Mode', mode.toUpperCase());
 
   // Execute pre-spawn hooks from protocol.json (collision check, issue comment)
-  // If protocol has hooks defined, use them; otherwise fall back to hardcoded behavior
-  if (protocolDef?.hooks?.['pre-spawn']) {
-    await executePreSpawnHooks(protocolDef, {
-      issueNumber,
-      issue,
-      worktreePath,
-      force: options.force,
-      noComment: options.noComment,
-    });
-  } else {
-    // Fallback: hardcoded behavior for backwards compatibility
-    await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
-    if (!options.noComment) {
-      logger.info('Commenting on issue...');
-      try {
-        await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
-      } catch {
-        logger.warn('Warning: Failed to comment on issue (continuing anyway)');
+  // Skip collision checks in resume mode — the worktree is expected to exist
+  if (!options.resume) {
+    if (protocolDef?.hooks?.['pre-spawn']) {
+      await executePreSpawnHooks(protocolDef, {
+        issueNumber,
+        issue,
+        worktreePath,
+        force: options.force,
+        noComment: options.noComment,
+      });
+    } else {
+      // Fallback: hardcoded behavior for backwards compatibility
+      await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+      if (!options.noComment) {
+        logger.info('Commenting on issue...');
+        try {
+          await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
+        } catch {
+          logger.warn('Warning: Failed to comment on issue (continuing anyway)');
+        }
       }
     }
   }
 
   await ensureDirectories(config);
   await checkDependencies();
-  await createWorktree(config, branchName, worktreePath);
+
+  if (options.resume) {
+    if (!existsSync(worktreePath)) {
+      fatal(`Cannot resume: worktree does not exist at ${worktreePath}`);
+    }
+    if (!existsSync(resolve(worktreePath, '.git'))) {
+      fatal(`Cannot resume: ${worktreePath} is not a valid git worktree`);
+    }
+    logger.info('Resuming existing worktree (skipping creation)');
+  } else {
+    await createWorktree(config, branchName, worktreePath);
+  }
 
   // Build the prompt using template
   const templateContext: TemplateContext = {
@@ -1274,7 +1331,8 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   // Refuse to spawn if the main worktree has uncommitted changes.
   // Builders work in git worktrees branched from HEAD — uncommitted changes
   // (specs, plans, codev updates) won't be visible to the builder.
-  if (!options.force) {
+  // Skip this check in resume mode — the worktree already exists with its own branch.
+  if (!options.force && !options.resume) {
     try {
       const { stdout } = await run('git status --porcelain', { cwd: config.projectRoot });
       if (stdout.trim().length > 0) {

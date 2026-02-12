@@ -391,7 +391,7 @@ Removes entries for projects that no longer exist.
 
 ### af tower
 
-Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects.
+Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects and provides cloud connectivity via codevos.ai.
 
 #### af tower start
 
@@ -403,7 +403,6 @@ af tower start [options]
 
 **Options:**
 - `-p, --port <port>` - Port to run on (default: 4100)
-- `-w, --web` - Enable web access mode (requires CODEV_WEB_KEY)
 
 #### af tower stop
 
@@ -415,6 +414,43 @@ af tower stop [options]
 
 **Options:**
 - `-p, --port <port>` - Port to stop (default: 4100)
+
+#### af tower register
+
+Register this tower with codevos.ai for remote access.
+
+```bash
+af tower register [options]
+```
+
+**Options:**
+- `--reauth` - Re-authenticate without changing tower name
+- `-p, --port <port>` - Tower port to signal after registration (default: 4100)
+
+#### af tower deregister
+
+Remove this tower's registration from codevos.ai.
+
+```bash
+af tower deregister [options]
+```
+
+**Options:**
+- `-p, --port <port>` - Tower port to signal after deregistration (default: 4100)
+
+#### af tower status
+
+Show tower status including cloud connection info.
+
+```bash
+af tower status [options]
+```
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**Environment Variables:**
+- `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging.
 
 ---
 

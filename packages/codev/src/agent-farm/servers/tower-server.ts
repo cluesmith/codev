@@ -9,7 +9,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn, execSync, spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
@@ -27,6 +27,8 @@ import {
 import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
+import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
+import { readCloudConfig, getCloudConfigPath, maskApiKey, type CloudConfig } from '../lib/cloud-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,6 +84,192 @@ function cleanupRateLimits(): void {
 
 // Cleanup stale rate limit entries every 5 minutes
 setInterval(cleanupRateLimits, 5 * 60 * 1000);
+
+// ============================================================================
+// Cloud Tunnel Client (Spec 0097 Phase 4)
+// ============================================================================
+
+/** Tunnel client instance — created on startup or via POST /api/tunnel/connect */
+let tunnelClient: TunnelClient | null = null;
+
+/** Config file watcher — watches cloud-config.json for changes */
+let configWatcher: fs.FSWatcher | null = null;
+
+/** Debounce timer for config file watcher events */
+let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+/** Default tunnel port for codevos.ai */
+// TICK-001: tunnelPort is no longer needed — WebSocket connects on the same port
+
+/** Periodic metadata refresh interval (re-sends metadata to codevos.ai) */
+let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Metadata refresh period in milliseconds (30 seconds) */
+const METADATA_REFRESH_MS = 30_000;
+
+/**
+ * Gather current tower metadata (projects + terminals) for codevos.ai.
+ */
+async function gatherMetadata(): Promise<TowerMetadata> {
+  const instances = await getInstances();
+  const projects = instances.map((i) => ({
+    path: i.projectPath,
+    name: i.projectName,
+  }));
+
+  // Build reverse mapping: terminal ID → project path
+  const terminalToProject = new Map<string, string>();
+  for (const [projectPath, entry] of projectTerminals) {
+    if (entry.architect) terminalToProject.set(entry.architect, projectPath);
+    for (const termId of entry.builders.values()) terminalToProject.set(termId, projectPath);
+    for (const termId of entry.shells.values()) terminalToProject.set(termId, projectPath);
+  }
+
+  const manager = terminalManager;
+  const terminals: TowerMetadata['terminals'] = [];
+  if (manager) {
+    for (const session of manager.listSessions()) {
+      terminals.push({
+        id: session.id,
+        projectPath: terminalToProject.get(session.id) ?? '',
+      });
+    }
+  }
+
+  return { projects, terminals };
+}
+
+/**
+ * Start periodic metadata refresh — re-gathers metadata and pushes to codevos.ai
+ * every METADATA_REFRESH_MS while the tunnel is connected.
+ */
+function startMetadataRefresh(): void {
+  stopMetadataRefresh();
+  metadataRefreshInterval = setInterval(async () => {
+    try {
+      if (tunnelClient && tunnelClient.getState() === 'connected') {
+        const metadata = await gatherMetadata();
+        tunnelClient.sendMetadata(metadata);
+      }
+    } catch (err) {
+      log('WARN', `Metadata refresh failed: ${(err as Error).message}`);
+    }
+  }, METADATA_REFRESH_MS);
+}
+
+/**
+ * Stop the periodic metadata refresh.
+ */
+function stopMetadataRefresh(): void {
+  if (metadataRefreshInterval) {
+    clearInterval(metadataRefreshInterval);
+    metadataRefreshInterval = null;
+  }
+}
+
+/**
+ * Create or reconnect the tunnel client using the given config.
+ * Sets up state change listeners and sends initial metadata.
+ */
+async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
+  // Disconnect existing client if any
+  if (tunnelClient) {
+    tunnelClient.disconnect();
+  }
+
+  const client = new TunnelClient({
+    serverUrl: config.server_url,
+    apiKey: config.api_key,
+    towerId: config.tower_id,
+    localPort: port,
+  });
+
+  client.onStateChange((state: TunnelState, prev: TunnelState) => {
+    log('INFO', `Tunnel: ${prev} → ${state}`);
+    if (state === 'connected') {
+      startMetadataRefresh();
+    } else if (prev === 'connected') {
+      stopMetadataRefresh();
+    }
+    if (state === 'auth_failed') {
+      log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower register --reauth\' to update credentials.');
+    }
+  });
+
+  // Gather and set initial metadata before connecting
+  const metadata = await gatherMetadata();
+  client.sendMetadata(metadata);
+
+  tunnelClient = client;
+  client.connect();
+
+  // Ensure config watcher is running — the config directory now exists.
+  // Handles the case where Tower booted before registration (directory didn't
+  // exist, so startConfigWatcher() silently failed at boot time).
+  startConfigWatcher();
+
+  return client;
+}
+
+/**
+ * Start watching cloud-config.json for changes.
+ * On change: reconnect with new credentials.
+ * On delete: disconnect tunnel.
+ */
+function startConfigWatcher(): void {
+  stopConfigWatcher();
+
+  const configPath = getCloudConfigPath();
+  const configDir = path.dirname(configPath);
+  const configFile = path.basename(configPath);
+
+  // Watch the directory (more reliable than watching the file directly)
+  try {
+    configWatcher = fs.watch(configDir, (eventType, filename) => {
+      if (filename !== configFile) return;
+
+      // Debounce: multiple events fire for a single write
+      if (configWatchDebounce) clearTimeout(configWatchDebounce);
+      configWatchDebounce = setTimeout(async () => {
+        configWatchDebounce = null;
+        try {
+          const config = readCloudConfig();
+          if (config) {
+            log('INFO', `Cloud config changed, reconnecting tunnel (key: ${maskApiKey(config.api_key)})`);
+            // Reset circuit breaker in case previous key was invalid
+            if (tunnelClient) tunnelClient.resetCircuitBreaker();
+            await connectTunnel(config);
+          } else {
+            // Config deleted or invalid
+            log('INFO', 'Cloud config removed or invalid, disconnecting tunnel');
+            if (tunnelClient) {
+              tunnelClient.disconnect();
+              tunnelClient = null;
+            }
+          }
+        } catch (err) {
+          log('WARN', `Error handling config change: ${(err as Error).message}`);
+        }
+      }, 500);
+    });
+  } catch {
+    // Directory doesn't exist yet — that's fine, user hasn't registered
+  }
+}
+
+/**
+ * Stop watching cloud-config.json.
+ */
+function stopConfigWatcher(): void {
+  if (configWatcher) {
+    configWatcher.close();
+    configWatcher = null;
+  }
+  if (configWatchDebounce) {
+    clearTimeout(configWatchDebounce);
+    configWatchDebounce = null;
+  }
+}
 
 // ============================================================================
 // PHASE 2 & 4: Terminal Management (Spec 0090)
@@ -870,8 +1058,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
     gateWatcherInterval = null;
   }
 
-  // 5. Stop cloudflared tunnel if running
-  stopTunnel();
+  // 5. Disconnect tunnel (Spec 0097 Phase 4)
+  stopMetadataRefresh();
+  stopConfigWatcher();
+  if (tunnelClient) {
+    log('INFO', 'Disconnecting tunnel...');
+    tunnelClient.disconnect();
+    tunnelClient = null;
+  }
 
   log('INFO', 'Graceful shutdown complete');
   process.exit(0);
@@ -960,80 +1154,6 @@ function startGateWatcher(): void {
   }, 10_000);
 }
 
-// Cloudflared tunnel management
-let tunnelProcess: ReturnType<typeof spawn> | null = null;
-let tunnelUrl: string | null = null;
-
-function isCloudflaredInstalled(): boolean {
-  try {
-    execSync('which cloudflared', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getTunnelStatus(): { available: boolean; running: boolean; url: string | null } {
-  return {
-    available: isCloudflaredInstalled(),
-    running: tunnelProcess !== null && tunnelUrl !== null,
-    url: tunnelUrl,
-  };
-}
-
-async function startTunnel(port: number): Promise<{ success: boolean; url?: string; error?: string }> {
-  if (!isCloudflaredInstalled()) {
-    return { success: false, error: 'cloudflared not installed. Install with: brew install cloudflared' };
-  }
-
-  if (tunnelProcess) {
-    return { success: true, url: tunnelUrl || undefined };
-  }
-
-  return new Promise((resolve) => {
-    tunnelProcess = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const handleOutput = (data: Buffer) => {
-      const text = data.toString();
-      const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-      if (match && !tunnelUrl) {
-        tunnelUrl = match[0];
-        log('INFO', `Cloudflared tunnel started: ${tunnelUrl}`);
-        resolve({ success: true, url: tunnelUrl });
-      }
-    };
-
-    tunnelProcess.stdout?.on('data', handleOutput);
-    tunnelProcess.stderr?.on('data', handleOutput);
-
-    tunnelProcess.on('close', (code) => {
-      log('INFO', `Cloudflared tunnel closed with code ${code}`);
-      tunnelProcess = null;
-      tunnelUrl = null;
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      if (!tunnelUrl) {
-        tunnelProcess?.kill();
-        tunnelProcess = null;
-        resolve({ success: false, error: 'Tunnel startup timed out' });
-      }
-    }, 30000);
-  });
-}
-
-function stopTunnel(): { success: boolean } {
-  if (tunnelProcess) {
-    tunnelProcess.kill();
-    tunnelProcess = null;
-    tunnelUrl = null;
-    log('INFO', 'Cloudflared tunnel stopped');
-  }
-  return { success: true };
-}
 
 // SSE (Server-Sent Events) infrastructure for push notifications
 interface SSEClient {
@@ -1768,6 +1888,75 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // =========================================================================
+    // Tunnel Management Endpoints (Spec 0097 Phase 4)
+    // =========================================================================
+
+    // POST /api/tunnel/connect — Connect or reconnect tunnel to codevos.ai
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/connect') {
+      try {
+        const config = readCloudConfig();
+        if (!config) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Not registered. Run \'af tower register\' first.' }));
+          return;
+        }
+
+        // Reset circuit breaker if in auth_failed state
+        if (tunnelClient) tunnelClient.resetCircuitBreaker();
+
+        const client = await connectTunnel(config);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, state: client.getState() }));
+      } catch (err) {
+        log('ERROR', `Tunnel connect failed: ${(err as Error).message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+      }
+      return;
+    }
+
+    // POST /api/tunnel/disconnect — Disconnect tunnel from codevos.ai
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/disconnect') {
+      if (tunnelClient) {
+        tunnelClient.disconnect();
+        tunnelClient = null;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // GET /api/tunnel/status — Return tunnel connection status
+    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
+      let config: CloudConfig | null = null;
+      try {
+        config = readCloudConfig();
+      } catch {
+        // Config file may be corrupted — treat as unregistered
+      }
+
+      const state = tunnelClient?.getState() ?? 'disconnected';
+      const uptime = tunnelClient?.getUptime() ?? null;
+
+      const response: Record<string, unknown> = {
+        registered: config !== null,
+        state,
+        uptime,
+      };
+
+      if (config) {
+        response.towerId = config.tower_id;
+        response.towerName = config.tower_name;
+        response.serverUrl = config.server_url;
+        response.accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(response));
+      return;
+    }
+
     // API: List all projects (Spec 0090 Phase 1)
     if (req.method === 'GET' && url.pathname === '/api/projects') {
       const instances = await getInstances();
@@ -2224,30 +2413,6 @@ const server = http.createServer(async (req, res) => {
 
       const result = await launchInstance(projectPath);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-      return;
-    }
-
-    // API: Get tunnel status (cloudflared availability and running tunnel)
-    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
-      const status = getTunnelStatus();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(status));
-      return;
-    }
-
-    // API: Start cloudflared tunnel
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/start') {
-      const result = await startTunnel(port);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-      return;
-    }
-
-    // API: Stop cloudflared tunnel
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/stop') {
-      const result = stopTunnel();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
       return;
     }
@@ -3092,6 +3257,22 @@ server.listen(port, '127.0.0.1', async () => {
   // Spec 0100: Start background gate watcher for af send notifications
   startGateWatcher();
   log('INFO', 'Gate watcher started (10s poll interval)');
+
+  // Spec 0097 Phase 4: Auto-connect tunnel if registered
+  try {
+    const config = readCloudConfig();
+    if (config) {
+      log('INFO', `Cloud config found, connecting tunnel (tower: ${config.tower_name}, key: ${maskApiKey(config.api_key)})`);
+      await connectTunnel(config);
+    } else {
+      log('INFO', 'No cloud config found, operating in local-only mode');
+    }
+  } catch (err) {
+    log('WARN', `Failed to read cloud config: ${(err as Error).message}. Operating in local-only mode.`);
+  }
+
+  // Start watching cloud-config.json for changes
+  startConfigWatcher();
 });
 
 // Initialize terminal WebSocket server (Phase 2 - Spec 0090)

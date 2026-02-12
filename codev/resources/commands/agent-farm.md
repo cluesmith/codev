@@ -390,7 +390,7 @@ Removes entries for projects that no longer exist.
 
 ### af tower
 
-Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects.
+Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects and provides cloud connectivity via codevos.ai.
 
 #### af tower start
 
@@ -402,7 +402,6 @@ af tower start [options]
 
 **Options:**
 - `-p, --port <port>` - Port to run on (default: 4100)
-- `-w, --web` - Enable web access mode (requires CODEV_WEB_KEY)
 
 #### af tower stop
 
@@ -414,6 +413,68 @@ af tower stop [options]
 
 **Options:**
 - `-p, --port <port>` - Port to stop (default: 4100)
+
+#### af tower register
+
+Register this tower with codevos.ai for remote access.
+
+```bash
+af tower register [options]
+```
+
+**Options:**
+- `--reauth` - Re-authenticate without changing tower name
+- `-p, --port <port>` - Tower port to signal after registration (default: 4100)
+
+**Description:**
+
+Opens a browser to codevos.ai for authentication, then exchanges the token for an API key. If the browser callback times out, falls back to manual token paste. Writes credentials to `~/.agent-farm/cloud-config.json` and signals the running tower daemon to connect.
+
+**Examples:**
+
+```bash
+# Register tower
+af tower register
+
+# Re-authenticate existing registration
+af tower register --reauth
+
+# Register and signal tower on custom port
+af tower register -p 4300
+```
+
+#### af tower deregister
+
+Remove this tower's registration from codevos.ai.
+
+```bash
+af tower deregister [options]
+```
+
+**Options:**
+- `-p, --port <port>` - Tower port to signal after deregistration (default: 4100)
+
+**Description:**
+
+Calls the codevos.ai API to delete the tower, removes local credentials from `~/.agent-farm/cloud-config.json`, and signals the tower daemon to disconnect.
+
+#### af tower status
+
+Show tower status including cloud connection info.
+
+```bash
+af tower status [options]
+```
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**Description:**
+
+Displays local tower status plus cloud registration details: tower name, ID, connection state, uptime, and access URL. If the tower daemon is not running, shows config-based info. The tower dashboard also includes a CloudStatus UI component showing this information.
+
+**Environment Variables:**
+- `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging environments.
 
 ---
 

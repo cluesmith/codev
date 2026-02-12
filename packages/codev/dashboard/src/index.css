@@ -953,3 +953,110 @@ body {
   color: var(--text-muted);
   background: rgba(102, 102, 102, 0.15);
 }
+
+/* Cloud status indicator (Spec 0097) */
+.cloud-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 12px;
+}
+
+.cloud-status--none {
+  color: var(--text-muted);
+}
+
+.cloud-status--error {
+  color: var(--status-error);
+}
+
+.cloud-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cloud-dot--green {
+  background: var(--status-active);
+}
+
+.cloud-dot--yellow {
+  background: var(--status-waiting);
+  animation: cloud-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cloud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.cloud-dot--red {
+  background: var(--status-error);
+}
+
+.cloud-dot--gray {
+  background: var(--text-muted);
+}
+
+.cloud-uptime {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.cloud-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.cloud-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 11px;
+}
+
+.cloud-link:hover {
+  text-decoration: underline;
+}
+
+.cloud-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cloud-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.cloud-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Mobile cloud status header */
+.mobile-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.mobile-header {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.mobile-wrapper .mobile-layout {
+  flex: 1;
+  min-height: 0;
+}

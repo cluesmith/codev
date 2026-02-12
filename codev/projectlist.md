@@ -1083,24 +1083,24 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0097"
     title: "Cloud Tower Client (Tunnel & Registration)"
     summary: "Replace cloudflared with built-in tunnel client that connects to codevos.ai for remote tower access"
-    status: conceived
+    status: implemented
     priority: high
     release: v2.0.0
     files:
       spec: codev/specs/0097-cloud-tower-client.md
       plan: null
-      review: null
+      review: codev/reviews/0097-cloud-tower-client.md
     dependencies: ["0090"]
     tags: [tower, remote-access, cloud, tunnel]
     timestamps:
       conceived_at: "2026-02-10T00:00:00-08:00"
-      specified_at: null
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
+      specified_at: "2026-02-10T00:00:00-08:00"
+      planned_at: "2026-02-10T00:00:00-08:00"
+      implementing_at: "2026-02-10T00:00:00-08:00"
+      implemented_at: "2026-02-12T00:00:00-08:00"
       committed_at: null
       integrated_at: null
-    notes: "Client-side companion to codevos.ai server spec 0001. Replaces cloudflared with native tunnel. Written by codevos.ai builder agent."
+    notes: "PR #210 open (+6,845/-443, 25 files). WebSocket tunnel replaces cloudflared. 109 tests. Awaiting merge."
 
   - id: "0098"
     title: "Per-Project Port Registry Removal"
@@ -1149,7 +1149,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0100"
     title: "Porch Gate Notifications"
     summary: "Tower dashboard shows pending gates, sends af-send message to architect when builder is blocked, auto-clears on unblock"
-    status: conceived
+    status: implementing
     priority: high
     release: v2.0.0
     files:
@@ -1160,18 +1160,18 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [tower, dashboard, porch, notifications, agent-farm]
     timestamps:
       conceived_at: "2026-02-12T00:00:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-12T00:00:00-08:00"
       planned_at: null
-      implementing_at: null
+      implementing_at: "2026-02-12T00:00:00-08:00"
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Builder gates are currently silent. Wire existing gate detection + af send + dashboard rendering."
+    notes: "Spec reviewed by Gemini + Codex. Builder 0100 spawned and running."
 
   - id: "0101"
     title: "Clickable File Paths in Terminal"
     summary: "File paths displayed in xterm.js terminals become clickable links that invoke af open, with dotted underline visual indicator"
-    status: conceived
+    status: implementing
     priority: high
     release: v2.0.0
     files:
@@ -1182,13 +1182,13 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [tower, dashboard, terminal, xterm, ux]
     timestamps:
       conceived_at: "2026-02-12T00:00:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-12T00:00:00-08:00"
       planned_at: null
-      implementing_at: null
+      implementing_at: "2026-02-12T00:00:00-08:00"
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Extend xterm.js WebLinksAddon to detect file paths (not just URLs). Must work in architect and builder worktrees."
+    notes: "Spec reviewed by Gemini (approved) + Codex (addressed). Builder 0101 spawned and running."
 ```
 
 ## Next Available Number

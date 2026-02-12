@@ -116,14 +116,12 @@ Before PR:
 
 ### 6. Create Pull Request
 
-After the review document is complete, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
+**IMPORTANT: Create the PR BEFORE signaling completion.** The PR must exist so that
+porch consultation reviews the actual PR, and the architect can review a real PR
+when the pr-ready gate fires.
 
-Prepare PR with:
-
-**Title**: `[Spec {{project_id}}] {{title}}`
-
-**Body**:
-```markdown
+```bash
+gh pr create --title "[Spec {{project_id}}] {{title}}" --body "$(cat <<'EOF'
 ## Summary
 [Brief description of the implementation]
 
@@ -141,29 +139,30 @@ Link: codev/specs/{{project_id}}-{{title}}.md
 
 ## Review
 Link: codev/reviews/{{project_id}}-{{title}}.md
+EOF
+)"
 ```
+
+### 7. Signal Completion
+
+After the PR is created, signal completion. Porch will run 3-way consultation
+(Gemini, Codex, Claude) automatically via the verify step. If reviewers request
+changes, you'll be respawned with their feedback.
 
 ## Output
 
 - Review document at `codev/reviews/{{project_id}}-{{title}}.md`
 - Updated documentation (if needed)
-- Pull request ready for submission
+- Pull request created and ready for review
 
 ## Signals
-
-Emit appropriate signals based on your progress:
 
 - After review document is complete:
   ```
   <signal>REVIEW_COMPLETE</signal>
   ```
 
-- After PR is created:
-  ```
-  <signal>PR_CREATED</signal>
-  ```
-
-- When ready for Architect review:
+- After PR is created — signal completion so porch runs consultation:
   ```
   <signal>PR_READY</signal>
   ```

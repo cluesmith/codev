@@ -94,6 +94,9 @@ export interface SpawnOptions {
   soft?: boolean;       // Soft mode: AI follows protocol, architect verifies: --soft
   strict?: boolean;     // Strict mode: porch orchestrates: --strict
 
+  // Resume mode
+  resume?: boolean;    // Resume existing worktree: --resume
+
   // General options
   noRole?: boolean;
   instruction?: string;
