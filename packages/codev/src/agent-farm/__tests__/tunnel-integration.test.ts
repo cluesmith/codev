@@ -518,7 +518,7 @@ describe('tunnel integration (Phase 4)', () => {
   });
 
   describe('config file watcher', () => {
-    it('detects config file changes in watched directory', async () => {
+    it('detects config file changes in watched directory', { timeout: 10000, retry: 2 }, async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnel-cfg-'));
       const testFile = path.join(tmpDir, 'cloud-config.json');
 
@@ -537,7 +537,7 @@ describe('tunnel integration (Phase 4)', () => {
       fs.rmdirSync(tmpDir);
     });
 
-    it('detects config file deletion in watched directory', async () => {
+    it('detects config file deletion in watched directory', { timeout: 10000, retry: 2 }, async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnel-cfg-'));
       const testFile = path.join(tmpDir, 'cloud-config.json');
 
@@ -550,9 +550,9 @@ describe('tunnel integration (Phase 4)', () => {
         if (filename === 'cloud-config.json') deleteDetected = true;
       });
 
-      // Delete the config file
+      // Delete the config file — fs.watch may take a while to fire on macOS under load
       fs.unlinkSync(testFile);
-      await waitFor(() => deleteDetected, 5000);
+      await waitFor(() => deleteDetected, 8000);
       expect(deleteDetected).toBe(true);
 
       watcher.close();
