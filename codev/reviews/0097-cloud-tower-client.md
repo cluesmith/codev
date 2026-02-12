@@ -67,10 +67,15 @@ Replaced cloudflared integration with a built-in HTTP/2 role-reversal tunnel cli
 
 ## Follow-up Items
 
+- **TICK-001 (WebSocket transport)**: Spec amended to use WebSocket (`ws` library) instead of raw TCP/TLS for tunnel transport. The current implementation uses `node:net`/`node:tls`. TICK-001 will be implemented as a separate pass — all H2 role-reversal logic is transport-agnostic and only the connection setup needs to change.
 - CI pipeline integration for E2E tests (start codevos.ai in CI, run tunnel E2E suite)
 - 24-hour stability soak test (deferred per plan — impractical in automated testing)
 - `af tower register --reauth` flow (re-authentication without re-registration)
 - Production TLS testing against live codevos.ai (local dev uses plain TCP)
+
+## Merge Resolution
+
+The merge from `main` into the builder branch re-introduced cloudflared code that was removed in Phase 2, along with a dead `getBasePortForProject` function (removed by Spec 0098 on main). Both were cleaned up in the review phase.
 
 ## Stats
 
