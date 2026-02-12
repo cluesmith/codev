@@ -251,10 +251,14 @@ export class TunnelClient {
     });
 
     ws.on('error', (err: Error) => {
+      // Ignore events from stale WebSockets (e.g. after disconnect + reconnect)
+      if (ws !== this.ws) return;
       this.handleConnectionError(err);
     });
 
     ws.on('close', () => {
+      // Ignore events from stale WebSockets (e.g. after disconnect + reconnect)
+      if (ws !== this.ws) return;
       if (this.state === 'connected' || this.state === 'connecting') {
         this.cleanup();
         this.setState('disconnected');
