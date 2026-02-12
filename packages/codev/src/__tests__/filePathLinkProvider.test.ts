@@ -444,4 +444,53 @@ describe('FilePathLinkProvider', () => {
       });
     });
   });
+
+  describe('hover/leave CSS class toggling', () => {
+    it('adds file-path-link-hover class on hover', async () => {
+      const terminal = createMockTerminal('error in src/foo.ts here');
+      const mockElement = { classList: { add: vi.fn(), remove: vi.fn() } };
+      Object.defineProperty(terminal, 'element', { get: () => mockElement });
+
+      const provider = new FilePathLinkProvider(terminal, vi.fn());
+      const links = await new Promise<ILink[] | undefined>((resolve) => {
+        provider.provideLinks(1, resolve);
+      });
+      expect(links).toBeDefined();
+      expect(links![0].hover).toBeDefined();
+
+      links![0].hover!({} as MouseEvent, links![0].text);
+      expect(mockElement.classList.add).toHaveBeenCalledWith('file-path-link-hover');
+    });
+
+    it('removes file-path-link-hover class on leave', async () => {
+      const terminal = createMockTerminal('error in src/foo.ts here');
+      const mockElement = { classList: { add: vi.fn(), remove: vi.fn() } };
+      Object.defineProperty(terminal, 'element', { get: () => mockElement });
+
+      const provider = new FilePathLinkProvider(terminal, vi.fn());
+      const links = await new Promise<ILink[] | undefined>((resolve) => {
+        provider.provideLinks(1, resolve);
+      });
+      expect(links).toBeDefined();
+      expect(links![0].leave).toBeDefined();
+
+      links![0].leave!({} as MouseEvent, links![0].text);
+      expect(mockElement.classList.remove).toHaveBeenCalledWith('file-path-link-hover');
+    });
+
+    it('handles null terminal element gracefully', async () => {
+      const terminal = createMockTerminal('error in src/foo.ts here');
+      Object.defineProperty(terminal, 'element', { get: () => null });
+
+      const provider = new FilePathLinkProvider(terminal, vi.fn());
+      const links = await new Promise<ILink[] | undefined>((resolve) => {
+        provider.provideLinks(1, resolve);
+      });
+      expect(links).toBeDefined();
+
+      // Should not throw when element is null
+      expect(() => links![0].hover!({} as MouseEvent, links![0].text)).not.toThrow();
+      expect(() => links![0].leave!({} as MouseEvent, links![0].text)).not.toThrow();
+    });
+  });
 });

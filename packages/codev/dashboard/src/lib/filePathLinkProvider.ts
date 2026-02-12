@@ -66,6 +66,14 @@ export class FilePathLinkProvider implements ILinkProvider {
           if (isMac ? !event.metaKey : !event.ctrlKey) return;
           this.onFileOpen(filePath, line, column, this.terminalId);
         },
+        // Toggle CSS class on hover for dotted underline styling (distinct from URL solid underline).
+        // xterm.js applies inline text-decoration:underline; CSS overrides to dotted when class is present.
+        hover: () => {
+          this.terminal.element?.classList.add('file-path-link-hover');
+        },
+        leave: () => {
+          this.terminal.element?.classList.remove('file-path-link-hover');
+        },
       });
     }
 
