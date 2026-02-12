@@ -9,7 +9,7 @@
  * distinguished from surrounding text (not just on hover).
  */
 
-import type { IDisposable, ILink, ILinkProvider, Terminal } from '@xterm/xterm';
+import type { IDisposable, ILink, ILinkProvider, IMarker, Terminal } from '@xterm/xterm';
 import { FILE_PATH_REGEX, looksLikeFilePath } from './filePaths.js';
 
 type FileOpenCallback = (path: string, line?: number, column?: number, terminalId?: string) => void;
@@ -21,6 +21,7 @@ export class FilePathLinkProvider implements ILinkProvider {
     private terminal: Terminal,
     private onFileOpen: FileOpenCallback,
     private terminalId?: string,
+    private decorationManager?: FilePathDecorationManager,
   ) {}
 
   provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -57,6 +58,10 @@ export class FilePathLinkProvider implements ILinkProvider {
       const linkStart = match.index + capturedOffset;
       const linkEnd = match.index + fullMatch.length;
 
+      // Capture linkStart for the hover/leave closures
+      const x = linkStart;
+      const bufferLineIndex = lineNumber - 1;
+
       // xterm.js ILink.range uses 1-based inclusive coordinates.
       // underline: false — persistent dotted underline is handled by FilePathDecorationManager
       // overlay elements, not xterm's built-in hover underline.
@@ -72,18 +77,24 @@ export class FilePathLinkProvider implements ILinkProvider {
           if (isMac ? !event.metaKey : !event.ctrlKey) return;
           this.onFileOpen(filePath, line, column, this.terminalId);
         },
-        // Toggle CSS class on hover for brightness shift on dotted underline overlays.
+        // Per-link hover: highlight only the specific decoration overlay for this link.
         hover: () => {
-          this.terminal.element?.classList.add('file-path-link-hover');
+          this.decorationManager?.highlightAt(bufferLineIndex, x);
         },
         leave: () => {
-          this.terminal.element?.classList.remove('file-path-link-hover');
+          this.decorationManager?.unhighlightAll();
         },
       });
     }
 
     callback(links.length > 0 ? links : undefined);
   }
+}
+
+interface DecorationEntry {
+  marker: IMarker;
+  x: number;
+  element?: HTMLElement;
 }
 
 /**
@@ -93,15 +104,35 @@ export class FilePathLinkProvider implements ILinkProvider {
  * Listens for term.onWriteParsed to scan new lines as content arrives.
  * Decorations persist in the terminal (visible without hover), satisfying the spec's
  * requirement that file paths are "visually indicated as clickable."
+ *
+ * Exposes highlightAt/unhighlightAll for per-link hover effects, called by
+ * FilePathLinkProvider's ILink.hover/leave callbacks.
  */
 export class FilePathDecorationManager {
   private disposables: IDisposable[] = [];
+  private entries: DecorationEntry[] = [];
   private lastScannedLine = -1;
 
   constructor(private terminal: Terminal) {
     this.disposables.push(
       terminal.onWriteParsed(() => this.scanNewLines()),
     );
+  }
+
+  /** Highlight the decoration at the given buffer line and x position. */
+  highlightAt(bufferLine: number, x: number): void {
+    for (const entry of this.entries) {
+      if (entry.marker.line === bufferLine && entry.x === x && entry.element) {
+        entry.element.classList.add('file-path-decoration-hover');
+      }
+    }
+  }
+
+  /** Remove hover highlight from all decorations. */
+  unhighlightAll(): void {
+    for (const entry of this.entries) {
+      entry.element?.classList.remove('file-path-decoration-hover');
+    }
   }
 
   private scanNewLines(): void {
@@ -138,6 +169,8 @@ export class FilePathDecorationManager {
       const marker = this.terminal.registerMarker(offset);
       if (!marker || marker.line === -1) continue;
 
+      const entry: DecorationEntry = { marker, x: linkStart };
+
       const decoration = this.terminal.registerDecoration({
         marker,
         x: linkStart,
@@ -147,9 +180,11 @@ export class FilePathDecorationManager {
       if (decoration) {
         decoration.onRender(el => {
           el.classList.add('file-path-decoration');
+          entry.element = el;
         });
         this.disposables.push(decoration);
       }
+      this.entries.push(entry);
       this.disposables.push(marker);
     }
   }
@@ -157,6 +192,7 @@ export class FilePathDecorationManager {
   dispose(): void {
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
+    this.entries = [];
     this.lastScannedLine = -1;
   }
 }

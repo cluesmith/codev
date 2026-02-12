@@ -91,15 +91,16 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     let linkProviderDisposable: { dispose(): void } | null = null;
     let decorationManager: FilePathDecorationManager | null = null;
     if (onFileOpen) {
+      decorationManager = new FilePathDecorationManager(term);
       const filePathProvider = new FilePathLinkProvider(
         term,
         (filePath, line, column, tid) => {
           onFileOpen(filePath, line, column, tid);
         },
         terminalId,
+        decorationManager,
       );
       linkProviderDisposable = term.registerLinkProvider(filePathProvider);
-      decorationManager = new FilePathDecorationManager(term);
     }
 
     // Clipboard handling

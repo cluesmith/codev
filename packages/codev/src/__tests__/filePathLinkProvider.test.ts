@@ -445,13 +445,15 @@ describe('FilePathLinkProvider', () => {
     });
   });
 
-  describe('hover/leave CSS class toggling', () => {
-    it('adds file-path-link-hover class on hover', async () => {
+  describe('per-link hover via decorationManager', () => {
+    it('calls decorationManager.highlightAt on hover', async () => {
       const terminal = createMockTerminal('error in src/foo.ts here');
-      const mockElement = { classList: { add: vi.fn(), remove: vi.fn() } };
-      Object.defineProperty(terminal, 'element', { get: () => mockElement });
+      const mockManager = { highlightAt: vi.fn(), unhighlightAll: vi.fn(), dispose: vi.fn() };
 
-      const provider = new FilePathLinkProvider(terminal, vi.fn());
+      const provider = new FilePathLinkProvider(
+        terminal, vi.fn(), undefined,
+        mockManager as unknown as FilePathDecorationManager,
+      );
       const links = await new Promise<ILink[] | undefined>((resolve) => {
         provider.provideLinks(1, resolve);
       });
@@ -459,15 +461,18 @@ describe('FilePathLinkProvider', () => {
       expect(links![0].hover).toBeDefined();
 
       links![0].hover!({} as MouseEvent, links![0].text);
-      expect(mockElement.classList.add).toHaveBeenCalledWith('file-path-link-hover');
+      // bufferLineIndex = lineNumber - 1 = 0, x = linkStart for "src/foo.ts" = 9
+      expect(mockManager.highlightAt).toHaveBeenCalledWith(0, 9);
     });
 
-    it('removes file-path-link-hover class on leave', async () => {
+    it('calls decorationManager.unhighlightAll on leave', async () => {
       const terminal = createMockTerminal('error in src/foo.ts here');
-      const mockElement = { classList: { add: vi.fn(), remove: vi.fn() } };
-      Object.defineProperty(terminal, 'element', { get: () => mockElement });
+      const mockManager = { highlightAt: vi.fn(), unhighlightAll: vi.fn(), dispose: vi.fn() };
 
-      const provider = new FilePathLinkProvider(terminal, vi.fn());
+      const provider = new FilePathLinkProvider(
+        terminal, vi.fn(), undefined,
+        mockManager as unknown as FilePathDecorationManager,
+      );
       const links = await new Promise<ILink[] | undefined>((resolve) => {
         provider.provideLinks(1, resolve);
       });
@@ -475,20 +480,18 @@ describe('FilePathLinkProvider', () => {
       expect(links![0].leave).toBeDefined();
 
       links![0].leave!({} as MouseEvent, links![0].text);
-      expect(mockElement.classList.remove).toHaveBeenCalledWith('file-path-link-hover');
+      expect(mockManager.unhighlightAll).toHaveBeenCalled();
     });
 
-    it('handles null terminal element gracefully', async () => {
+    it('does not throw without decorationManager', async () => {
       const terminal = createMockTerminal('error in src/foo.ts here');
-      Object.defineProperty(terminal, 'element', { get: () => null });
-
       const provider = new FilePathLinkProvider(terminal, vi.fn());
       const links = await new Promise<ILink[] | undefined>((resolve) => {
         provider.provideLinks(1, resolve);
       });
       expect(links).toBeDefined();
 
-      // Should not throw when element is null
+      // Should not throw when no decorationManager
       expect(() => links![0].hover!({} as MouseEvent, links![0].text)).not.toThrow();
       expect(() => links![0].leave!({} as MouseEvent, links![0].text)).not.toThrow();
     });
@@ -678,5 +681,65 @@ describe('FilePathDecorationManager', () => {
 
     for (const m of markers) expect(m.dispose).toHaveBeenCalled();
     for (const d of decorations) expect(d.dispose).toHaveBeenCalled();
+  });
+
+  describe('per-link hover highlighting', () => {
+    it('highlightAt adds file-path-decoration-hover to the matching decoration', () => {
+      const { terminal, decorations } = createMockTerminalForDecoration([
+        'error in src/foo.ts here',
+      ]);
+
+      const manager = new FilePathDecorationManager(terminal);
+      onWriteParsedCallback!();
+
+      expect(decorations.length).toBe(1);
+      const el = decorations[0].element!;
+      expect(el.classList.contains('file-path-decoration-hover')).toBe(false);
+
+      // "src/foo.ts" starts at column 9 in "error in src/foo.ts here"
+      manager.highlightAt(0, 9);
+      expect(el.classList.contains('file-path-decoration-hover')).toBe(true);
+
+      manager.dispose();
+    });
+
+    it('highlightAt does not affect non-matching decorations', () => {
+      const { terminal, decorations } = createMockTerminalForDecoration([
+        'error in src/a.ts and src/b.ts here',
+      ]);
+
+      const manager = new FilePathDecorationManager(terminal);
+      onWriteParsedCallback!();
+
+      expect(decorations.length).toBe(2);
+      const elA = decorations[0].element!;
+      const elB = decorations[1].element!;
+
+      // Highlight only the first path (src/a.ts at column 9)
+      manager.highlightAt(0, 9);
+      expect(elA.classList.contains('file-path-decoration-hover')).toBe(true);
+      expect(elB.classList.contains('file-path-decoration-hover')).toBe(false);
+
+      manager.dispose();
+    });
+
+    it('unhighlightAll removes hover class from all decorations', () => {
+      const { terminal, decorations } = createMockTerminalForDecoration([
+        'error in src/a.ts and src/b.ts here',
+      ]);
+
+      const manager = new FilePathDecorationManager(terminal);
+      onWriteParsedCallback!();
+
+      // Highlight both
+      manager.highlightAt(0, 9);
+      const elA = decorations[0].element!;
+      expect(elA.classList.contains('file-path-decoration-hover')).toBe(true);
+
+      manager.unhighlightAll();
+      expect(elA.classList.contains('file-path-decoration-hover')).toBe(false);
+
+      manager.dispose();
+    });
   });
 });
