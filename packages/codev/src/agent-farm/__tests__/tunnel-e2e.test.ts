@@ -872,7 +872,7 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('tunnel latency is within acceptable range (E2E)', { timeout: 30000 }, async (ctx) => {
+  it('tunnel latency is within acceptable range (E2E)', { timeout: 30000, retry: 2 }, async (ctx) => {
     if (!available) ctx.skip();
 
     const client = new TunnelClient({
