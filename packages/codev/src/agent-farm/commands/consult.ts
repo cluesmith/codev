@@ -7,7 +7,7 @@
 
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { loadState } from '../state.js';
+import { TowerClient } from '../lib/tower-client.js';
 
 // Tower port — the single HTTP server since Spec 0090
 const DEFAULT_TOWER_PORT = 4100;
@@ -32,10 +32,9 @@ export async function consult(
   target: string,
   options: ConsultOptions
 ): Promise<void> {
-  const state = loadState();
-
-  if (!state.architect) {
-    fatal('Dashboard not running. Start with: af dash start');
+  const client = new TowerClient(DEFAULT_TOWER_PORT);
+  if (!(await client.isRunning())) {
+    fatal('Tower not running. Start with: af dash start');
   }
 
   const config = getConfig();
