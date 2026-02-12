@@ -1103,9 +1103,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     notes: "Client-side companion to codevos.ai server spec 0001. Replaces cloudflared with native tunnel. Written by codevos.ai builder agent."
 ```
 
+  - id: "0098"
+    title: "Per-Project Port Registry Removal"
+    summary: "Remove vestigial per-project port allocation system. Tower at 4100 is the only server; port blocks are dead code."
+    status: specified
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0098-port-registry-removal.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [architecture, cleanup, agent-farm]
+    timestamps:
+      conceived_at: "2026-02-11T00:00:00-08:00"
+      specified_at: "2026-02-11T00:00:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Port registry is 220 lines of dead code. consult.ts is broken (hits dead port). Builder roles get wrong port."
+
 ## Next Available Number
 
-**0098** - Reserve this number for your next project
+**0099** - Reserve this number for your next project
 
 ---
 

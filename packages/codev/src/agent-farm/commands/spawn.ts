@@ -14,9 +14,12 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Builder, Config, BuilderType, ProtocolDefinition } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, commandExists, findAvailablePort } from '../utils/shell.js';
+import { run, commandExists } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
+
+// Tower port — the single HTTP server since Spec 0090
+const DEFAULT_TOWER_PORT = 4100;
 
 // =============================================================================
 // Template Rendering
@@ -494,19 +497,11 @@ async function checkDependencies(): Promise<void> {
 }
 
 /**
- * Find an available port, avoiding ports already in use by other builders
+ * Port is no longer needed for PTY-backed sessions (Tower handles all routing).
+ * Returns 0 — builder state tracks terminals via terminalId, not ports.
  */
-async function findFreePort(config: Config): Promise<number> {
-  const state = loadState();
-  const usedPorts = new Set<number>();
-  for (const b of state.builders || []) {
-    if (b.port > 0) usedPorts.add(b.port);
-  }
-  let port = config.builderPortRange[0];
-  while (usedPorts.has(port)) {
-    port++;
-  }
-  return findAvailablePort(port);
+function findFreePort(): number {
+  return 0;
 }
 
 /**
@@ -552,7 +547,6 @@ async function createPtySession(
   cwd: string,
   registration?: { projectPath: string; type: 'builder' | 'shell'; roleId: string; tmuxSession?: string },
 ): Promise<{ terminalId: string; tmuxSession: string | null }> {
-  const towerPort = 4100;
   const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50 };
   if (registration) {
     body.projectPath = registration.projectPath;
@@ -562,7 +556,7 @@ async function createPtySession(
       body.tmuxSession = registration.tmuxSession;
     }
   }
-  const response = await fetch(`http://localhost:${towerPort}/api/terminals`, {
+  const response = await fetch(`http://localhost:${DEFAULT_TOWER_PORT}/api/terminals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -589,7 +583,7 @@ async function startBuilderSession(
   roleContent: string | null,
   roleSource: string | null,
 ): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const sessionName = getSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
@@ -606,7 +600,7 @@ async function startBuilderSession(
     // Write role to a file and use $(cat) to avoid shell escaping issues
     const roleFile = resolve(worktreePath, '.builder-role.md');
     // Inject the actual dashboard port into the role prompt
-    const roleWithPort = roleContent.replace(/\{PORT\}/g, String(config.dashboardPort));
+    const roleWithPort = roleContent.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${roleSource})`);
     scriptContent = `#!/bin/bash
@@ -655,7 +649,7 @@ async function startShellSession(
   shellId: string,
   baseCmd: string,
 ): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const tmuxName = `shell-${getProjectName(config)}-${shellId}`;
   const sessionName = tmuxName;
 
@@ -775,7 +769,7 @@ ${initialPrompt}`;
   logger.success(`Builder ${builderId} spawned!`);
   logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
   if (terminalId) {
-    logger.kv('Terminal', `ws://localhost:${config.dashboardPort}/ws/terminal/${terminalId}`);
+    logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
   } else {
     logger.kv('Terminal', `http://localhost:${port}`);
   }
@@ -1015,7 +1009,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   const commands = getResolvedCommands();
 
   // Worktree mode: launch Claude with no prompt, but in the worktree directory
-  const port = await findFreePort(config);
+  const port = findFreePort();
   const sessionName = getSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
@@ -1027,7 +1021,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     // Inject the actual dashboard port into the role prompt
-    const roleWithPort = role.content.replace(/\{PORT\}/g, String(config.dashboardPort));
+    const roleWithPort = role.content.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
     scriptContent = `#!/bin/bash
@@ -1288,7 +1282,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   logger.success(`Bugfix builder for issue #${issueNumber} spawned!`);
   logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
   if (terminalId) {
-    logger.kv('Terminal', `ws://localhost:${config.dashboardPort}/ws/terminal/${terminalId}`);
+    logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
   } else {
     logger.kv('Terminal', `http://localhost:${port}`);
   }

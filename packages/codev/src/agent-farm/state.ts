@@ -176,8 +176,8 @@ export function addUtil(util: UtilTerminal): void {
 }
 
 /**
- * Try to add a utility terminal, returning false on port conflict
- * Used to handle concurrent port allocation race conditions
+ * Try to add a utility terminal, returning false on ID conflict
+ * Used to handle concurrent insertion race conditions
  */
 export function tryAddUtil(util: UtilTerminal): boolean {
   try {

@@ -21,16 +21,6 @@ describe('getConfig', () => {
     expect(config.serversDir).toBeDefined();
   });
 
-  it('should have correct port defaults', () => {
-    const config = getConfig();
-
-    expect(config.dashboardPort).toBe(4200);
-    expect(config.architectPort).toBe(4201);
-    expect(config.builderPortRange).toEqual([4210, 4229]);
-    expect(config.utilPortRange).toEqual([4230, 4249]);
-    // openPortRange removed - Spec 0092: files served through Tower
-  });
-
   it('should derive paths from projectRoot', () => {
     const config = getConfig();
 

@@ -17,7 +17,6 @@ import { resolve, basename } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
-import { removeAllocation } from '../utils/port-registry.js';
 
 const TEST_TOWER_PORT = 14600;
 const STARTUP_TIMEOUT = 15_000;
@@ -109,7 +108,7 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
 
     const encodedPath = toBase64URL(tempProjectDir);
 
-    // Step 2: Activate the project (creates port_allocations entry in global.db)
+    // Step 2: Activate the project (registers in tower's terminal_sessions)
     const activateRes = await fetch(`${base}/api/projects/${encodedPath}/activate`, {
       method: 'POST',
     });
@@ -122,7 +121,7 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     const found1 = data1.projects.find((p: { path: string }) => p.path === tempProjectDir);
     expect(found1).toBeDefined();
 
-    // Step 4: Deactivate the project (stops terminals but keeps port_allocations entry)
+    // Step 4: Deactivate the project (stops terminals)
     await fetch(`${base}/api/projects/${encodedPath}/deactivate`, { method: 'POST' });
 
     // Step 5: Kill tmux session and delete the temp directory from disk (simulating E2E test teardown)
@@ -136,8 +135,6 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     const found2 = data2.projects.find((p: { path: string }) => p.path === tempProjectDir);
     expect(found2).toBeUndefined();
 
-    // Cleanup: remove the stale port_allocations entry from global.db
-    removeAllocation(tempProjectDir);
   });
 
   it('filters temp directory projects from /api/status even when directory still exists', async () => {
@@ -173,7 +170,6 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
       expect(found).toBeUndefined();
     } finally {
       try { execSync(`tmux kill-session -t "architect-${basename(tempProjectDir)}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
-      removeAllocation(tempProjectDir);
       rmSync(tempProjectDir, { recursive: true, force: true });
     }
   });

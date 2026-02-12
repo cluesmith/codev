@@ -24,11 +24,9 @@ const REQUEST_TIMEOUT_MS = 10000;
 export interface TowerProject {
   path: string;
   name: string;
-  basePort: number;
   active: boolean;
   proxyUrl: string;
   terminals: number;
-  lastUsed?: string;
 }
 
 /**
@@ -38,7 +36,6 @@ export interface TowerProjectStatus {
   path: string;
   name: string;
   active: boolean;
-  basePort: number;
   terminals: Array<{
     type: 'architect' | 'builder' | 'shell';
     id: string;

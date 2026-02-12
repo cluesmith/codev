@@ -4,12 +4,12 @@
  * Detects and handles orphaned tmux sessions from previous agent-farm runs.
  * This prevents resource leaks and ensures clean startup.
  *
- * IMPORTANT: Only cleans up sessions for THIS project (based on port).
+ * IMPORTANT: Only cleans up architect sessions for THIS project (by project basename).
  * Sessions from other projects are left alone.
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, basename } from 'node:path';
 import { logger } from './logger.js';
 import { run } from './shell.js';
 import { getConfig } from './config.js';
@@ -33,17 +33,24 @@ interface OrphanedSession {
 }
 
 /**
- * Find tmux sessions that match THIS project's agent-farm patterns
- * Only matches sessions with this project's port to avoid killing other projects
+ * Find tmux sessions that match THIS project's agent-farm architect patterns.
+ * Matches Tower naming (architect-<basename>), CLI naming (af-architect),
+ * and legacy port-based (af-architect-XXXX).
+ * PID liveness check prevents killing active sessions.
  */
 async function findOrphanedSessions(): Promise<OrphanedSession[]> {
   const config = getConfig();
-  const architectPort = config.architectPort;
   const state = loadState();
+  // Use basename to match Tower's naming convention (tower-server.ts creates
+  // sessions as `architect-<basename>`). Basename-based matching is intentional —
+  // it must align with how sessions are actually created.
+  const escapedBasename = basename(config.projectRoot).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // Project-specific patterns - only match THIS project's architect session
-  const architectPattern = new RegExp(`^af-architect-${architectPort}$`);
-  const legacyArchitectPattern = /^af-architect$/;
+  // Match architect sessions scoped to THIS project:
+  // - Tower-managed: architect-<basename> (e.g., architect-codev-public)
+  // - Legacy CLI: af-architect (no project scope — single session)
+  // - Legacy port-based: af-architect-XXXX (e.g., af-architect-4201)
+  const architectPattern = new RegExp(`^(architect-${escapedBasename}|af-architect(-\\d+)?)$`);
 
   try {
     const result = await run('tmux list-sessions -F "#{session_name}" 2>/dev/null');
@@ -52,7 +59,7 @@ async function findOrphanedSessions(): Promise<OrphanedSession[]> {
 
     for (const name of sessions) {
       // Check architect sessions - only orphaned if PID is dead
-      if (architectPattern.test(name) || legacyArchitectPattern.test(name)) {
+      if (architectPattern.test(name)) {
         // If we have state for this architect, check if PID is still alive
         if (state.architect) {
           if (!isProcessAlive(state.architect.pid)) {

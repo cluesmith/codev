@@ -8,8 +8,6 @@ import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
-import { removeAllocation } from '../../utils/port-registry.js';
-
 const TOWER_START_TIMEOUT = 10_000;
 
 export interface TowerHandle {
@@ -29,7 +27,6 @@ export interface TowerState {
   instances: Array<{
     projectPath: string;
     projectName: string;
-    basePort: number;
     running: boolean;
     terminals: Array<{
       type: string;
@@ -152,14 +149,9 @@ export function createTestProject(): string {
 }
 
 /**
- * Clean up a test project directory and its port allocation from global.db
+ * Clean up a test project directory
  */
 export function cleanupTestProject(projectPath: string): void {
-  try {
-    removeAllocation(projectPath);
-  } catch {
-    // Ignore DB cleanup errors
-  }
   try {
     rmSync(projectPath, { recursive: true, force: true });
   } catch {

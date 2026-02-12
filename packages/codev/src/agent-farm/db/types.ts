@@ -69,17 +69,6 @@ export interface DbAnnotation {
 }
 
 /**
- * Database row type for port_allocations table
- */
-export interface DbPortAllocation {
-  project_path: string;
-  base_port: number;
-  pid: number | null;
-  registered_at: string;
-  last_used_at: string;
-}
-
-/**
  * Convert database architect row to application type
  */
 export function dbArchitectToArchitectState(row: DbArchitect): ArchitectState {

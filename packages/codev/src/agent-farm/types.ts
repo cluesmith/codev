@@ -66,11 +66,6 @@ export interface Config {
   templatesDir: string;
   serversDir: string;
   bundledRolesDir: string;
-  dashboardPort: number;
-  architectPort: number;
-  builderPortRange: [number, number];
-  utilPortRange: [number, number];
-  // openPortRange removed - Spec 0092: files served through Tower
   terminalBackend: 'node-pty';
 }
 

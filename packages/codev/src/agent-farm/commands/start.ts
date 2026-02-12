@@ -13,7 +13,6 @@ import { version as localVersion } from '../../version.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
-import { getPortBlock, cleanupStaleEntries } from '../utils/port-registry.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { towerStart } from './tower.js';
 
@@ -54,7 +53,7 @@ export function parseRemote(remote: string): ParsedRemote {
   if (!match) {
     throw new Error(`Invalid remote format: ${remote}. Use user@host or user@host:/path`);
   }
-  // Strip trailing slash to avoid duplicate port allocations (e.g., /path/ vs /path)
+  // Strip trailing slash to normalize path (e.g., /path/ vs /path)
   const remotePath = match[3]?.replace(/\/$/, '');
   return { user: match[1], host: match[2], remotePath };
 }
@@ -183,18 +182,16 @@ async function startRemote(options: StartOptions): Promise<void> {
   const config = getConfig();
   const { user, host, remotePath } = parseRemote(options.remote!);
 
-  // Clean up stale port allocations (handles machine restarts, killed processes)
-  cleanupStaleEntries();
-
-  // Determine local port - use specified, or get from port registry
-  // Use a synthetic path for remote connections so they get their own port block
-  let localPort: number;
-  if (options.port) {
-    localPort = Number(options.port);
-  } else {
-    // Register with a unique key for this remote target
-    const remoteKey = `remote:${user}@${host}:${remotePath || 'default'}`;
-    localPort = getPortBlock(remoteKey);
+  // Use specified port or find a free local port for the SSH tunnel
+  let localPort = options.port ? Number(options.port) : DEFAULT_TOWER_PORT;
+  if (!options.port && !(await isPortAvailable(localPort))) {
+    // Local Tower likely running on 4100, find an alternative port for the tunnel
+    for (let p = localPort + 1; p < localPort + 100; p++) {
+      if (await isPortAvailable(p)) {
+        localPort = p;
+        break;
+      }
+    }
   }
 
   logger.header('Starting Remote Agent Farm');
@@ -209,8 +206,9 @@ async function startRemote(options: StartOptions): Promise<void> {
     ? `cd ${remotePath}`
     : `cd ${projectName} 2>/dev/null || cd ~/${projectName} 2>/dev/null`;
   // Always pass --no-browser to remote since we open browser locally
+  // No --port needed: Tower always runs on DEFAULT_TOWER_PORT (4100)
   // Wrap in bash -l to source login environment (gets PATH from .profile)
-  const innerCommand = `${cdCommand} && af dash start --port ${localPort} --no-browser`;
+  const innerCommand = `${cdCommand} && af dash start --no-browser`;
   const remoteCommand = `bash -l -c '${innerCommand.replace(/'/g, "'\\''")}'`;
 
   // Check passwordless SSH is configured
@@ -236,7 +234,7 @@ Then verify with:
   // Spawn SSH with port forwarding, -f backgrounds after auth
   const sshArgs = [
     '-f',  // Background after authentication
-    '-L', `${localPort}:localhost:${localPort}`,
+    '-L', `${localPort}:localhost:${DEFAULT_TOWER_PORT}`,
     '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3',
     '-o', 'ExitOnForwardFailure=yes',
@@ -263,7 +261,7 @@ Then verify with:
   }
 
   // Find and report the SSH PID for cleanup
-  const pgrep = spawnSync('pgrep', ['-f', `ssh.*${localPort}:localhost:${localPort}.*${host}`]);
+  const pgrep = spawnSync('pgrep', ['-f', `ssh.*${localPort}:localhost:${DEFAULT_TOWER_PORT}.*${host}`]);
   if (pgrep.status === 0) {
     const pid = pgrep.stdout.toString().trim().split('\n')[0];
     logger.info(`To disconnect: kill ${pid}`);
