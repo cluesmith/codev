@@ -451,14 +451,14 @@ describe('porch next', () => {
   // Max iterations — emits gate pending
   // --------------------------------------------------------------------------
 
-  it('requests gate at max iterations without unanimity', async () => {
+  it('accepts majority approval at max iterations without unanimity', async () => {
     const state = makeState({
       build_complete: true,
       iteration: 7,
     });
     setupState(testDir, state);
 
-    // Create review files — not unanimous
+    // Create review files — 2/3 approve (majority)
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
     const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
@@ -469,9 +469,10 @@ describe('porch next', () => {
 
     const result = await next(testDir, '0001');
 
+    // After MAJORITY_ITERATION_THRESHOLD, 2/3 majority is accepted
     expect(result.status).toBe('gate_pending');
     expect(result.gate).toBe('spec-approval');
-    expect(result.tasks![0].description).toContain('Max iterations');
+    expect(result.tasks![0].description).toContain('All reviewers approved');
   });
 
   // --------------------------------------------------------------------------
