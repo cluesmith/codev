@@ -186,17 +186,24 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
 
 **File: `packages/codev/src/agent-farm/utils/gate-watcher.ts`** (new file)
 - `GateWatcher` class:
-  - Internal `Map<string, string>` keyed by `builderId:gateName` → ISO timestamp of when we first saw it
+  - Two data structures for dedup:
+    - `notified: Map<string, string>` keyed by `projectPath:builderId:gateName` → ISO timestamp of when we first saw it
+    - `projectKeys: Map<string, Set<string>>` mapping `projectPath` → set of notification keys for that project
   - `checkAndNotify(gateStatus: GateStatus, projectPath: string): Promise<void>` method:
-    1. If `!gateStatus.hasGate`: remove all entries for the project, return
-    2. Build key: `${gateStatus.builderId}:${gateStatus.gateName}`
-    3. If key already in map: skip (already notified)
-    4. Add key to map
+    1. If `!gateStatus.hasGate`: clear all entries for this `projectPath` (remove from `notified` using `projectKeys` index, then delete from `projectKeys`), return
+    2. Build key: `${projectPath}:${gateStatus.builderId}:${gateStatus.gateName}`
+    3. If key already in `notified`: skip (already notified)
+    4. Clear previous keys for this project (gate changed) and add new key
     5. Sanitize `gateName` and `builderId` (strip ANSI, reject tmux control chars)
     6. If sanitization fails: log warn, skip `af send`, return
     7. Execute `af send architect "..."` via `child_process.execFile` with the message
     8. On failure: log at warn level, continue
-  - `reset()`: clear the map (useful for testing)
+  - `reset()`: clear both maps (useful for testing)
+
+  This structure ensures:
+  - When a gate resolves (`hasGate: false`), the project's entries are cleared via `projectKeys` index
+  - When the same builder hits a new gate later, it triggers a fresh notification
+  - When the same gate is seen across multiple polls, dedup prevents re-sends
 - Message format:
   ```
   GATE: {gateName} (Builder {builderId})
@@ -341,3 +348,15 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 1. Sanitization in `getGateStatusForProject` suppresses gate data system-wide — spec only requires suppressing `af send`. **Fixed**: moved sanitization to `GateWatcher` only. Data layer returns raw values; React JSX auto-escapes for dashboard.
 2. Architect notifications depend on dashboard polling — if dashboard is closed, `af send` never fires. **Fixed**: added background `setInterval` (10s) in Tower that polls gate status independently of dashboard requests.
 3. Playwright testing required for UI changes but absent from plan. **Fixed**: added explicit Playwright E2E tests in Phase 2 test plan.
+
+### Iteration 2 (2026-02-12)
+
+**Gemini**: APPROVE (HIGH confidence). No issues.
+
+**Claude**: APPROVE (HIGH confidence). Minor notes:
+- "No notification when Tower runs without active builders" success criterion lacks explicit test. Response: handled implicitly — `getGateStatusForProject()` returns `hasGate: false` when no projects exist, watcher does nothing. Can add an explicit test during implementation.
+- `getGateStatusForProject()` may be called redundantly (already called inside `getTerminalsForProject`). Response: will check during implementation and reuse if possible.
+
+**Codex**: REQUEST_CHANGES (HIGH confidence). Two issues:
+1. GateWatcher dedup map can't clear entries when gate resolves — no `projectPath` tie in the Map. **Fixed**: restructured to dual-map design with `notified` (keyed by `projectPath:builderId:gateName`) and `projectKeys` index (mapping `projectPath` → set of keys). When `hasGate` is false, all keys for that project are cleared.
+2. Playwright tests in wrong directory — claims they should be in `packages/codev/tests/e2e/`. **Not a real issue**: `playwright.config.ts` specifies `testDir: './src/agent-farm/__tests__/e2e'` and all existing Playwright tests are in that directory. Plan has the correct location.
