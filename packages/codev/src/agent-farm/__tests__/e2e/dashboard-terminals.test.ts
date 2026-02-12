@@ -46,9 +46,7 @@ test.describe('Dashboard Terminals E2E', () => {
     expect(state.architect).toBeTruthy();
     expect(typeof state.architect.terminalId).toBe('string');
     expect(state.architect.terminalId.length).toBeGreaterThan(0);
-    // port and pid are returned but may be 0 for the simplified Tower API
-    expect(state.architect.port).toBeDefined();
-    expect(state.architect.pid).toBeDefined();
+    // port and pid exist in SQLite but are always 0 (vestigial columns)
   });
 
   test('shell tab creation returns terminalId and WebSocket works', async ({ page, request }) => {

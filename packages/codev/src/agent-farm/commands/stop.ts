@@ -9,7 +9,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { loadState, clearState } from '../state.js';
 import { logger } from '../utils/logger.js';
-import { killProcess, killProcessTree, isProcessRunning } from '../utils/shell.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 
@@ -20,30 +19,8 @@ const execFileAsync = promisify(execFile);
  */
 const DEFAULT_TOWER_PORT = 4100;
 
-/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection.
- *  If expectedPid is provided, verifies the session's PID matches before killing
- *  to prevent cross-project kills when two projects share the same basename.
- */
-async function killTmuxSession(sessionName: string, expectedPid?: number): Promise<void> {
-  if (expectedPid && expectedPid > 0) {
-    // Verify the session belongs to this project by checking its PID
-    try {
-      const { stdout } = await execFileAsync('tmux', [
-        'list-sessions', '-F', '#{session_name} #{session_pid}',
-      ]);
-      const line = stdout.trim().split('\n').find(l => l.startsWith(sessionName + ' '));
-      if (line) {
-        const sessionPid = parseInt(line.split(' ')[1], 10);
-        if (sessionPid !== expectedPid && !isNaN(sessionPid)) {
-          // PID mismatch — this session belongs to a different project
-          throw new Error(`Session ${sessionName} PID ${sessionPid} != expected ${expectedPid}`);
-        }
-      }
-    } catch (err) {
-      if ((err as Error).message?.includes('PID')) throw err;
-      // tmux command failed — fall through to kill attempt
-    }
-  }
+/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection. */
+async function killTmuxSession(sessionName: string): Promise<void> {
   await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
 }
 
@@ -84,92 +61,45 @@ export async function stop(): Promise<void> {
     logger.debug(`Tower deactivation failed: ${result.error}, trying legacy cleanup`);
   }
 
-  // Legacy cleanup for processes not managed by tower
+  // Legacy cleanup for processes not managed by tower (tmux session names only)
   const state = loadState();
 
   let stopped = 0;
 
-  // Stop architect — kill tmux session by name (safer than tree-kill)
-  if (state.architect) {
-    logger.info(`Stopping architect (PID: ${state.architect.pid})`);
+  // Stop architect — kill tmux session by name
+  if (state.architect?.tmuxSession) {
+    logger.info('Stopping architect...');
     try {
-      // Kill tmux session by name — this cleanly terminates the session and its processes
-      if (state.architect.tmuxSession) {
-        try {
-          await killTmuxSession(state.architect.tmuxSession, state.architect.pid);
-          stopped++;
-        } catch {
-          // Session may already be gone, try PID fallback
-          if (await isProcessRunning(state.architect.pid)) {
-            await killProcess(state.architect.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(state.architect.pid)) {
-        await killProcess(state.architect.pid);
-        stopped++;
-      }
-    } catch (error) {
-      logger.warn(`Failed to stop architect: ${error}`);
+      await killTmuxSession(state.architect.tmuxSession);
+      stopped++;
+    } catch {
+      // Session may already be gone
     }
   }
 
-  // Stop all builders — prefer tmux kill-session over PID kill
+  // Stop all builders — kill tmux sessions by name
   for (const builder of state.builders) {
-    logger.info(`Stopping builder ${builder.id} (PID: ${builder.pid})`);
-    try {
-      if (builder.tmuxSession) {
-        try {
-          await killTmuxSession(builder.tmuxSession, builder.pid);
-          stopped++;
-        } catch {
-          if (await isProcessRunning(builder.pid)) {
-            await killProcess(builder.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(builder.pid)) {
-        await killProcess(builder.pid);
+    if (builder.tmuxSession) {
+      logger.info(`Stopping builder ${builder.id}...`);
+      try {
+        await killTmuxSession(builder.tmuxSession);
         stopped++;
+      } catch {
+        // Session may already be gone
       }
-    } catch (error) {
-      logger.warn(`Failed to stop builder ${builder.id}: ${error}`);
     }
   }
 
-  // Stop all utils — prefer tmux kill-session over PID kill
+  // Stop all utils — kill tmux sessions by name
   for (const util of state.utils) {
-    logger.info(`Stopping util ${util.id} (PID: ${util.pid})`);
-    try {
-      if (util.tmuxSession) {
-        try {
-          await killTmuxSession(util.tmuxSession, util.pid);
-          stopped++;
-        } catch {
-          if (await isProcessRunning(util.pid)) {
-            await killProcess(util.pid);
-            stopped++;
-          }
-        }
-      } else if (await isProcessRunning(util.pid)) {
-        await killProcess(util.pid);
+    if (util.tmuxSession) {
+      logger.info(`Stopping util ${util.id}...`);
+      try {
+        await killTmuxSession(util.tmuxSession);
         stopped++;
+      } catch {
+        // Session may already be gone
       }
-    } catch (error) {
-      logger.warn(`Failed to stop util ${util.id}: ${error}`);
-    }
-  }
-
-  // Stop all annotations — use tree-kill since these are standalone node servers
-  for (const annotation of state.annotations) {
-    logger.info(`Stopping annotation ${annotation.id} (PID: ${annotation.pid})`);
-    try {
-      if (await isProcessRunning(annotation.pid)) {
-        await killProcessTree(annotation.pid);
-        stopped++;
-      }
-    } catch (error) {
-      logger.warn(`Failed to stop annotation ${annotation.id}: ${error}`);
     }
   }
 

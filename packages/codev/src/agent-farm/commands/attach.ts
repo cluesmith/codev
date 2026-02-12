@@ -4,7 +4,7 @@
 
 import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, isProcessRunning, openBrowser } from '../utils/shell.js';
+import { run, openBrowser } from '../utils/shell.js';
 import { loadState, getBuilder, getBuilders } from '../state.js';
 import chalk from 'chalk';
 
@@ -81,16 +81,13 @@ async function displayBuilderList(): Promise<void> {
   logger.header('Running Builders');
   logger.blank();
 
-  const widths = [15, 30, 8, 10, 6];
-  logger.row(['ID', 'Name', 'Type', 'Status', 'Port'], widths);
-  logger.row(['──', '────', '────', '──────', '────'], widths);
+  const widths = [15, 30, 8, 10];
+  logger.row(['ID', 'Name', 'Type', 'Status'], widths);
+  logger.row(['──', '────', '────', '──────'], widths);
 
   for (const builder of builders) {
-    // pid=0 means PTY-backed terminal (no direct process); check tmux session instead
     let running: boolean;
-    if (builder.pid > 0) {
-      running = await isProcessRunning(builder.pid);
-    } else if (builder.tmuxSession) {
+    if (builder.tmuxSession) {
       running = await verifyTmuxSession(builder.tmuxSession);
     } else {
       running = !!builder.terminalId;  // Assume running if Tower terminal exists
@@ -103,7 +100,6 @@ async function displayBuilderList(): Promise<void> {
       builder.name.substring(0, 28),
       typeColor(builder.type),
       statusText,
-      builder.port > 0 ? String(builder.port) : '-',
     ], widths);
   }
 
@@ -166,27 +162,12 @@ export async function attach(options: AttachOptions): Promise<void> {
     return; // TypeScript doesn't know fatal() never returns
   }
 
-  // Check if the builder's process is still running
-  // pid=0 means PTY-backed terminal; check tmux session instead
-  if (builder.pid > 0) {
-    const isRunning = await isProcessRunning(builder.pid);
-    if (!isRunning) {
-      logger.warn(`Builder ${builder.id} process is not running (PID ${builder.pid})`);
-      if (builder.port > 0) {
-        logger.info(`Terminal may still be accessible at: http://localhost:${builder.port}`);
-      }
-    }
-  }
-
-  // Option 1: Open in browser
+  // Option 1: Open in browser (via Tower dashboard)
   if (options.browser) {
-    if (builder.port <= 0) {
-      fatal(`Builder ${builder.id} has no direct port (PTY-backed). Use 'af attach -p ${builder.id}' for tmux, or open the Tower dashboard.`);
-    }
-    const url = `http://localhost:${builder.port}`;
-    logger.info(`Opening ${url} in browser...`);
+    const url = 'http://localhost:4100';
+    logger.info(`Opening Tower dashboard at ${url}...`);
     await openBrowser(url);
-    logger.success(`Opened builder ${builder.id} in browser`);
+    logger.success('Opened Tower dashboard in browser');
     return;
   }
 
@@ -199,12 +180,7 @@ export async function attach(options: AttachOptions): Promise<void> {
   const sessionExists = await verifyTmuxSession(builder.tmuxSession);
   if (!sessionExists) {
     logger.error(`tmux session "${builder.tmuxSession}" not found.`);
-    if (builder.port > 0) {
-      logger.info(`The builder may have exited. Terminal may still be accessible at:`);
-      logger.info(`  http://localhost:${builder.port}`);
-    } else {
-      logger.info('The builder may have exited. Check the Tower dashboard for terminal status.');
-    }
+    logger.info('The builder may have exited. Check the Tower dashboard for terminal status.');
     fatal('');
   }
 

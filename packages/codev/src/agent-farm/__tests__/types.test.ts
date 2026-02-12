@@ -20,8 +20,6 @@ describe('Type Definitions', () => {
       const builder: Builder = {
         id: 'B001',
         name: 'test-builder',
-        port: 7681,
-        pid: 1234,
         status: 'implementing',
         phase: 'planning',
         worktree: '/path/to/worktree',
@@ -54,12 +52,10 @@ describe('Type Definitions', () => {
       const util: UtilTerminal = {
         id: 'U001',
         name: 'my-util',
-        port: 7700,
-        pid: 5678,
       };
 
       expect(util.id).toBe('U001');
-      expect(util.port).toBe(7700);
+      expect(util.name).toBe('my-util');
     });
   });
 
@@ -68,8 +64,6 @@ describe('Type Definitions', () => {
       const annotation: Annotation = {
         id: 'A001',
         file: '/path/to/file.ts',
-        port: 8080,
-        pid: 9012,
         parent: {
           type: 'architect',
         },
@@ -83,8 +77,6 @@ describe('Type Definitions', () => {
       const annotation: Annotation = {
         id: 'A002',
         file: '/path/to/file.ts',
-        port: 8081,
-        pid: 9013,
         parent: {
           type: 'builder',
           id: 'B001',
@@ -100,8 +92,6 @@ describe('Type Definitions', () => {
     it('should accept valid dashboard state', () => {
       const state: DashboardState = {
         architect: {
-          port: 7680,
-          pid: 1111,
           cmd: 'claude',
           startedAt: '2024-01-01T00:00:00Z',
         },
@@ -110,7 +100,7 @@ describe('Type Definitions', () => {
         annotations: [],
       };
 
-      expect(state.architect?.port).toBe(7680);
+      expect(state.architect?.cmd).toBe('claude');
       expect(state.builders).toHaveLength(0);
     });
 
@@ -136,6 +126,7 @@ describe('Type Definitions', () => {
         templatesDir: '/path/to/templates',
         serversDir: '/path/to/servers',
         bundledRolesDir: '/path/to/roles',
+        terminalBackend: 'node-pty',
       };
 
       expect(config.projectRoot).toBe('/path/to/project');

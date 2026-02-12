@@ -164,16 +164,6 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // Kill terminal process if running
-  if (builder.pid) {
-    logger.info('Stopping builder terminal...');
-    try {
-      process.kill(builder.pid, 'SIGTERM');
-    } catch {
-      // Process may already be dead
-    }
-  }
-
   // Kill tmux session if exists (use stored session name for correct shell/builder naming)
   const sessionName = builder.tmuxSession || getSessionName(config, builder.id);
   try {

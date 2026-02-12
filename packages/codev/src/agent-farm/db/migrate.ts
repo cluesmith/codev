@@ -6,14 +6,31 @@
 
 import type Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
-import type { DashboardState } from '../types.js';
+
+/**
+ * Legacy JSON state format (pre-SQLite migration).
+ * Includes pid/port fields that no longer exist on current application types.
+ */
+interface LegacyJsonState {
+  architect: { pid: number; port: number; cmd: string; startedAt: string; tmuxSession?: string } | null;
+  builders: Array<{
+    id: string; name: string; port: number; pid: number; status: string; phase: string;
+    worktree: string; branch: string; tmuxSession?: string; type: string;
+    taskText?: string; protocolName?: string;
+  }>;
+  utils: Array<{ id: string; name: string; port: number; pid: number; tmuxSession?: string }>;
+  annotations: Array<{
+    id: string; file: string; port: number; pid: number;
+    parent: { type: string; id?: string };
+  }>;
+}
 
 /**
  * Migrate local state from JSON to SQLite
  */
 export function migrateLocalFromJson(db: Database.Database, jsonPath: string): void {
   const jsonContent = readFileSync(jsonPath, 'utf-8');
-  const state: DashboardState = JSON.parse(jsonContent);
+  const state: LegacyJsonState = JSON.parse(jsonContent);
 
   // Wrap in transaction for atomicity
   const migrate = db.transaction(() => {
