@@ -75,6 +75,21 @@ The Tower's `POST /api/tabs/file` already handles absolute paths correctly. The 
 - **Preferred**: Resolve relative paths on the server side. The Tower knows each terminal's cwd from the pty session metadata. Send the terminal ID alongside the file path so the Tower can resolve relative to the correct cwd.
 - **Alternative**: The dashboard could prepend the worktree prefix if it knows the terminal is a builder. But this couples the dashboard to worktree layout details.
 
+### Terminal ID Data Flow
+
+The `terminalId` is already available at every point in the dashboard:
+
+1. **Tower assigns** a `terminalId` (UUID) when creating each pty session (`PtySession.id`)
+2. **Dashboard receives** the ID via the `GET /api/state` response — each builder, architect, and shell tab includes a `terminalId` field (see `Builder.terminalId`, `ArchitectState.terminalId` in `api.ts`)
+3. **Terminal component** receives `wsPath` which contains the `terminalId` (e.g., `/ws/terminal/<id>`)
+4. **On click**: The `Terminal` component passes the `terminalId` to the `onFileOpen` callback
+5. **`onFileOpen` → `createFileTab`**: Passes `terminalId` in the API request body
+6. **Tower resolves**: Uses `TerminalManager.getSession(terminalId)` to look up `session.config.cwd`
+
+The `terminalId` is stable for the lifetime of the pty session. It doesn't change on WebSocket reconnect (the session persists server-side). The Terminal component extracts the ID from its `wsPath` prop.
+
+**Note**: `PtySession.config.cwd` is accessible within `tower-server.ts` directly — the public `PtySessionInfo` interface doesn't expose `cwd`, but the Tower has access to the internal session object.
+
 ## Success Criteria
 
 - [ ] File paths in terminal output are visually indicated (dotted underline, pointer cursor)
@@ -145,7 +160,7 @@ When `terminalId` is provided and `path` is relative:
 4. Rejects with 403 if the resolved path escapes the project tree
 5. For symlink resolution: uses `fs.realpathSync()` before the containment check. If the file doesn't exist (e.g., path from a compilation error for a deleted file), falls back to `path.resolve()` without symlink resolution — the containment check still applies
 
-**Fallback when `terminalId` is invalid**: If the terminal session cannot be found (e.g., historical session, tab restored after reconnect), the Tower falls back to resolving relative to the project root. This is the same behavior as when `terminalId` is omitted.
+**Fallback when `terminalId` is invalid**: If the terminal session cannot be found (e.g., historical session, tab restored after reconnect), the Tower logs a warning (`WARN: Terminal session <id> not found, resolving relative to project root`) and falls back to resolving relative to the project root. This is the same behavior as when `terminalId` is omitted. The warning is server-side only (not surfaced to the user as a toast) because the fallback usually produces the correct result for architect terminals.
 
 When `terminalId` is omitted, existing behavior is unchanged (resolves relative to project root).
 
@@ -191,7 +206,7 @@ When `terminalId` is omitted, existing behavior is unchanged (resolves relative 
 | Scenario | Behavior |
 |----------|----------|
 | File doesn't exist | File viewer shows "File not found" indicator |
-| `terminalId` not found (expired/reconnected session) | Falls back to project-root-relative resolution |
+| `terminalId` not found (expired/reconnected session) | Server logs warning; falls back to project-root-relative resolution |
 | Path escapes project tree | Tower returns 403; dashboard shows error toast |
 | Tower unreachable | Dashboard shows connection error toast |
 | `realpathSync` throws (non-existent file) | Falls back to `path.resolve()` for containment check |
@@ -200,8 +215,8 @@ When `terminalId` is omitted, existing behavior is unchanged (resolves relative 
 
 - **Cmd/Ctrl+Click required** — Cmd+Click on macOS, Ctrl+Click on Linux/Windows. Plain click is reserved for text selection. This matches VS Code's integrated terminal behavior. The `ILinkProvider.activate` callback checks `event.metaKey || event.ctrlKey` and returns early without action if neither is held.
 - **Non-existent files are still clickable** — all file path patterns are marked as links. When clicked, if the file doesn't exist, the file viewer shows a visual error indicator (e.g., a cross icon or "File not found" message) rather than silently failing. This avoids the performance cost of checking file existence for every detected path on every terminal render.
-- **macOS-only for now** — Codev currently targets macOS. Windows drive-letter paths (`C:\foo\bar.ts`) are out of scope but the regex can be extended later.
-- **No quoted/bracketed path support in v1** — paths inside quotes (`"foo/bar.ts"`) or brackets (`[foo/bar.ts]`) are matched by the inner content only. Wrapper characters are not included in the link. This can be refined if false negatives are reported.
+- **Windows drive-letter paths deferred** — The feature works cross-platform (Cmd+Click on macOS, Ctrl+Click on Linux/Windows). Only Windows-specific drive-letter path patterns (`C:\foo\bar.ts`) are out of scope for v1, since Codev currently targets macOS. The regex can be extended later.
+- **No quoted/bracketed/space-containing paths in v1** — Paths inside quotes (`"foo/bar.ts"`), brackets (`[foo/bar.ts]`), or containing spaces (`My Tests/foo.ts`) are not matched. Development repositories rarely use spaces in paths. Wrapper character stripping and space-in-path support can be added in a follow-up if false negatives are reported.
 - **ANSI escape codes** — xterm.js `ILinkProvider.provideLinks` receives the **text content** of each buffer line (after ANSI parsing), not raw escape sequences. The regex runs against clean text, so ANSI codes don't interfere with matching.
 - **Multi-line wrapped paths** — Paths that wrap across terminal lines are not matched in v1. The `ILinkProvider` operates per-line. This is a reasonable limitation since most tool output keeps file paths on a single line. Can be revisited if wrapped paths are a common issue.
 - **Column support deferred** — `parseFilePath` extracts column numbers, but the file viewer doesn't support column-level scrolling. Column is parsed and passed through the pipeline but not acted upon in v1. This keeps the data available for future use without adding viewer complexity now.
