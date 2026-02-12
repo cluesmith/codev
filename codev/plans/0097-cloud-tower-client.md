@@ -180,20 +180,20 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 
 **Class `TunnelClient`:**
 - `constructor(options: TunnelClientOptions)`
-- `connect(): void` — Opens outbound TLS connection to server, sends auth, starts H2 server
+- `connect(): void` — Opens outbound WebSocket to server, authenticates via JSON, starts H2 server over the stream (TICK-001)
 - `disconnect(): void` — Closes tunnel gracefully
 - `getState(): TunnelState` — Returns current state
 - `getUptime(): number | null` — Returns ms since connected, or null
 - `onStateChange(callback): void` — State change listener
-- `sendMetadata(metadata: TowerMetadata): void` — Send project/terminal lists as an H2 request (see Metadata Protocol below)
+- `sendMetadata(metadata: TowerMetadata): void` — Caches metadata for H2 GET poll + pushes via outbound HTTPS POST (see Metadata Protocol below)
 
-**Connection flow (matches codevos.ai tunnel server protocol):**
-1. Open TLS connection to tunnel server via `tls.connect()` to `serverUrl` hostname on `tunnelPort` (default 4200). **TLS is mandatory** — the spec requires transport security. The tower validates the server certificate (default Node.js TLS behavior). For local development/testing, the mock tunnel server uses plain TCP (tests only).
-2. Send auth frame: `AUTH <apiKey>\n` (max 256 bytes, 5s timeout on server side)
-3. Wait for response:
-   - Success: `OK <towerId>\n` — server confirms tower identity. Tower stores `towerId` for subsequent use.
-   - Failure: `ERR <reason>\n` where reason is `invalid_api_key`, `rate_limited`, `invalid_auth_frame`, or `internal_error`
-4. On `OK`: Create `http2.createServer()`, emit `'connection'` with the socket
+**Connection flow (matches codevos.ai tunnel server protocol, TICK-001):**
+1. Open WebSocket connection to `wss://serverUrl/tunnel` (or `ws://` for local dev). TLS is handled by the WebSocket layer (`wss://`). For testing, the mock tunnel server uses `ws://` (no TLS).
+2. Send JSON auth message: `{ type: "auth", apiKey: "ctk_..." }`
+3. Wait for JSON response:
+   - Success: `{ type: "auth_ok", towerId: "..." }` — server confirms tower identity
+   - Failure: `{ type: "auth_error", reason: "..." }` where reason is `invalid_api_key`, `rate_limited`, or `internal_error`
+4. On `auth_ok`: Convert WebSocket to duplex stream via `createWebSocketStream()`, create `http2.createServer()`, emit `'connection'` with the stream
 5. H2 stream handler: for each incoming request:
    a. Check path against blocklist (`/api/tunnel/*`) → 403
    b. Proxy to `http://localhost:<localPort>` via `node:http`
@@ -202,17 +202,21 @@ type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 **WebSocket proxying through H2:**
 codevos.ai proxies browser WebSocket connections to the tower via HTTP/2 CONNECT method (RFC 8441 — WebSockets over HTTP/2). The tower's H2 stream handler detects `:method` = `CONNECT` with `:protocol` = `websocket`, makes a regular HTTP/1.1 WebSocket upgrade request to `localhost:<localPort>`, and bidirectionally pipes the H2 stream data to the raw socket. This is how terminal I/O (xterm.js) flows through the tunnel. The codevos.ai server already implements this via its `handleUpgrade()` function.
 
-**Metadata protocol:**
-After tunnel connects, the tower sends metadata to codevos.ai as a special H2 request on a reserved path. The tower makes an outbound H2 request (from the tower's H2 server session) to codevos.ai's H2 client with:
-- Method: `POST`
-- Path: `/__tower/metadata`
+**Metadata protocol (dual mechanism):**
+Metadata delivery uses two complementary mechanisms to ensure codevos.ai always has up-to-date tower information:
+
+1. **Pull (H2 tunnel):** codevos.ai's H2 client polls `GET /__tower/metadata` through the tunnel. The tower's H2 stream handler responds with cached metadata. This works "over the tunnel connection" as the spec requires.
+
+2. **Push (outbound HTTPS):** When metadata changes while connected, the tunnel client also makes an outbound `POST ${serverUrl}/api/tower/metadata` with `Authorization: Bearer <apiKey>`. This proactively notifies codevos.ai without waiting for a poll cycle.
+
 - Body: JSON `{ projects: [...], terminals: [...] }`
-This is a convention — codevos.ai's H2 client handles this path specially. Metadata is re-sent whenever projects or terminals change (debounced).
+- The push is best-effort — failures are silently ignored since the pull mechanism serves as fallback.
+- Metadata is refreshed every 30 seconds while connected (via tower-server's `startMetadataRefresh`).
 
 **Reconnection:**
 - `calculateBackoff(attempt: number): number` — Exponential with jitter: `min(1000 * 2^attempt + random(0, 1000), 60000)`. Jitter is a random value between 0 and 1000ms added to the base delay. After 10 consecutive failures: 300000ms (5 min).
-- Circuit breaker: On `ERR invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."`
-- On transient failure (`ERR rate_limited`, `ERR internal_error`, connection reset, timeout): schedule reconnect with backoff.
+- Circuit breaker: On `auth_error` with reason `invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."`
+- On transient failure (`rate_limited`, `internal_error`, WebSocket close, timeout): schedule reconnect with backoff.
 
 **Hop-by-hop headers to filter:**
 `connection`, `keep-alive`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailers`, `transfer-encoding`, `upgrade`
@@ -221,15 +225,17 @@ This is a convention — codevos.ai's H2 client handles this path specially. Met
 Any path starting with `/api/tunnel/` returns HTTP 403 `{"error": "Forbidden: tunnel management endpoints are local-only"}`.
 
 **Mock tunnel server** (`mock-tunnel-server.ts`):
-Created in this phase to enable integration testing alongside the client. Lightweight TCP server implementing the codevos.ai tunnel protocol:
-- Accepts `AUTH <key>\n`, responds with `OK <id>\n` or `ERR <reason>\n`
-- Configurable: accept/reject auth, timeout, disconnect after N requests
-- Runs H2 client over the connection to send requests to the tower
-- Plain TCP (no TLS) for test simplicity
+Created in this phase to enable integration testing alongside the client. Lightweight WebSocket server implementing the codevos.ai tunnel protocol (TICK-001):
+- Accepts WebSocket connections on `/tunnel`, expects JSON auth messages
+- Responds with `{ type: "auth_ok" }` or `{ type: "auth_error" }`
+- Configurable: accept/reject auth, force errors, disconnect after auth
+- Converts WebSocket to duplex stream, runs H2 client to send requests to the tower
+- Handles outbound metadata POST on `/api/tower/metadata`
+- Plain WebSocket (`ws://`) for test simplicity
 
 #### Acceptance Criteria
-- [ ] TLS connection opens to server (mandatory, not optional)
-- [ ] Auth handshake succeeds with valid key
+- [ ] WebSocket connection opens to server (wss:// for production, ws:// for testing)
+- [ ] JSON auth handshake succeeds with valid key
 - [ ] H2 server runs over outbound socket
 - [ ] HTTP requests proxied to localhost correctly
 - [ ] WebSocket CONNECT requests proxied correctly (bidirectional pipe)

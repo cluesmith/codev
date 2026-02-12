@@ -435,6 +435,44 @@ describe('tunnel-client integration', () => {
       expect(body.projects).toHaveLength(1);
       expect(body.projects[0].name).toBe('updated');
     });
+
+    it('pushes metadata via outbound HTTP POST on connect', async () => {
+      await setupTunnel();
+
+      client.sendMetadata({
+        projects: [{ path: '/pushed', name: 'pushed-project' }],
+        terminals: [],
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Wait for the async HTTP POST to arrive
+      await waitFor(() => mockServer.lastPushedMetadata !== null);
+
+      expect(mockServer.lastPushedMetadata!.projects).toHaveLength(1);
+      expect(mockServer.lastPushedMetadata!.projects[0].name).toBe('pushed-project');
+    });
+
+    it('pushes metadata via HTTP POST when sendMetadata called while connected', async () => {
+      await setupTunnel();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Clear any initial push
+      mockServer.lastPushedMetadata = null;
+
+      client.sendMetadata({
+        projects: [{ path: '/live-update', name: 'live' }],
+        terminals: [{ id: 't1', projectPath: '/live-update' }],
+      });
+
+      await waitFor(() => mockServer.lastPushedMetadata !== null);
+
+      expect(mockServer.lastPushedMetadata!.projects[0].name).toBe('live');
+      expect(mockServer.lastPushedMetadata!.terminals).toHaveLength(1);
+    });
   });
 
   describe('WebSocket CONNECT proxy', () => {

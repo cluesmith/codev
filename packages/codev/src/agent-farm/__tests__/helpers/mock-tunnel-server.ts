@@ -53,8 +53,26 @@ export class MockTunnelServer {
       towerId: 'test-tower-id',
       ...options,
     };
-    // Create an HTTP server for WebSocket upgrade
-    this.httpServer = http.createServer();
+    // Create an HTTP server for WebSocket upgrade + metadata POST handler
+    this.httpServer = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/api/tower/metadata') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', () => {
+          try {
+            this.lastPushedMetadata = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+          } catch {
+            res.writeHead(400);
+            res.end();
+          }
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
     this.wss = new WebSocketServer({ noServer: true });
 
     this.httpServer.on('upgrade', (req, socket, head) => {
@@ -191,6 +209,8 @@ export class MockTunnelServer {
 
   /** Last received metadata from the tower (fetched via H2 GET /__tower/metadata) */
   lastMetadata: TowerMetadata | null = null;
+  /** Last received metadata via outbound HTTP POST /api/tower/metadata */
+  lastPushedMetadata: TowerMetadata | null = null;
 
   private handleConnection(ws: WebSocket): void {
     this.wsConnections.push(ws);

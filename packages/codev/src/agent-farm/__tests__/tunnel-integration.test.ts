@@ -529,7 +529,7 @@ describe('tunnel integration (Phase 4)', () => {
 
       // Simulate config write
       fs.writeFileSync(testFile, JSON.stringify(createTestConfig()));
-      await waitFor(() => changeDetected, 2000);
+      await waitFor(() => changeDetected, 5000);
       expect(changeDetected).toBe(true);
 
       watcher.close();

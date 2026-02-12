@@ -12,6 +12,7 @@
 
 import http2 from 'node:http2';
 import http from 'node:http';
+import https from 'node:https';
 import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
 import WebSocket, { createWebSocketStream } from 'ws';
@@ -150,6 +151,10 @@ export class TunnelClient {
       this.connectedAt = Date.now();
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
+      // Push cached metadata on connect
+      if (this._pendingMetadata) {
+        this.pushMetadataViaHttp(this._pendingMetadata);
+      }
     } else if (newState === 'disconnected' || newState === 'auth_failed') {
       this.connectedAt = null;
     }
@@ -196,18 +201,57 @@ export class TunnelClient {
   }
 
   /**
-   * Send tower metadata to codevos.ai through the tunnel.
+   * Send tower metadata to codevos.ai.
    *
-   * Metadata is served via `GET /__tower/metadata` when the codevos.ai
-   * H2 client polls. Call before `connect()` to set initial metadata,
-   * or after `connect()` to update it (served on next GET poll).
+   * Uses a dual mechanism:
+   * 1. Caches metadata for `GET /__tower/metadata` (served when codevos.ai H2 client polls)
+   * 2. When connected, proactively POSTs to `serverUrl/api/tower/metadata` via HTTPS
+   *
+   * Call before `connect()` to set initial metadata, or after to update it.
    */
   sendMetadata(metadata: TowerMetadata): void {
     this._pendingMetadata = metadata;
+    // Proactively push via HTTPS when connected
+    if (this.state === 'connected') {
+      this.pushMetadataViaHttp(metadata);
+    }
   }
 
   /** Stored metadata for serving via GET /__tower/metadata */
   private _pendingMetadata: TowerMetadata | null = null;
+
+  /**
+   * Push metadata to codevos.ai via outbound HTTPS POST.
+   * Best-effort — failures are silently ignored since codevos.ai
+   * can also poll via the H2 tunnel's GET /__tower/metadata handler.
+   */
+  private pushMetadataViaHttp(metadata: TowerMetadata): void {
+    try {
+      const url = new URL('/api/tower/metadata', this.options.serverUrl);
+      const body = JSON.stringify(metadata);
+      const isSecure = url.protocol === 'https:';
+      const transport = isSecure ? https : http;
+
+      const req = transport.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.options.apiKey}`,
+          'Content-Length': Buffer.byteLength(body),
+        },
+      }, (res) => {
+        res.resume(); // Drain response
+      });
+
+      req.on('error', () => {
+        // Best-effort — silently ignore network errors
+      });
+
+      req.end(body);
+    } catch {
+      // Ignore URL construction or other errors
+    }
+  }
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer) {
