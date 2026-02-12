@@ -299,7 +299,7 @@ describe('FilePathLinkProvider', () => {
       expect(links).toBeDefined();
 
       // Simulate Cmd+Click
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalledWith('src/foo.ts', 42, undefined, undefined);
     });
 
@@ -313,7 +313,7 @@ describe('FilePathLinkProvider', () => {
       });
       expect(links).toBeDefined();
 
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalledWith('src/foo.ts', 42, 15, undefined);
     });
 
@@ -327,7 +327,7 @@ describe('FilePathLinkProvider', () => {
       });
       expect(links).toBeDefined();
 
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalledWith('src/foo.ts', 42, 15, undefined);
     });
 
@@ -341,7 +341,7 @@ describe('FilePathLinkProvider', () => {
       });
       expect(links).toBeDefined();
 
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalledWith('src/foo.ts', undefined, undefined, undefined);
     });
   });
@@ -357,7 +357,7 @@ describe('FilePathLinkProvider', () => {
       });
       expect(links).toBeDefined();
 
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalledWith('src/foo.ts', undefined, undefined, 'term-123');
     });
   });
@@ -378,9 +378,8 @@ describe('FilePathLinkProvider', () => {
 
     // Note: platform-aware modifier behavior (metaKey on macOS, ctrlKey on others)
     // depends on navigator.platform which is set at module load time.
-    // In the test environment, isMac detection is based on the test runner's platform.
-    // We test that at least ONE of the modifier keys activates the callback.
-    it('activates with metaKey (Cmd)', async () => {
+    // We pass both metaKey and ctrlKey so the test works on both platforms.
+    it('activates with modifier key (Cmd on macOS, Ctrl on Linux)', async () => {
       const onFileOpen = vi.fn();
       const terminal = createMockTerminal('error in src/foo.ts here');
       const provider = new FilePathLinkProvider(terminal, onFileOpen);
@@ -389,12 +388,7 @@ describe('FilePathLinkProvider', () => {
         provider.provideLinks(1, resolve);
       });
 
-      // On macOS test runner, metaKey should work
-      links![0].activate({ metaKey: true, ctrlKey: false } as MouseEvent, links![0].text);
-      // On non-macOS, ctrlKey should work
-      if (!onFileOpen.mock.calls.length) {
-        links![0].activate({ metaKey: false, ctrlKey: true } as MouseEvent, links![0].text);
-      }
+      links![0].activate({ metaKey: true, ctrlKey: true } as MouseEvent, links![0].text);
       expect(onFileOpen).toHaveBeenCalled();
     });
   });
