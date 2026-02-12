@@ -206,11 +206,19 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(afterTabCount).toBeGreaterThan(beforeTabCount);
     });
 
-    test('Cmd+Click on path with line number opens file tab (spec scenario 11)', async ({ page, request }) => {
+    test('Cmd+Click on path with line number sends line metadata to API (spec scenario 11)', async ({ page, request }) => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
 
       const beforeTabCount = await getFileTabCount(request);
+
+      // Intercept the file tab API call to verify line metadata
+      let capturedBody: { path?: string; line?: number } | null = null;
+      await page.route('**/api/tabs/file', async (route) => {
+        const postData = route.request().postDataJSON();
+        capturedBody = postData;
+        await route.continue();
+      });
 
       // Output a file path with a line number
       await typeAndWait(page, terminal, 'echo "package.json:5"');
@@ -230,6 +238,10 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       // A file tab should have been created via the click
       const afterTabCount = await getFileTabCount(request);
       expect(afterTabCount).toBeGreaterThan(beforeTabCount);
+
+      // Verify the API call included the line number
+      expect(capturedBody).not.toBeNull();
+      expect(capturedBody!.line).toBe(5);
     });
 
     test('Cmd+Click on non-existent file path shows notFound tab (spec scenario 15)', async ({ page, request }) => {
