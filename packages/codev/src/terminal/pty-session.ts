@@ -204,6 +204,11 @@ export class PtySession extends EventEmitter {
     }
   }
 
+  /** Working directory of the PTY session. */
+  get cwd(): string {
+    return this.config.cwd;
+  }
+
   get status(): 'running' | 'exited' {
     return this.exitCode === undefined ? 'running' : 'exited';
   }

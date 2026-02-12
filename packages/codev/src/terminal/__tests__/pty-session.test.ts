@@ -162,6 +162,15 @@ describe('PtySession', () => {
     vi.useRealTimers();
   });
 
+  it('exposes cwd from config via getter', () => {
+    expect(session.cwd).toBe('/tmp');
+  });
+
+  it('exposes custom cwd from config', () => {
+    const customSession = new PtySession(makeConfig({ cwd: '/home/user/project' }));
+    expect(customSession.cwd).toBe('/home/user/project');
+  });
+
   it('supports resume with sequence number', () => {
     dataCallback('a\nb\nc\nd');
     const client = { send: vi.fn() };

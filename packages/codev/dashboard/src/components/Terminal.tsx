@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { parseFilePath, looksLikeFilePath } from '../lib/filePaths.js';
+import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePathLinkProvider.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -14,8 +14,8 @@ const FRAME_DATA = 0x01;
 interface TerminalProps {
   /** WebSocket path for the terminal session, e.g. /ws/terminal/<id> */
   wsPath: string;
-  /** Callback when user clicks a file path in terminal output (Spec 0092) */
-  onFileOpen?: (path: string, line?: number, column?: number) => void;
+  /** Callback when user clicks a file path in terminal output (Spec 0092, 0101) */
+  onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
 }
 
 /**
@@ -77,26 +77,30 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       loadCanvasFallback();
     }
 
-    // Spec 0092: Add web links addon for clickable file paths
+    // URL links: open in new browser tab (WebLinksAddon handles http/https only)
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      event.preventDefault();
+      window.open(uri, '_blank');
+    });
+    term.loadAddon(webLinksAddon);
+
+    // Spec 0101: File path links — register custom ILinkProvider for Cmd/Ctrl+Click activation
+    // and FilePathDecorationManager for persistent dotted underline decoration.
+    // Extract terminalId from wsPath: "/base/ws/terminal/<id>" → "<id>"
+    const terminalId = wsPath.split('/').pop();
+    let linkProviderDisposable: { dispose(): void } | null = null;
+    let decorationManager: FilePathDecorationManager | null = null;
     if (onFileOpen) {
-      const webLinksAddon = new WebLinksAddon(
-        (event, uri) => {
-          event.preventDefault();
-          // Check if it looks like a file path (not a URL)
-          if (looksLikeFilePath(uri)) {
-            const parsed = parseFilePath(uri);
-            onFileOpen(parsed.path, parsed.line, parsed.column);
-          } else {
-            // For actual URLs, open in new tab
-            window.open(uri, '_blank');
-          }
+      decorationManager = new FilePathDecorationManager(term);
+      const filePathProvider = new FilePathLinkProvider(
+        term,
+        (filePath, line, column, tid) => {
+          onFileOpen(filePath, line, column, tid);
         },
-        {
-          // Enable URL detection (http, https, etc.)
-          urlRegex: undefined, // Use default URL regex
-        }
+        terminalId,
+        decorationManager,
       );
-      term.loadAddon(webLinksAddon);
+      linkProviderDisposable = term.registerLinkProvider(filePathProvider);
     }
 
     // Clipboard handling
@@ -257,6 +261,8 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
+      decorationManager?.dispose();
+      linkProviderDisposable?.dispose();
       selectionDisposable.dispose();
       container.removeEventListener('mouseup', handleMouseUp);
       resizeObserver.disconnect();

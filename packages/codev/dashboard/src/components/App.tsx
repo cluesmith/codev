@@ -26,10 +26,10 @@ export function App() {
   // Spec 0092: Store pending initial line numbers for file tabs (not persisted server-side)
   const pendingFileLinesRef = useRef<Map<string, number>>(new Map());
 
-  // Spec 0092: Handle file path clicks from terminal output
-  const handleFileOpen = useCallback(async (path: string, line?: number, _column?: number) => {
+  // Spec 0092 + 0101: Handle file path clicks from terminal output
+  const handleFileOpen = useCallback(async (path: string, line?: number, _column?: number, terminalId?: string) => {
     try {
-      const result = await createFileTab(path, line);
+      const result = await createFileTab(path, line, terminalId);
       // Store the line number for when FileViewer renders
       if (line && line > 0) {
         pendingFileLinesRef.current.set(result.id, line);
