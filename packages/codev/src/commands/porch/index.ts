@@ -18,6 +18,7 @@ import {
   getProjectDir,
   getStatusPath,
   detectProjectId,
+  detectProjectIdFromCwd,
 } from './state.js';
 import {
   loadProtocol,
@@ -612,13 +613,25 @@ export async function cli(args: string[]): Promise<void> {
 
   // Auto-detect project ID for commands that need it
   function getProjectId(provided?: string): string {
+    // 1. Explicit CLI argument (highest priority)
     if (provided) return provided;
+
+    // 2. CWD worktree detection
+    const fromCwd = detectProjectIdFromCwd(process.cwd());
+    if (fromCwd) {
+      console.log(chalk.dim(`[auto-detected project from worktree: ${fromCwd}]`));
+      return fromCwd;
+    }
+
+    // 3. Filesystem scan fallback
     const detected = detectProjectId(projectRoot);
     if (detected) {
       console.log(chalk.dim(`[auto-detected project: ${detected}]`));
       return detected;
     }
-    throw new Error('No project ID provided and could not auto-detect.\nProvide ID explicitly or ensure exactly one project exists in codev/projects/');
+
+    // 4. Error — none of the detection methods succeeded
+    throw new Error('Cannot determine project ID. Provide it explicitly or run from a builder worktree.');
   }
 
   try {
@@ -677,7 +690,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
         console.log('');
-        console.log('Project ID is auto-detected when exactly one project exists.');
+        console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
         console.log('');
         process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
     }
