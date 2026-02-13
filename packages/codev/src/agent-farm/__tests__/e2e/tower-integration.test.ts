@@ -122,3 +122,141 @@ test.describe('Tower Mobile', () => {
     await expect(page.locator('body')).not.toBeEmpty();
   });
 });
+
+test.describe('Tower Mobile Compaction (Spec 0094)', () => {
+  test.use({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true });
+
+  test('share button is hidden on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    const shareBtn = page.locator('#share-btn');
+    await expect(shareBtn).toBeHidden();
+  });
+
+  test('project path row is hidden on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    const pathRow = page.locator('.instance-path-row');
+    if (await pathRow.count() > 0) {
+      await expect(pathRow.first()).toBeHidden();
+    }
+  });
+
+  test('port items use row layout on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    const portItem = page.locator('.port-item').first();
+    if (await portItem.count() > 0) {
+      const flexDirection = await portItem.evaluate(
+        el => window.getComputedStyle(el).flexDirection
+      );
+      expect(flexDirection).toBe('row');
+    }
+  });
+
+  test('instance header uses row wrap layout on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    const header = page.locator('.instance-header').first();
+    const styles = await header.evaluate(el => {
+      const cs = window.getComputedStyle(el);
+      return { flexDirection: cs.flexDirection, flexWrap: cs.flexWrap };
+    });
+    expect(styles.flexDirection).toBe('row');
+    expect(styles.flexWrap).toBe('wrap');
+  });
+
+  test('recent projects path is hidden on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    const recentPath = page.locator('.recent-path');
+    if (await recentPath.count() > 0) {
+      await expect(recentPath.first()).toBeHidden();
+    }
+  });
+
+  test('recent items use row layout on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    const recentItem = page.locator('.recent-item');
+    if (await recentItem.count() > 0) {
+      const flexDirection = await recentItem.first().evaluate(
+        el => window.getComputedStyle(el).flexDirection
+      );
+      expect(flexDirection).toBe('row');
+    }
+  });
+
+  test('all buttons meet minimum touch target size', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    // Check action buttons meet 36px minimum
+    const buttons = page.locator('.instance-actions .btn');
+    const count = await buttons.count();
+    for (let i = 0; i < count; i++) {
+      const box = await buttons.nth(i).boundingBox();
+      if (box) {
+        expect(box.height).toBeGreaterThanOrEqual(36);
+      }
+    }
+  });
+});
+
+test.describe('Tower Desktop Unchanged (Spec 0094)', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('share button is not force-hidden by CSS on desktop', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    // The share button starts hidden via inline style="display: none;" and JS
+    // shows it when a tunnel is available. On mobile, CSS adds display:none !important.
+    // On desktop, CSS should NOT force-hide it — verify no CSS rule hides it.
+    const shareBtn = page.locator('#share-btn');
+    const hasCSSHidden = await shareBtn.evaluate(el => {
+      // Temporarily remove inline display style to isolate CSS rules
+      const inlineDisplay = el.style.display;
+      el.style.display = '';
+      const cssDisplay = window.getComputedStyle(el).display;
+      el.style.display = inlineDisplay; // restore
+      return cssDisplay === 'none';
+    });
+    expect(hasCSSHidden).toBe(false);
+  });
+
+  test('project path row is visible on desktop', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    const pathRow = page.locator('.instance-path-row');
+    if (await pathRow.count() > 0) {
+      await expect(pathRow.first()).toBeVisible();
+    }
+  });
+
+  test('port items use default layout on desktop', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    const instance = page.locator('.instance');
+    await expect(instance.first()).toBeVisible({ timeout: 10_000 });
+
+    const portItem = page.locator('.port-item').first();
+    if (await portItem.count() > 0) {
+      const flexDirection = await portItem.evaluate(
+        el => window.getComputedStyle(el).flexDirection
+      );
+      expect(flexDirection).toBe('row');
+    }
+  });
+});

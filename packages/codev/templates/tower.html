@@ -422,6 +422,11 @@
       gap: 24px;
     }
 
+    .new-shell-row {
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+
     /* Recents section */
     .recents-section {
       margin-top: 32px;
@@ -727,10 +732,24 @@
         justify-content: flex-end;
       }
 
+      /* 1. Hide Share button on mobile (tunnel is for reaching phone, not FROM phone) */
+      #share-btn {
+        display: none !important;
+      }
+
+      /* 7. Reduce section spacing */
       .main {
-        padding: 16px;
-        padding-left: calc(16px + env(safe-area-inset-left, 0));
-        padding-right: calc(16px + env(safe-area-inset-right, 0));
+        padding: 12px;
+        padding-left: calc(12px + env(safe-area-inset-left, 0));
+        padding-right: calc(12px + env(safe-area-inset-right, 0));
+      }
+
+      .section-header {
+        margin-bottom: 8px;
+      }
+
+      .instances {
+        gap: 10px;
       }
 
       .btn {
@@ -744,34 +763,78 @@
         padding: 10px 14px;
       }
 
+      /* 2. Keep project name + status badge + Restart/Stop on one line */
       .instance-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
-        padding: 16px;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 16px;
       }
 
       .instance-actions {
-        width: 100%;
-        justify-content: flex-end;
+        margin-left: auto;
       }
 
+      /* 3. Hide project path row on mobile */
+      .instance-path-row {
+        display: none;
+      }
+
+      /* 4. Compact terminal list (Overview, Architect, shells) */
       .port-item {
-        flex-direction: column;
-        align-items: flex-start;
+        flex-direction: row;
+        align-items: center;
+        padding: 8px 12px;
         gap: 8px;
       }
 
       .port-actions {
-        width: 100%;
+        width: auto;
       }
 
       .port-actions a {
-        min-height: 44px;
         display: flex;
         align-items: center;
         justify-content: center;
-        flex: 1;
+        padding: 6px 12px;
+        flex: 0;
+        /* min-height handled by @media (pointer: coarse) at 44px */
+      }
+
+      .instance-body {
+        padding: 12px;
+      }
+
+      /* 5. Compact New Shell row */
+      .new-shell-row {
+        margin-top: 4px;
+        padding-top: 4px;
+      }
+
+      /* 6. Compact Recent Projects */
+      .recent-item {
+        flex-direction: row;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 8px;
+      }
+
+      .recent-path {
+        display: none;
+      }
+
+      .recent-time {
+        font-size: 12px;
+      }
+
+      /* 7. Reduce section spacing (continued) */
+      .recents-section {
+        margin-top: 16px;
+        padding-top: 16px;
+      }
+
+      .instance-meta {
+        margin-top: 8px;
+        padding-top: 8px;
       }
 
       .launch-section {
@@ -789,13 +852,6 @@
       .btn-launch {
         width: 100%;
         min-height: 44px;
-      }
-
-      .recent-item {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
-        padding: 16px;
       }
 
       .dialog-box {
@@ -1194,7 +1250,7 @@
 
         // Add "New Shell" button for this instance
         terminalsHtml += `
-          <div class="port-item" style="border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px;">
+          <div class="port-item new-shell-row" style="border-top: 1px dashed var(--border);">
             <div class="port-info">
               <span class="port-status" style="background: var(--accent);"></span>
               <span class="port-type">New Shell</span>
