@@ -16,9 +16,11 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm');
 const CLOUD_CONFIG_FILENAME = 'cloud-config.json';
+const MACHINE_ID_FILENAME = 'machine-id';
 
 /**
  * Cloud configuration stored after tower registration with codevos.ai.
@@ -128,6 +130,38 @@ export function deleteCloudConfig(): void {
  */
 export function isRegistered(): boolean {
   return readCloudConfig() !== null;
+}
+
+/**
+ * Returns the path to ~/.agent-farm/machine-id
+ */
+export function getMachineIdPath(): string {
+  return resolve(AGENT_FARM_DIR, MACHINE_ID_FILENAME);
+}
+
+/**
+ * Get or create a persistent machine ID (UUID v4).
+ *
+ * Reads from ~/.agent-farm/machine-id if it exists.
+ * Otherwise generates a new UUID, persists it, and returns it.
+ * This ID survives tower deregistration and re-registration.
+ */
+export function getOrCreateMachineId(): string {
+  const machineIdPath = getMachineIdPath();
+
+  if (existsSync(machineIdPath)) {
+    const id = readFileSync(machineIdPath, 'utf-8').trim();
+    if (id) return id;
+  }
+
+  const id = randomUUID();
+
+  if (!existsSync(AGENT_FARM_DIR)) {
+    mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  writeFileSync(machineIdPath, id + '\n', { mode: 0o600 });
+  return id;
 }
 
 /**

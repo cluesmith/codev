@@ -15,6 +15,7 @@ import {
   writeCloudConfig,
   deleteCloudConfig,
   maskApiKey,
+  getOrCreateMachineId,
   type CloudConfig,
 } from '../lib/cloud-config.js';
 
@@ -44,11 +45,12 @@ async function confirm(question: string): Promise<boolean> {
 }
 
 /**
- * Generate a stable machine ID from hostname + platform.
+ * Get a persistent machine ID (UUID).
+ * Delegates to cloud-config's getOrCreateMachineId() which reads or generates
+ * a UUID stored at ~/.agent-farm/machine-id.
  */
 function getMachineId(): string {
-  const { platform, arch } = process;
-  return `${hostname()}-${platform}-${arch}`;
+  return getOrCreateMachineId();
 }
 
 /**
