@@ -39,6 +39,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       lineHeight: 1,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       customGlyphs: true,
+      scrollback: 10000,
       theme: {
         background: '#1a1a1a',
         foreground: '#e0e0e0',
@@ -243,10 +244,11 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     });
 
     // Scroll handling: when xterm.js is in the alternate screen buffer (e.g., tmux),
-    // translate wheel events to arrow key sequences sent to the PTY.
-    // In normal screen buffer, xterm.js handles scrollback natively.
+    // translate wheel events to arrow key sequences sent to the PTY so apps like
+    // Claude Code scroll their TUI output. In normal screen buffer, xterm.js
+    // handles scrollback natively via its own viewport.
     let scrollAccumulator = 0;
-    const SCROLL_PIXELS_PER_LINE = 30;
+    const SCROLL_PIXELS_PER_LINE = 20; // responsive threshold for trackpad
 
     const handleWheel = (event: WheelEvent) => {
       if (term.buffer.active.type !== 'alternate') return;
@@ -266,7 +268,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       scrollAccumulator -= lines * SCROLL_PIXELS_PER_LINE;
 
       const count = Math.min(Math.abs(lines), 15);
-      const seq = lines < 0 ? '\x1b[A' : '\x1b[B';
+      const seq = lines < 0 ? '\x1b[A' : '\x1b[B'; // Up / Down arrow
       sendData(ws, seq.repeat(count));
     };
 
