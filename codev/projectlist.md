@@ -1213,9 +1213,32 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     notes: "UX issue: builders always know their project ID from the worktree path, but porch requires explicit arg."
 ```
 
+  - id: "0103"
+    title: "Consult Claude via Agent SDK"
+    summary: "Replace CLI subprocess delegation for Claude with Agent SDK, enabling tool-using reviews and eliminating CLAUDECODE nesting failures"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0103-consult-claude-agent-sdk.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [consult, claude, sdk, agent-sdk]
+    timestamps:
+      conceived_at: "2026-02-13T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Addresses Claude review timeouts in builder contexts. SDK v0.2.41 provides query() with tool restrictions, system prompt, and structured output."
+```
+
 ## Next Available Number
 
-**0103** - Reserve this number for your next project
+**0104** - Reserve this number for your next project
 
 ---
 
