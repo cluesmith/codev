@@ -570,6 +570,8 @@ function createTmuxSession(
     // Mouse OFF — xterm.js in the browser handles selection, scrolling,
     // and Cmd+C/Cmd+V clipboard. tmux mouse mode conflicts with this.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'off'], { stdio: 'ignore' });
+    // Unset CLAUDECODE so spawned Claude processes don't detect a nested session
+    spawnSync('tmux', ['set-environment', '-t', sessionName, '-u', 'CLAUDECODE'], { stdio: 'ignore' });
 
     return sessionName;
   } catch (err) {
