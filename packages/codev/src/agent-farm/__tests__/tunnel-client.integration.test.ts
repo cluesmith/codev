@@ -595,8 +595,7 @@ describe('tunnel-client integration', () => {
       }
     });
 
-    // Skipped: pre-existing timeout failure on main (times out at 5000ms consistently)
-    it.skip('forwards custom headers through WebSocket CONNECT proxy', async () => {
+    it('forwards custom headers through WebSocket CONNECT proxy', async () => {
       // Track headers received by the local server
       let receivedHeaders: http.IncomingHttpHeaders = {};
       const headerServer = http.createServer();
@@ -609,6 +608,8 @@ describe('tunnel-client integration', () => {
           'Connection: Upgrade\r\n' +
           '\r\n',
         );
+        socket.resume();
+        socket.on('error', () => {});
       });
       const headerPort = await startServer(headerServer);
 
@@ -646,6 +647,13 @@ describe('tunnel-client integration', () => {
         expect(receivedHeaders['x-custom-header']).toBe('test-value');
         stream.destroy();
       } finally {
+        // Destroy upgrade sockets before stopping server to prevent hang —
+        // stream.destroy() cascades asynchronously, so the piped socket may
+        // still be alive when stopServer is called, causing server.close()
+        // to wait indefinitely for the connection to end.
+        for (const s of upgradeSockets) {
+          if (!s.destroyed) s.destroy();
+        }
         await stopServer(headerServer);
       }
     });
