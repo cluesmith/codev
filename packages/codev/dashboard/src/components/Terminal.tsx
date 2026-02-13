@@ -231,9 +231,19 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
 
     // Send user input to the PTY
     term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        sendData(ws, data);
+      if (ws.readyState !== WebSocket.OPEN) return;
+      // During initial handshake, filter automatic terminal responses
+      // (DA, DSR, mode reports) that xterm.js sends in reply to tmux queries.
+      // These would otherwise be interpreted as keyboard input by the shell.
+      if (initialPhase) {
+        const filtered = data
+          .replace(/\x1b\[[\?>][\d;]*c/g, '')    // DA1/DA2 responses
+          .replace(/\x1b\[\d+;\d+R/g, '')          // DSR cursor position
+          .replace(/\x1b\[\?[\d;]*\$y/g, '');      // Mode reports (DECRPM)
+        if (!filtered) return;
+        data = filtered;
       }
+      sendData(ws, data);
     });
 
     // Send resize events
