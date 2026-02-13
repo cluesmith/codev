@@ -1858,6 +1858,82 @@ function serveStaticFile(filePath: string, res: http.ServerResponse): boolean {
   }
 }
 
+/**
+ * Handle tunnel management endpoints (Spec 0097 Phase 4).
+ * Extracted so both /api/tunnel/* and /project/<encoded>/api/tunnel/* can use it.
+ */
+async function handleTunnelEndpoint(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  tunnelSub: string
+): Promise<void> {
+  // POST connect
+  if (req.method === 'POST' && tunnelSub === 'connect') {
+    try {
+      const config = readCloudConfig();
+      if (!config) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Not registered. Run \'af tower register\' first.' }));
+        return;
+      }
+      if (tunnelClient) tunnelClient.resetCircuitBreaker();
+      const client = await connectTunnel(config);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, state: client.getState() }));
+    } catch (err) {
+      log('ERROR', `Tunnel connect failed: ${(err as Error).message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+    }
+    return;
+  }
+
+  // POST disconnect
+  if (req.method === 'POST' && tunnelSub === 'disconnect') {
+    if (tunnelClient) {
+      tunnelClient.disconnect();
+      tunnelClient = null;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // GET status
+  if (req.method === 'GET' && tunnelSub === 'status') {
+    let config: CloudConfig | null = null;
+    try {
+      config = readCloudConfig();
+    } catch {
+      // Config file may be corrupted — treat as unregistered
+    }
+
+    const state = tunnelClient?.getState() ?? 'disconnected';
+    const uptime = tunnelClient?.getUptime() ?? null;
+
+    const response: Record<string, unknown> = {
+      registered: config !== null,
+      state,
+      uptime,
+    };
+
+    if (config) {
+      response.towerId = config.tower_id;
+      response.towerName = config.tower_name;
+      response.serverUrl = config.server_url;
+      response.accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(response));
+    return;
+  }
+
+  // Unknown tunnel endpoint
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
+
 // Create server
 const server = http.createServer(async (req, res) => {
   // Security: Validate Host and Origin headers
@@ -1913,70 +1989,12 @@ const server = http.createServer(async (req, res) => {
 
     // =========================================================================
     // Tunnel Management Endpoints (Spec 0097 Phase 4)
+    // Also reachable from /project/<encoded>/api/tunnel/* (see project router)
     // =========================================================================
 
-    // POST /api/tunnel/connect — Connect or reconnect tunnel to codevos.ai
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/connect') {
-      try {
-        const config = readCloudConfig();
-        if (!config) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Not registered. Run \'af tower register\' first.' }));
-          return;
-        }
-
-        // Reset circuit breaker if in auth_failed state
-        if (tunnelClient) tunnelClient.resetCircuitBreaker();
-
-        const client = await connectTunnel(config);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, state: client.getState() }));
-      } catch (err) {
-        log('ERROR', `Tunnel connect failed: ${(err as Error).message}`);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: (err as Error).message }));
-      }
-      return;
-    }
-
-    // POST /api/tunnel/disconnect — Disconnect tunnel from codevos.ai
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/disconnect') {
-      if (tunnelClient) {
-        tunnelClient.disconnect();
-        tunnelClient = null;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-      return;
-    }
-
-    // GET /api/tunnel/status — Return tunnel connection status
-    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
-      let config: CloudConfig | null = null;
-      try {
-        config = readCloudConfig();
-      } catch {
-        // Config file may be corrupted — treat as unregistered
-      }
-
-      const state = tunnelClient?.getState() ?? 'disconnected';
-      const uptime = tunnelClient?.getUptime() ?? null;
-
-      const response: Record<string, unknown> = {
-        registered: config !== null,
-        state,
-        uptime,
-      };
-
-      if (config) {
-        response.towerId = config.tower_id;
-        response.towerName = config.tower_name;
-        response.serverUrl = config.server_url;
-        response.accessUrl = `${config.server_url}/t/${config.tower_name}/`;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(response));
+    if (url.pathname.startsWith('/api/tunnel/')) {
+      const tunnelSub = url.pathname.slice('/api/tunnel/'.length);
+      await handleTunnelEndpoint(req, res, tunnelSub);
       return;
     }
 
@@ -2510,6 +2528,16 @@ const server = http.createServer(async (req, res) => {
       // Phase 4 (Spec 0090): Tower handles everything directly
       const isApiCall = subPath.startsWith('api/') || subPath === 'api';
       const isWsPath = subPath.startsWith('ws/') || subPath === 'ws';
+
+      // Tunnel endpoints are tower-level, not project-scoped, but the React
+      // dashboard uses relative paths (./api/tunnel/...) which resolve to
+      // /project/<encoded>/api/tunnel/... in project context. Handle here by
+      // extracting the tunnel sub-path and dispatching to handleTunnelEndpoint().
+      if (subPath.startsWith('api/tunnel/')) {
+        const tunnelSub = subPath.slice('api/tunnel/'.length); // e.g. "status", "connect", "disconnect"
+        await handleTunnelEndpoint(req, res, tunnelSub);
+        return;
+      }
 
       // GET /file?path=<relative-path> — Read project file by path (for StatusPanel project list)
       if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
