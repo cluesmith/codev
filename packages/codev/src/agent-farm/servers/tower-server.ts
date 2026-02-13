@@ -571,8 +571,13 @@ function createTmuxSession(
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
     // Mouse OFF — xterm.js in the browser handles selection and Cmd+C/Cmd+V
     // clipboard. tmux mouse mode conflicts (auto-copy on selection, intercepts
-    // click/drag). Scroll in alternate buffer is a known limitation (#220).
+    // click/drag). See codev/resources/terminal-tmux.md.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'off'], { stdio: 'ignore' });
+    // Alternate screen OFF — without this, tmux puts xterm.js into alternate
+    // buffer which has no scrollback. xterm.js then translates wheel events
+    // to arrow keys (cycling command history). With alternate-screen off,
+    // tmux writes to the normal buffer and xterm.js native scroll works.
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'alternate-screen', 'off'], { stdio: 'ignore' });
     // Unset CLAUDECODE so spawned Claude processes don't detect a nested session
     spawnSync('tmux', ['set-environment', '-t', sessionName, '-u', 'CLAUDECODE'], { stdio: 'ignore' });
 
@@ -835,8 +840,9 @@ async function reconcileTerminalSessions(): Promise<void> {
       saveTerminalSession(newSession.id, projectPath, type, roleId, newSession.pid, tmuxName);
       registerKnownProject(projectPath);
 
-      // Ensure mouse off on reconnected sessions (old sessions may have mouse on)
+      // Ensure correct tmux options on reconnected sessions
       spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'alternate-screen', 'off'], { stdio: 'ignore' });
 
       if (dbRow) {
         log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);

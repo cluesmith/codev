@@ -307,14 +307,6 @@ async function runClaudeConsultation(
           if ('text' in block) {
             process.stdout.write(block.text);
             chunks.push(block.text);
-          } else if ('name' in block) {
-            // Tool use block — show tool name + input summary on stderr
-            const input = 'input' in block ? block.input : {};
-            const detail = typeof input === 'object' && input !== null
-              ? (input as Record<string, unknown>).file_path || (input as Record<string, unknown>).pattern || (input as Record<string, unknown>).path || ''
-              : '';
-            const summary = detail ? `: ${detail}` : '';
-            process.stderr.write(chalk.dim(`[Tool: ${block.name}${summary}]\n`));
           }
         }
       }

@@ -316,7 +316,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0087"
     title: "Porch Timeout Termination Retries"
     summary: "Add timeout logic to porch so that when Claude (as the worker) hangs or fails to respond, porch can terminate and retry the operation"
-    status: specified
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -327,13 +327,13 @@ Projects currently in development (conceived through committed), sorted by prior
     tags: [porch, reliability, timeout, retry]
     timestamps:
       conceived_at: "2026-01-31T07:40:00-08:00"
-      specified_at: null
+      specified_at: "2026-01-31T07:40:00-08:00"
       planned_at: null
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
-    notes: "User-requested. Claude workers in porch can hang indefinitely. Need timeout detection, graceful termination, and automatic retry with context preservation."
+      integrated_at: "2026-02-13T00:00:00-08:00"
+    notes: "Porch timeout detection, graceful termination, and automatic retry with context preservation."
 
   - id: "0075"
     title: "Porch Minimal Redesign"
@@ -1149,7 +1149,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0100"
     title: "Porch Gate Notifications"
     summary: "Tower dashboard shows pending gates, sends af-send message to architect when builder is blocked, auto-clears on unblock"
-    status: implementing
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -1163,15 +1163,15 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       specified_at: "2026-02-12T00:00:00-08:00"
       planned_at: null
       implementing_at: "2026-02-12T00:00:00-08:00"
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Spec reviewed by Gemini + Codex. Builder 0100 spawned and running."
+      implemented_at: "2026-02-13T00:00:00-08:00"
+      committed_at: "2026-02-13T00:00:00-08:00"
+      integrated_at: "2026-02-13T00:00:00-08:00"
+    notes: "PR merged. Gate notifications in Tower dashboard with af-send messages."
 
   - id: "0101"
     title: "Clickable File Paths in Terminal"
     summary: "File paths displayed in xterm.js terminals become clickable links that invoke af open, with dotted underline visual indicator"
-    status: implementing
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -1185,15 +1185,15 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       specified_at: "2026-02-12T00:00:00-08:00"
       planned_at: null
       implementing_at: "2026-02-12T00:00:00-08:00"
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Spec reviewed by Gemini (approved) + Codex (addressed). Builder 0101 spawned and running."
+      implemented_at: "2026-02-13T00:00:00-08:00"
+      committed_at: "2026-02-13T00:00:00-08:00"
+      integrated_at: "2026-02-13T00:00:00-08:00"
+    notes: "PR merged. Cmd+Click file paths in terminal opens them via af open. FilePathLinkProvider + FilePathDecorationManager."
 
   - id: "0102"
     title: "Porch CWD / Worktree Awareness"
     summary: "Auto-detect project/bug ID from CWD when running inside a builder worktree, making the numeric ID argument optional"
-    status: conceived
+    status: integrated
     priority: medium
     release: null
     files:
@@ -1204,19 +1204,19 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [porch, ux, cli]
     timestamps:
       conceived_at: "2026-02-12T00:00:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-12T00:00:00-08:00"
       planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "UX issue: builders always know their project ID from the worktree path, but porch requires explicit arg."
+      implementing_at: "2026-02-13T00:00:00-08:00"
+      implemented_at: "2026-02-13T00:00:00-08:00"
+      committed_at: "2026-02-13T00:00:00-08:00"
+      integrated_at: "2026-02-13T00:00:00-08:00"
+    notes: "PR #230 merged. detectProjectIdFromCwd() + resolveProjectId() with priority chain. 18 tests."
 ```
 
   - id: "0103"
     title: "Consult Claude via Agent SDK"
     summary: "Replace CLI subprocess delegation for Claude with Agent SDK, enabling tool-using reviews and eliminating CLAUDECODE nesting failures"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
@@ -1227,13 +1227,13 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     tags: [consult, claude, sdk, agent-sdk]
     timestamps:
       conceived_at: "2026-02-13T00:00:00-08:00"
-      specified_at: null
+      specified_at: "2026-02-13T00:00:00-08:00"
       planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Addresses Claude review timeouts in builder contexts. SDK v0.2.41 provides query() with tool restrictions, system prompt, and structured output."
+      implementing_at: "2026-02-13T00:00:00-08:00"
+      implemented_at: "2026-02-13T00:00:00-08:00"
+      committed_at: "2026-02-13T00:00:00-08:00"
+      integrated_at: "2026-02-13T00:00:00-08:00"
+    notes: "PR #231 merged. Agent SDK replaces CLI subprocess for Claude consultation. Hard dep on @anthropic-ai/claude-agent-sdk. Doctor updated. 7 tests."
 ```
 
 ## Next Available Number
