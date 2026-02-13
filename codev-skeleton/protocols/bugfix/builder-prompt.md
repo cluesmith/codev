@@ -15,7 +15,7 @@ You are running in SOFT mode. This means:
 ## Mode: STRICT
 You are running in STRICT mode. This means:
 - Porch orchestrates your work
-- Run: `porch run {{project_id}}`
+- Run: `porch next` to get your next tasks
 - Follow porch signals and gate approvals
 
 ### ABSOLUTE RESTRICTIONS (STRICT MODE)
@@ -39,8 +39,8 @@ Follow the BUGFIX protocol: `codev/protocols/bugfix/protocol.md`
 2. Identify root cause
 3. Implement fix (< 300 LOC)
 4. Add regression test
-5. Run CMAP review (3-way parallel: Gemini, Codex, Claude)
-6. Create PR with "Fixes #{{issue.number}}" in body
+5. Create PR with "Fixes #{{issue.number}}" in body
+6. Notify architect — your job ends here
 
 If the fix is too complex (> 300 LOC or architectural changes), notify the Architect via:
 ```bash

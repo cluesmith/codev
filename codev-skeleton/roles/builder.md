@@ -20,15 +20,16 @@ In strict mode, porch orchestrates your work and drives the protocol to completi
 ### The Core Loop
 
 ```bash
-# 1. Check your current state
-porch status
+# 1. Get your next tasks (project ID auto-detected from worktree)
+porch next
 
-# 2. Run the protocol loop
-porch run
+# 2. Do the work described in the tasks
+# 3. Signal completion
+porch done
 
-# 3. If porch hits a gate, STOP and wait for human approval
-# 4. After gate approval, run porch again
-# 5. Repeat until project is complete
+# 4. If porch hits a gate, STOP and wait for human approval
+# 5. After gate approval, run porch next again
+# 6. Repeat until project is complete
 ```
 
 Porch handles:
@@ -56,7 +57,7 @@ You must:
 1. Output a clear message: "Spec ready for approval. Waiting for human."
 2. **STOP working**
 3. Wait for the human to run `porch approve XXXX spec-approval`
-4. After approval, run `porch run` again
+4. After approval, run `porch next` again
 
 ### What You DON'T Do in Strict Mode
 

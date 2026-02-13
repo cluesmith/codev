@@ -11,6 +11,7 @@ import {
   writeState,
   createInitialState,
   findStatusPath,
+  detectProjectId,
   detectProjectIdFromCwd,
   resolveProjectId,
   getProjectDir,
@@ -235,12 +236,45 @@ updated_at: "${state.updated_at}"
       expect(result).toContain('0074-test-feature');
     });
 
+    it('should find bugfix project by bugfix ID prefix', () => {
+      const projectDir = path.join(projectsDir, 'bugfix-237-fix-spawn');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "bugfix-237"\nprotocol: bugfix\nphase: investigate\n');
+
+      const result = findStatusPath(testDir, 'bugfix-237');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('bugfix-237-fix-spawn');
+    });
+
     it('should return null if projects directory does not exist', () => {
       const emptyDir = path.join(testDir, 'empty');
       fs.mkdirSync(emptyDir);
 
       const result = findStatusPath(emptyDir, '0074');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('detectProjectId (filesystem scan)', () => {
+    it('should detect a single bugfix project', () => {
+      const projectDir = path.join(projectsDir, 'bugfix-42-login-bug');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "bugfix-42"\n');
+
+      expect(detectProjectId(testDir)).toBe('bugfix-42');
+    });
+
+    it('should return null when multiple projects exist (bugfix + spec)', () => {
+      const bugfixDir = path.join(projectsDir, 'bugfix-42-login-bug');
+      fs.mkdirSync(bugfixDir, { recursive: true });
+      fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), 'id: "bugfix-42"\n');
+
+      const specDir = path.join(projectsDir, '0001-feature');
+      fs.mkdirSync(specDir, { recursive: true });
+      fs.writeFileSync(path.join(specDir, 'status.yaml'), 'id: "0001"\n');
+
+      expect(detectProjectId(testDir)).toBeNull();
     });
   });
 
@@ -253,20 +287,20 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/0073/src/commands/')).toBe('0073');
     });
 
-    it('should detect and zero-pad bugfix worktree ID', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228')).toBe('0228');
+    it('should return full bugfix ID from bugfix worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228')).toBe('bugfix-228');
     });
 
     it('should detect bugfix ID from subdirectory', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228/src/deep/path')).toBe('0228');
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228/src/deep/path')).toBe('bugfix-228');
     });
 
-    it('should zero-pad single-digit bugfix IDs', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-5')).toBe('0005');
+    it('should return full bugfix ID for single-digit issue numbers', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-5')).toBe('bugfix-5');
     });
 
-    it('should handle bugfix IDs > 9999 without truncation', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-12345')).toBe('12345');
+    it('should handle bugfix IDs > 9999', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-12345')).toBe('bugfix-12345');
     });
 
     it('should return null for task worktrees', () => {
@@ -327,9 +361,9 @@ updated_at: "${state.updated_at}"
       expect(result).toEqual({ id: '0073', source: 'cwd' });
     });
 
-    it('step 2: CWD bugfix worktree resolves correctly', () => {
+    it('step 2: CWD bugfix worktree resolves to full bugfix ID', () => {
       const result = resolveProjectId(undefined, '/repo/.builders/bugfix-42', singleProjectRoot);
-      expect(result).toEqual({ id: '0042', source: 'cwd' });
+      expect(result).toEqual({ id: 'bugfix-42', source: 'cwd' });
     });
 
     it('step 3: falls back to filesystem scan when CWD is not a worktree', () => {

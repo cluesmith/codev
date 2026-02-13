@@ -167,8 +167,10 @@ export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
   const match = normalized.match(/\/\.builders\/(bugfix-(\d+)|(\d{4}))(\/|$)/);
   if (!match) return null;
-  const rawId = match[2] || match[3];
-  return rawId.padStart(4, '0');
+  // Bugfix worktrees use "bugfix-N" as the porch project ID
+  if (match[2]) return `bugfix-${match[2]}`;
+  // Spec worktrees use zero-padded numeric IDs
+  return match[3];
 }
 
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
@@ -216,8 +218,9 @@ export function detectProjectId(projectRoot: string): string | null {
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      // Extract project ID from directory name (e.g., "0076-skip-close" -> "0076")
-      const match = entry.name.match(/^(\d{4})-/);
+      // Extract project ID from directory name
+      // Matches: "0076-skip-close" -> "0076", "bugfix-237-fix-name" -> "bugfix-237"
+      const match = entry.name.match(/^(bugfix-\d+|\d{4})-/);
       if (match) {
         const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
         if (fs.existsSync(statusPath)) {

@@ -15,7 +15,7 @@ You are running in SOFT mode. This means:
 ## Mode: STRICT
 You are running in STRICT mode. This means:
 - Porch orchestrates your work
-- Run: `porch run {{project_id}}`
+- Run: `porch next` to get your next tasks
 - Follow porch signals and gate approvals
 - Do not deviate from the porch-driven workflow
 

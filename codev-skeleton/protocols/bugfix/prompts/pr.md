@@ -42,13 +42,17 @@ EOF
 )"
 ```
 
-### 2. Signal Completion
+### 2. Notify Architect
 
-After the PR is created, signal completion. Porch will run consultation automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
+After the PR is created, notify the architect and signal completion. The architect handles review, merge, and cleanup from here.
+
+```bash
+af send architect "PR #<number> ready for review (fixes issue #{{issue.number}})"
+```
 
 ## Signals
 
-When PR is created and reviews are complete:
+When PR is created and architect is notified:
 
 ```
 <signal>PHASE_COMPLETE</signal>

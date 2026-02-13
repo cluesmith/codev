@@ -132,7 +132,7 @@ function buildPromptFromTemplate(
 function buildFallbackPrompt(protocolName: string, context: TemplateContext): string {
   const modeInstructions = context.mode === 'strict'
     ? `## Mode: STRICT
-Porch orchestrates your work. Run: \`porch next ${context.project_id || ''}\` to get your next tasks.`
+Porch orchestrates your work. Run: \`porch next\` to get your next tasks.`
     : `## Mode: SOFT
 You follow the protocol yourself. The architect monitors your work and verifies compliance.`;
 
@@ -179,14 +179,14 @@ ${context.issue.body || '(No description provided)'}
  * Build a resume notice to prepend to the builder prompt.
  * Tells the builder this is a resumed session and to check existing porch state.
  */
-function buildResumeNotice(projectId: string): string {
+function buildResumeNotice(_projectId: string): string {
   return `## RESUME SESSION
 
 This is a **resumed** builder session. A previous session was working in this worktree.
 
-**IMPORTANT**: Do NOT run \`porch init\` — porch state may already exist from the previous session.
-Instead, start by running \`porch next ${projectId}\` to check your current state and get next tasks.
-If porch state exists, continue from where the previous session left off.
+**IMPORTANT**: Do NOT run \`porch init\` — porch state already exists from the previous session.
+Instead, start by running \`porch next\` to check your current state and get next tasks.
+Continue from where the previous session left off.
 `;
 }
 
@@ -669,6 +669,25 @@ async function startShellSession(
   return { sessionName: actualTmux || sessionName, terminalId };
 }
 
+/**
+ * Pre-initialize porch in a worktree so the builder doesn't need to self-correct.
+ * Non-fatal: logs a warning on failure since the builder can still init manually.
+ */
+async function initPorchInWorktree(
+  worktreePath: string,
+  protocol: string,
+  projectId: string,
+  projectName: string,
+): Promise<void> {
+  logger.info('Initializing porch...');
+  try {
+    await run(`porch init ${protocol} ${projectId} "${projectName}"`, { cwd: worktreePath });
+    logger.info(`Porch initialized: ${projectId}`);
+  } catch (error) {
+    logger.warn(`Warning: Failed to initialize porch (builder can init manually): ${error}`);
+  }
+}
+
 // =============================================================================
 // Mode-specific spawn implementations
 // =============================================================================
@@ -725,6 +744,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   logger.kv('Protocol', protocol.toUpperCase());
   logger.kv('Mode', mode.toUpperCase());
+
+  // Pre-initialize porch so the builder doesn't need to figure out project ID
+  if (!options.resume) {
+    const porchProjectName = specName.replace(new RegExp(`^${projectId}-`), '');
+    await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
+  }
 
   // Build the prompt using template
   const specRelPath = `codev/specs/${specName}.md`;
@@ -1280,6 +1305,9 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     logger.info('Resuming existing worktree (skipping creation)');
   } else {
     await createWorktree(config, branchName, worktreePath);
+
+    // Pre-initialize porch so the builder doesn't need to figure out project ID
+    await initPorchInWorktree(worktreePath, protocol, builderId, slug);
   }
 
   // Build the prompt using template

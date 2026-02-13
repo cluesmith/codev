@@ -81,37 +81,7 @@
         "max_rounds": 1
       },
       "transition": {
-        "on_complete": "review"
-      }
-    },
-    {
-      "id": "review",
-      "name": "Review",
-      "description": "Address review feedback",
-      "type": "once",
-      "steps": [
-        "address_feedback",
-        "update_pr"
-      ],
-      "transition": {
-        "on_complete": "merge"
-      }
-    },
-    {
-      "id": "merge",
-      "name": "Merge",
-      "description": "Merge the fix and close the issue",
-      "type": "once",
-      "steps": [
-        "merge_pr",
-        "verify_main",
-        "close_issue"
-      ],
-      "gate": {
-        "name": "merge-approval",
-        "description": "Architect approves merge",
-        "requires": ["review_complete", "tests_pass"],
-        "next": null
+        "on_complete": null
       }
     }
   ],
