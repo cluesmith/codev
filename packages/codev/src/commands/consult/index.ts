@@ -271,58 +271,71 @@ async function runClaudeConsultation(
   outputPath?: string,
 ): Promise<void> {
   const chunks: string[] = [];
+
+  // The SDK spawns a Claude Code subprocess that checks process.env.CLAUDECODE.
+  // We must remove it from process.env (not just the options env) to avoid
+  // the nesting guard. Restore it after the SDK call.
+  const savedClaudeCode = process.env.CLAUDECODE;
+  delete process.env.CLAUDECODE;
+
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key !== 'CLAUDECODE' && value !== undefined) {
+    if (value !== undefined) {
       env[key] = value;
     }
   }
 
-  const session = claudeQuery({
-    prompt: queryText,
-    options: {
-      systemPrompt: role,
-      allowedTools: ['Read', 'Glob', 'Grep'],
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      model: 'claude-opus-4-6',
-      maxTurns: 10,
-      maxBudgetUsd: 1.00,
-      cwd: projectRoot,
-      env,
-    },
-  });
+  try {
+    const session = claudeQuery({
+      prompt: queryText,
+      options: {
+        systemPrompt: role,
+        allowedTools: ['Read', 'Glob', 'Grep'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        model: 'claude-opus-4-6',
+        maxTurns: 10,
+        maxBudgetUsd: 1.00,
+        cwd: projectRoot,
+        env,
+      },
+    });
 
-  for await (const message of session) {
-    if (message.type === 'assistant' && message.message?.content) {
-      for (const block of message.message.content) {
-        if ('text' in block) {
-          process.stdout.write(block.text);
-          chunks.push(block.text);
-        } else if ('name' in block) {
-          // Tool use block — show tool name + input summary on stderr
-          const input = 'input' in block ? block.input : {};
-          const detail = typeof input === 'object' && input !== null
-            ? (input as Record<string, unknown>).file_path || (input as Record<string, unknown>).pattern || (input as Record<string, unknown>).path || ''
-            : '';
-          const summary = detail ? `: ${detail}` : '';
-          process.stderr.write(chalk.dim(`[Tool: ${block.name}${summary}]\n`));
+    for await (const message of session) {
+      if (message.type === 'assistant' && message.message?.content) {
+        for (const block of message.message.content) {
+          if ('text' in block) {
+            process.stdout.write(block.text);
+            chunks.push(block.text);
+          } else if ('name' in block) {
+            // Tool use block — show tool name + input summary on stderr
+            const input = 'input' in block ? block.input : {};
+            const detail = typeof input === 'object' && input !== null
+              ? (input as Record<string, unknown>).file_path || (input as Record<string, unknown>).pattern || (input as Record<string, unknown>).path || ''
+              : '';
+            const summary = detail ? `: ${detail}` : '';
+            process.stderr.write(chalk.dim(`[Tool: ${block.name}${summary}]\n`));
+          }
+        }
+      }
+      if (message.type === 'result') {
+        if (message.subtype !== 'success') {
+          const errors = 'errors' in message ? (message as { errors: string[] }).errors : [];
+          throw new Error(`Claude SDK error (${message.subtype}): ${errors.join(', ')}`);
         }
       }
     }
-    if (message.type === 'result') {
-      if (message.subtype !== 'success') {
-        const errors = 'errors' in message ? (message as { errors: string[] }).errors : [];
-        throw new Error(`Claude SDK error (${message.subtype}): ${errors.join(', ')}`);
-      }
-    }
-  }
 
-  if (outputPath) {
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-    fs.writeFileSync(outputPath, chunks.join(''));
-    console.error(`\nOutput written to: ${outputPath}`);
+    if (outputPath) {
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(outputPath, chunks.join(''));
+      console.error(`\nOutput written to: ${outputPath}`);
+    }
+  } finally {
+    if (savedClaudeCode !== undefined) {
+      process.env.CLAUDECODE = savedClaudeCode;
+    }
   }
 }
 

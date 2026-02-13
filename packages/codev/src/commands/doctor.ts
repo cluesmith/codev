@@ -290,10 +290,15 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
  * Sends a minimal query to verify auth and connectivity.
  */
 async function verifyClaudeViaSDK(): Promise<CheckResult> {
+  // Temporarily remove CLAUDECODE nesting guard from process.env.
+  // The SDK spawns a subprocess that checks this directly.
+  const savedClaudeCode = process.env.CLAUDECODE;
+  delete process.env.CLAUDECODE;
+
   try {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
-      if (key !== 'CLAUDECODE' && value !== undefined) {
+      if (value !== undefined) {
         env[key] = value;
       }
     }
@@ -326,6 +331,10 @@ async function verifyClaudeViaSDK(): Promise<CheckResult> {
       return { status: 'fail', version: 'auth error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
     }
     return { status: 'fail', version: 'error', note: `Set ANTHROPIC_API_KEY or run: claude /login (${errMsg.substring(0, 60)})` };
+  } finally {
+    if (savedClaudeCode !== undefined) {
+      process.env.CLAUDECODE = savedClaudeCode;
+    }
   }
 }
 

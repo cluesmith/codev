@@ -557,8 +557,12 @@ describe('consult command', () => {
 
       await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
 
+      // Verify CLAUDECODE not in the env options
       const callArgs = mockQueryFn.mock.calls[0][0];
       expect(callArgs.options.env).not.toHaveProperty('CLAUDECODE');
+
+      // Verify CLAUDECODE is restored in process.env after the call
+      expect(process.env.CLAUDECODE).toBe('1');
 
       if (originalClaudeCode !== undefined) {
         process.env.CLAUDECODE = originalClaudeCode;
