@@ -1017,7 +1017,7 @@
 
     // Auth helper: get headers with auth token if available
     function getAuthHeaders() {
-      const key = localStorage.getItem('codev_web_key');
+      const key = localStorage.getItem('codev-web-key');
       return key ? { 'Authorization': `Bearer ${key}` } : {};
     }
 
@@ -1028,7 +1028,7 @@
 
       // If 401, clear key and redirect to login
       if (response.status === 401) {
-        localStorage.removeItem('codev_web_key');
+        localStorage.removeItem('codev-web-key');
         location.reload();
         throw new Error('Unauthorized');
       }
@@ -1037,7 +1037,7 @@
 
     // Logout function
     function logout() {
-      localStorage.removeItem('codev_web_key');
+      localStorage.removeItem('codev-web-key');
       window.location.href = './';
     }
 
