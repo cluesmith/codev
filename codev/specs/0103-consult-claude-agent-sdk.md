@@ -88,16 +88,16 @@ When `model === 'claude'`, instead of spawning `claude --print`, use the Agent S
 ### New `runClaudeConsultation()` function
 
 ```typescript
+import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
+
 async function runClaudeConsultation(
   queryText: string,
   role: string,
   projectRoot: string,
   outputPath?: string,
 ): Promise<void> {
-  const { query } = await import('@anthropic-ai/claude-agent-sdk');
-
   const chunks: string[] = [];
-  const session = query({
+  const session = claudeQuery({
     prompt: queryText,
     options: {
       systemPrompt: role,
@@ -118,6 +118,7 @@ async function runClaudeConsultation(
   });
 
   for await (const message of session) {
+    // Surface assistant text (the review itself)
     if (message.type === 'assistant' && message.message?.content) {
       for (const block of message.message.content) {
         if ('text' in block) {
@@ -125,6 +126,12 @@ async function runClaudeConsultation(
           chunks.push(block.text);
         }
       }
+    }
+    // Surface tool use summaries so file reads are visible in output
+    // (proves Claude explored the codebase during review)
+    if (message.type === 'tool_use_summary') {
+      const summary = `[Tool: ${message.tool_name}] ${message.summary || ''}\n`;
+      process.stderr.write(chalk.dim(summary));
     }
   }
 
@@ -135,6 +142,8 @@ async function runClaudeConsultation(
   }
 }
 ```
+
+**Note on tool output**: Tool use summaries (file reads, grep results) are written to stderr for visibility but NOT included in the output file. The output file contains only assistant text — matching the existing behavior where Gemini/Codex tool exploration is visible on stderr but the captured output contains just the review text.
 
 ### Structured verdict output (optional enhancement)
 
@@ -172,36 +181,35 @@ if (model === 'claude') {
 
 ### Dependency management
 
-Add `@anthropic-ai/claude-agent-sdk` as an **optional peer dependency** (not a hard dependency). The SDK is only needed when `consult -m claude` is used. If not installed, fail fast with a clear error message.
+Add `@anthropic-ai/claude-agent-sdk` as a **hard dependency** in `packages/codev/package.json`:
 
 ```json
-// package.json
-"peerDependencies": {
-  "@anthropic-ai/claude-agent-sdk": ">=0.2.0"
-},
-"peerDependenciesMeta": {
-  "@anthropic-ai/claude-agent-sdk": { "optional": true }
+"dependencies": {
+  "@anthropic-ai/claude-agent-sdk": "^0.2.41"
 }
 ```
 
-At runtime, use dynamic `import()` and catch the error:
-
-```typescript
-let sdkModule: typeof import('@anthropic-ai/claude-agent-sdk');
-try {
-  sdkModule = await import('@anthropic-ai/claude-agent-sdk');
-} catch {
-  throw new Error(
-    'Claude Agent SDK not installed.\n' +
-    'Install with: npm install -g @anthropic-ai/claude-agent-sdk\n' +
-    'Or use a different model: consult -m gemini ...'
-  );
-}
-```
+Use a static import — no dynamic `import()` or fallback needed since the SDK is always available.
 
 ### CLI fallback removed
 
 Once the SDK path is implemented, remove the `claude` entry from `MODEL_CONFIGS` entirely. The `commandExists('claude')` check is no longer needed for this model.
+
+### `codev doctor` updates
+
+`codev doctor` currently checks for the `claude` CLI binary (`packages/codev/src/commands/doctor.ts`, line 173) and verifies auth by running `claude --print -p 'Reply OK'` (line 289). With the SDK replacing CLI invocation:
+
+- **Remove** the `claude` CLI dependency check from `AI_DEPENDENCIES` — the CLI is no longer required for consultation
+- **Update** the `VERIFY_CONFIGS['Claude']` auth check to use the SDK's `query()` instead of `claude --print`. A minimal SDK query (same pattern as the auth spike test) can verify auth works:
+  ```typescript
+  // Quick SDK auth check: send minimal query, confirm response
+  const session = query({
+    prompt: 'Reply OK',
+    options: { tools: [], maxTurns: 1, persistSession: false, effort: 'low',
+               env: { ...process.env, CLAUDECODE: undefined } }
+  });
+  ```
+- **Keep** the Gemini and Codex CLI checks unchanged
 
 ### Dry-run behavior
 
@@ -224,10 +232,17 @@ For `--dry-run` with claude model, print the SDK invocation parameters instead o
 3. Claude can read files during review (uses Read, Glob, Grep tools) — visible in output
 4. `--output` flag writes review text to file (porch integration works)
 5. `--dry-run` shows SDK parameters instead of CLI command
-6. Missing SDK produces a clear error message with install instructions
+6. `codev doctor` verifies Claude auth via SDK instead of CLI
 7. Gemini and Codex invocations are unchanged
 8. Cost per review stays under $1.00 (enforced by `maxBudgetUsd`)
 9. Review completes within 120 seconds for typical PR reviews
+
+## Testing
+
+1. **Unit test for `runClaudeConsultation()`**: Mock the SDK's `query()` to return a canned `SDKMessage` sequence (system init, assistant text with VERDICT, result). Verify stdout output, output file write, and that the env has `CLAUDECODE` removed.
+2. **Unit test for dry-run**: Verify `--dry-run -m claude` prints SDK parameters without invoking `query()`.
+3. **Unit test for `codev doctor` Claude check**: Mock the SDK `query()` to verify the auth check path works (success and failure cases).
+4. **Integration test**: Run `consult -m claude general "Reply OK"` from a shell with `CLAUDECODE` set, verify it succeeds (confirms nesting workaround).
 
 ## Out of Scope
 
@@ -240,7 +255,7 @@ For `--dry-run` with claude model, print the SDK invocation parameters instead o
 
 1. **SDK IPC conflicts**: The SDK spawns a bundled Claude Code subprocess. If the parent Claude session's environment leaks into the SDK subprocess, the nesting guard may still trigger. Mitigation: explicitly set `env` with `CLAUDECODE: undefined` and verify during implementation.
 
-2. **SDK version churn**: The SDK is at v0.2.41 — still pre-1.0. API changes are possible. Mitigation: pin to `>=0.2.0` peer dependency, use only stable `query()` entrypoint.
+2. **SDK version churn**: The SDK is at v0.2.41 — still pre-1.0. API changes are possible. Mitigation: pin to `^0.2.41` in dependencies, use only stable `query()` entrypoint.
 
 3. **Output format differences**: The SDK returns structured `SDKMessage` objects, not raw text. The text extraction logic must match what the CLI's `--print` mode produced. Mitigation: extract text blocks from `AssistantMessage` content, concatenate in order.
 
