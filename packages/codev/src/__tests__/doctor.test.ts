@@ -17,6 +17,17 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
+// Mock Claude Agent SDK - returns success by default
+let mockDoctorQueryFn: ReturnType<typeof vi.fn>;
+vi.mock('@anthropic-ai/claude-agent-sdk', () => {
+  mockDoctorQueryFn = vi.fn().mockImplementation(() =>
+    (async function* () {
+      yield { type: 'result', subtype: 'success' };
+    })()
+  );
+  return { query: mockDoctorQueryFn };
+});
+
 // Mock chalk to avoid color output issues in tests
 // Chalk methods are chainable, so we need to return functions that also have methods
 vi.mock('chalk', () => {
@@ -191,6 +202,14 @@ describe('doctor command', () => {
 
       vi.resetModules();
       const { doctor } = await import('../commands/doctor.js');
+
+      // Claude SDK also fails (auth error)
+      mockDoctorQueryFn.mockImplementation(() =>
+        (async function* () {
+          throw new Error('Invalid API key');
+        })()
+      );
+
       const result = await doctor();
       expect(result).toBe(1);
     });
@@ -529,8 +548,8 @@ describe('doctor command', () => {
       expect(hasActionableHint).toBe(true);
     });
 
-    it('should show auth error with hint when API key related failure', async () => {
-      // Mock Claude CLI exists but auth fails with API key error
+    it('should show auth error with hint when Claude SDK auth fails', async () => {
+      // Mock core deps present
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which')) {
           return Buffer.from('/usr/bin/command');
@@ -541,31 +560,7 @@ describe('doctor command', () => {
         return Buffer.from('');
       });
 
-      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
-        // Claude version check succeeds, but auth check fails with API key error
-        if (cmd === 'claude') {
-          // Version check (--version) succeeds
-          if (args?.includes('--version')) {
-            return {
-              status: 0,
-              stdout: '1.0.0',
-              stderr: '',
-              signal: null,
-              output: [null, '1.0.0', ''],
-              pid: 0,
-            };
-          }
-          // Auth check (--print) fails with API key error
-          return {
-            status: 1,
-            stdout: '',
-            stderr: 'Error: Invalid API key provided',
-            signal: null,
-            output: [null, '', 'Error: Invalid API key provided'],
-            pid: 0,
-          };
-        }
-
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
@@ -590,6 +585,14 @@ describe('doctor command', () => {
       });
 
       const { doctor } = await import('../commands/doctor.js');
+
+      // Claude SDK fails with API key error
+      mockDoctorQueryFn.mockImplementation(() =>
+        (async function* () {
+          throw new Error('Invalid API key provided');
+        })()
+      );
+
       await doctor();
 
       // Should show auth error with actionable hint

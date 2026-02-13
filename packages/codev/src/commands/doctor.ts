@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
+import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -167,18 +168,8 @@ const CORE_DEPENDENCIES: Dependency[] = [
 ];
 
 // AI CLI dependencies - at least one required
+// Note: Claude is verified via Agent SDK (not CLI), handled separately below
 const AI_DEPENDENCIES: Dependency[] = [
-  {
-    name: 'Claude',
-    command: 'claude',
-    versionArg: '--version',
-    versionExtract: () => 'working',
-    required: false,
-    installHint: {
-      macos: 'npm i -g @anthropic-ai/claude-code',
-      linux: 'npm i -g @anthropic-ai/claude-code',
-    },
-  },
   {
     name: 'Gemini',
     command: 'gemini',
@@ -282,16 +273,7 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     successCheck: (r) => r.status === 0,
     authHint: 'Run "codex login status" in this directory and confirm it works without codev first',
   },
-  'Claude': {
-    // claude --version is a quick check that the CLI is functional
-    // If API key is invalid, even --version will fail on some setups
-    // We use a minimal --print query for a more reliable check
-    command: 'claude',
-    args: ['--print', '-p', 'Reply OK', '--max-turns', '1'],
-    timeout: 30000,
-    successCheck: (r) => r.status === 0,
-    authHint: 'Run: claude /login or set ANTHROPIC_API_KEY',
-  },
+  // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below
   'Gemini': {
     // gemini --version verifies the CLI works, but not auth
     // A minimal query is needed to verify API connectivity
@@ -302,6 +284,59 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     authHint: 'Run: gemini (interactive) then /auth, or set GOOGLE_API_KEY',
   },
 };
+
+/**
+ * Verify Claude is operational via Agent SDK.
+ * Sends a minimal query to verify auth and connectivity.
+ */
+async function verifyClaudeViaSDK(): Promise<CheckResult> {
+  // Temporarily remove CLAUDECODE nesting guard from process.env.
+  // The SDK spawns a subprocess that checks this directly.
+  const savedClaudeCode = process.env.CLAUDECODE;
+  delete process.env.CLAUDECODE;
+
+  try {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+
+    const session = claudeQuery({
+      prompt: 'Reply OK',
+      options: {
+        allowedTools: [],
+        maxTurns: 1,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        env,
+      },
+    });
+
+    for await (const message of session) {
+      if (message.type === 'result') {
+        if (message.subtype === 'success') {
+          return { status: 'ok', version: 'operational (SDK)' };
+        }
+        return { status: 'fail', version: 'SDK error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
+      }
+    }
+
+    return { status: 'ok', version: 'operational (SDK)' };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'unknown error';
+    const combined = errMsg.toLowerCase();
+    if (combined.includes('api key') || combined.includes('unauthorized') || combined.includes('authentication')) {
+      return { status: 'fail', version: 'auth error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
+    }
+    return { status: 'fail', version: 'error', note: `Set ANTHROPIC_API_KEY or run: claude /login (${errMsg.substring(0, 60)})` };
+  } finally {
+    if (savedClaudeCode !== undefined) {
+      process.env.CLAUDECODE = savedClaudeCode;
+    }
+  }
+}
 
 /**
  * Verify an AI model is operational using CLI-specific auth checks
@@ -513,7 +548,11 @@ export async function doctor(): Promise<number> {
   let aiCliCount = 0;
   const installedAiClis: string[] = [];
 
-  // First check if CLIs are installed
+  // Claude uses Agent SDK (always available as a dependency)
+  printStatus('Claude', { status: 'ok', version: 'Agent SDK' });
+  installedAiClis.push('Claude');
+
+  // Check CLI-based AI dependencies (Gemini, Codex)
   for (const dep of AI_DEPENDENCIES) {
     const result = checkDependency(dep);
     if (result.status === 'ok') {
@@ -522,41 +561,51 @@ export async function doctor(): Promise<number> {
     printStatus(dep.name, result);
   }
 
-  if (installedAiClis.length === 0) {
+  // Verify installed CLIs are actually operational
+  console.log('');
+  console.log(chalk.bold('AI Model Verification') + ' (checking auth & connectivity)');
+  console.log('');
+
+  // Verify Claude via SDK
+  console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
+  process.stdout.write('\x1b[1A\x1b[2K');
+  const claudeResult = await verifyClaudeViaSDK();
+  printStatus('Claude', claudeResult);
+  if (claudeResult.status === 'ok') {
+    aiCliCount++;
+  } else if (claudeResult.status === 'fail') {
+    warnings++;
+    warningDetails.push({
+      name: 'Claude',
+      issue: claudeResult.version,
+      recommendation: claudeResult.note,
+    });
+  }
+
+  // Verify CLI-based models
+  for (const cliName of installedAiClis.filter(n => n !== 'Claude')) {
+    console.log(chalk.blue(`  ⋯ ${cliName.padEnd(12)} verifying...`));
+    process.stdout.write('\x1b[1A\x1b[2K');
+
+    const result = verifyAiModel(cliName);
+    printStatus(cliName, result);
+
+    if (result.status === 'ok') {
+      aiCliCount++;
+    } else if (result.status === 'fail') {
+      warnings++;
+      warningDetails.push({
+        name: cliName,
+        issue: result.version,
+        recommendation: result.note,
+      });
+    }
+  }
+
+  if (aiCliCount === 0) {
     console.log('');
-    console.log(chalk.red('  ✗') + ' No AI CLI installed! Install at least one to use Codev.');
+    console.log(chalk.red('  ✗') + ' No AI model operational! Check API keys and authentication.');
     errors++;
-  } else {
-    // Verify installed CLIs are actually operational
-    console.log('');
-    console.log(chalk.bold('AI Model Verification') + ' (checking auth & connectivity)');
-    console.log('');
-
-    for (const cliName of installedAiClis) {
-      console.log(chalk.blue(`  ⋯ ${cliName.padEnd(12)} verifying...`));
-      // Move cursor up to overwrite the "verifying" line
-      process.stdout.write('\x1b[1A\x1b[2K');
-
-      const result = verifyAiModel(cliName);
-      printStatus(cliName, result);
-
-      if (result.status === 'ok') {
-        aiCliCount++;
-      } else if (result.status === 'fail') {
-        warnings++;
-        warningDetails.push({
-          name: cliName,
-          issue: result.version,
-          recommendation: result.note,
-        });
-      }
-    }
-
-    if (aiCliCount === 0) {
-      console.log('');
-      console.log(chalk.red('  ✗') + ' No AI CLI operational! Check API keys and authentication.');
-      errors++;
-    }
   }
 
   console.log('');

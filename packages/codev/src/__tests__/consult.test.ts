@@ -22,6 +22,14 @@ vi.mock('node:child_process', () => ({
   }),
 }));
 
+// Mock Claude Agent SDK
+let mockQueryFn: ReturnType<typeof vi.fn>;
+
+vi.mock('@anthropic-ai/claude-agent-sdk', () => {
+  mockQueryFn = vi.fn();
+  return { query: mockQueryFn };
+});
+
 // Mock chalk
 vi.mock('chalk', () => ({
   default: {
@@ -70,15 +78,14 @@ describe('consult command', () => {
     it('should have correct CLI configuration for each model', () => {
       // Note: Codex now uses experimental_instructions_file config flag (not env var)
       // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
+      // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
       const configs: Record<string, { cli: string; args: string[] }> = {
         gemini: { cli: 'gemini', args: ['--yolo'] },
         codex: { cli: 'codex', args: ['exec', '--full-auto'] },
-        claude: { cli: 'claude', args: ['--print', '-p'] },
       };
 
       expect(configs.gemini.cli).toBe('gemini');
       expect(configs.codex.args).toContain('--full-auto');
-      expect(configs.claude.args).toContain('--print');
     });
 
     it('should use experimental_instructions_file for codex (not env var)', () => {
@@ -444,6 +451,198 @@ describe('consult command', () => {
       const logContent = fs.readFileSync(path.join(logDir, 'history.log'), 'utf-8');
       expect(logContent).toContain('model=gemini');
       expect(logContent).toContain('duration=5.5s');
+    });
+  });
+
+  describe('Claude Agent SDK integration', () => {
+    beforeEach(() => {
+      mockQueryFn.mockClear();
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+    });
+
+    it('should invoke Agent SDK with correct parameters', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield { type: 'assistant', message: { content: [{ text: 'OK' }] } };
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      await consult({ model: 'claude', subcommand: 'general', args: ['test query'] });
+
+      expect(mockQueryFn).toHaveBeenCalledTimes(1);
+      const callArgs = mockQueryFn.mock.calls[0][0];
+      expect(callArgs.options.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(callArgs.options.model).toBe('claude-opus-4-6');
+      expect(callArgs.options.maxTurns).toBe(10);
+      expect(callArgs.options.maxBudgetUsd).toBe(1.00);
+      expect(callArgs.options.permissionMode).toBe('bypassPermissions');
+    });
+
+    it('should extract text from assistant messages', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: { content: [{ text: 'Review: ' }, { text: 'All good.' }] },
+          };
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+
+      const writes: string[] = [];
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        writes.push(chunk.toString());
+        return true;
+      });
+
+      await consult({ model: 'claude', subcommand: 'general', args: ['test query'] });
+
+      expect(writes).toContain('Review: ');
+      expect(writes).toContain('All good.');
+    });
+
+    it('should write output to file when output option is set', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: { content: [{ text: 'File output content' }] },
+          };
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      const outputFile = path.join(testBaseDir, 'output', 'review.md');
+      await consult({
+        model: 'claude',
+        subcommand: 'general',
+        args: ['test query'],
+        output: outputFile,
+      });
+
+      expect(fs.existsSync(outputFile)).toBe(true);
+      expect(fs.readFileSync(outputFile, 'utf-8')).toBe('File output content');
+    });
+
+    it('should remove CLAUDECODE from env passed to SDK', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      const originalClaudeCode = process.env.CLAUDECODE;
+      process.env.CLAUDECODE = '1';
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
+
+      // Verify CLAUDECODE not in the env options
+      const callArgs = mockQueryFn.mock.calls[0][0];
+      expect(callArgs.options.env).not.toHaveProperty('CLAUDECODE');
+
+      // Verify CLAUDECODE is restored in process.env after the call
+      expect(process.env.CLAUDECODE).toBe('1');
+
+      if (originalClaudeCode !== undefined) {
+        process.env.CLAUDECODE = originalClaudeCode;
+      } else {
+        delete process.env.CLAUDECODE;
+      }
+    });
+
+    it('should throw on SDK error results', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'error_max_turns',
+            errors: ['Max turns exceeded'],
+          };
+        })()
+      );
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      await expect(
+        consult({ model: 'claude', subcommand: 'general', args: ['test'] })
+      ).rejects.toThrow(/Claude SDK error/);
+    });
+
+    it('should show SDK parameters in dry-run mode', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      await consult({
+        model: 'claude',
+        subcommand: 'general',
+        args: ['test query'],
+        dryRun: true,
+      });
+
+      expect(mockQueryFn).not.toHaveBeenCalled();
+      expect(logOutput.some(l => l.includes('Agent SDK'))).toBe(true);
+      expect(logOutput.some(l => l.includes('claude-opus-4-6'))).toBe(true);
+      expect(logOutput.some(l => l.includes('Read, Glob, Grep'))).toBe(true);
+    });
+
+    it('should log tool use blocks to stderr', async () => {
+      vi.resetModules();
+      const { consult } = await import('../commands/consult/index.js');
+
+      mockQueryFn.mockImplementation(() =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                { name: 'Read', input: { file_path: '/foo/bar.ts' } },
+                { text: 'File contents here' },
+              ],
+            },
+          };
+          yield { type: 'result', subtype: 'success' };
+        })()
+      );
+
+      const stderrWrites: string[] = [];
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+        stderrWrites.push(chunk.toString());
+        return true;
+      });
+
+      await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
+
+      expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(true);
+      expect(stderrWrites.some(w => w.includes('/foo/bar.ts'))).toBe(true);
     });
   });
 });
