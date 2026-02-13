@@ -1652,6 +1652,41 @@ Codev itself follows test-driven development practices:
 - Improves code quality and completeness
 - User must explicitly disable (opt-out, not opt-in)
 
+#### Consult Architecture
+
+The `consult` command (`packages/codev/src/commands/consult/index.ts`, ~750 lines) is a **CLI delegation layer** — it does NOT call LLM APIs directly. Instead, it spawns external CLI tools as subprocesses:
+
+```
+consult -m gemini spec 42
+  → spawns: gemini --yolo "<role + query>"
+
+consult -m codex spec 42
+  → spawns: codex exec -c experimental_instructions_file=<tmpfile> --full-auto "<query>"
+
+consult -m claude spec 42
+  → spawns: claude --print -p "<role + query>" --dangerously-skip-permissions
+```
+
+**Model configuration** (top of `index.ts`):
+
+| Model | CLI Binary | Role Injection | Key Env Var |
+|-------|-----------|----------------|-------------|
+| gemini | `gemini` | Temp file via `GEMINI_SYSTEM_MD` env var | `GOOGLE_API_KEY` |
+| codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
+| claude | `claude` | Prepended to query string | `ANTHROPIC_API_KEY` |
+
+**Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
+
+**Role resolution** uses `readCodevFile()` with local-first, embedded-skeleton-fallback:
+1. `codev/roles/consultant.md` (local override)
+2. `skeleton/roles/consultant.md` (embedded default)
+
+**Porch integration**: Porch's `next.ts` spawns 3 parallel `consult` commands with `--output` flags, collects results, parses verdicts via `verdict.ts` (scans backward for `VERDICT:` line, defaults to `REQUEST_CHANGES` if not found).
+
+**Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
+1. **Unset `CLAUDECODE`**: Builder's tmux session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
+2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
+
 ### 10. TICK Protocol for Fast Iteration
 **Decision**: Create lightweight protocol for simple tasks
 
