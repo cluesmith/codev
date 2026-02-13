@@ -158,6 +158,28 @@ describe('tower cloud CLI flows (Phase 5)', () => {
       expect(openBrowser).not.toHaveBeenCalled();
     });
 
+    it('uses --service URL for registration and browser flow', async () => {
+      readlineAnswers.push('staging-tower'); // tower name prompt
+
+      await towerRegister({ serviceUrl: 'https://staging.codevos.ai' });
+
+      const config = readCloudConfig();
+      expect(config).not.toBeNull();
+      expect(config!.server_url).toBe('https://staging.codevos.ai');
+      expect(config!.tower_name).toBe('staging-tower');
+
+      // Browser should open on the custom service URL
+      expect(openBrowser).toHaveBeenCalledWith(
+        expect.stringContaining('https://staging.codevos.ai/towers/register?callback='),
+      );
+
+      // Token redemption should go to the custom service URL
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('https://staging.codevos.ai/api/towers/register/redeem'),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
     it('preserves tower name on --reauth', async () => {
       writeCloudConfig({
         tower_id: 'existing-id',
