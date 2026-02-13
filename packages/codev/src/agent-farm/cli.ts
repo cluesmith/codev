@@ -433,6 +433,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .action(async (options) => {
       try {
         await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
+        process.exit(0);
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
@@ -446,6 +447,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .action(async (options) => {
       try {
         await towerDeregister({ port: options.port ? parseInt(options.port, 10) : undefined });
+        process.exit(0);
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
