@@ -3,7 +3,8 @@
  *
  * Verifies that the Terminal component translates wheel events to arrow key
  * sequences when xterm.js is in the alternate screen buffer (e.g., tmux).
- * In normal screen buffer, wheel events should pass through to xterm.js.
+ * Arrow keys scroll TUI apps like Claude Code. In normal screen buffer,
+ * wheel events pass through to xterm.js native scrollback.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
@@ -113,7 +114,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
   describe('alternate screen buffer (tmux)', () => {
     it('sends up arrow keys on scroll up', () => {
       const el = renderTerminal();
-      dispatchWheel(el, -90); // scroll up, ~3 lines
+      dispatchWheel(el, -60); // scroll up, ~3 lines at 20px threshold
 
       expect(mockWsSend).toHaveBeenCalled();
       const lastCall = mockWsSend.mock.calls[mockWsSend.mock.calls.length - 1][0];
@@ -124,7 +125,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
 
     it('sends down arrow keys on scroll down', () => {
       const el = renderTerminal();
-      dispatchWheel(el, 90); // scroll down, ~3 lines
+      dispatchWheel(el, 60); // scroll down, ~3 lines
 
       expect(mockWsSend).toHaveBeenCalled();
       const lastCall = mockWsSend.mock.calls[mockWsSend.mock.calls.length - 1][0];
@@ -147,7 +148,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
 
     it('prevents default on wheel event', () => {
       const el = renderTerminal();
-      const event = dispatchWheel(el, -90);
+      const event = dispatchWheel(el, -60);
       expect(event.defaultPrevented).toBe(true);
     });
 
@@ -155,7 +156,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
       const el = renderTerminal();
 
       // Send a very small scroll that shouldn't trigger a line
-      dispatchWheel(el, 5); // ~0.17 lines, below threshold
+      dispatchWheel(el, 5); // below 20px threshold
 
       // Find any data frame sends (filter out the initial resize control frame)
       const dataFrameCalls = mockWsSend.mock.calls.filter((call) => {
@@ -174,7 +175,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
     it('does NOT send arrow keys (lets xterm.js handle scrollback)', () => {
       const el = renderTerminal();
       const sendCallsBefore = mockWsSend.mock.calls.length;
-      dispatchWheel(el, -90);
+      dispatchWheel(el, -60);
 
       // No new data frames should be sent
       const newDataFrames = mockWsSend.mock.calls.slice(sendCallsBefore).filter((call) => {
@@ -186,7 +187,7 @@ describe('Terminal scroll handling (Issue #220)', () => {
 
     it('does NOT prevent default on wheel event', () => {
       const el = renderTerminal();
-      const event = dispatchWheel(el, -90);
+      const event = dispatchWheel(el, -60);
       expect(event.defaultPrevented).toBe(false);
     });
   });
