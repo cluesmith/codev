@@ -1189,11 +1189,33 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       committed_at: null
       integrated_at: null
     notes: "Spec reviewed by Gemini (approved) + Codex (addressed). Builder 0101 spawned and running."
+
+  - id: "0102"
+    title: "Porch CWD / Worktree Awareness"
+    summary: "Auto-detect project/bug ID from CWD when running inside a builder worktree, making the numeric ID argument optional"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0102-porch-cwd-worktree-awareness.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [porch, ux, cli]
+    timestamps:
+      conceived_at: "2026-02-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "UX issue: builders always know their project ID from the worktree path, but porch requires explicit arg."
 ```
 
 ## Next Available Number
 
-**0102** - Reserve this number for your next project
+**0103** - Reserve this number for your next project
 
 ---
 
