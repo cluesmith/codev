@@ -49,7 +49,7 @@ Replace the Claude CLI subprocess delegation in `consult` with the Claude Agent 
 - Create `runClaudeConsultation()` function in consult/index.ts
 - Wire it into `runConsultation()` for the claude model branch
 - Handle dry-run output for SDK path
-- Remove `claude` entry from `MODEL_CONFIGS` (no longer needed for CLI)
+- Keep `claude` in `MODEL_CONFIGS` for now (removed in Phase 3 after validation updates)
 
 #### Deliverables
 - [ ] `@anthropic-ai/claude-agent-sdk` added to `packages/codev/package.json` dependencies
@@ -109,8 +109,14 @@ async function runClaudeConsultation(
           process.stdout.write(block.text);
           chunks.push(block.text);
         } else if ('name' in block) {
-          // Tool use block — show on stderr for visibility
-          process.stderr.write(chalk.dim(`[Tool: ${block.name}]\n`));
+          // Tool use block — show tool name + input summary on stderr
+          // This surfaces file paths and search patterns for visibility
+          const input = 'input' in block ? block.input : {};
+          const detail = typeof input === 'object' && input !== null
+            ? (input as any).file_path || (input as any).pattern || (input as any).path || ''
+            : '';
+          const summary = detail ? `: ${detail}` : '';
+          process.stderr.write(chalk.dim(`[Tool: ${block.name}${summary}]\n`));
         }
       }
     }
@@ -133,8 +139,10 @@ async function runClaudeConsultation(
 3. Modify `runConsultation()`:
 - Add claude SDK branch before existing CLI delegation
 - For dry-run, print SDK parameters
-- Remove `claude` from `MODEL_CONFIGS` or skip CLI check for claude
+- Skip `commandExists` check for claude (SDK handles this internally)
 - Keep logging duration and calling `logQuery()`
+
+**Note on stderr vs output file**: Tool use logs go to stderr only. The `chunks[]` array (written to `--output` file) contains only assistant text blocks. This matches existing Gemini/Codex behavior where tool exploration is visible on stderr but captured output is review text only.
 
 #### Acceptance Criteria
 - [ ] `npm run build` succeeds with new dependency
@@ -205,13 +213,35 @@ async function runClaudeConsultation(
    - Doctor reports auth failure via SDK (failure case)
    - Claude CLI no longer in AI_DEPENDENCIES
 
+**Integration test** (`packages/codev/src/__tests__/consult.test.ts` or separate file):
+
+Add an automated test that verifies CLAUDECODE nesting is handled:
+```typescript
+it('should succeed with CLAUDECODE env var set (nesting workaround)', async () => {
+  // Set CLAUDECODE to simulate builder context
+  process.env.CLAUDECODE = '1';
+  // Mock the SDK query to verify env passed does NOT contain CLAUDECODE
+  const mockQuery = vi.fn().mockReturnValue(mockAsyncGenerator([
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] } },
+    { type: 'result', subtype: 'success', result: 'OK', /* ... */ },
+  ]));
+  // Verify mockQuery was called with env that lacks CLAUDECODE
+  // ...
+  delete process.env.CLAUDECODE;
+});
+```
+
+This test ensures the primary regression (CLAUDECODE nesting) cannot silently return.
+
 #### Acceptance Criteria
 - [ ] `npm test` passes all existing and new tests
 - [ ] `codev doctor` no longer checks for `claude` CLI binary
 - [ ] `codev doctor` verifies Claude auth via SDK
+- [ ] CLAUDECODE nesting integration test passes
 
 #### Test Plan
 - **Unit Tests**: All tests listed above with mocked SDK
+- **Integration Test**: Automated CLAUDECODE nesting test (verifies env cleanup)
 - **Manual Testing**: Run `codev doctor` and verify Claude verification section
 
 #### Risks
@@ -274,6 +304,7 @@ Phase 1 (SDK + runClaudeConsultation) ──→ Phase 2 (Doctor + Tests) ──�
 | CLAUDECODE nesting still triggers in SDK subprocess | L | H | Explicitly delete from env before passing to SDK |
 | SDK version churn (pre-1.0) | L | M | Pin to ^0.2.41, use only stable `query()` API |
 | Cost increase from agent mode | L | M | `maxBudgetUsd: 1.00` and `maxTurns: 10` cap worst case |
+| CLAUDECODE regression without automated test | M | H | Integration test added to Phase 2 verifying env cleanup |
 
 ## Validation Checkpoints
 1. **After Phase 1**: `npm run build` succeeds, `consult -m claude --dry-run general "test"` works
