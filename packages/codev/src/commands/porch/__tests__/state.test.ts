@@ -292,4 +292,34 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/not.builders/0073')).toBeNull();
     });
   });
+
+  describe('resolution priority chain (getProjectId behavior)', () => {
+    // getProjectId() is a closure inside cli() and not directly testable.
+    // These tests verify the detectProjectIdFromCwd() behaviors that drive
+    // the priority chain: explicit arg > CWD detection > filesystem scan > error.
+
+    it('CWD detection returns ID for spec worktrees (step 2 resolves)', () => {
+      // When CWD is a spec worktree, detectProjectIdFromCwd returns a value,
+      // so getProjectId skips filesystem scan (step 3)
+      expect(detectProjectIdFromCwd('/repo/.builders/0073')).toBe('0073');
+    });
+
+    it('CWD detection returns ID for bugfix worktrees (step 2 resolves)', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-42')).toBe('0042');
+    });
+
+    it('CWD detection returns null for non-worktree paths (falls through to step 3)', () => {
+      // When CWD is the main repo root, detectProjectIdFromCwd returns null,
+      // causing getProjectId to try filesystem scan (step 3)
+      expect(detectProjectIdFromCwd('/repo/src/commands')).toBeNull();
+    });
+
+    it('CWD detection returns null for task/protocol worktrees (falls through to step 3/4)', () => {
+      // Task and protocol worktrees don't map to project IDs,
+      // so getProjectId falls through to filesystem scan or error
+      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
+      expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
+    });
+  });
 });
