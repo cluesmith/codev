@@ -24,8 +24,10 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
   // Codex uses experimental_instructions_file config flag (not env var)
   // See: https://github.com/openai/codex/discussions/3896
   codex: { cli: 'codex', args: ['exec', '-m', 'gpt-5.2-codex', '--full-auto'], envVar: null },
-  claude: { cli: 'claude', args: ['--print', '-p'], envVar: null },
 };
+
+// Models that use the Agent SDK instead of CLI subprocess
+const SDK_MODELS = ['claude'];
 
 // Model aliases
 const MODEL_ALIASES: Record<string, string> = {
@@ -713,8 +715,8 @@ export async function consult(options: ConsultOptions): Promise<void> {
   const model = MODEL_ALIASES[modelInput.toLowerCase()] || modelInput.toLowerCase();
 
   // Validate model
-  if (!MODEL_CONFIGS[model]) {
-    const validModels = [...Object.keys(MODEL_CONFIGS), ...Object.keys(MODEL_ALIASES)];
+  if (!MODEL_CONFIGS[model] && !SDK_MODELS.includes(model)) {
+    const validModels = [...Object.keys(MODEL_CONFIGS), ...SDK_MODELS, ...Object.keys(MODEL_ALIASES)];
     throw new Error(`Unknown model: ${modelInput}\nValid models: ${validModels.join(', ')}`);
   }
 

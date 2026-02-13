@@ -78,15 +78,14 @@ describe('consult command', () => {
     it('should have correct CLI configuration for each model', () => {
       // Note: Codex now uses experimental_instructions_file config flag (not env var)
       // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
+      // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
       const configs: Record<string, { cli: string; args: string[] }> = {
         gemini: { cli: 'gemini', args: ['--yolo'] },
         codex: { cli: 'codex', args: ['exec', '--full-auto'] },
-        claude: { cli: 'claude', args: ['--print', '-p'] },
       };
 
       expect(configs.gemini.cli).toBe('gemini');
       expect(configs.codex.args).toContain('--full-auto');
-      expect(configs.claude.args).toContain('--print');
     });
 
     it('should use experimental_instructions_file for codex (not env var)', () => {
