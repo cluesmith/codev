@@ -242,6 +242,37 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       }
     });
 
+    // Scroll handling: when xterm.js is in the alternate screen buffer (e.g., tmux),
+    // translate wheel events to arrow key sequences sent to the PTY.
+    // In normal screen buffer, xterm.js handles scrollback natively.
+    let scrollAccumulator = 0;
+    const SCROLL_PIXELS_PER_LINE = 30;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (term.buffer.active.type !== 'alternate') return;
+      if (ws.readyState !== WebSocket.OPEN) return;
+
+      event.preventDefault();
+
+      const delta = event.deltaMode === 1
+        ? event.deltaY * SCROLL_PIXELS_PER_LINE // line mode → pixels
+        : event.deltaY;
+
+      scrollAccumulator += delta;
+
+      const lines = Math.trunc(scrollAccumulator / SCROLL_PIXELS_PER_LINE);
+      if (lines === 0) return;
+
+      scrollAccumulator -= lines * SCROLL_PIXELS_PER_LINE;
+
+      const count = Math.min(Math.abs(lines), 15);
+      const seq = lines < 0 ? '\x1b[A' : '\x1b[B';
+      sendData(ws, seq.repeat(count));
+    };
+
+    const wheelTarget = containerRef.current;
+    wheelTarget.addEventListener('wheel', handleWheel, { passive: false });
+
     // Handle window resize (debounced to prevent resize storms)
     const resizeObserver = new ResizeObserver(debouncedFit);
     resizeObserver.observe(containerRef.current);
@@ -258,6 +289,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       if (flushTimer) clearTimeout(flushTimer);
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
+      wheelTarget.removeEventListener('wheel', handleWheel);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();
