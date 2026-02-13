@@ -495,14 +495,26 @@ async function runConsultation(
 }
 
 /**
- * Fetch PR data and return it inline
+ * Get a compact diff stat summary and list of changed files.
+ * Returns { stat, files } where stat is the `--stat` output and files is the list of paths.
  */
-function fetchPRData(prNumber: number): { info: string; diff: string; comments: string } {
+function getDiffStat(projectRoot: string, ref: string): { stat: string; files: string[] } {
+  const stat = execSync(`git diff --stat ${ref}`, { cwd: projectRoot, encoding: 'utf-8' }).toString();
+  const nameOnly = execSync(`git diff --name-only ${ref}`, { cwd: projectRoot, encoding: 'utf-8' }).toString();
+  const files = nameOnly.trim().split('\n').filter(Boolean);
+  return { stat, files };
+}
+
+/**
+ * Fetch PR metadata (no diff — reviewers read files from disk)
+ */
+function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; comments: string } {
   console.error(`Fetching PR #${prNumber} data...`);
 
   try {
     const info = execSync(`gh pr view ${prNumber} --json title,body,state,author,baseRefName,headRefName,files,additions,deletions`, { encoding: 'utf-8' });
-    const diff = execSync(`gh pr diff ${prNumber}`, { encoding: 'utf-8' });
+    const nameOnly = execSync(`gh pr diff ${prNumber} --name-only`, { encoding: 'utf-8' });
+    const changedFiles = nameOnly.trim().split('\n').filter(Boolean);
 
     let comments = '(No comments)';
     try {
@@ -511,23 +523,20 @@ function fetchPRData(prNumber: number): { info: string; diff: string; comments: 
       // No comments or error fetching
     }
 
-    return { info, diff, comments };
+    return { info, changedFiles, comments };
   } catch (err) {
     throw new Error(`Failed to fetch PR data: ${err}`);
   }
 }
 
 /**
- * Build query for PR review
+ * Build query for PR review.
+ * Provides file list and instructs reviewers to read files from disk.
  */
 function buildPRQuery(prNumber: number, _projectRoot: string): string {
   const prData = fetchPRData(prNumber);
 
-  // Truncate diff if too large (keep first 50k chars)
-  const maxDiffSize = 50000;
-  const diff = prData.diff.length > maxDiffSize
-    ? prData.diff.substring(0, maxDiffSize) + '\n\n... (diff truncated, ' + prData.diff.length + ' chars total)'
-    : prData.diff;
+  const fileList = prData.changedFiles.map(f => `- ${f}`).join('\n');
 
   return `Review Pull Request #${prNumber}
 
@@ -536,10 +545,13 @@ function buildPRQuery(prNumber: number, _projectRoot: string): string {
 ${prData.info}
 \`\`\`
 
-## Diff
-\`\`\`diff
-${diff}
-\`\`\`
+## Changed Files
+${fileList}
+
+## How to Review
+**Read the changed files from disk** to review their current content. You have full filesystem access.
+For each changed file listed above, read it and evaluate the code quality, correctness, and test coverage.
+Use \`git diff HEAD~1 -- <file>\` or \`git log -p -- <file>\` if you need to see what specifically changed.
 
 ## Comments
 ${prData.comments}
@@ -602,26 +614,23 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 }
 
 /**
- * Build query for implementation review
+ * Build query for implementation review.
+ * Provides diff stat + file list and instructs reviewers to read files from disk.
  */
 function buildImplQuery(projectNumber: number, projectRoot: string, planPhase?: string): string {
   const specPath = findSpec(projectRoot, projectNumber);
   const planPath = findPlan(projectRoot, projectNumber);
 
-  // Compute diff against base branch for focused review
-  let diff = '';
+  // Get compact diff summary against base branch
+  let diffStat = '';
+  let changedFiles: string[] = [];
   try {
-    // Find merge base with main to get only this branch's changes
     const mergeBase = execSync('git merge-base HEAD main', { cwd: projectRoot, encoding: 'utf-8' }).trim();
-    diff = execSync(`git diff ${mergeBase}..HEAD`, { cwd: projectRoot, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 });
-    // Truncate large diffs
-    const maxDiffSize = 80000;
-    if (diff.length > maxDiffSize) {
-      diff = diff.substring(0, maxDiffSize) + `\n\n... (diff truncated, ${diff.length} chars total)`;
-    }
+    const result = getDiffStat(projectRoot, `${mergeBase}..HEAD`);
+    diffStat = result.stat;
+    changedFiles = result.files;
   } catch {
-    // If git diff fails, fall back to filesystem exploration
-    diff = '';
+    // If git diff fails, reviewer will explore filesystem
   }
 
   let query = `Review Implementation for Project ${projectNumber}`;
@@ -647,10 +656,17 @@ function buildImplQuery(projectNumber: number, projectRoot: string, planPhase?: 
     query += `**DO** verify that this phase's deliverables are complete and correct.\n`;
   }
 
-  if (diff) {
-    query += `\n## Diff (branch changes vs main)\n\nReview the following diff. This is the ONLY code that changed — focus your review on these changes. You may read the spec and plan files for context, but do NOT explore the broader codebase.\n\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+  if (changedFiles.length > 0) {
+    query += `\n## Changed Files (${changedFiles.length} files)\n`;
+    query += `\`\`\`\n${diffStat}\`\`\`\n`;
+    query += `\n### File List\n`;
+    query += changedFiles.map(f => `- ${f}`).join('\n');
+    query += `\n\n## How to Review\n`;
+    query += `**Read the changed files from disk** to review their actual content. You have full filesystem access.\n`;
+    query += `For each file listed above, read it and evaluate the implementation against the spec/plan.\n`;
+    query += `Use \`git diff main -- <file>\` if you need to see what specifically changed in a file.\n`;
   } else {
-    query += `\n## Instructions\n\nRead the spec and plan files above, then review the implementation changes.\n`;
+    query += `\n## Instructions\n\nRead the spec and plan files above, then explore the filesystem to find and review the implementation changes.\n`;
   }
 
   query += `
@@ -838,3 +854,6 @@ export async function consult(options: ConsultOptions): Promise<void> {
 
   await runConsultation(model, query, projectRoot, dryRun, reviewType, customRole, outputPath);
 }
+
+// Exported for testing
+export { getDiffStat as _getDiffStat };

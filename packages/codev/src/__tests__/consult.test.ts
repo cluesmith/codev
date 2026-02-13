@@ -645,4 +645,104 @@ describe('consult command', () => {
       expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(false);
     });
   });
+
+  describe('diff stat approach (Bugfix #240)', () => {
+    it('should export getDiffStat for file-based review', async () => {
+      vi.resetModules();
+      const { _getDiffStat } = await import('../commands/consult/index.js');
+      expect(typeof _getDiffStat).toBe('function');
+    });
+
+    it('getDiffStat should call git diff --stat and --name-only', async () => {
+      vi.resetModules();
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('--stat')) {
+          return Buffer.from(' src/app.ts | 10 +++++++---\n 1 file changed, 7 insertions(+), 3 deletions(-)\n');
+        }
+        if (typeof cmd === 'string' && cmd.includes('--name-only')) {
+          return Buffer.from('src/app.ts\n');
+        }
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        return Buffer.from('');
+      });
+
+      const { _getDiffStat } = await import('../commands/consult/index.js');
+      const result = _getDiffStat('/fake/root', 'abc123..HEAD');
+
+      expect(result.stat).toContain('src/app.ts');
+      expect(result.files).toEqual(['src/app.ts']);
+    });
+
+    it('getDiffStat should handle multiple files', async () => {
+      vi.resetModules();
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('--stat')) {
+          return Buffer.from(
+            ' .claude/settings.json     |  5 +++++\n' +
+            ' src/app/widget.tsx         | 20 ++++++++++++++------\n' +
+            ' src/middleware.ts          | 15 ++++++++++++---\n' +
+            ' 3 files changed, 32 insertions(+), 9 deletions(-)\n'
+          );
+        }
+        if (typeof cmd === 'string' && cmd.includes('--name-only')) {
+          return Buffer.from('.claude/settings.json\nsrc/app/widget.tsx\nsrc/middleware.ts\n');
+        }
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        return Buffer.from('');
+      });
+
+      const { _getDiffStat } = await import('../commands/consult/index.js');
+      const result = _getDiffStat('/fake/root', 'abc123..HEAD');
+
+      expect(result.files).toHaveLength(3);
+      expect(result.files).toContain('.claude/settings.json');
+      expect(result.files).toContain('src/app/widget.tsx');
+      expect(result.files).toContain('src/middleware.ts');
+      expect(result.stat).toContain('3 files changed');
+    });
+
+    it('no diff is ever truncated — reviewers read files from disk', async () => {
+      // This is a documentation test: the old approach truncated diffs at 50K/80K chars,
+      // which caused reviewers to miss files alphabetically late in the diff (e.g., src/).
+      // The new approach sends only git diff --stat and instructs reviewers to read
+      // the actual files from disk, eliminating truncation entirely.
+      vi.resetModules();
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('--stat')) {
+          return Buffer.from(' 50 files changed, 10000 insertions(+), 5000 deletions(-)\n');
+        }
+        if (typeof cmd === 'string' && cmd.includes('--name-only')) {
+          // 50 files spanning the full alphabet
+          const files = Array.from({ length: 50 }, (_, i) =>
+            i < 10 ? `.claude/file${i}.json` :
+            i < 20 ? `codev/specs/${i}.md` :
+            `src/app/component${i}.tsx`
+          );
+          return Buffer.from(files.join('\n') + '\n');
+        }
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        return Buffer.from('');
+      });
+
+      const { _getDiffStat } = await import('../commands/consult/index.js');
+      const result = _getDiffStat('/fake/root', 'abc123..HEAD');
+
+      // ALL 50 files are present — none truncated
+      expect(result.files).toHaveLength(50);
+      // src/ files that were previously invisible are now listed
+      expect(result.files.filter(f => f.startsWith('src/'))).toHaveLength(30);
+    });
+  });
 });
