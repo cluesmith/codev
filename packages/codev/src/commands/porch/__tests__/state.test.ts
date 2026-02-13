@@ -11,6 +11,7 @@ import {
   writeState,
   createInitialState,
   findStatusPath,
+  detectProjectIdFromCwd,
   getProjectDir,
   getStatusPath,
   PROJECTS_DIR,
@@ -239,6 +240,56 @@ updated_at: "${state.updated_at}"
 
       const result = findStatusPath(emptyDir, '0074');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('detectProjectIdFromCwd', () => {
+    it('should detect project ID from spec worktree root', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073')).toBe('0073');
+    });
+
+    it('should detect project ID from spec worktree subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073/src/commands/')).toBe('0073');
+    });
+
+    it('should detect and zero-pad bugfix worktree ID', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228')).toBe('0228');
+    });
+
+    it('should detect bugfix ID from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228/src/deep/path')).toBe('0228');
+    });
+
+    it('should zero-pad single-digit bugfix IDs', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-5')).toBe('0005');
+    });
+
+    it('should handle bugfix IDs > 9999 without truncation', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-12345')).toBe('12345');
+    });
+
+    it('should return null for task worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
+    });
+
+    it('should return null for maintain worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
+    });
+
+    it('should return null for protocol worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
+    });
+
+    it('should return null for non-worktree paths', () => {
+      expect(detectProjectIdFromCwd('/regular/path/no/builders')).toBeNull();
+    });
+
+    it('should return null for worktree names with extra text after ID', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073-extra-text/')).toBeNull();
+    });
+
+    it('should not match partial .builders in unrelated paths', () => {
+      expect(detectProjectIdFromCwd('/repo/not.builders/0073')).toBeNull();
     });
   });
 });

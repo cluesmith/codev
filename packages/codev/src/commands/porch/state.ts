@@ -159,6 +159,19 @@ export function findStatusPath(projectRoot: string, projectId: string): string |
 }
 
 /**
+ * Detect project ID from the current working directory if inside a builder worktree.
+ * Works from any subdirectory within the worktree.
+ * Returns zero-padded project ID, or null if not in a recognized worktree.
+ */
+export function detectProjectIdFromCwd(cwd: string): string | null {
+  const normalized = path.resolve(cwd).split(path.sep).join('/');
+  const match = normalized.match(/\/\.builders\/(bugfix-(\d+)|(\d{4}))(\/|$)/);
+  if (!match) return null;
+  const rawId = match[2] || match[3];
+  return rawId.padStart(4, '0');
+}
+
+/**
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
