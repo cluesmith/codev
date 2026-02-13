@@ -29,6 +29,7 @@ import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
 import { readCloudConfig, getCloudConfigPath, maskApiKey, type CloudConfig } from '../lib/cloud-config.js';
+import { parseTmuxSessionName, type ParsedTmuxSession } from '../utils/session.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -631,56 +632,17 @@ function killTmuxSession(sessionName: string): void {
 // ============================================================================
 
 /**
- * Parsed metadata from a tmux session name.
- * Our naming convention: architect-{basename}, builder-{basename}-{specId}, shell-{basename}-{shellId}
- */
-interface ParsedTmuxSession {
-  type: 'architect' | 'builder' | 'shell';
-  projectBasename: string;
-  roleId: string | null;  // specId for builders, shellId for shells, null for architect
-}
-
-/**
- * Parse a codev tmux session name to extract type, project, and role.
- * Returns null if the name doesn't match any known codev pattern.
- *
- * Examples:
- *   "architect-codev-public"           → { type: 'architect', projectBasename: 'codev-public', roleId: null }
- *   "builder-codevos_ai-0001"          → { type: 'builder', projectBasename: 'codevos_ai', roleId: '0001' }
- *   "shell-codev-public-shell-1"       → { type: 'shell', projectBasename: 'codev-public', roleId: 'shell-1' }
- */
-function parseTmuxSessionName(name: string): ParsedTmuxSession | null {
-  // architect-{basename}
-  const architectMatch = name.match(/^architect-(.+)$/);
-  if (architectMatch) {
-    return { type: 'architect', projectBasename: architectMatch[1], roleId: null };
-  }
-
-  // builder-{basename}-{specId} — specId is always the last segment (digits like "0001")
-  const builderMatch = name.match(/^builder-(.+)-(\d{4,})$/);
-  if (builderMatch) {
-    return { type: 'builder', projectBasename: builderMatch[1], roleId: builderMatch[2] };
-  }
-
-  // shell-{basename}-{shellId} — shellId is "shell-N" (last two segments)
-  const shellMatch = name.match(/^shell-(.+)-(shell-\d+)$/);
-  if (shellMatch) {
-    return { type: 'shell', projectBasename: shellMatch[1], roleId: shellMatch[2] };
-  }
-
-  return null;
-}
-
-/**
  * List all tmux sessions that match codev naming conventions.
  * Returns an array of { tmuxName, parsed } for each matching session.
+ * Sessions with recognized prefixes (architect-, builder-, shell-) but
+ * unparseable ID formats are included with parsed: null for SQLite lookup.
  */
 // Cache for listCodevTmuxSessions — avoid shelling out on every dashboard poll
-let _tmuxListCache: Array<{ tmuxName: string; parsed: ParsedTmuxSession }> = [];
+let _tmuxListCache: Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> = [];
 let _tmuxListCacheTime = 0;
 const TMUX_LIST_CACHE_TTL = 10_000;  // 10 seconds
 
-function listCodevTmuxSessions(bypassCache = false): Array<{ tmuxName: string; parsed: ParsedTmuxSession }> {
+function listCodevTmuxSessions(bypassCache = false): Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> {
   if (!tmuxAvailable) return [];
 
   const now = Date.now();
@@ -691,12 +653,15 @@ function listCodevTmuxSessions(bypassCache = false): Array<{ tmuxName: string; p
   try {
     const result = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', { encoding: 'utf-8' });
     const sessions = result.trim().split('\n').filter(Boolean);
-    const codevSessions: Array<{ tmuxName: string; parsed: ParsedTmuxSession }> = [];
+    const codevSessions: Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> = [];
 
     for (const name of sessions) {
       const parsed = parseTmuxSessionName(name);
       if (parsed) {
         codevSessions.push({ tmuxName: name, parsed });
+      } else if (/^(?:architect|builder|shell)-/.test(name)) {
+        // Recognized codev prefix but unparseable ID format — include for SQLite lookup
+        codevSessions.push({ tmuxName: name, parsed: null });
       }
     }
 
@@ -789,12 +754,12 @@ async function reconcileTerminalSessions(): Promise<void> {
     matchedTmuxNames.add(tmuxName);
 
     // Determine metadata — prefer SQLite, fall back to parsed name
-    const projectPath = dbRow?.project_path || resolveProjectPathFromBasename(parsed.projectBasename);
-    const type = dbRow?.type || parsed.type;
-    const roleId = dbRow?.role_id || parsed.roleId;
+    const projectPath = dbRow?.project_path || (parsed && resolveProjectPathFromBasename(parsed.projectBasename));
+    const type = (dbRow?.type || parsed?.type) as 'architect' | 'builder' | 'shell' | undefined;
+    const roleId = dbRow?.role_id ?? parsed?.roleId ?? null;
 
-    if (!projectPath) {
-      log('WARN', `Cannot resolve project path for tmux session "${tmuxName}" (basename: ${parsed.projectBasename}) — skipping`);
+    if (!projectPath || !type) {
+      log('WARN', `Cannot resolve ${!projectPath ? 'project path' : 'type'} for tmux session "${tmuxName}"${parsed ? ` (basename: ${parsed.projectBasename})` : ''} — skipping`);
       continue;
     }
 
@@ -1376,6 +1341,8 @@ async function getTerminalsForProject(
   const projectBasename = sanitizeTmuxSessionName(path.basename(normalizedPath));
   const liveTmux = listCodevTmuxSessions();
   for (const { tmuxName, parsed } of liveTmux) {
+    // Skip sessions we couldn't fully parse (no projectBasename to match)
+    if (!parsed) continue;
     // Only process sessions whose sanitized project basename matches
     if (parsed.projectBasename !== projectBasename) continue;
 
