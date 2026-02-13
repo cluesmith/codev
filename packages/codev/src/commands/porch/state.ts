@@ -161,7 +161,7 @@ export function findStatusPath(projectRoot: string, projectId: string): string |
 /**
  * Detect project ID from the current working directory if inside a builder worktree.
  * Works from any subdirectory within the worktree.
- * Returns zero-padded project ID, or null if not in a recognized worktree.
+ * Returns the porch project ID (e.g. "bugfix-237" or "0073"), or null if not in a recognized worktree.
  */
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');

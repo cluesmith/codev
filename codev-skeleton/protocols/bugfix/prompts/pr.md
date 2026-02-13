@@ -4,7 +4,7 @@ You are executing the **PR** phase of the BUGFIX protocol.
 
 ## Your Goal
 
-Create a pull request, run CMAP review, and address feedback.
+Create a pull request and notify the architect. The architect handles review, merge, and cleanup.
 
 ## Context
 

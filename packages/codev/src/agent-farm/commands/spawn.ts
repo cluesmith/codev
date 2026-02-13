@@ -184,9 +184,9 @@ function buildResumeNotice(_projectId: string): string {
 
 This is a **resumed** builder session. A previous session was working in this worktree.
 
-**IMPORTANT**: Do NOT run \`porch init\` — porch state already exists from the previous session.
-Instead, start by running \`porch next\` to check your current state and get next tasks.
-Continue from where the previous session left off.
+Start by running \`porch next\` to check your current state and get next tasks.
+If porch state exists, continue from where the previous session left off.
+If porch reports "not found", run \`porch init\` to re-initialize.
 `;
 }
 
@@ -681,7 +681,12 @@ async function initPorchInWorktree(
 ): Promise<void> {
   logger.info('Initializing porch...');
   try {
-    await run(`porch init ${protocol} ${projectId} "${projectName}"`, { cwd: worktreePath });
+    // Sanitize inputs to prevent shell injection (defense-in-depth;
+    // callers already use slugified names, but be safe)
+    const safeName = projectName.replace(/[^a-z0-9_-]/gi, '-');
+    const safeProto = protocol.replace(/[^a-z0-9_-]/gi, '');
+    const safeId = projectId.replace(/[^a-z0-9_-]/gi, '');
+    await run(`porch init ${safeProto} ${safeId} "${safeName}"`, { cwd: worktreePath });
     logger.info(`Porch initialized: ${projectId}`);
   } catch (error) {
     logger.warn(`Warning: Failed to initialize porch (builder can init manually): ${error}`);
