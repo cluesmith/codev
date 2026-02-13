@@ -19,6 +19,7 @@ import {
   getStatusPath,
   detectProjectId,
   detectProjectIdFromCwd,
+  resolveProjectId,
 } from './state.js';
 import {
   loadProtocol,
@@ -613,25 +614,17 @@ export async function cli(args: string[]): Promise<void> {
 
   // Auto-detect project ID for commands that need it
   function getProjectId(provided?: string): string {
-    // 1. Explicit CLI argument (highest priority)
-    if (provided) return provided;
-
-    // 2. CWD worktree detection
-    const fromCwd = detectProjectIdFromCwd(process.cwd());
-    if (fromCwd) {
-      console.log(chalk.dim(`[auto-detected project from worktree: ${fromCwd}]`));
-      return fromCwd;
+    const resolved = resolveProjectId(provided, process.cwd(), projectRoot);
+    // Log auto-detection source when no explicit arg was given
+    if (!provided) {
+      const fromCwd = detectProjectIdFromCwd(process.cwd());
+      if (fromCwd) {
+        console.log(chalk.dim(`[auto-detected project from worktree: ${resolved}]`));
+      } else {
+        console.log(chalk.dim(`[auto-detected project: ${resolved}]`));
+      }
     }
-
-    // 3. Filesystem scan fallback
-    const detected = detectProjectId(projectRoot);
-    if (detected) {
-      console.log(chalk.dim(`[auto-detected project: ${detected}]`));
-      return detected;
-    }
-
-    // 4. Error — none of the detection methods succeeded
-    throw new Error('Cannot determine project ID. Provide it explicitly or run from a builder worktree.');
+    return resolved;
   }
 
   try {

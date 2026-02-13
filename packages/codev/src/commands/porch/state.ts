@@ -172,6 +172,33 @@ export function detectProjectIdFromCwd(cwd: string): string | null {
 }
 
 /**
+ * Resolve project ID using the priority chain:
+ * 1. Explicit CLI argument (highest priority)
+ * 2. CWD worktree detection
+ * 3. Filesystem scan fallback
+ * 4. Error if none succeed
+ */
+export function resolveProjectId(
+  provided: string | undefined,
+  cwd: string,
+  projectRoot: string,
+): string {
+  // 1. Explicit CLI argument (highest priority)
+  if (provided) return provided;
+
+  // 2. CWD worktree detection
+  const fromCwd = detectProjectIdFromCwd(cwd);
+  if (fromCwd) return fromCwd;
+
+  // 3. Filesystem scan fallback
+  const detected = detectProjectId(projectRoot);
+  if (detected) return detected;
+
+  // 4. Error — none of the detection methods succeeded
+  throw new Error('Cannot determine project ID. Provide it explicitly or run from a builder worktree.');
+}
+
+/**
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
