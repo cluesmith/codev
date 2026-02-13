@@ -17,6 +17,7 @@ export default defineConfig({
       '**/dashboard/__tests__/**',   // Dashboard tests use their own vitest config
       '**/worktrees/**',             // Git worktrees have their own test files
       '**/.builders/**',             // Builder worktrees
+      '**/bugfix-213-architect-restart.test.ts',  // Integration test that requires dist/ build
     ],
     coverage: {
       provider: 'v8',

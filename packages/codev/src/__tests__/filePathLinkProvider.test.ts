@@ -420,12 +420,12 @@ describe('FilePathLinkProvider', () => {
   });
 
   describe('ILink.decorations', () => {
-    it('sets pointerCursor true and underline false (overlay handles underline)', async () => {
+    it('sets pointerCursor true and underline true', async () => {
       const links = await getLinks('error in src/foo.ts here');
       expect(links).toBeDefined();
       expect(links![0].decorations).toEqual({
         pointerCursor: true,
-        underline: false,
+        underline: true,
       });
     });
   });

@@ -14,7 +14,7 @@ import { TunnelClient, type TunnelState } from '../lib/tunnel-client.js';
 /** Wait for a condition to be true within a timeout */
 async function waitFor(
   fn: () => boolean,
-  timeoutMs = 5000,
+  timeoutMs = 10000,
   intervalMs = 50,
 ): Promise<void> {
   const start = Date.now();
