@@ -248,7 +248,7 @@ Build the shepherd process (`codev-shepherd.mjs`) and the Tower-side `SessionMan
 
 ### Phase 2: Integration and Session Creation
 
-Wire the shepherd into Tower's session creation flow. New terminal sessions are created via shepherd instead of tmux. Existing tmux sessions continue working during the transition. Reconciliation handles both tmux and shepherd sessions simultaneously.
+Wire the shepherd into Tower's session creation flow. New terminal sessions are created via shepherd instead of tmux. Existing tmux sessions continue working during the transition. Reconciliation handles both session types simultaneously: tmux sessions are reconnected via `tmux attach`, shepherd sessions via Unix socket. Session type is determined by checking whether `shepherd_socket` or `tmux_session` is populated in SQLite.
 
 ### Phase 3: Reconciliation and tmux Removal
 
@@ -288,6 +288,14 @@ Remove `terminal-tmux.md` documentation (replaced by this spec's architecture). 
 - **Auto-restart cycle**: Session with restartOnExit → kill process → verify restart → kill again → verify maxRestarts limit
 - **Stale socket cleanup**: Create stale socket file → start Tower → verify cleanup
 - **Graceful degradation**: Prevent shepherd from spawning → verify session works without persistence → verify dashboard warning
+
+### Protocol Robustness Tests
+
+- **Malformed frames**: Send incomplete header, invalid JSON control payload, oversized frame (>16MB) → verify connection closed gracefully
+- **Unknown frame types**: Send frame with type 0xFF → verify silently ignored
+- **Version mismatch**: Send HELLO with version 99 → verify appropriate handling
+- **Signal allowlist**: Send SIGNAL with disallowed signal number → verify rejected
+- **Rapid restart cycles**: Kill process 10 times in quick succession → verify maxRestarts honored and no race conditions
 
 ### E2E Tests (Playwright)
 
