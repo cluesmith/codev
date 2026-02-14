@@ -304,6 +304,31 @@ The first run of this experiment produced:
 | Deployment | 6.0 | 8.0 | **+2.0** |
 | **Overall** | **5.9** | **7.3** | **+1.4** |
 
-Note: Both implementations used regex-based NL parsing despite the prompt requesting a conversational interface. Future runs should explicitly require Gemini 3.0 Flash as the NL backend to test whether SPIR's consultation process leads to better NL architecture choices.
+Note: Both implementations used regex-based NL parsing despite the prompt requesting a conversational interface. Round 2 addressed this by explicitly requiring Gemini 3.0 Flash as the NL backend.
 
 Full results: `codev/resources/vibe-vs-spir-comparison-2026-02.md`
+
+## Feb 2026 Results — Round 2
+
+The second run used an updated prompt explicitly requiring Gemini Flash (not regex). Also used codev v2.0.0-rc.69 with the stateful review/rebuttal mechanism (Issue #245).
+
+Deployment excluded from scoring — it flipped randomly between rounds (SPIR had Dockerfile in R1, Vibe had it in R2), making it noise rather than signal.
+
+| Dimension | Vibe (avg) | SPIR (avg) | Delta |
+|-----------|:----------:|:----------:|:-----:|
+| Bugs | 4.7 | 7.3 | **+2.7** |
+| Code Quality | 6.3 | 7.7 | +1.3 |
+| Maintainability | 7.3 | 7.7 | +0.3 |
+| Tests | 5.0 | 6.0 | +1.0 |
+| Extensibility | 5.0 | 6.0 | +1.0 |
+| NL Interface | 6.0 | 7.0 | +1.0 |
+| **Overall** | **5.7** | **7.0** | **+1.2** |
+
+Key findings:
+- Bugs is the largest delta (+2.7) — SPIR has fewer, less severe bugs (0 Critical vs 1 Critical)
+- Both implementations successfully used Gemini Flash (the explicit prompt worked)
+- SPIR's NL architecture (action executor + discriminated unions) rated higher
+- SPIR leads on every scored dimension, overall delta +1.2
+- The rebuttal mechanism (PR #246) was critical — without it, SPIR got stuck in a 5-iteration spec review loop
+
+Full results: `codev/resources/vibe-vs-spir-r2-comparison-2026-02.md`
