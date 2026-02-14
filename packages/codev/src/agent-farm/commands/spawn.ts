@@ -543,7 +543,7 @@ async function createPtySession(
   cwd: string,
   registration?: { projectPath: string; type: 'builder' | 'shell'; roleId: string },
 ): Promise<{ terminalId: string }> {
-  const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50 };
+  const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50, persistent: true };
   if (registration) {
     body.projectPath = registration.projectPath;
     body.type = registration.type;
