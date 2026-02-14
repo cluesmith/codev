@@ -20,6 +20,7 @@ import {
   normalizeProjectPath,
   getProjectName,
   isTempDirectory,
+  buildArchitectArgs,
 } from './tower-utils.js';
 
 // ============================================================================
@@ -341,10 +342,10 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
       }
 
       try {
-        // Parse command string to separate command and args
+        // Parse command string to separate command and args, inject role prompt
         const cmdParts = architectCmd.split(/\s+/);
         const cmd = cmdParts[0];
-        const cmdArgs = cmdParts.slice(1);
+        const cmdArgs = buildArchitectArgs(cmdParts.slice(1), projectPath);
 
         // Build env with CLAUDECODE removed so spawned Claude processes
         // don't detect a nested session

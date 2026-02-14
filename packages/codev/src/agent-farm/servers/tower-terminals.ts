@@ -23,7 +23,7 @@ import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { ProjectTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeProjectPath } from './tower-utils.js';
+import { normalizeProjectPath, buildArchitectArgs } from './tower-utils.js';
 
 // ============================================================================
 // Module-private state (lifecycle driven by orchestrator)
@@ -390,7 +390,7 @@ export async function reconcileTerminalSessions(): Promise<void> {
         delete cleanEnv['CLAUDECODE'];
         restartOptions = {
           command: cmdParts[0],
-          args: cmdParts.slice(1),
+          args: buildArchitectArgs(cmdParts.slice(1), projectPath),
           cwd: projectPath,
           env: cleanEnv,
           restartDelay: 2000,
@@ -575,7 +575,7 @@ export async function getTerminalsForProject(
           delete cleanEnv['CLAUDECODE'];
           restartOptions = {
             command: cmdParts[0],
-            args: cmdParts.slice(1),
+            args: buildArchitectArgs(cmdParts.slice(1), dbSession.project_path),
             cwd: dbSession.project_path,
             env: cleanEnv,
             restartDelay: 2000,

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ServerResponse } from 'node:http';
 import type { RateLimitEntry } from './tower-types.js';
+import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 
 // ============================================================================
 // Rate Limiting
@@ -160,6 +161,30 @@ export const MIME_TYPES: Record<string, string> = {
   '.ttf': 'font/ttf',
   '.map': 'application/json',
 };
+
+// ============================================================================
+// Architect Role Prompt
+// ============================================================================
+
+/**
+ * Build architect command args with role prompt injected.
+ * Writes the role to .architect-role.md in the project dir and adds
+ * --append-system-prompt to the args (matching how builders receive theirs).
+ * Returns the modified args array.
+ */
+export function buildArchitectArgs(baseArgs: string[], projectPath: string): string[] {
+  const codevDir = path.join(projectPath, 'codev');
+  const bundledRolesDir = path.resolve(import.meta.dirname, '../../skeleton/roles');
+  const config: RoleConfig = { codevDir, bundledRolesDir };
+
+  const role = loadRolePrompt(config, 'architect');
+  if (!role) return baseArgs;
+
+  const roleFile = path.join(projectPath, '.architect-role.md');
+  fs.writeFileSync(roleFile, role.content);
+
+  return [...baseArgs, '--append-system-prompt', role.content];
+}
 
 /**
  * Serve a static file from the React dashboard dist.
