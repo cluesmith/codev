@@ -296,7 +296,7 @@ async function runClaudeConsultation(
         allowDangerouslySkipPermissions: true,
         model: 'claude-opus-4-6',
         maxTurns: 10,
-        maxBudgetUsd: 1.00,
+        maxBudgetUsd: 25.00,
         cwd: projectRoot,
         env,
       },
@@ -365,7 +365,7 @@ async function runConsultation(
       console.log(`  Model: claude-opus-4-6`);
       console.log(`  Tools: Read, Glob, Grep`);
       console.log(`  Max turns: 10`);
-      console.log(`  Max budget: $1.00`);
+      console.log(`  Max budget: $25.00`);
       const promptPreview = query.substring(0, 200) + (query.length > 200 ? '...' : '');
       console.log(`  Prompt: ${promptPreview}`);
       return;
