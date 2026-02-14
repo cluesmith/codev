@@ -660,6 +660,45 @@ body {
   font-size: 14px;
 }
 
+/* Virtual keyboard for mobile terminals (Issue #254) */
+.virtual-keyboard {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.virtual-key {
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.virtual-key:active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.virtual-key-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.virtual-key-active:active {
+  background: var(--accent-hover);
+}
+
 /* Mobile layout */
 .mobile-layout {
   display: flex;

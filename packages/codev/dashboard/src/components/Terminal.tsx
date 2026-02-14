@@ -6,6 +6,9 @@ import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePathLinkProvider.js';
+import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
+import { useMediaQuery } from '../hooks/useMediaQuery.js';
+import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -29,6 +32,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
+  const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
 
   useEffect(() => {
@@ -246,6 +251,46 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         if (!filtered) return;
         data = filtered;
       }
+
+      // Sticky modifier handling for mobile virtual keyboard
+      const mod = modifierRef.current;
+      if ((mod.ctrl || mod.cmd) && data.length === 1) {
+        const charCode = data.charCodeAt(0);
+        if (mod.ctrl) {
+          // Ctrl+letter: convert to control character (a=0x01, z=0x1a)
+          if (charCode >= 0x61 && charCode <= 0x7a) {
+            data = String.fromCharCode(charCode - 96);
+          } else if (charCode >= 0x41 && charCode <= 0x5a) {
+            data = String.fromCharCode(charCode - 64);
+          }
+          mod.ctrl = false;
+          mod.cmd = false;
+          mod.clearCallback?.();
+        } else if (mod.cmd) {
+          const key = data.toLowerCase();
+          if (key === 'v') {
+            navigator.clipboard?.readText().then((text) => {
+              if (text) term.paste(text);
+            }).catch(() => {});
+            mod.ctrl = false;
+            mod.cmd = false;
+            mod.clearCallback?.();
+            return;
+          }
+          if (key === 'c') {
+            const sel = term.getSelection();
+            if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+            mod.ctrl = false;
+            mod.cmd = false;
+            mod.clearCallback?.();
+            return;
+          }
+          mod.ctrl = false;
+          mod.cmd = false;
+          mod.clearCallback?.();
+        }
+      }
+
       sendData(ws, data);
     });
 
@@ -299,6 +344,9 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         }}>
           Session persistence unavailable — this terminal will not survive a restart
         </div>
+      )}
+      {isMobile && (
+        <VirtualKeyboard xtermRef={xtermRef} modifierRef={modifierRef} />
       )}
       <div
         ref={containerRef}
