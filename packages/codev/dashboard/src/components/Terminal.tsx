@@ -473,9 +473,6 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           Session persistence unavailable — this terminal will not survive a restart
         </div>
       )}
-      {isMobile && (
-        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
-      )}
       <div
         ref={containerRef}
         className="terminal-container"
@@ -485,6 +482,9 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           backgroundColor: '#1a1a1a',
         }}
       />
+      {isMobile && (
+        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
+      )}
     </div>
   );
 }
