@@ -83,9 +83,9 @@ function handleNativePaste(event: ClipboardEvent, term: XTerm): void {
 
   for (const item of Array.from(items)) {
     if (IMAGE_TYPES.includes(item.type)) {
-      event.preventDefault();
       const blob = item.getAsFile();
       if (!blob) continue;
+      event.preventDefault();
       term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
       uploadPasteImage(blob).then(({ path }) => {
         term.write('\r\x1b[2K');

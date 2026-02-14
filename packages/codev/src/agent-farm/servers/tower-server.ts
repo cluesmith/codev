@@ -2997,7 +2997,7 @@ const server = http.createServer(async (req, res) => {
               : contentType.includes('gif') ? '.gif'
               : contentType.includes('webp') ? '.webp'
               : '.png';
-            const filename = `paste-${Date.now()}${ext}`;
+            const filename = `paste-${crypto.randomUUID()}${ext}`;
             const pasteDir = path.join(tmpdir(), 'codev-paste');
             fs.mkdirSync(pasteDir, { recursive: true });
             const filePath = path.join(pasteDir, filename);

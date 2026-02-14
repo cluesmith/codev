@@ -291,6 +291,30 @@ describe('Terminal clipboard handling (Issue #203, #252)', () => {
       });
     });
 
+    it('does not preventDefault when image-type item yields null from getAsFile()', () => {
+      render(<Terminal wsPath="/ws/terminal/test" />);
+
+      const container = document.querySelector('.terminal-container');
+      expect(container).not.toBeNull();
+
+      const preventDefault = vi.fn();
+      const pasteEvent = new Event('paste', { bubbles: true }) as ClipboardEvent;
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        value: {
+          items: [
+            { type: 'image/png', getAsFile: () => null },
+          ],
+        },
+      });
+      Object.defineProperty(pasteEvent, 'preventDefault', { value: preventDefault });
+
+      container!.dispatchEvent(pasteEvent);
+
+      // If getAsFile() returns null, we should NOT block default paste behavior
+      expect(preventDefault).not.toHaveBeenCalled();
+      expect(mockUploadPasteImage).not.toHaveBeenCalled();
+    });
+
     it('does not preventDefault for text-only paste events', () => {
       render(<Terminal wsPath="/ws/terminal/test" />);
 
