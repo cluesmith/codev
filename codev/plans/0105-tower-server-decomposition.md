@@ -116,14 +116,14 @@ export interface RateLimitEntry { ... }
 - `startMetadataRefresh()` / `stopMetadataRefresh()` (lines ~145-169)
 - `gatherMetadata()` (lines ~109-140)
 - `handleTunnelEndpoint()` (lines ~231-280)
-- Module state: `tunnelClient`, `configWatcher`, `configWatchDebounce`, `metadataRefreshInterval`
+
+**State ownership**: Tunnel-related state (`tunnelClient`, `configWatcher`, `configWatchDebounce`, `metadataRefreshInterval`) lives inside `tower-tunnel.ts` as module-private variables, but lifecycle is orchestrator-driven via `initTunnel()` and `shutdownTunnel()`. The `tunnelClient` reference is also stored in `TowerContext` so other modules can read tunnel state. The orchestrator calls `initTunnel(ctx)` which sets `ctx.tunnelClient` after connection.
 
 **API**: Export functions that `tower-server.ts` calls:
 ```typescript
-export function initTunnel(ctx: TowerContext): Promise<void>
-export function shutdownTunnel(): Promise<void>
+export function initTunnel(ctx: TowerContext): Promise<void>  // sets ctx.tunnelClient
+export function shutdownTunnel(): Promise<void>  // cleans up internal state
 export function handleTunnelEndpoint(req, res, subPath): Promise<void>
-export function getTunnelClient(): TunnelClient | null
 ```
 
 #### Acceptance Criteria
@@ -208,6 +208,10 @@ All functions receive `TowerContext` as first parameter. `shepherdManager` acces
 *Gate watching (lines ~1006-1025):*
 - `startGateWatcher()` — periodic gate status polling
 - Move `gateWatcherInterval` state here
+- **Important**: `startGateWatcher()` uses `ctx.broadcastNotification` from TowerContext to send gate change notifications. Do NOT import `broadcastNotification` from tower-routes — always access it via context to avoid circular dependencies.
+
+*Terminal list assembly:*
+- `getTerminalsForProject()` (~80 lines, line ~1054) — builds the terminal list for the API response, reads `projectTerminals` Map and `terminalManager`
 
 All functions receive `TowerContext` as first parameter.
 
@@ -237,15 +241,29 @@ All functions receive `TowerContext` as first parameter.
 
 #### Implementation Details
 
-**tower-websocket.ts** (~100 lines) — extract from tower-server.ts:
-- `handleTerminalWebSocket()` — WebSocket upgrade handler that bridges WS frames to PTY sessions
+**tower-websocket.ts** (~180 lines) — extract from tower-server.ts:
+
+*Frame bridging (~100 lines):*
+- `handleTerminalWebSocket()` — bridges WS frames to PTY sessions
 - Uses `decodeFrame()`, `encodeData()`, `encodeControl()` from `../../terminal/ws-protocol.js`
-- Receives `TowerContext` for access to `terminalManager`
+
+*WebSocket upgrade routing (~80 lines, lines 3328-3408):*
+- `handleUpgrade()` — the `server.on('upgrade', ...)` handler that parses:
+  - Direct routes: `/ws/terminal/:id`
+  - Project-scoped routes: `/project/:path/ws/terminal/:id`
+  - Base64URL decoding, path normalization, error responses
+- This lives **outside** the `http.createServer` callback, so it must be explicitly extracted here (not in Phase 6)
 
 ```typescript
 export function handleTerminalWebSocket(
   ws: WebSocket,
   sessionId: string,
+  ctx: TowerContext
+): void
+
+export function setupUpgradeHandler(
+  server: http.Server,
+  wss: WebSocketServer,
   ctx: TowerContext
 ): void
 ```
@@ -304,8 +322,9 @@ export async function handleRequest(
 - `handleProjectDashboard()` — GET/POST/DELETE /project/:path/*
 
 *SSE state:*
-- `sseClients` array and `notificationIdCounter` — move here since they're only used by route handlers
-- `broadcastNotification()` — called from routes and gate watcher
+- `sseClients` array, `notificationIdCounter`, and `broadcastNotification()` — these stay in the **orchestrator** (`tower-server.ts`) and are passed via `TowerContext.broadcastNotification`. This avoids a circular dependency: gate watcher (in tower-terminals) also calls `broadcastNotification`, so it cannot be imported from tower-routes.
+- Route handlers access `broadcastNotification` via `ctx.broadcastNotification`
+- The SSE endpoint handler (`handleSSEEvents`) registers clients in the orchestrator's `sseClients` array via a callback on TowerContext
 
 *CORS/Security:*
 - CORS headers logic
@@ -413,9 +432,26 @@ Phase 7 (spawn) — independent, can run in parallel with Phases 2-6
 | `shepherdManager` coupling across 4+ modules | Medium | Medium | All access goes through `TowerContext`; single initialization point |
 | Module-scope side effects leak into tests | Low | Medium | Convert all `setInterval` to explicit lifecycle functions |
 
+## Commit Strategy
+
+**Each phase MUST end with an atomic commit** before the next phase begins (per spec constraint #4). Commit format:
+
+```
+[Spec 0105][Phase: N-name] refactor: Extract <module> from tower-server.ts
+```
+
+The commit must include: the new module file, the updated tower-server.ts, and any new test files. `npm run build` and `npm test` must pass before committing.
+
 ## Validation Checkpoints
 1. **After Phase 1**: Build passes, rate limiting still works
 2. **After Phase 3**: Instance lifecycle E2E works (activate/deactivate projects)
 3. **After Phase 4**: Terminal WebSocket connections work end-to-end
 4. **After Phase 6**: Full E2E suite passes — tower-server.ts is now ≤ 400 lines
 5. **After Phase 7**: Spawn command works for all modes (spec, task, bugfix, shell, worktree, protocol)
+
+## Error and Logging Parity
+
+Per spec constraints 7-8, all phases must preserve:
+- **Error responses**: Same HTTP status codes and JSON error shapes for all failure paths
+- **Log messages**: Same format (`log('LEVEL', 'message')`) and same message content — the `log()` function stays in the orchestrator and is passed via TowerContext
+- Tests should spot-check at least one error path per extracted module (e.g., 404 for unknown terminal, 429 for rate limit, 400 for invalid path encoding)
