@@ -85,6 +85,33 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 // ============================================================================
+// Route dispatch table — exact-match routes (O(1) lookup)
+// ============================================================================
+
+type RouteEntry = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  ctx: RouteContext,
+) => Promise<void> | void;
+
+const ROUTES: Record<string, RouteEntry> = {
+  'GET /health':          (_req, res) => handleHealthCheck(res),
+  'GET /api/projects':    (_req, res) => handleListProjects(res),
+  'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
+  'GET /api/terminals':   (_req, res) => handleTerminalList(res),
+  'GET /api/status':      (_req, res) => handleStatus(res),
+  'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
+  'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
+  'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
+  'POST /api/create':     (req, res, _url, ctx) => handleCreateProject(req, res, ctx),
+  'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
+  'POST /api/stop':       (req, res) => handleStopInstance(req, res),
+  'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
+  'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
+};
+
+// ============================================================================
 // Main request handler
 // ============================================================================
 
@@ -122,104 +149,35 @@ export async function handleRequest(
   const url = new URL(req.url || '/', `http://localhost:${ctx.port}`);
 
   try {
-    // =========================================================================
-    // NEW API ENDPOINTS (Spec 0090 - Tower as Single Daemon)
-    // =========================================================================
-
-    // Health check endpoint (Spec 0090 Phase 1)
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return await handleHealthCheck(res);
+    // Exact-match route dispatch (O(1) lookup)
+    const routeKey = `${req.method} ${url.pathname}`;
+    const handler = ROUTES[routeKey];
+    if (handler) {
+      return await handler(req, res, url, ctx);
     }
 
-    // =========================================================================
-    // Tunnel Management Endpoints (Spec 0097 Phase 4)
-    // Also reachable from /project/<encoded>/api/tunnel/* (see project router)
-    // =========================================================================
+    // Pattern-based routes (require regex or prefix matching)
 
+    // Tunnel endpoints: /api/tunnel/* (Spec 0097 Phase 4)
     if (url.pathname.startsWith('/api/tunnel/')) {
       const tunnelSub = url.pathname.slice('/api/tunnel/'.length);
       await handleTunnelEndpoint(req, res, tunnelSub);
       return;
     }
 
-    // API: List all projects (Spec 0090 Phase 1)
-    if (req.method === 'GET' && url.pathname === '/api/projects') {
-      return await handleListProjects(res);
-    }
-
-    // API: Project-specific endpoints (Spec 0090 Phase 1)
-    // Routes: /api/projects/:encodedPath/activate, /deactivate, /status
+    // Project API: /api/projects/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)
     const projectApiMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/(activate|deactivate|status)$/);
     if (projectApiMatch) {
       return await handleProjectAction(req, res, ctx, projectApiMatch);
     }
 
-    // =========================================================================
-    // TERMINAL API (Phase 2 - Spec 0090)
-    // =========================================================================
-
-    // POST /api/terminals - Create a new terminal
-    if (req.method === 'POST' && url.pathname === '/api/terminals') {
-      return await handleTerminalCreate(req, res, ctx);
-    }
-
-    // GET /api/terminals - List all terminals
-    if (req.method === 'GET' && url.pathname === '/api/terminals') {
-      return handleTerminalList(res);
-    }
-
-    // Terminal-specific routes: /api/terminals/:id/*
+    // Terminal-specific routes: /api/terminals/:id/* (Spec 0090 Phase 2)
     const terminalRouteMatch = url.pathname.match(/^\/api\/terminals\/([^/]+)(\/.*)?$/);
     if (terminalRouteMatch) {
       return await handleTerminalRoutes(req, res, url, terminalRouteMatch);
     }
 
-    // =========================================================================
-    // EXISTING API ENDPOINTS
-    // =========================================================================
-
-    // API: Get status of all instances (legacy - kept for backward compat)
-    if (req.method === 'GET' && url.pathname === '/api/status') {
-      return await handleStatus(res);
-    }
-
-    // API: Server-Sent Events for push notifications
-    if (req.method === 'GET' && url.pathname === '/api/events') {
-      return handleSSEEvents(req, res, ctx);
-    }
-
-    // API: Receive notification from builder
-    if (req.method === 'POST' && url.pathname === '/api/notify') {
-      return await handleNotify(req, res, ctx);
-    }
-
-    // API: Browse directories for autocomplete
-    if (req.method === 'GET' && url.pathname === '/api/browse') {
-      return await handleBrowse(res, url);
-    }
-
-    // API: Create new project
-    if (req.method === 'POST' && url.pathname === '/api/create') {
-      return await handleCreateProject(req, res, ctx);
-    }
-
-    // API: Launch new instance
-    if (req.method === 'POST' && url.pathname === '/api/launch') {
-      return await handleLaunchInstance(req, res);
-    }
-
-    // API: Stop an instance
-    if (req.method === 'POST' && url.pathname === '/api/stop') {
-      return await handleStopInstance(req, res);
-    }
-
-    // Serve dashboard
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      return handleDashboard(res, ctx);
-    }
-
-    // Project routes: /project/:base64urlPath/*
-    // Phase 4 (Spec 0090): Tower serves React dashboard and handles APIs directly
+    // Project routes: /project/:base64urlPath/* (Spec 0090 Phase 4)
     if (url.pathname.startsWith('/project/')) {
       return await handleProjectRoutes(req, res, ctx, url);
     }
