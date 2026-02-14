@@ -43,9 +43,9 @@ describe('codev doctor (CLI)', () => {
     expect(hasIndicators).toBe(true);
   });
 
-  it('checks for tmux (optional)', () => {
+  it('checks for gh (GitHub CLI)', () => {
     const result = runCodev(['doctor'], env.dir, env.env);
-    expect(result.stdout).toContain('tmux');
+    expect(result.stdout).toContain('gh');
   });
 
   it('output is readable (multiple lines)', () => {
