@@ -32,22 +32,28 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'imag
  */
 async function tryPasteImage(term: XTerm): Promise<boolean> {
   if (!navigator.clipboard?.read) return false;
+  let imageFound = false;
   try {
     const items = await navigator.clipboard.read();
     for (const item of items) {
       const imageType = item.types.find((t) => IMAGE_TYPES.includes(t));
       if (imageType) {
+        imageFound = true;
         const blob = await item.getType(imageType);
         term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
         const { path } = await uploadPasteImage(blob);
-        // Clear the status message and paste the file path
         term.write('\r\x1b[2K');
         term.paste(path);
         return true;
       }
     }
   } catch {
-    // clipboard.read() may be denied or unavailable — fall back to text
+    if (imageFound) {
+      // Upload failed after image was detected — show error and clear status
+      term.write('\r\x1b[2K\x1b[31m[Image upload failed]\x1b[0m\r\n');
+      return true; // Don't fall back to text — the user intended to paste an image
+    }
+    // clipboard.read() denied or unavailable — fall back to text
   }
   return false;
 }
@@ -76,7 +82,7 @@ function handleNativePaste(event: ClipboardEvent, term: XTerm): void {
   if (!items) return;
 
   for (const item of Array.from(items)) {
-    if (item.type.startsWith('image/')) {
+    if (IMAGE_TYPES.includes(item.type)) {
       event.preventDefault();
       const blob = item.getAsFile();
       if (!blob) continue;

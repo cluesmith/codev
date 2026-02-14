@@ -235,6 +235,29 @@ describe('Terminal clipboard handling (Issue #203, #252)', () => {
         expect(mockWrite).toHaveBeenCalledWith('\r\x1b[2K');
       });
     });
+
+    it('shows error message when image upload fails', async () => {
+      const mockBlob = new Blob(['fake-image'], { type: 'image/png' });
+      clipboardRead.mockResolvedValue([
+        {
+          types: ['image/png'],
+          getType: vi.fn().mockResolvedValue(mockBlob),
+        },
+      ]);
+      mockUploadPasteImage.mockRejectedValue(new Error('Upload failed: 500'));
+
+      const handler = renderTerminal();
+      handler(makeKeyEvent('v', { metaKey: true }));
+
+      await vi.waitFor(() => {
+        expect(mockUploadPasteImage).toHaveBeenCalledWith(mockBlob);
+      });
+      await vi.waitFor(() => {
+        expect(mockWrite).toHaveBeenCalledWith(expect.stringContaining('[Image upload failed]'));
+      });
+      // Should NOT fall back to text paste when image was detected
+      expect(clipboardReadText).not.toHaveBeenCalled();
+    });
   });
 
   describe('native paste event (mobile/context menu) — Issue #252', () => {
