@@ -39,7 +39,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       lineHeight: 1,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       customGlyphs: true,
-      scrollback: 10000,
+      scrollback: 50000,
       theme: {
         background: '#1a1a1a',
         foreground: '#e0e0e0',
