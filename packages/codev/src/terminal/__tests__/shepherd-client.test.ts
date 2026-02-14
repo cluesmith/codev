@@ -7,6 +7,7 @@ import {
   FrameType,
   PROTOCOL_VERSION,
   createFrameParser,
+  encodeFrame,
   encodeWelcome,
   encodeData,
   encodeExit,
@@ -507,6 +508,36 @@ describe('ShepherdClient', () => {
 
       const client = new ShepherdClient(socketPath);
       await expect(client.connect()).rejects.toThrow();
+    });
+
+    it('does not crash when error emitted with no listener', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+      await client.connect();
+
+      // Do NOT attach an error listener.
+      // Send an EXIT frame with non-JSON payload — this triggers safeEmitError
+      // internally via the Invalid EXIT payload catch path.
+      // If error emission were unsafe, this would throw and crash the test process.
+      serverSocket!.write(encodeFrame(FrameType.EXIT, Buffer.from('not-json')));
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Process survived — no crash
+      expect(client.connected).toBe(true);
     });
 
     it('buffers frames received before WELCOME and delivers them after', async () => {

@@ -91,12 +91,22 @@ export class SessionManager extends EventEmitter {
     const info = await this.readShepherdInfo(child);
     child.unref();
 
-    // Wait briefly for socket to be ready
-    await this.waitForSocket(socketPath);
+    // Post-spawn setup with rollback: if anything fails after the shepherd
+    // is spawned, kill the orphaned process and clean up the socket.
+    let client: ShepherdClient;
+    try {
+      // Wait briefly for socket to be ready
+      await this.waitForSocket(socketPath);
 
-    // Connect client
-    const client = new ShepherdClient(socketPath);
-    await client.connect();
+      // Connect client
+      client = new ShepherdClient(socketPath);
+      await client.connect();
+    } catch (err) {
+      // Rollback: kill the orphaned shepherd process
+      try { process.kill(info.pid, 'SIGKILL'); } catch { /* already dead */ }
+      this.unlinkSocketIfExists(socketPath);
+      throw err;
+    }
 
     const session: ManagedSession = {
       client,
@@ -460,6 +470,14 @@ export class SessionManager extends EventEmitter {
       // Check if session was removed (killed intentionally)
       if (!this.sessions.has(sessionId)) return;
 
+      // Cancel the reset timer while the process is down — it should only
+      // run while the process is alive, preventing restartResetAfter < restartDelay
+      // from resetting the counter during downtime.
+      if (session.restartResetTimer) {
+        clearTimeout(session.restartResetTimer);
+        session.restartResetTimer = null;
+      }
+
       const maxRestarts = session.options.maxRestarts ?? 50;
       if (session.restartCount >= maxRestarts) {
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));
@@ -485,7 +503,7 @@ export class SessionManager extends EventEmitter {
           env: session.options.env,
         });
 
-        // Restart the reset timer
+        // Only restart the reset timer after a successful spawn
         this.startRestartResetTimer(session);
       }, delay);
     });
@@ -496,10 +514,14 @@ export class SessionManager extends EventEmitter {
       clearTimeout(session.restartResetTimer);
     }
 
+    const restartDelay = session.options.restartDelay ?? 2000;
     const resetAfter = session.options.restartResetAfter ?? 300_000; // 5 minutes
+    // Enforce minimum: reset window must be at least as long as restartDelay
+    // to prevent the counter from resetting while the process is restarting
+    const effectiveResetAfter = Math.max(resetAfter, restartDelay);
     session.restartResetTimer = setTimeout(() => {
       session.restartCount = 0;
-    }, resetAfter);
+    }, effectiveResetAfter);
   }
 }
 

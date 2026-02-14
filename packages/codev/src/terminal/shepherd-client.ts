@@ -54,6 +54,17 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
     super();
   }
 
+  /**
+   * Emit an 'error' event only if listeners are attached.
+   * Prevents Node.js from throwing on unhandled 'error' events,
+   * which would crash Tower.
+   */
+  private safeEmitError(err: Error): void {
+    if (this.listenerCount('error') > 0) {
+      this.emit('error', err);
+    }
+  }
+
   get connected(): boolean {
     return this._connected;
   }
@@ -81,14 +92,14 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
           handshakeResolved = true;
           reject(err);
         } else {
-          this.emit('error', err);
+          this.safeEmitError(err);
         }
         this.cleanup();
       };
 
       socket.on('error', onError);
       parser.on('error', (err) => {
-        this.emit('error', err);
+        this.safeEmitError(err);
         this.cleanup();
       });
 
@@ -158,7 +169,7 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
           const exit = parseJsonPayload<ExitMessage>(frame.payload);
           this.emit('exit', exit);
         } catch {
-          this.emit('error', new Error('Invalid EXIT payload'));
+          this.safeEmitError(new Error('Invalid EXIT payload'));
         }
         break;
       }
