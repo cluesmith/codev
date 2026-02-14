@@ -19,7 +19,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { ShepherdProcess, type IShepherdPty, type PtyOptions } from './shepherd-process.js';
+
+// createRequire enables importing native/CJS modules (like node-pty) from ESM.
+// The package uses "type": "module", so bare `require()` is not available.
+const require = createRequire(import.meta.url);
 
 interface ShepherdConfig {
   command: string;
@@ -33,7 +38,6 @@ interface ShepherdConfig {
 }
 
 function createRealPty(): IShepherdPty {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   let ptyModule: typeof import('node-pty') | null = null;
   let ptyInstance: import('node-pty').IPty | null = null;
   let dataCallback: ((data: string) => void) | null = null;
@@ -41,9 +45,8 @@ function createRealPty(): IShepherdPty {
 
   return {
     spawn(command: string, args: string[], options: PtyOptions): void {
-      // Dynamic import at spawn time to fail fast if node-pty isn't available
-      // We use require() here because this runs as a standalone compiled .js file
-      // and dynamic import() of native modules in ESM context can be problematic
+      // Load node-pty at spawn time via createRequire (defined at module level).
+      // node-pty is a native CJS module; createRequire handles ESM→CJS interop.
       ptyModule = require('node-pty') as typeof import('node-pty');
       ptyInstance = ptyModule.spawn(command, args, {
         name: options.name ?? 'xterm-256color',

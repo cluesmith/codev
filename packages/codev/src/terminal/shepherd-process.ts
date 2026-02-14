@@ -102,8 +102,9 @@ export class ShepherdProcess extends EventEmitter {
     rows: number,
   ): void {
     this.exited = false;
-    this.pty = this.ptyFactory();
-    this.pty.spawn(command, args, {
+    const pty = this.ptyFactory();
+    this.pty = pty;
+    pty.spawn(command, args, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -111,7 +112,10 @@ export class ShepherdProcess extends EventEmitter {
       env,
     });
 
-    this.pty.onData((data: string) => {
+    pty.onData((data: string) => {
+      // Guard: ignore data from a replaced PTY (after SPAWN)
+      if (this.pty !== pty) return;
+
       const buf = Buffer.from(data, 'utf-8');
       this.replayBuffer.append(buf);
 
@@ -120,7 +124,12 @@ export class ShepherdProcess extends EventEmitter {
       }
     });
 
-    this.pty.onExit((exitInfo) => {
+    pty.onExit((exitInfo) => {
+      // Guard: ignore exit from a replaced PTY (after SPAWN).
+      // Without this, the old PTY's exit would set this.exited = true
+      // and send an EXIT frame, corrupting the state of the new PTY.
+      if (this.pty !== pty) return;
+
       this.exited = true;
       const exitFrame = encodeExit({
         code: exitInfo.exitCode,
@@ -203,13 +212,13 @@ export class ShepherdProcess extends EventEmitter {
         this.handleData(frame.payload);
         break;
       case FrameType.RESIZE:
-        this.handleResize(frame.payload);
+        this.handleResize(socket, frame.payload);
         break;
       case FrameType.SIGNAL:
-        this.handleSignal(frame.payload);
+        this.handleSignal(socket, frame.payload);
         break;
       case FrameType.SPAWN:
-        this.handleSpawn(frame.payload);
+        this.handleSpawn(socket, frame.payload);
         break;
       case FrameType.PING:
         socket.write(encodePong());
@@ -255,7 +264,7 @@ export class ShepherdProcess extends EventEmitter {
     }
   }
 
-  private handleResize(payload: Buffer): void {
+  private handleResize(socket: net.Socket, payload: Buffer): void {
     try {
       const msg = parseJsonPayload<ResizeMessage>(payload);
       this.cols = msg.cols;
@@ -265,10 +274,11 @@ export class ShepherdProcess extends EventEmitter {
       }
     } catch {
       this.emit('protocol-error', new Error('Invalid RESIZE payload'));
+      socket.destroy();
     }
   }
 
-  private handleSignal(payload: Buffer): void {
+  private handleSignal(socket: net.Socket, payload: Buffer): void {
     try {
       const msg = parseJsonPayload<SignalMessage>(payload);
       if (!ALLOWED_SIGNALS.has(msg.signal)) {
@@ -280,10 +290,11 @@ export class ShepherdProcess extends EventEmitter {
       }
     } catch {
       this.emit('protocol-error', new Error('Invalid SIGNAL payload'));
+      socket.destroy();
     }
   }
 
-  handleSpawn(payload: Buffer): void {
+  private handleSpawn(socket: net.Socket, payload: Buffer): void {
     try {
       const msg = parseJsonPayload<SpawnMessage>(payload);
 
@@ -300,6 +311,7 @@ export class ShepherdProcess extends EventEmitter {
       this.emit('spawn', msg);
     } catch {
       this.emit('protocol-error', new Error('Invalid SPAWN payload'));
+      socket.destroy();
     }
   }
 

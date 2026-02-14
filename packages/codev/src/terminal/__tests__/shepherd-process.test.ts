@@ -511,7 +511,7 @@ describe('ShepherdProcess', () => {
   });
 
   describe('protocol errors', () => {
-    it('emits protocol-error on malformed JSON in control frame', async () => {
+    it('emits protocol-error and closes connection on malformed JSON', async () => {
       shepherd = new ShepherdProcess(createMockPty, socketPath);
       await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
@@ -529,8 +529,8 @@ describe('ShepherdProcess', () => {
 
       await new Promise((r) => setTimeout(r, 100));
       expect(errors.some((e) => e.message.includes('Invalid RESIZE payload'))).toBe(true);
-
-      socket.destroy();
+      // Per spec: malformed frames close the connection
+      expect(socket.destroyed).toBe(true);
     });
 
     it('silently ignores unknown frame types', async () => {
@@ -552,6 +552,102 @@ describe('ShepherdProcess', () => {
       await new Promise((r) => setTimeout(r, 100));
       // Should NOT cause any errors
       expect(errors.length).toBe(0);
+
+      socket.destroy();
+    });
+  });
+
+  describe('PTY replacement race condition', () => {
+    it('old PTY exit does not corrupt new PTY state after SPAWN', async () => {
+      let ptyCount = 0;
+      const ptys: MockPty[] = [];
+
+      shepherd = new ShepherdProcess(
+        () => {
+          const pty = new MockPty();
+          pty.pid = 12345 + ptyCount++;
+          ptys.push(pty);
+          return pty;
+        },
+        socketPath,
+      );
+
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      const firstPty = ptys[0];
+
+      const { socket } = await connectAndHandshake(socketPath);
+
+      // Send SPAWN to create new PTY
+      socket.write(
+        encodeSpawn({
+          command: '/bin/zsh',
+          args: [],
+          cwd: '/tmp',
+          env: {},
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 100));
+      expect(ptys.length).toBe(2);
+      const secondPty = ptys[1];
+
+      // Old PTY exits AFTER new one is spawned
+      firstPty.simulateExit(0);
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Critical: new PTY should NOT be marked as exited
+      expect(shepherd.hasExited).toBe(false);
+
+      // New PTY should still accept data
+      socket.write(encodeData('still works'));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(secondPty.writtenData).toContain('still works');
+
+      socket.destroy();
+    });
+
+    it('old PTY data is ignored after SPAWN', async () => {
+      let ptyCount = 0;
+      const ptys: MockPty[] = [];
+
+      shepherd = new ShepherdProcess(
+        () => {
+          const pty = new MockPty();
+          pty.pid = 12345 + ptyCount++;
+          ptys.push(pty);
+          return pty;
+        },
+        socketPath,
+      );
+
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      const firstPty = ptys[0];
+
+      const { socket } = await connectAndHandshake(socketPath);
+      const parser = createFrameParser();
+      socket.pipe(parser);
+
+      // Send SPAWN
+      socket.write(
+        encodeSpawn({
+          command: '/bin/zsh',
+          args: [],
+          cwd: '/tmp',
+          env: {},
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Simulate old PTY sending data after replacement
+      firstPty.simulateData('stale data from old pty');
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // The replay buffer should NOT contain old PTY data
+      const replay = shepherd.getReplayData().toString();
+      expect(replay).not.toContain('stale data from old pty');
 
       socket.destroy();
     });

@@ -52,6 +52,21 @@ export class ShepherdReplayBuffer {
       this.totalBytes -= oldest.length;
       this.lineCount -= removedLines;
     }
+
+    // Handle edge case: single chunk exceeds line limit.
+    // Trim from the front to keep only the last maxLines lines.
+    if (this.lineCount > this.maxLines && this.chunks.length === 1) {
+      const chunk = this.chunks[0];
+      let linesToSkip = this.lineCount - this.maxLines;
+      let offset = 0;
+      while (linesToSkip > 0 && offset < chunk.length) {
+        if (chunk[offset] === 0x0a) linesToSkip--;
+        offset++;
+      }
+      this.chunks[0] = chunk.subarray(offset);
+      this.totalBytes = this.chunks[0].length;
+      this.lineCount = this.maxLines;
+    }
   }
 
   /**

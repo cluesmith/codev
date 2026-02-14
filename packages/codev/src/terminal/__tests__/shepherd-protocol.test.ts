@@ -294,6 +294,35 @@ describe('shepherd-protocol', () => {
       expect(frames[0].type).toBe(0xff);
       expect(frames[0].payload.toString()).toBe('unknown');
     });
+
+    it('rejects incomplete frame at end of stream', async () => {
+      const parser = createFrameParser();
+
+      // Write just a partial header (3 bytes of the 5-byte header)
+      await expect(new Promise((resolve, reject) => {
+        parser.on('data', resolve);
+        parser.on('error', reject);
+        parser.write(Buffer.from([0x01, 0x00, 0x00]));
+        parser.end();
+      })).rejects.toThrow(/Incomplete frame/);
+    });
+
+    it('rejects incomplete frame payload at end of stream', async () => {
+      const parser = createFrameParser();
+
+      // Write a header claiming 10 bytes, but only provide 3
+      const header = Buffer.allocUnsafe(HEADER_SIZE);
+      header[0] = FrameType.DATA;
+      header.writeUInt32BE(10, 1);
+      const partialPayload = Buffer.from('abc');
+
+      await expect(new Promise((resolve, reject) => {
+        parser.on('data', resolve);
+        parser.on('error', reject);
+        parser.write(Buffer.concat([header, partialPayload]));
+        parser.end();
+      })).rejects.toThrow(/Incomplete frame/);
+    });
   });
 
   describe('parseJsonPayload', () => {

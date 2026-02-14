@@ -180,6 +180,16 @@ export class FrameParser extends Transform {
     }
   }
 
+  _flush(callback: TransformCallback): void {
+    if (this.bufferedLength > 0) {
+      callback(
+        new Error(`Incomplete frame: ${this.bufferedLength} bytes remaining at end of stream`),
+      );
+    } else {
+      callback();
+    }
+  }
+
   private drainFrames(): void {
     while (this.bufferedLength >= HEADER_SIZE) {
       // Peek at the header without consuming
