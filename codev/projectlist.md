@@ -158,23 +158,23 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0105"
     title: "Tower Server Decomposition"
     summary: "Decompose tower-server.ts (3,400 lines) into focused modules — pure refactoring, no behavior changes"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0105-tower-server-decomposition.md
-      plan: null
-      review: null
+      plan: codev/plans/0105-tower-server-decomposition.md
+      review: codev/reviews/0105-tower-server-decomposition.md
     dependencies: ["0104"]
     tags: [architecture, refactoring, tower, maintenance]
     timestamps:
       conceived_at: "2026-02-14T00:00:00-08:00"
-      specified_at: null
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
+      specified_at: "2026-02-14T00:00:00-08:00"
+      planned_at: "2026-02-14T00:00:00-08:00"
+      implementing_at: "2026-02-14T00:00:00-08:00"
+      implemented_at: "2026-02-14T00:00:00-08:00"
+      committed_at: "2026-02-14T13:44:03Z"
+      integrated_at: "2026-02-14T13:44:03Z"
     notes: "Blocked on 0104 merge. tower-server.ts is 3,439 lines with a 1,514-line HTTP handler. Decompose into ~7 focused modules. Also reduces spawn.ts from 1,439 to ~500 lines."
 
   - id: "0107"
@@ -202,22 +202,22 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0106"
     title: "Rename Shepherd to Shellper"
     summary: "Rename all Shepherd references to Shellper (shell + helper) — pure rename refactoring across source files, tests, SQLite columns, socket paths, and documentation"
-    status: conceived
+    status: integrated
     priority: medium
     release: null
     files:
       spec: codev/specs/0106-rename-shepherd-to-shellper.md
-      plan: null
-      review: null
+      plan: codev/plans/0106-rename-shepherd-to-shellper.md
+      review: codev/reviews/0106-rename-shepherd-to-shellper.md
     dependencies: ["0104"]
     tags: [refactoring, naming, terminal, maintenance]
     timestamps:
       conceived_at: "2026-02-14T00:00:00-08:00"
-      specified_at: null
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
+      specified_at: "2026-02-14T00:00:00-08:00"
+      planned_at: "2026-02-14T00:00:00-08:00"
+      implementing_at: "2026-02-14T00:00:00-08:00"
+      implemented_at: "2026-02-14T00:00:00-08:00"
+      committed_at: "2026-02-14T16:59:54Z"
       integrated_at: null
     notes: "Pure rename: Shepherd → Shellper. File renames, class renames, SQLite migration v8 for column renames, socket path prefix change."
 
