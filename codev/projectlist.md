@@ -155,6 +155,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Replace tmux with lightweight shepherd daemon. Spec proposes Approach B (shepherd process per session). See terminal-tmux.md for full problem history."
 
+  - id: "0105"
+    title: "Tower Server Decomposition"
+    summary: "Decompose tower-server.ts (3,400 lines) into focused modules — pure refactoring, no behavior changes"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0105-tower-server-decomposition.md
+      plan: null
+      review: null
+    dependencies: ["0104"]
+    tags: [architecture, refactoring, tower, maintenance]
+    timestamps:
+      conceived_at: "2026-02-14T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Blocked on 0104 merge. tower-server.ts is 3,439 lines with a 1,514-line HTTP handler. Decompose into ~7 focused modules. Also reduces spawn.ts from 1,439 to ~500 lines."
+
   - id: "0091"
     title: "Tower Mobile UX Refresh"
     summary: "Full mobile UX for tower: responsive layout, touch targets, QR code sharing, terminal usability on small screens"
@@ -1260,7 +1282,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0105** - Reserve this number for your next project
+**0106** - Reserve this number for your next project
 
 ---
 
