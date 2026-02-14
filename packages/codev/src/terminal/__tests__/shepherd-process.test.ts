@@ -661,4 +661,16 @@ describe('ShepherdProcess', () => {
       expect(shepherd.getPid()).toBe(12345);
     });
   });
+
+  describe('socket permissions', () => {
+    it('creates socket file with 0600 permissions', async () => {
+      shepherd = new ShepherdProcess(createMockPty, socketPath);
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const stat = fs.statSync(socketPath);
+      // Socket file should be 0600 (owner read/write only)
+      const mode = stat.mode & 0o777;
+      expect(mode).toBe(0o600);
+    });
+  });
 });

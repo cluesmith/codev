@@ -10,6 +10,7 @@
  * replaces the old one (handles rapid Tower restarts cleanly).
  */
 
+import fs from 'node:fs';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import {
@@ -156,6 +157,13 @@ export class ShepherdProcess extends EventEmitter {
       });
 
       this.server.listen(this.socketPath, () => {
+        // Enforce 0600 permissions on socket file (owner-only access).
+        // Unix sockets inherit permissions from umask; we override after creation.
+        try {
+          fs.chmodSync(this.socketPath, 0o600);
+        } catch {
+          // Non-fatal: socket still works, just with default permissions
+        }
         resolve();
       });
     });
