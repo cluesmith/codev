@@ -108,6 +108,49 @@ export class TerminalManager {
     return session.info;
   }
 
+  /**
+   * Create a PtySession without spawning a process.
+   * Used for shepherd-backed sessions where attachShepherd() will be called
+   * instead of spawn().
+   */
+  createSessionRaw(opts: { label: string; cwd: string }): PtySessionInfo {
+    if (this.sessions.size >= this.config.maxSessions) {
+      throw new ManagerError('MAX_SESSIONS', `Maximum ${this.config.maxSessions} sessions reached`);
+    }
+
+    const id = randomUUID();
+    const sessionConfig: PtySessionConfig = {
+      id,
+      command: '', // Not used for shepherd-backed sessions
+      args: [],
+      cols: 200,
+      rows: 50,
+      cwd: opts.cwd,
+      env: {},
+      label: opts.label,
+      logDir: this.config.logDir,
+      ringBufferLines: this.config.ringBufferLines,
+      diskLogEnabled: this.config.diskLogEnabled,
+      diskLogMaxBytes: this.config.diskLogMaxBytes,
+      reconnectTimeoutMs: this.config.reconnectTimeoutMs,
+    };
+
+    const session = new PtySession(sessionConfig);
+
+    session.on('exit', () => {
+      setTimeout(() => {
+        this.sessions.delete(id);
+      }, 30_000);
+    });
+
+    session.on('timeout', () => {
+      this.sessions.delete(id);
+    });
+
+    this.sessions.set(id, session);
+    return session.info;
+  }
+
   /** List all sessions. */
   listSessions(): PtySessionInfo[] {
     return Array.from(this.sessions.values()).map(s => s.info);

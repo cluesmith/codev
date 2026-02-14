@@ -8,6 +8,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
+import type { IShepherdClient } from './shepherd-client.js';
 
 export interface PtySessionConfig {
   id: string;
@@ -34,6 +35,7 @@ export interface PtySessionInfo {
   status: 'running' | 'exited';
   createdAt: string;
   exitCode?: number;
+  persistent?: boolean;
 }
 
 export class PtySession extends EventEmitter {
@@ -43,6 +45,9 @@ export class PtySession extends EventEmitter {
   readonly ringBuffer: RingBuffer;
 
   private pty: IPty | null = null;
+  private shepherdClient: IShepherdClient | null = null;
+  private _shepherdBacked = false;
+  private shepherdPid = -1;
   private cols: number;
   private rows: number;
   private exitCode: number | undefined;
@@ -99,6 +104,72 @@ export class PtySession extends EventEmitter {
     });
   }
 
+  /**
+   * Attach a shepherd client as the I/O backend instead of node-pty.
+   * Data flows: shepherd → ring buffer → WebSocket clients.
+   * User input flows: WebSocket → write() → shepherd.
+   */
+  attachShepherd(client: IShepherdClient, replayData: Buffer, shepherdPid: number): void {
+    this._shepherdBacked = true;
+    this.shepherdClient = client;
+    this.shepherdPid = shepherdPid;
+
+    // Ensure log directory exists
+    if (this.diskLogEnabled) {
+      fs.mkdirSync(path.dirname(this.logPath), { recursive: true });
+      this.logFd = fs.openSync(this.logPath, 'a');
+    }
+
+    // Populate ring buffer with replay data from shepherd
+    if (replayData.length > 0) {
+      this.ringBuffer.pushData(replayData.toString('utf-8'));
+    }
+
+    // Forward shepherd data to ring buffer + WebSocket clients
+    client.on('data', (buf: Buffer) => {
+      this.onPtyData(buf.toString('utf-8'));
+    });
+
+    // Handle shepherd exit (process inside shepherd exited)
+    client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
+      this.exitCode = exitInfo.code;
+      this.emit('exit', exitInfo.code);
+      // For shepherd-backed sessions, cleanup closes disk log and clients
+      // but doesn't clear the ring buffer (shepherd may still have replay data)
+      this.cleanupShepherd();
+    });
+
+    // Handle shepherd disconnect (socket closed without EXIT)
+    client.on('close', () => {
+      if (this.exitCode === undefined) {
+        // Unexpected disconnect — shepherd may have crashed
+        this.exitCode = -1;
+        this.emit('exit', -1);
+        this.cleanupShepherd();
+      }
+    });
+  }
+
+  /** Whether this session is backed by a shepherd process. */
+  get shepherdBacked(): boolean {
+    return this._shepherdBacked;
+  }
+
+  private cleanupShepherd(): void {
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+    this.clients.clear();
+    // Close disk log handle
+    if (this.logFd !== null) {
+      try { fs.closeSync(this.logFd); } catch { /* ignore */ }
+      this.logFd = null;
+    }
+    // Note: ring buffer is NOT cleared — shepherd handles replay
+    // Note: shepherd client is NOT disconnected — SessionManager owns that lifecycle
+  }
+
   private onPtyData(data: string): void {
     // Store in ring buffer
     this.ringBuffer.pushData(data);
@@ -141,24 +212,43 @@ export class PtySession extends EventEmitter {
     this.logBytes = 0;
   }
 
-  /** Write user input to the PTY. */
+  /** Write user input to the PTY or shepherd. */
   write(data: string): void {
+    if (this._shepherdBacked) {
+      if (this.shepherdClient && this.status === 'running') {
+        this.shepherdClient.write(data);
+      }
+      return;
+    }
     if (this.pty && this.status === 'running') {
       this.pty.write(data);
     }
   }
 
-  /** Resize the PTY. */
+  /** Resize the PTY or shepherd. */
   resize(cols: number, rows: number): void {
     this.cols = cols;
     this.rows = rows;
+    if (this._shepherdBacked) {
+      if (this.shepherdClient && this.status === 'running') {
+        this.shepherdClient.resize(cols, rows);
+      }
+      return;
+    }
     if (this.pty && this.status === 'running') {
       this.pty.resize(cols, rows);
     }
   }
 
-  /** Kill the PTY process. */
+  /** Kill the PTY process or send signal to shepherd. */
   kill(): void {
+    if (this._shepherdBacked) {
+      if (this.shepherdClient && this.status === 'running') {
+        this.shepherdClient.signal(15); // SIGTERM
+      }
+      this.cleanupShepherd();
+      return;
+    }
     if (this.pty && this.status === 'running') {
       try {
         // Kill process group to prevent orphans
@@ -193,9 +283,12 @@ export class PtySession extends EventEmitter {
     return this.ringBuffer.getSince(sinceSeq);
   }
 
-  /** Detach a WebSocket client. Starts disconnect timer if no clients remain. */
+  /** Detach a WebSocket client. Starts disconnect timer if no clients remain (non-shepherd only). */
   detach(client: { send: (data: Buffer | string) => void }): void {
     this.clients.delete(client);
+    // Shepherd-backed sessions don't need a disconnect timer — the shepherd
+    // keeps the process alive independently of WebSocket connections.
+    if (this._shepherdBacked) return;
     if (this.clients.size === 0 && this.status === 'running') {
       this.disconnectTimer = setTimeout(() => {
         this.emit('timeout');
@@ -214,6 +307,7 @@ export class PtySession extends EventEmitter {
   }
 
   get pid(): number {
+    if (this._shepherdBacked) return this.shepherdPid;
     return this.pty?.pid ?? -1;
   }
 
@@ -227,6 +321,7 @@ export class PtySession extends EventEmitter {
       status: this.status,
       createdAt: this.createdAt,
       exitCode: this.exitCode,
+      persistent: this._shepherdBacked,
     };
   }
 

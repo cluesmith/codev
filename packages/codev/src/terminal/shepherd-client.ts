@@ -42,6 +42,7 @@ export interface IShepherdClient extends EventEmitter {
   signal(sig: number): void;
   spawn(msg: SpawnMessage): void;
   ping(): void;
+  getReplayData(): Buffer | null;
   readonly connected: boolean;
 }
 
