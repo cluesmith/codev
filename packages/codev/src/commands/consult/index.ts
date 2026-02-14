@@ -296,7 +296,7 @@ async function runClaudeConsultation(
         allowDangerouslySkipPermissions: true,
         model: 'claude-opus-4-6',
         maxTurns: 10,
-        maxBudgetUsd: 1.00,
+        maxBudgetUsd: 25,
         cwd: projectRoot,
         env,
       },
