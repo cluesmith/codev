@@ -14,21 +14,10 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
-import { getGlobalDb } from '../db/index.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
-import { getGateStatusForProject } from '../utils/gate-status.js';
-import type { GateStatus } from '../utils/gate-status.js';
-import { GateWatcher } from '../utils/gate-watcher.js';
-import {
-  saveFileTab as saveFileTabToDb,
-  deleteFileTab as deleteFileTabFromDb,
-  loadFileTabsForProject as loadFileTabsFromDb,
-} from '../utils/file-tabs.js';
-import type { FileTab } from '../utils/file-tabs.js';
-import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
-import { SessionManager, type ReconnectRestartOptions } from '../../terminal/session-manager.js';
-import type { ProjectTerminals, SSEClient, TerminalEntry, InstanceStatus, DbTerminalSession } from './tower-types.js';
+import { SessionManager } from '../../terminal/session-manager.js';
+import type { SSEClient } from './tower-types.js';
 import {
   isRateLimited,
   startRateLimitCleanup,
@@ -54,6 +43,24 @@ import {
   killTerminalWithShepherd,
   stopInstance,
 } from './tower-instances.js';
+import {
+  initTerminals,
+  shutdownTerminals,
+  getProjectTerminals,
+  getTerminalManager,
+  getProjectTerminalsEntry,
+  getNextShellId,
+  saveTerminalSession,
+  isSessionPersistent,
+  deleteTerminalSession,
+  deleteProjectTerminalSessions,
+  saveFileTab,
+  deleteFileTab,
+  getTerminalsForProject,
+  reconcileTerminalSessions,
+  startGateWatcher,
+  stopGateWatcher,
+} from './tower-terminals.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,414 +74,17 @@ const rateLimitCleanupInterval = startRateLimitCleanup();
 
 // Cloud tunnel: imported from ./tower-tunnel.ts (initTunnel, shutdownTunnel, handleTunnelEndpoint)
 
-// ============================================================================
-// PHASE 2 & 4: Terminal Management (Spec 0090)
-// ============================================================================
+// Terminal management: imported from ./tower-terminals.ts
+// (getProjectTerminals, getTerminalManager, getProjectTerminalsEntry, etc.)
 
-// Global TerminalManager instance for tower-managed terminals
-// Uses a temporary directory as projectRoot since terminals can be for any project
-let terminalManager: TerminalManager | null = null;
-
-// Project terminal registry - tracks which terminals belong to which project
-// Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
-// FileTab type is imported from utils/file-tabs.ts
-
-// ProjectTerminals interface: imported from ./tower-types.ts
-const projectTerminals = new Map<string, ProjectTerminals>();
-
-/**
- * Get or create project terminal registry entry.
- * On first access for a project, hydrates file tabs from SQLite so
- * persisted tabs are available immediately (not just after /api/state).
- */
-function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
-  let entry = projectTerminals.get(projectPath);
-  if (!entry) {
-    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForProject(projectPath) };
-    projectTerminals.set(projectPath, entry);
-  }
-  // Migration: ensure fileTabs exists for older entries
-  if (!entry.fileTabs) {
-    entry.fileTabs = new Map();
-  }
-  return entry;
-}
-
-// getLanguageForExt, getMimeTypeForFile: imported from ./tower-utils.ts
-
-/**
- * Generate next shell ID for a project
- */
-function getNextShellId(projectPath: string): string {
-  const entry = getProjectTerminalsEntry(projectPath);
-  let maxId = 0;
-  for (const id of entry.shells.keys()) {
-    const num = parseInt(id.replace('shell-', ''), 10);
-    if (!isNaN(num) && num > maxId) maxId = num;
-  }
-  return `shell-${maxId + 1}`;
-}
-
-/**
- * Get or create the global TerminalManager instance
- */
-function getTerminalManager(): TerminalManager {
-  if (!terminalManager) {
-    // Use a neutral projectRoot - terminals specify their own cwd
-    const projectRoot = process.env.HOME || '/tmp';
-    terminalManager = new TerminalManager({
-      projectRoot,
-      logDir: path.join(homedir(), '.agent-farm', 'logs'),
-      maxSessions: 100,
-      ringBufferLines: 10000,
-      diskLogEnabled: true,
-      diskLogMaxBytes: 50 * 1024 * 1024,
-      reconnectTimeoutMs: 300_000,
-    });
-  }
-  return terminalManager;
-}
-
-// ============================================================================
-// TICK-001: Terminal Session Persistence and Reconciliation (Spec 0090)
-// ============================================================================
-
-// DbTerminalSession interface: imported from ./tower-types.ts
-
-// normalizeProjectPath: imported from ./tower-utils.ts
-
-/**
- * Save a terminal session to SQLite.
- * Guards against race conditions by checking if project is still active.
- */
-function saveTerminalSession(
-  terminalId: string,
-  projectPath: string,
-  type: 'architect' | 'builder' | 'shell',
-  roleId: string | null,
-  pid: number | null,
-  shepherdSocket: string | null = null,
-  shepherdPid: number | null = null,
-  shepherdStartTime: number | null = null,
-): void {
-  try {
-    const normalizedPath = normalizeProjectPath(projectPath);
-
-    // Race condition guard: only save if project is still in the active registry
-    // This prevents zombie rows when stop races with session creation
-    if (!projectTerminals.has(normalizedPath) && !projectTerminals.has(projectPath)) {
-      log('INFO', `Skipping session save - project no longer active: ${projectPath}`);
-      return;
-    }
-
-    const db = getGlobalDb();
-    db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shepherdSocket, shepherdPid, shepherdStartTime);
-    log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
-  } catch (err) {
-    log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Check if a terminal session is persistent (shepherd-backed).
- * A session is persistent if it can survive a Tower restart.
- */
-function isSessionPersistent(_terminalId: string, session: PtySession): boolean {
-  return session.shepherdBacked;
-}
-
-/**
- * Delete a terminal session from SQLite
- */
-function deleteTerminalSession(terminalId: string): void {
-  try {
-    const db = getGlobalDb();
-    db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(terminalId);
-  } catch (err) {
-    log('WARN', `Failed to delete terminal session: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Delete all terminal sessions for a project from SQLite.
- * Normalizes path to ensure consistent cleanup regardless of how path was provided.
- */
-function deleteProjectTerminalSessions(projectPath: string): void {
-  try {
-    const normalizedPath = normalizeProjectPath(projectPath);
-    const db = getGlobalDb();
-
-    // Delete both normalized and raw path to handle any inconsistencies
-    db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(normalizedPath);
-    if (normalizedPath !== projectPath) {
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(projectPath);
-    }
-  } catch (err) {
-    log('WARN', `Failed to delete project terminal sessions: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Save a file tab to SQLite for persistence across Tower restarts.
- * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
- */
-function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
-  try {
-    const normalizedPath = normalizeProjectPath(projectPath);
-    saveFileTabToDb(getGlobalDb(), id, normalizedPath, filePath, createdAt);
-  } catch (err) {
-    log('WARN', `Failed to save file tab: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Delete a file tab from SQLite.
- * Thin wrapper around utils/file-tabs.ts with error handling.
- */
-function deleteFileTab(id: string): void {
-  try {
-    deleteFileTabFromDb(getGlobalDb(), id);
-  } catch (err) {
-    log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Load file tabs for a project from SQLite.
- * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
- */
-function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
-  try {
-    const normalizedPath = normalizeProjectPath(projectPath);
-    return loadFileTabsFromDb(getGlobalDb(), normalizedPath);
-  } catch (err) {
-    log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
-  }
-  return new Map<string, FileTab>();
-}
+// getProjectTerminalsEntry, getNextShellId, getTerminalManager, saveTerminalSession,
+// isSessionPersistent, deleteTerminalSession, deleteProjectTerminalSessions,
+// saveFileTab, deleteFileTab, loadFileTabsForProject, processExists,
+// reconcileTerminalSessions, getTerminalSessionsForProject: imported from ./tower-terminals.ts
 
 // Shepherd session manager (initialized at startup)
 let shepherdManager: SessionManager | null = null;
 
-/**
- * Check if a process is running
- */
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
-/**
- * Reconcile terminal sessions on startup.
- *
- * DUAL-SOURCE STRATEGY (shepherd + SQLite):
- *
- * Phase 1 — Shepherd reconnection:
- *   For SQLite rows with shepherd_socket IS NOT NULL, attempt to reconnect
- *   via SessionManager.reconnectSession(). Shepherd processes survive Tower
- *   restarts as detached OS processes.
- *
- * Phase 2 — SQLite sweep:
- *   Any rows not matched in Phase 1 are stale → clean up.
- *
- * File tabs are the exception: they have no backing process, so SQLite is
- * the sole source of truth for their persistence (see file_tabs table).
- */
-async function reconcileTerminalSessions(): Promise<void> {
-  const manager = getTerminalManager();
-  const db = getGlobalDb();
-
-  let shepherdReconnected = 0;
-  let orphanReconnected = 0;
-  let killed = 0;
-  let cleaned = 0;
-
-  // Track matched session IDs across all phases
-  const matchedSessionIds = new Set<string>();
-
-  // ---- Phase 1: Shepherd reconnection ----
-  let allDbSessions: DbTerminalSession[];
-  try {
-    allDbSessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
-  } catch (err) {
-    log('WARN', `Failed to read terminal sessions: ${(err as Error).message}`);
-    allDbSessions = [];
-  }
-
-  const shepherdSessions = allDbSessions.filter(s => s.shepherd_socket !== null);
-  if (shepherdSessions.length > 0) {
-    log('INFO', `Found ${shepherdSessions.length} shepherd session(s) in SQLite — reconnecting...`);
-  }
-
-  for (const dbSession of shepherdSessions) {
-    const projectPath = dbSession.project_path;
-
-    // Skip sessions whose project path doesn't exist or is in temp directory
-    if (!fs.existsSync(projectPath)) {
-      log('INFO', `Skipping shepherd session ${dbSession.id} — project path no longer exists: ${projectPath}`);
-      // Kill orphaned shepherd process before removing row
-      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
-        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
-      }
-      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      cleaned++;
-      continue;
-    }
-    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => projectPath === d || projectPath.startsWith(d + '/'))) {
-      log('INFO', `Skipping shepherd session ${dbSession.id} — project is in temp directory: ${projectPath}`);
-      // Kill orphaned shepherd process before removing row
-      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
-        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
-      }
-      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      cleaned++;
-      continue;
-    }
-
-    if (!shepherdManager) {
-      log('WARN', `Shepherd manager not initialized — cannot reconnect ${dbSession.id}`);
-      continue;
-    }
-
-    try {
-      // For architect sessions, restore auto-restart behavior after reconnection
-      let restartOptions: ReconnectRestartOptions | undefined;
-      if (dbSession.type === 'architect') {
-        let architectCmd = 'claude';
-        const configPath = path.join(projectPath, 'af-config.json');
-        if (fs.existsSync(configPath)) {
-          try {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            if (config.shell?.architect) {
-              architectCmd = config.shell.architect;
-            }
-          } catch { /* use default */ }
-        }
-        const cmdParts = architectCmd.split(/\s+/);
-        const cleanEnv = { ...process.env } as Record<string, string>;
-        delete cleanEnv['CLAUDECODE'];
-        restartOptions = {
-          command: cmdParts[0],
-          args: cmdParts.slice(1),
-          cwd: projectPath,
-          env: cleanEnv,
-          restartDelay: 2000,
-          maxRestarts: 50,
-        };
-      }
-
-      const client = await shepherdManager.reconnectSession(
-        dbSession.id,
-        dbSession.shepherd_socket!,
-        dbSession.shepherd_pid!,
-        dbSession.shepherd_start_time!,
-        restartOptions,
-      );
-
-      if (!client) {
-        log('INFO', `Shepherd session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
-        continue; // Will be cleaned up in Phase 3
-      }
-
-      // Wait for REPLAY frame — the shepherd sends it right after WELCOME,
-      // but it may arrive in a separate read from the Unix socket.
-      const replayData = await client.waitForReplay();
-      const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
-
-      // Create a PtySession backed by the reconnected shepherd client
-      const session = manager.createSessionRaw({ label, cwd: projectPath });
-      const ptySession = manager.getSession(session.id);
-      if (ptySession) {
-        ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
-      }
-
-      // Register in projectTerminals Map
-      const entry = getProjectTerminalsEntry(projectPath);
-      if (dbSession.type === 'architect') {
-        entry.architect = session.id;
-      } else if (dbSession.type === 'builder') {
-        entry.builders.set(dbSession.role_id || dbSession.id, session.id);
-      } else if (dbSession.type === 'shell') {
-        entry.shells.set(dbSession.role_id || dbSession.id, session.id);
-      }
-
-      // Update SQLite with new terminal ID
-      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      saveTerminalSession(session.id, projectPath, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
-        dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
-      registerKnownProject(projectPath);
-
-      // Clean up on exit
-      if (ptySession) {
-        ptySession.on('exit', () => {
-          const currentEntry = getProjectTerminalsEntry(projectPath);
-          if (dbSession.type === 'architect' && currentEntry.architect === session.id) {
-            currentEntry.architect = undefined;
-          }
-          deleteTerminalSession(session.id);
-        });
-      }
-
-      matchedSessionIds.add(dbSession.id);
-      shepherdReconnected++;
-      log('INFO', `Reconnected shepherd session → ${session.id} (${dbSession.type} for ${path.basename(projectPath)})`);
-    } catch (err) {
-      log('WARN', `Failed to reconnect shepherd session ${dbSession.id}: ${(err as Error).message}`);
-    }
-  }
-
-  // ---- Phase 2: Sweep stale SQLite rows ----
-  for (const session of allDbSessions) {
-    if (matchedSessionIds.has(session.id)) continue;
-
-    const existing = manager.getSession(session.id);
-    if (existing && existing.status !== 'exited') continue;
-
-    // Stale row — kill orphaned process if any, then delete
-    if (session.pid && processExists(session.pid)) {
-      log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
-      try {
-        process.kill(session.pid, 'SIGTERM');
-        killed++;
-      } catch { /* process not killable */ }
-    }
-
-    db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
-    cleaned++;
-  }
-
-  const total = shepherdReconnected + orphanReconnected;
-  if (total > 0 || killed > 0 || cleaned > 0) {
-    log('INFO', `Reconciliation complete: ${shepherdReconnected} shepherd, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
-  } else {
-    log('INFO', 'No terminal sessions to reconcile');
-  }
-}
-
-/**
- * Get terminal sessions from SQLite for a project.
- * Normalizes path for consistent lookup.
- */
-function getTerminalSessionsForProject(projectPath: string): DbTerminalSession[] {
-  try {
-    const normalizedPath = normalizeProjectPath(projectPath);
-    const db = getGlobalDb();
-    return db.prepare('SELECT * FROM terminal_sessions WHERE project_path = ?').all(normalizedPath) as DbTerminalSession[];
-  } catch {
-    return [];
-  }
-}
-
-// Import PtySession type for WebSocket handling
 import type { PtySession, PtySessionInfo } from '../../terminal/pty-session.js';
 
 /**
@@ -619,13 +229,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     terminalWss.close();
   }
 
-  // 3. Kill all PTY sessions
-  if (terminalManager) {
-    log('INFO', 'Shutting down terminal manager...');
-    terminalManager.shutdown();
-  }
-
-  // 3b. Shepherd clients: do NOT call shepherdManager.shutdown() here.
+  // 3. Shepherd clients: do NOT call shepherdManager.shutdown() here.
   // SessionManager.shutdown() disconnects sockets, which triggers ShepherdClient
   // 'close' events → PtySession exit(-1) → SQLite row deletion. This would erase
   // the rows that reconcileTerminalSessions() needs on restart.
@@ -635,11 +239,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     log('INFO', 'Shepherd sessions will continue running (sockets close on process exit)');
   }
 
-  // 4. Stop gate watcher and rate limit cleanup
-  if (gateWatcherInterval) {
-    clearInterval(gateWatcherInterval);
-    gateWatcherInterval = null;
-  }
+  // 4. Stop rate limit cleanup
   clearInterval(rateLimitCleanupInterval);
 
   // 5. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
@@ -647,6 +247,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 6. Tear down instance module (Spec 0105 Phase 3)
   shutdownInstances();
+
+  // 7. Tear down terminal module (Spec 0105 Phase 4) — stops gate watcher, shuts down terminal manager
+  shutdownTerminals();
 
   log('INFO', 'Graceful shutdown complete');
   process.exit(0);
@@ -665,24 +268,7 @@ log('INFO', `Tower server starting on port ${port}`);
 
 // registerKnownProject, getKnownProjectPaths: imported from ./tower-instances.ts
 
-// Spec 0100: Gate watcher for af send notifications
-const gateWatcher = new GateWatcher(log);
-let gateWatcherInterval: ReturnType<typeof setInterval> | null = null;
-
-function startGateWatcher(): void {
-  gateWatcherInterval = setInterval(async () => {
-    const projectPaths = getKnownProjectPaths();
-    for (const projectPath of projectPaths) {
-      try {
-        const gateStatus = getGateStatusForProject(projectPath);
-        await gateWatcher.checkAndNotify(gateStatus, projectPath);
-      } catch (err) {
-        log('WARN', `Gate watcher error for ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }, 10_000);
-}
-
+// startGateWatcher, stopGateWatcher: imported from ./tower-terminals.ts
 
 // SSE (Server-Sent Events) infrastructure for push notifications
 // SSEClient interface: imported from ./tower-types.ts
@@ -707,203 +293,7 @@ function broadcastNotification(notification: { type: string; title: string; body
   }
 }
 
-/**
- * Get terminal list for a project from tower's registry.
- * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server fetch.
- * Returns architect, builders, and shells with their URLs.
- */
-async function getTerminalsForProject(
-  projectPath: string,
-  proxyUrl: string
-): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
-  const manager = getTerminalManager();
-  const terminals: TerminalEntry[] = [];
-
-  // Query SQLite first, then augment with shepherd reconnection
-  const dbSessions = getTerminalSessionsForProject(projectPath);
-
-  // Use normalized path for cache consistency
-  const normalizedPath = normalizeProjectPath(projectPath);
-
-  // Build a fresh entry from SQLite, then replace atomically to avoid
-  // destroying in-memory state that was registered via POST /api/terminals.
-  // Previous approach cleared the cache then rebuilt, which lost terminals
-  // if their SQLite rows were deleted by external interference (e.g., tests).
-  const freshEntry: ProjectTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
-
-  // Load file tabs from SQLite (persisted across restarts)
-  const existingEntry = projectTerminals.get(normalizedPath);
-  if (existingEntry && existingEntry.fileTabs.size > 0) {
-    // Use in-memory state if already populated (avoids redundant DB reads)
-    freshEntry.fileTabs = existingEntry.fileTabs;
-  } else {
-    freshEntry.fileTabs = loadFileTabsForProject(projectPath);
-  }
-
-  for (const dbSession of dbSessions) {
-    // Verify session still exists in TerminalManager (runtime state)
-    let session = manager.getSession(dbSession.id);
-
-    if (!session && dbSession.shepherd_socket && shepherdManager) {
-      // PTY session gone but shepherd may still be alive — reconnect on-the-fly
-      try {
-        // Restore auto-restart for architect sessions (same as startup reconciliation)
-        let restartOptions: ReconnectRestartOptions | undefined;
-        if (dbSession.type === 'architect') {
-          let architectCmd = 'claude';
-          const configPath = path.join(dbSession.project_path, 'af-config.json');
-          if (fs.existsSync(configPath)) {
-            try {
-              const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-              if (config.shell?.architect) {
-                architectCmd = config.shell.architect;
-              }
-            } catch { /* use default */ }
-          }
-          const cmdParts = architectCmd.split(/\s+/);
-          const cleanEnv = { ...process.env } as Record<string, string>;
-          delete cleanEnv['CLAUDECODE'];
-          restartOptions = {
-            command: cmdParts[0],
-            args: cmdParts.slice(1),
-            cwd: dbSession.project_path,
-            env: cleanEnv,
-            restartDelay: 2000,
-            maxRestarts: 50,
-          };
-        }
-
-        const client = await shepherdManager.reconnectSession(
-          dbSession.id,
-          dbSession.shepherd_socket,
-          dbSession.shepherd_pid!,
-          dbSession.shepherd_start_time!,
-          restartOptions,
-        );
-        if (client) {
-          // Wait for REPLAY frame — same race as startup reconciliation path
-          const replayData = await client.waitForReplay();
-          const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`;
-          const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
-          const ptySession = manager.getSession(newSession.id);
-          if (ptySession) {
-            ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
-
-            // Clean up on exit (same as startup reconciliation path)
-            ptySession.on('exit', () => {
-              const currentEntry = getProjectTerminalsEntry(dbSession.project_path);
-              if (dbSession.type === 'architect' && currentEntry.architect === newSession.id) {
-                currentEntry.architect = undefined;
-              }
-              deleteTerminalSession(newSession.id);
-            });
-          }
-          deleteTerminalSession(dbSession.id);
-          saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
-            dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
-          dbSession.id = newSession.id;
-          session = manager.getSession(newSession.id);
-          log('INFO', `Reconnected to shepherd on-the-fly → ${newSession.id}`);
-        }
-      } catch (err) {
-        log('WARN', `Failed shepherd on-the-fly reconnect for ${dbSession.id}: ${(err as Error).message}`);
-      }
-    }
-
-    if (!session) {
-      // Stale row, nothing to reconnect — clean up
-      deleteTerminalSession(dbSession.id);
-      continue;
-    }
-
-    if (dbSession.type === 'architect') {
-      freshEntry.architect = dbSession.id;
-      terminals.push({
-        type: 'architect',
-        id: 'architect',
-        label: 'Architect',
-        url: `${proxyUrl}?tab=architect`,
-        active: true,
-      });
-    } else if (dbSession.type === 'builder') {
-      const builderId = dbSession.role_id || dbSession.id;
-      freshEntry.builders.set(builderId, dbSession.id);
-      terminals.push({
-        type: 'builder',
-        id: builderId,
-        label: `Builder ${builderId}`,
-        url: `${proxyUrl}?tab=builder-${builderId}`,
-        active: true,
-      });
-    } else if (dbSession.type === 'shell') {
-      const shellId = dbSession.role_id || dbSession.id;
-      freshEntry.shells.set(shellId, dbSession.id);
-      terminals.push({
-        type: 'shell',
-        id: shellId,
-        label: `Shell ${shellId.replace('shell-', '')}`,
-        url: `${proxyUrl}?tab=shell-${shellId}`,
-        active: true,
-      });
-    }
-  }
-
-  // Also merge in-memory entries that may not be in SQLite yet
-  // (e.g., registered via POST /api/terminals but SQLite row was lost)
-  if (existingEntry) {
-    if (existingEntry.architect && !freshEntry.architect) {
-      const session = manager.getSession(existingEntry.architect);
-      if (session && session.status === 'running') {
-        freshEntry.architect = existingEntry.architect;
-        terminals.push({
-          type: 'architect',
-          id: 'architect',
-          label: 'Architect',
-          url: `${proxyUrl}?tab=architect`,
-          active: true,
-        });
-      }
-    }
-    for (const [builderId, terminalId] of existingEntry.builders) {
-      if (!freshEntry.builders.has(builderId)) {
-        const session = manager.getSession(terminalId);
-        if (session && session.status === 'running') {
-          freshEntry.builders.set(builderId, terminalId);
-          terminals.push({
-            type: 'builder',
-            id: builderId,
-            label: `Builder ${builderId}`,
-            url: `${proxyUrl}?tab=builder-${builderId}`,
-            active: true,
-          });
-        }
-      }
-    }
-    for (const [shellId, terminalId] of existingEntry.shells) {
-      if (!freshEntry.shells.has(shellId)) {
-        const session = manager.getSession(terminalId);
-        if (session && session.status === 'running') {
-          freshEntry.shells.set(shellId, terminalId);
-          terminals.push({
-            type: 'shell',
-            id: shellId,
-            label: `Shell ${shellId.replace('shell-', '')}`,
-            url: `${proxyUrl}?tab=shell-${shellId}`,
-            active: true,
-          });
-        }
-      }
-    }
-  }
-
-  // Atomically replace the cache entry
-  projectTerminals.set(normalizedPath, freshEntry);
-
-  // Read gate status from porch YAML files
-  const gateStatus = getGateStatusForProject(projectPath);
-
-  return { terminals, gateStatus };
-}
+// getTerminalsForProject: imported from ./tower-terminals.ts
 
 // getInstances, getDirectorySuggestions, launchInstance, killTerminalWithShepherd,
 // stopInstance: imported from ./tower-instances.ts
@@ -2128,7 +1518,7 @@ const server = http.createServer(async (req, res) => {
           }
 
           // Clear registry
-          projectTerminals.delete(projectPath);
+          getProjectTerminals().delete(projectPath);
 
           // TICK-001: Delete all terminal sessions from SQLite
           deleteProjectTerminalSessions(projectPath);
@@ -2446,12 +1836,20 @@ server.listen(port, '127.0.0.1', async () => {
   }
   log('INFO', 'Shepherd session manager initialized');
 
+  // Spec 0105 Phase 4: Initialize terminal management module
+  initTerminals({
+    log,
+    shepherdManager,
+    registerKnownProject,
+    getKnownProjectPaths,
+  });
+
   // Spec 0105 Phase 3: Initialize instance lifecycle module
   // Must be before reconcileTerminalSessions() so instance APIs are available
   // as soon as the server starts accepting requests.
   initInstances({
     log,
-    projectTerminals,
+    projectTerminals: getProjectTerminals(),
     getTerminalManager,
     shepherdManager,
     getProjectTerminalsEntry,
@@ -2470,7 +1868,7 @@ server.listen(port, '127.0.0.1', async () => {
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
   await initTunnel(
-    { port, log, projectTerminals, terminalManager: terminalManager! },
+    { port, log, projectTerminals: getProjectTerminals(), terminalManager: getTerminalManager() },
     { getInstances },
   );
 });
