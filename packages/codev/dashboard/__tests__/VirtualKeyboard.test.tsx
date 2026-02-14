@@ -166,21 +166,41 @@ describe('VirtualKeyboard (Issue #254)', () => {
   });
 
   describe('Esc key', () => {
-    it('sends escape sequence when tapped', () => {
+    it('sends escape via WebSocket data frame (not paste) when tapped', () => {
       const { container } = renderTerminal();
+      const sendsBefore = mockWsSend.mock.calls.length;
       const escBtn = container.querySelector('.virtual-key')!;
       fireEvent.pointerDown(escBtn);
-      expect(mockPaste).toHaveBeenCalledWith('\x1b');
+
+      // Should NOT use paste (which wraps in bracketed paste sequences)
+      expect(mockPaste).not.toHaveBeenCalled();
+
+      // Should send raw \x1b via WebSocket data frame
+      const newFrames = mockWsSend.mock.calls.slice(sendsBefore)
+        .filter(call => new Uint8Array(call[0])[0] === FRAME_DATA)
+        .map(call => decodeDataFrame(call[0]));
+      expect(newFrames).toHaveLength(1);
+      expect(newFrames[0]).toBe('\x1b');
     });
   });
 
   describe('Tab key', () => {
-    it('sends tab sequence when tapped', () => {
+    it('sends tab via WebSocket data frame (not paste) when tapped', () => {
       const { container } = renderTerminal();
+      const sendsBefore = mockWsSend.mock.calls.length;
       const buttons = container.querySelectorAll('.virtual-key');
       const tabBtn = buttons[1]; // Tab is second button
       fireEvent.pointerDown(tabBtn);
-      expect(mockPaste).toHaveBeenCalledWith('\t');
+
+      // Should NOT use paste (which wraps in bracketed paste sequences)
+      expect(mockPaste).not.toHaveBeenCalled();
+
+      // Should send raw \t via WebSocket data frame
+      const newFrames = mockWsSend.mock.calls.slice(sendsBefore)
+        .filter(call => new Uint8Array(call[0])[0] === FRAME_DATA)
+        .map(call => decodeDataFrame(call[0]));
+      expect(newFrames).toHaveLength(1);
+      expect(newFrames[0]).toBe('\t');
     });
   });
 

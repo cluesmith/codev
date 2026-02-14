@@ -346,7 +346,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         </div>
       )}
       {isMobile && (
-        <VirtualKeyboard xtermRef={xtermRef} modifierRef={modifierRef} />
+        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
       )}
       <div
         ref={containerRef}

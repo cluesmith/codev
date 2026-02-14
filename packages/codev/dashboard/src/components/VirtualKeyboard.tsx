@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Terminal } from '@xterm/xterm';
+
+/** WebSocket frame prefix for data frames (must match Terminal.tsx). */
+const FRAME_DATA = 0x01;
 
 export interface ModifierState {
   ctrl: boolean;
@@ -8,8 +10,18 @@ export interface ModifierState {
 }
 
 interface VirtualKeyboardProps {
-  xtermRef: React.RefObject<Terminal | null>;
+  wsRef: React.RefObject<WebSocket | null>;
   modifierRef: React.RefObject<ModifierState>;
+}
+
+/** Encode and send a data frame directly via WebSocket (avoids bracketed paste). */
+function sendRawKey(ws: WebSocket | null, key: string): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const encoded = new TextEncoder().encode(key);
+  const frame = new Uint8Array(1 + encoded.length);
+  frame[0] = FRAME_DATA;
+  frame.set(encoded, 1);
+  ws.send(frame.buffer);
 }
 
 /**
@@ -17,7 +29,7 @@ interface VirtualKeyboardProps {
  * Renders Esc, Tab, Ctrl (sticky), Cmd (sticky) above the terminal.
  * Uses onPointerDown with preventDefault to avoid stealing focus from xterm.
  */
-export function VirtualKeyboard({ xtermRef, modifierRef }: VirtualKeyboardProps) {
+export function VirtualKeyboard({ wsRef, modifierRef }: VirtualKeyboardProps) {
   const [activeModifier, setActiveModifier] = useState<'ctrl' | 'cmd' | null>(null);
 
   useEffect(() => {
@@ -27,13 +39,13 @@ export function VirtualKeyboard({ xtermRef, modifierRef }: VirtualKeyboardProps)
 
   const handleEsc = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    xtermRef.current?.paste('\x1b');
-  }, [xtermRef]);
+    sendRawKey(wsRef.current, '\x1b');
+  }, [wsRef]);
 
   const handleTab = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    xtermRef.current?.paste('\t');
-  }, [xtermRef]);
+    sendRawKey(wsRef.current, '\t');
+  }, [wsRef]);
 
   const handleCtrl = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
