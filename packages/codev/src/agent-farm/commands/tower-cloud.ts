@@ -1,8 +1,8 @@
 /**
  * Cloud Tower Registration Commands (Spec 0097 Phase 5)
  *
- * Implements `af tower register`, `af tower register --reauth`,
- * `af tower deregister`, and cloud status display for `af tower status`.
+ * Implements `af tower connect`, `af tower connect --reauth`,
+ * `af tower disconnect`, and cloud status display for `af tower status`.
  */
 
 import http from 'node:http';
@@ -18,8 +18,9 @@ import {
   getOrCreateMachineId,
   type CloudConfig,
 } from '../lib/cloud-config.js';
+import { redeemToken } from '../lib/token-exchange.js';
 
-const CODEVOS_URL = process.env.CODEVOS_URL || 'https://codevos.ai';
+const CODEVOS_URL = process.env.CODEVOS_URL || 'https://cloud.codevos.ai';
 const DEFAULT_TOWER_PORT = 4100;
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 
@@ -51,54 +52,6 @@ async function confirm(question: string): Promise<boolean> {
  */
 function getMachineId(): string {
   return getOrCreateMachineId();
-}
-
-/**
- * Exchange a registration token for API key and tower ID.
- */
-async function redeemToken(
-  serverUrl: string,
-  token: string,
-  towerName: string,
-  machineId: string,
-): Promise<{ towerId: string; apiKey: string }> {
-  const url = `${serverUrl}/api/towers/register/redeem`;
-  const body = JSON.stringify({ token, name: towerName, machineId });
-
-  // Use manual redirect to preserve POST method across 301/302 redirects
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(30_000),
-  }).then((res) => {
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (location) {
-        return fetch(location, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          signal: AbortSignal.timeout(30_000),
-        });
-      }
-    }
-    return res;
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Registration failed (${response.status}): ${text || response.statusText}`);
-  }
-
-  const data = (await response.json()) as { towerId?: string; apiKey?: string };
-
-  if (!data.towerId || !data.apiKey) {
-    throw new Error('Invalid response from registration server: missing towerId or apiKey');
-  }
-
-  return { towerId: data.towerId, apiKey: data.apiKey };
 }
 
 /**
@@ -178,7 +131,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
 
   // Resolve service URL: CLI --service flag > CODEVOS_URL env var > existing config > default
   // Normalize to HTTPS — HTTP POST requests get downgraded to GET by 301 redirects
-  const rawUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
+  const rawUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://cloud.codevos.ai';
   const serverUrl = rawUrl.replace(/^http:\/\/(?!localhost)/, 'https://');
 
   // Start ephemeral callback server

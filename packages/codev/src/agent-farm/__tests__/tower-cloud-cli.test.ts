@@ -112,7 +112,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
       expect(config!.tower_id).toBe('tower-mock-id');
       expect(config!.api_key).toBe('ctk_MockApiKey123');
       expect(config!.tower_name).toBe('my-test-tower');
-      expect(config!.server_url).toBe('https://codevos.ai');
+      expect(config!.server_url).toBe('https://cloud.codevos.ai');
 
       expect(openBrowser).toHaveBeenCalledWith(
         expect.stringContaining('/towers/register?callback='),
