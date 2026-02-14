@@ -286,6 +286,60 @@ describe('tower-instances', () => {
         fs.rmSync(tmpDir2, { recursive: true });
       }
     });
+
+    it('populates lastUsed from known_projects.last_launched_at', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-lastused-'));
+
+      try {
+        const projectTerminals = new Map();
+        projectTerminals.set(tmpDir, {
+          architect: undefined, builders: new Map(), shells: new Map(),
+        });
+
+        const deps = makeDeps({ projectTerminals });
+        initInstances(deps);
+
+        // Route mock results based on the SQL query
+        mockDbPrepare.mockImplementation((sql: string) => ({
+          run: mockDbRun,
+          all: () => {
+            if (sql.includes('last_launched_at') && sql.includes('known_projects')) {
+              return [{ project_path: tmpDir, last_launched_at: '2026-02-14 10:30:00' }];
+            }
+            if (sql.includes('known_projects')) {
+              return [{ project_path: tmpDir }];
+            }
+            return [];
+          },
+        }));
+
+        const instances = await getInstances();
+        expect(instances).toHaveLength(1);
+        expect(instances[0].lastUsed).toBe('2026-02-14 10:30:00');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('sets lastUsed to undefined when project not in known_projects', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-nolastused-'));
+
+      try {
+        const projectTerminals = new Map();
+        projectTerminals.set(tmpDir, {
+          architect: undefined, builders: new Map(), shells: new Map(),
+        });
+
+        const deps = makeDeps({ projectTerminals });
+        initInstances(deps);
+
+        const instances = await getInstances();
+        expect(instances).toHaveLength(1);
+        expect(instances[0].lastUsed).toBeUndefined();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
   });
 
   // =========================================================================

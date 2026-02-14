@@ -71,6 +71,7 @@ export interface InstanceStatus {
   architectUrl: string;
   terminals: TerminalEntry[];
   gateStatus?: GateStatus;
+  lastUsed?: string;
 }
 
 /** SQLite terminal session row shape */

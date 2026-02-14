@@ -143,6 +143,18 @@ export async function getInstances(): Promise<InstanceStatus[]> {
   const knownPaths = getKnownProjectPaths();
   const instances: InstanceStatus[] = [];
 
+  // Build a lookup of last_launched_at from known_projects
+  const lastLaunchedMap = new Map<string, string>();
+  try {
+    const db = getGlobalDb();
+    const rows = db.prepare('SELECT project_path, last_launched_at FROM known_projects').all() as { project_path: string; last_launched_at: string }[];
+    for (const row of rows) {
+      lastLaunchedMap.set(row.project_path, row.last_launched_at);
+    }
+  } catch {
+    // Table may not exist yet (pre-migration)
+  }
+
   for (const projectPath of knownPaths) {
     // Skip builder worktrees - they're managed by their parent project
     if (projectPath.includes('/.builders/')) {
@@ -178,6 +190,7 @@ export async function getInstances(): Promise<InstanceStatus[]> {
       architectUrl: `${proxyUrl}?tab=architect`,
       terminals,
       gateStatus,
+      lastUsed: lastLaunchedMap.get(projectPath),
     });
   }
 
