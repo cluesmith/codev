@@ -109,7 +109,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
    - Device name input (default: machine hostname from `/api/status`, validated: 1-63 chars, lowercase alphanumeric + hyphens, must start/end with letter or digit)
    - Service URL input (default: `https://codevos.ai`)
    - "Connect" and "Cancel" buttons
-3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If the normalized result is empty or fails validation (e.g., starts/ends with hyphen, exceeds 63 chars), show inline error.
+3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If the normalized result is empty or still fails validation (e.g., starts/ends with hyphen, exceeds 63 chars, all-hyphens), show inline error: "Invalid device name. Use letters, numbers, and hyphens (must start and end with a letter or number)."
 4. POST to `/api/tunnel/connect` with `{ name, serverUrl, origin: window.location.origin }`, receive `{ authUrl }`
 5. Navigate current tab to `authUrl` (`window.location.href = authUrl`)
 6. After OAuth completes, callback redirects back to Tower homepage
@@ -157,6 +157,24 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 - [ ] Old CLI names (`register`/`deregister`) work as hidden aliases
 - [ ] Existing tunnel connect/disconnect behavior preserved
 - [ ] Callback error pages rendered for all failure modes
+
+## Testing Requirements
+
+### Unit Tests
+- **Nonce store**: generation, lookup, expiry after 5 minutes, single-use consumption, cleanup of expired entries
+- **Callback handler**: valid nonce → success, expired nonce → error, missing nonce → error, already-used nonce → error
+- **Smart Connect logic**: config exists → reconnect (no OAuth), config missing → initiate OAuth, config malformed → initiate OAuth
+- **Device name normalization**: spaces → hyphens, uppercase → lowercase, strip invalid chars, empty result → error, all-hyphens → error
+- **Disconnect**: successful full cleanup, server-side deregister failure → warning (local cleanup still proceeds), local credential deletion failure → error
+
+### Integration/E2E Tests
+- **CLI aliases**: `af tower connect` and `af tower disconnect` execute correctly; `af tower register` and `af tower deregister` still work as hidden aliases
+- **Connect dialog UI**: renders when not connected, device name defaults to hostname, service URL defaults to `https://codevos.ai`, validation errors display inline
+- **Disconnect UI**: confirmation dialog appears, connected status updates to disconnected after successful disconnect
+
+### Not Tested (intentional)
+- Full OAuth round-trip (requires live codevos.ai interaction — tested manually)
+- Token exchange with real server (mock the POST to `/api/towers/register/redeem` in tests)
 
 ## Constraints
 
