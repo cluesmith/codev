@@ -2446,14 +2446,9 @@ server.listen(port, '127.0.0.1', async () => {
   }
   log('INFO', 'Shepherd session manager initialized');
 
-  // TICK-001: Reconcile terminal sessions from previous run
-  await reconcileTerminalSessions();
-
-  // Spec 0100: Start background gate watcher for af send notifications
-  startGateWatcher();
-  log('INFO', 'Gate watcher started (10s poll interval)');
-
   // Spec 0105 Phase 3: Initialize instance lifecycle module
+  // Must be before reconcileTerminalSessions() so instance APIs are available
+  // as soon as the server starts accepting requests.
   initInstances({
     log,
     projectTerminals,
@@ -2465,6 +2460,13 @@ server.listen(port, '127.0.0.1', async () => {
     deleteProjectTerminalSessions,
     getTerminalsForProject,
   });
+
+  // TICK-001: Reconcile terminal sessions from previous run
+  await reconcileTerminalSessions();
+
+  // Spec 0100: Start background gate watcher for af send notifications
+  startGateWatcher();
+  log('INFO', 'Gate watcher started (10s poll interval)');
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
   await initTunnel(
