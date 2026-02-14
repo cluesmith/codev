@@ -28,11 +28,12 @@ For debugging common issues, start here:
 | Issue | Entry Point | What to Check |
 |-------|-------------|---------------|
 | **"Tower won't start"** | `packages/codev/src/agent-farm/servers/tower-server.ts` | Port 4100 conflict, node-pty availability |
-| **"Project won't activate"** | `tower-server.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
-| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
-| **"Terminal not persistent"** | `tower-server.ts` → session creation | Check shellper spawn succeeded, dashboard shows `persistent` flag |
-| **"Project shows inactive"** | `tower-server.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
+| **"Project won't activate"** | `tower-instances.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
+| **"Terminal not showing output"** | `tower-websocket.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
+| **"Terminal not persistent"** | `tower-instances.ts` → `launchInstance()` | Check shellper spawn succeeded, dashboard shows `persistent` flag |
+| **"Project shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shellper session, role injection |
+| **"Gate not notifying architect"** | `tower-terminals.ts` → `startGateWatcher()` | GateWatcher poll interval, `af send` binary resolution |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
@@ -201,9 +202,11 @@ The global registry is a SQLite database that tracks port allocations across all
 - WAL mode enables concurrent reads
 - 5-second busy timeout prevents deadlocks
 
-### Shellper Process Architecture (Spec 0104)
+### Shellper Process Architecture (Spec 0104, renamed from Shepherd in Spec 0106)
 
 Shellper processes provide terminal session persistence. Each terminal session is owned by a dedicated detached Node.js process (the "shellper") that holds the PTY master file descriptor. Tower communicates with shellpers over Unix sockets.
+
+**Historical note**: Originally named "Shepherd" (Spec 0104), renamed to "Shellper" (Spec 0106). DB migration v8 renames `shepherd_*` columns to `shellper_*` and renames socket files from `shepherd-{id}.sock` to `shellper-{id}.sock`.
 
 ```
 Browser (xterm.js, scrollback: 50000)
@@ -250,9 +253,39 @@ Architect sessions use `restartOnExit: true` in `SessionManager.createSession()`
 - `maxRestarts` (default: 50) prevents infinite restart loops
 - Counter resets after `restartResetAfter` (default: 5min) of stable operation
 
+#### Architect Role Prompt Injection
+
+All architect sessions (at all 3 creation points) receive a role prompt injected via `buildArchitectArgs()` in `tower-utils.ts`. This function:
+
+1. Loads the architect role from `codev/roles/architect.md` (local) or `skeleton/roles/architect.md` (bundled fallback) via `loadRolePrompt()`
+2. Writes the role content to `.architect-role.md` in the project directory
+3. Appends `--append-system-prompt <content>` to the architect command args
+
+**Three architect creation points** where role injection is applied:
+- `tower-instances.ts` → `launchInstance()` (new project activation)
+- `tower-terminals.ts` → `reconcileTerminalSessions()` (startup reconnection with auto-restart options)
+- `tower-terminals.ts` → `getTerminalsForProject()` (on-the-fly shellper reconnection)
+
+#### Builder Gate Notifications (Spec 0100 / Bugfix #261)
+
+The `GateWatcher` class (`packages/codev/src/agent-farm/utils/gate-watcher.ts`) polls for gate transitions and sends `af send architect` messages when builders reach approval gates.
+
+**How it works**:
+1. `tower-terminals.ts` → `startGateWatcher()` starts a 10-second polling interval
+2. For each known project, reads porch YAML status files via `getGateStatusForProject()`
+3. On new gate detection, sends a notification to the architect terminal via `af send architect --raw --no-enter`
+4. Uses dedup maps to avoid repeated notifications for the same gate
+5. Clears notifications when gates are resolved
+
+**Key design**:
+- **Dedup**: `Map<key, timestamp>` keyed by `projectPath:builderId:gateName`
+- **Project index**: `Map<projectPath, Set<key>>` for efficient cleanup when gate resolves
+- **Input sanitization**: Strips ANSI escape sequences, rejects control characters
+- **Binary resolution**: Resolves `af` binary path relative to the package directory
+
 #### Known Issue: Hardcoded Initial Dimensions (cols: 200, rows: 50)
 
-All shellper sessions are spawned with `cols: 200, rows: 50` in `tower-server.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
+All shellper sessions are spawned with `cols: 200, rows: 50` in `tower-instances.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
 
 **Symptom**: Large blank area above the first few prompts when scrolling up in a newly opened terminal.
 
@@ -263,7 +296,7 @@ All shellper sessions are spawned with `cols: 200, rows: 50` in `tower-server.ts
 2. Lazy spawn: defer PTY creation until the first RESIZE frame arrives from Tower
 3. Send a clear screen sequence (`ESC[2J ESC[H`) after the first resize
 
-**Affected code**: `tower-server.ts` lines calling `shellperManager.createSession()` — search for `cols: 200`.
+**Affected code**: `tower-instances.ts` → `launchInstance()` calling `shellperManager.createSession()` — search for `cols: 200`.
 
 #### Security
 
@@ -434,9 +467,9 @@ When cleaning up a builder (`af cleanup -p 0003`):
 6. **Update state**: Remove builder from database
 7. **Prune worktrees**: `git worktree prune`
 
-### Tower Single Daemon Architecture (Spec 0090)
+### Tower Single Daemon Architecture (Spec 0090, decomposed in Spec 0105)
 
-As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** architecture. The Tower server manages all projects directly - there are no separate dashboard-server processes per project.
+As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** architecture. The Tower server manages all projects directly - there are no separate dashboard-server processes per project. As of Spec 0105, the monolithic `tower-server.ts` was decomposed into focused modules (see "Server Architecture" below for the full module table).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -512,19 +545,34 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 - **SQLite (global.db)**: Persistent port allocations and terminal session metadata (including `shellper_socket`, `shellper_pid`, `shellper_start_time`)
 - **In-memory (projectTerminals)**: Runtime terminal state
 
-On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy (`reconcileTerminalSessions()`) uses a **dual-source approach**:
+On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy (`reconcileTerminalSessions()` in `tower-terminals.ts`) uses a **dual-source approach**:
 
 1. **Phase 1 -- Shellper reconnection**: For SQLite rows with `shellper_socket IS NOT NULL`, attempt `SessionManager.reconnectSession()`. Validates PID is alive and start time matches. On success, creates a PtySession via `TerminalManager.createSessionRaw()` and wires it with `attachShellper()`. Receives REPLAY frame for output continuity.
 2. **Phase 2 -- SQLite sweep**: Stale rows (no matching shellper) are cleaned up. Orphaned non-shellper processes are killed. Shellper processes are preserved (they may be reconnectable later).
 
 This dual-source strategy (SQLite + live shellper processes) ensures sessions survive Tower restarts when backed by shellper processes.
 
-#### Server Architecture
+#### Server Architecture (Spec 0105: Tower Decomposition)
 
 - **Framework**: Native Node.js `http` module (no Express)
 - **Port**: 4100 (Tower default)
 - **Security**: Localhost binding only (see Security Model section)
 - **State**: In-memory `projectTerminals` Map + SQLite for port allocations
+
+**Module decomposition** (Spec 0105): The monolithic `tower-server.ts` was decomposed into focused modules with dependency injection. The orchestrator (`tower-server.ts`) creates the HTTP server and initializes all subsystems, delegating work to specialized modules:
+
+| Module | Purpose |
+|--------|---------|
+| `tower-server.ts` | **Orchestrator** -- creates HTTP/WS servers, initializes subsystems, wires dependency injection, handles graceful shutdown |
+| `tower-routes.ts` | All HTTP route handlers (~30 routes). Receives a `RouteContext` from the orchestrator. |
+| `tower-instances.ts` | Project lifecycle: `launchInstance()`, `getInstances()`, `stopInstance()`, `killTerminalWithShellper()`, known project registration, directory suggestions |
+| `tower-terminals.ts` | Terminal session CRUD, file tab persistence, shell ID allocation, `reconcileTerminalSessions()`, gate watcher, terminal list assembly |
+| `tower-websocket.ts` | WebSocket upgrade routing and bidirectional WS-to-PTY frame bridging (`handleTerminalWebSocket()`) |
+| `tower-utils.ts` | Shared utilities: rate limiting, path normalization, `isTempDirectory()`, MIME types, static file serving, `buildArchitectArgs()` |
+| `tower-types.ts` | TypeScript interfaces: `TowerContext`, `ProjectTerminals`, `SSEClient`, `RateLimitEntry`, `TerminalEntry`, `InstanceStatus`, `DbTerminalSession` |
+| `tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh |
+
+**Dependency injection pattern**: Each module exports `init*()` and `shutdown*()` lifecycle functions. The orchestrator calls `initTerminals()`, `initInstances()`, and `initTunnel()` at startup (in dependency order), and the corresponding shutdown functions during graceful shutdown. Modules receive only the dependencies they need via typed interfaces (e.g., `TerminalDeps`, `InstanceDeps`, `RouteContext`).
 
 #### Tower API Endpoints (Spec 0090)
 
@@ -652,7 +700,7 @@ async cleanupStaleSockets(): Promise<number> {
 When multiple builders spawn simultaneously:
 
 ```typescript
-// Retry loop in tower-server.ts
+// Retry loop in tower-instances.ts / tower-terminals.ts
 const MAX_PORT_RETRIES = 5;
 for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
   const currentState = loadState();
@@ -687,10 +735,17 @@ function cleanupDeadProcesses(): void {
 
 #### Graceful Shutdown
 
-Tower shutdown uses a multi-step process:
+Tower shutdown uses a multi-step process (orchestrated in `tower-server.ts` → `gracefulShutdown()`):
 
-1. **TerminalManager.shutdown()**: Iterates all PtySessions. Shellper-backed sessions are **skipped** (they survive Tower restart). Non-shellper sessions receive SIGTERM/SIGKILL.
-2. **SessionManager.shutdown()**: Disconnects from all shellpers (closes Unix socket connections) without killing the shellper processes. Shellpers continue running as orphaned OS processes.
+1. **Stop accepting connections**: Close HTTP server
+2. **Close WebSocket connections**: Disconnect all terminal WebSocket clients
+3. **Preserve shellper sessions**: Do NOT call `shellperManager.shutdown()` -- let the process exit naturally so OS closes sockets. Shellpers detect disconnection and keep running. SQLite rows are preserved for reconnection on next startup.
+4. **Stop rate limit cleanup**: Clear interval
+5. **Disconnect tunnel**: `shutdownTunnel()` (Spec 0097/0105)
+6. **Tear down instances**: `shutdownInstances()` (Spec 0105)
+7. **Tear down terminals**: `shutdownTerminals()` -- stops gate watcher, shuts down TerminalManager (Spec 0105)
+
+**TerminalManager.shutdown()**: Iterates all PtySessions. Shellper-backed sessions are **skipped** (they survive Tower restart). Non-shellper sessions receive SIGTERM/SIGKILL.
 
 ```typescript
 // TerminalManager.shutdown() — preserves shellper sessions
@@ -858,14 +913,21 @@ const CONFIG = {
 |------|---------|
 | `state.ts` | High-level state operations |
 
-#### Servers
+#### Servers (Spec 0105: Tower Decomposition)
 
 | File | Purpose |
 |------|---------|
-| `servers/tower-server.ts` | **Tower Single Daemon** - manages all projects, terminals, and dashboards (Spec 0090) |
+| `servers/tower-server.ts` | **Orchestrator** -- creates HTTP/WS servers, initializes subsystem modules via DI, handles graceful shutdown (Spec 0090 + 0105) |
+| `servers/tower-routes.ts` | All HTTP route handlers (~30 routes), receives `RouteContext` from orchestrator (Spec 0105 Phase 6) |
+| `servers/tower-instances.ts` | Project lifecycle: `launchInstance()`, `getInstances()`, `stopInstance()`, known project registration, directory autocomplete (Spec 0105 Phase 3) |
+| `servers/tower-terminals.ts` | Terminal session CRUD, file tab persistence, `reconcileTerminalSessions()`, gate watcher, terminal list assembly (Spec 0105 Phase 4) |
+| `servers/tower-websocket.ts` | WebSocket upgrade routing and WS-to-PTY frame bridging (Spec 0105 Phase 5) |
+| `servers/tower-utils.ts` | Rate limiting, path normalization, MIME types, static file serving, `buildArchitectArgs()` (Spec 0105 Phase 1) |
+| `servers/tower-types.ts` | Shared TypeScript interfaces: `TowerContext`, `ProjectTerminals`, `SSEClient`, `InstanceStatus`, `DbTerminalSession` (Spec 0105) |
+| `servers/tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh (Spec 0097 / 0105 Phase 2) |
 | `servers/open-server.ts` | File annotation viewer server |
 
-**Note**: As of Spec 0090 Phase 4, `dashboard-server.ts` has been removed. Tower manages everything directly.
+**Note**: As of Spec 0090 Phase 4, `dashboard-server.ts` has been removed. Tower manages everything directly. As of Spec 0105, the monolithic tower-server.ts was decomposed into the focused modules listed above.
 
 #### Utilities
 
@@ -877,6 +939,11 @@ const CONFIG = {
 | `utils/logger.ts` | Formatted console output |
 | `utils/deps.ts` | Dependency checking (git, node-pty) |
 | `utils/orphan-handler.ts` | Stale session cleanup |
+| `utils/gate-watcher.ts` | Polls porch YAML for gate transitions, sends `af send architect` notifications (Spec 0100) |
+| `utils/gate-status.ts` | Reads gate status from porch project status YAML files |
+| `utils/file-tabs.ts` | File tab persistence in SQLite (save, delete, load by project) |
+| `utils/roles.ts` | Role prompt loading with local-first, bundled-fallback resolution |
+| `utils/server-utils.ts` | HTTP utilities: JSON body parsing, request validation (Host/Origin checks) |
 
 #### Terminal Management (Spec 0085, extended by Spec 0104)
 
@@ -1043,8 +1110,15 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── open.ts             # File annotation viewer
 │   │   │   │   ├── send.ts             # Send message to builder
 │   │   │   │   └── rename.ts           # Rename builder/util
-│   │   │   ├── servers/                # Web servers
-│   │   │   │   ├── tower-server.ts     # Single daemon: serves all projects, terminals, REST API
+│   │   │   ├── servers/                # Web servers (Spec 0105 decomposition)
+│   │   │   │   ├── tower-server.ts     # Orchestrator: HTTP/WS server creation, subsystem init, shutdown
+│   │   │   │   ├── tower-routes.ts     # HTTP route handlers (~30 routes)
+│   │   │   │   ├── tower-instances.ts  # Project lifecycle (launch, getInstances, stop)
+│   │   │   │   ├── tower-terminals.ts  # Terminal session CRUD, reconciliation, gate watcher
+│   │   │   │   ├── tower-websocket.ts  # WebSocket upgrade routing, WS↔PTY frame bridging
+│   │   │   │   ├── tower-utils.ts      # Rate limiting, path utils, MIME types, buildArchitectArgs()
+│   │   │   │   ├── tower-types.ts      # Shared TypeScript interfaces
+│   │   │   │   ├── tower-tunnel.ts     # Cloud tunnel client lifecycle
 │   │   │   │   └── open-server.ts      # File annotation viewer
 │   │   │   ├── db/                     # SQLite database layer
 │   │   │   │   ├── index.ts            # Database operations
