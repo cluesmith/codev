@@ -177,6 +177,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Blocked on 0104 merge. tower-server.ts is 3,439 lines with a 1,514-line HTTP handler. Decompose into ~7 focused modules. Also reduces spawn.ts from 1,439 to ~500 lines."
 
+  - id: "0107"
+    title: "Tower Cloud Registration UI"
+    summary: "Add register/deregister UI to the Tower homepage, cloning the af tower register/deregister CLI commands"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0107-tower-cloud-registration-ui.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [tower, cloud, ui]
+    timestamps:
+      conceived_at: "2026-02-14T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Mirror af tower register/deregister in the Tower web UI. OAuth flow, tower naming, deregister button."
+
   - id: "0106"
     title: "Rename Shepherd to Shellper"
     summary: "Rename all Shepherd references to Shellper (shell + helper) — pure rename refactoring across source files, tests, SQLite columns, socket paths, and documentation"
