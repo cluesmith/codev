@@ -154,6 +154,20 @@ export async function stopAll(): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
+/** Upload a pasted image to the server and return the temp file path (Issue #252). */
+export async function uploadPasteImage(blob: Blob): Promise<{ path: string }> {
+  const res = await fetch(apiUrl('api/paste-image'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': blob.type || 'image/png',
+      ...getAuthHeaders(),
+    },
+    body: blob,
+  });
+  if (!res.ok) throw new Error(`Image upload failed: ${res.status}`);
+  return res.json();
+}
+
 /** Get WebSocket path for a terminal tab's node-pty session. */
 export function getTerminalWsPath(tab: { type: string; terminalId?: string }): string | null {
   if (tab.terminalId) {

@@ -9,6 +9,7 @@ import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePath
 import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
+import { uploadPasteImage } from '../lib/api.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -21,6 +22,81 @@ interface TerminalProps {
   onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
   /** Whether this session is backed by a persistent shepherd process (Spec 0104) */
   persistent?: boolean;
+}
+
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
+
+/**
+ * Try to read an image from the clipboard and upload it. Returns true if an
+ * image was found and handled, false otherwise (caller should fall back to text).
+ */
+async function tryPasteImage(term: XTerm): Promise<boolean> {
+  if (!navigator.clipboard?.read) return false;
+  let imageFound = false;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const imageType = item.types.find((t) => IMAGE_TYPES.includes(t));
+      if (imageType) {
+        imageFound = true;
+        const blob = await item.getType(imageType);
+        term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
+        const { path } = await uploadPasteImage(blob);
+        term.write('\r\x1b[2K');
+        term.paste(path);
+        return true;
+      }
+    }
+  } catch {
+    if (imageFound) {
+      // Upload failed after image was detected — show error and clear status
+      term.write('\r\x1b[2K\x1b[31m[Image upload failed]\x1b[0m\r\n');
+      return true; // Don't fall back to text — the user intended to paste an image
+    }
+    // clipboard.read() denied or unavailable — fall back to text
+  }
+  return false;
+}
+
+/**
+ * Handle paste: try image first (via Clipboard API), fall back to text.
+ * Used by both the keyboard shortcut handler and the native paste event.
+ */
+async function handlePaste(term: XTerm): Promise<void> {
+  if (await tryPasteImage(term)) return;
+  // Fall back to text paste
+  try {
+    const text = await navigator.clipboard?.readText();
+    if (text) term.paste(text);
+  } catch {
+    // clipboard access denied
+  }
+}
+
+/**
+ * Handle a native paste event (e.g. from mobile long-press menu or context menu).
+ * Checks clipboardData for image files, then falls back to text.
+ */
+function handleNativePaste(event: ClipboardEvent, term: XTerm): void {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of Array.from(items)) {
+    if (IMAGE_TYPES.includes(item.type)) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      event.preventDefault();
+      term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
+      uploadPasteImage(blob).then(({ path }) => {
+        term.write('\r\x1b[2K');
+        term.paste(path);
+      }).catch(() => {
+        term.write('\r\x1b[2K\x1b[31m[Image upload failed]\x1b[0m\r\n');
+      });
+      return;
+    }
+  }
+  // Text paste: let xterm.js handle it natively (no preventDefault)
 }
 
 /**
@@ -120,6 +196,13 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.type !== 'keydown') return true;
 
+      // Shift+Enter: insert backslash + newline for line continuation
+      if (event.key === 'Enter' && event.shiftKey) {
+        event.preventDefault();
+        term.paste('\\\n');
+        return false;
+      }
+
       const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
       if (!modKey) return true;
 
@@ -136,14 +219,18 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
 
       if (event.key === 'v' || event.key === 'V') {
         event.preventDefault();
-        navigator.clipboard?.readText().then((text) => {
-          if (text) term.paste(text);
-        }).catch(() => {});
+        handlePaste(term);
         return false;
       }
 
       return true;
     });
+
+    // Native paste event listener for mobile browsers and context-menu paste.
+    // On mobile, users paste via long-press menu which fires a native paste event
+    // rather than a keyboard shortcut. This also handles image paste from context menu.
+    const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
+    containerRef.current.addEventListener('paste', onNativePaste);
 
     // Debounced fit: coalesce multiple fit() triggers into one resize event.
     // This prevents resize storms from multiple sources (initial fit, CSS
@@ -362,6 +449,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       }
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
+      containerRef.current?.removeEventListener('paste', onNativePaste);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();
