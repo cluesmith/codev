@@ -268,7 +268,7 @@ Remove `terminal-tmux.md` documentation (replaced by this spec's architecture). 
 6. No tmux dependency in Codev's codebase (tmux may still be installed but is not required)
 7. After Tower restart, reconnected terminals display recent output from shepherd's replay buffer (not blank)
 8. All existing Playwright E2E tests pass
-9. SQLite `terminal_sessions` table continues to be source of truth, with updated schema (`shepherd_socket`, `shepherd_pid` columns)
+9. SQLite `terminal_sessions` table continues to be source of truth, with updated schema (`shepherd_socket`, `shepherd_pid`, `shepherd_start_time` columns)
 
 ## Testing Requirements
 
@@ -331,4 +331,4 @@ Rejected because it has the same fundamental problem — an external multiplexer
 
 1. **Should we support session "snapshots"?** Save the full terminal state (screen buffer + cursor position) to disk for offline inspection. Not required for MVP but could be valuable for debugging. Deferred to future spec.
 
-2. **Should the shepherd replay buffer be configurable?** Default 1000 lines matches the existing RingBuffer. Power users might want more. Deferred — can be added as a config option later without protocol changes.
+2. **Should the shepherd replay buffer be configurable?** Default 10,000 lines matches the xterm.js scrollback. Power users might want more. Deferred — can be added as a config option later without protocol changes.
