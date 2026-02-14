@@ -6,6 +6,7 @@ worktrees/
 .agent-farm/
 .env
 .update-hashes.json
+.architect-role.md
 
 # OS files
 .DS_Store
