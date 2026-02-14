@@ -1119,10 +1119,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
     terminalManager.shutdown();
   }
 
-  // 3b. Disconnect shepherd clients (shepherds keep running)
+  // 3b. Shepherd clients: do NOT call shepherdManager.shutdown() here.
+  // SessionManager.shutdown() disconnects sockets, which triggers ShepherdClient
+  // 'close' events → PtySession exit(-1) → SQLite row deletion. This would erase
+  // the rows that reconcileTerminalSessions() needs on restart.
+  // Instead, let the process exit naturally — OS closes all sockets, and shepherds
+  // detect the disconnection and keep running. SQLite rows are preserved.
   if (shepherdManager) {
-    log('INFO', 'Disconnecting shepherd sessions (shepherds will continue running)...');
-    shepherdManager.shutdown();
+    log('INFO', 'Shepherd sessions will continue running (sockets close on process exit)');
   }
 
   // 4. Stop gate watcher
