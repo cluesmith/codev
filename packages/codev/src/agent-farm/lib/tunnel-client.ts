@@ -11,14 +11,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import fs from 'node:fs';
 import http2 from 'node:http2';
 import http from 'node:http';
-
-function wsDebug(msg: string): void {
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  try { fs.appendFileSync('/tmp/tunnel-ws-debug.log', line); } catch {}
-}
 import https from 'node:https';
 import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
@@ -463,7 +457,7 @@ export class TunnelClient {
     const authority = headers[':authority'] as string || `localhost:${this.options.localPort}`;
     const path = headers[':path'] as string || '/';
 
-    wsDebug(`[tunnel-ws] CONNECT ${path} → localhost:${this.options.localPort}`);
+    // WebSocket CONNECT: proxy to local server
 
     // Forward non-hop-by-hop headers from the H2 CONNECT to the local WS upgrade
     const forwardHeaders: Record<string, string | string[]> = {
@@ -492,7 +486,6 @@ export class TunnelClient {
     });
 
     wsReq.on('upgrade', (_res, socket, head) => {
-      wsDebug(`[tunnel-ws] upgrade success for ${path}, responding 200 to H2`);
       // Respond 200 to the H2 CONNECT
       stream.respond({ ':status': 200 });
 
@@ -505,27 +498,21 @@ export class TunnelClient {
       socket.pipe(stream);
       stream.pipe(socket);
 
-      socket.on('error', (err) => { wsDebug(`[tunnel-ws] local socket error: ${err.message}`); stream.destroy(); });
-      stream.on('error', (err) => { wsDebug(`[tunnel-ws] H2 stream error: ${err.message}`); socket.destroy(); });
-      socket.on('close', () => { wsDebug(`[tunnel-ws] local socket closed for ${path}`); if (!stream.destroyed) stream.destroy(); });
-      stream.on('close', () => { wsDebug(`[tunnel-ws] H2 stream closed for ${path}`); if (!socket.destroyed) socket.destroy(); });
+      socket.on('error', () => { stream.destroy(); });
+      stream.on('error', () => { socket.destroy(); });
+      socket.on('close', () => { if (!stream.destroyed) stream.destroy(); });
+      stream.on('close', () => { if (!socket.destroyed) socket.destroy(); });
     });
 
     // Handle non-upgrade responses (e.g. 404 for missing terminal)
     wsReq.on('response', (res) => {
-      let body = '';
-      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-      res.on('end', () => {
-        wsDebug(`[tunnel-ws] HTTP ${res.statusCode} for ${path}: ${body || '(no body)'}`);
-      });
       if (!stream.destroyed) {
         stream.respond({ ':status': res.statusCode || 502 });
         res.pipe(stream);
       }
     });
 
-    wsReq.on('error', (err) => {
-      wsDebug(`[tunnel-ws] request error for ${path}: ${err.message}`);
+    wsReq.on('error', () => {
       if (!stream.destroyed) {
         stream.respond({ ':status': 502 });
         stream.end();

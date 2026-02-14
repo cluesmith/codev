@@ -65,11 +65,26 @@ async function redeemToken(
   const url = `${serverUrl}/api/towers/register/redeem`;
   const body = JSON.stringify({ token, name: towerName, machineId });
 
+  // Use manual redirect to preserve POST method across 301/302 redirects
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
+    redirect: 'manual',
     signal: AbortSignal.timeout(30_000),
+  }).then((res) => {
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (location) {
+        return fetch(location, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(30_000),
+        });
+      }
+    }
+    return res;
   });
 
   if (!response.ok) {
@@ -162,7 +177,9 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   logger.header('Tower Registration');
 
   // Resolve service URL: CLI --service flag > CODEVOS_URL env var > existing config > default
-  const serverUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
+  // Normalize to HTTPS — HTTP POST requests get downgraded to GET by 301 redirects
+  const rawUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
+  const serverUrl = rawUrl.replace(/^http:\/\/(?!localhost)/, 'https://');
 
   // Start ephemeral callback server
   const callbackServer = await startCallbackServer();

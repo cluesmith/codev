@@ -194,11 +194,61 @@
 - **Metrics Dashboards**: [Monitoring links]
 - **Test Reports**: [CI/CD links]
 
-### Expert Consultation Summary
-[If expert AI review was performed post-implementation]
-- **Model**: [Which model]
-- **Feedback**: [Key points]
-- **Incorporated Changes**: [What was acted upon]
+### Timeline
+
+All times [timezone].
+
+| Time | Event |
+|------|-------|
+| [HH:MM] | First commit: spec with 3-way consultation feedback |
+| [HH:MM] | Spec revision addressing review comments |
+| — | **GATE: spec-approval** (human approval required) |
+| [HH:MM] | Implementation begins — Phase 1 |
+| [HH:MM] | Phase 1 complete after [N] iterations |
+| [HH:MM] | Phase 2 begins |
+| [HH:MM] | Phase 2 complete after [N] iterations |
+| — | **Context window expired** — session resumed automatically |
+| [HH:MM] | Review document written |
+| [HH:MM] | **GATE: pr-ready** (awaiting human approval) |
+
+### Autonomous Operation
+
+| Period | Duration | Activity |
+|--------|----------|----------|
+| Spec + Plan | [Xm] | Created spec, incorporated 3-way feedback, created plan |
+| Human gate wait | [Xh Xm] | Idle — waiting for spec-approval + plan-approval |
+| Implementation → PR | [Xh Xm] | [N] phases, [N] consultation rounds, review document, PR creation |
+
+**Total wall clock** (first commit to pr-ready): [time]
+**Total autonomous work time** (excluding gate wait): [time]
+**Context windows used**: [N] (expired [N] times, resumed automatically)
+
+### CMAP Consultation History
+
+[Total consultation rounds] rounds × 3 models = [total files]. [X] APPROVE, [Y] REQUEST_CHANGES, [Z] COMMENT.
+
+| Phase | Iters | Who Blocked | What They Caught |
+|-------|-------|-------------|------------------|
+| Specify | [N] | [Model(s)] | [Key issues raised] |
+| Plan | [N] | [Model(s)] | [Key issues raised] |
+| Phase 1 | [N] | [Model(s)] | [Key issues raised] |
+| Phase 2 | [N] | [Model(s)] | [Key issues raised] |
+| Review | [N] | [Model(s)] | [Key issues raised] |
+
+#### Reviewer Patterns
+
+**Codex**: [What Codex consistently focused on — test quality, edge cases, completeness, etc.]
+
+**Gemini**: [What Gemini consistently focused on — architecture, documentation, naming, etc.]
+
+**Claude**: [What Claude consistently focused on — type safety, compilation, security, etc.]
+
+#### Prompting Improvements for Future Builders
+
+Issues that the builder should have caught without needing reviewer feedback:
+
+1. [Pattern the builder missed — describe the anti-pattern and the fix]
+2. [Pattern the builder missed — describe the anti-pattern and the fix]
 
 ## Sign-off
 - [ ] Technical Lead Review
