@@ -576,6 +576,80 @@ describe('ShepherdClient', () => {
     });
   });
 
+  describe('waitForReplay', () => {
+    it('resolves immediately if replay data already received', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            // Send WELCOME + REPLAY together (same as shepherd handleHello)
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeReplay(Buffer.from('prompt $ \r\n')));
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+      await client.connect();
+
+      // Small delay to let REPLAY frame arrive
+      await new Promise((r) => setTimeout(r, 50));
+
+      const replay = await client.waitForReplay();
+      expect(replay.toString()).toBe('prompt $ \r\n');
+    });
+
+    it('waits for replay frame that arrives after connect resolves', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            // Delay REPLAY to simulate split reads
+            setTimeout(() => {
+              socket.write(encodeReplay(Buffer.from('delayed replay\r\n')));
+            }, 50);
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+      await client.connect();
+
+      // REPLAY hasn't arrived yet
+      expect(client.getReplayData()).toBeNull();
+
+      // waitForReplay should wait and resolve when REPLAY arrives
+      const replay = await client.waitForReplay();
+      expect(replay.toString()).toBe('delayed replay\r\n');
+    });
+
+    it('resolves with empty buffer on timeout when no replay sent', async () => {
+      const shepherd = createMiniShepherd(socketPath);
+      cleanup.push(shepherd.close);
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+      await client.connect();
+
+      // Server never sends REPLAY — should timeout
+      const replay = await client.waitForReplay(100);
+      expect(replay.length).toBe(0);
+    });
+  });
+
   describe('version mismatch handling', () => {
     it('disconnects when shepherd version is older than Tower version', async () => {
       let serverSocket: net.Socket | null = null;

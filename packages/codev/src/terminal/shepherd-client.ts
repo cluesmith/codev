@@ -43,6 +43,7 @@ export interface IShepherdClient extends EventEmitter {
   spawn(msg: SpawnMessage): void;
   ping(): void;
   getReplayData(): Buffer | null;
+  waitForReplay(timeoutMs?: number): Promise<Buffer>;
   readonly connected: boolean;
 }
 
@@ -250,5 +251,28 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
   /** Get the last received replay data, or null if none. */
   getReplayData(): Buffer | null {
     return this.replayData;
+  }
+
+  /**
+   * Wait for the REPLAY frame to arrive after connection.
+   * The shepherd sends REPLAY immediately after WELCOME, but they may
+   * arrive in separate reads. Returns the replay data, or empty Buffer
+   * if no REPLAY arrives within the timeout (shepherd had nothing to replay).
+   */
+  waitForReplay(timeoutMs: number = 500): Promise<Buffer> {
+    if (this.replayData !== null) {
+      return Promise.resolve(this.replayData);
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.removeListener('replay', onReplay);
+        resolve(Buffer.alloc(0));
+      }, timeoutMs);
+      const onReplay = (data: Buffer) => {
+        clearTimeout(timer);
+        resolve(data);
+      };
+      this.once('replay', onReplay);
+    });
   }
 }

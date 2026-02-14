@@ -641,7 +641,9 @@ async function reconcileTerminalSessions(): Promise<void> {
         continue; // Will be cleaned up in Phase 3
       }
 
-      const replayData = client.getReplayData() ?? Buffer.alloc(0);
+      // Wait for REPLAY frame — the shepherd sends it right after WELCOME,
+      // but it may arrive in a separate read from the Unix socket.
+      const replayData = await client.waitForReplay();
       const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
 
       // Create a PtySession backed by the reconnected shepherd client
@@ -1120,7 +1122,8 @@ async function getTerminalsForProject(
           restartOptions,
         );
         if (client) {
-          const replayData = client.getReplayData() ?? Buffer.alloc(0);
+          // Wait for REPLAY frame — same race as startup reconciliation path
+          const replayData = await client.waitForReplay();
           const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`;
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
           const ptySession = manager.getSession(newSession.id);
