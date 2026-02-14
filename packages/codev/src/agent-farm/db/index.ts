@@ -367,6 +367,21 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Created known_projects table');
   }
 
+  // Migration v6: Add shepherd columns to terminal_sessions (Spec 0104)
+  const v6 = db.prepare('SELECT version FROM _migrations WHERE version = 6').get();
+  if (!v6) {
+    const cols = ['shepherd_socket TEXT', 'shepherd_pid INTEGER', 'shepherd_start_time INTEGER'];
+    for (const col of cols) {
+      try {
+        db.exec(`ALTER TABLE terminal_sessions ADD COLUMN ${col}`);
+      } catch {
+        // Column already exists (fresh install ran updated schema)
+      }
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (6)').run();
+    console.log('[info] Added shepherd columns to terminal_sessions (Spec 0104)');
+  }
+
   return db;
 }
 

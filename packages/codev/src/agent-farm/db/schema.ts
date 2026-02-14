@@ -104,6 +104,9 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   role_id TEXT,                           -- builder ID or shell ID (null for architect)
   pid INTEGER,                            -- process ID of the terminal
   tmux_session TEXT,                      -- tmux session name if tmux-backed
+  shepherd_socket TEXT,                   -- Unix socket path for shepherd process
+  shepherd_pid INTEGER,                   -- shepherd process PID
+  shepherd_start_time INTEGER,            -- shepherd process start time (epoch ms)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
