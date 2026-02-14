@@ -260,7 +260,7 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 
   if (!config) {
     logger.blank();
-    logger.info('Cloud Registration: not registered. Run \'af tower register\' to connect to codevos.ai.');
+    logger.info('Cloud Registration: not registered. Run \'af tower connect\' to connect to codevos.ai.');
     return;
   }
 

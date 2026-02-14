@@ -67,7 +67,7 @@ export function readCloudConfig(): CloudConfig | null {
     parsed = JSON.parse(raw);
   } catch {
     throw new Error(
-      `Cloud config at ${configPath} contains invalid JSON. Delete it and re-register with 'af tower register'.`
+      `Cloud config at ${configPath} contains invalid JSON. Delete it and re-register with 'af tower connect'.`
     );
   }
 
@@ -86,7 +86,7 @@ export function readCloudConfig(): CloudConfig | null {
   if (missing.length > 0) {
     console.warn(
       `Cloud config at ${configPath} is missing required fields: ${missing.join(', ')}. ` +
-        `Tower will operate in local-only mode. Fix with 'af tower register'.`
+        `Tower will operate in local-only mode. Fix with 'af tower connect'.`
     );
     return null;
   }

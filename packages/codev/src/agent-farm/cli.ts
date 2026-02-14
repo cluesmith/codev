@@ -425,11 +425,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   towerCmd
-    .command('register')
-    .description('Register this tower with codevos.ai for remote access')
+    .command('connect')
+    .alias('register')
+    .description('Connect this tower to Codev Cloud for remote access')
     .option('--reauth', 'Update API key without changing tower name')
     .option('--service <url>', 'CodevOS service URL (default: https://codevos.ai)')
-    .option('-p, --port <port>', 'Tower port to signal after registration (default: 4100)')
+    .option('-p, --port <port>', 'Tower port to signal after connection (default: 4100)')
     .action(async (options) => {
       try {
         await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
@@ -441,9 +442,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   towerCmd
-    .command('deregister')
-    .description('Remove this tower from codevos.ai')
-    .option('-p, --port <port>', 'Tower port to signal after deregistration (default: 4100)')
+    .command('disconnect')
+    .alias('deregister')
+    .description('Disconnect this tower from Codev Cloud')
+    .option('-p, --port <port>', 'Tower port to signal after disconnection (default: 4100)')
     .action(async (options) => {
       try {
         await towerDeregister({ port: options.port ? parseInt(options.port, 10) : undefined });

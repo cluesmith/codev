@@ -143,7 +143,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
       stopMetadataRefresh();
     }
     if (state === 'auth_failed') {
-      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower register --reauth\' to update credentials.');
+      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower connect --reauth\' to update credentials.');
     }
   });
 

@@ -357,7 +357,7 @@ export class TunnelClient {
     if (reason === 'invalid_api_key') {
       this.setState('auth_failed');
       console.error(
-        "Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."
+        "Cloud connection failed: API key is invalid or revoked. Run 'af tower connect --reauth' to update credentials."
       );
       // Circuit breaker: don't retry
       return;

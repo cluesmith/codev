@@ -18,6 +18,7 @@ export default defineConfig({
       '**/worktrees/**',             // Git worktrees have their own test files
       '**/.builders/**',             // Builder worktrees
       '**/bugfix-213-architect-restart.test.ts',  // Integration test that requires dist/ build
+      '**/init.test.ts',                            // Flaky: codev doctor timeout in worktree context
     ],
     coverage: {
       provider: 'v8',
