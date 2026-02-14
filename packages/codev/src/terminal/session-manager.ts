@@ -1,13 +1,13 @@
 /**
- * SessionManager: orchestrates shepherd process lifecycle.
+ * SessionManager: orchestrates shellper process lifecycle.
  *
  * Responsibilities:
- * - Spawn shepherd processes as detached children
- * - Connect ShepherdClient to each shepherd
+ * - Spawn shellper processes as detached children
+ * - Connect ShellperClient to each shellper
  * - Kill sessions (SIGTERM → wait → SIGKILL)
  * - Detect and clean up stale sockets
  * - Auto-restart on exit (configurable per session)
- * - Reconnect to existing shepherds after Tower restart
+ * - Reconnect to existing shellpers after Tower restart
  *
  * Process start time validation prevents PID reuse reconnection.
  */
@@ -18,11 +18,11 @@ import net from 'node:net';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
-import { ShepherdClient, type IShepherdClient } from './shepherd-client.js';
+import { ShellperClient, type IShellperClient } from './shellper-client.js';
 
 export interface SessionManagerConfig {
   socketDir: string;
-  shepherdScript: string;
+  shellperScript: string;
   nodeExecutable: string;
 }
 
@@ -51,7 +51,7 @@ export interface ReconnectRestartOptions {
 }
 
 interface ManagedSession {
-  client: IShepherdClient;
+  client: IShellperClient;
   socketPath: string;
   pid: number;
   startTime: number;
@@ -68,10 +68,10 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Spawn a new shepherd process and connect to it.
+   * Spawn a new shellper process and connect to it.
    * Returns the connected client.
    */
-  async createSession(opts: CreateSessionOptions): Promise<IShepherdClient> {
+  async createSession(opts: CreateSessionOptions): Promise<IShellperClient> {
     const socketPath = this.getSocketPath(opts.sessionId);
 
     // Ensure socket directory exists with 0700 permissions
@@ -80,8 +80,8 @@ export class SessionManager extends EventEmitter {
     // Clean up any stale socket file
     this.unlinkSocketIfExists(socketPath);
 
-    // Build config for shepherd-main.js
-    const shepherdConfig = JSON.stringify({
+    // Build config for shellper-main.js
+    const shellperConfig = JSON.stringify({
       command: opts.command,
       args: opts.args,
       cwd: opts.cwd,
@@ -91,28 +91,28 @@ export class SessionManager extends EventEmitter {
       socketPath,
     });
 
-    // Spawn shepherd as detached process
-    const child = cpSpawn(this.config.nodeExecutable, [this.config.shepherdScript, shepherdConfig], {
+    // Spawn shellper as detached process
+    const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
     // Read PID + startTime from stdout
-    const info = await this.readShepherdInfo(child);
+    const info = await this.readShellperInfo(child);
     child.unref();
 
-    // Post-spawn setup with rollback: if anything fails after the shepherd
+    // Post-spawn setup with rollback: if anything fails after the shellper
     // is spawned, kill the orphaned process and clean up the socket.
-    let client: ShepherdClient;
+    let client: ShellperClient;
     try {
       // Wait briefly for socket to be ready
       await this.waitForSocket(socketPath);
 
       // Connect client
-      client = new ShepherdClient(socketPath);
+      client = new ShellperClient(socketPath);
       await client.connect();
     } catch (err) {
-      // Rollback: kill the orphaned shepherd process
+      // Rollback: kill the orphaned shellper process
       try { process.kill(info.pid, 'SIGKILL'); } catch { /* already dead */ }
       this.unlinkSocketIfExists(socketPath);
       throw err;
@@ -150,13 +150,13 @@ export class SessionManager extends EventEmitter {
       this.emit('session-error', opts.sessionId, err);
     });
 
-    // Handle shepherd crash (socket disconnects without EXIT frame)
+    // Handle shellper crash (socket disconnects without EXIT frame)
     client.on('close', () => {
       // If the session is still in the map (wasn't already cleaned up by exit/kill),
-      // the shepherd died without sending EXIT. Remove the dead session.
+      // the shellper died without sending EXIT. Remove the dead session.
       if (this.sessions.has(opts.sessionId)) {
         this.removeDeadSession(opts.sessionId);
-        this.emit('session-error', opts.sessionId, new Error('Shepherd disconnected unexpectedly'));
+        this.emit('session-error', opts.sessionId, new Error('Shellper disconnected unexpectedly'));
       }
     });
 
@@ -169,9 +169,9 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Reconnect to an existing shepherd process after Tower restart.
+   * Reconnect to an existing shellper process after Tower restart.
    * Validates PID is alive and start time matches.
-   * Returns connected client, or null if shepherd is stale/dead.
+   * Returns connected client, or null if shellper is stale/dead.
    */
   async reconnectSession(
     sessionId: string,
@@ -179,7 +179,7 @@ export class SessionManager extends EventEmitter {
     pid: number,
     startTime: number,
     restartOptions?: ReconnectRestartOptions,
-  ): Promise<IShepherdClient | null> {
+  ): Promise<IShellperClient | null> {
     // Check if process is alive
     if (!this.isProcessAlive(pid)) {
       return null;
@@ -203,7 +203,7 @@ export class SessionManager extends EventEmitter {
     }
 
     // Connect client
-    const client = new ShepherdClient(socketPath);
+    const client = new ShellperClient(socketPath);
     try {
       await client.connect();
     } catch {
@@ -251,11 +251,11 @@ export class SessionManager extends EventEmitter {
       this.emit('session-error', sessionId, err);
     });
 
-    // Handle shepherd crash (socket disconnects without EXIT frame)
+    // Handle shellper crash (socket disconnects without EXIT frame)
     client.on('close', () => {
       if (this.sessions.has(sessionId)) {
         this.removeDeadSession(sessionId);
-        this.emit('session-error', sessionId, new Error('Shepherd disconnected unexpectedly'));
+        this.emit('session-error', sessionId, new Error('Shellper disconnected unexpectedly'));
       }
     });
 
@@ -313,8 +313,8 @@ export class SessionManager extends EventEmitter {
   /**
    * List all active sessions.
    */
-  listSessions(): Map<string, IShepherdClient> {
-    const result = new Map<string, IShepherdClient>();
+  listSessions(): Map<string, IShellperClient> {
+    const result = new Map<string, IShellperClient>();
     for (const [id, session] of this.sessions) {
       result.set(id, session.client);
     }
@@ -349,7 +349,7 @@ export class SessionManager extends EventEmitter {
     }
 
     for (const file of files) {
-      if (!file.startsWith('shepherd-') || !file.endsWith('.sock')) continue;
+      if (!file.startsWith('shellper-') || !file.endsWith('.sock')) continue;
 
       const fullPath = path.join(this.config.socketDir, file);
 
@@ -362,15 +362,15 @@ export class SessionManager extends EventEmitter {
         continue;
       }
 
-      // Extract session ID from filename: shepherd-{sessionId}.sock
-      const sessionId = file.replace('shepherd-', '').replace('.sock', '');
+      // Extract session ID from filename: shellper-{sessionId}.sock
+      const sessionId = file.replace('shellper-', '').replace('.sock', '');
 
       // Skip if we have an active session for this
       if (this.sessions.has(sessionId)) continue;
 
-      // Probe the socket: try connecting to see if a shepherd is alive.
+      // Probe the socket: try connecting to see if a shellper is alive.
       // If connection is refused, the socket is stale and safe to delete.
-      // If connection succeeds, a shepherd is still running — leave it alone.
+      // If connection succeeds, a shellper is still running — leave it alone.
       const isAlive = await this.probeSocket(fullPath);
       if (isAlive) continue;
 
@@ -413,9 +413,9 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Disconnect from all sessions without killing shepherd processes.
+   * Disconnect from all sessions without killing shellper processes.
    * Per spec: "When Tower intentionally stops, Tower closes its socket
-   * connections to shepherds. Shepherds continue running."
+   * connections to shellpers. Shellpers continue running."
    */
   shutdown(): void {
     for (const [id, session] of this.sessions) {
@@ -446,7 +446,7 @@ export class SessionManager extends EventEmitter {
   }
 
   private getSocketPath(sessionId: string): string {
-    return path.join(this.config.socketDir, `shepherd-${sessionId}.sock`);
+    return path.join(this.config.socketDir, `shellper-${sessionId}.sock`);
   }
 
   private unlinkSocketIfExists(socketPath: string): void {
@@ -460,13 +460,13 @@ export class SessionManager extends EventEmitter {
     }
   }
 
-  private readShepherdInfo(
+  private readShellperInfo(
     child: ReturnType<typeof cpSpawn>,
   ): Promise<{ pid: number; startTime: number }> {
     return new Promise((resolve, reject) => {
       let data = '';
       const timeout = setTimeout(() => {
-        reject(new Error('Timed out reading shepherd info from stdout'));
+        reject(new Error('Timed out reading shellper info from stdout'));
       }, 10_000);
 
       child.stdout!.on('data', (chunk: Buffer) => {
@@ -479,7 +479,7 @@ export class SessionManager extends EventEmitter {
           const info = JSON.parse(data) as { pid: number; startTime: number };
           resolve(info);
         } catch {
-          reject(new Error(`Invalid shepherd info JSON: ${data}`));
+          reject(new Error(`Invalid shellper info JSON: ${data}`));
         }
       });
 
@@ -491,7 +491,7 @@ export class SessionManager extends EventEmitter {
       child.on('exit', (code) => {
         if (code !== null && code !== 0 && data === '') {
           clearTimeout(timeout);
-          reject(new Error(`Shepherd exited with code ${code} before writing info`));
+          reject(new Error(`Shellper exited with code ${code} before writing info`));
         }
       });
     });

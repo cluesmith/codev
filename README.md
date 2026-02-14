@@ -325,7 +325,7 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 
 **Current limitations:**
 - Currently optimized for **Claude Code** (uses `-p` flag, `--append-system-prompt`, etc.)
-- Uses **shepherd processes** for persistent terminal sessions (node-pty handles terminal I/O)
+- Uses **shellper processes** for persistent terminal sessions (node-pty handles terminal I/O)
 - macOS-focused (should work on Linux but less tested)
 
 ## Architect-Builder Pattern

@@ -29,10 +29,10 @@ For debugging common issues, start here:
 |-------|-------------|---------------|
 | **"Tower won't start"** | `packages/codev/src/agent-farm/servers/tower-server.ts` | Port 4100 conflict, node-pty availability |
 | **"Project won't activate"** | `tower-server.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
-| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shepherd alive |
-| **"Terminal not persistent"** | `tower-server.ts` → session creation | Check shepherd spawn succeeded, dashboard shows `persistent` flag |
+| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
+| **"Terminal not persistent"** | `tower-server.ts` → session creation | Check shellper spawn succeeded, dashboard shows `persistent` flag |
 | **"Project shows inactive"** | `tower-server.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
-| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shepherd session, role injection |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shellper session, role injection |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
@@ -53,8 +53,8 @@ curl -s http://localhost:4100/api/projects | jq
 # Check terminal sessions on Tower
 curl -s http://localhost:4100/api/terminals | jq
 
-# Check shepherd processes (Spec 0104)
-ls ~/.codev/run/shepherd-*.sock 2>/dev/null
+# Check shellper processes (Spec 0104)
+ls ~/.codev/run/shellper-*.sock 2>/dev/null
 
 # Check Tower logs (if started with --log-file)
 tail -f ~/.agent-farm/tower.log
@@ -77,8 +77,8 @@ tail -f ~/.agent-farm/tower.log
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Worktree** | Git worktree providing isolated environment for a builder |
 | **node-pty** | Native PTY session manager replacing ttyd, multiplexed over WebSocket |
-| **Shepherd** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
-| **SessionManager** | Tower-side orchestrator for shepherd process lifecycle (spawn, reconnect, kill, auto-restart) |
+| **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
+| **SessionManager** | Tower-side orchestrator for shellper process lifecycle (spawn, reconnect, kill, auto-restart) |
 | **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
 | **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
 
@@ -133,7 +133,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
               ┌─────────────┼─────────────┬─────────────┐
               ▼             ▼             ▼             ▼
    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-   │ Shepherd │  │ Shepherd │  │ Shepherd │  │ Shepherd │
+   │ Shellper │  │ Shellper │  │ Shellper │  │ Shellper │
    │ (unix    │  │ (unix    │  │ (unix    │  │ (unix    │
    │  socket) │  │  socket) │  │  socket) │  │  socket) │
    │ architect│  │ builder  │  │ builder  │  │  shell   │
@@ -150,8 +150,8 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 **Key Components**:
 1. **Tower Server**: Single daemon HTTP server (port 4100) serving React SPA and REST API for all projects
 2. **Terminal Manager**: node-pty based PTY session manager with WebSocket multiplexing (Spec 0085)
-3. **Shepherd Processes**: Detached Node.js processes owning PTYs for session persistence (Spec 0104)
-4. **SessionManager**: Tower-side orchestrator for shepherd lifecycle (spawn, reconnect, kill, auto-restart)
+3. **Shellper Processes**: Detached Node.js processes owning PTYs for session persistence (Spec 0104)
+4. **SessionManager**: Tower-side orchestrator for shellper lifecycle (spawn, reconnect, kill, auto-restart)
 5. **Git Worktrees**: Isolated working directories for each builder
 6. **SQLite Databases**: State persistence (local and global)
 
@@ -159,8 +159,8 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 1. User opens dashboard at `http://localhost:4200`
 2. React dashboard polls `/api/state` for current state (1-second interval). Response includes `persistent` boolean per terminal.
 3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
-4. Terminal creation uses `SessionManager.createSession()` for persistent shepherd-backed sessions, or direct node-pty for non-persistent sessions
-5. Shepherd-backed PtySessions delegate write/resize/kill to the shepherd's Unix socket via `IShepherdClient`
+4. Terminal creation uses `SessionManager.createSession()` for persistent shellper-backed sessions, or direct node-pty for non-persistent sessions
+5. Shellper-backed PtySessions delegate write/resize/kill to the shellper's Unix socket via `IShellperClient`
 6. Builders work in isolated git worktrees under `.builders/`
 
 ### Port System
@@ -201,28 +201,28 @@ The global registry is a SQLite database that tracks port allocations across all
 - WAL mode enables concurrent reads
 - 5-second busy timeout prevents deadlocks
 
-### Shepherd Process Architecture (Spec 0104)
+### Shellper Process Architecture (Spec 0104)
 
-Shepherd processes provide terminal session persistence. Each terminal session is owned by a dedicated detached Node.js process (the "shepherd") that holds the PTY master file descriptor. Tower communicates with shepherds over Unix sockets.
+Shellper processes provide terminal session persistence. Each terminal session is owned by a dedicated detached Node.js process (the "shellper") that holds the PTY master file descriptor. Tower communicates with shellpers over Unix sockets.
 
 ```
 Browser (xterm.js, scrollback: 50000)
   |  WebSocket (binary hybrid protocol, unchanged)
 Tower (SessionManager -> PtySession -> RingBuffer)
-  |  Unix Socket (~/.codev/run/shepherd-{sessionId}.sock)
-Shepherd (PTY owner + 10,000-line replay buffer)
+  |  Unix Socket (~/.codev/run/shellper-{sessionId}.sock)
+Shellper (PTY owner + 10,000-line replay buffer)
   |  PTY master fd
 Shell / Claude / Builder process
 ```
 
-#### Shepherd Lifecycle
+#### Shellper Lifecycle
 
-1. **Spawn**: Tower calls `SessionManager.createSession()`, which spawns `shepherd-main.js` as a detached child (`child_process.spawn` with `detached: true`). Shepherd writes PID + start time to stdout, then Tower calls `child.unref()`.
-2. **Connect**: Tower connects to the shepherd's Unix socket at `~/.codev/run/shepherd-{sessionId}.sock` via `ShepherdClient`. Handshake: Tower sends HELLO, shepherd responds with WELCOME (pid, cols, rows, startTime).
-3. **Data flow**: Shepherd forwards PTY output as DATA frames to Tower. Tower pipes DATA frames to all attached WebSocket clients via PtySession.
-4. **Tower restart**: Shepherds continue running as orphaned OS processes. On restart, Tower queries SQLite for sessions with `shepherd_socket IS NOT NULL`, validates PID + start time, reconnects via Unix socket, and receives REPLAY frame with buffered output.
+1. **Spawn**: Tower calls `SessionManager.createSession()`, which spawns `shellper-main.js` as a detached child (`child_process.spawn` with `detached: true`). Shellper writes PID + start time to stdout, then Tower calls `child.unref()`.
+2. **Connect**: Tower connects to the shellper's Unix socket at `~/.codev/run/shellper-{sessionId}.sock` via `ShellperClient`. Handshake: Tower sends HELLO, shellper responds with WELCOME (pid, cols, rows, startTime).
+3. **Data flow**: Shellper forwards PTY output as DATA frames to Tower. Tower pipes DATA frames to all attached WebSocket clients via PtySession.
+4. **Tower restart**: Shellpers continue running as orphaned OS processes. On restart, Tower queries SQLite for sessions with `shellper_socket IS NOT NULL`, validates PID + start time, reconnects via Unix socket, and receives REPLAY frame with buffered output.
 5. **Kill**: Tower sends SIGTERM via SIGNAL frame, waits 5s, SIGKILL if needed. Cleans up socket file.
-6. **Graceful degradation**: If shepherd spawn fails, Tower falls back to direct node-pty (non-persistent). SQLite row has `shepherd_socket = NULL`. Dashboard shows "Session persistence unavailable" warning.
+6. **Graceful degradation**: If shellper spawn fails, Tower falls back to direct node-pty (non-persistent). SQLite row has `shellper_socket = NULL`. Dashboard shows "Session persistence unavailable" warning.
 
 #### Wire Protocol
 
@@ -231,14 +231,14 @@ Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
 | Type | Code | Direction | Purpose |
 |------|------|-----------|---------|
 | DATA | 0x01 | Both | PTY output / user input |
-| RESIZE | 0x02 | Tower->Shepherd | Terminal resize (JSON: cols, rows) |
-| SIGNAL | 0x03 | Tower->Shepherd | Send signal to child (allowlist: SIGINT, SIGTERM, SIGKILL, SIGHUP, SIGWINCH) |
-| EXIT | 0x04 | Shepherd->Tower | Child process exited (JSON: code, signal) |
-| REPLAY | 0x05 | Shepherd->Tower | Replay buffer dump on connect |
+| RESIZE | 0x02 | Tower->Shellper | Terminal resize (JSON: cols, rows) |
+| SIGNAL | 0x03 | Tower->Shellper | Send signal to child (allowlist: SIGINT, SIGTERM, SIGKILL, SIGHUP, SIGWINCH) |
+| EXIT | 0x04 | Shellper->Tower | Child process exited (JSON: code, signal) |
+| REPLAY | 0x05 | Shellper->Tower | Replay buffer dump on connect |
 | PING/PONG | 0x06/0x07 | Both | Keepalive |
-| HELLO | 0x08 | Tower->Shepherd | Handshake (JSON: version) |
-| WELCOME | 0x09 | Shepherd->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
-| SPAWN | 0x0A | Tower->Shepherd | Restart child process (JSON: command, args, cwd, env) |
+| HELLO | 0x08 | Tower->Shellper | Handshake (JSON: version) |
+| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
+| SPAWN | 0x0A | Tower->Shellper | Restart child process (JSON: command, args, cwd, env) |
 
 Max frame payload: 16MB. Unknown frame types are silently ignored.
 
@@ -246,30 +246,30 @@ Max frame payload: 16MB. Unknown frame types are silently ignored.
 
 Architect sessions use `restartOnExit: true` in `SessionManager.createSession()`:
 - On child exit, SessionManager increments restart counter
-- After `restartDelay` (default: 2s), sends SPAWN frame to shepherd with original command/args
+- After `restartDelay` (default: 2s), sends SPAWN frame to shellper with original command/args
 - `maxRestarts` (default: 50) prevents infinite restart loops
 - Counter resets after `restartResetAfter` (default: 5min) of stable operation
 
 #### Known Issue: Hardcoded Initial Dimensions (cols: 200, rows: 50)
 
-All shepherd sessions are spawned with `cols: 200, rows: 50` in `tower-server.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
+All shellper sessions are spawned with `cols: 200, rows: 50` in `tower-server.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
 
 **Symptom**: Large blank area above the first few prompts when scrolling up in a newly opened terminal.
 
-**Root cause**: Shepherd spawns the PTY before the browser's actual dimensions are known (chicken-and-egg: browser can't send resize until WebSocket connects, but shepherd needs cols/rows at spawn time).
+**Root cause**: Shellper spawns the PTY before the browser's actual dimensions are known (chicken-and-egg: browser can't send resize until WebSocket connects, but shellper needs cols/rows at spawn time).
 
 **Potential fixes**:
 1. Use smaller defaults (e.g., `cols: 80, rows: 24`) to minimize the gap
 2. Lazy spawn: defer PTY creation until the first RESIZE frame arrives from Tower
 3. Send a clear screen sequence (`ESC[2J ESC[H`) after the first resize
 
-**Affected code**: `tower-server.ts` lines calling `shepherdManager.createSession()` — search for `cols: 200`.
+**Affected code**: `tower-server.ts` lines calling `shellperManager.createSession()` — search for `cols: 200`.
 
 #### Security
 
 - **Unix socket permissions**: `~/.codev/run/` is `0700` (owner-only). Socket files are `0600`.
 - **No authentication protocol**: Filesystem permissions are the authentication mechanism.
-- **Input isolation**: Each shepherd manages exactly one session. No cross-session access.
+- **Input isolation**: Each shellper manages exactly one session. No cross-session access.
 - **PID reuse protection**: Reconnection validates process start time, not just PID.
 
 #### Session Naming Convention
@@ -285,7 +285,7 @@ Each session has a unique name based on its purpose:
 
 #### node-pty Terminal Manager (Spec 0085, extended by Spec 0104)
 
-All terminal sessions are managed by the Terminal Manager (`packages/codev/src/terminal/`), which multiplexes PTY sessions over WebSocket. As of Spec 0104, PtySession supports two I/O backends: direct node-pty (non-persistent) and shepherd-backed (persistent via `attachShepherd()`).
+All terminal sessions are managed by the Terminal Manager (`packages/codev/src/terminal/`), which multiplexes PTY sessions over WebSocket. As of Spec 0104, PtySession supports two I/O backends: direct node-pty (non-persistent) and shellper-backed (persistent via `attachShellper()`).
 
 ```bash
 # REST API for session management
@@ -428,7 +428,7 @@ When cleaning up a builder (`af cleanup -p 0003`):
 
 1. **Check for uncommitted changes**: Refuses if dirty (unless `--force`)
 2. **Kill PTY session**: Terminal Manager kills node-pty session
-3. **Kill shepherd session**: `SessionManager.killSession()` sends SIGTERM, waits 5s, SIGKILL, cleans up socket
+3. **Kill shellper session**: `SessionManager.killSession()` sends SIGTERM, waits 5s, SIGKILL, cleans up socket
 4. **Remove worktree**: `git worktree remove .builders/0003`
 5. **Delete branch**: `git branch -d builder/0003-feature-name`
 6. **Update state**: Remove builder from database
@@ -450,11 +450,11 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │  │                     │    │                     │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Architect     │  │    │  │ Architect     │  │                         │
-│  │  │ (shepherd)    │  │    │  │ (shepherd)    │  │                         │
+│  │  │ (shellper)    │  │    │  │ (shellper)    │  │                         │
 │  │  └───────────────┘  │    │  └───────────────┘  │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Shells        │  │    │  │ Builders      │  │                         │
-│  │  │ (shepherd)    │  │    │  │ (shepherd)    │  │                         │
+│  │  │ (shellper)    │  │    │  │ (shellper)    │  │                         │
 │  │  └───────────────┘  │    │  └───────────────┘  │                         │
 │  └─────────────────────┘    └─────────────────────┘                         │
 │                                                                              │
@@ -467,17 +467,17 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    TerminalManager (node-pty sessions)               │    │
-│  │  - Spawns PTY sessions via node-pty or attaches to shepherd         │    │
-│  │  - createSessionRaw() for shepherd-backed sessions (no spawn)       │    │
+│  │  - Spawns PTY sessions via node-pty or attaches to shellper         │    │
+│  │  - createSessionRaw() for shellper-backed sessions (no spawn)       │    │
 │  │  - Maintains ring buffer (1000 lines) per session                    │    │
 │  │  - Handles WebSocket broadcast to connected clients                  │    │
-│  │  - shutdown() preserves shepherd-backed sessions                     │    │
+│  │  - shutdown() preserves shellper-backed sessions                     │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                 SessionManager (shepherd orchestration)              │    │
-│  │  - Spawns shepherd-main.js as detached OS processes                 │    │
-│  │  - Connects ShepherdClient to each shepherd via Unix socket         │    │
-│  │  - Reconnects to living shepherds after Tower restart               │    │
+│  │                 SessionManager (shellper orchestration)              │    │
+│  │  - Spawns shellper-main.js as detached OS processes                 │    │
+│  │  - Connects ShellperClient to each shellper via Unix socket         │    │
+│  │  - Reconnects to living shellpers after Tower restart               │    │
 │  │  - Auto-restart for architect sessions (SPAWN frame)                │    │
 │  │  - Cleans up stale sockets on startup                               │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
@@ -500,24 +500,24 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 
 **These MUST remain true - violating them will break the system:**
 
-1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shepherd-backed)
+1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shellper-backed)
 2. **projectTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which project
-3. **SQLite (global.db) tracks port allocations and terminal sessions**: Port assignments and shepherd metadata (`shepherd_socket`, `shepherd_pid`, `shepherd_start_time`) persist across restarts
+3. **SQLite (global.db) tracks port allocations and terminal sessions**: Port assignments and shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`) persist across restarts
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/project/<encoded>/` routes
 5. **WebSocket paths include project context**: Format is `/project/<base64url>/ws/terminal/<id>`
 
 #### State Split Problem & Reconciliation
 
 **WARNING**: The system has a known state split between:
-- **SQLite (global.db)**: Persistent port allocations and terminal session metadata (including `shepherd_socket`, `shepherd_pid`, `shepherd_start_time`)
+- **SQLite (global.db)**: Persistent port allocations and terminal session metadata (including `shellper_socket`, `shellper_pid`, `shellper_start_time`)
 - **In-memory (projectTerminals)**: Runtime terminal state
 
 On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy (`reconcileTerminalSessions()`) uses a **dual-source approach**:
 
-1. **Phase 1 -- Shepherd reconnection**: For SQLite rows with `shepherd_socket IS NOT NULL`, attempt `SessionManager.reconnectSession()`. Validates PID is alive and start time matches. On success, creates a PtySession via `TerminalManager.createSessionRaw()` and wires it with `attachShepherd()`. Receives REPLAY frame for output continuity.
-2. **Phase 2 -- SQLite sweep**: Stale rows (no matching shepherd) are cleaned up. Orphaned non-shepherd processes are killed. Shepherd processes are preserved (they may be reconnectable later).
+1. **Phase 1 -- Shellper reconnection**: For SQLite rows with `shellper_socket IS NOT NULL`, attempt `SessionManager.reconnectSession()`. Validates PID is alive and start time matches. On success, creates a PtySession via `TerminalManager.createSessionRaw()` and wires it with `attachShellper()`. Receives REPLAY frame for output continuity.
+2. **Phase 2 -- SQLite sweep**: Stale rows (no matching shellper) are cleaned up. Orphaned non-shellper processes are killed. Shellper processes are preserved (they may be reconnectable later).
 
-This dual-source strategy (SQLite + live shepherd processes) ensures sessions survive Tower restarts when backed by shepherd processes.
+This dual-source strategy (SQLite + live shellper processes) ensures sessions survive Tower restarts when backed by shellper processes.
 
 #### Server Architecture
 
@@ -631,18 +631,18 @@ Agent Farm includes several mechanisms for handling failures and recovering from
 #### Orphan Session Detection
 
 On startup, `handleOrphanedSessions()` and `reconcileTerminalSessions()` detect and clean up:
-- Stale shepherd sockets with no live process (via `SessionManager.cleanupStaleSockets()`)
+- Stale shellper sockets with no live process (via `SessionManager.cleanupStaleSockets()`)
 - node-pty sessions without active WebSocket clients
 - State entries for dead processes
 
-Shepherd processes are treated specially during cleanup: orphaned shepherds are NOT killed during the SQLite sweep because they may be reconnectable later. Only non-shepherd orphaned processes receive SIGTERM.
+Shellper processes are treated specially during cleanup: orphaned shellpers are NOT killed during the SQLite sweep because they may be reconnectable later. Only non-shellper orphaned processes receive SIGTERM.
 
 ```typescript
 // From session-manager.ts — stale socket cleanup
 async cleanupStaleSockets(): Promise<number> {
-  // Scan ~/.codev/run/shepherd-*.sock
+  // Scan ~/.codev/run/shellper-*.sock
   // Skip symlinks (security), skip active sessions
-  // Probe socket: connect to check if shepherd is alive
+  // Probe socket: connect to check if shellper is alive
   // If connection refused → stale, unlink socket file
 }
 ```
@@ -678,7 +678,7 @@ function cleanupDeadProcesses(): void {
   for (const util of getUtils()) {
     if (!isProcessRunning(util.pid)) {
       console.log(`Auto-closing shell tab ${util.name} (process ${util.pid} exited)`);
-      // For shepherd-backed sessions, SessionManager handles cleanup
+      // For shellper-backed sessions, SessionManager handles cleanup
       removeUtil(util.id);
     }
   }
@@ -689,14 +689,14 @@ function cleanupDeadProcesses(): void {
 
 Tower shutdown uses a multi-step process:
 
-1. **TerminalManager.shutdown()**: Iterates all PtySessions. Shepherd-backed sessions are **skipped** (they survive Tower restart). Non-shepherd sessions receive SIGTERM/SIGKILL.
-2. **SessionManager.shutdown()**: Disconnects from all shepherds (closes Unix socket connections) without killing the shepherd processes. Shepherds continue running as orphaned OS processes.
+1. **TerminalManager.shutdown()**: Iterates all PtySessions. Shellper-backed sessions are **skipped** (they survive Tower restart). Non-shellper sessions receive SIGTERM/SIGKILL.
+2. **SessionManager.shutdown()**: Disconnects from all shellpers (closes Unix socket connections) without killing the shellper processes. Shellpers continue running as orphaned OS processes.
 
 ```typescript
-// TerminalManager.shutdown() — preserves shepherd sessions
+// TerminalManager.shutdown() — preserves shellper sessions
 shutdown(): void {
   for (const session of this.sessions.values()) {
-    if (session.shepherdBacked) continue; // Survive Tower restart
+    if (session.shellperBacked) continue; // Survive Tower restart
     session.kill();
   }
   this.sessions.clear();
@@ -882,16 +882,16 @@ const CONFIG = {
 
 | File | Purpose |
 |------|---------|
-| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing. `createSessionRaw()` creates PtySession without spawning (for shepherd). `shutdown()` skips shepherd-backed sessions. |
-| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast. `attachShepherd()` wires IShepherdClient as I/O backend. `shepherdBacked` flag changes write/resize/kill/detach behavior. |
+| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing. `createSessionRaw()` creates PtySession without spawning (for shellper). `shutdown()` skips shellper-backed sessions. |
+| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast. `attachShellper()` wires IShellperClient as I/O backend. `shellperBacked` flag changes write/resize/kill/detach behavior. |
 | `terminal/ring-buffer.ts` | Fixed-size circular buffer (1000 lines) with monotonic sequence numbers |
 | `terminal/ws-protocol.ts` | WebSocket frame encoding/decoding (hybrid binary protocol) |
-| `terminal/session-manager.ts` | Orchestrates shepherd lifecycle: spawn, reconnect, kill, auto-restart, stale socket cleanup (Spec 0104) |
-| `terminal/shepherd-client.ts` | Tower-side client connecting to a single shepherd process via Unix socket (Spec 0104) |
-| `terminal/shepherd-protocol.ts` | Binary wire protocol encoder/decoder shared by shepherd and Tower (Spec 0104) |
-| `terminal/shepherd-process.ts` | Shepherd core logic: PTY management, replay buffer, socket handling (Spec 0104) |
-| `terminal/shepherd-main.ts` | Standalone shepherd entry point spawned by Tower as detached process (Spec 0104) |
-| `terminal/shepherd-replay-buffer.ts` | Shepherd-side 10,000-line replay buffer (standalone, no ring-buffer.ts dependency) (Spec 0104) |
+| `terminal/session-manager.ts` | Orchestrates shellper lifecycle: spawn, reconnect, kill, auto-restart, stale socket cleanup (Spec 0104) |
+| `terminal/shellper-client.ts` | Tower-side client connecting to a single shellper process via Unix socket (Spec 0104) |
+| `terminal/shellper-protocol.ts` | Binary wire protocol encoder/decoder shared by shellper and Tower (Spec 0104) |
+| `terminal/shellper-process.ts` | Shellper core logic: PTY management, replay buffer, socket handling (Spec 0104) |
+| `terminal/shellper-main.ts` | Standalone shellper entry point spawned by Tower as detached process (Spec 0104) |
+| `terminal/shellper-replay-buffer.ts` | Shellper-side 10,000-line replay buffer (standalone, no ring-buffer.ts dependency) (Spec 0104) |
 
 #### Dashboard (React + Vite, Spec 0085)
 
@@ -929,7 +929,7 @@ const CONFIG = {
 - **commander.js**: CLI argument parsing and command structure
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode)
 - **tree-kill**: Process cleanup and termination
-- **Shepherd processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
+- **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
 - **React 19 + Vite 6**: Dashboard SPA (replaced vanilla JS in Spec 0085)
 - **xterm.js**: Terminal emulator in the browser (with `customGlyphs: true` for Unicode)
@@ -954,7 +954,7 @@ const CONFIG = {
 - Linux (GNU/Linux)
 - Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
 - Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
-- Runtime directory: `~/.codev/run/` for shepherd Unix sockets (created automatically with `0700` permissions)
+- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions)
 
 ## Repository Dual Nature
 
@@ -1753,7 +1753,7 @@ consult -m claude spec 42
 **Porch integration**: Porch's `next.ts` spawns 3 parallel `consult` commands with `--output` flags, collects results, parses verdicts via `verdict.ts` (scans backward for `VERDICT:` line, defaults to `REQUEST_CHANGES` if not found).
 
 **Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
-1. **Unset `CLAUDECODE`**: Builder's shepherd session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
+1. **Unset `CLAUDECODE`**: Builder's shellper session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
 2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
 
 ### 10. TICK Protocol for Fast Iteration
@@ -1837,7 +1837,7 @@ base+70-99: Reserved for future use
 - **No migration complexity** - Delete old artifacts rather than migrating
 - **Dirty worktree protection** - Refuse to delete worktrees with uncommitted changes
 - **Force flag requirement** - `--force` required to override safety checks
-- **Orphaned session handling** - Detect and handle stale shepherd sockets on startup
+- **Orphaned session handling** - Detect and handle stale shellper sockets on startup
 
 ## Integration Points
 
@@ -2254,10 +2254,10 @@ Based on consultation with external models, these scenarios MUST be tested:
    - Connect to architect terminal via WebSocket
    - Verify terminal receives output
 
-4. **State Persistence Test** (Shepherd, Spec 0104)
-   - Activate project (creates shepherd-backed architect terminal)
+4. **State Persistence Test** (Shellper, Spec 0104)
+   - Activate project (creates shellper-backed architect terminal)
    - Restart Tower
-   - Verify project reconnects to surviving shepherd process
+   - Verify project reconnects to surviving shellper process
    - Verify architect terminal shows replay data (output continuity)
    - Verify terminal is interactive (keystrokes reach shell)
 
@@ -2277,14 +2277,14 @@ npm run test:e2e -- --grep "tower" --headed
 |------|---------|
 | `packages/codev/src/agent-farm/__tests__/tower-api.test.ts` | Tower API unit tests |
 | `packages/codev/src/agent-farm/__tests__/e2e/tower.spec.ts` | Tower E2E tests (Playwright) |
-| `packages/codev/src/terminal/__tests__/shepherd-protocol.test.ts` | Shepherd wire protocol unit tests (Spec 0104 Phase 1) |
-| `packages/codev/src/terminal/__tests__/shepherd-process.test.ts` | Shepherd process logic unit tests (Spec 0104 Phase 1) |
-| `packages/codev/src/terminal/__tests__/shepherd-client.test.ts` | ShepherdClient unit tests (Spec 0104 Phase 2) |
+| `packages/codev/src/terminal/__tests__/shellper-protocol.test.ts` | Shellper wire protocol unit tests (Spec 0104 Phase 1) |
+| `packages/codev/src/terminal/__tests__/shellper-process.test.ts` | Shellper process logic unit tests (Spec 0104 Phase 1) |
+| `packages/codev/src/terminal/__tests__/shellper-client.test.ts` | ShellperClient unit tests (Spec 0104 Phase 2) |
 | `packages/codev/src/terminal/__tests__/session-manager.test.ts` | SessionManager unit/integration tests (Spec 0104 Phase 2) |
-| `packages/codev/src/terminal/__tests__/tower-shepherd-integration.test.ts` | PtySession + ShepherdClient integration tests (16 tests, Spec 0104 Phase 3) |
+| `packages/codev/src/terminal/__tests__/tower-shellper-integration.test.ts` | PtySession + ShellperClient integration tests (16 tests, Spec 0104 Phase 3) |
 
 ---
 
 **Last Updated**: 2026-02-14
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Updated Tower diagram labels from (node-pty) to (shepherd), updated State Persistence Test for shepherd reconnection, documented known hardcoded dimensions issue (cols:200, rows:50) causing scrollback gap.
+**Changes**: Updated Tower diagram labels from (node-pty) to (shellper), updated State Persistence Test for shellper reconnection, documented known hardcoded dimensions issue (cols:200, rows:50) causing scrollback gap.

@@ -1,12 +1,12 @@
 /**
- * ShepherdProcess: the testable core logic of the shepherd daemon.
+ * ShellperProcess: the testable core logic of the shellper daemon.
  *
- * Owns a single PTY via the IShepherdPty interface (injected for testability).
+ * Owns a single PTY via the IShellperPty interface (injected for testability).
  * Listens on a Unix socket for a single Tower connection. Handles the binary
  * wire protocol: HELLO/WELCOME handshake, DATA forwarding, RESIZE, SIGNAL,
  * SPAWN, PING/PONG, and EXIT lifecycle.
  *
- * The shepherd accepts only one Tower connection at a time. A new connection
+ * The shellper accepts only one Tower connection at a time. A new connection
  * replaces the old one (handles rapid Tower restarts cleanly).
  */
 
@@ -31,10 +31,10 @@ import {
   type ResizeMessage,
   type SignalMessage,
   type SpawnMessage,
-} from './shepherd-protocol.js';
-import { ShepherdReplayBuffer } from './shepherd-replay-buffer.js';
+} from './shellper-protocol.js';
+import { ShellperReplayBuffer } from './shellper-replay-buffer.js';
 
-// --- IShepherdPty: abstraction over node-pty for testing ---
+// --- IShellperPty: abstraction over node-pty for testing ---
 
 export interface PtyOptions {
   name?: string;
@@ -44,7 +44,7 @@ export interface PtyOptions {
   env: Record<string, string>;
 }
 
-export interface IShepherdPty {
+export interface IShellperPty {
   spawn(command: string, args: string[], options: PtyOptions): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
@@ -54,29 +54,29 @@ export interface IShepherdPty {
   pid: number;
 }
 
-// --- ShepherdProcess ---
+// --- ShellperProcess ---
 
-export class ShepherdProcess extends EventEmitter {
-  private pty: IShepherdPty | null = null;
+export class ShellperProcess extends EventEmitter {
+  private pty: IShellperPty | null = null;
   private server: net.Server | null = null;
   private currentConnection: net.Socket | null = null;
-  private replayBuffer: ShepherdReplayBuffer;
+  private replayBuffer: ShellperReplayBuffer;
   private cols = 80;
   private rows = 24;
   private startTime: number = Date.now();
   private exited = false;
 
   constructor(
-    private readonly ptyFactory: () => IShepherdPty,
+    private readonly ptyFactory: () => IShellperPty,
     private readonly socketPath: string,
     replayBufferLines: number = 10_000,
   ) {
     super();
-    this.replayBuffer = new ShepherdReplayBuffer(replayBufferLines);
+    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines);
   }
 
   /**
-   * Start the shepherd: spawn the PTY and begin listening on the Unix socket.
+   * Start the shellper: spawn the PTY and begin listening on the Unix socket.
    */
   async start(
     command: string,
@@ -234,7 +234,7 @@ export class ShepherdProcess extends EventEmitter {
       case FrameType.PONG:
         // No-op: keepalive acknowledgement
         break;
-      // Shepherd doesn't expect REPLAY, EXIT, WELCOME from Tower
+      // Shellper doesn't expect REPLAY, EXIT, WELCOME from Tower
       default:
         break;
     }

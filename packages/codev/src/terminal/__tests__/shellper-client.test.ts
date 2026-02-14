@@ -18,17 +18,17 @@ import {
   type ParsedFrame,
   type HelloMessage,
   type WelcomeMessage,
-} from '../shepherd-protocol.js';
-import { ShepherdClient } from '../shepherd-client.js';
+} from '../shellper-protocol.js';
+import { ShellperClient } from '../shellper-client.js';
 
 // Helper: create a temp socket path
 function tmpSocketPath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shepherd-client-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellper-client-test-'));
   return path.join(dir, 'test.sock');
 }
 
-// Helper: mini shepherd server that does HELLO/WELCOME handshake
-function createMiniShepherd(
+// Helper: mini shellper server that does HELLO/WELCOME handshake
+function createMiniShellper(
   socketPath: string,
   welcomeMsg: WelcomeMessage = { version: PROTOCOL_VERSION, pid: 1234, cols: 80, rows: 24, startTime: Date.now() },
 ) {
@@ -56,7 +56,7 @@ function createMiniShepherd(
   };
 }
 
-describe('ShepherdClient', () => {
+describe('ShellperClient', () => {
   let socketPath: string;
   let cleanup: (() => void)[] = [];
 
@@ -76,10 +76,10 @@ describe('ShepherdClient', () => {
   describe('connect/disconnect lifecycle', () => {
     it('connects and performs HELLO/WELCOME handshake', async () => {
       const welcomeMsg: WelcomeMessage = { version: PROTOCOL_VERSION, pid: 5678, cols: 120, rows: 40, startTime: 1700000000000 };
-      const shepherd = createMiniShepherd(socketPath, welcomeMsg);
-      cleanup.push(shepherd.close);
+      const shellper = createMiniShellper(socketPath, welcomeMsg);
+      cleanup.push(shellper.close);
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       const welcome = await client.connect();
@@ -91,10 +91,10 @@ describe('ShepherdClient', () => {
     });
 
     it('disconnect sets connected to false', async () => {
-      const shepherd = createMiniShepherd(socketPath);
-      cleanup.push(shepherd.close);
+      const shellper = createMiniShellper(socketPath);
+      cleanup.push(shellper.close);
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       await client.connect();
       expect(client.connected).toBe(true);
 
@@ -103,15 +103,15 @@ describe('ShepherdClient', () => {
     });
 
     it('rejects on connection refused', async () => {
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       await expect(client.connect()).rejects.toThrow();
     });
 
     it('rejects if already connected', async () => {
-      const shepherd = createMiniShepherd(socketPath);
-      cleanup.push(shepherd.close);
+      const shellper = createMiniShellper(socketPath);
+      cleanup.push(shellper.close);
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       await client.connect();
@@ -134,7 +134,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       await client.connect();
@@ -176,7 +176,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -207,7 +207,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -239,7 +239,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -270,7 +270,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -304,7 +304,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -317,7 +317,7 @@ describe('ShepherdClient', () => {
     });
 
     it('does not send frames when disconnected', async () => {
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       // No connection — should be no-ops
       client.write('hello');
       client.resize(80, 24);
@@ -343,7 +343,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -373,7 +373,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -382,7 +382,7 @@ describe('ShepherdClient', () => {
       });
 
       // Import encodeExit from protocol
-      const { encodeExit } = await import('../shepherd-protocol.js');
+      const { encodeExit } = await import('../shellper-protocol.js');
       serverSocket!.write(encodeExit({ code: 42, signal: null }));
 
       const exitInfo = await exitPromise;
@@ -405,7 +405,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -440,7 +440,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -480,7 +480,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -506,7 +506,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       await expect(client.connect()).rejects.toThrow();
     });
 
@@ -525,7 +525,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -558,7 +558,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       const receivedData: string[] = [];
@@ -585,7 +585,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            // Send WELCOME + REPLAY together (same as shepherd handleHello)
+            // Send WELCOME + REPLAY together (same as shellper handleHello)
             socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
             socket.write(encodeReplay(Buffer.from('prompt $ \r\n')));
           }
@@ -594,7 +594,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -624,7 +624,7 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -637,10 +637,10 @@ describe('ShepherdClient', () => {
     });
 
     it('resolves with empty buffer on timeout when no replay sent', async () => {
-      const shepherd = createMiniShepherd(socketPath);
-      cleanup.push(shepherd.close);
+      const shellper = createMiniShellper(socketPath);
+      cleanup.push(shellper.close);
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
       await client.connect();
 
@@ -651,7 +651,7 @@ describe('ShepherdClient', () => {
   });
 
   describe('version mismatch handling', () => {
-    it('disconnects when shepherd version is older than Tower version', async () => {
+    it('disconnects when shellper version is older than Tower version', async () => {
       let serverSocket: net.Socket | null = null;
       const server = net.createServer((socket) => {
         serverSocket = socket;
@@ -667,14 +667,14 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
-      await expect(client.connect()).rejects.toThrow('Shepherd protocol version 0 is older than Tower version');
+      await expect(client.connect()).rejects.toThrow('Shellper protocol version 0 is older than Tower version');
       expect(client.connected).toBe(false);
     });
 
-    it('connects and emits version-warning when shepherd version is newer', async () => {
+    it('connects and emits version-warning when shellper version is newer', async () => {
       let serverSocket: net.Socket | null = null;
       const server = net.createServer((socket) => {
         serverSocket = socket;
@@ -690,12 +690,12 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       const warnings: number[] = [];
-      client.on('version-warning', (shepherdVersion: number) => {
-        warnings.push(shepherdVersion);
+      client.on('version-warning', (shellperVersion: number) => {
+        warnings.push(shellperVersion);
       });
 
       const welcome = await client.connect();
@@ -719,12 +719,12 @@ describe('ShepherdClient', () => {
       server.listen(socketPath);
       cleanup.push(() => { server.close(); });
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
 
       const warnings: number[] = [];
-      client.on('version-warning', (shepherdVersion: number) => {
-        warnings.push(shepherdVersion);
+      client.on('version-warning', (shellperVersion: number) => {
+        warnings.push(shellperVersion);
       });
 
       const welcome = await client.connect();

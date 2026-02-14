@@ -1,15 +1,15 @@
 /**
- * Standalone replay buffer for the shepherd process.
+ * Standalone replay buffer for the shellper process.
  *
  * Unlike RingBuffer (which stores lines), this stores raw byte chunks
  * to preserve exact terminal output including escape sequences. It tracks
  * the total bytes stored and evicts oldest chunks when the limit is exceeded.
  *
- * This module has NO dependencies beyond Node.js built-ins so the shepherd
+ * This module has NO dependencies beyond Node.js built-ins so the shellper
  * process doesn't need to pull in the full package dependency tree.
  */
 
-export class ShepherdReplayBuffer {
+export class ShellperReplayBuffer {
   private chunks: Buffer[] = [];
   private totalBytes = 0;
   private readonly maxLines: number;

@@ -1,0 +1,75 @@
+id: '0106'
+title: rename-shepherd-to-shellper
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Rename All Source, Tests, Schema, and Migration
+    status: complete
+  - id: phase_2
+    title: Documentation Updates
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-14T14:33:23.076Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-02-14T14:46:25.980Z'
+    approved_at: '2026-02-14T16:13:27.391Z'
+  pr-ready:
+    status: pending
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter2-gemini.txt
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0106/codev/projects/0106-rename-shepherd-to-shellper/0106-phase_2-iter2-claude.txt
+started_at: '2026-02-14T14:33:11.161Z'
+updated_at: '2026-02-14T16:58:15.896Z'

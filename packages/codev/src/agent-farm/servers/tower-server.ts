@@ -57,8 +57,8 @@ const DEFAULT_PORT = 4100;
 // Rate limiting: cleanup interval for token bucket
 const rateLimitCleanupInterval = startRateLimitCleanup();
 
-// Shepherd session manager (initialized at startup)
-let shepherdManager: SessionManager | null = null;
+// Shellper session manager (initialized at startup)
+let shellperManager: SessionManager | null = null;
 
 // Parse arguments with Commander
 const program = new Command()
@@ -124,14 +124,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
     terminalWss.close();
   }
 
-  // 3. Shepherd clients: do NOT call shepherdManager.shutdown() here.
-  // SessionManager.shutdown() disconnects sockets, which triggers ShepherdClient
+  // 3. Shellper clients: do NOT call shellperManager.shutdown() here.
+  // SessionManager.shutdown() disconnects sockets, which triggers ShellperClient
   // 'close' events → PtySession exit(-1) → SQLite row deletion. This would erase
   // the rows that reconcileTerminalSessions() needs on restart.
-  // Instead, let the process exit naturally — OS closes all sockets, and shepherds
+  // Instead, let the process exit naturally — OS closes all sockets, and shellpers
   // detect the disconnection and keep running. SQLite rows are preserved.
-  if (shepherdManager) {
-    log('INFO', 'Shepherd sessions will continue running (sockets close on process exit)');
+  if (shellperManager) {
+    log('INFO', 'Shellper sessions will continue running (sockets close on process exit)');
   }
 
   // 4. Stop rate limit cleanup
@@ -224,7 +224,7 @@ const routeCtx: RouteContext = {
   templatePath,
   reactDashboardPath,
   hasReactDashboard,
-  getShepherdManager: () => shepherdManager,
+  getShellperManager: () => shellperManager,
   broadcastNotification,
   addSseClient: (client: SSEClient) => {
     sseClients.push(client);
@@ -249,24 +249,24 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, '127.0.0.1', async () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
 
-  // Initialize shepherd session manager for persistent terminals
+  // Initialize shellper session manager for persistent terminals
   const socketDir = path.join(homedir(), '.codev', 'run');
-  const shepherdScript = path.join(__dirname, '..', '..', 'terminal', 'shepherd-main.js');
-  shepherdManager = new SessionManager({
+  const shellperScript = path.join(__dirname, '..', '..', 'terminal', 'shellper-main.js');
+  shellperManager = new SessionManager({
     socketDir,
-    shepherdScript,
+    shellperScript,
     nodeExecutable: process.execPath,
   });
-  const staleCleaned = await shepherdManager.cleanupStaleSockets();
+  const staleCleaned = await shellperManager.cleanupStaleSockets();
   if (staleCleaned > 0) {
-    log('INFO', `Cleaned up ${staleCleaned} stale shepherd socket(s)`);
+    log('INFO', `Cleaned up ${staleCleaned} stale shellper socket(s)`);
   }
-  log('INFO', 'Shepherd session manager initialized');
+  log('INFO', 'Shellper session manager initialized');
 
   // Spec 0105 Phase 4: Initialize terminal management module
   initTerminals({
     log,
-    shepherdManager,
+    shellperManager,
     registerKnownProject,
     getKnownProjectPaths,
   });
@@ -278,7 +278,7 @@ server.listen(port, '127.0.0.1', async () => {
     log,
     projectTerminals: getProjectTerminals(),
     getTerminalManager,
-    shepherdManager,
+    shellperManager,
     getProjectTerminalsEntry,
     saveTerminalSession,
     deleteTerminalSession,

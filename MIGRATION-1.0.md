@@ -84,7 +84,7 @@ Migration should be performed by an AI assistant (Claude, etc.) that can:
 
 ```bash
 pkill -f 'agent-farm' 2>/dev/null
-# (session cleanup no longer needed — shepherd processes are self-managing)
+# (session cleanup no longer needed — shellper processes are self-managing)
 ```
 
 ### Step 2: Clean Up Obsolete Files

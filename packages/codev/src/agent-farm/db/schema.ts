@@ -100,9 +100,9 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
     CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,                           -- builder ID or shell ID (null for architect)
   pid INTEGER,                            -- process ID of the terminal
-  shepherd_socket TEXT,                   -- Unix socket path for shepherd process
-  shepherd_pid INTEGER,                   -- shepherd process PID
-  shepherd_start_time INTEGER,            -- shepherd process start time (epoch ms)
+  shellper_socket TEXT,                   -- Unix socket path for shellper process
+  shellper_pid INTEGER,                   -- shellper process PID
+  shellper_start_time INTEGER,            -- shellper process start time (epoch ms)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

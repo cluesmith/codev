@@ -2,7 +2,7 @@
  * Unit tests for tower-instances.ts (Spec 0105 Phase 3)
  *
  * Tests: registerKnownProject, getKnownProjectPaths, getInstances,
- * getDirectorySuggestions, launchInstance, killTerminalWithShepherd, stopInstance,
+ * getDirectorySuggestions, launchInstance, killTerminalWithShellper, stopInstance,
  * initInstances / shutdownInstances lifecycle.
  */
 
@@ -18,7 +18,7 @@ import {
   getInstances,
   getDirectorySuggestions,
   launchInstance,
-  killTerminalWithShepherd,
+  killTerminalWithShellper,
   stopInstance,
   type InstanceDeps,
 } from '../servers/tower-instances.js';
@@ -77,7 +77,7 @@ function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
       createSessionRaw: vi.fn(),
       listSessions: vi.fn().mockReturnValue([]),
     }),
-    shepherdManager: null,
+    shellperManager: null,
     getProjectTerminalsEntry: vi.fn().mockReturnValue({
       architect: undefined,
       builders: new Map(),
@@ -465,13 +465,13 @@ describe('tower-instances', () => {
   });
 
   // =========================================================================
-  // killTerminalWithShepherd
+  // killTerminalWithShellper
   // =========================================================================
 
-  describe('killTerminalWithShepherd', () => {
+  describe('killTerminalWithShellper', () => {
     it('returns false when module is not initialized', async () => {
       const manager = { getSession: vi.fn(), killSession: vi.fn() } as any;
-      const result = await killTerminalWithShepherd(manager, 'term-1');
+      const result = await killTerminalWithShellper(manager, 'term-1');
       expect(result).toBe(false);
     });
 
@@ -480,42 +480,42 @@ describe('tower-instances', () => {
       initInstances(deps);
 
       const manager = { getSession: vi.fn().mockReturnValue(null), killSession: vi.fn() } as any;
-      const result = await killTerminalWithShepherd(manager, 'term-1');
+      const result = await killTerminalWithShellper(manager, 'term-1');
       expect(result).toBe(false);
     });
 
-    it('kills session without shepherd for non-shepherd sessions', async () => {
+    it('kills session without shellper for non-shellper sessions', async () => {
       const deps = makeDeps();
       initInstances(deps);
 
       const manager = {
-        getSession: vi.fn().mockReturnValue({ shepherdBacked: false }),
+        getSession: vi.fn().mockReturnValue({ shellperBacked: false }),
         killSession: vi.fn().mockReturnValue(true),
       } as any;
 
-      const result = await killTerminalWithShepherd(manager, 'term-1');
+      const result = await killTerminalWithShellper(manager, 'term-1');
       expect(result).toBe(true);
       expect(manager.killSession).toHaveBeenCalledWith('term-1');
     });
 
-    it('calls shepherdManager.killSession for shepherd-backed sessions', async () => {
-      const mockShepherdKill = vi.fn();
+    it('calls shellperManager.killSession for shellper-backed sessions', async () => {
+      const mockShellperKill = vi.fn();
       const deps = makeDeps({
-        shepherdManager: { killSession: mockShepherdKill } as any,
+        shellperManager: { killSession: mockShellperKill } as any,
       });
       initInstances(deps);
 
       const manager = {
         getSession: vi.fn().mockReturnValue({
-          shepherdBacked: true,
-          shepherdSessionId: 'shep-1',
+          shellperBacked: true,
+          shellperSessionId: 'shep-1',
         }),
         killSession: vi.fn().mockReturnValue(true),
       } as any;
 
-      const result = await killTerminalWithShepherd(manager, 'term-1');
+      const result = await killTerminalWithShellper(manager, 'term-1');
       expect(result).toBe(true);
-      expect(mockShepherdKill).toHaveBeenCalledWith('shep-1');
+      expect(mockShellperKill).toHaveBeenCalledWith('shep-1');
       expect(manager.killSession).toHaveBeenCalledWith('term-1');
     });
   });
@@ -551,7 +551,7 @@ describe('tower-instances', () => {
       });
 
       const mockManager = {
-        getSession: vi.fn().mockReturnValue({ pid: 42, shepherdBacked: false }),
+        getSession: vi.fn().mockReturnValue({ pid: 42, shellperBacked: false }),
         killSession: vi.fn().mockReturnValue(true),
       };
 
@@ -577,7 +577,7 @@ describe('tower-instances', () => {
       });
 
       const mockManager = {
-        getSession: vi.fn().mockReturnValue({ pid: 42, shepherdBacked: false }),
+        getSession: vi.fn().mockReturnValue({ pid: 42, shellperBacked: false }),
         killSession: vi.fn().mockReturnValue(true),
       };
 

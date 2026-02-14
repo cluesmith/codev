@@ -6,9 +6,9 @@
  */
 
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from './schema.js';
 import { migrateLocalFromJson } from './migrate.js';
 import { getConfig } from '../utils/index.js';
@@ -426,6 +426,58 @@ function ensureGlobalDatabase(): Database.Database {
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (7)').run();
     console.log('[info] Dropped tmux_session column from terminal_sessions (Spec 0104)');
+  }
+
+  // Migration v8: Rename shepherd_* columns to shellper_* (Spec 0106)
+  const v8 = db.prepare('SELECT version FROM _migrations WHERE version = 8').get();
+  if (!v8) {
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS terminal_sessions_new (
+          id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
+          role_id TEXT,
+          pid INTEGER,
+          shellper_socket TEXT,
+          shellper_pid INTEGER,
+          shellper_start_time INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO terminal_sessions_new
+          SELECT id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time, created_at
+          FROM terminal_sessions;
+        DROP TABLE terminal_sessions;
+        ALTER TABLE terminal_sessions_new RENAME TO terminal_sessions;
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
+        UPDATE terminal_sessions SET shellper_socket = REPLACE(shellper_socket, 'shepherd-', 'shellper-')
+          WHERE shellper_socket LIKE '%shepherd-%';
+      `);
+    } catch {
+      // Table may already be in the correct schema (fresh install)
+    }
+    // Rename physical socket files on disk
+    try {
+      const runDir = join(homedir(), '.codev', 'run');
+      if (existsSync(runDir)) {
+        const files = readdirSync(runDir);
+        for (const file of files) {
+          if (file.startsWith('shepherd-') && file.endsWith('.sock')) {
+            const newName = file.replace('shepherd-', 'shellper-');
+            try {
+              renameSync(join(runDir, file), join(runDir, newName));
+            } catch {
+              // Skip files that can't be renamed (missing, permissions, etc.)
+            }
+          }
+        }
+      }
+    } catch {
+      // Skip if run directory doesn't exist or can't be read
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (8)').run();
+    console.log('[info] Renamed shepherd columns to shellper in terminal_sessions (Spec 0106)');
   }
 
   return db;

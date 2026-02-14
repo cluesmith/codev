@@ -51,8 +51,8 @@ let gateWatcherInterval: ReturnType<typeof setInterval> | null = null;
 export interface TerminalDeps {
   /** Logging function */
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
-  /** Shepherd session manager for persistent terminals */
-  shepherdManager: SessionManager | null;
+  /** Shellper session manager for persistent terminals */
+  shellperManager: SessionManager | null;
   /** Register a known project path (from tower-instances) */
   registerKnownProject: (projectPath: string) => void;
   /** Get all known project paths (from tower-instances) */
@@ -155,9 +155,9 @@ export function saveTerminalSession(
   type: 'architect' | 'builder' | 'shell',
   roleId: string | null,
   pid: number | null,
-  shepherdSocket: string | null = null,
-  shepherdPid: number | null = null,
-  shepherdStartTime: number | null = null,
+  shellperSocket: string | null = null,
+  shellperPid: number | null = null,
+  shellperStartTime: number | null = null,
 ): void {
   try {
     const normalizedPath = normalizeProjectPath(projectPath);
@@ -171,9 +171,9 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time)
+      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shepherdSocket, shepherdPid, shepherdStartTime);
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -181,11 +181,11 @@ export function saveTerminalSession(
 }
 
 /**
- * Check if a terminal session is persistent (shepherd-backed).
+ * Check if a terminal session is persistent (shellper-backed).
  * A session is persistent if it can survive a Tower restart.
  */
 export function isSessionPersistent(_terminalId: string, session: PtySession): boolean {
-  return session.shepherdBacked;
+  return session.shellperBacked;
 }
 
 /**
@@ -299,11 +299,11 @@ export function processExists(pid: number): boolean {
 /**
  * Reconcile terminal sessions on startup.
  *
- * DUAL-SOURCE STRATEGY (shepherd + SQLite):
+ * DUAL-SOURCE STRATEGY (shellper + SQLite):
  *
- * Phase 1 — Shepherd reconnection:
- *   For SQLite rows with shepherd_socket IS NOT NULL, attempt to reconnect
- *   via SessionManager.reconnectSession(). Shepherd processes survive Tower
+ * Phase 1 — Shellper reconnection:
+ *   For SQLite rows with shellper_socket IS NOT NULL, attempt to reconnect
+ *   via SessionManager.reconnectSession(). Shellper processes survive Tower
  *   restarts as detached OS processes.
  *
  * Phase 2 — SQLite sweep:
@@ -318,7 +318,7 @@ export async function reconcileTerminalSessions(): Promise<void> {
   const manager = getTerminalManager();
   const db = getGlobalDb();
 
-  let shepherdReconnected = 0;
+  let shellperReconnected = 0;
   let orphanReconnected = 0;
   let killed = 0;
   let cleaned = 0;
@@ -326,7 +326,7 @@ export async function reconcileTerminalSessions(): Promise<void> {
   // Track matched session IDs across all phases
   const matchedSessionIds = new Set<string>();
 
-  // ---- Phase 1: Shepherd reconnection ----
+  // ---- Phase 1: Shellper reconnection ----
   let allDbSessions: DbTerminalSession[];
   try {
     allDbSessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
@@ -335,20 +335,20 @@ export async function reconcileTerminalSessions(): Promise<void> {
     allDbSessions = [];
   }
 
-  const shepherdSessions = allDbSessions.filter(s => s.shepherd_socket !== null);
-  if (shepherdSessions.length > 0) {
-    _deps.log('INFO', `Found ${shepherdSessions.length} shepherd session(s) in SQLite — reconnecting...`);
+  const shellperSessions = allDbSessions.filter(s => s.shellper_socket !== null);
+  if (shellperSessions.length > 0) {
+    _deps.log('INFO', `Found ${shellperSessions.length} shellper session(s) in SQLite — reconnecting...`);
   }
 
-  for (const dbSession of shepherdSessions) {
+  for (const dbSession of shellperSessions) {
     const projectPath = dbSession.project_path;
 
     // Skip sessions whose project path doesn't exist or is in temp directory
     if (!fs.existsSync(projectPath)) {
-      _deps.log('INFO', `Skipping shepherd session ${dbSession.id} — project path no longer exists: ${projectPath}`);
-      // Kill orphaned shepherd process before removing row
-      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
-        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — project path no longer exists: ${projectPath}`);
+      // Kill orphaned shellper process before removing row
+      if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
+        try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
       }
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
       cleaned++;
@@ -356,18 +356,18 @@ export async function reconcileTerminalSessions(): Promise<void> {
     }
     const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
     if (tmpDirs.some(d => projectPath === d || projectPath.startsWith(d + '/'))) {
-      _deps.log('INFO', `Skipping shepherd session ${dbSession.id} — project is in temp directory: ${projectPath}`);
-      // Kill orphaned shepherd process before removing row
-      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
-        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — project is in temp directory: ${projectPath}`);
+      // Kill orphaned shellper process before removing row
+      if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
+        try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
       }
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
       cleaned++;
       continue;
     }
 
-    if (!_deps.shepherdManager) {
-      _deps.log('WARN', `Shepherd manager not initialized — cannot reconnect ${dbSession.id}`);
+    if (!_deps.shellperManager) {
+      _deps.log('WARN', `Shellper manager not initialized — cannot reconnect ${dbSession.id}`);
       continue;
     }
 
@@ -398,27 +398,27 @@ export async function reconcileTerminalSessions(): Promise<void> {
         };
       }
 
-      const client = await _deps.shepherdManager.reconnectSession(
+      const client = await _deps.shellperManager.reconnectSession(
         dbSession.id,
-        dbSession.shepherd_socket!,
-        dbSession.shepherd_pid!,
-        dbSession.shepherd_start_time!,
+        dbSession.shellper_socket!,
+        dbSession.shellper_pid!,
+        dbSession.shellper_start_time!,
         restartOptions,
       );
 
       if (!client) {
-        _deps.log('INFO', `Shepherd session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
+        _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
         continue; // Will be cleaned up in Phase 2
       }
 
       const replayData = client.getReplayData() ?? Buffer.alloc(0);
       const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
 
-      // Create a PtySession backed by the reconnected shepherd client
+      // Create a PtySession backed by the reconnected shellper client
       const session = manager.createSessionRaw({ label, cwd: projectPath });
       const ptySession = manager.getSession(session.id);
       if (ptySession) {
-        ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
+        ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
       }
 
       // Register in projectTerminals Map
@@ -433,8 +433,8 @@ export async function reconcileTerminalSessions(): Promise<void> {
 
       // Update SQLite with new terminal ID
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      saveTerminalSession(session.id, projectPath, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
-        dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
+      saveTerminalSession(session.id, projectPath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
+        dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
       _deps.registerKnownProject(projectPath);
 
       // Clean up on exit
@@ -449,10 +449,10 @@ export async function reconcileTerminalSessions(): Promise<void> {
       }
 
       matchedSessionIds.add(dbSession.id);
-      shepherdReconnected++;
-      _deps.log('INFO', `Reconnected shepherd session → ${session.id} (${dbSession.type} for ${path.basename(projectPath)})`);
+      shellperReconnected++;
+      _deps.log('INFO', `Reconnected shellper session → ${session.id} (${dbSession.type} for ${path.basename(projectPath)})`);
     } catch (err) {
-      _deps.log('WARN', `Failed to reconnect shepherd session ${dbSession.id}: ${(err as Error).message}`);
+      _deps.log('WARN', `Failed to reconnect shellper session ${dbSession.id}: ${(err as Error).message}`);
     }
   }
 
@@ -476,9 +476,9 @@ export async function reconcileTerminalSessions(): Promise<void> {
     cleaned++;
   }
 
-  const total = shepherdReconnected + orphanReconnected;
+  const total = shellperReconnected + orphanReconnected;
   if (total > 0 || killed > 0 || cleaned > 0) {
-    _deps.log('INFO', `Reconciliation complete: ${shepherdReconnected} shepherd, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
+    _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
   } else {
     _deps.log('INFO', 'No terminal sessions to reconcile');
   }
@@ -529,7 +529,7 @@ export async function getTerminalsForProject(
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
-  // Query SQLite first, then augment with shepherd reconnection
+  // Query SQLite first, then augment with shellper reconnection
   const dbSessions = getTerminalSessionsForProject(projectPath);
 
   // Use normalized path for cache consistency
@@ -554,8 +554,8 @@ export async function getTerminalsForProject(
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
 
-    if (!session && dbSession.shepherd_socket && _deps?.shepherdManager) {
-      // PTY session gone but shepherd may still be alive — reconnect on-the-fly
+    if (!session && dbSession.shellper_socket && _deps?.shellperManager) {
+      // PTY session gone but shellper may still be alive — reconnect on-the-fly
       try {
         // Restore auto-restart for architect sessions (same as startup reconciliation)
         let restartOptions: ReconnectRestartOptions | undefined;
@@ -583,11 +583,11 @@ export async function getTerminalsForProject(
           };
         }
 
-        const client = await _deps.shepherdManager.reconnectSession(
+        const client = await _deps.shellperManager.reconnectSession(
           dbSession.id,
-          dbSession.shepherd_socket,
-          dbSession.shepherd_pid!,
-          dbSession.shepherd_start_time!,
+          dbSession.shellper_socket,
+          dbSession.shellper_pid!,
+          dbSession.shellper_start_time!,
           restartOptions,
         );
         if (client) {
@@ -596,7 +596,7 @@ export async function getTerminalsForProject(
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
-            ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
+            ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
 
             // Clean up on exit (same as startup reconciliation path)
             ptySession.on('exit', () => {
@@ -608,14 +608,14 @@ export async function getTerminalsForProject(
             });
           }
           deleteTerminalSession(dbSession.id);
-          saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
-            dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
+          saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
+            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
-          _deps.log('INFO', `Reconnected to shepherd on-the-fly → ${newSession.id}`);
+          _deps.log('INFO', `Reconnected to shellper on-the-fly → ${newSession.id}`);
         }
       } catch (err) {
-        _deps.log('WARN', `Failed shepherd on-the-fly reconnect for ${dbSession.id}: ${(err as Error).message}`);
+        _deps.log('WARN', `Failed shellper on-the-fly reconnect for ${dbSession.id}: ${(err as Error).message}`);
       }
     }
 

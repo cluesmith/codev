@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Shepherd main: standalone entry point spawned by Tower as a detached process.
+ * Shellper main: standalone entry point spawned by Tower as a detached process.
  *
  * Usage:
- *   node shepherd-main.js <json-config>
+ *   node shellper-main.js <json-config>
  *
  * Where json-config is a JSON string with:
  *   { command, args, cwd, env, cols, rows, socketPath }
@@ -20,13 +20,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ShepherdProcess, type IShepherdPty, type PtyOptions } from './shepherd-process.js';
+import { ShellperProcess, type IShellperPty, type PtyOptions } from './shellper-process.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
 // The package uses "type": "module", so bare `require()` is not available.
 const require = createRequire(import.meta.url);
 
-interface ShepherdConfig {
+interface ShellperConfig {
   command: string;
   args: string[];
   cwd: string;
@@ -37,7 +37,7 @@ interface ShepherdConfig {
   replayBufferLines?: number;
 }
 
-function createRealPty(): IShepherdPty {
+function createRealPty(): IShellperPty {
   let ptyModule: typeof import('node-pty') | null = null;
   let ptyInstance: import('node-pty').IPty | null = null;
   let dataCallback: ((data: string) => void) | null = null;
@@ -105,13 +105,13 @@ function createRealPty(): IShepherdPty {
 async function main(): Promise<void> {
   const configJson = process.argv[2];
   if (!configJson) {
-    process.stderr.write('Usage: shepherd-main.js <json-config>\n');
+    process.stderr.write('Usage: shellper-main.js <json-config>\n');
     process.exit(1);
   }
 
-  let config: ShepherdConfig;
+  let config: ShellperConfig;
   try {
-    config = JSON.parse(configJson) as ShepherdConfig;
+    config = JSON.parse(configJson) as ShellperConfig;
   } catch {
     process.stderr.write('Invalid JSON config\n');
     process.exit(1);
@@ -131,14 +131,14 @@ async function main(): Promise<void> {
     // File doesn't exist — fine
   }
 
-  const shepherd = new ShepherdProcess(
+  const shellper = new ShellperProcess(
     createRealPty,
     config.socketPath,
     config.replayBufferLines ?? 10_000,
   );
 
-  // Start the shepherd (spawns PTY and listens on socket)
-  await shepherd.start(
+  // Start the shellper (spawns PTY and listens on socket)
+  await shellper.start(
     config.command,
     config.args,
     config.cwd,
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   // Write PID and start time to stdout, then close stdout
   const info = JSON.stringify({
     pid: process.pid,
-    startTime: shepherd.getStartTime(),
+    startTime: shellper.getStartTime(),
   });
   process.stdout.write(info, () => {
     // Close stdout after write completes (Tower reads this, then we detach)
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
 
   // Handle SIGTERM: graceful shutdown
   process.on('SIGTERM', () => {
-    shepherd.shutdown();
+    shellper.shutdown();
     // Clean up socket file
     try {
       fs.unlinkSync(config.socketPath);
@@ -173,20 +173,20 @@ async function main(): Promise<void> {
     process.exit(0);
   });
 
-  // When the child process exits and no connection is active, exit the shepherd
-  shepherd.on('exit', () => {
+  // When the child process exits and no connection is active, exit the shellper
+  shellper.on('exit', () => {
     // Don't exit immediately — Tower might send a SPAWN frame to restart.
-    // The shepherd stays alive as long as the socket server is running.
-    // If Tower never reconnects, the shepherd will be cleaned up by stale
+    // The shellper stays alive as long as the socket server is running.
+    // If Tower never reconnects, the shellper will be cleaned up by stale
     // socket cleanup on next Tower startup.
   });
 
-  shepherd.on('error', (err) => {
-    process.stderr.write(`Shepherd error: ${err.message}\n`);
+  shellper.on('error', (err) => {
+    process.stderr.write(`Shellper error: ${err.message}\n`);
   });
 }
 
 main().catch((err) => {
-  process.stderr.write(`Shepherd fatal: ${err.message}\n`);
+  process.stderr.write(`Shellper fatal: ${err.message}\n`);
   process.exit(1);
 });

@@ -22,7 +22,7 @@ import {
   parseJsonPayload,
   type ParsedFrame,
   type FrameTypeValue,
-} from '../shepherd-protocol.js';
+} from '../shellper-protocol.js';
 
 // Helper: collect all frames emitted by a parser
 function collectFrames(parser: ReturnType<typeof createFrameParser>, data: Buffer): Promise<ParsedFrame[]> {
@@ -36,7 +36,7 @@ function collectFrames(parser: ReturnType<typeof createFrameParser>, data: Buffe
   });
 }
 
-describe('shepherd-protocol', () => {
+describe('shellper-protocol', () => {
   describe('encodeFrame / basic structure', () => {
     it('produces correct header: [type][4-byte length]', () => {
       const payload = Buffer.from('hello');

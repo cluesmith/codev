@@ -479,7 +479,7 @@ af ports cleanup
 
 1. **Architect** (you + primary AI) creates specs and plans
 2. **Builders** (autonomous AI agents) implement specs in isolated git worktrees
-3. Each builder runs in a **persistent terminal session** (shepherd process + node-pty) with web terminal access
+3. Each builder runs in a **persistent terminal session** (shellper process + node-pty) with web terminal access
 4. **Review comments** are stored directly in files using `// REVIEW:` syntax
 5. Builders create PRs when complete; architect reviews and merges
 

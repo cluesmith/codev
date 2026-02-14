@@ -36,7 +36,7 @@ import {
   getInstances,
   getDirectorySuggestions,
   launchInstance,
-  killTerminalWithShepherd,
+  killTerminalWithShellper,
   stopInstance,
 } from './tower-instances.js';
 import {
@@ -66,7 +66,7 @@ export interface RouteContext {
   templatePath: string | null;
   reactDashboardPath: string;
   hasReactDashboard: boolean;
-  getShepherdManager: () => SessionManager | null;
+  getShellperManager: () => SessionManager | null;
   broadcastNotification: (notification: { type: string; title: string; body: string; project?: string }) => void;
   addSseClient: (client: SSEClient) => void;
   removeSseClient: (id: string) => void;
@@ -327,7 +327,7 @@ async function handleTerminalCreate(
     const env = typeof body.env === 'object' && body.env !== null ? (body.env as Record<string, string>) : undefined;
     const label = typeof body.label === 'string' ? body.label : undefined;
 
-    // Optional session persistence via shepherd
+    // Optional session persistence via shellper
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : null;
     const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;
@@ -336,15 +336,15 @@ async function handleTerminalCreate(
     let info: PtySessionInfo | undefined;
     let persistent = false;
 
-    // Try shepherd if persistence was requested
-    const shepherdManager = ctx.getShepherdManager();
-    if (requestPersistence && shepherdManager && command && cwd) {
+    // Try shellper if persistence was requested
+    const shellperManager = ctx.getShellperManager();
+    if (requestPersistence && shellperManager && command && cwd) {
       try {
         const sessionId = crypto.randomUUID();
         // Strip CLAUDECODE so spawned Claude processes don't detect nesting
         const sessionEnv = { ...(env || process.env) } as Record<string, string>;
         delete sessionEnv['CLAUDECODE'];
-        const client = await shepherdManager.createSession({
+        const client = await shellperManager.createSession({
           sessionId,
           command,
           args: args || [],
@@ -356,7 +356,7 @@ async function handleTerminalCreate(
         });
 
         const replayData = client.getReplayData() ?? Buffer.alloc(0);
-        const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+        const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
 
         const session = manager.createSessionRaw({
           label: label || `terminal-${sessionId.slice(0, 8)}`,
@@ -364,7 +364,7 @@ async function handleTerminalCreate(
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
-          ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+          ptySession.attachShellper(client, replayData, shellperInfo.pid, sessionId);
         }
 
         info = session;
@@ -377,17 +377,17 @@ async function handleTerminalCreate(
           } else {
             entry.shells.set(roleId, session.id);
           }
-          saveTerminalSession(session.id, projectPath, termType, roleId, shepherdInfo.pid,
-            shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
-          ctx.log('INFO', `Registered shepherd terminal ${session.id} as ${termType} "${roleId}" for project ${projectPath}`);
+          saveTerminalSession(session.id, projectPath, termType, roleId, shellperInfo.pid,
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
+          ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for project ${projectPath}`);
         }
-      } catch (shepherdErr) {
-        ctx.log('WARN', `Shepherd creation failed for terminal, falling back: ${(shepherdErr as Error).message}`);
+      } catch (shellperErr) {
+        ctx.log('WARN', `Shellper creation failed for terminal, falling back: ${(shellperErr as Error).message}`);
       }
     }
 
     // Fallback: non-persistent session (graceful degradation per plan)
-    // Shepherd is the only persistence backend for new sessions.
+    // Shellper is the only persistence backend for new sessions.
     if (!info) {
       info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
       persistent = false;
@@ -400,7 +400,7 @@ async function handleTerminalCreate(
           entry.shells.set(roleId, info.id);
         }
         saveTerminalSession(info.id, projectPath, termType, roleId, info.pid);
-        ctx.log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shepherd unavailable)`);
+        ctx.log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shellper unavailable)`);
       }
     }
 
@@ -443,9 +443,9 @@ async function handleTerminalRoutes(
     return;
   }
 
-  // DELETE /api/terminals/:id - Kill terminal (disable shepherd auto-restart if applicable)
+  // DELETE /api/terminals/:id - Kill terminal (disable shellper auto-restart if applicable)
   if (req.method === 'DELETE' && (!subpath || subpath === '')) {
-    if (!(await killTerminalWithShepherd(manager, terminalId))) {
+    if (!(await killTerminalWithShellper(manager, terminalId))) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
       return;
@@ -1005,7 +1005,7 @@ async function handleProjectState(
   projectPath: string,
 ): Promise<void> {
   // Refresh cache via getTerminalsForProject (handles SQLite sync
-  // and shepherd reconnection in one place)
+  // and shellper reconnection in one place)
   const encodedPath = Buffer.from(projectPath).toString('base64url');
   const proxyUrl = `/project/${encodedPath}/`;
   const { gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
@@ -1104,15 +1104,15 @@ async function handleProjectShellCreate(
 
     let shellCreated = false;
 
-    // Try shepherd first for persistent shell session
-    const shepherdManager = ctx.getShepherdManager();
-    if (shepherdManager) {
+    // Try shellper first for persistent shell session
+    const shellperManager = ctx.getShellperManager();
+    if (shellperManager) {
       try {
         const sessionId = crypto.randomUUID();
         // Strip CLAUDECODE so spawned Claude processes don't detect nesting
         const shellEnv = { ...process.env } as Record<string, string>;
         delete shellEnv['CLAUDECODE'];
-        const client = await shepherdManager.createSession({
+        const client = await shellperManager.createSession({
           sessionId,
           command: shellCmd,
           args: shellArgs,
@@ -1124,7 +1124,7 @@ async function handleProjectShellCreate(
         });
 
         const replayData = client.getReplayData() ?? Buffer.alloc(0);
-        const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+        const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
 
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,
@@ -1132,13 +1132,13 @@ async function handleProjectShellCreate(
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
-          ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+          ptySession.attachShellper(client, replayData, shellperInfo.pid, sessionId);
         }
 
         const entry = getProjectTerminalsEntry(projectPath);
         entry.shells.set(shellId, session.id);
-        saveTerminalSession(session.id, projectPath, 'shell', shellId, shepherdInfo.pid,
-          shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+        saveTerminalSession(session.id, projectPath, 'shell', shellId, shellperInfo.pid,
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1149,13 +1149,13 @@ async function handleProjectShellCreate(
           terminalId: session.id,
           persistent: true,
         }));
-      } catch (shepherdErr) {
-        ctx.log('WARN', `Shepherd creation failed for shell, falling back: ${(shepherdErr as Error).message}`);
+      } catch (shellperErr) {
+        ctx.log('WARN', `Shellper creation failed for shell, falling back: ${(shellperErr as Error).message}`);
       }
     }
 
     // Fallback: non-persistent session (graceful degradation per plan)
-    // Shepherd is the only persistence backend for new sessions.
+    // Shellper is the only persistence backend for new sessions.
     if (!shellCreated) {
       const session = await manager.createSession({
         command: shellCmd,
@@ -1168,7 +1168,7 @@ async function handleProjectShellCreate(
       const entry = getProjectTerminalsEntry(projectPath);
       entry.shells.set(shellId, session.id);
       saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid);
-      ctx.log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shepherd unavailable)`);
+      ctx.log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -1449,8 +1449,8 @@ async function handleProjectTabDelete(
   }
 
   if (terminalId) {
-    // Disable shepherd auto-restart if applicable, then kill the PtySession
-    await killTerminalWithShepherd(manager, terminalId);
+    // Disable shellper auto-restart if applicable, then kill the PtySession
+    await killTerminalWithShellper(manager, terminalId);
 
     // TICK-001: Delete from SQLite
     deleteTerminalSession(terminalId);
@@ -1470,15 +1470,15 @@ async function handleProjectStopAll(
   const entry = getProjectTerminalsEntry(projectPath);
   const manager = getTerminalManager();
 
-  // Kill all terminals (disable shepherd auto-restart if applicable)
+  // Kill all terminals (disable shellper auto-restart if applicable)
   if (entry.architect) {
-    await killTerminalWithShepherd(manager, entry.architect);
+    await killTerminalWithShellper(manager, entry.architect);
   }
   for (const terminalId of entry.shells.values()) {
-    await killTerminalWithShepherd(manager, terminalId);
+    await killTerminalWithShellper(manager, terminalId);
   }
   for (const terminalId of entry.builders.values()) {
-    await killTerminalWithShepherd(manager, terminalId);
+    await killTerminalWithShellper(manager, terminalId);
   }
 
   // Clear registry

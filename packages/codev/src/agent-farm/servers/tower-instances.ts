@@ -32,14 +32,14 @@ export interface InstanceDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
   projectTerminals: Map<string, ProjectTerminals>;
   getTerminalManager: () => TerminalManager;
-  shepherdManager: SessionManager | null;
+  shellperManager: SessionManager | null;
   /** Get or create a project's terminal registry entry */
   getProjectTerminalsEntry: (projectPath: string) => ProjectTerminals;
   /** Persist a terminal session row to SQLite */
   saveTerminalSession: (
     id: string, projectPath: string, type: 'architect' | 'builder' | 'shell',
     roleId: string | null, pid: number | null,
-    shepherdSocket?: string | null, shepherdPid?: number | null, shepherdStartTime?: number | null,
+    shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -365,12 +365,12 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
         const cleanEnv = { ...process.env } as Record<string, string>;
         delete cleanEnv['CLAUDECODE'];
 
-        // Try shepherd first for persistent session with auto-restart
-        let shepherdCreated = false;
-        if (_deps.shepherdManager) {
+        // Try shellper first for persistent session with auto-restart
+        let shellperCreated = false;
+        if (_deps.shellperManager) {
           try {
             const sessionId = crypto.randomUUID();
-            const client = await _deps.shepherdManager.createSession({
+            const client = await _deps.shellperManager.createSession({
               sessionId,
               command: cmd,
               args: cmdArgs,
@@ -383,25 +383,25 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
               maxRestarts: 50,
             });
 
-            // Get replay data and shepherd info
+            // Get replay data and shellper info
             const replayData = client.getReplayData() ?? Buffer.alloc(0);
-            const shepherdInfo = _deps.shepherdManager.getSessionInfo(sessionId)!;
+            const shellperInfo = _deps.shellperManager.getSessionInfo(sessionId)!;
 
-            // Create a PtySession backed by the shepherd client
+            // Create a PtySession backed by the shellper client
             const session = manager.createSessionRaw({
               label: 'Architect',
               cwd: projectPath,
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
-              ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+              ptySession.attachShellper(client, replayData, shellperInfo.pid, sessionId);
             }
 
             entry.architect = session.id;
-            _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, shepherdInfo.pid,
-              shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+            _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, shellperInfo.pid,
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
 
-            // Clean up cache/SQLite when the shepherd session exits
+            // Clean up cache/SQLite when the shellper session exits
             if (ptySession) {
               ptySession.on('exit', () => {
                 const currentEntry = _deps!.getProjectTerminalsEntry(resolvedPath);
@@ -409,20 +409,20 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
                   currentEntry.architect = undefined;
                 }
                 _deps!.deleteTerminalSession(session.id);
-                _deps!.log('INFO', `Architect shepherd session exited for ${projectPath}`);
+                _deps!.log('INFO', `Architect shellper session exited for ${projectPath}`);
               });
             }
 
-            shepherdCreated = true;
-            _deps.log('INFO', `Created shepherd-backed architect session for project: ${projectPath}`);
-          } catch (shepherdErr) {
-            _deps.log('WARN', `Shepherd creation failed for architect, falling back: ${(shepherdErr as Error).message}`);
+            shellperCreated = true;
+            _deps.log('INFO', `Created shellper-backed architect session for project: ${projectPath}`);
+          } catch (shellperErr) {
+            _deps.log('WARN', `Shellper creation failed for architect, falling back: ${(shellperErr as Error).message}`);
           }
         }
 
         // Fallback: non-persistent session (graceful degradation per plan)
-        // Shepherd is the only persistence backend for new sessions.
-        if (!shepherdCreated) {
+        // Shellper is the only persistence backend for new sessions.
+        if (!shellperCreated) {
           const session = await manager.createSession({
             command: cmd,
             args: cmdArgs,
@@ -446,7 +446,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
             });
           }
 
-          _deps.log('WARN', `Architect terminal for ${projectPath} is non-persistent (shepherd unavailable)`);
+          _deps.log('WARN', `Architect terminal for ${projectPath} is non-persistent (shellper unavailable)`);
         }
 
         _deps.log('INFO', `Created architect terminal for project: ${projectPath}`);
@@ -463,20 +463,20 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
 }
 
 /**
- * Kill a terminal session, including its shepherd auto-restart if applicable.
- * For shepherd-backed sessions, calls SessionManager.killSession() which clears
+ * Kill a terminal session, including its shellper auto-restart if applicable.
+ * For shellper-backed sessions, calls SessionManager.killSession() which clears
  * the restart timer and removes the session before sending SIGTERM, preventing
- * the shepherd from auto-restarting the process.
+ * the shellper from auto-restarting the process.
  */
-export async function killTerminalWithShepherd(manager: TerminalManager, terminalId: string): Promise<boolean> {
+export async function killTerminalWithShellper(manager: TerminalManager, terminalId: string): Promise<boolean> {
   if (!_deps) return false;
 
   const session = manager.getSession(terminalId);
   if (!session) return false;
 
-  // If shepherd-backed, disable auto-restart via SessionManager before killing the PtySession
-  if (session.shepherdBacked && session.shepherdSessionId && _deps.shepherdManager) {
-    await _deps.shepherdManager.killSession(session.shepherdSessionId);
+  // If shellper-backed, disable auto-restart via SessionManager before killing the PtySession
+  if (session.shellperBacked && session.shellperSessionId && _deps.shellperManager) {
+    await _deps.shellperManager.killSession(session.shellperSessionId);
   }
 
   return manager.killSession(terminalId);
@@ -506,29 +506,29 @@ export async function stopInstance(projectPath: string): Promise<{ success: bool
   const entry = _deps.projectTerminals.get(resolvedPath) || _deps.projectTerminals.get(projectPath);
 
   if (entry) {
-    // Kill architect (disable shepherd auto-restart if applicable)
+    // Kill architect (disable shellper auto-restart if applicable)
     if (entry.architect) {
       const session = manager.getSession(entry.architect);
       if (session) {
-        await killTerminalWithShepherd(manager, entry.architect);
+        await killTerminalWithShellper(manager, entry.architect);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all shells (disable shepherd auto-restart if applicable)
+    // Kill all shells (disable shellper auto-restart if applicable)
     for (const terminalId of entry.shells.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        await killTerminalWithShepherd(manager, terminalId);
+        await killTerminalWithShellper(manager, terminalId);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all builders (disable shepherd auto-restart if applicable)
+    // Kill all builders (disable shellper auto-restart if applicable)
     for (const terminalId of entry.builders.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        await killTerminalWithShepherd(manager, terminalId);
+        await killTerminalWithShellper(manager, terminalId);
         stopped.push(session.pid);
       }
     }

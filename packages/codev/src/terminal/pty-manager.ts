@@ -109,7 +109,7 @@ export class TerminalManager {
 
   /**
    * Create a PtySession without spawning a process.
-   * Used for shepherd-backed sessions where attachShepherd() will be called
+   * Used for shellper-backed sessions where attachShellper() will be called
    * instead of spawn().
    */
   createSessionRaw(opts: { label: string; cwd: string }): PtySessionInfo {
@@ -120,7 +120,7 @@ export class TerminalManager {
     const id = randomUUID();
     const sessionConfig: PtySessionConfig = {
       id,
-      command: '', // Not used for shepherd-backed sessions
+      command: '', // Not used for shellper-backed sessions
       args: [],
       cols: 200,
       rows: 50,
@@ -413,11 +413,11 @@ export class TerminalManager {
   /** Kill all sessions and clean up. */
   shutdown(): void {
     for (const session of this.sessions.values()) {
-      if (session.shepherdBacked) {
-        // Shepherd-backed sessions survive Tower restart. Detach listeners
+      if (session.shellperBacked) {
+        // Shellper-backed sessions survive Tower restart. Detach listeners
         // so that SessionManager.shutdown() disconnecting the client doesn't
         // cascade into exit events and SQLite row deletion.
-        session.detachShepherd();
+        session.detachShellper();
         continue;
       }
       session.kill();

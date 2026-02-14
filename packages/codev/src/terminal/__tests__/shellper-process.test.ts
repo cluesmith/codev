@@ -17,12 +17,12 @@ import {
   type ParsedFrame,
   type WelcomeMessage,
   type ExitMessage,
-} from '../shepherd-protocol.js';
-import { ShepherdProcess, type IShepherdPty, type PtyOptions } from '../shepherd-process.js';
+} from '../shellper-protocol.js';
+import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 
 // --- Mock PTY ---
 
-class MockPty implements IShepherdPty {
+class MockPty implements IShellperPty {
   pid = 12345;
   spawned = false;
   killed = false;
@@ -76,14 +76,14 @@ class MockPty implements IShepherdPty {
 let tmpDir: string;
 let socketPath: string;
 let mockPty: MockPty;
-let shepherd: ShepherdProcess;
+let shellper: ShellperProcess;
 
-function createMockPty(): IShepherdPty {
+function createMockPty(): IShellperPty {
   mockPty = new MockPty();
   return mockPty;
 }
 
-/** Connect to the shepherd socket, perform handshake, return socket and welcome message. */
+/** Connect to the shellper socket, perform handshake, return socket and welcome message. */
 async function connectAndHandshake(sockPath: string): Promise<{ socket: net.Socket; welcome: WelcomeMessage }> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(sockPath);
@@ -126,14 +126,14 @@ function collectFramesFor(
   });
 }
 
-describe('ShepherdProcess', () => {
+describe('ShellperProcess', () => {
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shepherd-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellper-test-'));
     socketPath = path.join(tmpDir, 'test.sock');
   });
 
   afterEach(() => {
-    shepherd?.shutdown();
+    shellper?.shutdown();
     // Clean up temp directory
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -144,8 +144,8 @@ describe('ShepherdProcess', () => {
 
   describe('start and spawn', () => {
     it('spawns PTY with correct parameters', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', ['-l'], '/home/user', { HOME: '/home/user' }, 120, 40);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', ['-l'], '/home/user', { HOME: '/home/user' }, 120, 40);
 
       expect(mockPty.spawned).toBe(true);
       expect(mockPty.spawnArgs?.command).toBe('/bin/bash');
@@ -156,8 +156,8 @@ describe('ShepherdProcess', () => {
     });
 
     it('listens on Unix socket', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // Verify socket file exists
       const stat = fs.statSync(socketPath);
@@ -165,20 +165,20 @@ describe('ShepherdProcess', () => {
     });
 
     it('records start time', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
+      shellper = new ShellperProcess(createMockPty, socketPath);
       const before = Date.now();
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
       const after = Date.now();
 
-      expect(shepherd.getStartTime()).toBeGreaterThanOrEqual(before);
-      expect(shepherd.getStartTime()).toBeLessThanOrEqual(after);
+      expect(shellper.getStartTime()).toBeGreaterThanOrEqual(before);
+      expect(shellper.getStartTime()).toBeLessThanOrEqual(after);
     });
   });
 
   describe('connection handling', () => {
     it('performs HELLO/WELCOME handshake', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket, welcome } = await connectAndHandshake(socketPath);
       expect(welcome.pid).toBe(12345); // MockPty pid
@@ -190,8 +190,8 @@ describe('ShepherdProcess', () => {
     });
 
     it('sends replay buffer on connect', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // Simulate some PTY output before connection
       mockPty.simulateData('hello\nworld\n');
@@ -209,15 +209,15 @@ describe('ShepherdProcess', () => {
       // REPLAY should follow WELCOME
       const replayFrame = frames.find((f) => f.type === FrameType.REPLAY);
       // The replay data may arrive in the welcome handler or as a separate frame
-      // Either way, the shepherd should have sent it
-      expect(shepherd.getReplayData().length).toBeGreaterThan(0);
+      // Either way, the shellper should have sent it
+      expect(shellper.getReplayData().length).toBeGreaterThan(0);
 
       socket.destroy();
     });
 
     it('new connection replaces old one', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket: socket1 } = await connectAndHandshake(socketPath);
 
@@ -237,8 +237,8 @@ describe('ShepherdProcess', () => {
 
   describe('data forwarding', () => {
     it('forwards PTY data to connected client', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
       const parser = createFrameParser();
@@ -259,8 +259,8 @@ describe('ShepherdProcess', () => {
     });
 
     it('forwards client input to PTY', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -276,8 +276,8 @@ describe('ShepherdProcess', () => {
 
   describe('RESIZE handling', () => {
     it('resizes PTY on RESIZE frame', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -292,8 +292,8 @@ describe('ShepherdProcess', () => {
 
   describe('SIGNAL handling', () => {
     it('forwards allowed signals to PTY', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -307,11 +307,11 @@ describe('ShepherdProcess', () => {
     });
 
     it('rejects disallowed signals', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const errors: Error[] = [];
-      shepherd.on('protocol-error', (err: Error) => errors.push(err));
+      shellper.on('protocol-error', (err: Error) => errors.push(err));
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -327,8 +327,8 @@ describe('ShepherdProcess', () => {
 
   describe('EXIT handling', () => {
     it('sends EXIT frame when PTY exits', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
       const parser = createFrameParser();
@@ -351,12 +351,12 @@ describe('ShepherdProcess', () => {
     });
 
     it('reports hasExited after PTY exits', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
-      expect(shepherd.hasExited).toBe(false);
+      expect(shellper.hasExited).toBe(false);
       mockPty.simulateExit(1);
-      expect(shepherd.hasExited).toBe(true);
+      expect(shellper.hasExited).toBe(true);
     });
   });
 
@@ -365,7 +365,7 @@ describe('ShepherdProcess', () => {
       let ptyCount = 0;
       const ptys: MockPty[] = [];
 
-      shepherd = new ShepherdProcess(
+      shellper = new ShellperProcess(
         () => {
           const pty = new MockPty();
           pty.pid = 12345 + ptyCount++;
@@ -375,7 +375,7 @@ describe('ShepherdProcess', () => {
         socketPath,
       );
 
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
       const firstPty = ptys[0];
       expect(firstPty.spawned).toBe(true);
 
@@ -407,12 +407,12 @@ describe('ShepherdProcess', () => {
     });
 
     it('clears replay buffer on SPAWN', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // Accumulate some data
       mockPty.simulateData('old output\n');
-      expect(shepherd.getReplayData().length).toBeGreaterThan(0);
+      expect(shellper.getReplayData().length).toBeGreaterThan(0);
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -429,7 +429,7 @@ describe('ShepherdProcess', () => {
       // Replay buffer should be cleared (new data from new PTY will accumulate)
       // But since no new PTY output happened, it should be empty or very small
       // The key assertion is that old data is gone
-      const replayStr = shepherd.getReplayData().toString();
+      const replayStr = shellper.getReplayData().toString();
       expect(replayStr).not.toContain('old output');
 
       socket.destroy();
@@ -438,8 +438,8 @@ describe('ShepherdProcess', () => {
 
   describe('PING/PONG handling', () => {
     it('responds to PING with PONG', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
       const parser = createFrameParser();
@@ -459,29 +459,29 @@ describe('ShepherdProcess', () => {
 
   describe('replay buffer', () => {
     it('accumulates PTY output in replay buffer', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       mockPty.simulateData('line 1\n');
       mockPty.simulateData('line 2\n');
       mockPty.simulateData('line 3\n');
 
-      const replay = shepherd.getReplayData().toString();
+      const replay = shellper.getReplayData().toString();
       expect(replay).toContain('line 1');
       expect(replay).toContain('line 2');
       expect(replay).toContain('line 3');
     });
 
     it('respects replay buffer line limit', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath, 5);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath, 5);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // Push more lines than the buffer can hold
       for (let i = 0; i < 20; i++) {
         mockPty.simulateData(`line-${i}\n`);
       }
 
-      const replay = shepherd.getReplayData().toString();
+      const replay = shellper.getReplayData().toString();
       // Early lines should be evicted
       expect(replay).not.toContain('line-0');
       // Recent lines should be present
@@ -491,15 +491,15 @@ describe('ShepherdProcess', () => {
 
   describe('shutdown', () => {
     it('kills PTY, closes connections, and closes server', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const { socket } = await connectAndHandshake(socketPath);
 
       let shutdownEmitted = false;
-      shepherd.on('shutdown', () => { shutdownEmitted = true; });
+      shellper.on('shutdown', () => { shutdownEmitted = true; });
 
-      shepherd.shutdown();
+      shellper.shutdown();
 
       expect(mockPty.killed).toBe(true);
       expect(shutdownEmitted).toBe(true);
@@ -512,11 +512,11 @@ describe('ShepherdProcess', () => {
 
   describe('protocol errors', () => {
     it('emits protocol-error and closes connection on malformed JSON', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const errors: Error[] = [];
-      shepherd.on('protocol-error', (err: Error) => errors.push(err));
+      shellper.on('protocol-error', (err: Error) => errors.push(err));
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -534,11 +534,11 @@ describe('ShepherdProcess', () => {
     });
 
     it('silently ignores unknown frame types', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const errors: Error[] = [];
-      shepherd.on('protocol-error', (err: Error) => errors.push(err));
+      shellper.on('protocol-error', (err: Error) => errors.push(err));
 
       const { socket } = await connectAndHandshake(socketPath);
 
@@ -562,7 +562,7 @@ describe('ShepherdProcess', () => {
       let ptyCount = 0;
       const ptys: MockPty[] = [];
 
-      shepherd = new ShepherdProcess(
+      shellper = new ShellperProcess(
         () => {
           const pty = new MockPty();
           pty.pid = 12345 + ptyCount++;
@@ -572,7 +572,7 @@ describe('ShepherdProcess', () => {
         socketPath,
       );
 
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
       const firstPty = ptys[0];
 
       const { socket } = await connectAndHandshake(socketPath);
@@ -597,7 +597,7 @@ describe('ShepherdProcess', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Critical: new PTY should NOT be marked as exited
-      expect(shepherd.hasExited).toBe(false);
+      expect(shellper.hasExited).toBe(false);
 
       // New PTY should still accept data
       socket.write(encodeData('still works'));
@@ -611,7 +611,7 @@ describe('ShepherdProcess', () => {
       let ptyCount = 0;
       const ptys: MockPty[] = [];
 
-      shepherd = new ShepherdProcess(
+      shellper = new ShellperProcess(
         () => {
           const pty = new MockPty();
           pty.pid = 12345 + ptyCount++;
@@ -621,7 +621,7 @@ describe('ShepherdProcess', () => {
         socketPath,
       );
 
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
       const firstPty = ptys[0];
 
       const { socket } = await connectAndHandshake(socketPath);
@@ -646,7 +646,7 @@ describe('ShepherdProcess', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // The replay buffer should NOT contain old PTY data
-      const replay = shepherd.getReplayData().toString();
+      const replay = shellper.getReplayData().toString();
       expect(replay).not.toContain('stale data from old pty');
 
       socket.destroy();
@@ -655,17 +655,17 @@ describe('ShepherdProcess', () => {
 
   describe('getPid', () => {
     it('returns PTY pid after start', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
-      expect(shepherd.getPid()).toBe(12345);
+      expect(shellper.getPid()).toBe(12345);
     });
   });
 
   describe('socket permissions', () => {
     it('creates socket file with 0600 permissions', async () => {
-      shepherd = new ShepherdProcess(createMockPty, socketPath);
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const stat = fs.statSync(socketPath);
       // Socket file should be 0600 (owner read/write only)

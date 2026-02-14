@@ -75,7 +75,7 @@ vi.mock('../utils/file-tabs.js', () => ({
 function makeDeps(overrides: Partial<TerminalDeps> = {}): TerminalDeps {
   return {
     log: vi.fn(),
-    shepherdManager: null,
+    shellperManager: null,
     registerKnownProject: vi.fn(),
     getKnownProjectPaths: vi.fn(() => []),
     ...overrides,
@@ -230,13 +230,13 @@ describe('tower-terminals', () => {
   // =========================================================================
 
   describe('isSessionPersistent', () => {
-    it('returns true for shepherd-backed sessions', () => {
-      const session = { shepherdBacked: true } as any;
+    it('returns true for shellper-backed sessions', () => {
+      const session = { shellperBacked: true } as any;
       expect(isSessionPersistent('term-1', session)).toBe(true);
     });
 
-    it('returns false for non-shepherd sessions', () => {
-      const session = { shepherdBacked: false } as any;
+    it('returns false for non-shellper sessions', () => {
+      const session = { shellperBacked: false } as any;
       expect(isSessionPersistent('term-1', session)).toBe(false);
     });
   });
@@ -404,7 +404,7 @@ describe('tower-terminals', () => {
   // =========================================================================
 
   describe('reconcileTerminalSessions', () => {
-    // Full reconciliation tests would require complex shepherd mocking.
+    // Full reconciliation tests would require complex shellper mocking.
     // Here we test the startup guard and basic paths.
 
     it('returns silently when not initialized', async () => {

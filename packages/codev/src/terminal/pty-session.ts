@@ -8,7 +8,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
-import type { IShepherdClient } from './shepherd-client.js';
+import type { IShellperClient } from './shellper-client.js';
 
 export interface PtySessionConfig {
   id: string;
@@ -45,10 +45,10 @@ export class PtySession extends EventEmitter {
   readonly ringBuffer: RingBuffer;
 
   private pty: IPty | null = null;
-  private shepherdClient: IShepherdClient | null = null;
-  private _shepherdBacked = false;
-  private _shepherdSessionId: string | null = null;
-  private shepherdPid = -1;
+  private shellperClient: IShellperClient | null = null;
+  private _shellperBacked = false;
+  private _shellperSessionId: string | null = null;
+  private shellperPid = -1;
   private cols: number;
   private rows: number;
   private exitCode: number | undefined;
@@ -106,15 +106,15 @@ export class PtySession extends EventEmitter {
   }
 
   /**
-   * Attach a shepherd client as the I/O backend instead of node-pty.
-   * Data flows: shepherd → ring buffer → WebSocket clients.
-   * User input flows: WebSocket → write() → shepherd.
+   * Attach a shellper client as the I/O backend instead of node-pty.
+   * Data flows: shellper → ring buffer → WebSocket clients.
+   * User input flows: WebSocket → write() → shellper.
    */
-  attachShepherd(client: IShepherdClient, replayData: Buffer, shepherdPid: number, shepherdSessionId?: string): void {
-    this._shepherdBacked = true;
-    this.shepherdClient = client;
-    this.shepherdPid = shepherdPid;
-    this._shepherdSessionId = shepherdSessionId ?? null;
+  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string): void {
+    this._shellperBacked = true;
+    this.shellperClient = client;
+    this.shellperPid = shellperPid;
+    this._shellperSessionId = shellperSessionId ?? null;
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {
@@ -122,60 +122,60 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    // Populate ring buffer with replay data from shepherd
+    // Populate ring buffer with replay data from shellper
     if (replayData.length > 0) {
       this.ringBuffer.pushData(replayData.toString('utf-8'));
     }
 
-    // Forward shepherd data to ring buffer + WebSocket clients
+    // Forward shellper data to ring buffer + WebSocket clients
     client.on('data', (buf: Buffer) => {
       this.onPtyData(buf.toString('utf-8'));
     });
 
-    // Handle shepherd exit (process inside shepherd exited)
+    // Handle shellper exit (process inside shellper exited)
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
       this.emit('exit', exitInfo.code);
-      // For shepherd-backed sessions, cleanup closes disk log and clients
-      // but doesn't clear the ring buffer (shepherd may still have replay data)
-      this.cleanupShepherd();
+      // For shellper-backed sessions, cleanup closes disk log and clients
+      // but doesn't clear the ring buffer (shellper may still have replay data)
+      this.cleanupShellper();
     });
 
-    // Handle shepherd disconnect (socket closed without EXIT)
+    // Handle shellper disconnect (socket closed without EXIT)
     client.on('close', () => {
       if (this.exitCode === undefined) {
-        // Unexpected disconnect — shepherd may have crashed
+        // Unexpected disconnect — shellper may have crashed
         this.exitCode = -1;
         this.emit('exit', -1);
-        this.cleanupShepherd();
+        this.cleanupShellper();
       }
     });
   }
 
-  /** Whether this session is backed by a shepherd process. */
-  get shepherdBacked(): boolean {
-    return this._shepherdBacked;
+  /** Whether this session is backed by a shellper process. */
+  get shellperBacked(): boolean {
+    return this._shellperBacked;
   }
 
-  /** The SessionManager session ID for this shepherd-backed session, or null. */
-  get shepherdSessionId(): string | null {
-    return this._shepherdSessionId;
+  /** The SessionManager session ID for this shellper-backed session, or null. */
+  get shellperSessionId(): string | null {
+    return this._shellperSessionId;
   }
 
   /**
-   * Detach from shepherd client during Tower shutdown.
+   * Detach from shellper client during Tower shutdown.
    * Removes all event listeners so that SessionManager.shutdown() disconnecting
    * the client doesn't cascade into exit events and SQLite row deletion.
    */
-  detachShepherd(): void {
-    if (this.shepherdClient) {
-      this.shepherdClient.removeAllListeners();
-      this.shepherdClient = null;
+  detachShellper(): void {
+    if (this.shellperClient) {
+      this.shellperClient.removeAllListeners();
+      this.shellperClient = null;
     }
-    this.cleanupShepherd();
+    this.cleanupShellper();
   }
 
-  private cleanupShepherd(): void {
+  private cleanupShellper(): void {
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
@@ -186,8 +186,8 @@ export class PtySession extends EventEmitter {
       try { fs.closeSync(this.logFd); } catch { /* ignore */ }
       this.logFd = null;
     }
-    // Note: ring buffer is NOT cleared — shepherd handles replay
-    // Note: shepherd client is NOT disconnected — SessionManager owns that lifecycle
+    // Note: ring buffer is NOT cleared — shellper handles replay
+    // Note: shellper client is NOT disconnected — SessionManager owns that lifecycle
   }
 
   private onPtyData(data: string): void {
@@ -232,11 +232,11 @@ export class PtySession extends EventEmitter {
     this.logBytes = 0;
   }
 
-  /** Write user input to the PTY or shepherd. */
+  /** Write user input to the PTY or shellper. */
   write(data: string): void {
-    if (this._shepherdBacked) {
-      if (this.shepherdClient && this.status === 'running') {
-        this.shepherdClient.write(data);
+    if (this._shellperBacked) {
+      if (this.shellperClient && this.status === 'running') {
+        this.shellperClient.write(data);
       }
       return;
     }
@@ -245,13 +245,13 @@ export class PtySession extends EventEmitter {
     }
   }
 
-  /** Resize the PTY or shepherd. */
+  /** Resize the PTY or shellper. */
   resize(cols: number, rows: number): void {
     this.cols = cols;
     this.rows = rows;
-    if (this._shepherdBacked) {
-      if (this.shepherdClient && this.status === 'running') {
-        this.shepherdClient.resize(cols, rows);
+    if (this._shellperBacked) {
+      if (this.shellperClient && this.status === 'running') {
+        this.shellperClient.resize(cols, rows);
       }
       return;
     }
@@ -260,13 +260,13 @@ export class PtySession extends EventEmitter {
     }
   }
 
-  /** Kill the PTY process or send signal to shepherd. */
+  /** Kill the PTY process or send signal to shellper. */
   kill(): void {
-    if (this._shepherdBacked) {
-      if (this.shepherdClient && this.status === 'running') {
-        this.shepherdClient.signal(15); // SIGTERM
+    if (this._shellperBacked) {
+      if (this.shellperClient && this.status === 'running') {
+        this.shellperClient.signal(15); // SIGTERM
       }
-      this.cleanupShepherd();
+      this.cleanupShellper();
       return;
     }
     if (this.pty && this.status === 'running') {
@@ -303,12 +303,12 @@ export class PtySession extends EventEmitter {
     return this.ringBuffer.getSince(sinceSeq);
   }
 
-  /** Detach a WebSocket client. Starts disconnect timer if no clients remain (non-shepherd only). */
+  /** Detach a WebSocket client. Starts disconnect timer if no clients remain (non-shellper only). */
   detach(client: { send: (data: Buffer | string) => void }): void {
     this.clients.delete(client);
-    // Shepherd-backed sessions don't need a disconnect timer — the shepherd
+    // Shellper-backed sessions don't need a disconnect timer — the shellper
     // keeps the process alive independently of WebSocket connections.
-    if (this._shepherdBacked) return;
+    if (this._shellperBacked) return;
     if (this.clients.size === 0 && this.status === 'running') {
       this.disconnectTimer = setTimeout(() => {
         this.emit('timeout');
@@ -327,7 +327,7 @@ export class PtySession extends EventEmitter {
   }
 
   get pid(): number {
-    if (this._shepherdBacked) return this.shepherdPid;
+    if (this._shellperBacked) return this.shellperPid;
     return this.pty?.pid ?? -1;
   }
 
@@ -341,7 +341,7 @@ export class PtySession extends EventEmitter {
       status: this.status,
       createdAt: this.createdAt,
       exitCode: this.exitCode,
-      persistent: this._shepherdBacked,
+      persistent: this._shellperBacked,
     };
   }
 

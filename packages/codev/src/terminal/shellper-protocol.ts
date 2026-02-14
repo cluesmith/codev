@@ -1,12 +1,12 @@
 /**
- * Shepherd wire protocol: binary frame encoding/decoding for Unix socket
- * communication between Tower and shepherd processes.
+ * Shellper wire protocol: binary frame encoding/decoding for Unix socket
+ * communication between Tower and shellper processes.
  *
  * Frame format: [1-byte type] [4-byte big-endian length] [payload]
  *
- * This module is imported by both the shepherd process (standalone) and
+ * This module is imported by both the shellper process (standalone) and
  * Tower (within the main package). It has NO dependencies beyond Node.js
- * built-ins to keep the shepherd process lightweight.
+ * built-ins to keep the shellper process lightweight.
  */
 
 import { Transform, type TransformCallback } from 'node:stream';

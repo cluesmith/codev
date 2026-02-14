@@ -22,7 +22,7 @@ export interface TowerContext {
   port: number;
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   terminalManager: TerminalManager;
-  shepherdManager: SessionManager | null;
+  shellperManager: SessionManager | null;
   projectTerminals: Map<string, ProjectTerminals>;
   db: () => Database.Database;
   gateWatcher: GateWatcher;
@@ -81,8 +81,8 @@ export interface DbTerminalSession {
   type: 'architect' | 'builder' | 'shell';
   role_id: string | null;
   pid: number | null;
-  shepherd_socket: string | null;
-  shepherd_pid: number | null;
-  shepherd_start_time: number | null;
+  shellper_socket: string | null;
+  shellper_pid: number | null;
+  shellper_start_time: number | null;
   created_at: string;
 }

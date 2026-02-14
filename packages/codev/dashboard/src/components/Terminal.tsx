@@ -20,7 +20,7 @@ interface TerminalProps {
   wsPath: string;
   /** Callback when user clicks a file path in terminal output (Spec 0092, 0101) */
   onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
-  /** Whether this session is backed by a persistent shepherd process (Spec 0104) */
+  /** Whether this session is backed by a persistent shellper process (Spec 0104) */
   persistent?: boolean;
 }
 
@@ -256,7 +256,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     wsRef.current = ws;
 
     // Filter DA (Device Attribute) response sequences that can appear as visible
-    // text when reconnecting to an existing shepherd session. Buffer the first
+    // text when reconnecting to an existing shellper session. Buffer the first
     // 500ms of data to catch fragmented DA sequences, then flush and switch to
     // direct writes. Uses a fixed deadline (not reset per frame) so active
     // terminals don't starve.

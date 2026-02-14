@@ -34,7 +34,7 @@ vi.mock('../servers/tower-instances.js', () => ({
   getKnownProjectPaths: vi.fn(() => []),
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
-  killTerminalWithShepherd: vi.fn(async () => true),
+  killTerminalWithShellper: vi.fn(async () => true),
   stopInstance: vi.fn(async () => ({ ok: true })),
 }));
 
@@ -83,7 +83,7 @@ function makeCtx(overrides: Partial<RouteContext> = {}): RouteContext {
     templatePath: '/tmp/tower.html',
     reactDashboardPath: '/tmp/dashboard/dist',
     hasReactDashboard: false,
-    getShepherdManager: () => null,
+    getShellperManager: () => null,
     broadcastNotification: vi.fn(),
     addSseClient: vi.fn(),
     removeSseClient: vi.fn(),

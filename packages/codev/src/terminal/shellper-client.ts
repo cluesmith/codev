@@ -1,12 +1,12 @@
 /**
- * ShepherdClient: Tower's connection to a single shepherd process.
+ * ShellperClient: Tower's connection to a single shellper process.
  *
- * Connects to a shepherd via Unix socket, performs HELLO/WELCOME handshake,
+ * Connects to a shellper via Unix socket, performs HELLO/WELCOME handshake,
  * and provides a typed API for sending/receiving frames. Emits events for
  * data, exit, replay, and errors.
  *
  * Usage:
- *   const client = new ShepherdClient('/path/to/shepherd.sock');
+ *   const client = new ShellperClient('/path/to/shellper.sock');
  *   const welcome = await client.connect();
  *   client.on('data', (buf) => { ... });
  *   client.write('ls\n');
@@ -32,9 +32,9 @@ import {
   type WelcomeMessage,
   type ExitMessage,
   type SpawnMessage,
-} from './shepherd-protocol.js';
+} from './shellper-protocol.js';
 
-export interface IShepherdClient extends EventEmitter {
+export interface IShellperClient extends EventEmitter {
   connect(): Promise<WelcomeMessage>;
   disconnect(): void;
   write(data: string | Buffer): void;
@@ -47,7 +47,7 @@ export interface IShepherdClient extends EventEmitter {
   readonly connected: boolean;
 }
 
-export class ShepherdClient extends EventEmitter implements IShepherdClient {
+export class ShellperClient extends EventEmitter implements IShellperClient {
   private socket: net.Socket | null = null;
   private _connected = false;
   private replayData: Buffer | null = null;
@@ -72,7 +72,7 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
   }
 
   /**
-   * Connect to the shepherd, perform HELLO/WELCOME handshake.
+   * Connect to the shellper, perform HELLO/WELCOME handshake.
    * Resolves with the WelcomeMessage on success.
    * Rejects on connection error or handshake failure.
    */
@@ -124,7 +124,7 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
       });
 
       // Buffer frames that arrive before WELCOME (e.g., DATA from PTY output
-      // that the shepherd forwards immediately on connection)
+      // that the shellper forwards immediately on connection)
       const preWelcomeBuffer: ParsedFrame[] = [];
 
       parser.on('data', (frame: ParsedFrame) => {
@@ -134,18 +134,18 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
               const welcome = parseJsonPayload<WelcomeMessage>(frame.payload);
 
               // Version mismatch handling per spec:
-              // - shepherd version < Tower version → disconnect (stale shepherd)
-              // - shepherd version > Tower version → warn but continue
-              const shepherdVersion = welcome.version ?? 0;
-              if (shepherdVersion < PROTOCOL_VERSION) {
+              // - shellper version < Tower version → disconnect (stale shellper)
+              // - shellper version > Tower version → warn but continue
+              const shellperVersion = welcome.version ?? 0;
+              if (shellperVersion < PROTOCOL_VERSION) {
                 handshakeResolved = true;
-                reject(new Error(`Shepherd protocol version ${shepherdVersion} is older than Tower version ${PROTOCOL_VERSION}`));
+                reject(new Error(`Shellper protocol version ${shellperVersion} is older than Tower version ${PROTOCOL_VERSION}`));
                 this.cleanup();
                 return;
               }
-              if (shepherdVersion > PROTOCOL_VERSION) {
-                // Newer shepherd — log warning but continue (forward compatible)
-                this.emit('version-warning', shepherdVersion, PROTOCOL_VERSION);
+              if (shellperVersion > PROTOCOL_VERSION) {
+                // Newer shellper — log warning but continue (forward compatible)
+                this.emit('version-warning', shellperVersion, PROTOCOL_VERSION);
               }
 
               handshakeResolved = true;
@@ -205,8 +205,8 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
         // Duplicate WELCOME after handshake — ignore
         break;
       default:
-        // Other frame types (HELLO, RESIZE, SIGNAL, SPAWN) are shepherd-bound,
-        // not expected from shepherd → Tower
+        // Other frame types (HELLO, RESIZE, SIGNAL, SPAWN) are shellper-bound,
+        // not expected from shellper → Tower
         break;
     }
   }
@@ -255,9 +255,9 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
 
   /**
    * Wait for the REPLAY frame to arrive after connection.
-   * The shepherd sends REPLAY immediately after WELCOME, but they may
+   * The shellper sends REPLAY immediately after WELCOME, but they may
    * arrive in separate reads. Returns the replay data, or empty Buffer
-   * if no REPLAY arrives within the timeout (shepherd had nothing to replay).
+   * if no REPLAY arrives within the timeout (shellper had nothing to replay).
    */
   waitForReplay(timeoutMs: number = 500): Promise<Buffer> {
     if (this.replayData !== null) {

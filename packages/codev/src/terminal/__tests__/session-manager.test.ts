@@ -4,8 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { SessionManager, getProcessStartTime, type CreateSessionOptions } from '../session-manager.js';
-import { ShepherdProcess, type IShepherdPty, type PtyOptions } from '../shepherd-process.js';
-import { ShepherdClient } from '../shepherd-client.js';
+import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
+import { ShellperClient } from '../shellper-client.js';
 
 // Helper: create a temp directory for socket files
 function tmpDir(): string {
@@ -21,8 +21,8 @@ function rmrf(dir: string): void {
   }
 }
 
-// Helper: create a MockPty for use with ShepherdProcess
-class MockPty implements IShepherdPty {
+// Helper: create a MockPty for use with ShellperProcess
+class MockPty implements IShellperPty {
   private dataCallback: ((data: string) => void) | null = null;
   private exitCallback: ((info: { exitCode: number; signal?: number }) => void) | null = null;
   pid = 9999;
@@ -82,17 +82,17 @@ describe('SessionManager', () => {
     rmrf(socketDir);
   });
 
-  describe('with mock shepherd (unit tests)', () => {
-    // Create a real ShepherdProcess with MockPty to serve as the shepherd
-    async function createMockShepherd(sessionId: string): Promise<{
-      shepherd: ShepherdProcess;
+  describe('with mock shellper (unit tests)', () => {
+    // Create a real ShellperProcess with MockPty to serve as the shellper
+    async function createMockShellper(sessionId: string): Promise<{
+      shellper: ShellperProcess;
       socketPath: string;
       mockPty: MockPty;
     }> {
-      const socketPath = path.join(socketDir, `shepherd-${sessionId}.sock`);
+      const socketPath = path.join(socketDir, `shellper-${sessionId}.sock`);
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -101,16 +101,16 @@ describe('SessionManager', () => {
         1000,
       );
 
-      await shepherd.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
 
-      return { shepherd, socketPath, mockPty: capturedPty! };
+      return { shellper, socketPath, mockPty: capturedPty! };
     }
 
-    it('connects to a shepherd via ShepherdClient', async () => {
-      const { shepherd, socketPath, mockPty } = await createMockShepherd('test-1');
-      cleanupFns.push(() => shepherd.shutdown());
+    it('connects to a shellper via ShellperClient', async () => {
+      const { shellper, socketPath, mockPty } = await createMockShellper('test-1');
+      cleanupFns.push(() => shellper.shutdown());
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanupFns.push(() => client.disconnect());
 
       const welcome = await client.connect();
@@ -120,11 +120,11 @@ describe('SessionManager', () => {
       expect(client.connected).toBe(true);
     });
 
-    it('receives data from shepherd', async () => {
-      const { shepherd, socketPath, mockPty } = await createMockShepherd('test-2');
-      cleanupFns.push(() => shepherd.shutdown());
+    it('receives data from shellper', async () => {
+      const { shellper, socketPath, mockPty } = await createMockShellper('test-2');
+      cleanupFns.push(() => shellper.shutdown());
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanupFns.push(() => client.disconnect());
       await client.connect();
 
@@ -138,11 +138,11 @@ describe('SessionManager', () => {
       expect(data.toString()).toContain('hello from pty');
     });
 
-    it('sends data to shepherd', async () => {
-      const { shepherd, socketPath, mockPty } = await createMockShepherd('test-3');
-      cleanupFns.push(() => shepherd.shutdown());
+    it('sends data to shellper', async () => {
+      const { shellper, socketPath, mockPty } = await createMockShellper('test-3');
+      cleanupFns.push(() => shellper.shutdown());
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanupFns.push(() => client.disconnect());
       await client.connect();
 
@@ -153,11 +153,11 @@ describe('SessionManager', () => {
       // If we get here without errors, the write was accepted
     });
 
-    it('receives exit event from shepherd', async () => {
-      const { shepherd, socketPath, mockPty } = await createMockShepherd('test-4');
-      cleanupFns.push(() => shepherd.shutdown());
+    it('receives exit event from shellper', async () => {
+      const { shellper, socketPath, mockPty } = await createMockShellper('test-4');
+      cleanupFns.push(() => shellper.shutdown());
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanupFns.push(() => client.disconnect());
       await client.connect();
 
@@ -172,8 +172,8 @@ describe('SessionManager', () => {
     });
 
     it('receives replay data on connect', async () => {
-      const { shepherd, socketPath, mockPty } = await createMockShepherd('test-5');
-      cleanupFns.push(() => shepherd.shutdown());
+      const { shellper, socketPath, mockPty } = await createMockShellper('test-5');
+      cleanupFns.push(() => shellper.shutdown());
 
       // Generate some output in the replay buffer
       mockPty.simulateData('line1\n');
@@ -183,7 +183,7 @@ describe('SessionManager', () => {
       // Wait for data to be buffered
       await new Promise((r) => setTimeout(r, 20));
 
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       cleanupFns.push(() => client.disconnect());
 
       const replayPromise = new Promise<Buffer>((resolve) => {
@@ -203,7 +203,7 @@ describe('SessionManager', () => {
     it('returns empty map initially', () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
       expect(manager.listSessions().size).toBe(0);
@@ -214,12 +214,12 @@ describe('SessionManager', () => {
     it('removes stale socket files', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
       // Create a real Unix socket file, then close the server (leaving a stale socket)
-      const staleSocketPath = path.join(socketDir, 'shepherd-stale1.sock');
+      const staleSocketPath = path.join(socketDir, 'shellper-stale1.sock');
       const staleServer = net.createServer();
       await new Promise<void>((resolve) => staleServer.listen(staleSocketPath, resolve));
       // Keep the server listening so the socket file exists, then close
@@ -254,14 +254,14 @@ describe('SessionManager', () => {
     it('skips symlinks', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
       // Create a regular file and symlink to it
       const realFile = path.join(socketDir, 'real-file');
       fs.writeFileSync(realFile, '');
-      const symlinkPath = path.join(socketDir, 'shepherd-symlink.sock');
+      const symlinkPath = path.join(socketDir, 'shellper-symlink.sock');
       fs.symlinkSync(realFile, symlinkPath);
 
       const cleaned = await manager.cleanupStaleSockets();
@@ -270,14 +270,14 @@ describe('SessionManager', () => {
       expect(fs.existsSync(symlinkPath)).toBe(true);
     });
 
-    it('skips non-shepherd files', async () => {
+    it('skips non-shellper files', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
-      // Create a file that doesn't match shepherd pattern
+      // Create a file that doesn't match shellper pattern
       fs.writeFileSync(path.join(socketDir, 'other-file.sock'), '');
 
       const cleaned = await manager.cleanupStaleSockets();
@@ -287,7 +287,7 @@ describe('SessionManager', () => {
     it('returns 0 if socket directory does not exist', async () => {
       const manager = new SessionManager({
         socketDir: '/nonexistent/dir',
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -300,19 +300,19 @@ describe('SessionManager', () => {
     it('returns null for unknown session', () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
       expect(manager.getSessionInfo('nonexistent')).toBeNull();
     });
   });
 
-  describe('cleanupStaleSockets (live shepherd preserved)', () => {
-    it('does not delete sockets with live shepherds', async () => {
-      // Create a real shepherd that is listening on a socket
-      const socketPath = path.join(socketDir, 'shepherd-livesock.sock');
+  describe('cleanupStaleSockets (live shellper preserved)', () => {
+    it('does not delete sockets with live shellpers', async () => {
+      // Create a real shellper that is listening on a socket
+      const socketPath = path.join(socketDir, 'shellper-livesock.sock');
       let mockPty: MockPty | null = null;
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           mockPty = new MockPty();
           return mockPty;
@@ -320,19 +320,19 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       // SessionManager has NO knowledge of this session (simulates Tower restart)
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
       expect(fs.existsSync(socketPath)).toBe(true);
       const cleaned = await manager.cleanupStaleSockets();
-      // Should NOT delete the socket because the shepherd is alive (connection succeeds)
+      // Should NOT delete the socket because the shellper is alive (connection succeeds)
       expect(cleaned).toBe(0);
       expect(fs.existsSync(socketPath)).toBe(true);
     });
@@ -343,10 +343,10 @@ describe('SessionManager', () => {
       const newSocketDir = path.join(os.tmpdir(), `session-mgr-perm-test-${Date.now()}`);
       cleanupFns.push(() => rmrf(newSocketDir));
 
-      const socketPath = path.join(newSocketDir, 'shepherd-perm.sock');
+      const socketPath = path.join(newSocketDir, 'shellper-perm.sock');
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -358,7 +358,7 @@ describe('SessionManager', () => {
       // SessionManager creates the directory with 0700
       const manager = new SessionManager({
         socketDir: newSocketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -371,19 +371,19 @@ describe('SessionManager', () => {
     });
   });
 
-  // Real shepherd integration tests require node-pty native module and are
+  // Real shellper integration tests require node-pty native module and are
   // skipped in CI where the child process cannot resolve the native binding.
-  describe.skipIf(!!process.env.CI)('createSession (integration with real shepherd)', () => {
-    // These tests spawn a real shepherd-main.js process
-    const shepherdScript = path.resolve(
+  describe.skipIf(!!process.env.CI)('createSession (integration with real shellper)', () => {
+    // These tests spawn a real shellper-main.js process
+    const shellperScript = path.resolve(
       path.dirname(new URL(import.meta.url).pathname),
-      '../../../dist/terminal/shepherd-main.js',
+      '../../../dist/terminal/shellper-main.js',
     );
 
-    it('spawns a shepherd and returns connected client', async () => {
+    it('spawns a shellper and returns connected client', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript,
+        shellperScript,
         nodeExecutable: process.execPath,
       });
 
@@ -412,7 +412,7 @@ describe('SessionManager', () => {
     it('create → write → read → kill → verify cleanup', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript,
+        shellperScript,
         nodeExecutable: process.execPath,
       });
 
@@ -463,10 +463,10 @@ describe('SessionManager', () => {
 
   describe('killSession', () => {
     it('kills session and cleans up', async () => {
-      // Create a shepherd with MockPty
-      const socketPath = path.join(socketDir, 'shepherd-kill.sock');
+      // Create a shellper with MockPty
+      const socketPath = path.join(socketDir, 'shellper-kill.sock');
       let mockPty: MockPty | null = null;
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           mockPty = new MockPty();
           return mockPty;
@@ -474,15 +474,15 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // Connect client and register in a mock manager-like setup
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       await client.connect();
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -502,16 +502,16 @@ describe('SessionManager', () => {
 
       // Clean up in case reconnect failed
       client.disconnect();
-      shepherd.shutdown();
+      shellper.shutdown();
     });
   });
 
-  describe('shepherd crash cleanup (close without EXIT)', () => {
-    it('removes session from map when shepherd disconnects without EXIT', async () => {
-      const socketPath = path.join(socketDir, 'shepherd-crash.sock');
+  describe('shellper crash cleanup (close without EXIT)', () => {
+    it('removes session from map when shellper disconnects without EXIT', async () => {
+      const socketPath = path.join(socketDir, 'shellper-crash.sock');
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -519,11 +519,11 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -540,35 +540,35 @@ describe('SessionManager', () => {
 
         const errorPromise = new Promise<Error>((resolve) => {
           manager.on('session-error', (_id: string, err: Error) => {
-            if (err.message.includes('Shepherd disconnected unexpectedly')) {
+            if (err.message.includes('Shellper disconnected unexpectedly')) {
               resolve(err);
             }
           });
         });
 
-        // Simulate shepherd crash by shutting down the server (closes socket)
-        shepherd.shutdown();
+        // Simulate shellper crash by shutting down the server (closes socket)
+        shellper.shutdown();
 
         const err = await Promise.race([
           errorPromise,
           new Promise<Error>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
         ]);
 
-        expect(err.message).toContain('Shepherd disconnected unexpectedly');
+        expect(err.message).toContain('Shellper disconnected unexpectedly');
         expect(manager.listSessions().size).toBe(0);
         expect(manager.getSessionInfo('crash-test')).toBeNull();
       } else {
-        shepherd.shutdown();
+        shellper.shutdown();
       }
     });
   });
 
   describe('natural exit cleanup (no auto-restart)', () => {
     it('removes session from map when process exits and restartOnExit is false', async () => {
-      const socketPath = path.join(socketDir, 'shepherd-natural-exit.sock');
+      const socketPath = path.join(socketDir, 'shellper-natural-exit.sock');
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -576,12 +576,12 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -610,17 +610,17 @@ describe('SessionManager', () => {
         expect(manager.getSessionInfo('natural-exit-test')).toBeNull();
       }
 
-      shepherd.shutdown();
+      shellper.shutdown();
     });
   });
 
   describe('auto-restart logic', () => {
     it('sends SPAWN frame on exit when restartOnExit is true', async () => {
-      const socketPath = path.join(socketDir, 'shepherd-restart.sock');
+      const socketPath = path.join(socketDir, 'shellper-restart.sock');
       let capturedPty: MockPty | null = null;
       let spawnCount = 0;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           spawnCount++;
           capturedPty = new MockPty();
@@ -629,28 +629,28 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
       // Create a mock session with auto-restart by manually connecting
       // and registering with restart options
-      const client = new ShepherdClient(socketPath);
+      const client = new ShellperClient(socketPath);
       await client.connect();
 
       // We need to test the auto-restart behavior directly.
-      // Since createSession isn't available without a real shepherd binary,
+      // Since createSession isn't available without a real shellper binary,
       // we'll test the internal logic by verifying that the session-restart
       // event is emitted when a client exit occurs.
 
       // Simulate the auto-restart behavior: after exit, SPAWN is sent
       const restartPromise = new Promise<void>((resolve) => {
-        shepherd.on('spawn', () => {
+        shellper.on('spawn', () => {
           resolve();
         });
       });
@@ -680,16 +680,16 @@ describe('SessionManager', () => {
       client.disconnect();
     });
 
-    // This test spawns real shepherd processes — skip in CI
+    // This test spawns real shellper processes — skip in CI
     it.skipIf(!!process.env.CI)('respects maxRestarts limit', async () => {
-      const shepherdScript = path.resolve(
+      const shellperScript = path.resolve(
         path.dirname(new URL(import.meta.url).pathname),
-        '../../../dist/terminal/shepherd-main.js',
+        '../../../dist/terminal/shellper-main.js',
       );
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript,
+        shellperScript,
         nodeExecutable: process.execPath,
       });
 
@@ -729,11 +729,11 @@ describe('SessionManager', () => {
   });
 
   describe('shutdown (disconnect without killing)', () => {
-    it('disconnects clients but leaves shepherd processes alive', async () => {
-      const socketPath = path.join(socketDir, 'shepherd-shutdown.sock');
+    it('disconnects clients but leaves shellper processes alive', async () => {
+      const socketPath = path.join(socketDir, 'shellper-shutdown.sock');
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -741,12 +741,12 @@ describe('SessionManager', () => {
         socketPath,
         100,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -762,13 +762,13 @@ describe('SessionManager', () => {
         expect(manager.listSessions().size).toBe(1);
         expect(client.connected).toBe(true);
 
-        // Shutdown should disconnect but NOT kill the shepherd
+        // Shutdown should disconnect but NOT kill the shellper
         manager.shutdown();
 
         expect(manager.listSessions().size).toBe(0);
 
-        // The shepherd should still be accepting connections (still alive)
-        const client2 = new ShepherdClient(socketPath);
+        // The shellper should still be accepting connections (still alive)
+        const client2 = new ShellperClient(socketPath);
         cleanupFns.push(() => client2.disconnect());
         const welcome = await client2.connect();
         expect(welcome.pid).toBeGreaterThan(0);
@@ -779,10 +779,10 @@ describe('SessionManager', () => {
 
   describe('stop/reconnect/replay integration', () => {
     it('disconnects Tower connection, reconnects, and receives replay', async () => {
-      const socketPath = path.join(socketDir, 'shepherd-replay.sock');
+      const socketPath = path.join(socketDir, 'shellper-replay.sock');
       let capturedPty: MockPty | null = null;
 
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           capturedPty = new MockPty();
           return capturedPty;
@@ -790,12 +790,12 @@ describe('SessionManager', () => {
         socketPath,
         1000,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -812,17 +812,17 @@ describe('SessionManager', () => {
         capturedPty!.simulateData('hello world\r\n');
         await new Promise((r) => setTimeout(r, 50));
 
-        // Disconnect (simulates Tower stop) — shutdown doesn't kill shepherd
+        // Disconnect (simulates Tower stop) — shutdown doesn't kill shellper
         manager.shutdown();
         expect(manager.listSessions().size).toBe(0);
 
         // Wait for socket to fully close
         await new Promise((r) => setTimeout(r, 100));
 
-        // Reconnect — shepherd is still alive
+        // Reconnect — shellper is still alive
         const manager2 = new SessionManager({
           socketDir,
-          shepherdScript: '/nonexistent/shepherd.js',
+          shellperScript: '/nonexistent/shellper.js',
           nodeExecutable: process.execPath,
         });
 
@@ -858,7 +858,7 @@ describe('SessionManager', () => {
     it('returns null for dead process', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -870,7 +870,7 @@ describe('SessionManager', () => {
     it('returns null if socket file missing', async () => {
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
@@ -879,11 +879,11 @@ describe('SessionManager', () => {
       expect(result).toBeNull();
     });
 
-    it('reconnects to a live shepherd', async () => {
-      // Create a real mock shepherd
-      const socketPath = path.join(socketDir, 'shepherd-reconnect.sock');
+    it('reconnects to a live shellper', async () => {
+      // Create a real mock shellper
+      const socketPath = path.join(socketDir, 'shellper-reconnect.sock');
       let mockPty: MockPty | null = null;
-      const shepherd = new ShepherdProcess(
+      const shellper = new ShellperProcess(
         () => {
           mockPty = new MockPty();
           return mockPty;
@@ -891,16 +891,16 @@ describe('SessionManager', () => {
         socketPath,
         1000,
       );
-      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
-      cleanupFns.push(() => shepherd.shutdown());
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
 
       const manager = new SessionManager({
         socketDir,
-        shepherdScript: '/nonexistent/shepherd.js',
+        shellperScript: '/nonexistent/shellper.js',
         nodeExecutable: process.execPath,
       });
 
-      // Use our own PID since the shepherd doesn't have its own process
+      // Use our own PID since the shellper doesn't have its own process
       // and the socket is alive. We mock start time validation.
       const client = await manager.reconnectSession(
         'reconnect-test',
@@ -949,10 +949,10 @@ describe('getProcessStartTime', () => {
 });
 
 describe('schema migration', () => {
-  it('GLOBAL_SCHEMA includes shepherd columns', async () => {
+  it('GLOBAL_SCHEMA includes shellper columns', async () => {
     const { GLOBAL_SCHEMA } = await import('../../agent-farm/db/schema.js');
-    expect(GLOBAL_SCHEMA).toContain('shepherd_socket TEXT');
-    expect(GLOBAL_SCHEMA).toContain('shepherd_pid INTEGER');
-    expect(GLOBAL_SCHEMA).toContain('shepherd_start_time INTEGER');
+    expect(GLOBAL_SCHEMA).toContain('shellper_socket TEXT');
+    expect(GLOBAL_SCHEMA).toContain('shellper_pid INTEGER');
+    expect(GLOBAL_SCHEMA).toContain('shellper_start_time INTEGER');
   });
 });

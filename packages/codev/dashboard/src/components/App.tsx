@@ -75,7 +75,7 @@ export function App() {
     const wsPath = getTerminalWsPath(tab);
     if (!wsPath) return <div className="no-terminal">No terminal session</div>;
     // Spec 0092: Pass file open handler for clickable file paths in terminal
-    // Spec 0104: Pass persistent flag for shepherd-backed session indicator
+    // Spec 0104: Pass persistent flag for shellper-backed session indicator
     return <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} persistent={tab.persistent} />;
   };
 

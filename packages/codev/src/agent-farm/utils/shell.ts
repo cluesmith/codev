@@ -154,7 +154,7 @@ export async function isProcessRunning(pid: number): Promise<boolean> {
 
 /**
  * Kill a single process with SIGTERM → wait → SIGKILL escalation.
- * Does NOT walk the process tree — safe for shepherd/session processes
+ * Does NOT walk the process tree — safe for shellper/session processes
  * where tree-kill could kill siblings across projects.
  */
 export async function killProcess(pid: number): Promise<void> {

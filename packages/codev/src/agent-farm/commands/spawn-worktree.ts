@@ -335,7 +335,7 @@ done
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
-  // Create PTY session via Tower REST API (shepherd for persistence)
+  // Create PTY session via Tower REST API (shellper for persistence)
   logger.info('Creating PTY terminal session...');
   const { terminalId } = await createPtySession(
     config,

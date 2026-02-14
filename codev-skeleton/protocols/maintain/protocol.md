@@ -186,8 +186,8 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 - **Location**: path/to/component
 - **How It Works**:
   - Step-by-step explanation of the mechanism
-  - Key technologies used (e.g., "uses shepherd processes for terminal persistence")
-  - Runtime behavior (e.g., "spawns a shepherd process per builder terminal")
+  - Key technologies used (e.g., "uses shellper processes for terminal persistence")
+  - Runtime behavior (e.g., "spawns a shellper process per builder terminal")
   - State management (e.g., "state stored in SQLite at .agent-farm/state.db")
 - **Key Files**:
   - `file.ts` - does X
@@ -222,7 +222,7 @@ For each major component, arch.md MUST explain the implementation mechanism, not
 
 | Bad (just WHAT) | Good (includes HOW) |
 |-----------------|---------------------|
-| "Agent Farm manages builders" | "Agent Farm spawns builders in isolated git worktrees. Each builder runs in a shepherd-backed terminal session. The Tower dashboard exposes terminals via WebSocket. State is persisted in SQLite." |
+| "Agent Farm manages builders" | "Agent Farm spawns builders in isolated git worktrees. Each builder runs in a shellper-backed terminal session. The Tower dashboard exposes terminals via WebSocket. State is persisted in SQLite." |
 | "Consult tool queries AI models" | "Consult shells out to external CLIs (gemini-cli, codex, claude). It writes the consultant role to a temp file, sets environment variables, and streams stdout/stderr back to the user." |
 
 This level of detail enables rapid onboarding and debugging.
