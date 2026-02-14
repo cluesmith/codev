@@ -1,38 +1,38 @@
 # Implementation Review Prompt
 
 ## Context
-You are reviewing implementation work at Stage 4 (IMPLEMENTING) of the workflow. A builder has completed a phase (Implement + Defend) and needs feedback before proceeding. Your job is to verify the implementation matches the spec and plan.
+You are reviewing implementation work during the Implement phase. A builder has completed a plan phase and needs feedback before proceeding. Your job is to verify the implementation matches the spec and plan.
+
+## CRITICAL: Verify Before Flagging
+
+Before requesting changes for missing configuration, incorrect patterns, or framework issues:
+1. **Check `package.json`** for actual dependency versions — framework conventions change between major versions
+2. **Read the actual config files** (or confirm their deliberate absence) before flagging missing configs
+3. **Do not assume** your training data reflects the version in use — verify against project files
+4. If "Previous Iteration Context" is provided, read it carefully before re-raising concerns that were already disputed
 
 ## Focus Areas
 
 1. **Spec Adherence**
    - Does the implementation fulfill the spec requirements for this phase?
    - Are acceptance criteria met?
-   - Are there deviations from the spec that need explanation?
 
 2. **Code Quality**
    - Is the code readable and maintainable?
    - Are there obvious bugs or issues?
    - Are error cases handled appropriately?
-   - Does it follow project conventions?
 
 3. **Test Coverage**
    - Are the tests adequate for this phase?
    - Do tests cover the main paths AND edge cases?
-   - Are tests testing the right things (behavior, not implementation)?
-   - Would the tests catch regressions?
 
 4. **Plan Alignment**
    - Does the implementation follow the plan?
-   - Are there deviations that make sense?
    - Are there plan items skipped or partially completed?
 
 5. **UX Verification** (if spec has UX requirements)
    - Does the actual user experience match what the spec describes?
    - If spec says "async" or "non-blocking", is it actually async?
-   - If spec says "immediate response", does user get one quickly?
-   - Do any flow diagrams in the spec match the actual behavior?
-   - **CRITICAL:** A synchronous implementation that passes tests can completely fail UX requirements
 
 ## Verdict Format
 

@@ -1,7 +1,7 @@
 # Integration Review Prompt
 
 ## Context
-You are performing an integration review at Stage 6 (COMMITTED) of the workflow. The builder has created a PR and you are evaluating whether this change fits well into the broader system. This is the architect's review, focusing on how the change integrates rather than whether it works.
+You are performing an integration review of a pull request. The builder has created a PR and you are evaluating whether this change fits well into the broader system. This is the architect's review, focusing on how the change integrates rather than whether it works.
 
 ## Focus Areas
 
@@ -33,6 +33,13 @@ You are performing an integration review at Stage 6 (COMMITTED) of the workflow.
    - Are there backward compatibility concerns?
    - Is migration path clear for existing users?
    - Are breaking changes properly communicated?
+
+6. **UX Verification** (if spec has UX requirements)
+   - Does the actual user experience match what the spec describes?
+   - Compare spec's "Goals" section and flow diagrams to actual behavior
+   - If spec says "async/non-blocking", verify the code is actually async
+   - If spec says "immediate response", verify user isn't blocked waiting
+   - **CRITICAL:** Tests passing does NOT mean UX requirements are met - verify manually
 
 ## Verdict Format
 

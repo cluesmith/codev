@@ -451,14 +451,14 @@ describe('porch next', () => {
   // Max iterations — emits gate pending
   // --------------------------------------------------------------------------
 
-  it('accepts majority approval at max iterations without unanimity', async () => {
+  it('force-advances to gate at max iterations even without unanimity', async () => {
     const state = makeState({
       build_complete: true,
       iteration: 7,
     });
     setupState(testDir, state);
 
-    // Create review files — 2/3 approve (majority)
+    // Create review files — 2/3 approve but not unanimous
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
     const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
@@ -469,10 +469,82 @@ describe('porch next', () => {
 
     const result = await next(testDir, '0001');
 
-    // After MAJORITY_ITERATION_THRESHOLD, 2/3 majority is accepted
+    // At max iterations, force-advances to gate regardless of verdict
     expect(result.status).toBe('gate_pending');
     expect(result.gate).toBe('spec-approval');
-    expect(result.tasks![0].description).toContain('All reviewers approved');
+    expect(result.tasks![0].description).toContain('Max iterations');
+  });
+
+  // --------------------------------------------------------------------------
+  // Stateful reviews — generates context file for iteration > 1
+  // --------------------------------------------------------------------------
+
+  it('generates context file for consult commands on iteration > 1', async () => {
+    const state = makeState({
+      build_complete: true,
+      iteration: 2,
+      history: [{
+        iteration: 1,
+        build_output: '',
+        reviews: [
+          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review-gemini.txt' },
+          { model: 'codex', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review-codex.txt' },
+          { model: 'claude', verdict: 'APPROVE', file: '/tmp/fake-review-claude.txt' },
+        ],
+      }],
+    });
+    setupState(testDir, state);
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks).toBeDefined();
+    expect(result.tasks![0].description).toContain('--context');
+
+    // Verify context file was created
+    const projectDir = getProjectDir(testDir, '0001', 'test-feature');
+    const contextPath = path.join(projectDir, '0001-specify-iter2-context.md');
+    expect(fs.existsSync(contextPath)).toBe(true);
+
+    const contextContent = fs.readFileSync(contextPath, 'utf-8');
+    expect(contextContent).toContain('Iteration 1 Reviews');
+    expect(contextContent).toContain('gemini: REQUEST_CHANGES');
+    expect(contextContent).toContain('Stateful Review Context');
+  });
+
+  it('includes rebuttals in context file when rebuttal file exists', async () => {
+    const state = makeState({
+      build_complete: true,
+      iteration: 2,
+      history: [{
+        iteration: 1,
+        build_output: '',
+        reviews: [
+          { model: 'gemini', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review.txt' },
+          { model: 'codex', verdict: 'APPROVE', file: '/tmp/fake-review2.txt' },
+          { model: 'claude', verdict: 'APPROVE', file: '/tmp/fake-review3.txt' },
+        ],
+      }],
+    });
+    setupState(testDir, state);
+
+    // Create a rebuttal file for iteration 1
+    const projectDir = getProjectDir(testDir, '0001', 'test-feature');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, '0001-specify-iter1-rebuttals.md'),
+      '## Disputed: Missing tailwind.config.ts\n\nTailwind v4 uses CSS-first configuration.'
+    );
+
+    const result = await next(testDir, '0001');
+
+    // Verify context file includes rebuttals
+    const contextPath = path.join(projectDir, '0001-specify-iter2-context.md');
+    expect(fs.existsSync(contextPath)).toBe(true);
+
+    const contextContent = fs.readFileSync(contextPath, 'utf-8');
+    expect(contextContent).toContain('Builder Response to Iteration 1');
+    expect(contextContent).toContain('Tailwind v4 uses CSS-first configuration');
   });
 
   // --------------------------------------------------------------------------

@@ -45,6 +45,7 @@ interface ConsultOptions {
   role?: string;
   output?: string;
   planPhase?: string;
+  context?: string;
 }
 
 // Valid review types
@@ -512,7 +513,7 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
   console.error(`Fetching PR #${prNumber} data...`);
 
   try {
-    const info = execSync(`gh pr view ${prNumber} --json title,body,state,author,baseRefName,headRefName,files,additions,deletions`, { encoding: 'utf-8' });
+    const info = execSync(`gh pr view ${prNumber} --json title,body,state,author,baseRefName,headRefName,additions,deletions`, { encoding: 'utf-8' });
     const nameOnly = execSync(`gh pr diff ${prNumber} --name-only`, { encoding: 'utf-8' });
     const changedFiles = nameOnly.trim().split('\n').filter(Boolean);
 
@@ -838,6 +839,17 @@ export async function consult(options: ConsultOptions): Promise<void> {
 
     default:
       throw new Error(`Unknown subcommand: ${subcommand}\nValid subcommands: pr, spec, plan, impl, general`);
+  }
+
+  // Prepend iteration context if provided (for stateful reviews)
+  if (options.context) {
+    try {
+      const contextContent = fs.readFileSync(options.context, 'utf-8');
+      query = `## Previous Iteration Context\n\n${contextContent}\n\n---\n\n${query}`;
+      console.error(`Context: ${options.context}`);
+    } catch {
+      console.error(chalk.yellow(`Warning: Could not read context file: ${options.context}`));
+    }
   }
 
   // Show the query/prompt being sent

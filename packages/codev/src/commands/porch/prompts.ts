@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
+import { getProjectDir } from './state.js';
 
 /** Locations to search for protocol prompts */
 const PROTOCOL_PATHS = [
@@ -116,9 +117,9 @@ function substituteVariables(
  * Build a header listing all previous iteration files.
  * Claude can read these files to understand the history and feedback.
  */
-function buildHistoryHeader(history: IterationRecord[], currentIteration: number): string {
+function buildHistoryHeader(history: IterationRecord[], currentIteration: number, state: ProjectState, projectRoot: string): string {
   const lines: string[] = [
-    '# ⚠️ REVISION REQUIRED',
+    '# REVISION REQUIRED',
     '',
     `This is iteration ${currentIteration}. Previous iterations received feedback from reviewers.`,
     '',
@@ -151,8 +152,31 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
   lines.push('## Instructions');
   lines.push('');
   lines.push('1. Read the review files above to understand the feedback');
-  lines.push('2. Address any REQUEST_CHANGES issues');
+  lines.push('2. Address any legitimate REQUEST_CHANGES issues');
   lines.push('3. Consider suggestions from COMMENT and APPROVE reviews');
+  lines.push('4. **If a reviewer concern is a false positive**, write a rebuttal (see below)');
+  lines.push('');
+
+  // Add rebuttal instructions
+  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const phase = state.current_plan_phase || state.phase;
+  const rebuttalFileName = `${state.id}-${phase}-iter${currentIteration - 1}-rebuttals.md`;
+  const rebuttalPath = path.join(projectDir, rebuttalFileName);
+
+  lines.push('## Rebuttals (Dispute False Positives)');
+  lines.push('');
+  lines.push('If you believe a reviewer concern is a false positive (e.g., based on outdated framework knowledge),');
+  lines.push(`write your rebuttal to: \`${rebuttalPath}\``);
+  lines.push('');
+  lines.push('Format each disputed concern as a section:');
+  lines.push('```');
+  lines.push('## Disputed: [Brief description of the concern]');
+  lines.push('');
+  lines.push('[Your explanation of why this is a false positive, with evidence]');
+  lines.push('```');
+  lines.push('');
+  lines.push('Rebuttals are passed as context to reviewers in the next iteration.');
+  lines.push('Only dispute genuinely incorrect feedback — still fix legitimate issues.');
   lines.push('');
 
   return lines.join('\n');
@@ -194,7 +218,7 @@ export function buildPhasePrompt(
       h => (h.plan_phase || undefined) === currentPhase
     );
     if (phaseHistory.length > 0) {
-      historyHeader = buildHistoryHeader(phaseHistory, state.iteration);
+      historyHeader = buildHistoryHeader(phaseHistory, state.iteration, state, projectRoot);
     }
   }
 

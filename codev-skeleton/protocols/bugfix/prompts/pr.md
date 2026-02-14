@@ -4,7 +4,7 @@ You are executing the **PR** phase of the BUGFIX protocol.
 
 ## Your Goal
 
-Create a pull request and notify the architect. The architect handles review, merge, and cleanup.
+Create a pull request, run CMAP review, and address feedback.
 
 ## Context
 
@@ -42,9 +42,28 @@ EOF
 )"
 ```
 
-### 2. Notify Architect
+### 2. Run CMAP Review
 
-After the PR is created, notify the architect and signal completion. The architect handles review, merge, and cleanup from here.
+Run 3-way parallel consultation on the PR:
+
+```bash
+consult --model gemini pr <PR_NUMBER> &
+consult --model codex pr <PR_NUMBER> &
+consult --model claude pr <PR_NUMBER> &
+```
+
+All three should run in the background (`run_in_background: true`).
+
+### 3. Address Feedback
+
+Review the consultation results:
+- Fix any issues identified by reviewers
+- Push updates to the PR branch
+- Re-run CMAP if substantial changes were made
+
+### 4. Notify Architect
+
+After CMAP review is complete and feedback is addressed, notify the architect:
 
 ```bash
 af send architect "PR #<number> ready for review (fixes issue #{{issue.number}})"
@@ -52,7 +71,7 @@ af send architect "PR #<number> ready for review (fixes issue #{{issue.number}})
 
 ## Signals
 
-When PR is created and architect is notified:
+When PR is created and reviews are complete:
 
 ```
 <signal>PHASE_COMPLETE</signal>

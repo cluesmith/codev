@@ -92,6 +92,7 @@ program
   .option('-r, --role <role>', 'Custom role from codev/roles/<name>.md (e.g., gtm-specialist, security-reviewer)')
   .option('--output <path>', 'Write consultation output to file (used by porch for review file collection)')
   .option('--plan-phase <phase>', 'Scope impl review to a specific plan phase (used by porch for phased protocols)')
+  .option('--context <path>', 'Context file with previous iteration feedback (used by porch for stateful reviews)')
   .allowUnknownOption(true)
   .action(async (subcommand, args, options) => {
     try {
@@ -104,6 +105,7 @@ program
         role: options.role,
         output: options.output,
         planPhase: options.planPhase,
+        context: options.context,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));

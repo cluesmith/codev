@@ -59,16 +59,3 @@ export function allApprove(reviews: ReviewResult[]): boolean {
   return reviews.every(r => r.verdict === 'APPROVE' || r.verdict === 'COMMENT');
 }
 
-/**
- * Check if a supermajority of reviewers approved (2-of-3 or better).
- *
- * Used after MAJORITY_ITERATION_THRESHOLD iterations to prevent a single
- * model from blocking progress indefinitely with repeated impractical requests.
- */
-export const MAJORITY_ITERATION_THRESHOLD = 5;
-
-export function majorityApprove(reviews: ReviewResult[]): boolean {
-  if (reviews.length === 0) return true;
-  const approvals = reviews.filter(r => r.verdict === 'APPROVE' || r.verdict === 'COMMENT').length;
-  return approvals > reviews.length / 2;
-}

@@ -1,7 +1,7 @@
 # Plan Review Prompt
 
 ## Context
-You are reviewing an implementation plan at Stage 2 (SPECIFIED) of the workflow. The spec has been approved - now you must evaluate whether the plan adequately describes HOW to implement it.
+You are reviewing an implementation plan during the Plan phase. The spec has been approved - now you must evaluate whether the plan adequately describes HOW to implement it.
 
 ## Focus Areas
 

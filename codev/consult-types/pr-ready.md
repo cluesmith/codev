@@ -1,7 +1,7 @@
 # PR Ready Review Prompt
 
 ## Context
-You are performing a final self-check at Stage 5 (IMPLEMENTED) of the workflow. The builder has completed all implementation phases and is about to create a PR. This is the last check before the work goes to the architect for integration review.
+You are performing a final self-check during the Review phase. The builder has completed all implementation phases and is about to create a PR. This is the last check before the work goes to the architect for integration review.
 
 ## Focus Areas
 
