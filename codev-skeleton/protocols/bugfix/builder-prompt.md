@@ -40,12 +40,18 @@ Follow the BUGFIX protocol: `codev/protocols/bugfix/protocol.md`
 3. Implement fix (< 300 LOC)
 4. Add regression test
 5. Create PR with "Fixes #{{issue.number}}" in body
-6. Notify architect — your job ends here
+6. Notify architect via `af send architect "PR #N ready for review (fixes #{{issue.number}})"`
 
 If the fix is too complex (> 300 LOC or architectural changes), notify the Architect via:
 ```bash
 af send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to SPIR/TICK."
 ```
+
+## Notifications
+Always use `af send architect "..."` to notify the architect at key moments:
+- **PR ready**: `af send architect "PR #N ready for review (fixes #{{issue.number}})"`
+- **PR merged**: `af send architect "PR #N merged for issue #{{issue.number}}. Ready for cleanup."`
+- **Blocked**: `af send architect "Blocked on issue #{{issue.number}}: [reason]"`
 {{/if}}
 
 ## Getting Started

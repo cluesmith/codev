@@ -61,6 +61,14 @@ Review the consultation results:
 - Push updates to the PR branch
 - Re-run CMAP if substantial changes were made
 
+### 4. Notify Architect
+
+After CMAP review is complete and feedback is addressed, notify the architect:
+
+```bash
+af send architect "PR #<number> ready for review (fixes issue #{{issue.number}})"
+```
+
 ## Signals
 
 When PR is created and reviews are complete:

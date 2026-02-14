@@ -233,7 +233,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
       tasks: [{
         subject: 'Merge the pull request',
         activeForm: 'Merging pull request',
-        description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect that the work is complete.`,
+        description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`,
         sequential: true,
       }],
     };
@@ -291,7 +291,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
         tasks: [{
           subject: `Request human approval: ${gateName}`,
           activeForm: `Requesting ${gateName} approval`,
-          description: `Run: porch gate ${state.id}\nThis will open the artifact for human review.\nSTOP and wait for human approval before proceeding.`,
+          description: `Run: porch gate ${state.id}\nThis will open the artifact for human review.\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} ready for review. Waiting for approval."\n\nSTOP and wait for human approval before proceeding.`,
         }],
       };
     }
@@ -508,7 +508,7 @@ async function handleBuildVerify(
           tasks: [{
             subject: `Request human approval: ${gateName} (max iterations reached)`,
             activeForm: `Requesting ${gateName} approval`,
-            description: `Max iterations (${maxIterations}) reached without unanimous approval.\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\nSTOP and wait for human approval.`,
+            description: `Max iterations (${maxIterations}) reached without unanimous approval.\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} needs approval (max iterations reached). Waiting for review."\n\nSTOP and wait for human approval.`,
           }],
         };
       }
@@ -635,7 +635,7 @@ async function handleVerifyApproved(
       tasks: [{
         subject: `Request human approval: ${gateName}`,
         activeForm: `Requesting ${gateName} approval`,
-        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\nSTOP and wait for human approval.`,
+        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} ready for approval. All reviewers approved."\n\nSTOP and wait for human approval.`,
       }],
     };
   }

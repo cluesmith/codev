@@ -140,12 +140,26 @@ porch status      # (strict mode) Your project status
 af status         # All builders
 ```
 
+## Notifications
+
+**ALWAYS notify the architect** via `af send` at these key moments:
+
+| When | What to send |
+|------|-------------|
+| **Gate reached** | `af send architect "Project XXXX: <gate-name> ready for approval"` |
+| **PR ready** | `af send architect "PR #N ready for review"` |
+| **PR merged** | `af send architect "Project XXXX complete. PR merged. Ready for cleanup."` |
+| **Blocked/stuck** | `af send architect "Blocked on X — need guidance"` |
+| **Escalation needed** | `af send architect "Issue too complex — recommend escalating to SPIR/TICK"` |
+
+The architect may be working on other tasks and won't know you need attention unless you send a message. **Don't assume they're watching** — always notify explicitly.
+
 ## When You're Blocked
 
 If you encounter issues you can't resolve:
 
 1. **Output a clear blocker message** describing the problem and options
-2. **Use `af send architect "..."` ** to notify the Architect
+2. **Use `af send architect "..."` to notify the Architect**
 3. **Wait for guidance** before proceeding
 
 Example:
