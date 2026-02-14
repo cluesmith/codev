@@ -581,6 +581,7 @@ export class SessionManager extends EventEmitter {
  */
 export function getProcessStartTime(pid: number): Promise<number | null> {
   return new Promise((resolve) => {
+    try {
     if (process.platform === 'darwin') {
       // macOS: use ps to get launch time
       execFile('ps', ['-p', String(pid), '-o', 'lstart='], (err, stdout) => {
@@ -629,6 +630,11 @@ export function getProcessStartTime(pid: number): Promise<number | null> {
         });
       });
     } else {
+      resolve(null);
+    }
+    } catch {
+      // Defensive: if execFile/readFile throws synchronously (e.g., EPERM
+      // in restricted environments), return null instead of rejecting.
       resolve(null);
     }
   });
