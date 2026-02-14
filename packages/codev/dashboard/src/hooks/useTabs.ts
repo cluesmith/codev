@@ -11,6 +11,7 @@ export interface Tab {
   utilId?: string;
   annotationId?: string;
   filePath?: string;
+  persistent?: boolean;
 }
 
 function buildTabs(state: DashboardState | null): Tab[] {
@@ -19,7 +20,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
   ];
 
   if (state?.architect) {
-    tabs.push({ id: 'architect', type: 'architect', label: 'Architect', closable: false, terminalId: state.architect.terminalId });
+    tabs.push({ id: 'architect', type: 'architect', label: 'Architect', closable: false, terminalId: state.architect.terminalId, persistent: state.architect.persistent });
   }
 
   for (const builder of state?.builders ?? []) {
@@ -30,6 +31,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
       closable: true,
       projectId: builder.id,
       terminalId: builder.terminalId,
+      persistent: builder.persistent,
     });
   }
 
@@ -43,6 +45,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
       closable: true,
       utilId: util.id,
       terminalId: util.terminalId,
+      persistent: util.persistent,
     });
   }
 

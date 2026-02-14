@@ -2808,9 +2808,9 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
           const state: {
-            architect: { port: number; pid: number; terminalId?: string } | null;
-            builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string }>;
-            utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string }>;
+            architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
+            builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
+            utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
             annotations: Array<{ id: string; file: string; port: number; pid: number }>;
             projectName?: string;
             gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
@@ -2831,6 +2831,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId: entry.architect,
+                persistent: session.shepherdBacked,
               };
             }
           }
@@ -2845,6 +2846,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId,
+                persistent: session.shepherdBacked,
               });
             }
           }
@@ -2864,6 +2866,7 @@ const server = http.createServer(async (req, res) => {
                 branch: '',
                 type: 'spec',
                 terminalId,
+                persistent: session.shepherdBacked,
               });
             }
           }

@@ -291,3 +291,31 @@ describe('TerminalManager.createSessionRaw()', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
+
+describe('TerminalManager.shutdown() shepherd handling', () => {
+  it('does not send SIGTERM to shepherd-backed sessions on shutdown', async () => {
+    const { TerminalManager } = await import('../pty-manager.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-shutdown-test-'));
+
+    const manager = new TerminalManager({
+      projectRoot: tmpDir,
+    });
+
+    // Create a shepherd-backed session
+    const info = manager.createSessionRaw({
+      label: 'Shepherd Session',
+      cwd: tmpDir,
+    });
+    const session = manager.getSession(info.id)!;
+    const client = new MockShepherdClient();
+    session.attachShepherd(client, Buffer.alloc(0), 7777);
+
+    // Shutdown should NOT send SIGTERM to the shepherd
+    manager.shutdown();
+
+    // SIGTERM = signal 15 — should NOT have been called
+    expect(client.signalCalls).toEqual([]);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+});

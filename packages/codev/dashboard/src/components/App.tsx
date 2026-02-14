@@ -70,11 +70,12 @@ export function App() {
     }
   }, [activeTab?.id, activeTab?.type]);
 
-  const renderTerminal = (tab: { type: string; terminalId?: string }) => {
+  const renderTerminal = (tab: { type: string; terminalId?: string; persistent?: boolean }) => {
     const wsPath = getTerminalWsPath(tab);
     if (!wsPath) return <div className="no-terminal">No terminal session</div>;
     // Spec 0092: Pass file open handler for clickable file paths in terminal
-    return <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />;
+    // Spec 0104: Pass persistent flag for shepherd-backed session indicator
+    return <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} persistent={tab.persistent} />;
   };
 
   const renderAnnotation = (tab: { annotationId?: string; initialLine?: number }) => {
@@ -109,7 +110,7 @@ export function App() {
               style={{ display: activeTabId === tab.id ? undefined : 'none' }}
             >
               {wsPath
-                ? <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />
+                ? <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} persistent={tab.persistent} />
                 : <div className="no-terminal">No terminal session</div>
               }
             </div>

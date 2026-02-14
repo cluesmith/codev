@@ -414,6 +414,9 @@ export class TerminalManager {
   /** Kill all sessions and clean up. */
   shutdown(): void {
     for (const session of this.sessions.values()) {
+      // Shepherd-backed sessions survive Tower restart — only disconnect,
+      // don't send SIGTERM to the shepherd process.
+      if (session.shepherdBacked) continue;
       session.kill();
     }
     this.sessions.clear();
