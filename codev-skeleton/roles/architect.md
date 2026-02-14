@@ -160,7 +160,7 @@ af cleanup -p 0042
 ### ALWAYS Do These:
 1. **Reserve project numbers first** - Update projectlist.md before spawning
 2. **Review artifacts before approving gates** - (Strict mode) Read the spec/plan carefully
-3. **Use PR comments for feedback** - Not tmux send-keys
+3. **Use PR comments for feedback** - Not terminal send-keys
 4. **Let builders own their work** - Guide, don't take over
 
 ## Project Tracking

@@ -33,7 +33,6 @@ codev doctor
 
 # Or check manually
 which node && node --version    # Need 18+
-which tmux && tmux -V           # Need 3.0+
 which ttyd && ttyd --version    # Need 1.7+
 which git && git --version      # Need 2.5+
 which gh && gh auth status      # Need authenticated
@@ -87,7 +86,7 @@ Migration should be performed by an AI assistant (Claude, etc.) that can:
 ```bash
 pkill -f 'agent-farm' 2>/dev/null
 pkill -f 'ttyd.*42' 2>/dev/null
-tmux kill-server 2>/dev/null
+# (session cleanup no longer needed — shepherd processes are self-managing)
 ```
 
 ### Step 2: Clean Up Obsolete Files
@@ -218,7 +217,7 @@ af dash start
 ## Post-Migration Checklist
 
 - [ ] npm package installed: `npm install -g @cluesmith/codev`
-- [ ] Dependencies installed (ttyd, tmux, node 18+, git, AI CLIs)
+- [ ] Dependencies installed (node 18+, git, AI CLIs)
 - [ ] `codev --help` shows available commands
 - [ ] `af --help` shows available commands
 - [ ] `consult --help` shows available commands
@@ -247,7 +246,7 @@ My project: /path/to/my/project
 Please:
 1. Install the npm package: npm install -g @cluesmith/codev
 2. Verify the three commands work: codev --help, af --help, consult --help
-3. Check prerequisites (ttyd, tmux, node, git, AI CLIs) with: codev doctor
+3. Check prerequisites (node, git, AI CLIs) with: codev doctor
 4. Clean up obsolete files (builders.md, .architect.pid, .builders/, etc.)
 5. Compare my codev/protocols/, codev/templates/, codev/roles/ with the
    new versions in codev-skeleton/ and merge any local customizations

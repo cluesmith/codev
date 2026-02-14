@@ -43,7 +43,7 @@ af dash start [options]
 Starts the agent-farm dashboard with:
 - Architect terminal (Claude session with architect role)
 - Web-based UI for monitoring builders
-- tmux session management
+- Terminal session management (shepherd processes)
 
 The dashboard is accessible via browser at `http://localhost:<port>`.
 
@@ -132,8 +132,7 @@ af dash stop
 **Description:**
 
 Stops all running agent-farm processes including:
-- tmux sessions
-- ttyd processes
+- Terminal sessions (shepherd processes)
 - Dashboard servers
 
 Does NOT clean up worktrees - use `af cleanup` for that.

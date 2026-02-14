@@ -95,7 +95,6 @@ Verifies that all required dependencies are installed and properly configured:
 
 **Core Dependencies (required):**
 - Node.js (>= 18.0.0)
-- tmux (>= 3.0)
 - ttyd (>= 1.7.0)
 - git (>= 2.5.0)
 - gh (GitHub CLI, authenticated)
@@ -123,7 +122,6 @@ Codev Doctor - Checking your environment
 Core Dependencies (required for Agent Farm)
 
   ✓ Node.js      20.10.0
-  ✓ tmux         3.4
   ✓ ttyd         1.7.4
   ✓ git          2.42.0
   ✓ gh           authenticated
