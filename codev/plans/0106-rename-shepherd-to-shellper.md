@@ -8,10 +8,10 @@
 
 ## Executive Summary
 
-Pure mechanical rename refactoring. Three phases: (1) rename source files and update all code references, (2) write the SQLite migration and update schema, (3) update documentation. Each phase is independently testable and builds on the previous.
+Pure mechanical rename refactoring. Two phases: (1) rename all source files, update code references, update schema, and write SQLite migration — all atomically so the build never breaks, (2) update living documentation. Code and schema changes must be in the same phase because `tower-server.ts` and test files reference DB column names directly.
 
 ## Success Metrics
-- [ ] `grep -ri shepherd packages/codev/src/` returns zero hits (excluding old migration code and dist/)
+- [ ] `grep -ri shepherd packages/codev/` returns zero hits (excluding old migration code in `db/index.ts`, `dist/`, and dashboard build artifacts)
 - [ ] All existing tests pass with new names
 - [ ] `npm run build` succeeds
 - [ ] SQLite migration (v8) handles column rename and value update
@@ -22,23 +22,27 @@ Pure mechanical rename refactoring. Three phases: (1) rename source files and up
 ```json
 {
   "phases": [
-    {"id": "phase_1", "title": "Rename Source Files and Update Code References"},
-    {"id": "phase_2", "title": "SQLite Migration and Schema Update"},
-    {"id": "phase_3", "title": "Documentation Updates"}
+    {"id": "phase_1", "title": "Rename All Source, Tests, Schema, and Migration"},
+    {"id": "phase_2", "title": "Documentation Updates"}
   ]
 }
 ```
 
 ## Phase Breakdown
 
-### Phase 1: Rename Source Files and Update Code References
+### Phase 1: Rename All Source, Tests, Schema, and Migration
 **Dependencies**: None
 
 #### Objectives
 - Rename all 5 source files and 4 test files from `shepherd-*` to `shellper-*`
-- Update all class, interface, method, and variable names
+- Update all class, interface, method, and variable names across all source and test files
 - Update all import paths
+- Update GLOBAL_SCHEMA column names
+- Write migration v8 using table-rebuild pattern
 - Update all code comments referencing shepherd
+- Result: build succeeds and all tests pass
+
+**Why merged**: Code in `tower-server.ts`, `terminal-sessions.test.ts`, and `schema.ts` references DB column names (`shepherd_socket`, etc.). If source is renamed before schema is updated, the build/tests will fail. These must change atomically.
 
 #### Deliverables
 - [ ] 5 source files renamed via `git mv`
@@ -48,100 +52,82 @@ Pure mechanical rename refactoring. Three phases: (1) rename source files and up
 - [ ] All variable/property renames applied (~15 variables)
 - [ ] All import paths updated
 - [ ] Socket path pattern updated (`shepherd-*.sock` → `shellper-*.sock`)
-- [ ] Code comments updated
-- [ ] Build succeeds
-- [ ] All tests pass
+- [ ] `schema.ts` GLOBAL_SCHEMA updated with `shellper_*` columns
+- [ ] Migration v8 added to `db/index.ts`
+- [ ] Dashboard component comments updated (`App.tsx`, `Terminal.tsx`)
+- [ ] All other code comments updated
+- [ ] Build succeeds (`npm run build`)
+- [ ] All tests pass (`npm test` from `packages/codev/`)
 
 #### Implementation Details
 
-**File renames** (source, `packages/codev/src/terminal/`):
+**Step 1: File renames** (source, `packages/codev/src/terminal/`):
 - `shepherd-protocol.ts` → `shellper-protocol.ts`
 - `shepherd-process.ts` → `shellper-process.ts`
 - `shepherd-client.ts` → `shellper-client.ts`
 - `shepherd-main.ts` → `shellper-main.ts`
 - `shepherd-replay-buffer.ts` → `shellper-replay-buffer.ts`
 
-**File renames** (tests, `packages/codev/src/terminal/__tests__/`):
+**Step 2: Test file renames** (`packages/codev/src/terminal/__tests__/`):
 - `shepherd-protocol.test.ts` → `shellper-protocol.test.ts`
 - `shepherd-process.test.ts` → `shellper-process.test.ts`
 - `shepherd-client.test.ts` → `shellper-client.test.ts`
 - `tower-shepherd-integration.test.ts` → `tower-shellper-integration.test.ts`
 
-**Files requiring content updates** (not renamed):
-- `terminal/pty-session.ts` (~49 refs)
-- `terminal/session-manager.ts` (~28 refs)
-- `terminal/pty-manager.ts` (~3 refs)
-- `agent-farm/servers/tower-server.ts` (~114 refs)
-- `agent-farm/commands/spawn.ts` (~1 ref)
-- `agent-farm/utils/shell.ts` (~1 ref)
-- `agent-farm/__tests__/terminal-sessions.test.ts` (~28 refs)
-- `terminal/__tests__/session-manager.test.ts` (~115 refs)
-- Dashboard components if shepherd references exist
+**Step 3: Content updates in renamed files** — update all class names, exports, variable names, and comments within the 9 renamed files.
 
-**Approach**: Use `git mv` for file renames. For content updates, use search-and-replace within each file — replace class names, method names, variable names, import paths, and comments. Process files in dependency order: renamed files first (they define exports), then consumers.
+**Step 4: Content updates in non-renamed source files:**
+- `terminal/pty-session.ts` (~49 refs) — methods, variables, comments, imports
+- `terminal/session-manager.ts` (~28 refs) — variable names, imports, socket path pattern
+- `terminal/pty-manager.ts` (~3 refs) — method call, comments
+- `agent-farm/servers/tower-server.ts` (~114 refs) — variables, DB column refs, comments
+- `agent-farm/commands/spawn.ts` (~1 ref) — comment
+- `agent-farm/utils/shell.ts` (~1 ref) — comment
 
-#### Acceptance Criteria
-- [ ] `grep -ri shepherd packages/codev/src/` returns zero hits (excluding db/index.ts migration code)
-- [ ] `npm run build` succeeds
-- [ ] All tests pass
+**Note**: `agent-farm/db/index.ts` is intentionally NOT updated in this step — its shepherd references are all in old migration code (v6, v7) which is historically correct and must remain as-is.
 
-#### Test Plan
-- **Unit Tests**: Existing tests renamed and updated — all must pass
-- **Build**: `npm run build` compiles without errors
-- **Grep**: Zero shepherd references in src/ (excluding migrations)
+**Step 5: Schema update** (`agent-farm/db/schema.ts`):
+- `shepherd_socket TEXT` → `shellper_socket TEXT`
+- `shepherd_pid INTEGER` → `shellper_pid INTEGER`
+- `shepherd_start_time INTEGER` → `shellper_start_time INTEGER`
 
----
-
-### Phase 2: SQLite Migration and Schema Update
-**Dependencies**: Phase 1
-
-#### Objectives
-- Update GLOBAL_SCHEMA to use `shellper_*` column names
-- Write migration v8 using table-rebuild pattern
-- Update stored socket path values
-- Rename physical socket files on disk
-
-#### Deliverables
-- [ ] `schema.ts` GLOBAL_SCHEMA updated with `shellper_*` columns
-- [ ] Migration v8 added to `db/index.ts`
-- [ ] Socket file rename logic in migration
-- [ ] Build succeeds
-- [ ] Tests pass
-
-#### Implementation Details
-
-**Schema update** (`agent-farm/db/schema.ts`):
-- Change `shepherd_socket TEXT` → `shellper_socket TEXT`
-- Change `shepherd_pid INTEGER` → `shellper_pid INTEGER`
-- Change `shepherd_start_time INTEGER` → `shellper_start_time INTEGER`
-
-**Migration v8** (`agent-farm/db/index.ts`):
+**Step 6: Migration v8** (`agent-farm/db/index.ts`):
 - Follow v7's table-rebuild pattern:
   1. CREATE `terminal_sessions_new` with `shellper_*` columns
   2. INSERT from old table mapping `shepherd_*` → `shellper_*`
   3. DROP old table, RENAME new table
   4. Recreate indexes
 - UPDATE stored socket path values: `REPLACE(shellper_socket, 'shepherd-', 'shellper-')`
-- Scan `~/.codev/run/` for `shepherd-*.sock`, rename to `shellper-*.sock`
+- Scan `~/.codev/run/` for `shepherd-*.sock`, rename to `shellper-*.sock` (skip files that can't be renamed)
 - Wrap in try-catch consistent with existing migration pattern
 
-**Test updates** (`agent-farm/__tests__/terminal-sessions.test.ts`):
-- Update schema references from `shepherd_*` to `shellper_*`
-- Update test data and assertions
+**Step 7: Test file content updates:**
+- `agent-farm/__tests__/terminal-sessions.test.ts` (~28 refs) — schema refs, test data, assertions
+- `terminal/__tests__/session-manager.test.ts` (~115 refs) — variables, mock names, assertions
+- All 4 renamed test files — update their internal references
+
+**Step 8: Dashboard component comments** (`packages/codev/dashboard/src/components/`):
+- `App.tsx` — update Spec 0104 shepherd comment
+- `Terminal.tsx` — update shepherd process comments
+
+**Approach**: Use `git mv` for file renames. For content updates, use search-and-replace within each file. Process in the order above: renamed files first (they define exports), then consumers, then schema/migration, then tests.
 
 #### Acceptance Criteria
+- [ ] `grep -ri shepherd packages/codev/src/` returns zero hits (excluding `db/index.ts` old migration code)
+- [ ] `grep -ri shepherd packages/codev/dashboard/src/` returns zero hits
 - [ ] GLOBAL_SCHEMA uses `shellper_*` column names
 - [ ] Migration v8 exists and follows table-rebuild pattern
 - [ ] `npm run build` succeeds
-- [ ] All tests pass
+- [ ] `npm test` passes (run from `packages/codev/`)
 
 #### Test Plan
-- **Unit Tests**: Existing terminal-sessions tests pass with new column names
-- **Build**: Compiles without errors
+- **Unit Tests**: Existing tests renamed and updated — all must pass (`npm test` from `packages/codev/`)
+- **Build**: `npm run build` compiles without errors
+- **Grep**: Zero shepherd references in `packages/codev/src/` and `packages/codev/dashboard/src/` (excluding old migration code)
 
 ---
 
-### Phase 3: Documentation Updates
+### Phase 2: Documentation Updates
 **Dependencies**: Phase 1
 
 #### Objectives
@@ -149,22 +135,20 @@ Pure mechanical rename refactoring. Three phases: (1) rename source files and up
 - Leave historical documents (0104 specs/plans/reviews) unchanged
 
 #### Deliverables
-- [ ] `codev/resources/arch.md` updated
-- [ ] `codev-skeleton/resources/commands/agent-farm.md` updated
-- [ ] `codev-skeleton/protocols/maintain/protocol.md` updated
-- [ ] `README.md` updated
-- [ ] `INSTALL.md` updated
-- [ ] `MIGRATION-1.0.md` updated
+- [ ] `codev/resources/arch.md` updated (~80 lines with references)
+- [ ] `codev-skeleton/resources/commands/agent-farm.md` updated (~2 refs)
+- [ ] `codev-skeleton/protocols/maintain/protocol.md` updated (~3 refs)
+- [ ] `README.md` updated (~1 ref)
+- [ ] `INSTALL.md` updated (~1 ref)
+- [ ] `MIGRATION-1.0.md` updated (~1 ref)
 
 #### Implementation Details
 
 **Files to update:**
-- `codev/resources/arch.md` — glossary entry, architecture sections, debugging commands, terminal system documentation (~64 refs)
-- `codev-skeleton/resources/commands/agent-farm.md` — command references (~2 refs)
-- `codev-skeleton/protocols/maintain/protocol.md` — protocol references (~3 refs)
-- `README.md` (~1 ref)
-- `INSTALL.md` (~1 ref)
-- `MIGRATION-1.0.md` (~1 ref)
+- `codev/resources/arch.md` — glossary entry, architecture sections, debugging commands, terminal system documentation
+- `codev-skeleton/resources/commands/agent-farm.md` — command references
+- `codev-skeleton/protocols/maintain/protocol.md` — protocol references
+- `README.md`, `INSTALL.md`, `MIGRATION-1.0.md` — brief references
 
 **Files NOT updated** (historical records):
 - `codev/specs/0104-custom-session-manager.md`
@@ -172,38 +156,39 @@ Pure mechanical rename refactoring. Three phases: (1) rename source files and up
 - `codev/reviews/0104-custom-session-manager.md`
 - `codev/projects/0104-*/` artifacts
 - `codev/projectlist.md` (0104 entry)
+- `codev/specs/0105-tower-server-decomposition.md` (historical reference)
 
 #### Acceptance Criteria
 - [ ] `grep -ri shepherd` in living docs returns zero hits
 - [ ] Historical docs unchanged
+- [ ] Build still succeeds
 
 #### Test Plan
 - **Manual**: Grep living docs for shepherd references
-- **Build**: Still compiles after doc changes (no code impact)
+- **Build**: `npm run build` still passes
 
 ---
 
 ## Dependency Map
 ```
-Phase 1 (Source) ──→ Phase 2 (Migration)
-      │
-      └──────────→ Phase 3 (Docs)
+Phase 1 (Source + Schema + Migration) ──→ Phase 2 (Docs)
 ```
 
 ## Risk Analysis
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| Missed shepherd reference | Low | Low | grep-based AC catches all |
-| Import path typo breaks build | Low | Low | Build check after each phase |
+| Missed shepherd reference in source | Low | Low | grep-based AC catches all |
+| Import path typo breaks build | Low | Low | Build check after phase |
 | Migration v8 conflicts with existing data | Low | Medium | Table-rebuild pattern proven in v7 |
+| Dashboard refs missed | Low | Low | Separate grep AC for dashboard/ |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `grep -ri shepherd packages/codev/src/` clean, build passes, tests pass
-2. **After Phase 2**: Schema updated, migration works, build passes, tests pass
-3. **After Phase 3**: Docs updated, final grep across entire repo
+1. **After Phase 1**: grep clean across `packages/codev/src/` and `packages/codev/dashboard/src/`, build passes, tests pass
+2. **After Phase 2**: Docs updated, final grep across living docs
 
 ## Notes
-- This is a mechanical rename with ~350+ individual replacements across ~15 files
+- This is a mechanical rename with ~350+ individual replacements across ~15+ files
 - The grep-based acceptance criterion is the safety net — if anything is missed, it will be caught
-- Old migration code (v6, v7) must retain shepherd references as they are historically correct
+- Old migration code (v6, v7) in `db/index.ts` must retain shepherd references as they are historically correct
+- Reference counts in the spec/plan are approximate — the grep AC is authoritative
