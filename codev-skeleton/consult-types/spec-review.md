@@ -1,7 +1,7 @@
 # Specification Review Prompt
 
 ## Context
-You are reviewing a feature specification at Stage 1 (CONCEIVED) of the workflow. Your role is to ensure the spec is complete, correct, and feasible before it moves to human approval.
+You are reviewing a feature specification during the Specify phase. Your role is to ensure the spec is complete, correct, and feasible before it moves to human approval.
 
 ## Focus Areas
 

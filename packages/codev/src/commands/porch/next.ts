@@ -34,7 +34,7 @@ import {
   allPlanPhasesComplete,
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
-import { parseVerdict, allApprove, majorityApprove, MAJORITY_ITERATION_THRESHOLD } from './verdict.js';
+import { parseVerdict, allApprove } from './verdict.js';
 import type {
   ProjectState,
   Protocol,
@@ -116,6 +116,87 @@ function getReviewFilePath(
   const phase = state.current_plan_phase || state.phase;
   const fileName = `${state.id}-${phase}-iter${state.iteration}-${model}.txt`;
   return path.join(projectDir, fileName);
+}
+
+/**
+ * Find a rebuttal file for a given iteration.
+ * Rebuttals are written by the builder to dispute false positive reviewer concerns.
+ */
+function findRebuttalFile(
+  projectRoot: string,
+  state: ProjectState,
+  iteration: number
+): string | null {
+  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const phase = state.current_plan_phase || state.phase;
+  const fileName = `${state.id}-${phase}-iter${iteration}-rebuttals.md`;
+  const filePath = path.join(projectDir, fileName);
+  return fs.existsSync(filePath) ? filePath : null;
+}
+
+/**
+ * Extract SUMMARY line from a review file.
+ */
+function extractReviewSummary(filePath: string): string {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const match = content.match(/SUMMARY:\s*(.+)/);
+    return match ? match[1].trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Build review context for stateful consultations.
+ * Includes previous iteration reviews and builder rebuttals so consultants
+ * can see what was raised before and how the builder responded.
+ */
+function buildReviewContext(
+  projectRoot: string,
+  state: ProjectState,
+): string | null {
+  if (state.history.length === 0) return null;
+
+  const currentPhase = state.current_plan_phase || undefined;
+  const phaseHistory = state.history.filter(
+    h => (h.plan_phase || undefined) === currentPhase
+  );
+  if (phaseHistory.length === 0) return null;
+
+  const lines: string[] = [];
+
+  for (const record of phaseHistory) {
+    lines.push(`### Iteration ${record.iteration} Reviews`);
+    for (const review of record.reviews) {
+      const summary = extractReviewSummary(review.file);
+      const summaryStr = summary ? ` — ${summary}` : '';
+      lines.push(`- ${review.model}: ${review.verdict}${summaryStr}`);
+    }
+    lines.push('');
+
+    // Check for builder rebuttals
+    const rebuttalFile = findRebuttalFile(projectRoot, state, record.iteration);
+    if (rebuttalFile) {
+      try {
+        const rebuttals = fs.readFileSync(rebuttalFile, 'utf-8');
+        lines.push(`### Builder Response to Iteration ${record.iteration}`);
+        lines.push(rebuttals);
+        lines.push('');
+      } catch { /* ignore read errors */ }
+    }
+  }
+
+  lines.push('### IMPORTANT: Stateful Review Context');
+  lines.push('This is NOT the first review iteration. Previous reviewers raised concerns and the builder has responded.');
+  lines.push('Before re-raising a previous concern:');
+  lines.push('1. Check if the builder has already addressed it in code');
+  lines.push('2. If the builder disputes a concern with evidence, verify the claim against actual project files before insisting');
+  lines.push('3. Do not re-raise concerns that have been explained as false positives with valid justification');
+  lines.push('4. Check package.json and config files for version numbers before flagging missing configuration');
+  lines.push('');
+
+  return lines.join('\n');
 }
 
 /**
@@ -335,8 +416,24 @@ async function handleBuildVerify(
       // Build consultation commands with --output so review files land where porch expects them
       const consultType = getConsultArtifactType(state.phase);
       const planPhaseFlag = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
+
+      // For iteration > 1, generate context file with previous reviews + rebuttals
+      let contextFlag = '';
+      if (state.iteration > 1) {
+        const context = buildReviewContext(projectRoot, state);
+        if (context) {
+          const projectDir = getProjectDir(projectRoot, state.id, state.title);
+          const contextPath = path.join(
+            projectDir,
+            `${state.id}-${state.current_plan_phase || state.phase}-iter${state.iteration}-context.md`
+          );
+          fs.writeFileSync(contextPath, context);
+          contextFlag = ` --context "${contextPath}"`;
+        }
+      }
+
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       tasks.push({
@@ -356,8 +453,22 @@ async function handleBuildVerify(
         m => !reviews.find(r => r.model === m)
       );
       const planPhaseFlagPartial = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
+
+      // Reuse context file from full consultation emission (if it exists)
+      let contextFlagPartial = '';
+      if (state.iteration > 1) {
+        const projectDir = getProjectDir(projectRoot, state.id, state.title);
+        const contextPath = path.join(
+          projectDir,
+          `${state.id}-${state.current_plan_phase || state.phase}-iter${state.iteration}-context.md`
+        );
+        if (fs.existsSync(contextPath)) {
+          contextFlagPartial = ` --context "${contextPath}"`;
+        }
+      }
+
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       return {
@@ -374,12 +485,6 @@ async function handleBuildVerify(
     // All reviews in — parse verdicts and decide
     if (allApprove(reviews)) {
       // All approve — advance
-      return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
-    }
-
-    // After MAJORITY_ITERATION_THRESHOLD iterations, accept 2-of-3 supermajority
-    // to prevent a single model from blocking progress with repeated impractical requests.
-    if (state.iteration >= MAJORITY_ITERATION_THRESHOLD && majorityApprove(reviews)) {
       return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
     }
 

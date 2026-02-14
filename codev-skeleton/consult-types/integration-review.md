@@ -1,7 +1,7 @@
 # Integration Review Prompt
 
 ## Context
-You are performing an integration review at Stage 6 (COMMITTED) of the workflow. The builder has created a PR and you are evaluating whether this change fits well into the broader system. This is the architect's review, focusing on how the change integrates rather than whether it works.
+You are performing an integration review of a pull request. The builder has created a PR and you are evaluating whether this change fits well into the broader system. This is the architect's review, focusing on how the change integrates rather than whether it works.
 
 ## Focus Areas
 
