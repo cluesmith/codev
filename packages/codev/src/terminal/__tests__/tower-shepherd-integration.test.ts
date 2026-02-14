@@ -319,6 +319,33 @@ describe('TerminalManager.shutdown() shepherd handling', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('tracks shepherdSessionId for kill path routing', async () => {
+    const { TerminalManager } = await import('../pty-manager.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-sessid-test-'));
+
+    const manager = new TerminalManager({
+      projectRoot: tmpDir,
+    });
+
+    // Create a session without shepherdSessionId
+    const info1 = manager.createSessionRaw({ label: 'No Session ID', cwd: tmpDir });
+    const session1 = manager.getSession(info1.id)!;
+    const client1 = new MockShepherdClient();
+    session1.attachShepherd(client1, Buffer.alloc(0), 1111);
+    expect(session1.shepherdSessionId).toBeNull();
+
+    // Create a session WITH shepherdSessionId
+    const info2 = manager.createSessionRaw({ label: 'With Session ID', cwd: tmpDir });
+    const session2 = manager.getSession(info2.id)!;
+    const client2 = new MockShepherdClient();
+    session2.attachShepherd(client2, Buffer.alloc(0), 2222, 'shepherd-uuid-abc');
+    expect(session2.shepherdSessionId).toBe('shepherd-uuid-abc');
+    expect(session2.shepherdBacked).toBe(true);
+
+    manager.shutdown();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it('detaches listeners so client close does not trigger exit event', async () => {
     const { TerminalManager } = await import('../pty-manager.js');
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detach-test-'));

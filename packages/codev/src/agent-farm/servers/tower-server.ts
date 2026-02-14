@@ -825,7 +825,7 @@ async function reconcileTerminalSessions(): Promise<void> {
       const session = manager.createSessionRaw({ label, cwd: projectPath });
       const ptySession = manager.getSession(session.id);
       if (ptySession) {
-        ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!);
+        ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
       }
 
       // Register in projectTerminals Map
@@ -1355,7 +1355,7 @@ async function getTerminalsForProject(
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
-            ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!);
+            ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
           }
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shepherd_pid, null,
@@ -1797,7 +1797,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
-              ptySession.attachShepherd(client, replayData, shepherdInfo.pid);
+              ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
             }
 
             entry.architect = session.id;
@@ -1867,6 +1867,24 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
 }
 
 /**
+ * Kill a terminal session, including its shepherd auto-restart if applicable.
+ * For shepherd-backed sessions, calls SessionManager.killSession() which clears
+ * the restart timer and removes the session before sending SIGTERM, preventing
+ * the shepherd from auto-restarting the process.
+ */
+async function killTerminalWithShepherd(manager: ReturnType<typeof getTerminalManager>, terminalId: string): Promise<boolean> {
+  const session = manager.getSession(terminalId);
+  if (!session) return false;
+
+  // If shepherd-backed, disable auto-restart via SessionManager before killing the PtySession
+  if (session.shepherdBacked && session.shepherdSessionId && shepherdManager) {
+    await shepherdManager.killSession(session.shepherdSessionId);
+  }
+
+  return manager.killSession(terminalId);
+}
+
+/**
  * Stop an agent-farm instance by killing all its terminals
  * Phase 4 (Spec 0090): Tower manages terminals directly
  */
@@ -1894,29 +1912,29 @@ async function stopInstance(projectPath: string): Promise<{ success: boolean; er
       .filter(s => s.tmux_session)
       .map(s => s.tmux_session as string);
 
-    // Kill architect
+    // Kill architect (disable shepherd auto-restart if applicable)
     if (entry.architect) {
       const session = manager.getSession(entry.architect);
       if (session) {
-        manager.killSession(entry.architect);
+        await killTerminalWithShepherd(manager, entry.architect);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all shells
+    // Kill all shells (disable shepherd auto-restart if applicable)
     for (const terminalId of entry.shells.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        manager.killSession(terminalId);
+        await killTerminalWithShepherd(manager, terminalId);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all builders
+    // Kill all builders (disable shepherd auto-restart if applicable)
     for (const terminalId of entry.builders.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        manager.killSession(terminalId);
+        await killTerminalWithShepherd(manager, terminalId);
         stopped.push(session.pid);
       }
     }
@@ -2309,7 +2327,7 @@ const server = http.createServer(async (req, res) => {
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
-              ptySession.attachShepherd(client, replayData, shepherdInfo.pid);
+              ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
             }
 
             info = session;
@@ -2331,34 +2349,12 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        // Fallback: tmux or non-persistent
+        // Fallback: non-persistent session (graceful degradation per plan)
+        // Note: tmux reconnection for existing sessions is handled in reconciliation.
+        // New sessions do NOT create tmux — shepherd is the only persistence backend.
         if (!info) {
-          if (tmuxSession && tmuxAvailable && command && cwd) {
-            const sanitizedName = createTmuxSession(
-              tmuxSession,
-              command,
-              args || [],
-              cwd,
-              cols || 200,
-              rows || 50
-            );
-            if (sanitizedName) {
-              command = 'tmux';
-              args = ['attach-session', '-t', sanitizedName];
-              activeTmuxSession = sanitizedName;
-              persistent = true;
-              log('INFO', `Created tmux session "${sanitizedName}" for terminal`);
-            }
-          }
-
-          try {
-            info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
-          } catch (createErr) {
-            if (activeTmuxSession) {
-              killTmuxSession(activeTmuxSession);
-            }
-            throw createErr;
-          }
+          info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
+          persistent = false;
 
           if (projectPath && termType && roleId) {
             const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
@@ -2367,13 +2363,13 @@ const server = http.createServer(async (req, res) => {
             } else {
               entry.shells.set(roleId, info.id);
             }
-            saveTerminalSession(info.id, projectPath, termType, roleId, info.pid, activeTmuxSession);
-            log('INFO', `Registered terminal ${info.id} as ${termType} "${roleId}" for project ${projectPath}${activeTmuxSession ? ` (tmux: ${activeTmuxSession})` : ''}`);
+            saveTerminalSession(info.id, projectPath, termType, roleId, info.pid, null);
+            log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shepherd unavailable)`);
           }
         }
 
         res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}`, tmuxSession: activeTmuxSession, persistent }));
+        res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}`, tmuxSession: null, persistent }));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         log('ERROR', `Failed to create terminal: ${message}`);
@@ -2411,9 +2407,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // DELETE /api/terminals/:id - Kill terminal
+      // DELETE /api/terminals/:id - Kill terminal (disable shepherd auto-restart if applicable)
       if (req.method === 'DELETE' && (!subpath || subpath === '')) {
-        if (!manager.killSession(terminalId)) {
+        if (!(await killTerminalWithShepherd(manager, terminalId))) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
           return;
@@ -2918,7 +2914,7 @@ const server = http.createServer(async (req, res) => {
                 });
                 const ptySession = manager.getSession(session.id);
                 if (ptySession) {
-                  ptySession.attachShepherd(client, replayData, shepherdInfo.pid);
+                  ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
                 }
 
                 const entry = getProjectTerminalsEntry(projectPath);
@@ -2940,25 +2936,13 @@ const server = http.createServer(async (req, res) => {
               }
             }
 
-            // Fallback: tmux or non-persistent
+            // Fallback: non-persistent session (graceful degradation per plan)
+            // Note: tmux reconnection for existing sessions is handled in reconciliation.
+            // New sessions do NOT create tmux — shepherd is the only persistence backend.
             if (!shellCreated) {
-              let fallbackCmd = shellCmd;
-              let fallbackArgs = shellArgs;
-              let activeTmuxSession: string | null = null;
-
-              if (tmuxAvailable) {
-                const tmuxName = `shell-${path.basename(projectPath)}-${shellId}`;
-                const sanitizedName = createTmuxSession(tmuxName, fallbackCmd, fallbackArgs, projectPath, 200, 50);
-                if (sanitizedName) {
-                  fallbackCmd = 'tmux';
-                  fallbackArgs = ['attach-session', '-t', sanitizedName];
-                  activeTmuxSession = sanitizedName;
-                }
-              }
-
               const session = await manager.createSession({
-                command: fallbackCmd,
-                args: fallbackArgs,
+                command: shellCmd,
+                args: shellArgs,
                 cwd: projectPath,
                 label: `Shell ${shellId.replace('shell-', '')}`,
                 env: process.env as Record<string, string>,
@@ -2966,7 +2950,8 @@ const server = http.createServer(async (req, res) => {
 
               const entry = getProjectTerminalsEntry(projectPath);
               entry.shells.set(shellId, session.id);
-              saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid, activeTmuxSession);
+              saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid, null);
+              log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shepherd unavailable)`);
 
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
@@ -2974,7 +2959,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 name: `Shell ${shellId.replace('shell-', '')}`,
                 terminalId: session.id,
-                persistent: !!activeTmuxSession,
+                persistent: false,
               }));
             }
           } catch (err) {
@@ -3247,7 +3232,8 @@ const server = http.createServer(async (req, res) => {
           }
 
           if (terminalId) {
-            manager.killSession(terminalId);
+            // Disable shepherd auto-restart if applicable, then kill the PtySession
+            await killTerminalWithShepherd(manager, terminalId);
 
             // TICK-001: Delete from SQLite
             deleteTerminalSession(terminalId);
@@ -3266,15 +3252,15 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
-          // Kill all terminals
+          // Kill all terminals (disable shepherd auto-restart if applicable)
           if (entry.architect) {
-            manager.killSession(entry.architect);
+            await killTerminalWithShepherd(manager, entry.architect);
           }
           for (const terminalId of entry.shells.values()) {
-            manager.killSession(terminalId);
+            await killTerminalWithShepherd(manager, terminalId);
           }
           for (const terminalId of entry.builders.values()) {
-            manager.killSession(terminalId);
+            await killTerminalWithShepherd(manager, terminalId);
           }
 
           // Clear registry

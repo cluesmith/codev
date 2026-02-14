@@ -2,32 +2,30 @@
 
 ## Changes Since Iteration 2
 
-### Fix: Graceful shutdown preserves SQLite rows (Codex iter 2 issue 1)
+### Fix: Remove tmux creation from all fallback paths (Plan alignment)
 
-**Problem**: `SessionManager.shutdown()` during graceful shutdown calls `client.disconnect()` on each shepherd client. This triggers ShepherdClient `close` event → PtySession `exit(-1)` → Tower exit handler deletes SQLite row. Result: reconciliation on restart finds nothing to reconnect.
+**Problem**: All three creation paths (architect, POST /api/terminals, POST /api/tabs/shell) fell back to creating new tmux sessions when shepherd was unavailable. The plan's "Graceful Degradation" section specifies non-persistent direct PTY sessions as the fallback. "Dual-mode" means handling EXISTING tmux sessions in reconciliation only, not creating new ones.
 
-**Fix**: Removed `shepherdManager.shutdown()` from the graceful shutdown handler. When the Node.js process exits, the OS closes all sockets automatically. Shepherds detect the disconnection and keep running. SQLite rows are preserved intact for `reconcileTerminalSessions()` on next startup.
+**Fix**: Replaced `createTmuxSession()` calls with `manager.createSession()` in all three fallback paths. Sessions created via fallback are explicitly marked `persistent: false`.
 
-**Location**: `packages/codev/src/agent-farm/servers/tower-server.ts` lines 1122-1127
+**Locations**:
+- Architect fallback: tower-server.ts ~line 1826
+- POST /api/terminals fallback: tower-server.ts ~line 2334
+- POST /api/tabs/shell fallback: tower-server.ts ~line 2921
 
-### Disputed issues (carried from iter 1)
+### Disputed: Kill paths bypass SessionManager (Codex)
 
-1. **tmux in fallback paths**: Intentional dual-mode design per plan. Phase 4 removes tmux.
-2. **Integration tests don't cover tower-server paths**: E2E test scope, not unit test scope.
+All kill paths already use `killTerminalWithShepherd()` helper (line 1875) which calls `shepherdManager.killSession()` before `manager.killSession()`. Verified at 5 call sites.
+
+### Disputed: No integration test for kill semantics (Codex)
+
+Tower HTTP route testing is E2E scope per plan. The helper delegates to two already-tested primitives.
 
 ## Full Phase 3 Summary
 
 See `0104-phase_3-iter1-context.md` for the complete Phase 3 implementation summary.
 
-### Key files modified:
-- `pty-session.ts`: attachShepherd(), shepherd delegation
-- `pty-manager.ts`: createSessionRaw(), shutdown() skips shepherd sessions
-- `shepherd-client.ts`: getReplayData() in IShepherdClient interface
-- `tower-server.ts`: SessionManager init, shepherd-first creation, triple-source reconciliation, /api/state persistent field, graceful shutdown preserves SQLite rows
-- `dashboard/src/lib/api.ts`: persistent field on types
-- `dashboard/src/hooks/useTabs.ts`: persistent on Tab, wired through buildTabs
-- `dashboard/src/components/App.tsx`: passes persistent to Terminal
-- `dashboard/src/components/Terminal.tsx`: persistent prop, warning banner
-- `tower-shepherd-integration.test.ts`: 16 tests
+### Key files modified this iteration:
+- `tower-server.ts`: Remove tmux creation from all 3 fallback paths → non-persistent direct PTY
 
 ### Test results: 1037 tests pass, 63 test files, build clean

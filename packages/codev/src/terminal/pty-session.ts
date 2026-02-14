@@ -47,6 +47,7 @@ export class PtySession extends EventEmitter {
   private pty: IPty | null = null;
   private shepherdClient: IShepherdClient | null = null;
   private _shepherdBacked = false;
+  private _shepherdSessionId: string | null = null;
   private shepherdPid = -1;
   private cols: number;
   private rows: number;
@@ -109,10 +110,11 @@ export class PtySession extends EventEmitter {
    * Data flows: shepherd → ring buffer → WebSocket clients.
    * User input flows: WebSocket → write() → shepherd.
    */
-  attachShepherd(client: IShepherdClient, replayData: Buffer, shepherdPid: number): void {
+  attachShepherd(client: IShepherdClient, replayData: Buffer, shepherdPid: number, shepherdSessionId?: string): void {
     this._shepherdBacked = true;
     this.shepherdClient = client;
     this.shepherdPid = shepherdPid;
+    this._shepherdSessionId = shepherdSessionId ?? null;
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {
@@ -153,6 +155,11 @@ export class PtySession extends EventEmitter {
   /** Whether this session is backed by a shepherd process. */
   get shepherdBacked(): boolean {
     return this._shepherdBacked;
+  }
+
+  /** The SessionManager session ID for this shepherd-backed session, or null. */
+  get shepherdSessionId(): string | null {
+    return this._shepherdSessionId;
   }
 
   /**
