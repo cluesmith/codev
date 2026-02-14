@@ -952,7 +952,6 @@
     </h1>
     <div class="header-actions">
       <span id="cloud-status"></span>
-      <button class="btn" onclick="refresh()">Refresh</button>
     </div>
   </header>
 
@@ -1773,21 +1772,15 @@
 
     function renderCloudStatus(status) {
       const el = document.getElementById('cloud-status');
-      if (!status || status.state === 'error') {
-        el.innerHTML = `
-          <span class="cloud-status">
-            <span class="cloud-dot cloud-dot--gray"></span>
-            Cloud: not registered
-          </span>`;
+
+      // When accessed through codevos.ai, cloud status is irrelevant
+      if (window.location.hostname.endsWith('codevos.ai')) {
+        el.innerHTML = '';
         return;
       }
 
-      if (!status.registered) {
-        el.innerHTML = `
-          <span class="cloud-status">
-            <span class="cloud-dot cloud-dot--gray"></span>
-            Cloud: not registered
-          </span>`;
+      if (!status || status.state === 'error' || !status.registered) {
+        el.innerHTML = '';
         return;
       }
 
@@ -1795,7 +1788,7 @@
         el.innerHTML = `
           <span class="cloud-status">
             <span class="cloud-dot cloud-dot--red"></span>
-            Cloud: auth failed
+            auth failed
           </span>`;
         return;
       }
@@ -1804,20 +1797,18 @@
         el.innerHTML = `
           <span class="cloud-status">
             <span class="cloud-dot cloud-dot--yellow"></span>
-            Cloud: connecting...
+            connecting...
           </span>`;
         return;
       }
 
       if (status.state === 'connected') {
+        const name = escapeHtml(status.towerName || 'connected');
         const uptimeStr = status.uptime != null ? ' <span class="cloud-uptime">' + formatUptime(status.uptime) + '</span>' : '';
-        const openLink = status.accessUrl ? ' <a href="' + escapeHtml(status.accessUrl) + '" target="_blank" rel="noopener" class="cloud-link">Open</a>' : '';
         el.innerHTML = `
           <span class="cloud-status">
             <span class="cloud-dot cloud-dot--green"></span>
-            Cloud: ${escapeHtml(status.towerName || 'connected')}
-            ${uptimeStr}
-            ${openLink}
+            ${name}${uptimeStr}
             <button class="cloud-btn" onclick="cloudDisconnect()" ${cloudLoading ? 'disabled' : ''}>Disconnect</button>
           </span>`;
         return;
@@ -1827,7 +1818,7 @@
       el.innerHTML = `
         <span class="cloud-status">
           <span class="cloud-dot cloud-dot--gray"></span>
-          Cloud: disconnected
+          disconnected
           <button class="cloud-btn" onclick="cloudConnect()" ${cloudLoading ? 'disabled' : ''}>Connect</button>
         </span>`;
     }

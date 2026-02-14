@@ -7,8 +7,9 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
-import { loadState, getArchitect } from '../state.js';
+import { loadState } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { getConfig } from '../utils/index.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
@@ -132,13 +133,24 @@ function detectProjectRoot(): string | null {
 }
 
 /**
- * Find the architect terminal ID from state or Tower.
+ * Find the architect terminal ID by querying the Tower API.
+ *
+ * The architect terminal is tracked in the Tower's global.db / in-memory state,
+ * NOT in the local state.db (setArchitect is never called in production).
+ * We query the Tower's project status endpoint to find the architect terminal.
  */
-function findArchitectTerminalId(): string {
-  const architect = getArchitect();
-  if (architect?.terminalId) {
-    return architect.terminalId;
+async function findArchitectTerminalId(): Promise<string> {
+  const client = new TowerClient();
+  const config = getConfig();
+  const status = await client.getProjectStatus(config.projectRoot);
+
+  if (status) {
+    const architectTerminal = status.terminals.find((t) => t.type === 'architect');
+    if (architectTerminal) {
+      return architectTerminal.id;
+    }
   }
+
   throw new Error('Architect not running. Use "af status" to check.');
 }
 
@@ -150,7 +162,7 @@ async function sendToArchitect(
   message: string,
   options: SendOptions
 ): Promise<void> {
-  const terminalId = findArchitectTerminalId();
+  const terminalId = await findArchitectTerminalId();
 
   const client = new TowerClient();
   const towerRunning = await client.isRunning();

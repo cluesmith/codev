@@ -17,6 +17,11 @@ function formatUptime(ms: number): string {
 }
 
 export function CloudStatus({ tunnelStatus, onRefresh }: CloudStatusProps) {
+  // When accessed through codevos.ai, the cloud status is irrelevant —
+  // we're already in the cloud.
+  const isCloudHosted = window.location.hostname.endsWith('codevos.ai');
+  if (isCloudHosted) return null;
+
   const [loading, setLoading] = useState(false);
 
   const handleConnect = useCallback(async () => {
