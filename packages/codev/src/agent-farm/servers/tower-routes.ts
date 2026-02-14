@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
@@ -914,6 +914,60 @@ async function handleProjectRoutes(
     const annotateMatch = apiPath.match(/^annotate\/([^/]+)(\/(.*))?$/);
     if (annotateMatch) {
       return handleProjectAnnotate(req, res, ctx, url, projectPath, annotateMatch);
+    }
+
+    // POST /api/paste-image - Upload pasted image to temp file (Issue #252)
+    if (req.method === 'POST' && apiPath === 'paste-image') {
+      const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+      let size = 0;
+      const chunks: Buffer[] = [];
+      let aborted = false;
+
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_IMAGE_SIZE) {
+          aborted = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Image too large (max 10 MB)' }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      req.on('end', () => {
+        if (aborted) return;
+        try {
+          const buffer = Buffer.concat(chunks);
+          const contentType = req.headers['content-type'] || 'image/png';
+          const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? '.jpg'
+            : contentType.includes('gif') ? '.gif'
+            : contentType.includes('webp') ? '.webp'
+            : '.png';
+          const filename = `paste-${crypto.randomUUID()}${ext}`;
+          const pasteDir = path.join(tmpdir(), 'codev-paste');
+          fs.mkdirSync(pasteDir, { recursive: true });
+          const filePath = path.join(pasteDir, filename);
+          fs.writeFileSync(filePath, buffer);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ path: filePath }));
+        } catch (err) {
+          if (!res.headersSent) {
+            const status = (err as Error).message.includes('too large') ? 413 : 500;
+            res.writeHead(status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
+          }
+        }
+      });
+
+      req.on('error', (err) => {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
     }
 
     // Unhandled API route
