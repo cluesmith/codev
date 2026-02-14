@@ -82,11 +82,11 @@ Shell / Claude / Builder process
 
 3. **Native xterm.js scrollback**: The browser's xterm.js scrollback buffer (currently 10,000 lines) must work natively — no alternate screen conflicts, no mouse interception, no modal copy-mode.
 
-4. **Process lifecycle management**: Start, resize, kill processes. Detect exit. Support disconnect timeouts before cleanup.
+4. **Process lifecycle management**: Start, resize, kill processes. Detect exit. Support disconnect timeouts before cleanup. Shepherd must forward resize (SIGWINCH) and signals (SIGINT, SIGTERM, SIGKILL) from Tower to the child process.
 
-5. **Reconnection with replay**: When a client reconnects, replay recent output from a server-side buffer so the terminal isn't blank. Current RingBuffer (1000 lines) serves this purpose.
+5. **Reconnection with replay**: When a client reconnects, replay recent output from a server-side buffer so the terminal isn't blank. The shepherd maintains its own replay buffer (1000 lines) so that after Tower restarts, recent output is available immediately without waiting for new shell output.
 
-6. **Auto-restart for architect sessions**: Architect sessions must auto-restart on exit (currently `while true; do ...; sleep 2; done` loop in tmux).
+6. **Auto-restart for architect sessions**: Architect sessions must auto-restart on any exit (clean or crash). The `restartOnExit` option triggers on all exit codes, matching the current unconditional `while true` loop behavior. A `maxRestarts` counter (default: 50) prevents infinite restart loops. Counter resets after 5 minutes of stable operation.
 
 7. **Zero global state mutation**: No mechanism should allow one session's configuration to affect another session.
 
@@ -94,9 +94,9 @@ Shell / Claude / Builder process
 
 8. **Disk logging**: Log terminal output to disk for debugging (current: 50MB max per session in `.agent-farm/logs/`).
 
-9. **Session metadata in SQLite**: Continue using `terminal_sessions` table as source of truth, with project path, session type, role ID.
+9. **Session metadata in SQLite**: Continue using `terminal_sessions` table as source of truth, with project path, session type, role ID. Schema migration: rename `tmux_session TEXT` column to `shepherd_socket TEXT` (stores Unix socket path) and add `shepherd_pid INTEGER` column.
 
-10. **Graceful degradation**: If the persistence mechanism fails, terminals should still work (just without persistence).
+10. **Graceful degradation**: If the shepherd process fails to spawn, Tower falls back to a direct node-pty session without persistence. The session works normally for the duration of the Tower process but won't survive a restart. SQLite row is marked with `shepherd_socket = NULL` to indicate non-persistent mode. User sees a warning in the dashboard terminal header: "Session persistence unavailable."
 
 ### Won't Have
 
@@ -115,59 +115,84 @@ Instead of tmux, we use **direct node-pty processes that are managed to survive 
 Browser (xterm.js, scrollback: 10000)
   ↓ WebSocket (binary hybrid protocol, unchanged)
 Tower (SessionManager → ManagedSession → RingBuffer)
-  ↓ node-pty spawns process directly
+  ↓ Unix Socket
+Shepherd (PTY owner + replay buffer)
+  ↓ PTY master fd
 Shell / Claude / Builder process (no tmux wrapper)
 ```
 
+### Decision: Node.js Shepherd
+
+The shepherd will be implemented as a **Node.js script** (`codev-shepherd.mjs`). Rationale:
+
+- Keeps the stack uniform (all TypeScript/Node.js) — easier to maintain and debug
+- Runtime overhead (~30MB RSS per session) is acceptable: we typically run 2-5 sessions, so 60-150MB total, well within dev machine RAM
+- Can be optimized to a compiled binary later if needed, with the same wire protocol
+- Node.js provides native Unix socket support (`net.createServer`) and child process management
+
 ### Session Persistence Strategy
 
-Three approaches to evaluate (in order of preference):
+**Approach B: Lightweight Shepherd Process** (selected — see alternatives in Appendix).
 
-#### Approach A: PID + PTY FD Recovery
+Each terminal session is managed by a dedicated shepherd process:
 
-When Tower starts, read saved PIDs from SQLite. For each:
-1. Check if process is still alive (`kill(pid, 0)`)
-2. If alive, open the PTY master fd (`/dev/ptmx` or platform equivalent)
-3. Create a new node-pty instance wrapping the existing fd
-4. Resume output streaming
-
-**Pros**: No external daemon, minimal complexity
-**Cons**: Reopening PTY fds is platform-specific and may not be possible with node-pty's API. node-pty creates the PTY pair internally and doesn't support adopting an existing fd.
-
-#### Approach B: Lightweight Shepherd Process
-
-Spawn a minimal daemon (`codev-shepherd`) that:
-1. Owns the PTY master fd and keeps it open
-2. Accepts Unix socket connections from Tower
-3. Forwards PTY I/O to/from Tower over the socket
-4. Survives Tower restarts (it's a separate process)
-5. Has no configuration, no options, no global state — just fd forwarding
+1. Tower spawns `codev-shepherd.mjs` as a detached child process (`child_process.spawn` with `detached: true, stdio: 'ignore'`)
+2. Shepherd creates the PTY (via `node-pty`) and owns the master fd
+3. Shepherd listens on a Unix socket for Tower connections
+4. Tower connects to the shepherd's socket and forwards I/O to/from WebSocket clients
+5. When Tower restarts, it discovers running shepherds via SQLite (socket path + PID) and reconnects
 
 ```
 Browser → WebSocket → Tower → Unix Socket → Shepherd → PTY → Shell
 ```
 
-The shepherd is ~100 lines of code. It has exactly one job: keep the PTY fd alive and forward bytes. It has no concept of mouse mode, alternate screen, scrollback, or any other terminal feature.
+### Shepherd Wire Protocol
 
-**Pros**: Clean separation, guaranteed persistence, no platform hacks
-**Cons**: Additional process per session (lightweight), new code to maintain
+The shepherd communicates with Tower over a Unix socket using a simple binary frame protocol:
 
-#### Approach C: Screen as tmux Alternative
+```
+Frame format: [1-byte type] [4-byte big-endian length] [payload]
 
-Use GNU `screen` instead of tmux. Screen has simpler defaults and less aggressive terminal feature interception.
+Types:
+  0x01 DATA      — PTY output (shepherd→Tower) or user input (Tower→shepherd)
+  0x02 RESIZE    — Terminal resize: payload = JSON {"cols": N, "rows": N}
+  0x03 SIGNAL    — Send signal to child: payload = JSON {"signal": N}
+  0x04 EXIT      — Child process exited: payload = JSON {"code": N, "signal": S}
+  0x05 REPLAY    — Replay buffer dump (shepherd→Tower on connect): payload = raw bytes
+  0x06 PING      — Keepalive (bidirectional)
+  0x07 PONG      — Keepalive response
+  0x08 HELLO     — Handshake (Tower→shepherd on connect): payload = JSON {"version": 1}
+  0x09 WELCOME   — Handshake response (shepherd→Tower): payload = JSON {"pid": N, "cols": N, "rows": N, "startTime": N}
+```
 
-**Pros**: Drop-in replacement, battle-tested
-**Cons**: Same fundamental problem (external multiplexer intercepting the byte stream), just with different defaults. Doesn't solve the architectural mismatch.
+The protocol is intentionally minimal — no authentication (Unix socket permissions handle access control), no multiplexing (one session per shepherd), no configuration.
 
-### Recommended Approach
+### Shepherd Lifecycle
 
-**Approach B (Shepherd process)** is recommended because:
+**Spawning**: Tower spawns one shepherd process per session. The shepherd is a standalone Node.js script that:
+1. Creates a PTY with the requested command, args, cwd, and environment
+2. Creates a Unix socket at a predictable path: `~/.codev/run/shepherd-{sessionId}.sock`
+3. Maintains a 1000-line replay buffer of recent PTY output
+4. Writes its PID to stdout before detaching (Tower captures this)
 
-1. It cleanly separates persistence (keeping fds alive) from terminal management (buffering, multiplexing, WebSocket)
-2. The shepherd has zero configuration — no settings to apply, sync, or accidentally mutate globally
-3. It's a tiny, auditable program with one responsibility
-4. It works identically on macOS and Linux (Unix sockets + PTY are POSIX)
-5. It eliminates the entire class of tmux bugs (alternate screen, mouse, copy-mode, global options)
+**Socket directory**: `~/.codev/run/` is created with permissions `0700` (owner-only). Socket files are created with permissions `0600`.
+
+**Discovery after Tower restart**:
+1. Tower queries SQLite for all sessions with non-null `shepherd_socket` paths
+2. For each, checks if the shepherd PID is still alive (`kill(pid, 0)`) AND validates process identity by checking the process start time matches the recorded start time (prevents PID reuse attacks)
+3. If alive and validated, connects to the Unix socket and sends HELLO handshake
+4. Shepherd responds with WELCOME containing current PTY state (pid, cols, rows)
+5. Shepherd sends REPLAY frame with buffered output, then streams live DATA frames
+6. If PID is dead or identity check fails, mark SQLite row as stale and clean up socket file
+
+**Stale socket cleanup**: On startup, Tower also scans `~/.codev/run/shepherd-*.sock` for socket files with no corresponding live process. Stale socket files are unlinked. This handles the case where a shepherd crashed without cleanup.
+
+**Shutdown**:
+- When Tower intentionally stops: Tower closes its socket connections to shepherds. Shepherds continue running (this is the whole point — persistence).
+- When Tower kills a session: Tower sends SIGNAL frame with SIGTERM, waits 5s, then SIGKILL if still alive. Then closes socket. Shepherd exits when child dies and no connections remain.
+- When a shepherd crashes: The PTY master fd closes, sending SIGHUP to the shell process, which terminates it. This is the same behavior as a tmux server crash — acceptable because the shepherd is a minimal process with few crash vectors.
+
+**Machine reboot**: All shepherds die (same as tmux). This is a clean-slate event — Tower starts fresh with empty session state.
 
 ### Multi-Client Shared Access
 
@@ -184,63 +209,109 @@ Replace tmux's `while true` loop with a `restartOnExit` option in SessionManager
 
 ```typescript
 interface SessionOptions {
-  restartOnExit?: boolean;    // Auto-restart on clean exit
+  restartOnExit?: boolean;    // Auto-restart on any exit (default: false)
   restartDelay?: number;      // Delay before restart (default: 2000ms)
-  maxRestarts?: number;       // Prevent infinite restart loops
+  maxRestarts?: number;       // Prevent infinite restart loops (default: 50)
+  restartResetAfter?: number; // Reset restart counter after stable operation (default: 300000ms / 5min)
 }
 ```
 
-When the process exits and `restartOnExit` is true, SessionManager spawns a new process in the same PTY (or creates a new PTY and updates the shepherd). Connected clients see the restart seamlessly.
+When the process exits and `restartOnExit` is true:
+1. Shepherd receives EXIT frame from child process
+2. Shepherd sends EXIT frame to Tower
+3. Tower increments restart counter. If counter exceeds `maxRestarts`, stop restarting and notify clients.
+4. After `restartDelay` ms, Tower tells shepherd to spawn a new process. Shepherd creates a new PTY and begins forwarding.
+5. Connected clients see the restart seamlessly — Tower sends a brief "Session restarting..." message via the WebSocket.
+6. If the session stays alive for `restartResetAfter` ms, the restart counter resets to 0.
+
+### Security
+
+- **Unix socket permissions**: Socket directory `~/.codev/run/` is `0700` (owner-only access). Socket files are `0600`. Only the user who started Tower can connect to shepherd sockets.
+- **No authentication protocol**: Unix socket filesystem permissions are the authentication mechanism. This is standard practice for local-only IPC (e.g., Docker socket, X11 socket).
+- **Input isolation**: Each shepherd manages exactly one session. There is no command channel that could be used to access other sessions. The only operations are: data forwarding, resize, signal, and lifecycle events.
+- **No `TMUX` environment variable**: The shepherd does not set `TMUX` or any other environment variable that would cause child processes to believe they're in a multiplexer.
 
 ## Migration Path
 
 ### Phase 1: Shepherd Implementation
 
-Build the shepherd process and SessionManager wrapper. Test alongside tmux (both running).
+Build the shepherd process (`codev-shepherd.mjs`) and the Tower-side `SessionManager` wrapper. Implement the wire protocol, socket lifecycle, and replay buffer. Include comprehensive unit and integration tests.
 
-### Phase 2: New Sessions Use Shepherd
+### Phase 2: Integration and Session Creation
 
-New terminal sessions are created via shepherd instead of tmux. Existing tmux sessions continue working.
+Wire the shepherd into Tower's session creation flow. New terminal sessions are created via shepherd instead of tmux. Existing tmux sessions continue working during the transition. Reconciliation handles both tmux and shepherd sessions simultaneously.
 
-### Phase 3: Reconciliation Update
+### Phase 3: Reconciliation and tmux Removal
 
-Update `reconcileTerminalSessions()` to reconnect via shepherd (Unix socket) instead of `tmux attach`.
+Update `reconcileTerminalSessions()` to reconnect via shepherd (Unix socket) instead of `tmux attach`. Remove all tmux-related code: `checkTmuxAvailable()`, `createTmuxSession()`, `killTmuxSession()`, `listCodevTmuxSessions()`, tmux option application, and tmux-related comments. Clean up SQLite schema (migrate `tmux_session` → `shepherd_socket`).
 
-### Phase 4: Remove tmux Code
+### Phase 4: Cleanup and Polish
 
-Remove all tmux-related code from tower-server.ts. Remove `checkTmuxAvailable()`, `createTmuxSession()`, `killTmuxSession()`, `listCodevTmuxSessions()`.
-
-### Phase 5: tmux as Optional User Tool
-
-tmux remains available for users who want it inside their shells — it's just no longer part of Codev's infrastructure.
+Remove `terminal-tmux.md` documentation (replaced by this spec's architecture). Update any remaining references to tmux in comments, error messages, or documentation. tmux remains available for users who want it inside their shells — it's just no longer part of Codev's infrastructure.
 
 ## Acceptance Criteria
 
-1. Terminal sessions survive Tower restart (stop Tower, start Tower, terminals resume)
+1. Terminal sessions survive Tower restart (stop Tower, start Tower, terminals resume with recent output visible)
 2. Multiple dashboard tabs viewing the same terminal see identical output
 3. Scrollback works natively in xterm.js — no alternate-screen artifacts, no mouse interception
-4. Architect sessions auto-restart on exit
-5. `af spawn` creates builder sessions that work identically to current behavior
+4. Architect sessions auto-restart on exit (including non-zero exit codes)
+5. `af spawn` creates builder sessions that: start a shell in the correct worktree, connect to the dashboard, accept input, display output, and survive Tower restart
 6. No tmux dependency in Codev's codebase (tmux may still be installed but is not required)
-7. RingBuffer replay works on reconnection (terminal is not blank after page refresh)
+7. After Tower restart, reconnected terminals display recent output from shepherd's replay buffer (not blank)
 8. All existing Playwright E2E tests pass
-9. SQLite `terminal_sessions` table continues to be source of truth
+9. SQLite `terminal_sessions` table continues to be source of truth, with updated schema (`shepherd_socket`, `shepherd_pid` columns)
+
+## Testing Requirements
+
+### Unit Tests
+
+- **Shepherd wire protocol**: Frame encoding/decoding round-trips for all message types (DATA, RESIZE, SIGNAL, EXIT, REPLAY, PING/PONG, HELLO/WELCOME)
+- **Shepherd replay buffer**: Circular buffer behavior, capacity limits, replay on connect
+- **SessionManager**: Session creation, listing, killing, resize forwarding
+- **Auto-restart logic**: Restart counter, maxRestarts limit, restartResetAfter timer, restart delay
+
+### Integration Tests
+
+- **Session lifecycle**: Create session → write input → read output → kill session → verify cleanup
+- **Tower restart survival**: Create session → stop Tower → verify shepherd alive → start Tower → reconnect → verify output continuity
+- **Shepherd crash recovery**: Create session → kill shepherd process → verify session cleanup in SQLite and socket file removal
+- **Multi-client concurrent input**: Two clients connected to same session, both sending input, both receiving output
+- **Auto-restart cycle**: Session with restartOnExit → kill process → verify restart → kill again → verify maxRestarts limit
+- **Stale socket cleanup**: Create stale socket file → start Tower → verify cleanup
+- **Graceful degradation**: Prevent shepherd from spawning → verify session works without persistence → verify dashboard warning
+
+### E2E Tests (Playwright)
+
+- All existing terminal E2E tests must pass (regression gate)
+- New test: Stop and restart Tower while terminal is active → verify terminal resumes
+- New test: Open same terminal in two tabs → verify both see same output
 
 ## Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| node-pty can't adopt existing PTY fds | Approach A fails | Use Approach B (shepherd) |
-| Shepherd process crashes | Sessions lose persistence | Shepherd is ~100 LOC with no deps; add PID monitoring |
+| node-pty can't adopt existing PTY fds | Approach A fails | Use Approach B (shepherd) — shepherd owns the PTY directly |
+| Shepherd process crashes | PTY master fd closes → SIGHUP kills shell → session lost | Shepherd is ~300-500 LOC with minimal dependencies; few crash vectors. Acceptable tradeoff (same as tmux crash). |
 | Unix socket performance | Latency in terminal I/O | Unix sockets add <0.1ms; negligible for terminal use |
-| Platform differences (macOS vs Linux) | Shepherd behavior varies | Use POSIX-only APIs; test both in CI |
-| Orphaned shepherd processes | Resource leak | Tower tracks shepherd PIDs in SQLite; cleanup on reconciliation |
-| Applications that expect tmux | Break if they detect tmux env vars | Don't set TMUX env var (which we shouldn't have been doing anyway) |
+| Platform differences (macOS vs Linux) | Shepherd behavior varies | Use POSIX-only APIs; test on macOS (primary dev platform) |
+| Orphaned shepherd processes | Resource leak | Tower scans `~/.codev/run/` on startup; kills shepherds with no matching SQLite row |
+| PID reuse after restart | Reconnect to wrong process | Validate process identity using start time comparison, not just PID |
+| Stale Unix socket files | Connection failures | Tower unlinks stale socket files during startup scan |
+| Rapid Tower restart race condition | Old/new Tower connections overlap on shepherd | Shepherd accepts only one Tower connection at a time; new connection closes old one |
+| Node.js runtime overhead | ~30MB RSS per shepherd process | Acceptable for 2-5 concurrent sessions; optimize to compiled binary later if needed |
+
+## Appendix: Rejected Approaches
+
+### Approach A: PID + PTY FD Recovery
+
+Rejected because node-pty doesn't support adopting an existing PTY fd. The PTY master fd closes when Tower exits, sending SIGHUP to the shell.
+
+### Approach C: Screen as tmux Alternative
+
+Rejected because it has the same fundamental problem — an external multiplexer intercepting the byte stream with its own terminal emulation layer.
 
 ## Open Questions
 
-1. **Should the shepherd be a compiled binary or a Node.js script?** A compiled Go/Rust binary is smaller and starts faster, but a Node.js script keeps the stack uniform and is easier to maintain. Recommendation: Start with Node.js, optimize later if needed.
+1. **Should we support session "snapshots"?** Save the full terminal state (screen buffer + cursor position) to disk for offline inspection. Not required for MVP but could be valuable for debugging. Deferred to future spec.
 
-2. **Should we support session "snapshots"?** Save the full terminal state (screen buffer + cursor position) to disk for offline inspection. Not required for MVP but could be valuable for debugging.
-
-3. **Can we use `nohup` or `setsid` instead of a shepherd?** These prevent process termination when Tower exits, but don't solve the PTY fd recovery problem. The PTY master fd closes when Tower exits, which sends SIGHUP to the shell. A shepherd keeps the master fd open.
+2. **Should the shepherd replay buffer be configurable?** Default 1000 lines matches the existing RingBuffer. Power users might want more. Deferred — can be added as a config option later without protocol changes.
