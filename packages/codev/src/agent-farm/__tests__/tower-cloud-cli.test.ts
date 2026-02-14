@@ -204,15 +204,13 @@ describe('tower cloud CLI flows (Phase 5)', () => {
   });
 
   describe('towerDeregister', () => {
-    it('deregisters after user confirmation', async () => {
+    it('deregisters without confirmation', async () => {
       writeCloudConfig({
         tower_id: 'dereg-id',
         tower_name: 'dereg-tower',
         api_key: 'ctk_DeregKey',
         server_url: 'https://codevos.ai',
       });
-
-      readlineAnswers.push('y');
 
       await towerDeregister();
 
@@ -221,21 +219,6 @@ describe('tower cloud CLI flows (Phase 5)', () => {
         expect.stringContaining('/api/towers/dereg-id'),
         expect.objectContaining({ method: 'DELETE' }),
       );
-    });
-
-    it('cancels when user declines', async () => {
-      writeCloudConfig({
-        tower_id: 'keep-id',
-        tower_name: 'keep-tower',
-        api_key: 'ctk_KeepKey',
-        server_url: 'https://codevos.ai',
-      });
-
-      readlineAnswers.push('n');
-
-      await towerDeregister();
-
-      expect(readCloudConfig()).not.toBeNull();
     });
 
     it('throws fatal when not registered', async () => {

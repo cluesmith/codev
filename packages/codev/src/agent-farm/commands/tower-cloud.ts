@@ -268,14 +268,6 @@ export async function towerDeregister(options: { port?: number } = {}): Promise<
     fatal('Tower is not registered. Nothing to deregister.');
   }
 
-  const proceed = await confirm(
-    `Deregister tower '${config.tower_name}' from codevos.ai? (y/N) `,
-  );
-  if (!proceed) {
-    logger.info('Deregistration cancelled.');
-    return;
-  }
-
   // Call server to deregister
   try {
     const response = await fetch(
