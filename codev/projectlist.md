@@ -136,7 +136,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0104"
     title: "Custom Terminal Session Manager"
     summary: "Replace tmux with a purpose-built shepherd process for session persistence, eliminating alternate-screen conflicts and global state mutation"
-    status: conceived
+    status: specified
     priority: high
     release: null
     files:

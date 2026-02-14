@@ -1,3 +1,8 @@
+---
+approved: 2026-02-14
+validated: [gemini, codex, claude]
+---
+
 # Spec 0104: Custom Terminal Session Manager
 
 ## Summary
