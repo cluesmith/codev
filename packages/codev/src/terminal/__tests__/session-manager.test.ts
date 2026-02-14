@@ -471,6 +471,57 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('natural exit cleanup (no auto-restart)', () => {
+    it('removes session from map when process exits and restartOnExit is false', async () => {
+      const socketPath = path.join(socketDir, 'shepherd-natural-exit.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shepherd = new ShepherdProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shepherd.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Reconnect to register the session (restartOnExit is NOT set)
+      const client = await manager.reconnectSession(
+        'natural-exit-test',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        expect(manager.listSessions().size).toBe(1);
+
+        // Wait for exit event to be processed
+        const exitPromise = new Promise<void>((resolve) => {
+          manager.on('session-exit', () => resolve());
+        });
+
+        // Simulate process exit
+        capturedPty!.simulateExit(0);
+        await exitPromise;
+
+        // Session should be removed from the map
+        expect(manager.listSessions().size).toBe(0);
+        expect(manager.getSessionInfo('natural-exit-test')).toBeNull();
+      }
+
+      shepherd.shutdown();
+    });
+  });
+
   describe('auto-restart logic', () => {
     it('sends SPAWN frame on exit when restartOnExit is true', async () => {
       const socketPath = path.join(socketDir, 'shepherd-restart.sock');

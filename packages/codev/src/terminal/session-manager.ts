@@ -125,9 +125,15 @@ export class SessionManager extends EventEmitter {
       this.setupAutoRestart(session, opts.sessionId);
     }
 
-    // Forward exit events
+    // Forward exit events and clean up dead sessions
     client.on('exit', (exitInfo) => {
       this.emit('session-exit', opts.sessionId, exitInfo);
+      // If not auto-restarting, remove the dead session from the map
+      // so listSessions() doesn't report it and cleanupStaleSockets()
+      // can clean its socket file.
+      if (!opts.restartOnExit) {
+        this.removeDeadSession(opts.sessionId);
+      }
     });
 
     client.on('error', (err) => {
@@ -135,7 +141,9 @@ export class SessionManager extends EventEmitter {
     });
 
     // Start restart reset timer if configured
-    this.startRestartResetTimer(session);
+    if (opts.restartOnExit) {
+      this.startRestartResetTimer(session);
+    }
 
     return client;
   }
@@ -203,6 +211,9 @@ export class SessionManager extends EventEmitter {
 
     client.on('exit', (exitInfo) => {
       this.emit('session-exit', sessionId, exitInfo);
+      // Reconnected sessions don't have auto-restart (no original options),
+      // so always clean up on exit.
+      this.removeDeadSession(sessionId);
     });
 
     client.on('error', (err) => {
@@ -367,6 +378,21 @@ export class SessionManager extends EventEmitter {
 
   // --- Private helpers ---
 
+  /**
+   * Remove a dead session from the map, clear its timers, and clean up socket.
+   * Called when a session exits naturally (no restart) or exhausts maxRestarts.
+   */
+  private removeDeadSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (session.restartResetTimer) {
+      clearTimeout(session.restartResetTimer);
+      session.restartResetTimer = null;
+    }
+    this.sessions.delete(sessionId);
+    this.unlinkSocketIfExists(session.socketPath);
+  }
+
   private getSocketPath(sessionId: string): string {
     return path.join(this.config.socketDir, `shepherd-${sessionId}.sock`);
   }
@@ -481,6 +507,8 @@ export class SessionManager extends EventEmitter {
       const maxRestarts = session.options.maxRestarts ?? 50;
       if (session.restartCount >= maxRestarts) {
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));
+        // Remove the exhausted session from the map
+        this.removeDeadSession(sessionId);
         return;
       }
 
