@@ -107,6 +107,87 @@ The HTTP request handler contained 30 inline route handlers that were tightly co
 
 **Claude**: Most thorough line-by-line reviews with function-by-function traceability tables. Rarely blocked. Caught subtle issues like the `buildWorktreeLaunchScript` filesystem side effect.
 
+## Time Analysis
+
+All times PST (UTC-8), 2026-02-14.
+
+| Time | Event |
+|------|-------|
+| 01:57 | First commit: spec with verified codebase state |
+| 02:00 | Spec revision with 3-way consultation feedback |
+| 02:03 | Spec revision addressing Claude feedback |
+| — | **GATE: spec-approval** (human approval) |
+| 02:12 | Plan: initial implementation plan |
+| 02:16 | Plan revision with 3-way consultation feedback |
+| — | **GATE: plan-approval** (human approval) |
+| 02:34 | Implementation begins — Phase 1 (tower-types + tower-utils) |
+| 02:47 | Phase 1 complete after 2 iterations |
+| 03:03 | Phase 2 begins (tower-tunnel) |
+| 03:09 | Phase 2 complete after 2 iterations |
+| 03:25 | Phase 3 begins (tower-instances) |
+| 03:53 | Phase 3 complete after 5 iterations |
+| 04:08 | Phase 4 begins (tower-terminals) |
+| 04:08 | Phase 4 complete after 3 iterations |
+| 04:26 | Phase 5 begins (tower-websocket) |
+| 04:26 | Phase 5 complete after 1 iteration |
+| 04:50 | Phase 6 begins (tower-routes) |
+| 05:07 | Phase 6 complete after 2 iterations |
+| 05:20 | Phase 7 begins (spawn decomposition) |
+| 05:39 | Phase 7 complete after 4 iterations |
+| 05:44 | Review document written |
+| 05:46 | Review consultation approved |
+| 05:46 | **GATE: pr-ready** (awaiting human approval) |
+
+### Autonomous Operation
+
+| Period | Duration | Activity |
+|--------|----------|----------|
+| Spec + Plan | ~19m | Created spec, 2 consultation rounds, created plan, 1 consultation round |
+| Human gate wait | variable | Idle — waiting for spec-approval + plan-approval |
+| Implementation → PR | ~3h 30m | 7 phases, 19 consultation rounds, review document, PR creation |
+
+**Total wall clock** (first commit to pr-ready): **3h 49m**
+**Total consultation rounds**: 22 rounds × 3 models = 66 consultation files
+**Context windows used**: 2 (expired 1 time, resumed automatically)
+
+## Stage-by-Stage Review Issues
+
+22 rounds × 3 models = 66 consultation files. **45 APPROVE, 14 REQUEST_CHANGES, 6 COMMENT, 1 missing verdict.**
+
+| Stage | Iter | Verdicts (C/Cx/G) | Who Blocked | Key Issues Raised |
+|-------|------|--------------------|-------------|-------------------|
+| Specify | 1 | COMMENT / RC / APR | Codex, Claude | Missing API/error/security parity checks; TowerContext interface incomplete |
+| Plan | 1 | COMMENT / RC / APR | Codex, Claude | Module-scope state conflicts with TowerContext model; WebSocket handler unassigned to phase |
+| Phase 1 | 1 | COMMENT / RC / RC | Codex, Gemini | `getLanguageForExt`/`getMimeTypeForFile` not extracted; duplicate MIME_TYPES |
+| Phase 1 | 2 | APR / APR / APR | — | All approved |
+| Phase 2 | 1 | COMMENT / RC / APR | Codex | Startup race: `/api/tunnel/connect` returns 500 before `initTunnel()`; missing debounce test |
+| Phase 2 | 2 | APR / APR / APR | — | All approved |
+| Phase 3 | 1 | APR / RC / APR | Codex | Startup race: instance APIs fail before `initInstances()` runs |
+| Phase 3 | 2 | APR / RC / APR | Codex | Init ordering still causes transient 500s on instance endpoints |
+| Phase 3 | 3 | APR / RC / APR | Codex | `launchInstance()`/`stopInstance()` still fail on uninitialized state |
+| Phase 3 | 4 | APR / RC / APR | Codex | `initInstances()` called too late in startup sequence |
+| Phase 3 | 5 | COMMENT / APR / APR | — | Claude had minor comments, all approved |
+| Phase 4 | 1 | APR / RC / APR | Codex | Module-global state instead of context-first API; missing integration tests |
+| Phase 4 | 2 | APR / RC / APR | Codex | Missing tests for `reconcileTerminalSessions()` recovery paths |
+| Phase 4 | 3 | APR / APR / APR | — | All approved |
+| Phase 5 | 1 | APR / APR / APR | — | All approved (cleanest extraction) |
+| Phase 6 | 1 | COMMENT / RC / APR | Codex, Claude | Missing route dispatch table; duplicate error handlers; no rate-limit test |
+| Phase 6 | 2 | APR / APR / APR | — | All approved |
+| Phase 7 | 1 | APR / RC / (none) | Codex | Test deliverables missing; `spawn-worktree.test.ts` not committed |
+| Phase 7 | 2 | APR / APR / RC | Gemini | `checkBugfixCollisions()` untested; missing `createWorktree`/`initPorchInWorktree` tests |
+| Phase 7 | 3 | APR / APR / APR | — | All approved |
+| Phase 7 | 4 | APR / APR / APR | — | All approved |
+| Review | 1 | APR / APR / APR | — | All approved |
+
+*Legend: C = Claude, Cx = Codex, G = Gemini, APR = APPROVE, RC = REQUEST_CHANGES*
+
+### Blocker Patterns
+
+- **Codex** blocked 12 of 14 REQUEST_CHANGES — primarily test completeness (missing test files, untested edge cases, insufficient coverage) and startup race conditions
+- **Gemini** blocked 2 of 14 — focused on architectural correctness (incomplete extraction, missing tests per plan)
+- **Claude** never issued REQUEST_CHANGES — used COMMENT (6 times) for structural observations (duplicate handlers, interface completeness)
+- **Phase 3 was hardest**: 5 iterations driven by a real startup race condition that Codex persistently flagged until fully resolved
+
 ## Recommendations
 
 1. Consider decomposing `tower-routes.ts` (1,701 lines) into route groups in a future spec
