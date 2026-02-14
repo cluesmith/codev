@@ -938,7 +938,6 @@ const CONFIG = {
 - macOS (Darwin)
 - Linux (GNU/Linux)
 - Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Optional: tmux (legacy session persistence, no longer required as of Spec 0104)
 - Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
 - Runtime directory: `~/.codev/run/` for shepherd Unix sockets (created automatically with `0700` permissions)
 
@@ -1823,7 +1822,7 @@ base+70-99: Reserved for future use
 - **No migration complexity** - Delete old artifacts rather than migrating
 - **Dirty worktree protection** - Refuse to delete worktrees with uncommitted changes
 - **Force flag requirement** - `--force` required to override safety checks
-- **Orphaned session handling** - Detect and handle stale shepherd sockets and legacy tmux sessions on startup
+- **Orphaned session handling** - Detect and handle stale shepherd sockets on startup
 
 ## Integration Points
 
@@ -1850,7 +1849,6 @@ base+70-99: Reserved for future use
 - **JSON**: State management and configuration
 
 ### Optional Dependencies (Agent-Farm)
-- **tmux**: Legacy session persistence (no longer required as of Spec 0104; shepherd processes provide persistence)
 - **node-pty**: Native PTY sessions for dashboard terminals (compiled during install, may need `npm rebuild node-pty`)
 
 ## System-Wide Patterns
@@ -2274,5 +2272,4 @@ npm run test:e2e -- --grep "tower" --headed
 
 **Last Updated**: 2026-02-13
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Updated for Spec 0104 Phase 3 (Custom Terminal Session Manager). Documented shepherd architecture replacing tmux, SessionManager, PtySession.attachShepherd(), triple-source reconciliation, dashboard persistent prop wiring, and new test files.
-**Next Review**: After Spec 0104 Phase 4 (tmux removal)
+**Changes**: Updated for Spec 0104 Phase 4 (tmux removal). Removed all tmux references, updated reconciliation from triple-source to dual-source, removed tmux from dependencies/glossary, deleted terminal-tmux.md.
