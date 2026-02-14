@@ -56,7 +56,7 @@ The cloud status shows the green dot, device name, uptime, and a "Disconnect" bu
 5. UI updates to show the "Connect" button again
 
 ### Smart Connect
-If credentials exist but the tunnel is down (e.g., tunnel dropped, Tower restarted), Connect reconnects the tunnel without re-doing OAuth. Specifically: if `readCloudConfig()` returns a valid config, POST `/api/tunnel/connect` with no body reconnects the existing tunnel. Only when no credentials exist does the full OAuth flow start.
+If credentials exist but the tunnel is down (e.g., tunnel dropped, Tower restarted), Connect reconnects the tunnel without re-doing OAuth. Specifically: if `readCloudConfig()` returns a non-null config (all 4 required fields present as non-empty strings: `tower_id`, `tower_name`, `api_key`, `server_url`), POST `/api/tunnel/connect` with no body reconnects the existing tunnel. If the config file is missing, `readCloudConfig()` returns null and the full OAuth flow starts. If the config file exists but is malformed (invalid JSON or missing fields), `readCloudConfig()` returns null and the OAuth flow starts (the existing validation in `cloud-config.ts` handles this).
 
 ## Approach
 
@@ -100,6 +100,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 4. **TTL**: Pending registrations expire after 5 minutes. A cleanup runs on each new registration.
 5. **Single-use**: Nonce is deleted after successful use (replay protection)
 6. **Tower restart**: If Tower restarts between initiation and callback, the in-memory store is lost. The callback returns an error page telling the user to try again. This is acceptable — the OAuth token is short-lived anyway.
+7. **Concurrent attempts**: Multiple connect initiations are allowed (each gets its own nonce). The first callback to complete wins and writes the config. Subsequent callbacks with valid nonces will also succeed — last writer wins. This is acceptable since both callbacks produce valid credentials from the same user's OAuth session.
 
 ### UI Changes (tower.html)
 
@@ -108,7 +109,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
    - Device name input (default: machine hostname from `/api/status`, validated: 1-63 chars, lowercase alphanumeric + hyphens, must start/end with letter or digit)
    - Service URL input (default: `https://codevos.ai`)
    - "Connect" and "Cancel" buttons
-3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If result is empty, show inline error.
+3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If the normalized result is empty or fails validation (e.g., starts/ends with hyphen, exceeds 63 chars), show inline error.
 4. POST to `/api/tunnel/connect` with `{ name, serverUrl, origin: window.location.origin }`, receive `{ authUrl }`
 5. Navigate current tab to `authUrl` (`window.location.href = authUrl`)
 6. After OAuth completes, callback redirects back to Tower homepage
@@ -163,7 +164,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 - Device name: 1-63 characters, lowercase alphanumeric + hyphens, must start and end with a letter or digit
 - Default service URL: `https://codevos.ai`
 - Cloud config permissions (0o600) must be maintained
-- Callback URL constructed from UI-provided origin (supports LAN access)
+- Callback URL constructed from UI-provided origin (supports LAN access). The `origin` is not a security boundary — nonce validation provides security. Origin is validated as a well-formed URL but not allowlisted (Tower is a local-first tool accessed from trusted networks).
 
 ## Security Considerations
 
