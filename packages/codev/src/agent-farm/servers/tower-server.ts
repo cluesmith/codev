@@ -1086,11 +1086,38 @@ async function getTerminalsForProject(
     if (!session && dbSession.shepherd_socket && shepherdManager) {
       // PTY session gone but shepherd may still be alive — reconnect on-the-fly
       try {
+        // Restore auto-restart for architect sessions (same as startup reconciliation)
+        let restartOptions: ReconnectRestartOptions | undefined;
+        if (dbSession.type === 'architect') {
+          let architectCmd = 'claude';
+          const configPath = path.join(dbSession.project_path, 'af-config.json');
+          if (fs.existsSync(configPath)) {
+            try {
+              const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+              if (config.shell?.architect) {
+                architectCmd = config.shell.architect;
+              }
+            } catch { /* use default */ }
+          }
+          const cmdParts = architectCmd.split(/\s+/);
+          const cleanEnv = { ...process.env } as Record<string, string>;
+          delete cleanEnv['CLAUDECODE'];
+          restartOptions = {
+            command: cmdParts[0],
+            args: cmdParts.slice(1),
+            cwd: dbSession.project_path,
+            env: cleanEnv,
+            restartDelay: 2000,
+            maxRestarts: 50,
+          };
+        }
+
         const client = await shepherdManager.reconnectSession(
           dbSession.id,
           dbSession.shepherd_socket,
           dbSession.shepherd_pid!,
           dbSession.shepherd_start_time!,
+          restartOptions,
         );
         if (client) {
           const replayData = client.getReplayData() ?? Buffer.alloc(0);
