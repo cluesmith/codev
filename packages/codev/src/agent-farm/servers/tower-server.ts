@@ -361,7 +361,7 @@ function getTerminalManager(): TerminalManager {
       projectRoot,
       logDir: path.join(homedir(), '.agent-farm', 'logs'),
       maxSessions: 100,
-      ringBufferLines: 1000,
+      ringBufferLines: 10000,
       diskLogEnabled: true,
       diskLogMaxBytes: 50 * 1024 * 1024,
       reconnectTimeoutMs: 300_000,
@@ -579,6 +579,10 @@ function createTmuxSession(
     // to arrow keys (cycling command history). With alternate-screen off,
     // tmux writes to the normal buffer and xterm.js native scroll works.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'alternate-screen', 'off'], { stdio: 'ignore' });
+    // Increase tmux scrollback buffer from default 2,000 to 50,000 lines.
+    // Even with alternate-screen off, tmux manages its own internal buffer
+    // which can limit output flow to xterm.js. See issue #247.
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'history-limit', '50000'], { stdio: 'ignore' });
     // Unset CLAUDECODE so spawned Claude processes don't detect a nested session
     spawnSync('tmux', ['set-environment', '-t', sessionName, '-u', 'CLAUDECODE'], { stdio: 'ignore' });
 
@@ -808,6 +812,7 @@ async function reconcileTerminalSessions(): Promise<void> {
       // Ensure correct tmux options on reconnected sessions
       spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
       spawnSync('tmux', ['set-option', '-t', tmuxName, 'alternate-screen', 'off'], { stdio: 'ignore' });
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'history-limit', '50000'], { stdio: 'ignore' });
 
       if (dbRow) {
         log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);
