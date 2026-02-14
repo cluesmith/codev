@@ -98,11 +98,31 @@ Revert the commit. These are pure library additions with no behavioral change to
 
 **Enhanced `handleTunnelEndpoint()`** in `tower-tunnel.ts`:
 
-1. **POST `/api/tunnel/connect`** (lines 267-291):
+**IMPORTANT — Route ordering**: The `connect/callback` handler MUST be checked BEFORE the existing `connect` handler. When the URL is `/api/tunnel/connect/callback`, `tunnelSub` will be `connect/callback`. The existing check `tunnelSub === 'connect'` won't match, but adding the callback check after could lead to confusion. Insert the GET handler first:
+
+```
+if (req.method === 'GET' && tunnelSub === 'connect/callback') { ... }
+else if (req.method === 'POST' && tunnelSub === 'connect') { ... }
+```
+
+1. **GET `/api/tunnel/connect/callback`** (new sub-route — add BEFORE existing connect handler):
+   - Set response header `Content-Type: text/html`
+   - Parse query params: `token`, `nonce`
+   - Look up nonce via `consumePendingRegistration(nonce)` → if null, return error HTML
+   - Get machine ID via `getOrCreateMachineId()`
+   - Call `redeemToken(token, name, machineId, serverUrl)` from shared module — use `maskApiKey()` when logging (tokens must not appear in server logs per spec)
+   - Call `writeCloudConfig({ tower_id, tower_name: name, api_key, server_url })`
+   - Connect tunnel (same as existing connect logic)
+   - On success: return HTML page with "Connected to Codev Cloud" + meta refresh to `/`
+   - On failure: return HTML error page per spec's error table + link to Tower homepage
+   - Note: `readCloudConfig()` throws on invalid JSON (not returns null as spec simplifies). Wrap in try/catch in all call sites — the existing connect handler at line 275 has implicit coverage via the `handleTunnelEndpoint` try/catch, but the callback handler needs explicit handling.
+
+2. **POST `/api/tunnel/connect`** (lines 267-291):
    - Parse request body as JSON
    - If body contains `name`: OAuth initiation flow
      - Validate `name` (1-63 chars, lowercase alphanumeric + hyphens, start/end with letter/digit)
-     - Extract `serverUrl` (default `https://cloud.codevos.ai`) and `origin` (default `http://localhost:${port}`)
+     - Extract `serverUrl` (default `https://cloud.codevos.ai`)
+     - Extract `origin` (default `http://localhost:${port}`), validate as well-formed URL via `new URL(origin)` — reject with 400 if malformed
      - Validate `serverUrl` is HTTPS (or localhost)
      - Create pending registration via nonce store
      - Build `authUrl`: `{serverUrl}/towers/register?callback={encodeURIComponent(callbackUrl)}`
@@ -110,41 +130,37 @@ Revert the commit. These are pure library additions with no behavioral change to
      - Return 200 `{ authUrl }`
    - If no body (or empty body): existing reconnect behavior (no change)
 
-2. **GET `/api/tunnel/connect/callback`** (new sub-route `connect/callback`):
-   - Parse query params: `token`, `nonce`
-   - Look up nonce via `consumePendingRegistration(nonce)` → if null, return error HTML
-   - Get machine ID via `getOrCreateMachineId()`
-   - Call `redeemToken(token, name, machineId, serverUrl)` from shared module
-   - Call `writeCloudConfig({ tower_id, tower_name: name, api_key, server_url })`
-   - Connect tunnel (same as existing connect logic)
-   - On success: return HTML page with "Connected to Codev Cloud" + meta refresh to `/`
-   - On failure: return HTML error page per spec's error table + link to Tower homepage
-   - Wrap `readCloudConfig()` in try/catch (it throws on invalid JSON)
-
 3. **POST `/api/tunnel/disconnect`** (lines 294-302):
-   - Read config before disconnecting (need `tower_id`, `api_key`, `server_url`)
-   - Disconnect tunnel (existing)
+   - Read config FIRST (need `tower_id`, `api_key`, `server_url` for deregister)
+   - Disconnect tunnel
    - Server-side deregister: DELETE `{serverUrl}/api/towers/{towerId}` with `Authorization: Bearer {apiKey}` — best-effort, catch errors
-   - Delete local config via `deleteCloudConfig()`
+   - Delete local config via `deleteCloudConfig()` LAST (order matters: read first, delete last)
    - Return `{ success: true }` with optional `warning` field if server-side deregister failed
    - If `deleteCloudConfig()` fails: return `{ success: false, error: "..." }`
 
 4. **Update error message** on line 278: `"Not registered. Run 'af tower register' first."` → `"Not registered. Run 'af tower connect' or use the Connect button in the Tower UI."`
 
+5. **Add `hostname` to `/api/tunnel/status` response**: Add `hostname: os.hostname()` to the status response JSON so the UI can use it as the device name default. This avoids the UI needing a separate endpoint.
+
 #### Acceptance Criteria
 - [ ] POST `/api/tunnel/connect` with body `{ name, serverUrl }` returns `{ authUrl }`
+- [ ] POST `/api/tunnel/connect` with malformed `origin` returns 400
 - [ ] POST `/api/tunnel/connect` with no body still reconnects (existing behavior)
 - [ ] GET `/api/tunnel/connect/callback` with valid nonce completes registration
-- [ ] GET `/api/tunnel/connect/callback` with invalid/expired nonce returns error HTML
+- [ ] GET `/api/tunnel/connect/callback` with invalid/expired nonce returns error HTML (Content-Type: text/html)
 - [ ] POST `/api/tunnel/disconnect` deregisters server-side, deletes config, disconnects tunnel
 - [ ] Disconnect returns warning (not error) when server-side deregister fails
+- [ ] `/api/tunnel/status` includes `hostname` field
+- [ ] Tokens are masked in all log output (use `maskApiKey()`)
 
 #### Test Plan
 - **Unit Tests** (`__tests__/tower-tunnel.test.ts`):
-  - Connect initiation: valid body → authUrl, missing name → 400, invalid serverUrl → 400
+  - Connect initiation: valid body → authUrl, missing name → 400, invalid serverUrl → 400, malformed origin → 400
   - Callback: valid nonce → success HTML, expired nonce → error HTML, missing nonce → error HTML, already-used nonce → error HTML
+  - Callback: verify response Content-Type is text/html
   - Disconnect: full cleanup, server-side failure → warning, local failure → error
   - Smart connect: config exists → reconnect, config missing → 400 with new message
+  - Status: response includes hostname field
 - **Manual Testing**: Full OAuth round-trip with cloud.codevos.ai
 
 #### Rollback Strategy
@@ -179,18 +195,24 @@ Revert the commit. Existing connect/disconnect behavior is preserved for the no-
 
 **Connect Dialog**:
 - HTML `<dialog>` element with:
-  - Device name `<input>` (default from `/api/status` hostname field)
+  - Device name `<input>` (default from `/api/tunnel/status` `hostname` field, added in Phase 2)
   - Service URL `<input>` (default `https://cloud.codevos.ai`)
-  - Inline error `<div>` (hidden by default)
+  - Inline error `<div>` (hidden by default, styled with red text)
   - "Connect" and "Cancel" buttons
-- CSS styling consistent with existing Tower dialogs
+- CSS styling consistent with existing Tower dialogs (reuse patterns from the existing create-project dialog at lines ~990-1006)
+- Use existing `showToast()` function for disconnect warnings
 
 **cloudConnect()** (lines 1826-1838):
 - If registered (smart connect): POST to `./api/tunnel/connect` with no body (existing behavior)
 - If not registered: open the connect dialog
+- New `normalizeDeviceName(raw)` function (pure logic, testable):
+  - trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars
+  - Return normalized string
+- New `validateDeviceName(name)` function (pure logic, testable):
+  - Check: non-empty, 1-63 chars, starts/ends with letter or digit, not all hyphens
+  - Return `{ valid: boolean, error?: string }`
 - New `submitConnect()` function:
-  - Normalize device name: trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars
-  - Validate: non-empty, 1-63 chars, starts/ends with letter or digit, not all hyphens
+  - Call `normalizeDeviceName()` then `validateDeviceName()`
   - If invalid: show inline error, return
   - POST to `./api/tunnel/connect` with `{ name, serverUrl, origin: window.location.origin }`
   - Navigate to `authUrl` via `window.location.href`
@@ -202,7 +224,7 @@ Revert the commit. Existing connect/disconnect behavior is preserved for the no-
 - Refresh UI
 
 **Status endpoint update**:
-- Ensure `/api/tunnel/status` includes hostname (for device name default). Check if `/api/status` already provides this — if so, reuse it.
+- Use `hostname` field from `/api/tunnel/status` (added in Phase 2) for device name default.
 
 #### Acceptance Criteria
 - [ ] Cloud status area visible when not registered (shows "Connect" button)
@@ -215,17 +237,22 @@ Revert the commit. Existing connect/disconnect behavior is preserved for the no-
 - [ ] Smart connect (registered but disconnected) reconnects without dialog
 
 #### Test Plan
-- **Manual Testing**: Visual inspection of connect/disconnect UI states, dialog interactions, validation errors, OAuth flow
-- **Device name normalization**: Test in browser console with various inputs
+- **Unit Tests** (`__tests__/device-name.test.ts`):
+  - `normalizeDeviceName()`: spaces → hyphens, uppercase → lowercase, underscores → hyphens, strip invalid chars, empty input → empty output
+  - `validateDeviceName()`: valid names pass, empty → error, too long (>63) → error, starts/ends with hyphen → error, all-hyphens → error
+  - Note: Extract these as standalone functions (not inline in HTML) so they can be imported and unit tested. Define in `packages/codev/src/agent-farm/lib/device-name.ts` and import in tower.html's inline script via a small helper or duplicate the logic (tower.html is a self-contained template).
+- **E2E Tests** (Playwright, `tests/e2e/`):
+  - Connect dialog renders when not connected; device name and service URL have correct defaults
+  - Disconnect confirmation dialog appears when "Disconnect" button is clicked
+  - Validation errors display inline for invalid device names
+- **Manual Testing**: Full OAuth round-trip, visual inspection of UI states
 
 #### Rollback Strategy
 Revert the HTML changes. Pure UI — no server-side impact.
 
 #### Risks
 - **Risk**: Dialog styling may not match existing Tower design
-  - **Mitigation**: Reuse existing CSS patterns from Tower (it already has modal/dialog patterns)
-- **Risk**: Device name default requires hostname from API
-  - **Mitigation**: `/api/status` already returns system info; check if hostname is included, add if needed
+  - **Mitigation**: Reuse existing CSS patterns from Tower (create-project dialog at ~lines 990-1006)
 
 ---
 
@@ -289,9 +316,11 @@ Phase 4 (CLI Rename) ── independent, sequenced last for commit clarity
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| OAuth callback routing conflict | Low | Medium | Test `connect/callback` sub-path matching explicitly |
+| OAuth callback routing conflict | Low | Medium | Check `connect/callback` BEFORE `connect` in route dispatch |
 | Existing tunnel tests break | Low | High | Run full test suite after each phase |
 | codevos.ai OAuth flow incompatible | Low | High | Test manually with real server; existing CLI flow proves compatibility |
+| Token leak in server logs | Low | High | Use `maskApiKey()` for all token logging; verify in code review |
+| Disconnect race condition | Low | Medium | Read config FIRST, delete config LAST; disconnect in between |
 
 ## Validation Checkpoints
 1. **After Phase 1**: Nonce store unit tests pass; existing CLI registration still works
