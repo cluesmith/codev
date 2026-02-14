@@ -1,30 +1,30 @@
 /**
  * Shared session-naming utilities for Agent Farm.
- * Centralizes tmux session name generation to prevent drift between commands.
+ * Centralizes session name generation to prevent drift between commands.
  */
 
 import { basename } from 'node:path';
 import type { Config } from '../types.js';
 
 /**
- * Get a namespaced tmux session name for a builder: builder-{project}-{id}
+ * Get a namespaced session name for a builder: builder-{project}-{id}
  */
 export function getBuilderSessionName(config: Config, builderId: string): string {
   return `builder-${basename(config.projectRoot)}-${builderId}`;
 }
 
 /**
- * Parsed metadata from a tmux session name.
+ * Parsed metadata from a session name.
  * Our naming convention: architect-{basename}, builder-{basename}-{specId}, shell-{basename}-{shellId}
  */
-export interface ParsedTmuxSession {
+export interface ParsedSession {
   type: 'architect' | 'builder' | 'shell';
   projectBasename: string;
   roleId: string | null;  // specId for builders, shellId for shells, null for architect
 }
 
 /**
- * Parse a codev tmux session name to extract type, project, and role.
+ * Parse a codev session name to extract type, project, and role.
  * Returns null if the name doesn't match any known codev pattern.
  *
  * Examples:
@@ -35,7 +35,7 @@ export interface ParsedTmuxSession {
  *   "builder-codev-public-worktree-QwEr"    → { type: 'builder', projectBasename: 'codev-public', roleId: 'worktree-QwEr' }
  *   "shell-codev-public-shell-1"            → { type: 'shell', projectBasename: 'codev-public', roleId: 'shell-1' }
  */
-export function parseTmuxSessionName(name: string): ParsedTmuxSession | null {
+export function parseSessionName(name: string): ParsedSession | null {
   // architect-{basename}
   const architectMatch = name.match(/^architect-(.+)$/);
   if (architectMatch) {

@@ -276,6 +276,20 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (5)').run();
   }
 
+  // Migration v6: Drop tmux_session columns (Spec 0104 - tmux replaced by shepherd)
+  const v6 = db.prepare('SELECT version FROM _migrations WHERE version = 6').get();
+  if (!v6) {
+    const tables = ['architect', 'builders', 'utils'];
+    for (const table of tables) {
+      try {
+        db.exec(`ALTER TABLE ${table} DROP COLUMN tmux_session`);
+      } catch {
+        // Column may not exist (fresh install with updated schema)
+      }
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (6)').run();
+  }
+
   return db;
 }
 
@@ -380,6 +394,38 @@ function ensureGlobalDatabase(): Database.Database {
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (6)').run();
     console.log('[info] Added shepherd columns to terminal_sessions (Spec 0104)');
+  }
+
+  // Migration v7: Drop tmux_session column from terminal_sessions (Spec 0104 Phase 4)
+  const v7 = db.prepare('SELECT version FROM _migrations WHERE version = 7').get();
+  if (!v7) {
+    // SQLite table-rebuild pattern to drop the tmux_session column
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS terminal_sessions_new (
+          id TEXT PRIMARY KEY,
+          project_path TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
+          role_id TEXT,
+          pid INTEGER,
+          shepherd_socket TEXT,
+          shepherd_pid INTEGER,
+          shepherd_start_time INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO terminal_sessions_new
+          SELECT id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time, created_at
+          FROM terminal_sessions;
+        DROP TABLE terminal_sessions;
+        ALTER TABLE terminal_sessions_new RENAME TO terminal_sessions;
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
+      `);
+    } catch {
+      // Table may already be in the correct schema (fresh install)
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (7)').run();
+    console.log('[info] Dropped tmux_session column from terminal_sessions (Spec 0104)');
   }
 
   return db;

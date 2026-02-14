@@ -114,7 +114,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   // Architect command - direct CLI access
   program
     .command('architect [args...]')
-    .description('Start or attach to architect tmux session (power user mode)')
+    .description('Start or attach to architect session (power user mode)')
     .option('-l, --layout', 'Create multi-pane layout with status and shell')
     .action(async (args: string[], options: { layout?: boolean }) => {
       const { architect } = await import('./commands/architect.js');
@@ -146,7 +146,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Attach to a running builder terminal')
     .option('-p, --project <id>', 'Builder ID / project ID to attach to')
     .option('-i, --issue <number>', 'Issue number (for bugfix builders)')
-    .option('-b, --browser', 'Open in browser instead of tmux attach')
+    .option('-b, --browser', 'Open in browser')
     .action(async (options) => {
       const { attach } = await import('./commands/attach.js');
       try {

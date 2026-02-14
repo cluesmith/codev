@@ -2,7 +2,7 @@
  * Tests for attach command
  *
  * These are unit tests for the attach command logic. Integration tests
- * that attach to actual builders require git and tmux to be running.
+ * that attach to actual builders require git and Tower to be running.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -74,7 +74,6 @@ describe('attach command', () => {
         phase: 'init',
         worktree: '/path/to/.builders/bugfix-42',
         branch: 'builder/bugfix-42-test-issue',
-        tmuxSession: 'builder-project-bugfix-42',
         type: 'bugfix',
         issueNumber: 42,
       });
@@ -107,7 +106,6 @@ describe('attach command', () => {
         phase: 'init',
         worktree: '/path/to/.builders/0073',
         branch: 'builder/0073-feature',
-        tmuxSession: 'builder-project-0073',
         type: 'spec',
       });
 
@@ -127,7 +125,6 @@ describe('attach command', () => {
         phase: 'init',
         worktree: '/path/to/.builders/bugfix-173',
         branch: 'builder/bugfix-173-test',
-        tmuxSession: 'builder-project-bugfix-173',
         type: 'bugfix',
         issueNumber: 173,
       });
@@ -159,7 +156,6 @@ describe('attach command', () => {
         phase: 'init',
         worktree: '/path',
         branch: 'branch',
-        tmuxSession: 'session',
         type: 'bugfix',
         issueNumber: 42,
       });
@@ -193,7 +189,6 @@ describe('attach command', () => {
         phase: 'init',
         worktree: '/path',
         branch: 'branch',
-        tmuxSession: 'session',
         type: 'spec',
       });
 

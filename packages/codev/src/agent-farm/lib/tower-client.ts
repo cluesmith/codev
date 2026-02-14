@@ -283,6 +283,17 @@ export class TowerClient {
   }
 
   /**
+   * Write data to a terminal session
+   */
+  async writeTerminal(terminalId: string, data: string): Promise<boolean> {
+    const result = await this.request(`/api/terminals/${terminalId}/write`, {
+      method: 'POST',
+      body: JSON.stringify({ data }),
+    });
+    return result.ok;
+  }
+
+  /**
    * Kill a terminal session
    */
   async killTerminal(terminalId: string): Promise<boolean> {

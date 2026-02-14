@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS architect (
   port INTEGER NOT NULL,
   cmd TEXT NOT NULL,
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
-  tmux_session TEXT,
   terminal_id TEXT
 );
 
@@ -37,7 +36,6 @@ CREATE TABLE IF NOT EXISTS builders (
   phase TEXT NOT NULL DEFAULT '',
   worktree TEXT NOT NULL,
   branch TEXT NOT NULL,
-  tmux_session TEXT,
   type TEXT NOT NULL DEFAULT 'spec'
     CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
   task_text TEXT,
@@ -58,7 +56,6 @@ CREATE TABLE IF NOT EXISTS utils (
   name TEXT NOT NULL,
   port INTEGER NOT NULL DEFAULT 0,
   pid INTEGER NOT NULL DEFAULT 0,
-  tmux_session TEXT,
   terminal_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -103,7 +100,6 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
     CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,                           -- builder ID or shell ID (null for architect)
   pid INTEGER,                            -- process ID of the terminal
-  tmux_session TEXT,                      -- tmux session name if tmux-backed
   shepherd_socket TEXT,                   -- Unix socket path for shepherd process
   shepherd_pid INTEGER,                   -- shepherd process PID
   shepherd_start_time INTEGER,            -- shepherd process start time (epoch ms)

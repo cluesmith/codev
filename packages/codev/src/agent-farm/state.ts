@@ -58,12 +58,11 @@ export function setArchitect(architect: ArchitectState | null): void {
     db.prepare('DELETE FROM architect WHERE id = 1').run();
   } else {
     db.prepare(`
-      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session, terminal_id)
-      VALUES (1, 0, 0, @cmd, @startedAt, @tmuxSession, @terminalId)
+      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, terminal_id)
+      VALUES (1, 0, 0, @cmd, @startedAt, @terminalId)
     `).run({
       cmd: architect.cmd,
       startedAt: architect.startedAt,
-      tmuxSession: architect.tmuxSession ?? null,
       terminalId: architect.terminalId ?? null,
     });
   }
@@ -79,11 +78,11 @@ export function upsertBuilder(builder: Builder): void {
   db.prepare(`
     INSERT INTO builders (
       id, name, port, pid, status, phase, worktree, branch,
-      tmux_session, type, task_text, protocol_name, issue_number, terminal_id
+      type, task_text, protocol_name, issue_number, terminal_id
     )
     VALUES (
       @id, @name, 0, 0, @status, @phase, @worktree, @branch,
-      @tmuxSession, @type, @taskText, @protocolName, @issueNumber, @terminalId
+      @type, @taskText, @protocolName, @issueNumber, @terminalId
     )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
@@ -91,7 +90,6 @@ export function upsertBuilder(builder: Builder): void {
       phase = excluded.phase,
       worktree = excluded.worktree,
       branch = excluded.branch,
-      tmux_session = excluded.tmux_session,
       type = excluded.type,
       task_text = excluded.task_text,
       protocol_name = excluded.protocol_name,
@@ -104,7 +102,6 @@ export function upsertBuilder(builder: Builder): void {
     phase: builder.phase,
     worktree: builder.worktree,
     branch: builder.branch,
-    tmuxSession: builder.tmuxSession ?? null,
     type: builder.type,
     taskText: builder.taskText ?? null,
     protocolName: builder.protocolName ?? null,
@@ -157,12 +154,11 @@ export function addUtil(util: UtilTerminal): void {
   const db = getDb();
 
   db.prepare(`
-    INSERT INTO utils (id, name, port, pid, tmux_session, terminal_id)
-    VALUES (@id, @name, 0, 0, @tmuxSession, @terminalId)
+    INSERT INTO utils (id, name, port, pid, terminal_id)
+    VALUES (@id, @name, 0, 0, @terminalId)
   `).run({
     id: util.id,
     name: util.name,
-    tmuxSession: util.tmuxSession ?? null,
     terminalId: util.terminalId ?? null,
   });
 }

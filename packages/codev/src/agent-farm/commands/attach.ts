@@ -4,7 +4,7 @@
 
 import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run, openBrowser } from '../utils/shell.js';
+import { openBrowser } from '../utils/shell.js';
 import { loadState, getBuilder, getBuilders } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
@@ -52,18 +52,6 @@ function findBuilderById(id: string): Builder | null {
 }
 
 /**
- * Verify that a tmux session exists and is accessible
- */
-async function verifyTmuxSession(sessionName: string): Promise<boolean> {
-  try {
-    await run(`tmux has-session -t "${sessionName}" 2>/dev/null`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Display a list of running builders for interactive selection
  */
 async function displayBuilderList(): Promise<void> {
@@ -88,12 +76,7 @@ async function displayBuilderList(): Promise<void> {
   logger.row(['──', '────', '────', '──────'], widths);
 
   for (const builder of builders) {
-    let running: boolean;
-    if (builder.tmuxSession) {
-      running = await verifyTmuxSession(builder.tmuxSession);
-    } else {
-      running = !!builder.terminalId;  // Assume running if Tower terminal exists
-    }
+    const running = !!builder.terminalId;
     const statusText = running ? chalk.green(builder.status) : chalk.red('stopped');
     const typeColor = getTypeColor(builder.type);
 
@@ -164,44 +147,25 @@ export async function attach(options: AttachOptions): Promise<void> {
     return; // TypeScript doesn't know fatal() never returns
   }
 
-  // Option 1: Open in browser (via Tower dashboard)
+  // Open in browser (via Tower dashboard)
+  const config = getConfig();
+  const client = new TowerClient();
+  const url = client.getProjectUrl(config.projectRoot);
+
   if (options.browser) {
-    const config = getConfig();
-    const client = new TowerClient();
-    const url = client.getProjectUrl(config.projectRoot);
     logger.info(`Opening Tower dashboard at ${url}...`);
     await openBrowser(url);
     logger.success('Opened Tower dashboard in browser');
     return;
   }
 
-  // Option 2: Attach to tmux session
-  if (!builder.tmuxSession) {
-    fatal(`Builder ${builder.id} has no tmux session recorded. Try opening in browser with --browser`);
+  // Default: open in browser (Tower dashboard is the primary terminal interface)
+  if (!builder.terminalId) {
+    fatal(`Builder ${builder.id} has no terminal session. Try opening in browser with --browser`);
   }
 
-  // Verify tmux session exists
-  const sessionExists = await verifyTmuxSession(builder.tmuxSession);
-  if (!sessionExists) {
-    logger.error(`tmux session "${builder.tmuxSession}" not found.`);
-    logger.info('The builder may have exited. Check the Tower dashboard for terminal status.');
-    fatal('');
-  }
-
-  logger.info(`Attaching to builder ${builder.id}...`);
-  logger.info(chalk.gray(`(Detach with Ctrl+B, D)`));
-  logger.blank();
-
-  // Attach to tmux session (this replaces the current terminal)
-  // We use execSync to properly hand over the terminal
-  const { execSync } = await import('node:child_process');
-  try {
-    execSync(`tmux attach-session -t "${builder.tmuxSession}"`, {
-      stdio: 'inherit',
-    });
-  } catch {
-    // User detached or session ended - this is normal
-    logger.blank();
-    logger.info('Detached from builder session.');
-  }
+  logger.info(`Builder ${builder.id} terminal is available in the Tower dashboard.`);
+  logger.info(`Opening ${url}...`);
+  await openBrowser(url);
+  logger.success('Opened Tower dashboard in browser');
 }

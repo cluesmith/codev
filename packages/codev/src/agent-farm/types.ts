@@ -11,20 +11,18 @@ export interface Builder {
   phase: string;
   worktree: string;
   branch: string;
-  tmuxSession?: string;
   type: BuilderType;
   taskText?: string;      // For task mode (display in dashboard)
   protocolName?: string;  // For protocol mode
   issueNumber?: number;   // For bugfix mode
-  terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
+  terminalId?: string;    // Terminal session ID
 }
 
 export interface UtilTerminal {
   id: string;
   name: string;
-  tmuxSession?: string;
   worktreePath?: string;  // For worktree shells - used for cleanup on tab close
-  terminalId?: string;    // node-pty terminal session ID (when backend=node-pty)
+  terminalId?: string;    // Terminal session ID
 }
 
 export interface Annotation {
@@ -39,7 +37,6 @@ export interface Annotation {
 export interface ArchitectState {
   cmd: string;
   startedAt: string;
-  tmuxSession?: string;
   terminalId?: string;
 }
 
@@ -59,12 +56,6 @@ export interface Config {
   serversDir: string;
   bundledRolesDir: string;
   terminalBackend: 'node-pty';
-}
-
-// Session tracking for tmux
-export interface TmuxSession {
-  name: string;
-  pid: number;
 }
 
 export interface StartOptions {

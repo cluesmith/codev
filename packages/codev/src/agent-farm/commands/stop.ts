@@ -5,24 +5,15 @@
  * Does NOT stop the tower - other projects may be using it.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { loadState, clearState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 
-const execFileAsync = promisify(execFile);
-
 /**
  * Default tower port
  */
 const DEFAULT_TOWER_PORT = 4100;
-
-/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection. */
-async function killTmuxSession(sessionName: string): Promise<void> {
-  await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
-}
 
 /**
  * Stop all agent farm processes
@@ -66,56 +57,33 @@ export async function stop(): Promise<void> {
 
   let stopped = 0;
 
-  // Stop architect — kill tmux session by name, then Tower terminal
-  if (state.architect?.tmuxSession) {
+  // Stop architect terminal
+  if (towerRunning && state.architect?.terminalId) {
     logger.info('Stopping architect...');
     try {
-      await killTmuxSession(state.architect.tmuxSession);
-      stopped++;
-    } catch {
-      // Session may already be gone
-    }
-  }
-  if (towerRunning && state.architect?.terminalId) {
-    try {
       await client.killTerminal(state.architect.terminalId);
+      stopped++;
     } catch { /* best-effort */ }
   }
 
-  // Stop all builders — kill tmux sessions, then Tower terminals
+  // Stop all builders
   for (const builder of state.builders) {
-    if (builder.tmuxSession) {
+    if (towerRunning && builder.terminalId) {
       logger.info(`Stopping builder ${builder.id}...`);
       try {
-        await killTmuxSession(builder.tmuxSession);
-        stopped++;
-      } catch {
-        // Session may already be gone
-      }
-    }
-    if (towerRunning && builder.terminalId) {
-      try {
         await client.killTerminal(builder.terminalId);
-        if (!builder.tmuxSession) stopped++;
+        stopped++;
       } catch { /* best-effort */ }
     }
   }
 
-  // Stop all utils — kill tmux sessions, then Tower terminals
+  // Stop all utils
   for (const util of state.utils) {
-    if (util.tmuxSession) {
+    if (towerRunning && util.terminalId) {
       logger.info(`Stopping util ${util.id}...`);
       try {
-        await killTmuxSession(util.tmuxSession);
-        stopped++;
-      } catch {
-        // Session may already be gone
-      }
-    }
-    if (towerRunning && util.terminalId) {
-      try {
         await client.killTerminal(util.terminalId);
-        if (!util.tmuxSession) stopped++;
+        stopped++;
       } catch { /* best-effort */ }
     }
   }

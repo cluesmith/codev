@@ -128,18 +128,6 @@ const CORE_DEPENDENCIES: Dependency[] = [
     },
   },
   {
-    name: 'tmux',
-    command: 'tmux',
-    versionArg: '-V',
-    versionExtract: (output) => output.replace(/^tmux /, '').replace(/[a-z]$/, ''),
-    minVersion: '3.0',
-    required: true,
-    installHint: {
-      macos: 'brew install tmux',
-      linux: 'apt install tmux',
-    },
-  },
-  {
     name: 'git',
     command: 'git',
     versionArg: '--version',

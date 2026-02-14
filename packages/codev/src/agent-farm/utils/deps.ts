@@ -41,22 +41,6 @@ export const CORE_DEPENDENCIES: Dependency[] = [
     required: true,
   },
   {
-    name: 'tmux',
-    command: 'tmux',
-    minVersion: '3.0',
-    versionCmd: 'tmux -V',
-    versionParser: (output) => {
-      // tmux 3.3a -> 3.3
-      const match = output.match(/tmux\s+(\d+\.\d+)/);
-      return match ? match[1] : null;
-    },
-    installHint: {
-      macos: 'brew install tmux',
-      linux: 'apt install tmux',
-    },
-    required: true,
-  },
-  {
     name: 'git',
     command: 'git',
     minVersion: '2.5.0',

@@ -15,16 +15,16 @@ import type { GateStatus } from './gate-status.js';
 // Strip ANSI escape sequences
 const ANSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
 
-// Reject tmux control characters that could be injected
-const TMUX_CONTROL_RE = /[;\n\r]/;
+// Reject control characters that could be injected
+const CONTROL_CHAR_RE = /[;\n\r]/;
 
 /**
  * Sanitize a string for use in af send messages.
- * Returns null if the value contains unsafe tmux control characters.
+ * Returns null if the value contains unsafe control characters.
  */
 function sanitize(value: string): string | null {
   const stripped = value.replace(ANSI_RE, '').trim();
-  if (!stripped || TMUX_CONTROL_RE.test(stripped)) return null;
+  if (!stripped || CONTROL_CHAR_RE.test(stripped)) return null;
   return stripped;
 }
 

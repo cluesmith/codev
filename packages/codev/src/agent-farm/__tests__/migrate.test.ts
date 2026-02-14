@@ -59,7 +59,7 @@ describe('Migration', () => {
       expect(architect.pid).toBe(1234);
       expect(architect.port).toBe(4201);
       expect(architect.cmd).toBe('claude --dangerously-skip-permissions');
-      expect(architect.tmux_session).toBe('architect-session');
+      // tmux_session column removed in Spec 0104 Phase 4 — no longer migrated
     });
 
     it('should migrate builders', () => {

@@ -37,14 +37,13 @@ export function migrateLocalFromJson(db: Database.Database, jsonPath: string): v
     // Migrate architect
     if (state.architect) {
       db.prepare(`
-        INSERT INTO architect (id, pid, port, cmd, started_at, tmux_session)
-        VALUES (1, @pid, @port, @cmd, @startedAt, @tmuxSession)
+        INSERT INTO architect (id, pid, port, cmd, started_at)
+        VALUES (1, @pid, @port, @cmd, @startedAt)
       `).run({
         pid: state.architect.pid,
         port: state.architect.port,
         cmd: state.architect.cmd,
         startedAt: state.architect.startedAt,
-        tmuxSession: state.architect.tmuxSession ?? null,
       });
     }
 
@@ -53,11 +52,11 @@ export function migrateLocalFromJson(db: Database.Database, jsonPath: string): v
       db.prepare(`
         INSERT INTO builders (
           id, name, port, pid, status, phase, worktree, branch,
-          tmux_session, type, task_text, protocol_name
+          type, task_text, protocol_name
         )
         VALUES (
           @id, @name, @port, @pid, @status, @phase, @worktree, @branch,
-          @tmuxSession, @type, @taskText, @protocolName
+          @type, @taskText, @protocolName
         )
       `).run({
         id: builder.id,
@@ -68,7 +67,6 @@ export function migrateLocalFromJson(db: Database.Database, jsonPath: string): v
         phase: builder.phase,
         worktree: builder.worktree,
         branch: builder.branch,
-        tmuxSession: builder.tmuxSession ?? null,
         type: builder.type,
         taskText: builder.taskText ?? null,
         protocolName: builder.protocolName ?? null,
@@ -78,14 +76,13 @@ export function migrateLocalFromJson(db: Database.Database, jsonPath: string): v
     // Migrate utils
     for (const util of state.utils || []) {
       db.prepare(`
-        INSERT INTO utils (id, name, port, pid, tmux_session)
-        VALUES (@id, @name, @port, @pid, @tmuxSession)
+        INSERT INTO utils (id, name, port, pid)
+        VALUES (@id, @name, @port, @pid)
       `).run({
         id: util.id,
         name: util.name,
         port: util.port,
         pid: util.pid,
-        tmuxSession: util.tmuxSession ?? null,
       });
     }
 

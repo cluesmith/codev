@@ -1,16 +1,14 @@
 /**
- * Send command - send instructions to running builders via tmux buffer paste
+ * Send command - send instructions to running builders via Tower terminal API
  */
 
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, basename, resolve, dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
-import { run } from '../utils/shell.js';
 import { loadState, getArchitect } from '../state.js';
+import { TowerClient } from '../lib/tower-client.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
@@ -55,7 +53,7 @@ ${content}
 }
 
 /**
- * Send a message to a specific builder
+ * Send a message to a specific builder via Tower API
  */
 async function sendToBuilder(
   builderId: string,
@@ -69,23 +67,19 @@ async function sendToBuilder(
     throw new Error(`Builder ${builderId} not found. Use 'af status' to see active builders.`);
   }
 
-  if (!builder.tmuxSession) {
-    throw new Error(`Builder ${builderId} has no tmux session recorded.`);
+  if (!builder.terminalId) {
+    throw new Error(`Builder ${builderId} has no terminal session.`);
   }
 
-  // Verify session exists
-  try {
-    await run(`tmux has-session -t "${builder.tmuxSession}" 2>/dev/null`);
-  } catch {
-    throw new Error(
-      `tmux session "${builder.tmuxSession}" not found (builder may have exited). Use 'af status' to check.`
-    );
+  const client = new TowerClient();
+  const towerRunning = await client.isRunning();
+  if (!towerRunning) {
+    throw new Error('Tower is not running. Start it with: af tower start');
   }
 
   // Optional: Send Ctrl+C first to interrupt any running process
   if (options.interrupt) {
-    await run(`tmux send-keys -t "${builder.tmuxSession}" C-c`);
-    // Brief pause for prompt to appear
+    await client.writeTerminal(builder.terminalId, '\x03'); // Ctrl+C
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
@@ -107,35 +101,15 @@ async function sendToBuilder(
   // Format the message
   const formattedMessage = formatArchitectMessage(message, fileContent, options.raw);
 
-  // Write message to temp file (avoids all shell escaping issues)
-  const tempFile = join(tmpdir(), `architect-msg-${randomUUID()}.txt`);
-  writeFileSync(tempFile, formattedMessage);
+  // Send via Tower API
+  await client.writeTerminal(builder.terminalId, formattedMessage);
 
-  try {
-    // Load into tmux buffer and paste
-    const bufferName = `architect-${builderId}`;
-    await run(`tmux load-buffer -b "${bufferName}" "${tempFile}"`);
-    await run(`tmux paste-buffer -b "${bufferName}" -t "${builder.tmuxSession}"`);
-
-    // Clean up tmux buffer
-    await run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {
-      // Ignore delete-buffer errors (buffer may not exist)
-    });
-
-    // Send Enter to submit (unless --no-enter)
-    if (!options.noEnter) {
-      await run(`tmux send-keys -t "${builder.tmuxSession}" Enter`);
-    }
-
-    logger.debug(`Sent to ${builderId}: ${message.substring(0, 50)}...`);
-  } finally {
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch {
-      // Ignore cleanup errors
-    }
+  // Send Enter to submit (unless --no-enter)
+  if (!options.noEnter) {
+    await client.writeTerminal(builder.terminalId, '\r');
   }
+
+  logger.debug(`Sent to ${builderId}: ${message.substring(0, 50)}...`);
 }
 
 /**
@@ -158,33 +132,13 @@ function detectProjectRoot(): string | null {
 }
 
 /**
- * Find the architect tmux session name.
- * Checks state.db first (legacy), then falls back to Tower naming convention.
+ * Find the architect terminal ID from state or Tower.
  */
-async function findArchitectTmuxSession(): Promise<string> {
-  // Try legacy state.db first
+function findArchitectTerminalId(): string {
   const architect = getArchitect();
-  if (architect?.tmuxSession) {
-    try {
-      await run(`tmux has-session -t "${architect.tmuxSession}" 2>/dev/null`);
-      return architect.tmuxSession;
-    } catch {
-      // Session recorded but no longer exists — fall through
-    }
+  if (architect?.terminalId) {
+    return architect.terminalId;
   }
-
-  // Fallback: Tower creates architect sessions as "architect-<project-basename>"
-  const projectRoot = detectProjectRoot();
-  if (projectRoot) {
-    const candidateSession = `architect-${basename(projectRoot)}`;
-    try {
-      await run(`tmux has-session -t "${candidateSession}" 2>/dev/null`);
-      return candidateSession;
-    } catch {
-      // Session doesn't exist
-    }
-  }
-
   throw new Error('Architect not running. Use "af status" to check.');
 }
 
@@ -196,11 +150,17 @@ async function sendToArchitect(
   message: string,
   options: SendOptions
 ): Promise<void> {
-  const tmuxSession = await findArchitectTmuxSession();
+  const terminalId = findArchitectTerminalId();
+
+  const client = new TowerClient();
+  const towerRunning = await client.isRunning();
+  if (!towerRunning) {
+    throw new Error('Tower is not running. Start it with: af tower start');
+  }
 
   // Optional: Send Ctrl+C first to interrupt any running process
   if (options.interrupt) {
-    await run(`tmux send-keys -t "${tmuxSession}" C-c`);
+    await client.writeTerminal(terminalId, '\x03'); // Ctrl+C
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
@@ -222,32 +182,15 @@ async function sendToArchitect(
   // Format the message (from builder)
   const formattedMessage = formatBuilderMessage(fromBuilderId, message, fileContent, options.raw);
 
-  // Write message to temp file
-  const tempFile = join(tmpdir(), `builder-msg-${randomUUID()}.txt`);
-  writeFileSync(tempFile, formattedMessage);
+  // Send via Tower API
+  await client.writeTerminal(terminalId, formattedMessage);
 
-  try {
-    // Load into tmux buffer and paste
-    const bufferName = `builder-${fromBuilderId}`;
-    await run(`tmux load-buffer -b "${bufferName}" "${tempFile}"`);
-    await run(`tmux paste-buffer -b "${bufferName}" -t "${tmuxSession}"`);
-
-    // Clean up tmux buffer
-    await run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
-
-    // Send Enter to submit (unless --no-enter)
-    if (!options.noEnter) {
-      await run(`tmux send-keys -t "${tmuxSession}" Enter`);
-    }
-
-    logger.debug(`Sent to architect from ${fromBuilderId}: ${message.substring(0, 50)}...`);
-  } finally {
-    try {
-      unlinkSync(tempFile);
-    } catch {
-      // Ignore cleanup errors
-    }
+  // Send Enter to submit (unless --no-enter)
+  if (!options.noEnter) {
+    await client.writeTerminal(terminalId, '\r');
   }
+
+  logger.debug(`Sent to architect from ${fromBuilderId}: ${message.substring(0, 50)}...`);
 }
 
 /**

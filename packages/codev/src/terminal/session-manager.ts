@@ -40,6 +40,16 @@ export interface CreateSessionOptions {
   restartResetAfter?: number;
 }
 
+export interface ReconnectRestartOptions {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  restartDelay?: number;
+  maxRestarts?: number;
+  restartResetAfter?: number;
+}
+
 interface ManagedSession {
   client: IShepherdClient;
   socketPath: string;
@@ -168,6 +178,7 @@ export class SessionManager extends EventEmitter {
     socketPath: string,
     pid: number,
     startTime: number,
+    restartOptions?: ReconnectRestartOptions,
   ): Promise<IShepherdClient | null> {
     // Check if process is alive
     if (!this.isProcessAlive(pid)) {
@@ -199,6 +210,7 @@ export class SessionManager extends EventEmitter {
       return null;
     }
 
+    const hasRestart = !!restartOptions;
     const session: ManagedSession = {
       client,
       socketPath,
@@ -206,12 +218,16 @@ export class SessionManager extends EventEmitter {
       startTime,
       options: {
         sessionId,
-        command: '',
-        args: [],
-        cwd: '',
-        env: {},
+        command: restartOptions?.command ?? '',
+        args: restartOptions?.args ?? [],
+        cwd: restartOptions?.cwd ?? '',
+        env: restartOptions?.env ?? {},
         cols: 80,
         rows: 24,
+        restartOnExit: hasRestart,
+        restartDelay: restartOptions?.restartDelay,
+        maxRestarts: restartOptions?.maxRestarts,
+        restartResetAfter: restartOptions?.restartResetAfter,
       },
       restartCount: 0,
       restartResetTimer: null,
@@ -219,11 +235,16 @@ export class SessionManager extends EventEmitter {
 
     this.sessions.set(sessionId, session);
 
+    // Set up auto-restart if configured (e.g. architect sessions after Tower restart)
+    if (hasRestart) {
+      this.setupAutoRestart(session, sessionId);
+    }
+
     client.on('exit', (exitInfo) => {
       this.emit('session-exit', sessionId, exitInfo);
-      // Reconnected sessions don't have auto-restart (no original options),
-      // so always clean up on exit.
-      this.removeDeadSession(sessionId);
+      if (!hasRestart) {
+        this.removeDeadSession(sessionId);
+      }
     });
 
     client.on('error', (err) => {
@@ -237,6 +258,11 @@ export class SessionManager extends EventEmitter {
         this.emit('session-error', sessionId, new Error('Shepherd disconnected unexpectedly'));
       }
     });
+
+    // Start restart reset timer if auto-restart is enabled
+    if (hasRestart) {
+      this.startRestartResetTimer(session);
+    }
 
     return client;
   }

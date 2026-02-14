@@ -109,7 +109,7 @@ export async function status(): Promise<void> {
     logger.row(['──', '────', '────', '──────', '─────'], widths);
 
     for (const builder of state.builders) {
-      const running = !!(builder.tmuxSession || builder.terminalId);
+      const running = !!builder.terminalId;
       const statusColor = getStatusColor(builder.status, running);
       const typeColor = getTypeColor(builder.type || 'spec');
 

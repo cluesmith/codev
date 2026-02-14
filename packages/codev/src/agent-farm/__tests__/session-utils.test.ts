@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getBuilderSessionName, parseTmuxSessionName } from '../utils/session.js';
+import { getBuilderSessionName, parseSessionName } from '../utils/session.js';
 import type { Config } from '../types.js';
 
 function makeConfig(projectRoot: string): Config {
@@ -32,16 +32,16 @@ describe('getBuilderSessionName', () => {
   });
 });
 
-describe('parseTmuxSessionName', () => {
+describe('parseSessionName', () => {
   describe('architect sessions', () => {
     it('should parse architect-{basename}', () => {
-      expect(parseTmuxSessionName('architect-codev-public')).toEqual({
+      expect(parseSessionName('architect-codev-public')).toEqual({
         type: 'architect', projectBasename: 'codev-public', roleId: null,
       });
     });
 
     it('should handle project names with underscores (sanitized dots)', () => {
-      expect(parseTmuxSessionName('architect-codevos_ai')).toEqual({
+      expect(parseSessionName('architect-codevos_ai')).toEqual({
         type: 'architect', projectBasename: 'codevos_ai', roleId: null,
       });
     });
@@ -49,19 +49,19 @@ describe('parseTmuxSessionName', () => {
 
   describe('SPIR builder sessions (digit IDs)', () => {
     it('should parse 4-digit spec IDs', () => {
-      expect(parseTmuxSessionName('builder-codev-public-0001')).toEqual({
+      expect(parseSessionName('builder-codev-public-0001')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: '0001',
       });
     });
 
     it('should parse short spec IDs (< 4 digits)', () => {
-      expect(parseTmuxSessionName('builder-my-project-42')).toEqual({
+      expect(parseSessionName('builder-my-project-42')).toEqual({
         type: 'builder', projectBasename: 'my-project', roleId: '42',
       });
     });
 
     it('should parse single-digit spec IDs', () => {
-      expect(parseTmuxSessionName('builder-repo-1')).toEqual({
+      expect(parseSessionName('builder-repo-1')).toEqual({
         type: 'builder', projectBasename: 'repo', roleId: '1',
       });
     });
@@ -69,25 +69,25 @@ describe('parseTmuxSessionName', () => {
 
   describe('bugfix builder sessions', () => {
     it('should parse bugfix-{N} with short issue numbers', () => {
-      expect(parseTmuxSessionName('builder-codev-public-bugfix-42')).toEqual({
+      expect(parseSessionName('builder-codev-public-bugfix-42')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'bugfix-42',
       });
     });
 
     it('should parse bugfix-{N} with 3-digit issue numbers', () => {
-      expect(parseTmuxSessionName('builder-codev-public-bugfix-242')).toEqual({
+      expect(parseSessionName('builder-codev-public-bugfix-242')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'bugfix-242',
       });
     });
 
     it('should parse bugfix-{N} with long issue numbers', () => {
-      expect(parseTmuxSessionName('builder-my-app-bugfix-12345')).toEqual({
+      expect(parseSessionName('builder-my-app-bugfix-12345')).toEqual({
         type: 'builder', projectBasename: 'my-app', roleId: 'bugfix-12345',
       });
     });
 
     it('should handle project names with underscores', () => {
-      expect(parseTmuxSessionName('builder-codevos_ai-bugfix-99')).toEqual({
+      expect(parseSessionName('builder-codevos_ai-bugfix-99')).toEqual({
         type: 'builder', projectBasename: 'codevos_ai', roleId: 'bugfix-99',
       });
     });
@@ -95,13 +95,13 @@ describe('parseTmuxSessionName', () => {
 
   describe('task builder sessions', () => {
     it('should parse task-{shortId}', () => {
-      expect(parseTmuxSessionName('builder-codev-public-task-AbCd')).toEqual({
+      expect(parseSessionName('builder-codev-public-task-AbCd')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'task-AbCd',
       });
     });
 
     it('should parse task IDs with underscores and hyphens (URL-safe base64)', () => {
-      expect(parseTmuxSessionName('builder-codev-public-task-A_-d')).toEqual({
+      expect(parseSessionName('builder-codev-public-task-A_-d')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'task-A_-d',
       });
     });
@@ -109,13 +109,13 @@ describe('parseTmuxSessionName', () => {
 
   describe('worktree builder sessions', () => {
     it('should parse worktree-{shortId}', () => {
-      expect(parseTmuxSessionName('builder-codev-public-worktree-QwEr')).toEqual({
+      expect(parseSessionName('builder-codev-public-worktree-QwEr')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'worktree-QwEr',
       });
     });
 
     it('should parse worktree IDs with underscores and hyphens (URL-safe base64)', () => {
-      expect(parseTmuxSessionName('builder-my-app-worktree-x_Y3')).toEqual({
+      expect(parseSessionName('builder-my-app-worktree-x_Y3')).toEqual({
         type: 'builder', projectBasename: 'my-app', roleId: 'worktree-x_Y3',
       });
     });
@@ -123,13 +123,13 @@ describe('parseTmuxSessionName', () => {
 
   describe('shell sessions', () => {
     it('should parse shell-{basename}-shell-{N}', () => {
-      expect(parseTmuxSessionName('shell-codev-public-shell-1')).toEqual({
+      expect(parseSessionName('shell-codev-public-shell-1')).toEqual({
         type: 'shell', projectBasename: 'codev-public', roleId: 'shell-1',
       });
     });
 
     it('should parse multi-digit shell IDs', () => {
-      expect(parseTmuxSessionName('shell-my-project-shell-42')).toEqual({
+      expect(parseSessionName('shell-my-project-shell-42')).toEqual({
         type: 'shell', projectBasename: 'my-project', roleId: 'shell-42',
       });
     });
@@ -137,15 +137,15 @@ describe('parseTmuxSessionName', () => {
 
   describe('unrecognized names', () => {
     it('should return null for non-codev sessions', () => {
-      expect(parseTmuxSessionName('my-random-session')).toBeNull();
+      expect(parseSessionName('my-random-session')).toBeNull();
     });
 
     it('should return null for bare prefix without content', () => {
-      expect(parseTmuxSessionName('builder')).toBeNull();
+      expect(parseSessionName('builder')).toBeNull();
     });
 
     it('should return null for empty string', () => {
-      expect(parseTmuxSessionName('')).toBeNull();
+      expect(parseSessionName('')).toBeNull();
     });
   });
 });

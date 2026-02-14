@@ -16,7 +16,6 @@ export interface DbArchitect {
   port: number;
   cmd: string;
   started_at: string;
-  tmux_session: string | null;
   terminal_id: string | null;
 }
 
@@ -32,7 +31,6 @@ export interface DbBuilder {
   phase: string;
   worktree: string;
   branch: string;
-  tmux_session: string | null;
   type: string;
   task_text: string | null;
   protocol_name: string | null;
@@ -50,7 +48,6 @@ export interface DbUtil {
   name: string;
   port: number;
   pid: number;
-  tmux_session: string | null;
   terminal_id: string | null;
   started_at: string;
 }
@@ -75,7 +72,6 @@ export function dbArchitectToArchitectState(row: DbArchitect): ArchitectState {
   return {
     cmd: row.cmd,
     startedAt: row.started_at,
-    tmuxSession: row.tmux_session ?? undefined,
     terminalId: row.terminal_id ?? undefined,
   };
 }
@@ -91,7 +87,6 @@ export function dbBuilderToBuilder(row: DbBuilder): Builder {
     phase: row.phase,
     worktree: row.worktree,
     branch: row.branch,
-    tmuxSession: row.tmux_session ?? undefined,
     type: row.type as BuilderType,
     taskText: row.task_text ?? undefined,
     protocolName: row.protocol_name ?? undefined,
@@ -107,7 +102,6 @@ export function dbUtilToUtilTerminal(row: DbUtil): UtilTerminal {
   return {
     id: row.id,
     name: row.name,
-    tmuxSession: row.tmux_session ?? undefined,
     terminalId: row.terminal_id ?? undefined,
   };
 }

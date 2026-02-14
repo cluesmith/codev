@@ -74,7 +74,6 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
       phase: 'init',
       worktree: '/tmp/1',
       branch: 'builder/task-AAAA',
-      tmuxSession: 'builder-proj-task-AAAA',
       type: 'task',
       terminalId: 'term-001',
     });
@@ -97,7 +96,6 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
       phase: 'init',
       worktree: '/tmp/1',
       branch: 'builder/task-AAAA',
-      tmuxSession: 'builder-proj-task-AAAA',
       type: 'task',
       terminalId: 'term-001',
     });
@@ -111,7 +109,7 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
   });
 
-  it('should attach via tmux for PTY-backed builders', async () => {
+  it('should fatal when builder has no terminal session', async () => {
     mockBuilders.push({
       id: 'task-BBBB',
       name: 'Task: Test',
@@ -119,47 +117,11 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
       phase: 'init',
       worktree: '/tmp/1',
       branch: 'builder/task-BBBB',
-      tmuxSession: 'builder-proj-task-BBBB',
       type: 'task',
     });
 
-    mockRun.mockResolvedValue({ stdout: '', stderr: '' });
-
     const { attach } = await import('../commands/attach.js');
-    const { logger } = await import('../utils/logger.js');
 
-    // This will try to execSync tmux attach, which will throw in test env
-    try {
-      await attach({ project: 'task-BBBB' });
-    } catch {
-      // execSync will fail in test — that's expected
-    }
-
-    // Should have logged the attach message
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Attaching to builder task-BBBB'));
-  });
-
-  it('should show Tower dashboard message when tmux session not found', async () => {
-    mockBuilders.push({
-      id: 'task-CCCC',
-      name: 'Task: Test',
-      status: 'implementing',
-      phase: 'init',
-      worktree: '/tmp/1',
-      branch: 'builder/task-CCCC',
-      tmuxSession: 'builder-proj-task-CCCC',
-      type: 'task',
-    });
-
-    // tmux has-session fails
-    mockRun.mockRejectedValue(new Error('session not found'));
-
-    const { attach } = await import('../commands/attach.js');
-    const { logger } = await import('../utils/logger.js');
-
-    await expect(attach({ project: 'task-CCCC' })).rejects.toThrow();
-
-    // Should show Tower dashboard message
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Tower dashboard'));
+    await expect(attach({ project: 'task-BBBB' })).rejects.toThrow('no terminal session');
   });
 });

@@ -2,7 +2,7 @@
  * Tests for spawn command - validates spawn options and mode detection
  *
  * These are unit tests for the spawn validation logic. Integration tests
- * that spawn actual builders require git and tmux to be installed.
+ * that spawn actual builders require git and Tower to be running.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -398,7 +398,7 @@ describe('Spawn Command', () => {
     });
   });
 
-  describe('tmux session naming', () => {
+  describe('session naming', () => {
     it('builder sessions use builder-{id}', () => {
       const builderId = '0009';
       const sessionName = `builder-${builderId}`;

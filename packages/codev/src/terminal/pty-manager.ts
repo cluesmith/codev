@@ -67,8 +67,7 @@ export class TerminalManager {
       HOME: process.env.HOME ?? '/tmp',
       SHELL: shell,
       TERM: 'xterm-256color',
-      // UTF-8 locale is required for tmux to send Unicode characters (block elements,
-      // powerline symbols, etc.) to the client. Without this, tmux falls back to ASCII.
+      // UTF-8 locale for proper Unicode character rendering
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? '',
     };

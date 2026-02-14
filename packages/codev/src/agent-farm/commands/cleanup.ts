@@ -11,7 +11,6 @@ import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { loadState, removeBuilder } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { getBuilderSessionName } from '../utils/session.js';
 
 /**
  * Remove porch state for a project from codev/projects/
@@ -159,16 +158,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // Kill tmux session if exists (use stored session name for correct shell/builder naming)
-  const sessionName = builder.tmuxSession || getBuilderSessionName(config, builder.id);
-  try {
-    await run(`tmux kill-session -t "${sessionName}" 2>/dev/null`);
-    logger.info('Killed tmux session');
-  } catch {
-    // Session may not exist
-  }
-
-  // Kill Tower terminal if exists (node-pty terminals without tmux)
+  // Kill Tower terminal if exists
   if (builder.terminalId) {
     try {
       const client = new TowerClient();
