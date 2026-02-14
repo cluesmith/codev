@@ -123,6 +123,8 @@ interface TowerContext {
 }
 ```
 
+**Lifecycle**: `tower-server.ts` (orchestrator) owns initialization and disposal. It creates each dependency in startup order, passes them through TowerContext, and tears them down in reverse order during `gracefulShutdown`. Individual modules do not manage their own lifecycle — they receive ready-to-use dependencies.
+
 ## Approach for spawn.ts
 
 `commands/spawn.ts` (1,405 lines) handles builder spawning with worktree setup, protocol detection, tmux session creation, and CLAUDE.md generation. Extract:
@@ -133,24 +135,40 @@ interface TowerContext {
 
 ## Constraints
 
-1. **No API changes**: All HTTP routes must return identical responses
+1. **No API changes**: All HTTP routes must return identical responses — same status codes, headers, and body shapes for both success and error paths
 2. **No import changes for consumers**: Other files that import from tower-server.ts must continue to work (verified: no external imports exist — only comment references in test files)
-3. **Tests must pass**: All existing unit and E2E tests must pass without modification
+3. **Tests must pass**: All existing unit and E2E tests must pass. Test harness updates (import paths) are acceptable if behavioral assertions remain unchanged.
 4. **Incremental extraction**: Each module extraction should be a separate commit — never move everything at once
 5. **Builder 0104 compatibility**: ~~The shepherd integration (currently on a branch) modifies tower-server.ts heavily.~~ **RESOLVED**: 0104 was merged to main (commit 85cb55d). Decomposition proceeds on the post-0104 codebase.
+6. **Security parity**: CORS headers, security headers, rate-limiting protections, path normalization (directory traversal defense), and `isRequestAllowed` checks must be preserved exactly as-is in their new locations
+7. **Error parity**: Error codes, error messages, and error response shapes must remain identical after extraction — "zero behavior change" includes error paths
+8. **Logging parity**: Log format, levels, and message structure must remain consistent across extracted modules
 
 ## Acceptance Criteria
 
+### Size targets
 - [ ] `tower-server.ts` is ≤ 400 lines
 - [ ] `spawn.ts` is ≤ 600 lines
 - [ ] No file in `packages/codev/src/` exceeds 900 lines (excluding test files)
-- [ ] All existing tests pass without modification
+- [ ] If a module exceeds its target line count while preserving cohesion, document the reason — cohesion trumps arbitrary limits
+
+### Build and test
 - [ ] `npm run build` succeeds
+- [ ] All existing tests pass (test harness updates for changed imports are acceptable)
+
+### Runtime behavior parity
 - [ ] Tower starts and serves dashboard correctly
-- [ ] Terminal WebSocket connections work
+- [ ] Terminal WebSocket connections work (open/close/error paths)
 - [ ] Cloud tunnel connects
 - [ ] Multi-project scenarios work (5 projects active simultaneously)
+- [ ] All error responses preserve existing status codes and error message shapes
+- [ ] CORS headers, security headers, and rate limiting behavior unchanged
+- [ ] Graceful shutdown properly tears down all subsystems
+
+### Test coverage
 - [ ] Each extracted module has at least one focused test file
+- [ ] `tower-routes` tests verify route dispatch returns correct status/body for key endpoints
+- [ ] `tower-terminals` tests cover session CRUD and reconciliation logic
 
 ## Risks
 
