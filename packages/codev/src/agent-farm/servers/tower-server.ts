@@ -1994,12 +1994,15 @@ const server = http.createServer(async (req, res) => {
         if (requestPersistence && shepherdManager && command && cwd) {
           try {
             const sessionId = crypto.randomUUID();
+            // Strip CLAUDECODE so spawned Claude processes don't detect nesting
+            const sessionEnv = { ...(env || process.env) } as Record<string, string>;
+            delete sessionEnv['CLAUDECODE'];
             const client = await shepherdManager.createSession({
               sessionId,
               command,
               args: args || [],
               cwd,
-              env: env || process.env as Record<string, string>,
+              env: sessionEnv,
               cols: cols || 200,
               rows: 50,
               restartOnExit: false,
@@ -2605,12 +2608,15 @@ const server = http.createServer(async (req, res) => {
             if (shepherdManager) {
               try {
                 const sessionId = crypto.randomUUID();
+                // Strip CLAUDECODE so spawned Claude processes don't detect nesting
+                const shellEnv = { ...process.env } as Record<string, string>;
+                delete shellEnv['CLAUDECODE'];
                 const client = await shepherdManager.createSession({
                   sessionId,
                   command: shellCmd,
                   args: shellArgs,
                   cwd: projectPath,
-                  env: process.env as Record<string, string>,
+                  env: shellEnv,
                   cols: 200,
                   rows: 50,
                   restartOnExit: false,
