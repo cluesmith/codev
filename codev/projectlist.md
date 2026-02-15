@@ -1322,11 +1322,41 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       committed_at: "2026-02-13T00:00:00-08:00"
       integrated_at: "2026-02-13T00:00:00-08:00"
     notes: "PR #231 merged. Agent SDK replaces CLI subprocess for Claude consultation. Hard dep on @anthropic-ai/claude-agent-sdk. Doctor updated. 7 tests."
+  - id: "0108"
+    title: "Porch Gate Notifications via af send"
+    summary: "Replace gate watcher polling with direct af send from porch when gates are hit"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0108-porch-gate-notifications.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [porch, notifications, af-send]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Gate watcher only scans main worktree, missing all builder gates. Push-based af send from porch is deterministic."
+  - id: "0109"
+    title: "Tunnel Keepalive (Heartbeat & Dead Connection Detection)"
+    summary: "Add WebSocket ping/pong heartbeat to tunnel client to detect and recover from silent connection drops"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0109-tunnel-keepalive.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [tunnel, cloud, reliability]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Silent WebSocket death after sleep/wake or network transition leaves tunnel in stale 'connected' state. 30s ping, 10s pong timeout."
 ```
 
 ## Next Available Number
 
-**0108** - Reserve this number for your next project
+**0110** - Reserve this number for your next project
 
 ---
 
