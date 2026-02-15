@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { TowerClient, encodeProjectPath } from '../lib/tower-client.js';
+import { TowerClient, encodeWorkspacePath } from '../lib/tower-client.js';
 
 interface OpenOptions {
   file: string;
@@ -19,11 +19,11 @@ interface OpenOptions {
  * Try to create a file tab via the Tower API
  * Returns the file tab ID if successful, null if Tower not available
  */
-async function tryTowerApi(client: TowerClient, projectPath: string, filePath: string): Promise<string | null> {
-  const encodedPath = encodeProjectPath(projectPath);
+async function tryTowerApi(client: TowerClient, workspacePath: string, filePath: string): Promise<string | null> {
+  const encodedPath = encodeWorkspacePath(workspacePath);
 
   const result = await client.request<{ id: string; existing?: boolean }>(
-    `/project/${encodedPath}/api/tabs/file`,
+    `/workspace/${encodedPath}/api/tabs/file`,
     {
       method: 'POST',
       body: JSON.stringify({ path: filePath }),
@@ -69,7 +69,7 @@ export async function open(options: OpenOptions): Promise<void> {
 
   // Try to use Tower API
   const client = new TowerClient();
-  const tabId = await tryTowerApi(client, config.projectRoot, filePath);
+  const tabId = await tryTowerApi(client, config.workspaceRoot, filePath);
 
   if (tabId) {
     // Tab created server-side — dashboard picks it up via state polling.

@@ -12,8 +12,8 @@ import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
 
 export interface TerminalManagerConfig {
-  projectRoot: string;
-  logDir?: string; // Default: <projectRoot>/.agent-farm/logs
+  workspaceRoot: string;
+  logDir?: string; // Default: <workspaceRoot>/.agent-farm/logs
   maxSessions?: number; // Default: 50
   ringBufferLines?: number;
   diskLogEnabled?: boolean;
@@ -44,8 +44,8 @@ export class TerminalManager {
 
   constructor(config: TerminalManagerConfig) {
     this.config = {
-      projectRoot: config.projectRoot,
-      logDir: config.logDir ?? path.join(config.projectRoot, '.agent-farm', 'logs'),
+      workspaceRoot: config.workspaceRoot,
+      logDir: config.logDir ?? path.join(config.workspaceRoot, '.agent-farm', 'logs'),
       maxSessions: config.maxSessions ?? 50,
       ringBufferLines: config.ringBufferLines ?? 1000,
       diskLogEnabled: config.diskLogEnabled ?? true,
@@ -78,7 +78,7 @@ export class TerminalManager {
       args: req.args ?? [],
       cols: req.cols ?? 80,
       rows: req.rows ?? 24,
-      cwd: req.cwd ?? this.config.projectRoot,
+      cwd: req.cwd ?? this.config.workspaceRoot,
       env: { ...baseEnv, ...req.env },
       label: req.label ?? `terminal-${id.slice(0, 8)}`,
       logDir: this.config.logDir,

@@ -20,16 +20,16 @@ import type { PlanPhase } from './types.js';
  * Find the plan file for a project
  * Searches both legacy (codev/plans/NNNN-name.md) and new (codev/projects/NNNN-name/plan.md) locations
  */
-export function findPlanFile(projectRoot: string, projectId: string, projectName?: string): string | null {
+export function findPlanFile(workspaceRoot: string, projectId: string, projectName?: string): string | null {
   const searchPaths: string[] = [];
 
   // New structure: codev/projects/<id>-<name>/plan.md
   if (projectName) {
-    searchPaths.push(path.join(projectRoot, 'codev/projects', `${projectId}-${projectName}`, 'plan.md'));
+    searchPaths.push(path.join(workspaceRoot, 'codev/projects', `${projectId}-${projectName}`, 'plan.md'));
   }
 
   // Legacy structure: codev/plans/<id>-*.md
-  const plansDir = path.join(projectRoot, 'codev/plans');
+  const plansDir = path.join(workspaceRoot, 'codev/plans');
   if (fs.existsSync(plansDir)) {
     const files = fs.readdirSync(plansDir);
     const match = files.find(f => f.startsWith(`${projectId}-`) && f.endsWith('.md'));

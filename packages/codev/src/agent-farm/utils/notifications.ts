@@ -9,7 +9,7 @@ export type NotificationType = 'gate' | 'blocked' | 'error' | 'info';
 
 interface NotificationPayload {
   type: NotificationType;
-  projectPath: string;
+  workspacePath: string;
   projectId: string;
   details: string;
 }
@@ -31,14 +31,14 @@ function isDuplicate(key: string): boolean {
 }
 
 /**
- * Get canonical project path from worktree path.
- * Builder worktrees are at: <project>/.builders/<id>/<branch>
+ * Get canonical workspace path from worktree path.
+ * Builder worktrees are at: <workspace>/.builders/<id>/<branch>
  * Porch runs in these worktrees but notifications need the canonical path.
  */
-function getCanonicalProjectPath(cwd: string): string {
+function getCanonicalWorkspacePath(cwd: string): string {
   const builderMatch = cwd.match(/^(.+)\/.builders\/[^/]+$/);
   if (builderMatch) {
-    return builderMatch[1]; // Return canonical project root
+    return builderMatch[1]; // Return canonical workspace root
   }
   return cwd;
 }
@@ -48,33 +48,33 @@ function getCanonicalProjectPath(cwd: string): string {
  * Notifications are delivered via SSE to connected browsers.
  */
 export async function sendPushNotification(payload: NotificationPayload): Promise<void> {
-  // Dedupe by project + type + details
-  const dedupeKey = `${payload.projectPath}:${payload.type}:${payload.details}`;
+  // Dedupe by workspace + type + details
+  const dedupeKey = `${payload.workspacePath}:${payload.type}:${payload.details}`;
   if (isDuplicate(dedupeKey)) {
     return;
   }
 
-  const projectName = path.basename(payload.projectPath);
+  const workspaceName = path.basename(payload.workspacePath);
 
   let title: string;
   let body: string;
 
   switch (payload.type) {
     case 'gate':
-      title = `${projectName}: Gate ${payload.details}`;
+      title = `${workspaceName}: Gate ${payload.details}`;
       body = `Project ${payload.projectId} needs approval`;
       break;
     case 'blocked':
-      title = `${projectName}: Builder Blocked`;
+      title = `${workspaceName}: Builder Blocked`;
       body = `${payload.projectId}: ${payload.details}`;
       break;
     case 'error':
-      title = `${projectName}: Build Failed`;
+      title = `${workspaceName}: Build Failed`;
       body = `${payload.projectId}: ${payload.details}`;
       break;
     case 'info':
     default:
-      title = `${projectName}`;
+      title = `${workspaceName}`;
       body = payload.details;
       break;
   }
@@ -89,12 +89,12 @@ export async function sendPushNotification(payload: NotificationPayload): Promis
         type: payload.type,
         title,
         body,
-        project: payload.projectPath,
+        workspace: payload.workspacePath,
       }),
     });
 
     if (!response.ok) {
-      console.warn(`[notifications] Tower responded ${response.status} for ${payload.type} notification (project ${payload.projectId})`);
+      console.warn(`[notifications] Tower responded ${response.status} for ${payload.type} notification (workspace project ${payload.projectId})`);
     }
   } catch {
     // Tower may not be running - silently ignore
@@ -105,13 +105,13 @@ export async function sendPushNotification(payload: NotificationPayload): Promis
  * Send notification when a gate is hit.
  */
 export async function notifyGateHit(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   gateName: string
 ): Promise<void> {
   await sendPushNotification({
     type: 'gate',
-    projectPath: getCanonicalProjectPath(projectRoot),
+    workspacePath: getCanonicalWorkspacePath(workspaceRoot),
     projectId,
     details: gateName,
   });
@@ -121,13 +121,13 @@ export async function notifyGateHit(
  * Send notification when builder is blocked.
  */
 export async function notifyBlocked(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   reason: string
 ): Promise<void> {
   await sendPushNotification({
     type: 'blocked',
-    projectPath: getCanonicalProjectPath(projectRoot),
+    workspacePath: getCanonicalWorkspacePath(workspaceRoot),
     projectId,
     details: reason,
   });
@@ -137,7 +137,7 @@ export async function notifyBlocked(
  * Send notification when build fails.
  */
 export async function notifyError(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   error: string
 ): Promise<void> {
@@ -148,7 +148,7 @@ export async function notifyError(
 
   await sendPushNotification({
     type: 'error',
-    projectPath: getCanonicalProjectPath(projectRoot),
+    workspacePath: getCanonicalWorkspacePath(workspaceRoot),
     projectId,
     details: error,
   });

@@ -10,12 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
-import { getGateStatusForProject } from '../utils/gate-status.js';
+import { getGateStatusForWorkspace } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
-  loadFileTabsForProject as loadFileTabsFromDb,
+  loadFileTabsForWorkspace as loadFileTabsFromDb,
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
@@ -95,7 +95,7 @@ export function getTerminalManager(): TerminalManager {
   if (!terminalManager) {
     const workspaceRoot = process.env.HOME || '/tmp';
     terminalManager = new TerminalManager({
-      projectRoot: workspaceRoot,
+      workspaceRoot: workspaceRoot,
       logDir: path.join(homedir(), '.agent-farm', 'logs'),
       maxSessions: 100,
       ringBufferLines: 10000,
@@ -689,7 +689,7 @@ export async function getTerminalsForWorkspace(
   workspaceTerminals.set(normalizedPath, freshEntry);
 
   // Read gate status from porch YAML files
-  const gateStatus = getGateStatusForProject(workspacePath);
+  const gateStatus = getGateStatusForWorkspace(workspacePath);
 
   return { terminals, gateStatus };
 }

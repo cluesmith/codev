@@ -1,8 +1,8 @@
 /**
  * Stop command - stops all agent farm processes
  *
- * Phase 3 (Spec 0090): Uses tower API for project deactivation.
- * Does NOT stop the tower - other projects may be using it.
+ * Phase 3 (Spec 0090): Uses tower API for workspace deactivation.
+ * Does NOT stop the tower - other workspaces may be using it.
  */
 
 import { loadState, clearState } from '../state.js';
@@ -18,12 +18,12 @@ const DEFAULT_TOWER_PORT = 4100;
 /**
  * Stop all agent farm processes
  *
- * Phase 3 (Spec 0090): Uses tower API to deactivate project.
- * Does NOT stop the tower daemon - other projects may be using it.
+ * Phase 3 (Spec 0090): Uses tower API to deactivate workspace.
+ * Does NOT stop the tower daemon - other workspaces may be using it.
  */
 export async function stop(): Promise<void> {
   const config = getConfig();
-  const projectPath = config.projectRoot;
+  const workspacePath = config.workspaceRoot;
 
   logger.header('Stopping Agent Farm');
 
@@ -32,15 +32,15 @@ export async function stop(): Promise<void> {
   const towerRunning = await client.isRunning();
 
   if (towerRunning) {
-    logger.info('Deactivating project via tower...');
-    const result = await client.deactivateProject(projectPath);
+    logger.info('Deactivating workspace via tower...');
+    const result = await client.deactivateWorkspace(workspacePath);
 
     if (result.ok) {
       const stoppedCount = result.stopped?.length || 0;
       if (stoppedCount > 0) {
         logger.success(`Stopped ${stoppedCount} process(es) via tower`);
       } else {
-        logger.info('Project was not running');
+        logger.info('Workspace was not running');
       }
 
       // Clear local state as well
@@ -48,7 +48,7 @@ export async function stop(): Promise<void> {
       return;
     }
 
-    // If tower returned error (e.g., project not found), fall through to legacy cleanup
+    // If tower returned error (e.g., workspace not found), fall through to legacy cleanup
     logger.debug(`Tower deactivation failed: ${result.error}, trying legacy cleanup`);
   }
 

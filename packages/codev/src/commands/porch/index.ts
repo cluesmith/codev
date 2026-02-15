@@ -66,14 +66,14 @@ function section(title: string, content: string): string {
  * porch status <id>
  * Shows current state and prescriptive next steps.
  */
-export async function status(projectRoot: string, projectId: string): Promise<void> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+export async function status(workspaceRoot: string, projectId: string): Promise<void> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.\nRun 'porch init' to create a new project.`);
   }
 
   const state = readState(statusPath);
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
 
   // Header
@@ -112,7 +112,7 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
       console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
 
       // Show phase content from plan
-      const planPath = findPlanFile(projectRoot, state.id, state.title);
+      const planPath = findPlanFile(workspaceRoot, state.id, state.title);
       if (planPath) {
         const content = fs.readFileSync(planPath, 'utf-8');
         const phaseContent = getPhaseContent(content, currentPlanPhase.id);
@@ -165,14 +165,14 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
  * porch check <id>
  * Runs the phase checks and reports results.
  */
-export async function check(projectRoot: string, projectId: string): Promise<void> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+export async function check(workspaceRoot: string, projectId: string): Promise<void> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
 
   const state = readState(statusPath);
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const checks = getPhaseChecks(protocol, state.phase);
 
   if (Object.keys(checks).length === 0) {
@@ -186,7 +186,7 @@ export async function check(projectRoot: string, projectId: string): Promise<voi
   console.log(chalk.bold('RUNNING CHECKS...'));
   console.log('');
 
-  const results = await runPhaseChecks(checks, projectRoot, checkEnv);
+  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -204,14 +204,14 @@ export async function check(projectRoot: string, projectId: string): Promise<voi
  * porch done <id>
  * Advances to next phase if checks pass. Refuses if checks fail.
  */
-export async function done(projectRoot: string, projectId: string): Promise<void> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+export async function done(workspaceRoot: string, projectId: string): Promise<void> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
 
   let state = readState(statusPath);
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const checks = getPhaseChecks(protocol, state.phase);
 
   // Run checks first
@@ -221,7 +221,7 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
 
-    const results = await runPhaseChecks(checks, projectRoot, checkEnv);
+    const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
     console.log(formatCheckResults(results));
 
     if (!allChecksPassed(results)) {
@@ -245,7 +245,7 @@ export async function done(projectRoot: string, projectId: string): Promise<void
   // Enforce 3-way verification for build_verify phases
   const verifyConfig = getVerifyConfig(protocol, state.phase);
   if (verifyConfig) {
-    const projectDir = getProjectDir(projectRoot, state.id, state.title);
+    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
     const phase = state.current_plan_phase || state.phase;
     const missingModels: string[] = [];
 
@@ -365,14 +365,14 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
  * porch gate <id>
  * Requests human approval for current gate.
  */
-export async function gate(projectRoot: string, projectId: string): Promise<void> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+export async function gate(workspaceRoot: string, projectId: string): Promise<void> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
 
   const state = readState(statusPath);
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const gateName = getPhaseGate(protocol, state.phase);
 
   if (!gateName) {
@@ -395,9 +395,9 @@ export async function gate(projectRoot: string, projectId: string): Promise<void
   console.log('');
 
   // Show relevant artifact and open it for review
-  const artifact = getArtifactForPhase(projectRoot, state);
+  const artifact = getArtifactForPhase(workspaceRoot, state);
   if (artifact) {
-    const fullPath = path.join(projectRoot, artifact);
+    const fullPath = path.join(workspaceRoot, artifact);
     if (fs.existsSync(fullPath)) {
       console.log(`  Artifact: ${artifact}`);
       console.log('');
@@ -426,12 +426,12 @@ export async function gate(projectRoot: string, projectId: string): Promise<void
  * Human approves a gate. Requires explicit flag to prevent automated approvals.
  */
 export async function approve(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   gateName: string,
   hasHumanFlag: boolean
 ): Promise<void> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
@@ -461,7 +461,7 @@ export async function approve(
   }
 
   // Run phase checks before approving
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const checks = getPhaseChecks(protocol, state.phase);
 
   if (Object.keys(checks).length > 0) {
@@ -470,7 +470,7 @@ export async function approve(
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
 
-    const results = await runPhaseChecks(checks, projectRoot, checkEnv);
+    const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
     console.log(formatCheckResults(results));
 
     if (!allChecksPassed(results)) {
@@ -500,13 +500,13 @@ export async function approve(
  * may re-run `porch init` after a session restart.
  */
 export async function init(
-  projectRoot: string,
+  workspaceRoot: string,
   protocolName: string,
   projectId: string,
   projectName: string
 ): Promise<void> {
-  const protocol = loadProtocol(projectRoot, protocolName);
-  const statusPath = getStatusPath(projectRoot, projectId, projectName);
+  const protocol = loadProtocol(workspaceRoot, protocolName);
+  const statusPath = getStatusPath(workspaceRoot, projectId, projectName);
 
   // If status.yaml already exists, preserve it (idempotent for resume)
   if (fs.existsSync(statusPath)) {
@@ -524,7 +524,7 @@ export async function init(
   }
 
   // Also check if a project with this ID exists under a different name
-  const existingPath = findStatusPath(projectRoot, projectId);
+  const existingPath = findStatusPath(workspaceRoot, projectId);
   if (existingPath) {
     const existingState = readState(existingPath);
     console.log('');
@@ -539,7 +539,7 @@ export async function init(
     return;
   }
 
-  const state = createInitialState(protocol, projectId, projectName, projectRoot);
+  const state = createInitialState(protocol, projectId, projectName, workspaceRoot);
   writeState(statusPath, state);
 
   console.log('');
@@ -590,7 +590,7 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
   return `Complete the phase work, then run: porch done ${state.id}`;
 }
 
-function getArtifactForPhase(projectRoot: string, state: ProjectState): string | null {
+function getArtifactForPhase(_workspaceRoot: string, state: ProjectState): string | null {
   switch (state.phase) {
     case 'specify':
       return `codev/specs/${state.id}-${state.title}.md`;
@@ -609,11 +609,11 @@ function getArtifactForPhase(projectRoot: string, state: ProjectState): string |
 
 export async function cli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
-  const projectRoot = process.cwd();
+  const workspaceRoot = process.cwd();
 
   // Auto-detect project ID for commands that need it
   function getProjectId(provided?: string): string {
-    const { id, source } = resolveProjectId(provided, process.cwd(), projectRoot);
+    const { id, source } = resolveProjectId(provided, process.cwd(), workspaceRoot);
     if (source === 'cwd') {
       console.log(chalk.dim(`[auto-detected project from worktree: ${id}]`));
     } else if (source === 'filesystem') {
@@ -626,7 +626,7 @@ export async function cli(args: string[]): Promise<void> {
     switch (command) {
       case 'next': {
         const { next: porchNext } = await import('./next.js');
-        const result = await porchNext(projectRoot, getProjectId(rest[0]));
+        const result = await porchNext(workspaceRoot, getProjectId(rest[0]));
         console.log(JSON.stringify(result, null, 2));
         break;
       }
@@ -638,32 +638,32 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       case 'status':
-        await status(projectRoot, getProjectId(rest[0]));
+        await status(workspaceRoot, getProjectId(rest[0]));
         break;
 
       case 'check':
-        await check(projectRoot, getProjectId(rest[0]));
+        await check(workspaceRoot, getProjectId(rest[0]));
         break;
 
       case 'done':
-        await done(projectRoot, getProjectId(rest[0]));
+        await done(workspaceRoot, getProjectId(rest[0]));
         break;
 
       case 'gate':
-        await gate(projectRoot, getProjectId(rest[0]));
+        await gate(workspaceRoot, getProjectId(rest[0]));
         break;
 
       case 'approve':
         if (!rest[0] || !rest[1]) throw new Error('Usage: porch approve <id> <gate> --a-human-explicitly-approved-this');
         const hasHumanFlag = rest.includes('--a-human-explicitly-approved-this');
-        await approve(projectRoot, rest[0], rest[1], hasHumanFlag);
+        await approve(workspaceRoot, rest[0], rest[1], hasHumanFlag);
         break;
 
       case 'init':
         if (!rest[0] || !rest[1] || !rest[2]) {
           throw new Error('Usage: porch init <protocol> <id> <name>');
         }
-        await init(projectRoot, rest[0], rest[1], rest[2]);
+        await init(workspaceRoot, rest[0], rest[1], rest[2]);
         break;
 
       default:

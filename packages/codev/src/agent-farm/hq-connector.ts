@@ -23,7 +23,7 @@ interface Message {
   payload: Record<string, unknown>;
 }
 
-interface ProjectInfo {
+interface WorkspaceInfo {
   path: string;
   name: string;
   git_remote?: string;
@@ -37,7 +37,7 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let pingInterval: NodeJS.Timeout | null = null;
 let statusWatcher: ReturnType<typeof watch> | null = null;
 let instanceId: string | null = null;
-let projectRoot: string | null = null;
+let workspaceRoot: string | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 60000;
 const BASE_RECONNECT_DELAY = 1000;
@@ -61,12 +61,12 @@ function sendMessage(message: Message): void {
 }
 
 /**
- * Get git remote URL for a project
+ * Get git remote URL for a workspace
  */
-function getGitRemote(projectPath: string): string | undefined {
+function getGitRemote(workspacePath: string): string | undefined {
   try {
     const remote = execSync('git remote get-url origin', {
-      cwd: projectPath,
+      cwd: workspacePath,
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
@@ -158,7 +158,7 @@ function handleMessage(data: string): void {
  */
 function handleApproval(message: Message): void {
   const payload = message.payload as {
-    project_path: string;
+    workspace_path: string;
     project_id: string;
     gate: string;
     approved_by: string;
@@ -169,10 +169,10 @@ function handleApproval(message: Message): void {
   logger.info(`[HQ] Received approval for ${payload.gate} from ${payload.approved_by}`);
 
   // Find the status file for this project
-  const statusDir = join(projectRoot!, 'codev', 'status');
+  const statusDir = join(workspaceRoot!, 'codev', 'status');
   const statusFile = join(statusDir, `${payload.project_id}-*.md`);
 
-  // For spike simplicity, just look for any file starting with project_id
+  // For spike simplicity, just look for any file starting with the project_id
   try {
     const { globSync } = require('glob');
     const files = globSync(statusFile);
@@ -205,7 +205,7 @@ function handleApproval(message: Message): void {
       }
 
       // Send status update back to HQ
-      sendStatusUpdate(payload.project_path, filePath, newContent);
+      sendStatusUpdate(payload.workspace_path, filePath, newContent);
     }
   } catch (error) {
     logger.error(`[HQ] Failed to handle approval: ${error instanceof Error ? error.message : error}`);
@@ -217,7 +217,7 @@ function handleApproval(message: Message): void {
  */
 function handleCommand(message: Message): void {
   const payload = message.payload as {
-    project_path: string;
+    workspace_path: string;
     command: string;
     args: Record<string, unknown>;
   };
@@ -240,12 +240,12 @@ function handleCommand(message: Message): void {
  * Register with HQ
  */
 function register(): void {
-  if (!projectRoot) return;
+  if (!workspaceRoot) return;
 
-  const projects: ProjectInfo[] = [{
-    path: projectRoot,
-    name: basename(projectRoot),
-    git_remote: getGitRemote(projectRoot),
+  const workspaces: WorkspaceInfo[] = [{
+    path: workspaceRoot,
+    name: basename(workspaceRoot),
+    git_remote: getGitRemote(workspaceRoot),
   }];
 
   sendMessage({
@@ -256,7 +256,7 @@ function register(): void {
       instance_id: instanceId,
       instance_name: process.env.CODEV_HQ_INSTANCE_NAME || `${require('os').hostname()}-agent-farm`,
       version: require('../../package.json').version,
-      projects,
+      workspaces,
     },
   });
 
@@ -270,14 +270,14 @@ function register(): void {
 /**
  * Send status file update to HQ
  */
-function sendStatusUpdate(projectPath: string, statusFile: string, content: string): void {
+function sendStatusUpdate(workspacePath: string, statusFile: string, content: string): void {
   sendMessage({
     type: 'status_update',
     id: generateId(),
     ts: Date.now(),
     payload: {
-      project_path: projectPath,
-      status_file: relative(projectPath, statusFile),
+      workspace_path: workspacePath,
+      status_file: relative(workspacePath, statusFile),
       content,
       git_sha: getGitSha(statusFile),
     },
@@ -289,9 +289,9 @@ function sendStatusUpdate(projectPath: string, statusFile: string, content: stri
  */
 function startStatusWatcher(): void {
   if (statusWatcher) return;
-  if (!projectRoot) return;
+  if (!workspaceRoot) return;
 
-  const statusDir = join(projectRoot, 'codev', 'status');
+  const statusDir = join(workspaceRoot, 'codev', 'status');
 
   // Create status directory if it doesn't exist
   if (!existsSync(statusDir)) {
@@ -309,7 +309,7 @@ function startStatusWatcher(): void {
 
     try {
       const content = readFileSync(filePath, 'utf-8');
-      sendStatusUpdate(projectRoot!, filePath, content);
+      sendStatusUpdate(workspaceRoot!, filePath, content);
       logger.debug(`[HQ] Synced ${filename}`);
     } catch (error) {
       logger.debug(`[HQ] Failed to read ${filename}: ${error instanceof Error ? error.message : error}`);
@@ -407,7 +407,7 @@ function cleanup(): void {
 
 /**
  * Connect to HQ and register this agent farm instance
- * Called during project activation when CODEV_HQ_URL is set
+ * Called during workspace activation when CODEV_HQ_URL is set
  */
 export function initHQConnector(root: string): void {
   const hqUrl = process.env.CODEV_HQ_URL;
@@ -417,7 +417,7 @@ export function initHQConnector(root: string): void {
   }
 
   instanceId = randomUUID();
-  projectRoot = root;
+  workspaceRoot = root;
 
   logger.info('[HQ] HQ connector enabled');
   connect();

@@ -55,11 +55,11 @@ import type {
  * validated: [gemini, codex, claude]
  * ---
  */
-function isArtifactPreApproved(projectRoot: string, artifactGlob: string): boolean {
-  const matches = globSync(artifactGlob, { cwd: projectRoot });
+function isArtifactPreApproved(workspaceRoot: string, artifactGlob: string): boolean {
+  const matches = globSync(artifactGlob, { cwd: workspaceRoot });
   if (matches.length === 0) return false;
 
-  const filePath = path.join(projectRoot, matches[0]);
+  const filePath = path.join(workspaceRoot, matches[0]);
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
@@ -80,11 +80,11 @@ function isArtifactPreApproved(projectRoot: string, artifactGlob: string): boole
  *   <id>-<phase>-iter<N>-<model>.txt
  */
 function findReviewFiles(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   verifyModels: string[]
 ): ReviewResult[] {
-  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
   if (!fs.existsSync(projectDir)) return [];
 
   const results: ReviewResult[] = [];
@@ -109,11 +109,11 @@ function findReviewFiles(
  * This must match the pattern used by findReviewFiles().
  */
 function getReviewFilePath(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   model: string
 ): string {
-  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
   const phase = state.current_plan_phase || state.phase;
   const fileName = `${state.id}-${phase}-iter${state.iteration}-${model}.txt`;
   return path.join(projectDir, fileName);
@@ -124,11 +124,11 @@ function getReviewFilePath(
  * Rebuttals are written by the builder to dispute false positive reviewer concerns.
  */
 function findRebuttalFile(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   iteration: number
 ): string | null {
-  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
   const phase = state.current_plan_phase || state.phase;
   const fileName = `${state.id}-${phase}-iter${iteration}-rebuttals.md`;
   const filePath = path.join(projectDir, fileName);
@@ -154,7 +154,7 @@ function extractReviewSummary(filePath: string): string {
  * can see what was raised before and how the builder responded.
  */
 function buildReviewContext(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
 ): string | null {
   if (state.history.length === 0) return null;
@@ -177,7 +177,7 @@ function buildReviewContext(
     lines.push('');
 
     // Check for builder rebuttals
-    const rebuttalFile = findRebuttalFile(projectRoot, state, record.iteration);
+    const rebuttalFile = findRebuttalFile(workspaceRoot, state, record.iteration);
     if (rebuttalFile) {
       try {
         const rebuttals = fs.readFileSync(rebuttalFile, 'utf-8');
@@ -209,8 +209,8 @@ function buildReviewContext(
  * State is only mutated when completed work is detected (filesystem-as-truth).
  * If called twice without filesystem changes, returns the same output.
  */
-export async function next(projectRoot: string, projectId: string): Promise<PorchNextResponse> {
-  const statusPath = findStatusPath(projectRoot, projectId);
+export async function next(workspaceRoot: string, projectId: string): Promise<PorchNextResponse> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     return {
       status: 'error',
@@ -221,7 +221,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
   }
 
   const state = readState(statusPath);
-  const protocol = loadProtocol(projectRoot, state.protocol);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
 
   // Protocol complete
@@ -245,7 +245,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
     const buildConfig = getBuildConfig(protocol, state.phase);
     if (buildConfig?.artifact) {
       const artifactGlob = buildConfig.artifact.replace('${PROJECT_ID}', state.id);
-      if (isArtifactPreApproved(projectRoot, artifactGlob)) {
+      if (isArtifactPreApproved(workspaceRoot, artifactGlob)) {
         // Auto-approve gate and advance
         const gateName = getPhaseGate(protocol, state.phase);
         if (gateName) {
@@ -257,7 +257,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
           state.phase = nextPhase.id;
           // If entering phased protocol, extract plan phases
           if (isPhased(protocol, nextPhase.id)) {
-            const planPath = findPlanFile(projectRoot, state.id, state.title);
+            const planPath = findPlanFile(workspaceRoot, state.id, state.title);
             if (planPath) {
               state.plan_phases = extractPhasesFromFile(planPath);
               if (state.plan_phases.length > 0) {
@@ -270,7 +270,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
           state.history = [];
           writeState(statusPath, state);
           // Recurse to compute tasks for the new phase
-          return next(projectRoot, projectId);
+          return next(workspaceRoot, projectId);
         }
       }
     }
@@ -303,7 +303,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
       if (!nextPhase) {
         state.phase = 'complete';
         writeState(statusPath, state);
-        return next(projectRoot, projectId);
+        return next(workspaceRoot, projectId);
       }
 
       state.phase = nextPhase.id;
@@ -313,7 +313,7 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
 
       // If entering phased protocol, extract plan phases
       if (isPhased(protocol, nextPhase.id)) {
-        const planPath = findPlanFile(projectRoot, state.id, state.title);
+        const planPath = findPlanFile(workspaceRoot, state.id, state.title);
         if (planPath) {
           state.plan_phases = extractPhasesFromFile(planPath);
           if (state.plan_phases.length > 0) {
@@ -323,24 +323,24 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
       }
 
       writeState(statusPath, state);
-      return next(projectRoot, projectId);
+      return next(workspaceRoot, projectId);
     }
   }
 
   // Handle build_verify / per_plan_phase phases
   if (isBuildVerify(protocol, state.phase)) {
-    return await handleBuildVerify(projectRoot, projectId, state, protocol, phaseConfig, statusPath);
+    return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath);
   }
 
   // Handle 'once' phases (TICK, BUGFIX)
-  return handleOncePhase(projectRoot, state, protocol, phaseConfig);
+  return handleOncePhase(workspaceRoot, state, protocol, phaseConfig);
 }
 
 /**
  * Handle build_verify and per_plan_phase phases.
  */
 async function handleBuildVerify(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   state: ProjectState,
   protocol: Protocol,
@@ -363,7 +363,7 @@ async function handleBuildVerify(
 
   // --- NEED BUILD ---
   if (!state.build_complete) {
-    const prompt = buildPhasePrompt(projectRoot, state, protocol);
+    const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
     const tasks: PorchTask[] = [];
 
     // Main build task with full phase prompt
@@ -408,7 +408,7 @@ async function handleBuildVerify(
 
   // --- NEED VERIFY ---
   if (state.build_complete && verifyConfig) {
-    const reviews = findReviewFiles(projectRoot, state, verifyConfig.models);
+    const reviews = findReviewFiles(workspaceRoot, state, verifyConfig.models);
 
     // No review files yet — emit consultation tasks
     if (reviews.length === 0) {
@@ -421,9 +421,9 @@ async function handleBuildVerify(
       // For iteration > 1, generate context file with previous reviews + rebuttals
       let contextFlag = '';
       if (state.iteration > 1) {
-        const context = buildReviewContext(projectRoot, state);
+        const context = buildReviewContext(workspaceRoot, state);
         if (context) {
-          const projectDir = getProjectDir(projectRoot, state.id, state.title);
+          const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
           const contextPath = path.join(
             projectDir,
             `${state.id}-${state.current_plan_phase || state.phase}-iter${state.iteration}-context.md`
@@ -434,7 +434,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       tasks.push({
@@ -458,7 +458,7 @@ async function handleBuildVerify(
       // Reuse context file from full consultation emission (if it exists)
       let contextFlagPartial = '';
       if (state.iteration > 1) {
-        const projectDir = getProjectDir(projectRoot, state.id, state.title);
+        const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
         const contextPath = path.join(
           projectDir,
           `${state.id}-${state.current_plan_phase || state.phase}-iter${state.iteration}-context.md`
@@ -469,7 +469,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       return {
@@ -486,7 +486,7 @@ async function handleBuildVerify(
     // All reviews in — parse verdicts and decide
     if (allApprove(reviews)) {
       // All approve — advance
-      return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
+      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
     // Some request changes — check max iterations escape
@@ -499,7 +499,7 @@ async function handleBuildVerify(
         state.iteration = 1;
         state.history = [];
         writeState(statusPath, state);
-        notifyArchitect(state.id, gateName, projectRoot);
+        notifyArchitect(state.id, gateName, workspaceRoot);
 
         return {
           status: 'gate_pending',
@@ -517,7 +517,7 @@ async function handleBuildVerify(
 
       // No gate for this phase (e.g., per_plan_phase implement) — force-advance
       // to prevent infinite loops when one model keeps blocking.
-      return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
+      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
     // Increment iteration and emit fix tasks
@@ -544,7 +544,7 @@ async function handleBuildVerify(
     writeState(statusPath, state);
 
     // Emit fix tasks (prompt will include history with feedback)
-    const prompt = buildPhasePrompt(projectRoot, state, protocol);
+    const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
     return {
       status: 'tasks',
       phase: state.phase,
@@ -581,7 +581,7 @@ async function handleBuildVerify(
  * Advances plan phase or requests gate.
  */
 async function handleVerifyApproved(
-  projectRoot: string,
+  workspaceRoot: string,
   projectId: string,
   state: ProjectState,
   protocol: Protocol,
@@ -610,14 +610,14 @@ async function handleVerifyApproved(
         state.phase = 'review';
         state.current_plan_phase = null;
         writeState(statusPath, state);
-        return next(projectRoot, projectId);
+        return next(workspaceRoot, projectId);
       }
 
       // Next plan phase
       const newCurrent = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrent?.id || null;
       writeState(statusPath, state);
-      return next(projectRoot, projectId);
+      return next(workspaceRoot, projectId);
     }
   }
 
@@ -628,7 +628,7 @@ async function handleVerifyApproved(
     state.iteration = 1;
     state.history = [];
     writeState(statusPath, state);
-    notifyArchitect(state.id, gateName, projectRoot);
+    notifyArchitect(state.id, gateName, workspaceRoot);
 
     return {
       status: 'gate_pending',
@@ -648,7 +648,7 @@ async function handleVerifyApproved(
   if (!nextPhase) {
     state.phase = 'complete';
     writeState(statusPath, state);
-    return next(projectRoot, projectId);
+    return next(workspaceRoot, projectId);
   }
 
   state.phase = nextPhase.id;
@@ -656,7 +656,7 @@ async function handleVerifyApproved(
   state.build_complete = false;
   state.history = [];
   writeState(statusPath, state);
-  return next(projectRoot, projectId);
+  return next(workspaceRoot, projectId);
 }
 
 /**
@@ -664,13 +664,13 @@ async function handleVerifyApproved(
  * These don't have build/verify config — emit a single task.
  */
 function handleOncePhase(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   protocol: Protocol,
   phaseConfig: ProtocolPhase,
 ): PorchNextResponse {
   // Try to load a prompt file for this phase
-  const prompt = buildPhasePrompt(projectRoot, state, protocol);
+  const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
 
   // If prompt is just a generic fallback, try to use phase steps from protocol
   let description = prompt;

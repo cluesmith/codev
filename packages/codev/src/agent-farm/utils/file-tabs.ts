@@ -17,14 +17,14 @@ export interface FileTab {
 export function saveFileTab(
   db: Database.Database,
   id: string,
-  projectPath: string,
+  workspacePath: string,
   filePath: string,
   createdAt: number
 ): void {
   db.prepare(`
-    INSERT OR REPLACE INTO file_tabs (id, project_path, file_path, created_at)
+    INSERT OR REPLACE INTO file_tabs (id, workspace_path, file_path, created_at)
     VALUES (?, ?, ?, ?)
-  `).run(id, projectPath, filePath, createdAt);
+  `).run(id, workspacePath, filePath, createdAt);
 }
 
 /**
@@ -35,15 +35,15 @@ export function deleteFileTab(db: Database.Database, id: string): void {
 }
 
 /**
- * Load file tabs for a project from SQLite.
+ * Load file tabs for a workspace from SQLite.
  */
-export function loadFileTabsForProject(
+export function loadFileTabsForWorkspace(
   db: Database.Database,
-  projectPath: string
+  workspacePath: string
 ): Map<string, FileTab> {
   const tabs = new Map<string, FileTab>();
-  const rows = db.prepare('SELECT id, file_path, created_at FROM file_tabs WHERE project_path = ?')
-    .all(projectPath) as Array<{ id: string; file_path: string; created_at: number }>;
+  const rows = db.prepare('SELECT id, file_path, created_at FROM file_tabs WHERE workspace_path = ?')
+    .all(workspacePath) as Array<{ id: string; file_path: string; created_at: number }>;
   for (const row of rows) {
     tabs.set(row.id, { id: row.id, path: row.file_path, createdAt: row.created_at });
   }
@@ -57,10 +57,10 @@ export function ensureFileTabsTable(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS file_tabs (
       id TEXT PRIMARY KEY,
-      project_path TEXT NOT NULL,
+      workspace_path TEXT NOT NULL,
       file_path TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
+    CREATE INDEX IF NOT EXISTS idx_file_tabs_workspace ON file_tabs(workspace_path);
   `);
 }

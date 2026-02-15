@@ -114,12 +114,12 @@ async function sendToBuilder(
 }
 
 /**
- * Detect project root from CWD by walking up to find .git or af-config.json.
- * Builder worktrees are at .builders/<id>/ which is inside the project root.
+ * Detect workspace root from CWD by walking up to find .git or af-config.json.
+ * Builder worktrees are at .builders/<id>/ which is inside the workspace root.
  */
-function detectProjectRoot(): string | null {
+function detectWorkspaceRoot(): string | null {
   let dir = process.cwd();
-  // If inside .builders/<id>/, the project root is two levels up
+  // If inside .builders/<id>/, the workspace root is two levels up
   const buildersMatch = dir.match(/^(.+?)\/\.builders\/[^/]+/);
   if (buildersMatch) return buildersMatch[1];
   // Walk up looking for markers
@@ -142,7 +142,7 @@ function detectProjectRoot(): string | null {
 async function findArchitectTerminalId(): Promise<string> {
   const client = new TowerClient();
   const config = getConfig();
-  const status = await client.getProjectStatus(config.projectRoot);
+  const status = await client.getWorkspaceStatus(config.workspaceRoot);
 
   if (status) {
     const architectTerminal = status.terminals.find((t) => t.type === 'architect');

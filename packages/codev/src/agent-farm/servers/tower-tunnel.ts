@@ -61,7 +61,7 @@ async function gatherMetadata(): Promise<TowerMetadata> {
   if (!_deps || !_getInstances) throw new Error('Tunnel not initialized');
 
   const instances = await _getInstances();
-  const projects = instances.map((i) => ({
+  const workspaces = instances.map((i) => ({
     path: i.workspacePath,
     name: i.workspaceName,
   }));
@@ -80,12 +80,12 @@ async function gatherMetadata(): Promise<TowerMetadata> {
     for (const session of manager.listSessions()) {
       terminals.push({
         id: session.id,
-        projectPath: terminalToWorkspace.get(session.id) ?? '',
+        workspacePath: terminalToWorkspace.get(session.id) ?? '',
       });
     }
   }
 
-  return { projects, terminals };
+  return { workspaces, terminals };
 }
 
 /**

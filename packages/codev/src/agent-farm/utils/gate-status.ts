@@ -14,12 +14,12 @@ export interface GateStatus {
 }
 
 /**
- * Read gate status from porch YAML files for a project.
+ * Read gate status from porch YAML files for a workspace.
  * Scans codev/projects/<id>/status.yaml for gates with status: pending.
  */
-export function getGateStatusForProject(projectPath: string): GateStatus {
+export function getGateStatusForWorkspace(workspacePath: string): GateStatus {
   try {
-    const projectsDir = path.join(projectPath, 'codev', 'projects');
+    const projectsDir = path.join(workspacePath, 'codev', 'projects');
     if (!fs.existsSync(projectsDir)) {
       return { hasGate: false };
     }

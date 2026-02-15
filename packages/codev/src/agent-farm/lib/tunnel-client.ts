@@ -32,8 +32,8 @@ export interface TunnelClientOptions {
 export type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
 
 export interface TowerMetadata {
-  projects: Array<{ path: string; name: string }>;
-  terminals: Array<{ id: string; projectPath: string }>;
+  workspaces: Array<{ path: string; name: string }>;
+  terminals: Array<{ id: string; workspacePath: string }>;
 }
 
 type StateChangeCallback = (state: TunnelState, previousState: TunnelState) => void;
@@ -504,7 +504,7 @@ export class TunnelClient {
         ':status': 200,
         'content-type': 'application/json',
       });
-      stream.end(JSON.stringify(this._pendingMetadata ?? { projects: [], terminals: [] }));
+      stream.end(JSON.stringify(this._pendingMetadata ?? { workspaces: [], terminals: [] }));
       return;
     }
 

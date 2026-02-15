@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawn, execSync } from 'node:child_process';
 import chalk from 'chalk';
-import { findProjectRoot } from '../lib/skeleton.js';
+import { findWorkspaceRoot } from '../lib/skeleton.js';
 
 interface ImportOptions {
   dryRun?: boolean;
@@ -191,8 +191,8 @@ export async function importCommand(source: string, options: ImportOptions = {})
     );
   }
 
-  const projectRoot = findProjectRoot();
-  const localCodevDir = path.join(projectRoot, 'codev');
+  const workspaceRoot = findWorkspaceRoot();
+  const localCodevDir = path.join(workspaceRoot, 'codev');
 
   if (!fs.existsSync(localCodevDir)) {
     throw new Error(
@@ -292,7 +292,7 @@ export async function importCommand(source: string, options: ImportOptions = {})
     // We use -p to pass the initial prompt, but NOT --print so it stays interactive
     const claudeProcess = spawn('claude', ['-p', prompt], {
       stdio: 'inherit',
-      cwd: projectRoot, // Run from project root so Claude can make edits
+      cwd: workspaceRoot, // Run from workspace root so Claude can make edits
     });
 
     await new Promise<void>((resolve, reject) => {

@@ -1,7 +1,7 @@
 /**
  * Status command - shows status of all agents
  *
- * Phase 3 (Spec 0090): Uses tower API for project status.
+ * Phase 3 (Spec 0090): Uses tower API for workspace status.
  */
 
 import { loadState } from '../state.js';
@@ -20,7 +20,7 @@ const DEFAULT_TOWER_PORT = 4100;
  */
 export async function status(): Promise<void> {
   const config = getConfig();
-  const projectPath = config.projectRoot;
+  const workspacePath = config.workspaceRoot;
 
   logger.header('Agent Farm Status');
 
@@ -34,32 +34,32 @@ export async function status(): Promise<void> {
     if (health) {
       logger.kv('Tower', chalk.green('running'));
       logger.kv('  Uptime', `${Math.floor(health.uptime)}s`);
-      logger.kv('  Active Projects', health.activeProjects);
+      logger.kv('  Active Workspaces', health.activeWorkspaces);
       logger.kv('  Memory', `${Math.round(health.memoryUsage / 1024 / 1024)}MB`);
     }
 
     logger.blank();
 
-    // Get project status from tower
-    const projectStatus = await client.getProjectStatus(projectPath);
+    // Get workspace status from tower
+    const workspaceStatus = await client.getWorkspaceStatus(workspacePath);
 
-    if (projectStatus) {
-      const statusText = projectStatus.active ? chalk.green('active') : chalk.gray('inactive');
-      logger.kv('Project', projectStatus.name);
+    if (workspaceStatus) {
+      const statusText = workspaceStatus.active ? chalk.green('active') : chalk.gray('inactive');
+      logger.kv('Workspace', workspaceStatus.name);
       logger.kv('  Status', statusText);
-      logger.kv('  Terminals', projectStatus.terminals.length);
+      logger.kv('  Terminals', workspaceStatus.terminals.length);
 
-      if (projectStatus.terminals.length > 0) {
+      if (workspaceStatus.terminals.length > 0) {
         logger.blank();
         logger.info('Terminals:');
-        for (const term of projectStatus.terminals) {
+        for (const term of workspaceStatus.terminals) {
           const typeColor = term.type === 'architect' ? chalk.cyan : term.type === 'builder' ? chalk.blue : chalk.gray;
           logger.info(`  ${typeColor(term.type)} - ${term.label} (${term.active ? 'active' : 'stopped'})`);
         }
       }
 
-      if (projectStatus.gateStatus?.hasGate) {
-        const gate = projectStatus.gateStatus;
+      if (workspaceStatus.gateStatus?.hasGate) {
+        const gate = workspaceStatus.gateStatus;
         let waitInfo = '';
         if (gate.requestedAt) {
           const elapsed = Date.now() - new Date(gate.requestedAt).getTime();
@@ -75,9 +75,9 @@ export async function status(): Promise<void> {
       return;
     }
 
-    // Project not found in tower, show "not active"
-    logger.kv('Project', chalk.gray('not active in tower'));
-    logger.info(`Run 'af tower start' to activate this project`);
+    // Workspace not found in tower, show "not active"
+    logger.kv('Workspace', chalk.gray('not active in tower'));
+    logger.info(`Run 'af tower start' to activate this workspace`);
     return;
   }
 

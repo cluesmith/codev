@@ -1,14 +1,14 @@
 /**
  * Architect command - direct CLI access to architect role
  *
- * Opens the Tower dashboard for the current project.
+ * Opens the Tower dashboard for the current workspace.
  * The dashboard provides full terminal access to the architect session.
  */
 
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
-import { TowerClient, encodeProjectPath } from '../lib/tower-client.js';
+import { TowerClient, encodeWorkspacePath } from '../lib/tower-client.js';
 
 export interface ArchitectOptions {
   args?: string[];
@@ -27,8 +27,8 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
     fatal('Tower is not running. Start it with: af tower start');
   }
 
-  // Open the project dashboard in browser
-  const url = client.getProjectUrl(config.projectRoot);
+  // Open the workspace dashboard in browser
+  const url = client.getWorkspaceUrl(config.workspaceRoot);
 
   if (options.layout) {
     logger.info('Layout mode is handled by the Tower dashboard.');

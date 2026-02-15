@@ -95,16 +95,16 @@ function getLocalKey(): string {
 }
 
 /**
- * Encode a project path for use in tower API URLs
+ * Encode a workspace path for use in tower API URLs
  */
-export function encodeProjectPath(projectPath: string): string {
-  return Buffer.from(projectPath).toString('base64url');
+export function encodeWorkspacePath(workspacePath: string): string {
+  return Buffer.from(workspacePath).toString('base64url');
 }
 
 /**
- * Decode a project path from tower API URL
+ * Decode a workspace path from tower API URL
  */
-export function decodeProjectPath(encoded: string): string {
+export function decodeWorkspacePath(encoded: string): string {
   return Buffer.from(encoded, 'base64url').toString('utf-8');
 }
 
@@ -185,22 +185,22 @@ export class TowerClient {
   }
 
   /**
-   * List all projects known to tower
+   * List all workspaces known to tower
    */
-  async listProjects(): Promise<TowerProject[]> {
-    const result = await this.request<{ projects: TowerProject[] }>('/api/projects');
-    return result.ok ? result.data!.projects : [];
+  async listWorkspaces(): Promise<TowerWorkspace[]> {
+    const result = await this.request<{ workspaces: TowerWorkspace[] }>('/api/workspaces');
+    return result.ok ? result.data!.workspaces : [];
   }
 
   /**
-   * Activate a project (start its dashboard)
+   * Activate a workspace (start its dashboard)
    */
-  async activateProject(
-    projectPath: string
+  async activateWorkspace(
+    workspacePath: string
   ): Promise<{ ok: boolean; adopted?: boolean; error?: string }> {
-    const encoded = encodeProjectPath(projectPath);
+    const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<{ success: boolean; adopted?: boolean; error?: string }>(
-      `/api/projects/${encoded}/activate`,
+      `/api/workspaces/${encoded}/activate`,
       { method: 'POST' }
     );
 
@@ -216,14 +216,14 @@ export class TowerClient {
   }
 
   /**
-   * Deactivate a project (stop its dashboard)
+   * Deactivate a workspace (stop its dashboard)
    */
-  async deactivateProject(
-    projectPath: string
+  async deactivateWorkspace(
+    workspacePath: string
   ): Promise<{ ok: boolean; stopped?: number[]; error?: string }> {
-    const encoded = encodeProjectPath(projectPath);
+    const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<{ success: boolean; stopped?: number[]; error?: string }>(
-      `/api/projects/${encoded}/deactivate`,
+      `/api/workspaces/${encoded}/deactivate`,
       { method: 'POST' }
     );
 
@@ -239,11 +239,11 @@ export class TowerClient {
   }
 
   /**
-   * Get status of a specific project
+   * Get status of a specific workspace
    */
-  async getProjectStatus(projectPath: string): Promise<TowerProjectStatus | null> {
-    const encoded = encodeProjectPath(projectPath);
-    const result = await this.request<TowerProjectStatus>(`/api/projects/${encoded}/status`);
+  async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const result = await this.request<TowerWorkspaceStatus>(`/api/workspaces/${encoded}/status`);
     return result.ok ? result.data! : null;
   }
 
@@ -317,11 +317,11 @@ export class TowerClient {
   }
 
   /**
-   * Get the tower dashboard URL for a project
+   * Get the tower dashboard URL for a workspace
    */
-  getProjectUrl(projectPath: string): string {
-    const encoded = encodeProjectPath(projectPath);
-    return `${this.baseUrl}/project/${encoded}/`;
+  getWorkspaceUrl(workspacePath: string): string {
+    const encoded = encodeWorkspacePath(workspacePath);
+    return `${this.baseUrl}/workspace/${encoded}/`;
   }
 
   /**
