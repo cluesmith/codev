@@ -1077,6 +1077,35 @@ describe('ShellperProcess', () => {
       towerSocket.destroy();
     });
 
+    it('failed write removes client from broadcast', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Destroy terminal's writable side to force write failure
+      termSocket.destroy();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Broadcast data — should not throw, and removed client logged
+      mockPty.simulateData('after disconnect');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Tower should still receive data
+      const parser = createFrameParser();
+      towerSocket.pipe(parser);
+      const framesPromise = collectFramesFor(parser, 200);
+      mockPty.simulateData('still broadcasting');
+      const frames = await framesPromise;
+      const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
+      expect(dataFrames.length).toBeGreaterThan(0);
+
+      towerSocket.destroy();
+    });
+
     it('pre-HELLO DATA frames are ignored', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
