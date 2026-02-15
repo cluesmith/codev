@@ -1,3 +1,7 @@
+/** Standard VT100 default terminal dimensions. */
+export const DEFAULT_COLS = 80;
+export const DEFAULT_ROWS = 24;
+
 export { RingBuffer } from './ring-buffer.js';
 export { TerminalManager } from './pty-manager.js';
 export type { TerminalManagerConfig, CreateTerminalRequest } from './pty-manager.js';

@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import { existsSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
+import { DEFAULT_COLS, DEFAULT_ROWS } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
 
 // Tower port — the single HTTP server since Spec 0090
@@ -261,7 +262,7 @@ export async function createPtySession(
   cwd: string,
   registration?: { workspacePath: string; type: 'builder' | 'shell'; roleId: string },
 ): Promise<{ terminalId: string }> {
-  const body: Record<string, unknown> = { command, args, cwd, cols: 80, rows: 24, persistent: true };
+  const body: Record<string, unknown> = { command, args, cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, persistent: true };
   if (registration) {
     body.workspacePath = registration.workspacePath;
     body.type = registration.type;

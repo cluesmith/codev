@@ -33,6 +33,7 @@ import {
   type SpawnMessage,
 } from './shellper-protocol.js';
 import { ShellperReplayBuffer } from './shellper-replay-buffer.js';
+import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
 
@@ -61,8 +62,8 @@ export class ShellperProcess extends EventEmitter {
   private server: net.Server | null = null;
   private currentConnection: net.Socket | null = null;
   private replayBuffer: ShellperReplayBuffer;
-  private cols = 80;
-  private rows = 24;
+  private cols = DEFAULT_COLS;
+  private rows = DEFAULT_ROWS;
   private startTime: number = Date.now();
   private exited = false;
 

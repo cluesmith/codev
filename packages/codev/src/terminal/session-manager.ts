@@ -18,6 +18,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
+import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 import type { Readable } from 'node:stream';
 import { ShellperClient, type IShellperClient } from './shellper-client.js';
 
@@ -324,8 +325,8 @@ export class SessionManager extends EventEmitter {
         args: restartOptions?.args ?? [],
         cwd: restartOptions?.cwd ?? '',
         env: restartOptions?.env ?? {},
-        cols: 80,
-        rows: 24,
+        cols: DEFAULT_COLS,
+        rows: DEFAULT_ROWS,
         restartOnExit: hasRestart,
         restartDelay: restartOptions?.restartDelay,
         maxRestarts: restartOptions?.maxRestarts,

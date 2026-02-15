@@ -15,6 +15,7 @@ import { getGlobalDb } from '../db/index.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
+import { DEFAULT_COLS, DEFAULT_ROWS } from '../../terminal/index.js';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,
@@ -376,8 +377,8 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
               args: cmdArgs,
               cwd: workspacePath,
               env: cleanEnv,
-              cols: 80,
-              rows: 24,
+              cols: DEFAULT_COLS,
+              rows: DEFAULT_ROWS,
               restartOnExit: true,
               restartDelay: 2000,
               maxRestarts: 50,

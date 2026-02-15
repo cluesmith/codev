@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
+import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
@@ -76,8 +77,8 @@ export class TerminalManager {
       id,
       command: shell,
       args: req.args ?? [],
-      cols: req.cols ?? 80,
-      rows: req.rows ?? 24,
+      cols: req.cols ?? DEFAULT_COLS,
+      rows: req.rows ?? DEFAULT_ROWS,
       cwd: req.cwd ?? this.config.workspaceRoot,
       env: { ...baseEnv, ...req.env },
       label: req.label ?? `terminal-${id.slice(0, 8)}`,
@@ -122,8 +123,8 @@ export class TerminalManager {
       id,
       command: '', // Not used for shellper-backed sessions
       args: [],
-      cols: 80,
-      rows: 24,
+      cols: DEFAULT_COLS,
+      rows: DEFAULT_ROWS,
       cwd: opts.cwd,
       env: {},
       label: opts.label,
