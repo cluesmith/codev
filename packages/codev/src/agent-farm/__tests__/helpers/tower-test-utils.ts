@@ -95,11 +95,13 @@ async function findAvailablePort(startPort: number): Promise<number> {
  * Start the tower server for testing.
  * Creates an isolated socket directory for shellper sessions (Spec 0116).
  */
-export async function startTower(port?: number): Promise<TowerHandle> {
+export async function startTower(port?: number, extraEnv?: Record<string, string>): Promise<TowerHandle> {
   const actualPort = port ?? (await findAvailablePort(14100));
 
   // Spec 0116: Create isolated socket dir so tests don't pollute ~/.codev/run/
-  const socketDir = mkdtempSync(resolve(tmpdir(), 'codev-test-sockets-'));
+  // Use /tmp/ directly (not os.tmpdir()) because macOS per-user tmpdir paths are
+  // too long for Unix sockets (sun_path max ~104 bytes).
+  const socketDir = mkdtempSync('/tmp/codev-sock-');
 
   const proc = spawn('node', [TOWER_SERVER_PATH, String(actualPort)], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -109,6 +111,7 @@ export async function startTower(port?: number): Promise<TowerHandle> {
       NODE_ENV: 'test',
       AF_TEST_DB: `test-${actualPort}.db`,
       SHELLPER_SOCKET_DIR: socketDir,
+      ...extraEnv,
     },
   });
 

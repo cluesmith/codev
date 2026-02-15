@@ -294,6 +294,36 @@ describe('SessionManager', () => {
       const cleaned = await manager.cleanupStaleSockets();
       expect(cleaned).toBe(0);
     });
+
+    it('repeated calls are idempotent (second call returns 0)', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Create a stale socket file (regular file with .sock extension)
+      const staleSocketPath = path.join(socketDir, 'shellper-idempotent.sock');
+      const tmpServer = net.createServer();
+      await new Promise<void>((resolve) => tmpServer.listen(staleSocketPath, resolve));
+      await new Promise<void>((resolve) => tmpServer.close(resolve));
+
+      if (fs.existsSync(staleSocketPath)) {
+        // First call removes the stale socket
+        const cleaned1 = await manager.cleanupStaleSockets();
+        expect(cleaned1).toBe(1);
+
+        // Second call finds nothing to clean
+        const cleaned2 = await manager.cleanupStaleSockets();
+        expect(cleaned2).toBe(0);
+      } else {
+        // Node cleaned up the socket — both calls return 0
+        const cleaned1 = await manager.cleanupStaleSockets();
+        expect(cleaned1).toBe(0);
+        const cleaned2 = await manager.cleanupStaleSockets();
+        expect(cleaned2).toBe(0);
+      }
+    });
   });
 
   describe('getSessionInfo', () => {
@@ -458,6 +488,45 @@ describe('SessionManager', () => {
       if (info) {
         expect(fs.existsSync(info.socketPath)).toBe(false);
       }
+    }, 20000);
+
+    it('kills child process when readShellperInfo fails (PID verification)', async () => {
+      // Create a script that writes its PID then hangs (never writes shellper info JSON)
+      const pidFile = path.join(socketDir, 'hang-pid.txt');
+      const hangScript = path.join(socketDir, 'hang-with-pid.js');
+      fs.writeFileSync(hangScript, [
+        `const fs = require('fs');`,
+        `fs.writeFileSync('${pidFile.replace(/\\/g, '\\\\')}', String(process.pid));`,
+        `setTimeout(() => {}, 60000);`,
+      ].join('\n'));
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: hangScript,
+        nodeExecutable: process.execPath,
+      });
+
+      await expect(manager.createSession({
+        sessionId: 'pid-kill-test',
+        command: '/bin/echo',
+        args: [],
+        cwd: '/tmp',
+        env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+        cols: 80,
+        rows: 24,
+      })).rejects.toThrow();
+
+      // Read the PID the child wrote before it was killed
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8'), 10);
+      expect(pid).toBeGreaterThan(0);
+
+      // Brief delay for SIGKILL to propagate
+      await new Promise(r => setTimeout(r, 500));
+
+      // Verify process is dead via signal 0 (ESRCH = dead)
+      let alive = false;
+      try { process.kill(pid, 0); alive = true; } catch { /* ESRCH = dead, good */ }
+      expect(alive).toBe(false);
     }, 20000);
   });
 
