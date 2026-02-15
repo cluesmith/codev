@@ -108,7 +108,7 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
       socket.on('connect', () => {
         socket.pipe(parser);
         // Send HELLO to initiate handshake
-        socket.write(encodeHello({ version: PROTOCOL_VERSION }));
+        socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
       });
 
       socket.on('close', () => {
