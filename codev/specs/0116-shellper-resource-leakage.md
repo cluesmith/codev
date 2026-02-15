@@ -89,8 +89,8 @@ This is especially acute during testing, where dozens of shellper sessions are c
 - This is a stability fix — should be prioritized before new features
 
 ## Assumptions
-- `posix_spawnp failed` is caused by resource exhaustion (FD limit or process limit), not a node-pty bug
-- Cleaning stale sockets and killing orphaned processes will prevent the exhaustion
+- ~~`posix_spawnp failed` is caused by resource exhaustion (FD limit or process limit), not a node-pty bug~~ **Confirmed**: The error is PTY device pool exhaustion. `posix_openpt(O_RDWR)` fails when `kern.tty.ptmx_max` (511 on macOS) is reached. The "posix_spawnp failed" message is misleading — the actual failure is in `node-pty`'s `pty_posix_spawn()` which calls `posix_openpt()` before `posix_spawnp()`. Process count (379) and memory (58% free) were fine; 143 open PTY FDs were measured even after killing most processes.
+- Cleaning stale sockets and killing orphaned processes will prevent the exhaustion (each orphaned shellper holds a PTY master/slave pair)
 - The `probeSocket()` mechanism (connect attempt with 2s timeout) is reliable for detecting dead sockets
 
 ## Solution Approaches
@@ -176,7 +176,9 @@ This is especially acute during testing, where dozens of shellper sessions are c
 
 ## Notes
 
-The 2026-02-15 crash sequence: `posix_spawnp failed` (17:24) → Tower restart attempts (17:25, 17:25) → continued failures → eventual SIGTERM (18:27) → `af` binary missing (corrupted npm install). The resource exhaustion was the root cause; everything else cascaded from it.
+The 2026-02-15 crash sequence: `posix_spawnp failed` (17:24) → Tower restart attempts (17:25, 17:25) → continued failures → eventual SIGTERM (18:27) → `af` binary missing (corrupted npm install). PTY device pool exhaustion (`kern.tty.ptmx_max = 511`) was the root cause; everything else cascaded from it.
+
+**Root cause detail**: The "posix_spawnp failed" error is misleading. The actual failure is `posix_openpt(O_RDWR)` returning -1 inside `node-pty`'s `pty_posix_spawn()` (`node_modules/node-pty/src/unix/pty.cc`). The function returns early without setting `*err` to an errno value (it stays at -1), so the caller throws the generic "posix_spawnp failed." message. Each shellper session holds a PTY master/slave pair. With concurrent builders, architects across multiple workspaces, and 3 consultation sub-processes per review iteration, PTY count climbs toward the 511 limit.
 
 Key file references:
 - `session-manager.ts:454-502` — `cleanupStaleSockets()` (currently startup-only)
