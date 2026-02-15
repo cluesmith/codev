@@ -40,4 +40,3 @@ codev-skeleton/executions/
 # Porch project iteration transcripts (bulk logs, not authored artifacts)
 # status.yaml IS versioned; .txt iteration logs are not
 codev/projects/*/*.txt
-packages/codev-hq/dist/
