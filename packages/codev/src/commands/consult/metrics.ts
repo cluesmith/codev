@@ -129,7 +129,7 @@ function buildWhereClause(filters: StatsFilters): { where: string; params: Recor
   const params: Record<string, unknown> = {};
 
   if (filters.days) {
-    conditions.push("timestamp >= datetime('now', @daysOffset)");
+    conditions.push("datetime(timestamp) >= datetime('now', @daysOffset)");
     params.daysOffset = `-${filters.days} days`;
   }
   if (filters.model) {
