@@ -349,23 +349,63 @@ describe('Stats filter flags', () => {
 
 // Test 8: CLI flag acceptance (--protocol, --project-id)
 describe('CLI flag acceptance', () => {
-  it('consult options include protocol and projectId', () => {
-    // Verify the MetricsRecord type accepts protocol and projectId
-    const record: MetricsRecord = sampleRecord({
-      protocol: 'spir',
-      projectId: '0115',
-    });
-    expect(record.protocol).toBe('spir');
-    expect(record.projectId).toBe('0115');
+  let tmpDir: string;
+  let db: MetricsDB;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    db = new MetricsDB(join(tmpDir, 'test.db'));
   });
 
-  it('protocol defaults to manual when not specified', () => {
-    const record: MetricsRecord = sampleRecord({
-      protocol: 'manual',
-      projectId: null,
-    });
-    expect(record.protocol).toBe('manual');
-    expect(record.projectId).toBeNull();
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('records protocol and projectId into database and retrieves them', () => {
+    db.record(sampleRecord({ protocol: 'spir', projectId: '0115' }));
+    db.record(sampleRecord({ protocol: 'tick', projectId: '0042' }));
+    db.record(sampleRecord({ protocol: 'manual', projectId: null }));
+
+    const rows = db.query({});
+    expect(rows).toHaveLength(3);
+
+    const spirRow = rows.find(r => r.protocol === 'spir');
+    expect(spirRow).toBeDefined();
+    expect(spirRow!.project_id).toBe('0115');
+
+    const manualRow = rows.find(r => r.protocol === 'manual');
+    expect(manualRow).toBeDefined();
+    expect(manualRow!.project_id).toBeNull();
+  });
+
+  it('filters by protocol and project in queries', () => {
+    db.record(sampleRecord({ protocol: 'spir', projectId: '0115' }));
+    db.record(sampleRecord({ protocol: 'manual', projectId: null }));
+
+    const spirRows = db.query({ protocol: 'spir' });
+    expect(spirRows).toHaveLength(1);
+    expect(spirRows[0].protocol).toBe('spir');
+
+    const projectRows = db.query({ project: '0115' });
+    expect(projectRows).toHaveLength(1);
+    expect(projectRows[0].project_id).toBe('0115');
+  });
+
+  it('summary breaks down by protocol', () => {
+    db.record(sampleRecord({ protocol: 'spir', costUsd: 5.00 }));
+    db.record(sampleRecord({ protocol: 'spir', costUsd: 3.00 }));
+    db.record(sampleRecord({ protocol: 'manual', costUsd: 1.00 }));
+
+    const summary = db.summary({});
+    const spirStats = summary.byProtocol.find(p => p.protocol === 'spir');
+    expect(spirStats).toBeDefined();
+    expect(spirStats!.count).toBe(2);
+    expect(spirStats!.totalCost).toBeCloseTo(8.00);
+
+    const manualStats = summary.byProtocol.find(p => p.protocol === 'manual');
+    expect(manualStats).toBeDefined();
+    expect(manualStats!.count).toBe(1);
   });
 });
 
@@ -499,9 +539,25 @@ describe('Cold start with no database', () => {
     expect(path).toContain('metrics.db');
   });
 
-  it('existsSync returns false for non-existent database path', () => {
+  it('handleStats prints "No metrics data found" when database does not exist', async () => {
+    const { handleStats } = await import('../stats.js');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Mock MetricsDB.defaultPath to a non-existent path
+    const originalDefaultPath = Object.getOwnPropertyDescriptor(MetricsDB, 'defaultPath');
     const nonExistentPath = join(tmpdir(), 'non-existent-codev-dir-12345', 'metrics.db');
-    expect(existsSync(nonExistentPath)).toBe(false);
+    Object.defineProperty(MetricsDB, 'defaultPath', { get: () => nonExistentPath, configurable: true });
+
+    try {
+      await handleStats([], {});
+      expect(consoleSpy).toHaveBeenCalledWith('No metrics data found. Run a consultation first.');
+    } finally {
+      // Restore original defaultPath
+      if (originalDefaultPath) {
+        Object.defineProperty(MetricsDB, 'defaultPath', originalDefaultPath);
+      }
+      consoleSpy.mockRestore();
+    }
   });
 });
 
