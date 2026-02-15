@@ -77,9 +77,26 @@ Tower.start():
   3. If not exists → spawn new detached shellper
 ```
 
+### Shellper CLI
+
+If shellper is a detached process, users need a way to interact with it directly — especially when Tower is down. Currently `af attach` goes through Tower, but the whole point of detaching is that sessions survive Tower being down.
+
+Shellper should be installed as a standalone CLI command (like `af`, `consult`, `codev`):
+
+```bash
+shellper list                # Show running sessions (id, pid, cwd, uptime)
+shellper attach <id>         # Connect terminal directly to a session
+shellper kill <id>           # Terminate a session
+shellper status              # Process status: running/stopped, session count, PTY usage
+```
+
+This replaces the `tmux ls` / `tmux attach` workflow we lost when moving to shellper. The CLI communicates with the shellper process over the same Unix socket that Tower uses.
+
+`af attach <builder>` would then be a thin wrapper that resolves the builder name to a shellper session ID and calls `shellper attach`.
+
 ### Interaction with 0118 (Multi-Client)
 
-Spec 0118 adds multi-client support to shellper. That's a natural prerequisite — Tower reconnecting after restart is just "another client connecting." These two specs together restore the session persistence that tmux provided natively.
+Spec 0118 adds multi-client support to shellper. That's a natural prerequisite — Tower reconnecting after restart is just "another client connecting," and `shellper attach` is another client too. These two specs together restore the session persistence that tmux provided natively.
 
 ## Success Criteria
 
@@ -91,6 +108,8 @@ Spec 0118 adds multi-client support to shellper. That's a natural prerequisite �
 - [ ] Tower reconnects to existing shellper on startup
 - [ ] PID file written for shellper lifecycle management
 - [ ] Tower stop does NOT kill shellper
+- [ ] `shellper` CLI installed as a global command (list, attach, kill, status)
+- [ ] `af attach` delegates to `shellper attach`
 
 ## Constraints
 
@@ -103,4 +122,5 @@ Spec 0118 adds multi-client support to shellper. That's a natural prerequisite �
 
 - Session consolidation: ~100 LOC changed
 - Detached shellper: ~150 LOC new/changed in `shellper-process.ts` and `tower-server.ts`
-- New test needed for reconnect-on-startup path
+- Shellper CLI: ~200 LOC new command entry point + subcommands
+- New tests needed for reconnect-on-startup and CLI commands
