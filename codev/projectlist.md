@@ -213,18 +213,19 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0110"
     title: "Messaging Infrastructure"
     summary: "Standardized agent naming, cross-project messaging, WebSocket message bus, POST /api/send endpoint"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0110-messaging-infrastructure.md
-      plan: null
-      review: null
+      plan: codev/plans/0110-messaging-infrastructure.md
+      review: codev/reviews/0110-messaging-infrastructure.md
     dependencies: ["0108", "0112"]
     tags: [messaging, af-send, dashboard, agents]
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
+      integrated_at: "2026-02-15"
     notes: "Standardize agent names (builder-spir-0109), add project:agent addressing, WebSocket message bus for dashboard observability, POST /api/send endpoint. Depends on 0108."
 
   - id: "0113"
@@ -258,15 +259,18 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0115"
     title: "Consultation Metrics & Cost Tracking"
     summary: "Add time/cost measurement to every consult invocation, store in SQLite for statistical analysis"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0115-consultation-metrics.md
+      plan: codev/plans/0115-consultation-metrics.md
+      review: codev/reviews/0115-consultation-metrics.md
     dependencies: []
     tags: [consult, metrics, cost, sqlite]
     timestamps:
       conceived_at: "2026-02-15"
+      integrated_at: "2026-02-15"
     notes: "Track duration, cost, protocol context, review type for every consult call. SQLite storage for analytics queries."
 
 # Low Priority
