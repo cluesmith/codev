@@ -8,14 +8,14 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Consult Integration and Output Unwrapping
-    status: in_progress
+    status: complete
   - id: phase_3
     title: Stats Subcommand and CLI Routing
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Porch Integration and Tests
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   spec-approval:
     status: approved
@@ -154,5 +154,21 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-phase_1-iter4-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-phase_2-iter1-claude.txt
 started_at: '2026-02-15T13:11:11.234Z'
-updated_at: '2026-02-15T15:23:28.200Z'
+updated_at: '2026-02-15T15:42:18.258Z'

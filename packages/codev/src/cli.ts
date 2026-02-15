@@ -10,6 +10,7 @@ import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
 import { consult } from './commands/consult/index.js';
+import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
@@ -86,16 +87,34 @@ program
   .description('AI consultation with external models')
   .argument('<subcommand>', 'Subcommand: pr, spec, plan, or general')
   .argument('[args...]', 'Arguments for the subcommand')
-  .requiredOption('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
+  .option('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
   .option('-n, --dry-run', 'Show what would execute without running')
   .option('-t, --type <type>', 'Review type: spec-review, plan-review, impl-review, pr-ready, integration-review')
   .option('-r, --role <role>', 'Custom role from codev/roles/<name>.md (e.g., gtm-specialist, security-reviewer)')
   .option('--output <path>', 'Write consultation output to file (used by porch for review file collection)')
   .option('--plan-phase <phase>', 'Scope impl review to a specific plan phase (used by porch for phased protocols)')
   .option('--context <path>', 'Context file with previous iteration feedback (used by porch for stateful reviews)')
+  .option('--protocol <name>', 'Protocol context: spir, tick, bugfix (used by porch)')
+  .option('--project-id <id>', 'Porch project ID (used by porch)')
+  .option('--days <n>', 'Stats: limit to last N days (default: 30)')
+  .option('--project <id>', 'Stats: filter by project ID')
+  .option('--last <n>', 'Stats: show last N individual invocations')
+  .option('--json', 'Stats: output as JSON')
   .allowUnknownOption(true)
   .action(async (subcommand, args, options) => {
     try {
+      // Stats subcommand doesn't require -m flag
+      if (subcommand === 'stats') {
+        await handleStats(args, options);
+        return;
+      }
+
+      // All other subcommands require -m
+      if (!options.model) {
+        console.error('Missing required option: -m, --model');
+        process.exit(1);
+      }
+
       await consult({
         model: options.model,
         subcommand,
@@ -106,6 +125,8 @@ program
         output: options.output,
         planPhase: options.planPhase,
         context: options.context,
+        protocol: options.protocol,
+        projectId: options.projectId,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
