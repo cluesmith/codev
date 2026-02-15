@@ -93,18 +93,24 @@ function extractGeminiUsage(output: string): UsageData | null {
 
 function extractCodexUsage(output: string): UsageData | null {
   const lines = output.split('\n').filter(l => l.trim());
-  let totalInput = 0;
-  let totalCached = 0;
-  let totalOutput = 0;
+  let totalInput: number | null = null;
+  let totalCached: number | null = null;
+  let totalOutput: number | null = null;
   let foundTurn = false;
 
   for (const line of lines) {
     const event = JSON.parse(line);
     if (event.type === 'turn.completed' && event.usage) {
       foundTurn = true;
-      totalInput += event.usage.input_tokens ?? 0;
-      totalCached += event.usage.cached_input_tokens ?? 0;
-      totalOutput += event.usage.output_tokens ?? 0;
+      if (typeof event.usage.input_tokens === 'number') {
+        totalInput = (totalInput ?? 0) + event.usage.input_tokens;
+      }
+      if (typeof event.usage.cached_input_tokens === 'number') {
+        totalCached = (totalCached ?? 0) + event.usage.cached_input_tokens;
+      }
+      if (typeof event.usage.output_tokens === 'number') {
+        totalOutput = (totalOutput ?? 0) + event.usage.output_tokens;
+      }
     }
   }
 
