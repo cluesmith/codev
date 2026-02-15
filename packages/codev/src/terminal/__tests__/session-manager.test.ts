@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
-import { SessionManager, getProcessStartTime, type CreateSessionOptions } from '../session-manager.js';
+import { SessionManager, StderrBuffer, getProcessStartTime, type CreateSessionOptions } from '../session-manager.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
 
@@ -867,6 +867,74 @@ describe('SessionManager', () => {
       expect(result).toBeNull();
     });
 
+    it('logs reason when reconnect fails: dead process', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      await manager.reconnectSession('dead-pid', '/tmp/nonexistent.sock', 999999, Date.now());
+      expect(logs.some((m) => m.includes('reconnect failed: process 999999 is dead'))).toBe(true);
+    });
+
+    it('logs reason when reconnect fails: socket missing', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Use actual process start time so we pass the PID reuse check
+      const actualStartTime = await getProcessStartTime(process.pid);
+      if (actualStartTime === null) return; // Skip if can't determine start time
+      await manager.reconnectSession('no-socket', '/tmp/nonexistent.sock', process.pid, actualStartTime);
+      expect(logs.some((m) => m.includes('reconnect failed: socket missing'))).toBe(true);
+    });
+
+    it('logs reason when reconnect fails: PID reused (start time mismatch)', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Use our own PID (alive) but a wildly wrong start time to trigger PID reuse detection
+      await manager.reconnectSession('pid-reuse', '/tmp/nonexistent.sock', process.pid, 1000);
+      expect(logs.some((m) => m.includes('reconnect failed: PID') && m.includes('reused (start time mismatch)'))).toBe(true);
+    });
+
+    it('logs reason when reconnect fails: connect error', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Create a real socket file that nothing is listening on
+      const staleSocketPath = path.join(socketDir, 'shellper-connect-err.sock');
+      const tmpServer = net.createServer();
+      await new Promise<void>((resolve) => tmpServer.listen(staleSocketPath, resolve));
+      await new Promise<void>((resolve) => tmpServer.close(resolve));
+
+      // If Node cleaned up the socket, skip (can't reproduce connect error without a socket file)
+      if (!fs.existsSync(staleSocketPath)) return;
+
+      const actualStartTime = await getProcessStartTime(process.pid);
+      if (actualStartTime === null) return;
+
+      await manager.reconnectSession('connect-err', staleSocketPath, process.pid, actualStartTime);
+      expect(logs.some((m) => m.includes('reconnect failed: connect error:'))).toBe(true);
+    });
+
     it('returns null if socket file missing', async () => {
       const manager = new SessionManager({
         socketDir,
@@ -918,6 +986,530 @@ describe('SessionManager', () => {
       }
     });
   });
+
+  describe('logger callback', () => {
+    it('logs session creation', async () => {
+      const logs: string[] = [];
+      const socketPath = path.join(socketDir, 'shellper-logcreate.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shellper = new ShellperProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      const client = await manager.reconnectSession(
+        'log-create',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        cleanupFns.push(() => client.disconnect());
+        expect(logs.some((m) => m.includes('Session log-create reconnected: pid='))).toBe(true);
+      }
+    });
+
+    it('logs kill session', async () => {
+      const logs: string[] = [];
+      const socketPath = path.join(socketDir, 'shellper-logkill.sock');
+
+      const shellper = new ShellperProcess(
+        () => new MockPty(),
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      const client = await manager.reconnectSession(
+        'log-kill',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        await manager.killSession('log-kill');
+        expect(logs.some((m) => m.includes('Killing session log-kill: pid='))).toBe(true);
+      }
+    });
+
+    it('logs unexpected disconnect', async () => {
+      const logs: string[] = [];
+      const socketPath = path.join(socketDir, 'shellper-logdisconnect.sock');
+
+      const shellper = new ShellperProcess(
+        () => new MockPty(),
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      const client = await manager.reconnectSession(
+        'log-disconnect',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        const errorPromise = new Promise<void>((resolve) => {
+          manager.on('session-error', () => resolve());
+        });
+
+        // Crash the shellper
+        shellper.shutdown();
+        await Promise.race([
+          errorPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+
+        expect(logs.some((m) => m.includes('Session log-disconnect shellper disconnected unexpectedly'))).toBe(true);
+      } else {
+        shellper.shutdown();
+      }
+    });
+
+    it('logs reconnect attempt with pid and socket', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Will fail (dead pid), but should still log the attempt first
+      await manager.reconnectSession('attempt-test', '/tmp/some.sock', 999999, Date.now());
+      expect(logs.some((m) => m.includes('Reconnecting session attempt-test: pid=999999, socket=/tmp/some.sock'))).toBe(true);
+    });
+  });
+
+  describe('auto-restart logging', () => {
+    it('logs auto-restart count, max, and delay', async () => {
+      const logs: string[] = [];
+      const socketPath = path.join(socketDir, 'shellper-autorestart-log.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shellper = new ShellperProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Reconnect with restart options to enable auto-restart
+      const client = await manager.reconnectSession(
+        'restart-log',
+        socketPath,
+        process.pid,
+        Date.now(),
+        {
+          command: '/bin/bash',
+          args: ['-l'],
+          cwd: '/tmp',
+          env: {},
+          restartDelay: 100,
+          maxRestarts: 3,
+        },
+      );
+
+      if (client) {
+        const restartPromise = new Promise<void>((resolve) => {
+          manager.on('session-restart', () => resolve());
+        });
+
+        // Simulate PTY exit to trigger auto-restart
+        capturedPty!.simulateExit(1);
+        await Promise.race([
+          restartPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+
+        expect(logs.some((m) => m.includes('Session restart-log auto-restart #1/3 in 100ms'))).toBe(true);
+      }
+    });
+
+    it('logs max restarts exceeded', async () => {
+      const logs: string[] = [];
+      const socketPath = path.join(socketDir, 'shellper-maxrestart-log.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shellper = new ShellperProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Reconnect with maxRestarts=1
+      const client = await manager.reconnectSession(
+        'maxrestart-log',
+        socketPath,
+        process.pid,
+        Date.now(),
+        {
+          command: '/bin/bash',
+          args: ['-l'],
+          cwd: '/tmp',
+          env: {},
+          restartDelay: 50,
+          maxRestarts: 1,
+        },
+      );
+
+      if (client) {
+        // First exit: triggers restart #1/1
+        const restart1 = new Promise<void>((resolve) => {
+          manager.on('session-restart', () => resolve());
+        });
+        capturedPty!.simulateExit(1);
+        await Promise.race([
+          restart1,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+
+        // Wait for SPAWN to fire (restartDelay=50ms)
+        await new Promise((r) => setTimeout(r, 100));
+
+        // Second exit: restartCount (1) >= maxRestarts (1), should log exhausted
+        const errorPromise = new Promise<void>((resolve) => {
+          manager.on('session-error', (_id: string, err: Error) => {
+            if (err.message.includes('Max restarts')) resolve();
+          });
+        });
+        capturedPty!.simulateExit(1);
+        await Promise.race([
+          errorPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+
+        expect(logs.some((m) => m.includes('Session maxrestart-log exhausted max restarts (1)'))).toBe(true);
+      }
+    });
+  });
+});
+
+describe('StderrBuffer', () => {
+  it('retains last maxLines lines (ring buffer)', () => {
+    const buf = new StderrBuffer(5, 10000);
+    for (let i = 0; i < 10; i++) {
+      buf.push(`line ${i}\n`);
+    }
+    const lines = buf.getLines();
+    expect(lines).toEqual(['line 5', 'line 6', 'line 7', 'line 8', 'line 9']);
+  });
+
+  it('retains last 500 lines with default config', () => {
+    const buf = new StderrBuffer();
+    for (let i = 0; i < 600; i++) {
+      buf.push(`line ${i}\n`);
+    }
+    const lines = buf.getLines();
+    expect(lines.length).toBe(500);
+    expect(lines[0]).toBe('line 100');
+    expect(lines[499]).toBe('line 599');
+  });
+
+  it('truncates lines at maxLineLength', () => {
+    const buf = new StderrBuffer(500, 100);
+    const longLine = 'x'.repeat(200);
+    buf.push(longLine + '\n');
+    const lines = buf.getLines();
+    expect(lines.length).toBe(1);
+    expect(lines[0].length).toBe(100);
+  });
+
+  it('truncates at 10000 chars with default config', () => {
+    const buf = new StderrBuffer();
+    const longLine = 'A'.repeat(20000);
+    buf.push(longLine + '\n');
+    const lines = buf.getLines();
+    expect(lines[0].length).toBe(10000);
+  });
+
+  it('replaces U+FFFD with ?', () => {
+    const buf = new StderrBuffer();
+    buf.push('hello \uFFFD world \uFFFD\n');
+    const lines = buf.getLines();
+    expect(lines[0]).toBe('hello ? world ?');
+  });
+
+  it('handles partial lines across chunks', () => {
+    const buf = new StderrBuffer();
+    buf.push('hello ');
+    buf.push('world\n');
+    const lines = buf.getLines();
+    expect(lines).toEqual(['hello world']);
+  });
+
+  it('flushes partial line into buffer', () => {
+    const buf = new StderrBuffer();
+    buf.push('incomplete');
+    expect(buf.getLines()).toEqual([]);
+    buf.flush();
+    expect(buf.getLines()).toEqual(['incomplete']);
+  });
+
+  it('flush truncates partial line at maxLineLength', () => {
+    const buf = new StderrBuffer(500, 50);
+    buf.push('x'.repeat(100));
+    buf.flush();
+    const lines = buf.getLines();
+    expect(lines[0].length).toBe(50);
+  });
+
+  it('flush is no-op when no partial line', () => {
+    const buf = new StderrBuffer();
+    buf.push('complete\n');
+    buf.flush();
+    expect(buf.getLines()).toEqual(['complete']);
+  });
+
+  it('hasContent returns true for buffered lines', () => {
+    const buf = new StderrBuffer();
+    expect(buf.hasContent()).toBe(false);
+    buf.push('line\n');
+    expect(buf.hasContent()).toBe(true);
+  });
+
+  it('hasContent returns true for partial content', () => {
+    const buf = new StderrBuffer();
+    buf.push('partial');
+    expect(buf.hasContent()).toBe(true);
+  });
+
+  it('getLines returns a copy', () => {
+    const buf = new StderrBuffer();
+    buf.push('a\nb\n');
+    const lines1 = buf.getLines();
+    lines1.push('c');
+    expect(buf.getLines()).toEqual(['a', 'b']);
+  });
+
+  it('handles empty lines', () => {
+    const buf = new StderrBuffer();
+    buf.push('a\n\nb\n');
+    expect(buf.getLines()).toEqual(['a', '', 'b']);
+  });
+
+  it('handles chunk ending with newline', () => {
+    const buf = new StderrBuffer();
+    buf.push('line1\nline2\n');
+    expect(buf.getLines()).toEqual(['line1', 'line2']);
+    // No partial line
+    buf.flush();
+    expect(buf.getLines()).toEqual(['line1', 'line2']);
+  });
+});
+
+describe('stderr tail logging (integration)', () => {
+  let socketDir: string;
+  let cleanupFns: (() => void)[] = [];
+
+  const shellperScript = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '../../../dist/terminal/shellper-main.js',
+  );
+
+  beforeEach(() => {
+    socketDir = tmpDir();
+    cleanupFns = [];
+  });
+
+  afterEach(async () => {
+    for (const fn of cleanupFns) {
+      try { await fn(); } catch { /* noop */ }
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    rmrf(socketDir);
+  });
+
+  it.skipIf(!!process.env.CI)('logs stderr tail when session exits normally', async () => {
+    const logs: string[] = [];
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript,
+      nodeExecutable: process.execPath,
+      logger: (msg) => logs.push(msg),
+    });
+
+    const client = await manager.createSession({
+      sessionId: 'stderr-exit-test',
+      command: '/bin/sh',
+      args: ['-c', 'echo "stderr msg" >&2; exit 0'],
+      cwd: '/tmp',
+      env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+      cols: 80,
+      rows: 24,
+    });
+    cleanupFns.push(async () => {
+      try { await manager.killSession('stderr-exit-test'); } catch { /* noop */ }
+    });
+
+    // Wait for exit event + stderr processing
+    await new Promise<void>((resolve) => {
+      manager.on('session-exit', () => resolve());
+    });
+    // Wait for stderr close + log emission
+    await new Promise((r) => setTimeout(r, 1500));
+
+    expect(logs.some((m) => m.includes('Session stderr-exit-test exited (code=0)'))).toBe(true);
+    expect(logs.some((m) => m.includes('Last stderr'))).toBe(true);
+  }, 15000);
+
+  it.skipIf(!!process.env.CI)('logs stderr tail when session is killed', async () => {
+    const logs: string[] = [];
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript,
+      nodeExecutable: process.execPath,
+      logger: (msg) => logs.push(msg),
+    });
+
+    const client = await manager.createSession({
+      sessionId: 'stderr-kill-test',
+      command: '/bin/cat',
+      args: [],
+      cwd: '/tmp',
+      env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+      cols: 80,
+      rows: 24,
+    });
+
+    // Wait briefly for shellper to start and emit stderr startup logs
+    await new Promise((r) => setTimeout(r, 500));
+
+    await manager.killSession('stderr-kill-test');
+    // Wait for stderr close + log emission
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // killSession logs stderr with exitCode=-1
+    expect(logs.some((m) => m.includes('Session stderr-kill-test exited (code=-1)'))).toBe(true);
+    expect(logs.some((m) => m.includes('Last stderr'))).toBe(true);
+  }, 15000);
+
+  it.skipIf(!!process.env.CI)('does not log stderr for reconnected sessions', async () => {
+    const logs: string[] = [];
+    const socketPath = path.join(socketDir, 'shellper-no-stderr.sock');
+    let mockPty: MockPty | null = null;
+
+    const shellper = new ShellperProcess(
+      () => {
+        mockPty = new MockPty();
+        return mockPty;
+      },
+      socketPath,
+      100,
+    );
+    await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+    cleanupFns.push(() => shellper.shutdown());
+
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript: '/nonexistent/shellper.js',
+      nodeExecutable: process.execPath,
+      logger: (msg) => logs.push(msg),
+    });
+
+    const client = await manager.reconnectSession(
+      'no-stderr-test',
+      socketPath,
+      process.pid,
+      Date.now(),
+    );
+
+    if (client) {
+      await manager.killSession('no-stderr-test');
+      await new Promise((r) => setTimeout(r, 200));
+      // No stderr tail log — reconnected sessions have no stderr capture
+      expect(logs.some((m) => m.includes('Last stderr'))).toBe(false);
+    }
+  });
+
+  it.skipIf(!!process.env.CI)('deduplicates stderr tail logging', async () => {
+    const logs: string[] = [];
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript,
+      nodeExecutable: process.execPath,
+      logger: (msg) => logs.push(msg),
+    });
+
+    const client = await manager.createSession({
+      sessionId: 'stderr-dedup-test',
+      command: '/bin/sh',
+      args: ['-c', 'echo "dedup stderr" >&2; exit 1'],
+      cwd: '/tmp',
+      env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+      cols: 80,
+      rows: 24,
+    });
+    cleanupFns.push(async () => {
+      try { await manager.killSession('stderr-dedup-test'); } catch { /* noop */ }
+    });
+
+    // Wait for exit + close events + stderr processing
+    await new Promise<void>((resolve) => {
+      manager.on('session-exit', () => resolve());
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Count how many "Last stderr" entries — should be exactly 1
+    const stderrLogCount = logs.filter((m) => m.includes('Last stderr')).length;
+    expect(stderrLogCount).toBe(1);
+  }, 15000);
 });
 
 describe('getProcessStartTime', () => {

@@ -208,7 +208,7 @@ describe('PtySession + ShellperClient integration', () => {
 
       mockClient.simulateExit(0);
 
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(exitSpy).toHaveBeenCalledWith(0, null);
       expect(session.status).toBe('exited');
       expect(session.info.exitCode).toBe(0);
     });

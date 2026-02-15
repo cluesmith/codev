@@ -12,18 +12,20 @@
  * Process start time validation prevents PID reuse reconnection.
  */
 
-import { spawn as cpSpawn } from 'node:child_process';
+import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { ShellperClient, type IShellperClient } from './shellper-client.js';
 
 export interface SessionManagerConfig {
   socketDir: string;
   shellperScript: string;
   nodeExecutable: string;
+  logger?: (message: string) => void;
 }
 
 export interface CreateSessionOptions {
@@ -50,6 +52,63 @@ export interface ReconnectRestartOptions {
   restartResetAfter?: number;
 }
 
+/**
+ * Ring buffer for stderr lines. Retains the last `maxLines` lines,
+ * each truncated at `maxLineLength` chars. Non-UTF-8 bytes (decoded as
+ * U+FFFD by Node) are replaced with '?'.
+ */
+export class StderrBuffer {
+  private lines: string[] = [];
+  private partial = '';
+  readonly maxLines: number;
+  readonly maxLineLength: number;
+
+  constructor(maxLines = 500, maxLineLength = 10000) {
+    this.maxLines = maxLines;
+    this.maxLineLength = maxLineLength;
+  }
+
+  /** Push a chunk of UTF-8 text, splitting on newlines. */
+  push(chunk: string): void {
+    // Replace U+FFFD (invalid UTF-8 replacement char) with '?'
+    const cleaned = chunk.replace(/\uFFFD/g, '?');
+    const parts = (this.partial + cleaned).split('\n');
+    // Last element is the incomplete line (or '' if chunk ends with \n)
+    this.partial = parts.pop()!;
+    for (const line of parts) {
+      const truncated = line.length > this.maxLineLength ? line.slice(0, this.maxLineLength) : line;
+      this.lines.push(truncated);
+      if (this.lines.length > this.maxLines) {
+        this.lines.shift();
+      }
+    }
+  }
+
+  /** Flush the partial line (if any) into the buffer. */
+  flush(): void {
+    if (this.partial) {
+      const truncated = this.partial.length > this.maxLineLength
+        ? this.partial.slice(0, this.maxLineLength)
+        : this.partial;
+      this.lines.push(truncated);
+      if (this.lines.length > this.maxLines) {
+        this.lines.shift();
+      }
+      this.partial = '';
+    }
+  }
+
+  /** Get all buffered lines. */
+  getLines(): string[] {
+    return [...this.lines];
+  }
+
+  /** Whether the buffer has any content (including partial). */
+  hasContent(): boolean {
+    return this.lines.length > 0 || this.partial.length > 0;
+  }
+}
+
 interface ManagedSession {
   client: IShellperClient;
   socketPath: string;
@@ -58,13 +117,18 @@ interface ManagedSession {
   options: CreateSessionOptions;
   restartCount: number;
   restartResetTimer: ReturnType<typeof setTimeout> | null;
+  stderrBuffer: StderrBuffer | null;
+  stderrStream: Readable | null;
+  stderrTailLogged: boolean;
 }
 
 export class SessionManager extends EventEmitter {
   private sessions = new Map<string, ManagedSession>();
+  private readonly log: (msg: string) => void;
 
   constructor(private readonly config: SessionManagerConfig) {
     super();
+    this.log = config.logger ?? (() => {});
   }
 
   /**
@@ -73,6 +137,7 @@ export class SessionManager extends EventEmitter {
    */
   async createSession(opts: CreateSessionOptions): Promise<IShellperClient> {
     const socketPath = this.getSocketPath(opts.sessionId);
+    this.log(`Creating session ${opts.sessionId}: command=${opts.command}, socket=${socketPath}`);
 
     // Ensure socket directory exists with 0700 permissions
     fs.mkdirSync(this.config.socketDir, { recursive: true, mode: 0o700 });
@@ -91,14 +156,31 @@ export class SessionManager extends EventEmitter {
       socketPath,
     });
 
-    // Spawn shellper as detached process
+    // Spawn shellper as detached process (stderr piped for capture)
     const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    // Start capturing stderr immediately
+    const stderrBuffer = new StderrBuffer();
+    this.wireStderrCapture(child.stderr!, stderrBuffer);
+
     // Read PID + startTime from stdout
-    const info = await this.readShellperInfo(child);
+    let info: { pid: number; startTime: number };
+    try {
+      info = await this.readShellperInfo(child);
+    } catch (err) {
+      // Include any startup stderr in the failure message
+      stderrBuffer.flush();
+      const stderrLines = stderrBuffer.getLines();
+      const stderrSuffix = stderrLines.length > 0
+        ? `. Startup stderr:\n  ${stderrLines.join('\n  ')}`
+        : '';
+      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}${stderrSuffix}`);
+      this.unlinkSocketIfExists(socketPath);
+      throw err;
+    }
     child.unref();
 
     // Post-spawn setup with rollback: if anything fails after the shellper
@@ -113,6 +195,12 @@ export class SessionManager extends EventEmitter {
       await client.connect();
     } catch (err) {
       // Rollback: kill the orphaned shellper process
+      stderrBuffer.flush();
+      const stderrLines = stderrBuffer.getLines();
+      const stderrSuffix = stderrLines.length > 0
+        ? `. Startup stderr:\n  ${stderrLines.join('\n  ')}`
+        : '';
+      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}${stderrSuffix}`);
       try { process.kill(info.pid, 'SIGKILL'); } catch { /* already dead */ }
       this.unlinkSocketIfExists(socketPath);
       throw err;
@@ -126,9 +214,13 @@ export class SessionManager extends EventEmitter {
       options: opts,
       restartCount: 0,
       restartResetTimer: null,
+      stderrBuffer,
+      stderrStream: child.stderr!,
+      stderrTailLogged: false,
     };
 
     this.sessions.set(opts.sessionId, session);
+    this.log(`Session ${opts.sessionId} created: pid=${info.pid}`);
 
     // Set up auto-restart if configured
     if (opts.restartOnExit) {
@@ -137,6 +229,7 @@ export class SessionManager extends EventEmitter {
 
     // Forward exit events and clean up dead sessions
     client.on('exit', (exitInfo) => {
+      this.logStderrTail(opts.sessionId, session, exitInfo.code);
       this.emit('session-exit', opts.sessionId, exitInfo);
       // If not auto-restarting, remove the dead session from the map
       // so listSessions() doesn't report it and cleanupStaleSockets()
@@ -155,6 +248,8 @@ export class SessionManager extends EventEmitter {
       // If the session is still in the map (wasn't already cleaned up by exit/kill),
       // the shellper died without sending EXIT. Remove the dead session.
       if (this.sessions.has(opts.sessionId)) {
+        this.log(`Session ${opts.sessionId} shellper disconnected unexpectedly`);
+        this.logStderrTail(opts.sessionId, session, -1);
         this.removeDeadSession(opts.sessionId);
         this.emit('session-error', opts.sessionId, new Error('Shellper disconnected unexpectedly'));
       }
@@ -180,8 +275,11 @@ export class SessionManager extends EventEmitter {
     startTime: number,
     restartOptions?: ReconnectRestartOptions,
   ): Promise<IShellperClient | null> {
+    this.log(`Reconnecting session ${sessionId}: pid=${pid}, socket=${socketPath}`);
+
     // Check if process is alive
     if (!this.isProcessAlive(pid)) {
+      this.log(`Session ${sessionId} reconnect failed: process ${pid} is dead`);
       return null;
     }
 
@@ -189,6 +287,7 @@ export class SessionManager extends EventEmitter {
     const actualStartTime = await getProcessStartTime(pid);
     if (actualStartTime === null || Math.abs(actualStartTime - startTime) > 2000) {
       // Start time mismatch or couldn't determine — PID was reused
+      this.log(`Session ${sessionId} reconnect failed: PID ${pid} reused (start time mismatch)`);
       return null;
     }
 
@@ -196,9 +295,11 @@ export class SessionManager extends EventEmitter {
     try {
       const stat = fs.lstatSync(socketPath);
       if (!stat.isSocket()) {
+        this.log(`Session ${sessionId} reconnect failed: socket not a socket file`);
         return null;
       }
     } catch {
+      this.log(`Session ${sessionId} reconnect failed: socket missing or lstat error`);
       return null;
     }
 
@@ -206,7 +307,8 @@ export class SessionManager extends EventEmitter {
     const client = new ShellperClient(socketPath);
     try {
       await client.connect();
-    } catch {
+    } catch (err) {
+      this.log(`Session ${sessionId} reconnect failed: connect error: ${(err as Error).message}`);
       return null;
     }
 
@@ -231,9 +333,13 @@ export class SessionManager extends EventEmitter {
       },
       restartCount: 0,
       restartResetTimer: null,
+      stderrBuffer: null,
+      stderrStream: null,
+      stderrTailLogged: false,
     };
 
     this.sessions.set(sessionId, session);
+    this.log(`Session ${sessionId} reconnected: pid=${pid}`);
 
     // Set up auto-restart if configured (e.g. architect sessions after Tower restart)
     if (hasRestart) {
@@ -254,6 +360,7 @@ export class SessionManager extends EventEmitter {
     // Handle shellper crash (socket disconnects without EXIT frame)
     client.on('close', () => {
       if (this.sessions.has(sessionId)) {
+        this.log(`Session ${sessionId} shellper disconnected unexpectedly`);
         this.removeDeadSession(sessionId);
         this.emit('session-error', sessionId, new Error('Shellper disconnected unexpectedly'));
       }
@@ -274,6 +381,8 @@ export class SessionManager extends EventEmitter {
   async killSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+
+    this.log(`Killing session ${sessionId}: pid=${session.pid}`);
 
     // Clear restart timer
     if (session.restartResetTimer) {
@@ -302,6 +411,9 @@ export class SessionManager extends EventEmitter {
         // Already dead
       }
     }
+
+    // Log stderr tail if available
+    this.logStderrTail(sessionId, session, -1);
 
     // Disconnect client
     session.client.disconnect();
@@ -383,6 +495,9 @@ export class SessionManager extends EventEmitter {
       }
     }
 
+    if (cleaned > 0) {
+      this.log(`Cleaned ${cleaned} stale sockets`);
+    }
     return cleaned;
   }
 
@@ -558,6 +673,7 @@ export class SessionManager extends EventEmitter {
 
       const maxRestarts = session.options.maxRestarts ?? 50;
       if (session.restartCount >= maxRestarts) {
+        this.log(`Session ${sessionId} exhausted max restarts (${maxRestarts})`);
         this.emit('session-error', sessionId, new Error(`Max restarts (${maxRestarts}) exceeded`));
         // Remove the exhausted session from the map
         this.removeDeadSession(sessionId);
@@ -566,6 +682,7 @@ export class SessionManager extends EventEmitter {
 
       session.restartCount++;
       const delay = session.options.restartDelay ?? 2000;
+      this.log(`Session ${sessionId} auto-restart #${session.restartCount}/${maxRestarts} in ${delay}ms`);
 
       this.emit('session-restart', sessionId, {
         restartCount: session.restartCount,
@@ -602,6 +719,61 @@ export class SessionManager extends EventEmitter {
     session.restartResetTimer = setTimeout(() => {
       session.restartCount = 0;
     }, effectiveResetAfter);
+  }
+
+  /**
+   * Wire stderr capture on a child process. Sets encoding to UTF-8
+   * and pushes decoded chunks into the buffer.
+   */
+  private wireStderrCapture(stderr: Readable, buffer: StderrBuffer): void {
+    stderr.setEncoding('utf8');
+    stderr.on('data', (chunk: string) => {
+      buffer.push(chunk);
+    });
+    stderr.on('error', () => {
+      // Silently ignore EPIPE and other stderr errors
+    });
+  }
+
+  /**
+   * Log the tail of a session's stderr buffer after exit/crash/kill.
+   * Waits up to 1000ms for stderr stream to close (to capture all data),
+   * then logs with the session's logger. Deduplicates via stderrTailLogged flag.
+   */
+  private logStderrTail(sessionId: string, session: ManagedSession, exitCode: number): void {
+    if (session.stderrTailLogged) return;
+    session.stderrTailLogged = true;
+    if (!session.stderrBuffer) return;
+
+    const emitLog = (incomplete: boolean) => {
+      session.stderrBuffer!.flush();
+      const lines = session.stderrBuffer!.getLines();
+      if (lines.length === 0) return;
+      const suffix = incomplete ? ' (stderr incomplete)' : '';
+      this.log(`Session ${sessionId} exited (code=${exitCode}). Last stderr${suffix}:\n  ${lines.join('\n  ')}`);
+    };
+
+    // If no stream reference or stream already destroyed/closed, log immediately
+    if (!session.stderrStream || session.stderrStream.destroyed) {
+      emitLog(false);
+      return;
+    }
+
+    // Wait up to 1000ms for stderr stream to close
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) { resolved = true; emitLog(true); }
+    }, 1000);
+    const check = setInterval(() => {
+      if (session.stderrStream!.destroyed && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        clearInterval(check);
+        emitLog(false);
+      }
+    }, 50);
+    // Ensure interval is cleaned up after timeout
+    setTimeout(() => { clearInterval(check); }, 1100);
   }
 }
 
