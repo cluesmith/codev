@@ -683,9 +683,10 @@ async function handleSend(
     session.write('\r');
   }
 
-  // Broadcast structured message (no-op until Phase 3)
+  // Broadcast structured message to WebSocket subscribers
   const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
   broadcastMessage({
+    type: 'message',
     from: {
       project: path.basename(senderWorkspace),
       agent: from ?? 'unknown',
@@ -694,7 +695,8 @@ async function handleSend(
       project: path.basename(result.workspacePath),
       agent: result.agent,
     },
-    body: message,
+    content: message,
+    metadata: { raw, source: 'api' },
     timestamp: new Date().toISOString(),
   });
 

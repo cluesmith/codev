@@ -1,14 +1,73 @@
 /**
- * Message routing and address resolution for Tower server.
- * Spec 0110: Messaging Infrastructure — Phase 2
+ * Message routing, address resolution, and WebSocket message bus for Tower server.
+ * Spec 0110: Messaging Infrastructure — Phases 2 & 3
  *
  * Resolves `[project:]agent` addresses to terminal IDs by querying
  * the workspace terminal registry maintained by tower-terminals.ts.
+ * Manages WebSocket subscribers and broadcasts structured message frames.
  */
 
 import path from 'node:path';
+import type { WebSocket } from 'ws';
 import { parseAddress, stripLeadingZeros } from '../utils/agent-names.js';
 import { getWorkspaceTerminals } from './tower-terminals.js';
+
+// ============================================================================
+// Message Frame
+// ============================================================================
+
+/**
+ * Structured message frame broadcast to WebSocket subscribers.
+ */
+export interface MessageFrame {
+  type: 'message';
+  timestamp: string;
+  from: { project: string; agent: string };
+  to: { project: string; agent: string };
+  content: string;
+  metadata: { raw?: boolean; source?: string };
+}
+
+// ============================================================================
+// Subscriber Management
+// ============================================================================
+
+interface MessageSubscriber {
+  ws: WebSocket;
+  projectFilter?: string;
+}
+
+/** Active WebSocket subscribers for the message bus. */
+const messageSubscribers = new Set<MessageSubscriber>();
+
+/**
+ * Add a WebSocket subscriber to the message bus.
+ * @param ws - The WebSocket connection
+ * @param projectFilter - Optional project name to filter messages by
+ */
+export function addSubscriber(ws: WebSocket, projectFilter?: string): void {
+  messageSubscribers.add({ ws, projectFilter });
+}
+
+/**
+ * Remove a WebSocket subscriber from the message bus.
+ * @param ws - The WebSocket connection to remove
+ */
+export function removeSubscriber(ws: WebSocket): void {
+  for (const sub of messageSubscribers) {
+    if (sub.ws === ws) {
+      messageSubscribers.delete(sub);
+      return;
+    }
+  }
+}
+
+/**
+ * Get the count of active subscribers (for testing/monitoring).
+ */
+export function getSubscriberCount(): number {
+  return messageSubscribers.size;
+}
 
 /**
  * Result of resolving a target address to a terminal.
@@ -179,16 +238,27 @@ function resolveAgentInWorkspace(
 }
 
 /**
- * Broadcast a structured message to all WebSocket subscribers.
- * Stub for Phase 3 — currently a no-op.
+ * Broadcast a structured message frame to all WebSocket subscribers.
+ * Filters by project if the subscriber has a projectFilter set.
  */
-export function broadcastMessage(_message: {
-  from: { project: string; agent: string };
-  to: { project: string; agent: string };
-  body: string;
-  timestamp: string;
-}): void {
-  // Phase 3 will wire this up to /ws/messages subscribers
+export function broadcastMessage(message: MessageFrame): void {
+  const payload = JSON.stringify(message);
+
+  for (const sub of messageSubscribers) {
+    // Apply project filter: message must involve the filtered project (from or to)
+    if (sub.projectFilter) {
+      if (message.from.project !== sub.projectFilter && message.to.project !== sub.projectFilter) {
+        continue;
+      }
+    }
+
+    try {
+      sub.ws.send(payload);
+    } catch {
+      // If send fails, subscriber is likely disconnected — remove it
+      messageSubscribers.delete(sub);
+    }
+  }
 }
 
 /**

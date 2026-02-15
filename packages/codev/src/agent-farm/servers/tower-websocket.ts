@@ -13,6 +13,7 @@ import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protoc
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getTerminalManager } from './tower-terminals.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
+import { addSubscriber, removeSubscriber } from './tower-messages.js';
 
 // ============================================================================
 // Frame bridging — WS ↔ PTY
@@ -129,6 +130,24 @@ export function setupUpgradeHandler(
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         handleTerminalWebSocket(ws, session, req);
+      });
+      return;
+    }
+
+    // Spec 0110 Phase 3: Handle /ws/messages — message bus subscription
+    if (reqUrl.pathname === '/ws/messages') {
+      const projectFilter = reqUrl.searchParams.get('project') || undefined;
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        addSubscriber(ws, projectFilter);
+
+        ws.on('close', () => {
+          removeSubscriber(ws);
+        });
+
+        ws.on('error', () => {
+          removeSubscriber(ws);
+        });
       });
       return;
     }

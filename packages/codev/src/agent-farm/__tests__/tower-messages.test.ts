@@ -1,6 +1,6 @@
 /**
- * Tests for tower-messages.ts (resolveTarget, broadcastMessage)
- * Spec 0110: Messaging Infrastructure — Phase 2
+ * Tests for tower-messages.ts (resolveTarget, broadcastMessage, subscriber management)
+ * Spec 0110: Messaging Infrastructure — Phases 2 & 3
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -18,7 +18,15 @@ vi.mock('../servers/tower-terminals.js', () => ({
   getWorkspaceTerminals: () => mockGetWorkspaceTerminals(),
 }));
 
-import { resolveTarget, isResolveError } from '../servers/tower-messages.js';
+import {
+  resolveTarget,
+  isResolveError,
+  addSubscriber,
+  removeSubscriber,
+  broadcastMessage,
+  getSubscriberCount,
+} from '../servers/tower-messages.js';
+import type { MessageFrame } from '../servers/tower-messages.js';
 
 // ============================================================================
 // Helpers
@@ -338,5 +346,158 @@ describe('resolveTarget', () => {
         expect(result.message).toContain('nonexistent');
       }
     });
+  });
+});
+
+// ============================================================================
+// Phase 3: Subscriber Management and Broadcast
+// ============================================================================
+
+/** Create a mock WebSocket for testing. */
+function makeMockWs(): { send: ReturnType<typeof vi.fn>; readyState: number } {
+  return { send: vi.fn(), readyState: 1 /* OPEN */ };
+}
+
+function makeFrame(overrides?: Partial<MessageFrame>): MessageFrame {
+  return {
+    type: 'message',
+    timestamp: '2026-02-15T00:00:00.000Z',
+    from: { project: 'proj-a', agent: 'architect' },
+    to: { project: 'proj-a', agent: 'builder-spir-109' },
+    content: 'Hello builder',
+    metadata: { source: 'api' },
+    ...overrides,
+  };
+}
+
+describe('subscriber management', () => {
+  beforeEach(() => {
+    // Clean up subscribers between tests by removing all
+    // We can't access the set directly, so add/remove cycle
+    // Instead, we'll track what we add and remove each in afterEach
+  });
+
+  it('addSubscriber increases count and removeSubscriber decreases it', () => {
+    const ws1 = makeMockWs();
+    const ws2 = makeMockWs();
+    const baseline = getSubscriberCount();
+
+    addSubscriber(ws1 as any);
+    expect(getSubscriberCount()).toBe(baseline + 1);
+
+    addSubscriber(ws2 as any);
+    expect(getSubscriberCount()).toBe(baseline + 2);
+
+    removeSubscriber(ws1 as any);
+    expect(getSubscriberCount()).toBe(baseline + 1);
+
+    removeSubscriber(ws2 as any);
+    expect(getSubscriberCount()).toBe(baseline);
+  });
+
+  it('removeSubscriber is a no-op for unknown WebSocket', () => {
+    const ws = makeMockWs();
+    const baseline = getSubscriberCount();
+
+    removeSubscriber(ws as any); // never added
+    expect(getSubscriberCount()).toBe(baseline);
+  });
+});
+
+describe('broadcastMessage', () => {
+  it('sends JSON frame to all subscribers', () => {
+    const ws1 = makeMockWs();
+    const ws2 = makeMockWs();
+    addSubscriber(ws1 as any);
+    addSubscriber(ws2 as any);
+
+    const frame = makeFrame();
+    broadcastMessage(frame);
+
+    const expected = JSON.stringify(frame);
+    expect(ws1.send).toHaveBeenCalledWith(expected);
+    expect(ws2.send).toHaveBeenCalledWith(expected);
+
+    // Clean up
+    removeSubscriber(ws1 as any);
+    removeSubscriber(ws2 as any);
+  });
+
+  it('filters by project when subscriber has projectFilter', () => {
+    const wsAll = makeMockWs();
+    const wsProjA = makeMockWs();
+    const wsProjB = makeMockWs();
+
+    addSubscriber(wsAll as any); // no filter — gets everything
+    addSubscriber(wsProjA as any, 'proj-a'); // only proj-a
+    addSubscriber(wsProjB as any, 'proj-b'); // only proj-b
+
+    const frame = makeFrame({
+      from: { project: 'proj-a', agent: 'architect' },
+      to: { project: 'proj-a', agent: 'builder-spir-109' },
+    });
+    broadcastMessage(frame);
+
+    expect(wsAll.send).toHaveBeenCalledTimes(1);
+    expect(wsProjA.send).toHaveBeenCalledTimes(1); // matches from.project
+    expect(wsProjB.send).not.toHaveBeenCalled(); // neither from nor to is proj-b
+
+    // Clean up
+    removeSubscriber(wsAll as any);
+    removeSubscriber(wsProjA as any);
+    removeSubscriber(wsProjB as any);
+  });
+
+  it('delivers to subscriber when projectFilter matches to.project', () => {
+    const wsProjB = makeMockWs();
+    addSubscriber(wsProjB as any, 'proj-b');
+
+    const frame = makeFrame({
+      from: { project: 'proj-a', agent: 'architect' },
+      to: { project: 'proj-b', agent: 'builder-spir-42' },
+    });
+    broadcastMessage(frame);
+
+    expect(wsProjB.send).toHaveBeenCalledTimes(1);
+
+    removeSubscriber(wsProjB as any);
+  });
+
+  it('removes subscriber on send failure', () => {
+    const wsBad = makeMockWs();
+    wsBad.send.mockImplementation(() => { throw new Error('connection lost'); });
+
+    addSubscriber(wsBad as any);
+    const beforeCount = getSubscriberCount();
+
+    broadcastMessage(makeFrame());
+
+    // Subscriber should have been removed due to send error
+    expect(getSubscriberCount()).toBe(beforeCount - 1);
+  });
+
+  it('sends nothing when there are no subscribers', () => {
+    // Just verify it doesn't throw
+    broadcastMessage(makeFrame());
+  });
+
+  it('includes all MessageFrame fields in broadcast payload', () => {
+    const ws = makeMockWs();
+    addSubscriber(ws as any);
+
+    const frame = makeFrame({
+      metadata: { raw: true, source: 'api' },
+    });
+    broadcastMessage(frame);
+
+    const payload = JSON.parse(ws.send.mock.calls[0][0]);
+    expect(payload.type).toBe('message');
+    expect(payload.timestamp).toBe('2026-02-15T00:00:00.000Z');
+    expect(payload.from).toEqual({ project: 'proj-a', agent: 'architect' });
+    expect(payload.to).toEqual({ project: 'proj-a', agent: 'builder-spir-109' });
+    expect(payload.content).toBe('Hello builder');
+    expect(payload.metadata).toEqual({ raw: true, source: 'api' });
+
+    removeSubscriber(ws as any);
   });
 });
