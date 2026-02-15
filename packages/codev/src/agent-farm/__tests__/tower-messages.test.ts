@@ -273,4 +273,70 @@ describe('resolveTarget', () => {
       }
     });
   });
+
+  describe('malformed addresses', () => {
+    it('treats empty agent after project: as NOT_FOUND', () => {
+      // parseAddress('project:') returns { project: 'project', agent: '' }
+      // Empty agent won't match architect, builders, or shells
+      const ws = makeWorkspaceTerminals({ architect: 'term-1' });
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
+
+      const result = resolveTarget('project:', '/home/user/project');
+      expect(isResolveError(result)).toBe(true);
+      if (isResolveError(result)) {
+        expect(result.code).toBe('NOT_FOUND');
+      }
+    });
+
+    it('handles whitespace-only target via fallback (resolved as NOT_FOUND)', () => {
+      const ws = makeWorkspaceTerminals();
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
+
+      // Whitespace becomes empty string after parseAddress lowercasing
+      const result = resolveTarget(' ', '/home/user/project');
+      expect(isResolveError(result)).toBe(true);
+    });
+  });
+
+  describe('error code contract', () => {
+    it('NO_CONTEXT errors map to 400 status (INVALID_PARAMS in handler)', () => {
+      // Verify the error code is NO_CONTEXT at the resolver level
+      const result = resolveTarget('architect');
+      expect(isResolveError(result)).toBe(true);
+      if (isResolveError(result)) {
+        expect(result.code).toBe('NO_CONTEXT');
+        // Handler maps this to { error: 'INVALID_PARAMS' } with status 400
+      }
+    });
+
+    it('AMBIGUOUS errors include candidate list in message', () => {
+      const ws = makeWorkspaceTerminals({
+        builders: new Map([
+          ['builder-spir-99', 'term-s99'],
+          ['builder-bugfix-99', 'term-bf99'],
+        ]),
+      });
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
+
+      const result = resolveTarget('99', '/home/user/project');
+      expect(isResolveError(result)).toBe(true);
+      if (isResolveError(result)) {
+        expect(result.code).toBe('AMBIGUOUS');
+        expect(result.message).toContain('builder-spir-99');
+        expect(result.message).toContain('builder-bugfix-99');
+      }
+    });
+
+    it('NOT_FOUND errors include descriptive message', () => {
+      const ws = makeWorkspaceTerminals();
+      mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/myproject', ws]]));
+
+      const result = resolveTarget('nonexistent', '/home/user/myproject');
+      expect(isResolveError(result)).toBe(true);
+      if (isResolveError(result)) {
+        expect(result.code).toBe('NOT_FOUND');
+        expect(result.message).toContain('nonexistent');
+      }
+    });
+  });
 });

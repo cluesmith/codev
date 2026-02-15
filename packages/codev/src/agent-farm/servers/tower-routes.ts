@@ -636,8 +636,10 @@ async function handleSend(
     const statusCode = result.code === 'AMBIGUOUS' ? 409
       : result.code === 'NO_CONTEXT' ? 400
       : 404;
+    // Map NO_CONTEXT to INVALID_PARAMS per plan's error contract
+    const errorCode = result.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : result.code;
     res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: result.code, message: result.message }));
+    res.end(JSON.stringify({ error: errorCode, message: result.message }));
     return;
   }
 
