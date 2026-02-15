@@ -293,6 +293,8 @@ describe('heartbeat', () => {
 
     expect(warnSpy).toHaveBeenCalledWith('Tunnel heartbeat: pong timeout, reconnecting');
     expect((client as any).state).toBe('disconnected');
+    // Verify reconnect was scheduled (scheduleReconnect sets reconnectTimer)
+    expect((client as any).reconnectTimer).not.toBeNull();
   });
 
   it('stops timers on cleanup()', () => {
@@ -328,6 +330,7 @@ describe('heartbeat', () => {
   });
 
   it('stale WebSocket guard: old ws timeout does not reconnect new connection', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const client = createClient();
     const oldWs = createMockWs();
     const newWs = createMockWs();
@@ -337,21 +340,31 @@ describe('heartbeat', () => {
     (client as any).state = 'connected';
     (client as any).startHeartbeat(oldWs);
 
-    // Trigger ping on old ws
+    // Trigger ping on old ws — this arms a pong timeout
     vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect(oldWs.ping).toHaveBeenCalledTimes(1);
 
-    // Simulate new connection replacing the old one
-    (client as any).stopHeartbeat();
+    // Capture the pong timeout reference before replacing
+    const oldPongTimeout = (client as any).pongTimeout;
+    expect(oldPongTimeout).not.toBeNull();
+
+    // Simulate new connection replacing the old one WITHOUT calling stopHeartbeat.
+    // This mimics the race: old timeout is still pending while new ws is active.
+    // We manually clear the interval to avoid new pings, but leave the old timeout armed.
+    clearInterval((client as any).pingInterval);
+    (client as any).pingInterval = null;
     (client as any).ws = newWs;
     (client as any).state = 'connected';
-    (client as any).startHeartbeat(newWs);
 
-    // Old ws pong timeout fires — but ws !== this.ws, so no reconnect
-    // The old timeout was cleared by stopHeartbeat, so this is a no-op
+    // Old pong timeout fires — but oldWs !== this.ws (now newWs), so the guard prevents reconnect
     vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+
+    expect(warnSpy).not.toHaveBeenCalled();
     expect((client as any).state).toBe('connected');
 
-    (client as any).stopHeartbeat();
+    // Clean up
+    clearTimeout((client as any).pongTimeout);
+    (client as any).pongTimeout = null;
   });
 
   it('duplicate startHeartbeat calls do not create duplicate timers or listeners', () => {
