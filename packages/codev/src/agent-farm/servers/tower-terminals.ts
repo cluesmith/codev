@@ -36,6 +36,9 @@ const projectTerminals = new Map<string, ProjectTerminals>();
 /** Global TerminalManager instance (lazy singleton) */
 let terminalManager: TerminalManager | null = null;
 
+/** True while reconcileTerminalSessions() is running — blocks on-the-fly reconnection (Bugfix #274) */
+let _reconciling = false;
+
 // ============================================================================
 // Dependency injection interface
 // ============================================================================
@@ -59,6 +62,11 @@ export interface TerminalDeps {
 /** Initialize the terminal module with external dependencies */
 export function initTerminals(deps: TerminalDeps): void {
   _deps = deps;
+}
+
+/** Check if reconciliation is currently in progress (Bugfix #274) */
+export function isReconciling(): boolean {
+  return _reconciling;
 }
 
 /** Tear down the terminal module */
@@ -304,6 +312,16 @@ export function processExists(pid: number): boolean {
 export async function reconcileTerminalSessions(): Promise<void> {
   if (!_deps) return;
 
+  _reconciling = true;
+  try {
+    await _reconcileTerminalSessionsInner();
+  } finally {
+    _reconciling = false;
+  }
+}
+
+async function _reconcileTerminalSessionsInner(): Promise<void> {
+  if (!_deps) return; // Redundant guard for TypeScript narrowing
   const manager = getTerminalManager();
   const db = getGlobalDb();
 
@@ -514,8 +532,10 @@ export async function getTerminalsForProject(
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
 
-    if (!session && dbSession.shellper_socket && _deps?.shellperManager) {
+    if (!session && dbSession.shellper_socket && _deps?.shellperManager && !_reconciling) {
       // PTY session gone but shellper may still be alive — reconnect on-the-fly
+      // Skip during reconciliation to avoid racing with reconcileTerminalSessions()
+      // which also reconnects to shellpers (Bugfix #274).
       try {
         // Restore auto-restart for architect sessions (same as startup reconciliation)
         let restartOptions: ReconnectRestartOptions | undefined;
