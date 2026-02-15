@@ -96,6 +96,7 @@ async function sendToAll(
   client: TowerClient,
   message: string,
   workspace: string | undefined,
+  from: string,
   options: SendOptions,
 ): Promise<{ sent: string[]; failed: string[] }> {
   const state = loadState();
@@ -109,7 +110,7 @@ async function sendToAll(
   for (const builder of state.builders) {
     try {
       const result = await client.sendMessage(builder.id, message, {
-        from: 'architect',
+        from,
         workspace,
         fromWorkspace: workspace,
         raw: options.raw,
@@ -187,7 +188,7 @@ export async function send(options: SendOptions): Promise<void> {
 
   if (options.all) {
     // Broadcast to all builders
-    const results = await sendToAll(client, message, workspace, options);
+    const results = await sendToAll(client, message, workspace, from, options);
 
     if (results.sent.length > 0) {
       logger.success(`Sent to ${results.sent.length} builder(s): ${results.sent.join(', ')}`);

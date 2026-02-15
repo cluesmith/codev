@@ -222,20 +222,20 @@ describe('send command', () => {
   });
 
   describe('--all broadcast', () => {
-    it('sends to all builders from state.db', async () => {
+    it('sends to all builders from state.db with correct sender identity', async () => {
       await send({ all: true, builder: 'Hello everyone' });
 
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
-      // sendToAll always uses from: 'architect' since broadcast is from architect
+      // sendToAll uses the detected sender identity (from CWD), same as single-target
       expect(mockSendMessage).toHaveBeenCalledWith(
         'builder-spir-109',
         'Hello everyone',
-        expect.objectContaining({ from: 'architect' }),
+        expect.objectContaining({ from: getExpectedFrom() }),
       );
       expect(mockSendMessage).toHaveBeenCalledWith(
         'builder-bugfix-42',
         'Hello everyone',
-        expect.objectContaining({ from: 'architect' }),
+        expect.objectContaining({ from: getExpectedFrom() }),
       );
     });
 
