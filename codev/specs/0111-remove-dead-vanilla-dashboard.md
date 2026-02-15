@@ -43,7 +43,7 @@ packages/codev/templates/dashboard/
 
 1. **`packages/codev/src/__tests__/templates.test.ts`** (line ~127): **No change needed.** The assertion `expect(isUpdatableFile('templates/dashboard.html')).toBe(true)` tests that the `isUpdatableFile` function correctly classifies paths starting with `templates/` as updatable — it tests prefix-matching logic, not file existence. This test passes regardless of whether the dashboard directory exists.
 
-2. **`packages/codev/src/agent-farm/__tests__/clipboard.test.ts`** (lines ~29-49): Remove the entire `'modular dashboard tabs.js includes clipboard permissions on dynamic iframes'` test block. It references `templates/dashboard/js/tabs.js` which will no longer exist. While the `existsSync` guard would cause it to auto-skip, dead test code should be removed alongside dead production code.
+2. **`packages/codev/src/agent-farm/__tests__/clipboard.test.ts`**: Delete this file entirely. It contains only one test block that references `templates/dashboard/js/tabs.js`. Removing just the test block would leave an empty test file, which causes test runners to fail with "No test found in suite".
 
 ### No Other References
 
@@ -60,7 +60,7 @@ Verified: no build scripts, `.npmignore`, `package.json` `files` field, or runti
 ## Scope
 
 - Delete `packages/codev/templates/dashboard/` directory (16 files)
-- Remove dead test block from `clipboard.test.ts`
+- Delete `packages/codev/src/agent-farm/__tests__/clipboard.test.ts` (only test references dead code)
 - Verify build passes, all tests pass
 
 ## Acceptance Criteria
