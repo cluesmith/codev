@@ -1785,21 +1785,7 @@
     }
 
     async function cloudConnect() {
-      // Smart connect: if registered, reconnect without dialog
-      if (lastCloudStatus && lastCloudStatus.registered) {
-        cloudLoading = true;
-        renderCloudStatus({ registered: true, state: 'connecting' });
-        try {
-          await authFetch('./api/tunnel/connect', { method: 'POST' });
-          showToast('Connecting to cloud...', 'success');
-        } catch (err) {
-          showToast('Connect failed: ' + err.message, 'error');
-        }
-        cloudLoading = false;
-        setTimeout(refresh, 2000);
-        return;
-      }
-      // Not registered: open the connect dialog
+      // Always show dialog so user can review/change preferences
       showConnectDialog();
     }
 
@@ -1828,9 +1814,14 @@
       const errorEl = document.getElementById('connect-error');
       errorEl.style.display = 'none';
       errorEl.textContent = '';
-      // Default device name from hostname (fetched via /api/tunnel/status)
-      nameInput.value = (lastCloudStatus && lastCloudStatus.hostname) || '';
-      document.getElementById('connect-server-url').value = 'https://cloud.codevos.ai';
+      // Pre-populate with existing registration values, or defaults
+      if (lastCloudStatus && lastCloudStatus.towerName) {
+        nameInput.value = lastCloudStatus.towerName;
+      } else {
+        nameInput.value = (lastCloudStatus && lastCloudStatus.hostname) || '';
+      }
+      document.getElementById('connect-server-url').value =
+        (lastCloudStatus && lastCloudStatus.serverUrl) || 'https://cloud.codevos.ai';
       dialog.style.display = 'flex';
       nameInput.focus();
     }
