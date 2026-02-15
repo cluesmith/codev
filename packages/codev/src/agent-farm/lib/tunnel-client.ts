@@ -319,8 +319,8 @@ export class TunnelClient {
         ws.ping();
       } catch {
         // ws.ping() can throw if the socket is in a transitional state.
-        // Treat as dead connection — the pong timeout will handle reconnect.
-        return;
+        // Fall through to arm the pong timeout — it will trigger reconnect
+        // if the socket remains unresponsive.
       }
 
       this.pongTimeout = setTimeout(() => {
