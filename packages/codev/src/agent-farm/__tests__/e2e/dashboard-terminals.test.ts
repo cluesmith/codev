@@ -126,6 +126,33 @@ test.describe('Dashboard Terminals E2E', () => {
     await expect(terminal).toBeVisible({ timeout: 15_000 });
   });
 
+  // Bugfix #296: Fullscreen shells broke when Spec 0105 extraction reverted
+  // Bugfix #185's fix. The tab URLs in tower-terminals.ts had double-prefixed
+  // IDs (e.g. ?tab=shell-shell-1) that didn't match the React tab IDs (shell-1).
+  test('fullscreen shell renders terminal (regression #296)', async ({ page, request }) => {
+    // Create a shell tab
+    const response = await request.post(`${BASE_URL}/api/tabs/shell`, {
+      data: { name: 'fullscreen-test' },
+    });
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.id).toBeTruthy();
+
+    // Open in fullscreen mode with tab= deep link
+    await page.goto(`${PAGE_URL}?tab=${body.id}&fullscreen=1`);
+    await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
+
+    // The fullscreen-terminal container should contain an xterm terminal
+    const fullscreenDiv = page.locator('.fullscreen-terminal');
+    await expect(fullscreenDiv).toBeVisible({ timeout: 5_000 });
+
+    const terminal = fullscreenDiv.locator('.terminal-container');
+    await expect(terminal).toBeVisible({ timeout: 15_000 });
+
+    // Clean up
+    await request.delete(`${BASE_URL}/api/tabs/${body.id}`);
+  });
+
   test('npm pack includes dashboard/dist', async () => {
     const { execSync } = await import('node:child_process');
     const output = execSync('npm pack --dry-run 2>&1', {

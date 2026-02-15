@@ -651,7 +651,7 @@ export async function getTerminalsForWorkspace(
         type: 'builder',
         id: builderId,
         label: `Builder ${builderId}`,
-        url: `${proxyUrl}?tab=builder-${builderId}`,
+        url: `${proxyUrl}?tab=${builderId}`,
         active: true,
       });
     } else if (dbSession.type === 'shell') {
@@ -661,7 +661,7 @@ export async function getTerminalsForWorkspace(
         type: 'shell',
         id: shellId,
         label: `Shell ${shellId.replace('shell-', '')}`,
-        url: `${proxyUrl}?tab=shell-${shellId}`,
+        url: `${proxyUrl}?tab=${shellId}`,
         active: true,
       });
     }
@@ -692,7 +692,7 @@ export async function getTerminalsForWorkspace(
             type: 'builder',
             id: builderId,
             label: `Builder ${builderId}`,
-            url: `${proxyUrl}?tab=builder-${builderId}`,
+            url: `${proxyUrl}?tab=${builderId}`,
             active: true,
           });
         }
@@ -707,7 +707,7 @@ export async function getTerminalsForWorkspace(
             type: 'shell',
             id: shellId,
             label: `Shell ${shellId.replace('shell-', '')}`,
-            url: `${proxyUrl}?tab=shell-${shellId}`,
+            url: `${proxyUrl}?tab=${shellId}`,
             active: true,
           });
         }
