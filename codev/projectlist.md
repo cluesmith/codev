@@ -223,6 +223,20 @@ Projects currently in development (conceived through committed), sorted by prior
       specified_at: "2026-02-15"
     notes: "Standardize agent names (builder-spir-0109), add project:agent addressing, WebSocket message bus for dashboard observability, POST /api/send endpoint. Depends on 0108."
 
+  - id: "0113"
+    title: "Shellper Debug Logging"
+    summary: "Add lifecycle logging to shellper processes, capture stderr in Tower, surface exit codes/signals on session death"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0113-shellper-debug-logging.md
+    dependencies: []
+    tags: [shellper, logging, debugging, reliability]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Triggered by unexplained life architect shellper death on 2026-02-15. Currently zero diagnostic info when sessions die."
+
 # Low Priority
 
   - id: "0023"
