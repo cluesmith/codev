@@ -10,102 +10,22 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import net from 'node:net';
+import type { TowerHandle } from './helpers/tower-test-utils.js';
+import {
+  startTower,
+  cleanupAllTerminals,
+  cleanupTestDb,
+  encodeWorkspacePath,
+} from './helpers/tower-test-utils.js';
 
 // Test configuration
 const TEST_TOWER_PORT = 14300;
-const STARTUP_TIMEOUT = 15_000;
 
-// Paths to server scripts
-const TOWER_SERVER_PATH = resolve(
-  import.meta.dirname,
-  '../../../dist/agent-farm/servers/tower-server.js'
-);
-
-// Server process
-let towerProcess: ChildProcess | null = null;
-
-/**
- * Check if a port is listening
- */
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
-    socket.connect(port, '127.0.0.1');
-  });
-}
-
-/**
- * Wait for a port to start listening
- */
-async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isPortListening(port)) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-/**
- * Start tower server
- */
-async function startTower(port: number): Promise<ChildProcess> {
-  const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
-  });
-
-  let stderr = '';
-  proc.stderr?.on('data', (d) => (stderr += d.toString()));
-
-  const started = await waitForPort(port, STARTUP_TIMEOUT);
-  if (!started) {
-    proc.kill();
-    throw new Error(`Tower failed to start on port ${port}. stderr: ${stderr}`);
-  }
-
-  return proc;
-}
-
-/**
- * Stop a server process
- */
-async function stopServer(proc: ChildProcess | null): Promise<void> {
-  if (!proc) return;
-  proc.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
-    proc.on('exit', () => resolve());
-    setTimeout(() => {
-      proc.kill('SIGKILL');
-      resolve();
-    }, 2000);
-  });
-}
-
-/**
- * Encode workspace path to base64url
- */
-function encodeWorkspacePath(workspacePath: string): string {
-  return Buffer.from(workspacePath).toString('base64url');
-}
+// Tower handle
+let tower: TowerHandle;
 
 /**
  * Create a test workspace directory
@@ -143,15 +63,13 @@ function cleanupTestWorkspace(workspacePath: string): void {
 
 describe('Tower API (Phase 1)', () => {
   beforeAll(async () => {
-    towerProcess = await startTower(TEST_TOWER_PORT);
+    tower = await startTower(TEST_TOWER_PORT);
   });
 
   afterAll(async () => {
-    await stopServer(towerProcess);
-    towerProcess = null;
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
+    await cleanupAllTerminals(TEST_TOWER_PORT);
+    await tower.stop();
+    cleanupTestDb(TEST_TOWER_PORT);
   });
 
   describe('GET /health', () => {

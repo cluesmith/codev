@@ -6,98 +6,22 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import net from 'node:net';
+import type { TowerHandle } from './helpers/tower-test-utils.js';
+import {
+  startTower,
+  isPortListening,
+  cleanupTestDb,
+  encodeWorkspacePath,
+} from './helpers/tower-test-utils.js';
 
 // Test configuration - use high ports to avoid conflicts
 const TEST_TOWER_PORT = 14100;
-const STARTUP_TIMEOUT = 15_000;
-
-// Paths to server scripts
-const TOWER_SERVER_PATH = resolve(
-  import.meta.dirname,
-  '../../../dist/agent-farm/servers/tower-server.js'
-);
 
 // Test workspace directory
 let testWorkspacePath: string;
-
-// Server processes
-let towerProcess: ChildProcess | null = null;
-
-/**
- * Check if a port is listening
- */
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
-    socket.connect(port, '127.0.0.1');
-  });
-}
-
-/**
- * Wait for a port to start listening
- */
-async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isPortListening(port)) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-/**
- * Start tower server
- */
-async function startTower(port: number): Promise<ChildProcess> {
-  const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
-  });
-
-  let stderr = '';
-  proc.stderr?.on('data', (d) => (stderr += d.toString()));
-
-  const started = await waitForPort(port, STARTUP_TIMEOUT);
-  if (!started) {
-    proc.kill();
-    throw new Error(`Tower failed to start on port ${port}. stderr: ${stderr}`);
-  }
-
-  return proc;
-}
-
-/**
- * Stop a server process
- */
-async function stopServer(proc: ChildProcess | null): Promise<void> {
-  if (!proc) return;
-  proc.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
-    proc.on('exit', () => resolve());
-    setTimeout(() => {
-      proc.kill('SIGKILL');
-      resolve();
-    }, 2000);
-  });
-}
 
 /**
  * Create a test workspace directory with minimal codev structure
@@ -134,13 +58,6 @@ function cleanupTestWorkspace(workspacePath: string): void {
 }
 
 /**
- * Encode workspace path for tower proxy URL (base64url)
- */
-function encodeWorkspacePath(path: string): string {
-  return Buffer.from(path).toString('base64url');
-}
-
-/**
  * Activate a workspace via tower API
  */
 async function activateWorkspace(towerPort: number, workspacePath: string): Promise<boolean> {
@@ -172,25 +89,25 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
   describe('tower lifecycle', () => {
     it('starts tower on specified port', async () => {
       const port = 14150;
-      const proc = await startTower(port);
+      const handle = await startTower(port);
 
       try {
         const listening = await isPortListening(port);
         expect(listening).toBe(true);
       } finally {
-        await stopServer(proc);
+        await handle.stop();
       }
     });
 
     it('stops tower cleanly on SIGTERM', async () => {
       const port = 14151;
-      const proc = await startTower(port);
+      const handle = await startTower(port);
 
       // Verify it's running
       expect(await isPortListening(port)).toBe(true);
 
       // Stop it
-      await stopServer(proc);
+      await handle.stop();
 
       // Verify it stopped
       await new Promise((r) => setTimeout(r, 500));
@@ -199,7 +116,7 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
 
     it('tower serves dashboard UI at root', async () => {
       const port = 14152;
-      const proc = await startTower(port);
+      const handle = await startTower(port);
 
       try {
         const response = await fetch(`http://localhost:${port}/`);
@@ -207,13 +124,13 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
         const html = await response.text();
         expect(html).toContain('Control Tower');
       } finally {
-        await stopServer(proc);
+        await handle.stop();
       }
     });
 
     it('tower returns status API response', async () => {
       const port = 14153;
-      const proc = await startTower(port);
+      const handle = await startTower(port);
 
       try {
         const response = await fetch(`http://localhost:${port}/api/status`);
@@ -222,25 +139,22 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
         expect(data).toHaveProperty('instances');
         expect(Array.isArray(data.instances)).toBe(true);
       } finally {
-        await stopServer(proc);
+        await handle.stop();
       }
     });
   });
 
   describe('dashboard lifecycle', () => {
-    let towerProc: ChildProcess | null = null;
+    let tower: TowerHandle;
     const towerPort = 14160;
 
     beforeAll(async () => {
-      towerProc = await startTower(towerPort);
+      tower = await startTower(towerPort);
     });
 
     afterAll(async () => {
-      await stopServer(towerProc);
-      towerProc = null;
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
+      await tower.stop();
+      cleanupTestDb(towerPort);
     });
 
     beforeEach(() => {
@@ -307,19 +221,16 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
   });
 
   describe('state consistency', () => {
-    let towerProc: ChildProcess | null = null;
+    let tower: TowerHandle;
     const towerPort = 14170;
 
     beforeAll(async () => {
-      towerProc = await startTower(towerPort);
+      tower = await startTower(towerPort);
     });
 
     afterAll(async () => {
-      await stopServer(towerProc);
-      towerProc = null;
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
+      await tower.stop();
+      cleanupTestDb(towerPort);
     });
 
     beforeEach(() => {
@@ -355,19 +266,16 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
   });
 
   describe('tower proxy', () => {
-    let towerProc: ChildProcess | null = null;
+    let tower: TowerHandle;
     const towerPort = 14180;
 
     beforeAll(async () => {
-      towerProc = await startTower(towerPort);
+      tower = await startTower(towerPort);
     });
 
     afterAll(async () => {
-      await stopServer(towerProc);
-      towerProc = null;
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
+      await tower.stop();
+      cleanupTestDb(towerPort);
     });
 
     beforeEach(() => {
@@ -416,21 +324,18 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
   });
 
   describe('multi-workspace support', () => {
-    let towerProc: ChildProcess | null = null;
+    let tower: TowerHandle;
     let workspace1: string;
     let workspace2: string;
     const towerPort = 14190;
 
     beforeAll(async () => {
-      towerProc = await startTower(towerPort);
+      tower = await startTower(towerPort);
     });
 
     afterAll(async () => {
-      await stopServer(towerProc);
-      towerProc = null;
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-wal`), { force: true }); } catch { /* ignore */ }
-      try { rmSync(resolve(homedir(), '.agent-farm', `test-${towerPort}.db-shm`), { force: true }); } catch { /* ignore */ }
+      await tower.stop();
+      cleanupTestDb(towerPort);
     });
 
     beforeEach(() => {

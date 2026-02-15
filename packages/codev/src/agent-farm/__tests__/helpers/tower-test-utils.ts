@@ -1,18 +1,27 @@
 /**
  * Test utilities for tower integration tests.
  * Phase 4 (Spec 0090): Tower-only architecture - no dashboard-server.
+ * Spec 0116: Socket isolation + cleanup helpers.
  */
 
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
-const TOWER_START_TIMEOUT = 10_000;
+
+const TOWER_START_TIMEOUT = 15_000;
+
+// Path to compiled tower-server.js (4 levels up from helpers/ to packages/codev/)
+const TOWER_SERVER_PATH = resolve(
+  import.meta.dirname,
+  '../../../../dist/agent-farm/servers/tower-server.js'
+);
 
 export interface TowerHandle {
   port: number;
   process: ChildProcess;
+  socketDir: string;
   stop: () => Promise<void>;
 }
 
@@ -37,22 +46,9 @@ export interface TowerState {
 }
 
 /**
- * Wait for a port to start listening
- */
-async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const isUp = await isPortListening(port);
-    if (isUp) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-/**
  * Check if a port is listening
  */
-async function isPortListening(port: number): Promise<boolean> {
+export async function isPortListening(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     socket.setTimeout(1000);
@@ -72,6 +68,19 @@ async function isPortListening(port: number): Promise<boolean> {
 }
 
 /**
+ * Wait for a port to start listening
+ */
+export async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const isUp = await isPortListening(port);
+    if (isUp) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/**
  * Find an available port starting from the given port
  */
 async function findAvailablePort(startPort: number): Promise<number> {
@@ -83,20 +92,24 @@ async function findAvailablePort(startPort: number): Promise<number> {
 }
 
 /**
- * Start the tower server for testing
+ * Start the tower server for testing.
+ * Creates an isolated socket directory for shellper sessions (Spec 0116).
  */
 export async function startTower(port?: number): Promise<TowerHandle> {
-  const actualPort = port ?? (await findAvailablePort(14100)); // Use high port for tests
+  const actualPort = port ?? (await findAvailablePort(14100));
 
-  // Find tower-server.js path
-  const towerPath = resolve(
-    import.meta.dirname,
-    '../../../dist/agent-farm/servers/tower-server.js'
-  );
+  // Spec 0116: Create isolated socket dir so tests don't pollute ~/.codev/run/
+  const socketDir = mkdtempSync(resolve(tmpdir(), 'codev-test-sockets-'));
 
-  const proc = spawn('node', [towerPath, String(actualPort)], {
+  const proc = spawn('node', [TOWER_SERVER_PATH, String(actualPort)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      AF_TEST_DB: `test-${actualPort}.db`,
+      SHELLPER_SOCKET_DIR: socketDir,
+    },
   });
 
   // Capture output for debugging
@@ -107,15 +120,16 @@ export async function startTower(port?: number): Promise<TowerHandle> {
   const started = await waitForPort(actualPort, TOWER_START_TIMEOUT);
   if (!started) {
     proc.kill();
+    try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
     throw new Error(`Tower failed to start on port ${actualPort}. stderr: ${stderr}`);
   }
 
   return {
     port: actualPort,
     process: proc,
+    socketDir,
     stop: async () => {
       proc.kill('SIGTERM');
-      // Wait for process to exit
       await new Promise<void>((resolve) => {
         proc.on('exit', () => resolve());
         setTimeout(() => {
@@ -123,8 +137,52 @@ export async function startTower(port?: number): Promise<TowerHandle> {
           resolve();
         }, 2000);
       });
+      // Clean up isolated socket dir
+      try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
     },
   };
+}
+
+/**
+ * Stop a server process (standalone version for tests managing ChildProcess directly)
+ */
+export async function stopServer(proc: ChildProcess | null): Promise<void> {
+  if (!proc) return;
+  proc.kill('SIGTERM');
+  await new Promise<void>((resolve) => {
+    proc.on('exit', () => resolve());
+    setTimeout(() => {
+      proc.kill('SIGKILL');
+      resolve();
+    }, 2000);
+  });
+}
+
+/**
+ * Kill all terminals via Tower API before stopping.
+ * Shellper sessions survive Tower shutdown by design, so explicit
+ * terminal deletion is needed to avoid orphaned processes.
+ */
+export async function cleanupAllTerminals(port: number): Promise<void> {
+  try {
+    const listRes = await fetch(`http://localhost:${port}/api/terminals`);
+    if (listRes.ok) {
+      const { terminals } = await listRes.json();
+      for (const t of terminals) {
+        await fetch(`http://localhost:${port}/api/terminals/${t.id}`, { method: 'DELETE' });
+      }
+    }
+  } catch { /* Tower may already be down */ }
+}
+
+/**
+ * Clean up test DB files created by a Tower instance.
+ */
+export function cleanupTestDb(port: number): void {
+  const dbBase = resolve(homedir(), '.agent-farm', `test-${port}.db`);
+  try { rmSync(dbBase, { force: true }); } catch { /* ignore */ }
+  try { rmSync(`${dbBase}-wal`, { force: true }); } catch { /* ignore */ }
+  try { rmSync(`${dbBase}-shm`, { force: true }); } catch { /* ignore */ }
 }
 
 /**

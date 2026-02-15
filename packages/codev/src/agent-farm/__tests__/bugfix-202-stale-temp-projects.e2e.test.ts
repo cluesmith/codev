@@ -12,85 +12,31 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import net from 'node:net';
+import type { TowerHandle } from './helpers/tower-test-utils.js';
+import {
+  startTower,
+  cleanupAllTerminals,
+  cleanupTestDb,
+  encodeWorkspacePath,
+} from './helpers/tower-test-utils.js';
 
 const TEST_TOWER_PORT = 14600;
-const STARTUP_TIMEOUT = 15_000;
 
-const TOWER_SERVER_PATH = resolve(
-  import.meta.dirname,
-  '../../../dist/agent-farm/servers/tower-server.js'
-);
-
-let towerProcess: ChildProcess | null = null;
-
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => { socket.destroy(); resolve(true); });
-    socket.on('timeout', () => { socket.destroy(); resolve(false); });
-    socket.on('error', () => { resolve(false); });
-    socket.connect(port, '127.0.0.1');
-  });
-}
-
-async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isPortListening(port)) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-async function startTower(port: number): Promise<ChildProcess> {
-  const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
-  });
-
-  let stderr = '';
-  proc.stderr?.on('data', (d) => (stderr += d.toString()));
-
-  const started = await waitForPort(port, STARTUP_TIMEOUT);
-  if (!started) {
-    proc.kill();
-    throw new Error(`Tower failed to start on port ${port}. stderr: ${stderr}`);
-  }
-
-  return proc;
-}
-
-async function stopServer(proc: ChildProcess | null): Promise<void> {
-  if (!proc) return;
-  proc.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
-    proc.on('exit', () => resolve());
-    setTimeout(() => { proc.kill('SIGKILL'); resolve(); }, 2000);
-  });
-}
-
-function toBase64URL(str: string): string {
-  return Buffer.from(str).toString('base64url');
-}
+let tower: TowerHandle;
 
 describe('Bugfix #202: Stale temp workspace directories filtered from workspace list', () => {
   beforeAll(async () => {
-    towerProcess = await startTower(TEST_TOWER_PORT);
+    tower = await startTower(TEST_TOWER_PORT);
   }, 30_000);
 
   afterAll(async () => {
-    await stopServer(towerProcess);
-    towerProcess = null;
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
+    // Defensive workspace deactivation + terminal cleanup (failure-safe)
+    await cleanupAllTerminals(TEST_TOWER_PORT);
+    await tower.stop();
+    cleanupTestDb(TEST_TOWER_PORT);
   });
 
   it('does not list workspaces whose directories have been deleted', async () => {
@@ -107,7 +53,7 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
       JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
     );
 
-    const encodedPath = toBase64URL(tempProjectDir);
+    const encodedPath = encodeWorkspacePath(tempProjectDir);
 
     // Step 2: Activate the workspace (registers in tower's terminal_sessions)
     const activateRes = await fetch(`${base}/api/workspaces/${encodedPath}/activate`, {
@@ -154,7 +100,7 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
       JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
     );
 
-    const encodedPath = toBase64URL(tempProjectDir);
+    const encodedPath = encodeWorkspacePath(tempProjectDir);
 
     try {
       // Activate the workspace

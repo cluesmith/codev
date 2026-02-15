@@ -11,74 +11,22 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { resolve, basename } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import net from 'node:net';
+import type { TowerHandle } from './helpers/tower-test-utils.js';
+import {
+  startTower,
+  cleanupAllTerminals,
+  cleanupTestDb,
+  encodeWorkspacePath,
+} from './helpers/tower-test-utils.js';
 
 const TEST_TOWER_PORT = 14500;
-const STARTUP_TIMEOUT = 15_000;
 
-const TOWER_SERVER_PATH = resolve(
-  import.meta.dirname,
-  '../../../dist/agent-farm/servers/tower-server.js'
-);
-
-let towerProcess: ChildProcess | null = null;
+let tower: TowerHandle;
 let testProjectDir: string;
-
-async function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => { socket.destroy(); resolve(true); });
-    socket.on('timeout', () => { socket.destroy(); resolve(false); });
-    socket.on('error', () => { resolve(false); });
-    socket.connect(port, '127.0.0.1');
-  });
-}
-
-async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isPortListening(port)) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-async function startTower(port: number): Promise<ChildProcess> {
-  const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
-  });
-
-  let stderr = '';
-  proc.stderr?.on('data', (d) => (stderr += d.toString()));
-
-  const started = await waitForPort(port, STARTUP_TIMEOUT);
-  if (!started) {
-    proc.kill();
-    throw new Error(`Tower failed to start on port ${port}. stderr: ${stderr}`);
-  }
-
-  return proc;
-}
-
-async function stopServer(proc: ChildProcess | null): Promise<void> {
-  if (!proc) return;
-  proc.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
-    proc.on('exit', () => resolve());
-    setTimeout(() => { proc.kill('SIGKILL'); resolve(); }, 2000);
-  });
-}
-
-function toBase64URL(str: string): string {
-  return Buffer.from(str).toString('base64url');
-}
 
 describe('Bugfix #199: Zombie builder tab removal', () => {
   beforeAll(async () => {
@@ -94,12 +42,18 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
       JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
     );
 
-    towerProcess = await startTower(TEST_TOWER_PORT);
+    tower = await startTower(TEST_TOWER_PORT);
   }, 30_000);
 
   afterAll(async () => {
-    await stopServer(towerProcess);
-    towerProcess = null;
+    // Deactivate workspace to clean up workspace-spawned terminals
+    try {
+      const encoded = encodeWorkspacePath(testProjectDir);
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/deactivate`, { method: 'POST' });
+    } catch { /* may not have activated, or Tower already down */ }
+    // Kill any remaining terminals via API
+    await cleanupAllTerminals(TEST_TOWER_PORT);
+    await tower.stop();
     // Kill tmux session created by Tower's launchInstance for this temp workspace
     if (testProjectDir) {
       const tmuxName = `architect-${basename(testProjectDir)}`;
@@ -107,14 +61,12 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     }
     // Clean up temp dir and test DB
     try { rmSync(testProjectDir, { recursive: true, force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
-    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
+    cleanupTestDb(TEST_TOWER_PORT);
   });
 
   it('removes stale builder from /api/state after terminal exits', async () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
-    const encodedPath = toBase64URL(testProjectDir);
+    const encodedPath = encodeWorkspacePath(testProjectDir);
     const workspaceApiBase = `${base}/workspace/${encodedPath}`;
 
     // Step 1: Activate the workspace
@@ -165,7 +117,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
 
   it('removes stale shell from /api/state after terminal exits', async () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
-    const encodedPath = toBase64URL(testProjectDir);
+    const encodedPath = encodeWorkspacePath(testProjectDir);
     const workspaceApiBase = `${base}/workspace/${encodedPath}`;
 
     // Create a shell terminal registered to this workspace
