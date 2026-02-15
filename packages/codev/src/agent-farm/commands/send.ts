@@ -11,48 +11,9 @@ import { loadState } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { getConfig } from '../utils/index.js';
 import { resolveAgentName } from '../utils/agent-names.js';
+import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
-
-/**
- * Format message from architect to builder
- */
-function formatArchitectMessage(message: string, fileContent?: string, raw: boolean = false): string {
-  let content = message;
-  if (fileContent) {
-    content += '\n\nAttached content:\n```\n' + fileContent + '\n```';
-  }
-
-  if (raw) {
-    return content;
-  }
-
-  // Structured format helps Claude identify Architect instructions
-  const timestamp = new Date().toISOString();
-  return `### [ARCHITECT INSTRUCTION | ${timestamp}] ###
-${content}
-###############################`;
-}
-
-/**
- * Format message from builder to architect
- */
-function formatBuilderMessage(builderId: string, message: string, fileContent?: string, raw: boolean = false): string {
-  let content = message;
-  if (fileContent) {
-    content += '\n\nAttached content:\n```\n' + fileContent + '\n```';
-  }
-
-  if (raw) {
-    return content;
-  }
-
-  // Structured format helps Claude identify Builder messages
-  const timestamp = new Date().toISOString();
-  return `### [BUILDER ${builderId} MESSAGE | ${timestamp}] ###
-${content}
-###############################`;
-}
 
 /**
  * Send a message to a specific builder via Tower API

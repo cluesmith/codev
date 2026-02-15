@@ -325,6 +325,48 @@ export class TowerClient {
   }
 
   /**
+   * Send a message to an agent via address resolution.
+   * Uses POST /api/send which resolves [project:]agent addresses.
+   */
+  async sendMessage(
+    to: string,
+    message: string,
+    options?: {
+      from?: string;
+      workspace?: string;
+      fromWorkspace?: string;
+      raw?: boolean;
+      noEnter?: boolean;
+      interrupt?: boolean;
+    },
+  ): Promise<{ ok: boolean; resolvedTo?: string; error?: string }> {
+    const result = await this.request<{ ok: boolean; resolvedTo: string }>(
+      '/api/send',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          to,
+          message,
+          from: options?.from,
+          workspace: options?.workspace,
+          fromWorkspace: options?.fromWorkspace,
+          options: {
+            raw: options?.raw,
+            noEnter: options?.noEnter,
+            interrupt: options?.interrupt,
+          },
+        }),
+      },
+    );
+
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    return { ok: true, resolvedTo: result.data!.resolvedTo };
+  }
+
+  /**
    * Get the WebSocket URL for a terminal
    */
   getTerminalWsUrl(terminalId: string): string {

@@ -31,6 +31,8 @@ import {
   serveStaticFile,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
+import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -107,6 +109,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/create':     (req, res, _url, ctx) => handleCreateWorkspace(req, res, ctx),
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
+  'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
 };
@@ -586,6 +589,121 @@ async function handleNotify(
   ctx.log('INFO', `Notification broadcast: ${title}`);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ success: true }));
+}
+
+// ============================================================================
+// POST /api/send — send a message to a resolved agent terminal
+// ============================================================================
+
+async function handleSend(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = await parseJsonBody(req);
+
+  // Validate required fields
+  const to = typeof body.to === 'string' ? body.to.trim() : '';
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+  if (!to) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Missing or empty "to" field' }));
+    return;
+  }
+
+  if (!message) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Missing or empty "message" field' }));
+    return;
+  }
+
+  // Optional fields
+  const from = typeof body.from === 'string' ? body.from : undefined;
+  const workspace = typeof body.workspace === 'string' ? body.workspace : undefined;
+  const fromWorkspace = typeof body.fromWorkspace === 'string' ? body.fromWorkspace : undefined;
+  const options = typeof body.options === 'object' && body.options !== null
+    ? (body.options as Record<string, unknown>)
+    : {};
+  const raw = options.raw === true;
+  const noEnter = options.noEnter === true;
+  const interrupt = options.interrupt === true;
+
+  // Resolve the target address to a terminal ID
+  const result = resolveTarget(to, workspace);
+
+  if (isResolveError(result)) {
+    const statusCode = result.code === 'AMBIGUOUS' ? 409
+      : result.code === 'NO_CONTEXT' ? 400
+      : 404;
+    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: result.code, message: result.message }));
+    return;
+  }
+
+  // Get the terminal session
+  const manager = getTerminalManager();
+  const session = manager.getSession(result.terminalId);
+  if (!session) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'NOT_FOUND',
+      message: `Terminal session ${result.terminalId} not found (agent '${result.agent}' resolved but terminal is gone).`,
+    }));
+    return;
+  }
+
+  // Format the message based on sender/target
+  const isArchitectTarget = result.agent === 'architect';
+  let formattedMessage: string;
+  if (isArchitectTarget && from) {
+    // Builder → Architect
+    formattedMessage = formatBuilderMessage(from, message, undefined, raw);
+  } else if (!isArchitectTarget) {
+    // Architect → Builder (or any → builder)
+    formattedMessage = formatArchitectMessage(message, undefined, raw);
+  } else {
+    // Unknown sender to architect — use raw
+    formattedMessage = raw ? message : formatArchitectMessage(message, undefined, false);
+  }
+
+  // Optionally interrupt first
+  if (interrupt) {
+    session.write('\x03'); // Ctrl+C
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  // Write the message to the terminal
+  session.write(formattedMessage);
+
+  // Send Enter to submit (unless noEnter)
+  if (!noEnter) {
+    session.write('\r');
+  }
+
+  // Broadcast structured message (no-op until Phase 3)
+  const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
+  broadcastMessage({
+    from: {
+      project: path.basename(senderWorkspace),
+      agent: from ?? 'unknown',
+    },
+    to: {
+      project: path.basename(result.workspacePath),
+      agent: result.agent,
+    },
+    body: message,
+    timestamp: new Date().toISOString(),
+  });
+
+  ctx.log('INFO', `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    ok: true,
+    terminalId: result.terminalId,
+    resolvedTo: result.agent,
+  }));
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {
