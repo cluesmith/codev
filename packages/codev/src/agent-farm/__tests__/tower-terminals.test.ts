@@ -2,7 +2,7 @@
  * Unit tests for tower-terminals.ts (Spec 0105 Phase 4)
  *
  * Tests: session CRUD, file tab persistence, shell ID allocation,
- * gate watcher, terminal manager lifecycle, reconciliation,
+ * terminal manager lifecycle, reconciliation,
  * getTerminalsForProject, and initTerminals/shutdownTerminals lifecycle.
  */
 

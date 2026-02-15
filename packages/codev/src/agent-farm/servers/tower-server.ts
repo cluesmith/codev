@@ -142,7 +142,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 6. Tear down instance module (Spec 0105 Phase 3)
   shutdownInstances();
 
-  // 7. Tear down terminal module (Spec 0105 Phase 4) — stops gate watcher, shuts down terminal manager
+  // 7. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
 
   log('INFO', 'Graceful shutdown complete');
