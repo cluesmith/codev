@@ -203,9 +203,14 @@ if (model === 'codex') {
 
 #### Test Plan
 - **Unit Tests** (in `metrics.test.ts` or a new `codex-sdk.test.ts`):
-  - Codex SDK cost computation: given token counts, verify `CODEX_PRICING` produces correct USD
-  - Codex SDK cost computation with null tokens: verify cost is null
-  - Codex SDK cost with cached tokens: verify uncached input computed correctly
+  - **Cost computation**: given token counts (24763 input, 24448 cached, 122 output), verify `CODEX_PRICING` produces correct USD value
+  - **Cost with null tokens**: if any token field is null, cost must be null
+  - **Cost with cached tokens**: verify `uncachedInput = input - cached` is used for pricing
+  - **Event stream text aggregation**: mock `runStreamed()` returning `item.completed` events with `agent_message` items; verify `chunks` array captures all text
+  - **Event stream usage capture**: mock `turn.completed` event with `{ input_tokens, cached_input_tokens, output_tokens }`; verify `usageData` is populated correctly
+  - **Error path — turn.failed**: mock `turn.failed` event; verify error is thrown, `exitCode = 1`, `errorMessage` captured, and metrics are still recorded in `finally`
+  - **Error path — stream throw**: mock the async generator throwing an error; verify temp file cleanup and metrics recording still happen
+  - **Temp file cleanup**: verify temp file is deleted in both success and error paths
 - **Manual Testing**: Run `consult -m codex --dry-run general "hello"` to verify SDK path
 - **Build**: Verify TypeScript compilation succeeds (`npm run build`)
 - **Regression**: Verify `consult -m gemini --dry-run general "hello"` still works via subprocess
@@ -278,7 +283,7 @@ if (model === 'codex') {
 
 #### Risks
 - **Risk**: Removing codex from SUBPROCESS_MODEL_PRICING affects cost computation
-  - **Mitigation**: Move pricing constants into `runCodexConsultation()` or keep them in a shared location
+  - **Mitigation**: Pricing is owned by `CODEX_PRICING` constant in `index.ts` (added in Phase 1). Remove the codex entry from `SUBPROCESS_MODEL_PRICING` in `usage-extractor.ts`. No shared utility needed — each SDK model owns its own cost computation.
 
 ---
 
