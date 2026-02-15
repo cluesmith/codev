@@ -3,8 +3,8 @@
  *
  * Root cause: A race condition in Tower's startup sequence. initInstances()
  * was called BEFORE reconcileTerminalSessions(), which enabled dashboard
- * polls (via getInstances → getTerminalsForProject) to arrive during
- * reconciliation. Both getTerminalsForProject()'s on-the-fly reconnection
+ * polls (via getInstances → getTerminalsForWorkspace) to arrive during
+ * reconciliation. Both getTerminalsForWorkspace()'s on-the-fly reconnection
  * and reconcileTerminalSessions() would attempt to connect to the same
  * shellper socket. The shellper's single-connection model (new connection
  * replaces old) caused the first client to be disconnected, triggering
@@ -12,16 +12,16 @@
  * file — permanently losing the architect terminal.
  *
  * Builder terminals were not affected because getInstances() skips
- * /.builders/ paths, so their getTerminalsForProject() was never called
+ * /.builders/ paths, so their getTerminalsForWorkspace() was never called
  * during the race window.
  *
  * Fix (two layers):
  * 1. Reorder startup so reconcileTerminalSessions() runs BEFORE
  *    initInstances(). This ensures getInstances() returns [] (since _deps
  *    is null) during reconciliation, blocking the main race path.
- * 2. Add a _reconciling guard in getTerminalsForProject() that skips
+ * 2. Add a _reconciling guard in getTerminalsForWorkspace() that skips
  *    on-the-fly shellper reconnection while reconciliation is in progress.
- *    This closes the secondary race path through /project/<path>/api/state
+ *    This closes the secondary race path through /workspace/<path>/api/state
  *    which bypasses getInstances() entirely.
  */
 
@@ -36,7 +36,7 @@ import {
   initTerminals,
   shutdownTerminals,
   isReconciling,
-  getTerminalsForProject,
+  getTerminalsForWorkspace,
   reconcileTerminalSessions,
 } from '../servers/tower-terminals.js';
 
@@ -60,7 +60,7 @@ vi.mock('../db/index.js', () => ({
 }));
 
 vi.mock('../utils/gate-status.js', () => ({
-  getGateStatusForProject: vi.fn().mockReturnValue(null),
+  getGateStatusForWorkspace: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('../servers/tower-utils.js', async () => {
@@ -78,7 +78,7 @@ vi.mock('../servers/tower-utils.js', async () => {
 function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
   return {
     log: vi.fn(),
-    projectTerminals: new Map(),
+    workspaceTerminals: new Map(),
     getTerminalManager: vi.fn().mockReturnValue({
       getSession: vi.fn(),
       killSession: vi.fn(),
@@ -87,15 +87,15 @@ function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
       listSessions: vi.fn().mockReturnValue([]),
     }),
     shellperManager: null,
-    getProjectTerminalsEntry: vi.fn().mockReturnValue({
+    getWorkspaceTerminalsEntry: vi.fn().mockReturnValue({
       architect: undefined,
       builders: new Map(),
       shells: new Map(),
     }),
     saveTerminalSession: vi.fn(),
     deleteTerminalSession: vi.fn(),
-    deleteProjectTerminalSessions: vi.fn(),
-    getTerminalsForProject: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
+    deleteWorkspaceTerminalSessions: vi.fn(),
+    getTerminalsForWorkspace: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
     ...overrides,
   };
 }
@@ -121,7 +121,7 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     // During Tower startup, reconcileTerminalSessions() must complete
     // BEFORE initInstances() is called. Since getInstances() checks
     // _deps and returns [] when null, no dashboard poll can trigger
-    // getTerminalsForProject() during reconciliation.
+    // getTerminalsForWorkspace() during reconciliation.
     //
     // If someone reorders the startup sequence so initInstances() runs
     // before reconciliation, this test documents the expected safeguard.
@@ -129,14 +129,14 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     expect(instances).toEqual([]);
   });
 
-  it('getInstances() processes projects after initInstances', async () => {
+  it('getInstances() processes workspaces after initInstances', async () => {
     // After initInstances, API requests should work normally
     const deps = makeDeps();
 
-    // Simulate a known project in the known_projects table
+    // Simulate a known workspace in the known_workspaces table
     mockDbAll.mockImplementation((sql?: string) => {
-      if (typeof sql === 'string' && sql.includes('known_projects')) {
-        return [{ project_path: '/tmp/test-project' }];
+      if (typeof sql === 'string' && sql.includes('known_workspaces')) {
+        return [{ workspace_path: '/tmp/test-project' }];
       }
       return [];
     });
@@ -144,7 +144,7 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     initInstances(deps);
 
     const instances = await getInstances();
-    // The project should be processed (though it may not appear since
+    // The workspace should be processed (though it may not appear since
     // the path might not exist — that's OK, the point is getInstances()
     // doesn't return [] blindly)
     expect(deps.log).not.toHaveBeenCalledWith('ERROR', expect.anything());
@@ -169,8 +169,8 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     initTerminals({
       log: vi.fn(),
       shellperManager: null,
-      registerKnownProject: vi.fn(),
-      getKnownProjectPaths: vi.fn().mockReturnValue([]),
+      registerKnownWorkspace: vi.fn(),
+      getKnownWorkspacePaths: vi.fn().mockReturnValue([]),
     });
 
     // Mock DB to return no sessions (fast path)
@@ -186,9 +186,9 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     expect(isReconciling()).toBe(false);
   });
 
-  it('getTerminalsForProject skips on-the-fly reconnection during reconciliation', async () => {
+  it('getTerminalsForWorkspace skips on-the-fly reconnection during reconciliation', async () => {
     // This test verifies the secondary defense: even if a request to
-    // /project/<path>/api/state arrives during reconciliation (bypassing
+    // /workspace/<path>/api/state arrives during reconciliation (bypassing
     // getInstances), on-the-fly shellper reconnection is blocked.
     const mockShellperManager = {
       reconnectSession: vi.fn(),
@@ -200,14 +200,14 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
     initTerminals({
       log: vi.fn(),
       shellperManager: mockShellperManager as any,
-      registerKnownProject: vi.fn(),
-      getKnownProjectPaths: vi.fn().mockReturnValue([]),
+      registerKnownWorkspace: vi.fn(),
+      getKnownWorkspacePaths: vi.fn().mockReturnValue([]),
     });
 
     // Simulate a stale DB session with shellper info (would trigger reconnection)
     mockDbAll.mockReturnValue([{
       id: 'test-session-1',
-      project_path: '/tmp/test-project',
+      workspace_path: '/tmp/test-project',
       type: 'architect',
       role_id: null,
       pid: 12345,
@@ -216,19 +216,7 @@ describe('Bugfix #274: Architect terminal persistence across Tower restarts', ()
       shellper_start_time: Date.now(),
     }]);
 
-    // Intercept reconcileTerminalSessions to call getTerminalsForProject
-    // while _reconciling is true. We do this by running reconciliation
-    // with a mock that also calls getTerminalsForProject during its execution.
-    // However, the simplest way to test is: since reconcileTerminalSessions
-    // will read the DB and process sessions, we just verify that
-    // getTerminalsForProject, when called after reconciliation has completed,
-    // does NOT have the reconciling flag set.
-    //
-    // The actual guard is tested by checking: if we call getTerminalsForProject
-    // while the module says it's not reconciling, the reconnect path IS available.
-    // But during reconciliation, it's skipped.
-
-    // After reconcile (flag cleared), calling getTerminalsForProject
+    // After reconcile (flag cleared), calling getTerminalsForWorkspace
     // with a stale shellper session will attempt reconnection (normal path).
     // We verify the mock was not called DURING reconciliation by checking
     // that isReconciling is false after completion.
