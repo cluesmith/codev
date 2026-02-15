@@ -289,6 +289,21 @@ Projects currently in development (conceived through committed), sorted by prior
       specified_at: "2026-02-15"
     notes: "Six files assemble the same cols/rows/cwd/env options bag for createSession(). Should be one function."
 
+  - id: "0118"
+    title: "Shellper Multi-Client Connections"
+    summary: "Replace single-connection model with multi-client Map, enabling af attach and simultaneous dashboard+terminal viewing"
+    status: committed
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0118-shellper-multi-client.md
+    dependencies: []
+    tags: [shellper, terminal, multi-client, af-attach]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Shellper currently accepts one connection (Tower). Need multiple clients like tmux. Enables af attach in terminal."
+
 # Low Priority
 
   - id: "0023"
@@ -1147,7 +1162,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0118** - Reserve this number for your next project
+**0119** - Reserve this number for your next project
 
 ---
 
