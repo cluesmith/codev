@@ -35,6 +35,7 @@ import {
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
+import { notifyArchitect } from './notify.js';
 import type {
   ProjectState,
   Protocol,
@@ -498,6 +499,7 @@ async function handleBuildVerify(
         state.iteration = 1;
         state.history = [];
         writeState(statusPath, state);
+        notifyArchitect(state.id, gateName, projectRoot);
 
         return {
           status: 'gate_pending',
@@ -626,6 +628,7 @@ async function handleVerifyApproved(
     state.iteration = 1;
     state.history = [];
     writeState(statusPath, state);
+    notifyArchitect(state.id, gateName, projectRoot);
 
     return {
       status: 'gate_pending',
