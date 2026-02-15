@@ -26,8 +26,8 @@ const PROTOCOL_PATHS = [
  * Get project summary from projectlist.md.
  * Returns the summary field for the given project ID.
  */
-function getProjectSummary(projectRoot: string, projectId: string): string | null {
-  const projectlistPath = path.join(projectRoot, 'codev', 'projectlist.md');
+function getProjectSummary(workspaceRoot: string, projectId: string): string | null {
+  const projectlistPath = path.join(workspaceRoot, 'codev', 'projectlist.md');
   if (!fs.existsSync(projectlistPath)) {
     return null;
   }
@@ -59,9 +59,9 @@ function getProjectSummary(projectRoot: string, projectId: string): string | nul
 /**
  * Find the prompts directory for a protocol.
  */
-function findPromptsDir(projectRoot: string, protocolName: string): string | null {
+function findPromptsDir(workspaceRoot: string, protocolName: string): string | null {
   for (const basePath of PROTOCOL_PATHS) {
-    const promptsDir = path.join(projectRoot, basePath, protocolName, 'prompts');
+    const promptsDir = path.join(workspaceRoot, basePath, protocolName, 'prompts');
     if (fs.existsSync(promptsDir)) {
       return promptsDir;
     }
@@ -117,7 +117,7 @@ function substituteVariables(
  * Build a header listing all previous iteration files.
  * Claude can read these files to understand the history and feedback.
  */
-function buildHistoryHeader(history: IterationRecord[], currentIteration: number, state: ProjectState, projectRoot: string): string {
+function buildHistoryHeader(history: IterationRecord[], currentIteration: number, state: ProjectState, workspaceRoot: string): string {
   const lines: string[] = [
     '# REVISION REQUIRED',
     '',
@@ -158,7 +158,7 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
   lines.push('');
 
   // Add rebuttal instructions
-  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
   const phase = state.current_plan_phase || state.phase;
   const rebuttalFileName = `${state.id}-${phase}-iter${currentIteration - 1}-rebuttals.md`;
   const rebuttalPath = path.join(projectDir, rebuttalFileName);
@@ -190,7 +190,7 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
  * and review files so Claude can read them for context.
  */
 export function buildPhasePrompt(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   protocol: Protocol
 ): string {
@@ -200,7 +200,7 @@ export function buildPhasePrompt(
   }
 
   // Get project summary from projectlist.md
-  const summary = getProjectSummary(projectRoot, state.id);
+  const summary = getProjectSummary(workspaceRoot, state.id);
 
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
@@ -218,7 +218,7 @@ export function buildPhasePrompt(
       h => (h.plan_phase || undefined) === currentPhase
     );
     if (phaseHistory.length > 0) {
-      historyHeader = buildHistoryHeader(phaseHistory, state.iteration, state, projectRoot);
+      historyHeader = buildHistoryHeader(phaseHistory, state.iteration, state, workspaceRoot);
     }
   }
 
@@ -229,7 +229,7 @@ export function buildPhasePrompt(
   }
 
   // Try to load prompt from protocol directory
-  const promptsDir = findPromptsDir(projectRoot, state.protocol);
+  const promptsDir = findPromptsDir(workspaceRoot, state.protocol);
   if (promptsDir) {
     // Get prompt filename from protocol's build config, fallback to phase.md
     const buildConfig = getBuildConfig(protocol, state.phase);
@@ -251,7 +251,7 @@ export function buildPhasePrompt(
 
       // Add plan phase context if applicable
       if (currentPlanPhase) {
-        result = addPlanPhaseContext(projectRoot, state, currentPlanPhase, result);
+        result = addPlanPhaseContext(workspaceRoot, state, currentPlanPhase, result);
       }
 
       // Prepend history if this is a retry
@@ -278,12 +278,12 @@ export function buildPhasePrompt(
  * Add plan phase context from the plan file.
  */
 function addPlanPhaseContext(
-  projectRoot: string,
+  workspaceRoot: string,
   state: ProjectState,
   planPhase: PlanPhase,
   prompt: string
 ): string {
-  const planPath = findPlanFile(projectRoot, state.id, state.title);
+  const planPath = findPlanFile(workspaceRoot, state.id, state.title);
   if (!planPath) {
     return prompt;
   }

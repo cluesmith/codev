@@ -24,7 +24,7 @@
  *
  * Prerequisites:
  *   - Tower running: `af tower start`
- *   - Project activated
+ *   - Workspace activated
  *   - npx playwright install chromium
  *
  * Run: npx playwright test clickable-file-paths
@@ -34,10 +34,10 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
-const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
-const BASE_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;
-const PAGE_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
+const BASE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}`;
+const PAGE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/`;
 
 /**
  * Wait for the terminal to be ready (xterm.js rendered and connected).
@@ -182,7 +182,7 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
 
       const beforeTabCount = await getFileTabCount(request);
 
-      // Output a real file path that exists in the project
+      // Output a real file path that exists in the workspace
       await typeAndWait(page, terminal, 'echo "package.json"');
 
       // Find a file-path decoration and get its center position
@@ -337,7 +337,7 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
   });
 
   test.describe('API path resolution', () => {
-    test('resolves relative path within project', async ({ request }) => {
+    test('resolves relative path within workspace', async ({ request }) => {
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json' },
       });
@@ -358,9 +358,9 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(body.id).toBeTruthy();
     });
 
-    test('resolves absolute path within project (spec scenario 12)', async ({ request }) => {
+    test('resolves absolute path within workspace (spec scenario 12)', async ({ request }) => {
       // Use an absolute path to a known file
-      const absolutePath = `${PROJECT_PATH}/package.json`;
+      const absolutePath = `${WORKSPACE_PATH}/package.json`;
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: absolutePath },
       });
@@ -387,11 +387,11 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
     });
 
     test('builder worktree resolution via shell tab cwd', async ({ request }) => {
-      // This E2E suite runs against a tower whose project root is a builder
+      // This E2E suite runs against a tower whose workspace root is a builder
       // worktree (.builders/0101/). The tower assigns this worktree path as the
       // cwd for all shell tabs. This test verifies that terminalId-based
       // resolution works correctly in the builder worktree context.
-      expect(PROJECT_PATH).toContain('.builders');
+      expect(WORKSPACE_PATH).toContain('.builders');
 
       // Create a shell tab — its cwd is the builder worktree
       const shellResp = await request.post(`${BASE_URL}/api/tabs/shell`, {
@@ -403,7 +403,7 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
 
       // Resolve a relative path using the shell's terminalId.
       // The shell's cwd is the builder worktree, so "package.json" resolves
-      // to .builders/0101/package.json, not the parent project's package.json.
+      // to .builders/0101/package.json, not the parent workspace's package.json.
       const fileResp = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json', terminalId: shell.terminalId },
       });
@@ -416,7 +416,7 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
     test('builder worktree path traversal via terminalId returns 403', async ({ request }) => {
       const terminalId = await getArchitectTerminalId(request);
 
-      // Even with a valid terminalId, traversal outside the project returns 403
+      // Even with a valid terminalId, traversal outside the workspace returns 403
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: '../../../../etc/passwd', terminalId },
       });

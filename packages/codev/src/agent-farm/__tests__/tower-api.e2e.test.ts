@@ -3,10 +3,10 @@
  *
  * Tests for the new tower APIs:
  * - GET /health
- * - GET /api/projects
- * - POST /api/projects/:encodedPath/activate
- * - POST /api/projects/:encodedPath/deactivate
- * - GET /api/projects/:encodedPath/status
+ * - GET /api/workspaces
+ * - POST /api/workspaces/:encodedPath/activate
+ * - POST /api/workspaces/:encodedPath/deactivate
+ * - GET /api/workspaces/:encodedPath/status
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -101,35 +101,37 @@ async function stopServer(proc: ChildProcess | null): Promise<void> {
 }
 
 /**
- * Encode project path to base64url
+ * Encode workspace path to base64url
  */
-function encodeProjectPath(projectPath: string): string {
-  return Buffer.from(projectPath).toString('base64url');
+function encodeWorkspacePath(workspacePath: string): string {
+  return Buffer.from(workspacePath).toString('base64url');
 }
 
 /**
- * Create a test project directory
+ * Create a test workspace directory
  */
-function createTestProject(): string {
-  // Create inside the test directory (not OS temp) to avoid isTempDirectory filtering
-  const testBase = resolve(import.meta.dirname, '.test-projects');
+function createTestWorkspace(): string {
+  // Create inside a dedicated test directory under homedir (not OS temp)
+  // to avoid isTempDirectory filtering AND to avoid .builders filtering
+  // when running tests inside a builder workspace.
+  const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
   mkdirSync(testBase, { recursive: true });
-  const projectPath = mkdtempSync(resolve(testBase, 'codev-api-test-'));
-  mkdirSync(resolve(projectPath, 'codev'), { recursive: true });
-  mkdirSync(resolve(projectPath, '.agent-farm'), { recursive: true });
+  const workspacePath = mkdtempSync(resolve(testBase, 'codev-api-test-'));
+  mkdirSync(resolve(workspacePath, 'codev'), { recursive: true });
+  mkdirSync(resolve(workspacePath, '.agent-farm'), { recursive: true });
   writeFileSync(
-    resolve(projectPath, 'af-config.json'),
-    JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+    resolve(workspacePath, 'af-config.json'),
+    JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
   );
-  return projectPath;
+  return workspacePath;
 }
 
 /**
- * Clean up test project
+ * Clean up test workspace
  */
-function cleanupTestProject(projectPath: string): void {
+function cleanupTestWorkspace(workspacePath: string): void {
   try {
-    rmSync(projectPath, { recursive: true, force: true });
+    rmSync(workspacePath, { recursive: true, force: true });
   } catch {
     // Ignore cleanup errors
   }
@@ -160,60 +162,60 @@ describe('Tower API (Phase 1)', () => {
       const data = await response.json();
       expect(data.status).toBe('healthy');
       expect(typeof data.uptime).toBe('number');
-      expect(typeof data.activeProjects).toBe('number');
-      expect(typeof data.totalProjects).toBe('number');
+      expect(typeof data.activeWorkspaces).toBe('number');
+      expect(typeof data.totalWorkspaces).toBe('number');
       expect(typeof data.memoryUsage).toBe('number');
       expect(data.timestamp).toBeDefined();
     });
   });
 
-  describe('GET /api/projects', () => {
-    it('returns list of projects', async () => {
-      const response = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
+  describe('GET /api/workspaces', () => {
+    it('returns list of workspaces', async () => {
+      const response = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces`);
       expect(response.ok).toBe(true);
 
       const data = await response.json();
-      expect(data.projects).toBeDefined();
-      expect(Array.isArray(data.projects)).toBe(true);
+      expect(data.workspaces).toBeDefined();
+      expect(Array.isArray(data.workspaces)).toBe(true);
     });
   });
 
-  describe('GET /api/projects/:encodedPath/status', () => {
-    it('returns 404 for non-existent project', async () => {
-      const fakePath = '/nonexistent/project/path';
-      const encoded = encodeProjectPath(fakePath);
+  describe('GET /api/workspaces/:encodedPath/status', () => {
+    it('returns 404 for non-existent workspace', async () => {
+      const fakePath = '/nonexistent/workspace/path';
+      const encoded = encodeWorkspacePath(fakePath);
 
       const response = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/status`
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/status`
       );
       expect(response.status).toBe(404);
     });
 
     it('returns 400 for invalid encoding', async () => {
       const response = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/invalid!!!encoding/status`
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/invalid!!!encoding/status`
       );
       expect(response.status).toBe(400);
     });
   });
 
-  describe('POST /api/projects/:encodedPath/activate', () => {
-    let testProject: string;
+  describe('POST /api/workspaces/:encodedPath/activate', () => {
+    let testWorkspace: string;
 
     beforeEach(() => {
-      testProject = createTestProject();
+      testWorkspace = createTestWorkspace();
     });
 
     afterEach(() => {
-      cleanupTestProject(testProject);
+      cleanupTestWorkspace(testWorkspace);
     });
 
     it('returns 400 for non-existent path', async () => {
-      const fakePath = '/nonexistent/path/to/project';
-      const encoded = encodeProjectPath(fakePath);
+      const fakePath = '/nonexistent/path/to/workspace';
+      const encoded = encodeWorkspacePath(fakePath);
 
       const response = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/activate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/activate`,
         { method: 'POST' }
       );
       expect(response.status).toBe(400);
@@ -223,13 +225,13 @@ describe('Tower API (Phase 1)', () => {
     });
   });
 
-  describe('POST /api/projects/:encodedPath/deactivate', () => {
-    it('returns 404 for non-existent project', async () => {
-      const fakePath = '/nonexistent/project/path';
-      const encoded = encodeProjectPath(fakePath);
+  describe('POST /api/workspaces/:encodedPath/deactivate', () => {
+    it('returns 404 for non-existent workspace', async () => {
+      const fakePath = '/nonexistent/workspace/path';
+      const encoded = encodeWorkspacePath(fakePath);
 
       const response = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/deactivate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/deactivate`,
         { method: 'POST' }
       );
       expect(response.status).toBe(404);
@@ -237,11 +239,11 @@ describe('Tower API (Phase 1)', () => {
   });
 
   describe('Static file serving', () => {
-    it('serves content at /project/:encodedPath/', async () => {
-      const projectPath = resolve(import.meta.dirname, '../../../../../');
-      const encoded = encodeProjectPath(projectPath);
+    it('serves content at /workspace/:encodedPath/', async () => {
+      const workspacePath = resolve(import.meta.dirname, '../../../../../');
+      const encoded = encodeWorkspacePath(workspacePath);
 
-      const response = await fetch(`http://localhost:${TEST_TOWER_PORT}/project/${encoded}/`);
+      const response = await fetch(`http://localhost:${TEST_TOWER_PORT}/workspace/${encoded}/`);
       expect(response.ok).toBe(true);
     });
   });
@@ -261,101 +263,101 @@ describe('Tower API (Phase 1)', () => {
 
   // SQLite tests MUST run before rate limiting tests (which exhaust the rate limit)
   describe('SQLite authoritative terminal storage', () => {
-    let testProjectDir: string;
+    let testWorkspaceDir: string;
     let encodedPath: string;
 
     beforeEach(() => {
-      // Create test project inside the test directory (not OS temp) to avoid isTempDirectory filtering
-      const testBase = resolve(import.meta.dirname, '.test-projects');
+      // Create test workspace inside a dedicated test directory under homedir
+      const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
       mkdirSync(testBase, { recursive: true });
-      testProjectDir = mkdtempSync(resolve(testBase, 'tower-sqlite-test-'));
-      mkdirSync(resolve(testProjectDir, 'codev'), { recursive: true });
-      writeFileSync(resolve(testProjectDir, 'af-config.json'), JSON.stringify({
-        shell: { architect: 'bash', builder: 'bash', shell: 'bash' }
+      testWorkspaceDir = mkdtempSync(resolve(testBase, 'tower-sqlite-test-'));
+      mkdirSync(resolve(testWorkspaceDir, 'codev'), { recursive: true });
+      writeFileSync(resolve(testWorkspaceDir, 'af-config.json'), JSON.stringify({
+        shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' }
       }));
-      encodedPath = encodeProjectPath(testProjectDir);
+      encodedPath = encodeWorkspacePath(testWorkspaceDir);
     });
 
     afterEach(() => {
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      rmSync(testWorkspaceDir, { recursive: true, force: true });
     });
 
     it('saves terminal session to SQLite on activate', async () => {
-      // Activate project - this allocates a port and creates terminals
+      // Activate workspace - this allocates a port and creates terminals
       const activateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/activate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/activate`,
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
       const activateData = await activateRes.json();
       expect(activateData.success).toBe(true);
 
-      // Poll for project to appear in the projects list with terminals
+      // Poll for workspace to appear in the workspaces list with terminals
       // CI runners can be slow — allow up to 60s (120 × 500ms)
-      let project: any;
+      let workspace: any;
       for (let i = 0; i < 120; i++) {
-        const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
+        const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces`);
         expect(listRes.ok).toBe(true);
         const listData = await listRes.json();
-        project = listData.projects.find((p: { path: string }) =>
-          p.path === testProjectDir || p.path.includes('tower-sqlite-test')
+        workspace = listData.workspaces.find((p: { path: string }) =>
+          p.path === testWorkspaceDir || p.path.includes('tower-sqlite-test')
         );
-        if (project?.terminals > 0) break;
+        if (workspace?.terminals > 0) break;
         await new Promise((r) => setTimeout(r, 500));
       }
-      expect(project).toBeDefined();
-      expect(project.terminals).toBeGreaterThan(0);
+      expect(workspace).toBeDefined();
+      expect(workspace.terminals).toBeGreaterThan(0);
 
       // Cleanup: deactivate
       await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/deactivate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/deactivate`,
         { method: 'POST' }
       );
     });
 
     it('clears terminal sessions from SQLite on deactivate', async () => {
-      // Activate project first
+      // Activate workspace first
       const activateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/activate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/activate`,
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
       await new Promise((r) => setTimeout(r, 1000));
 
-      // Deactivate project
+      // Deactivate workspace
       const deactivateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/deactivate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/deactivate`,
         { method: 'POST' }
       );
       expect(deactivateRes.ok).toBe(true);
 
-      // Verify project now shows 0 terminals in the projects list
-      const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
+      // Verify workspace now shows 0 terminals in the workspaces list
+      const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces`);
       expect(listRes.ok).toBe(true);
       const listData = await listRes.json();
-      const project = listData.projects.find((p: { path: string }) =>
-        p.path === testProjectDir || p.path.includes('tower-sqlite-test')
+      const workspace = listData.workspaces.find((p: { path: string }) =>
+        p.path === testWorkspaceDir || p.path.includes('tower-sqlite-test')
       );
-      // Project may still be listed (port allocated) but with 0 terminals
-      if (project) {
-        expect(project.terminals).toBe(0);
+      // Workspace may still be listed (port allocated) but with 0 terminals
+      if (workspace) {
+        expect(workspace.terminals).toBe(0);
       }
     });
   });
 
-  // Issue #187: POST /api/terminals with project association registers terminal in project state
-  describe('POST /api/terminals with project registration', () => {
-    let testProjectDir: string;
+  // Issue #187: POST /api/terminals with workspace association registers terminal in workspace state
+  describe('POST /api/terminals with workspace registration', () => {
+    let testWorkspaceDir: string;
     let encodedPath: string;
 
     beforeEach(async () => {
-      testProjectDir = createTestProject();
-      encodedPath = encodeProjectPath(testProjectDir);
+      testWorkspaceDir = createTestWorkspace();
+      encodedPath = encodeWorkspacePath(testWorkspaceDir);
 
-      // Activate the project so it has an entry in projectTerminals
+      // Activate the workspace so it has an entry in workspaceTerminals
       const activateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/activate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/activate`,
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
@@ -365,24 +367,24 @@ describe('Tower API (Phase 1)', () => {
     afterEach(async () => {
       // Deactivate and clean up
       await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/api/projects/${encodedPath}/deactivate`,
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/deactivate`,
         { method: 'POST' }
       );
-      cleanupTestProject(testProjectDir);
+      cleanupTestWorkspace(testWorkspaceDir);
     });
 
-    it('registers builder terminal in project state when projectPath/type/roleId provided', async () => {
-      // Create a terminal with project association fields
+    it('registers builder terminal in workspace state when workspacePath/type/roleId provided', async () => {
+      // Create a terminal with workspace association fields
       const createRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/terminals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command: '/bin/echo',
           args: ['hello'],
-          cwd: testProjectDir,
+          cwd: testWorkspaceDir,
           cols: 80,
           rows: 24,
-          projectPath: testProjectDir,
+          workspacePath: testWorkspaceDir,
           type: 'builder',
           roleId: 'builder-test-1',
         }),
@@ -391,9 +393,9 @@ describe('Tower API (Phase 1)', () => {
       const createData = await createRes.json();
       expect(createData.id).toBeDefined();
 
-      // Query project state and verify the builder appears
+      // Query workspace state and verify the builder appears
       const stateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/project/${encodedPath}/api/state`
+        `http://localhost:${TEST_TOWER_PORT}/workspace/${encodedPath}/api/state`
       );
       expect(stateRes.ok).toBe(true);
       const state = await stateRes.json();
@@ -403,17 +405,17 @@ describe('Tower API (Phase 1)', () => {
       expect(builder.terminalId).toBe(createData.id);
     });
 
-    it('registers shell terminal in project state when type is shell', async () => {
+    it('registers shell terminal in workspace state when type is shell', async () => {
       const createRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/terminals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command: '/bin/echo',
           args: ['hello'],
-          cwd: testProjectDir,
+          cwd: testWorkspaceDir,
           cols: 80,
           rows: 24,
-          projectPath: testProjectDir,
+          workspacePath: testWorkspaceDir,
           type: 'shell',
           roleId: 'shell-test-1',
         }),
@@ -422,7 +424,7 @@ describe('Tower API (Phase 1)', () => {
       const createData = await createRes.json();
 
       const stateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/project/${encodedPath}/api/state`
+        `http://localhost:${TEST_TOWER_PORT}/workspace/${encodedPath}/api/state`
       );
       expect(stateRes.ok).toBe(true);
       const state = await stateRes.json();
@@ -432,15 +434,15 @@ describe('Tower API (Phase 1)', () => {
       expect(shell.terminalId).toBe(createData.id);
     });
 
-    it('does not register terminal when project fields are missing', async () => {
-      // Create terminal WITHOUT project association fields
+    it('does not register terminal when workspace fields are missing', async () => {
+      // Create terminal WITHOUT workspace association fields
       const createRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/terminals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command: '/bin/echo',
           args: ['hello'],
-          cwd: testProjectDir,
+          cwd: testWorkspaceDir,
           cols: 80,
           rows: 24,
         }),
@@ -448,9 +450,9 @@ describe('Tower API (Phase 1)', () => {
       expect(createRes.status).toBe(201);
       const createData = await createRes.json();
 
-      // Query project state - the terminal should NOT appear as a builder or shell
+      // Query workspace state - the terminal should NOT appear as a builder or shell
       const stateRes = await fetch(
-        `http://localhost:${TEST_TOWER_PORT}/project/${encodedPath}/api/state`
+        `http://localhost:${TEST_TOWER_PORT}/workspace/${encodedPath}/api/state`
       );
       expect(stateRes.ok).toBe(true);
       const state = await stateRes.json();
@@ -478,9 +480,9 @@ describe('Tower API (Phase 1)', () => {
       const responses: number[] = [];
 
       for (const fakePath of fakePaths) {
-        const encoded = encodeProjectPath(fakePath);
+        const encoded = encodeWorkspacePath(fakePath);
         const response = await fetch(
-          `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/activate`,
+          `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/activate`,
           { method: 'POST' }
         );
         responses.push(response.status);
@@ -504,12 +506,12 @@ describe('Tower API (Phase 1)', () => {
       const fakePaths = Array.from({ length: 15 }, (_, i) => `/nonexistent/deactivate-test-${i}`);
 
       for (const fakePath of fakePaths) {
-        const encoded = encodeProjectPath(fakePath);
+        const encoded = encodeWorkspacePath(fakePath);
         const response = await fetch(
-          `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/deactivate`,
+          `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/deactivate`,
           { method: 'POST' }
         );
-        // Should be 404 (project not found), not 429
+        // Should be 404 (workspace not found), not 429
         expect(response.status).toBe(404);
       }
     });
@@ -519,11 +521,11 @@ describe('Tower API (Phase 1)', () => {
       const fakePaths = Array.from({ length: 15 }, (_, i) => `/nonexistent/status-test-${i}`);
 
       for (const fakePath of fakePaths) {
-        const encoded = encodeProjectPath(fakePath);
+        const encoded = encodeWorkspacePath(fakePath);
         const response = await fetch(
-          `http://localhost:${TEST_TOWER_PORT}/api/projects/${encoded}/status`
+          `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/status`
         );
-        // Should be 404 (project not found), not 429
+        // Should be 404 (workspace not found), not 429
         expect(response.status).toBe(404);
       }
     });

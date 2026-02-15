@@ -6,7 +6,7 @@
  *
  * Prerequisites:
  *   - Tower running: `af tower start`
- *   - Project activated
+ *   - Workspace activated
  *   - npx playwright install chromium
  *
  * Run: npx playwright test dashboard-gate-banner
@@ -17,13 +17,13 @@ import { resolve } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
-const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
-const PAGE_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
+const PAGE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/`;
 
 // Temporary project directory for gate tests (cleaned up after each test)
 const TEST_PROJECT_ID = '9999-gate-banner-e2e';
-const TEST_PROJECT_DIR = resolve(PROJECT_PATH, 'codev', 'projects', TEST_PROJECT_ID);
+const TEST_PROJECT_DIR = resolve(WORKSPACE_PATH, 'codev', 'projects', TEST_PROJECT_ID);
 
 function writeGateStatus(yaml: string): void {
   mkdirSync(TEST_PROJECT_DIR, { recursive: true });

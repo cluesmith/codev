@@ -3,7 +3,7 @@
  *
  * Tests: route dispatch (handleRequest routing), CORS headers, security
  * checks, SSE events wiring, health check, terminal list, dashboard,
- * project path decoding, and 404 fallback.
+ * workspace path decoding, and 404 fallback.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -17,21 +17,21 @@ import type { RouteContext } from '../servers/tower-routes.js';
 // ============================================================================
 
 const { mockGetInstances, mockGetTerminalManager, mockGetSession,
-  mockListSessions, mockGetProjectTerminalsEntry, mockGetTerminalsForProject,
+  mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
   mockIsSessionPersistent, mockGetNextShellId } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
   mockListSessions: vi.fn(),
-  mockGetProjectTerminalsEntry: vi.fn(),
-  mockGetTerminalsForProject: vi.fn(),
+  mockGetWorkspaceTerminalsEntry: vi.fn(),
+  mockGetTerminalsForWorkspace: vi.fn(),
   mockIsSessionPersistent: vi.fn(),
   mockGetNextShellId: vi.fn(),
 }));
 
 vi.mock('../servers/tower-instances.js', () => ({
   getInstances: mockGetInstances,
-  getKnownProjectPaths: vi.fn(() => []),
+  getKnownWorkspacePaths: vi.fn(() => []),
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
@@ -39,17 +39,17 @@ vi.mock('../servers/tower-instances.js', () => ({
 }));
 
 vi.mock('../servers/tower-terminals.js', () => ({
-  getProjectTerminals: vi.fn(() => new Map()),
+  getWorkspaceTerminals: vi.fn(() => new Map()),
   getTerminalManager: mockGetTerminalManager,
-  getProjectTerminalsEntry: mockGetProjectTerminalsEntry,
+  getWorkspaceTerminalsEntry: mockGetWorkspaceTerminalsEntry,
   getNextShellId: mockGetNextShellId,
   saveTerminalSession: vi.fn(),
   isSessionPersistent: mockIsSessionPersistent,
   deleteTerminalSession: vi.fn(),
-  deleteProjectTerminalSessions: vi.fn(),
+  deleteWorkspaceTerminalSessions: vi.fn(),
   saveFileTab: vi.fn(),
   deleteFileTab: vi.fn(),
-  getTerminalsForProject: mockGetTerminalsForProject,
+  getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
 }));
 
 vi.mock('../servers/tower-tunnel.js', () => ({
@@ -61,7 +61,7 @@ vi.mock('../servers/tower-tunnel.js', () => ({
 
 vi.mock('../servers/tower-utils.js', () => ({
   isRateLimited: vi.fn(() => false),
-  normalizeProjectPath: (p: string) => p,
+  normalizeWorkspacePath: (p: string) => p,
   getLanguageForExt: (ext: string) => ext,
   getMimeTypeForFile: () => 'application/octet-stream',
   serveStaticFile: vi.fn(() => false),
@@ -137,13 +137,13 @@ describe('tower-routes', () => {
       listSessions: mockListSessions.mockReturnValue([]),
       getSession: mockGetSession.mockReturnValue(null),
     });
-    mockGetProjectTerminalsEntry.mockReturnValue({
+    mockGetWorkspaceTerminalsEntry.mockReturnValue({
       architect: undefined,
       shells: new Map(),
       builders: new Map(),
       fileTabs: new Map(),
     });
-    mockGetTerminalsForProject.mockResolvedValue({ gateStatus: undefined });
+    mockGetTerminalsForWorkspace.mockResolvedValue({ gateStatus: undefined });
   });
 
   // =========================================================================
@@ -201,10 +201,10 @@ describe('tower-routes', () => {
   // =========================================================================
 
   describe('GET /health', () => {
-    it('returns healthy status with project counts', async () => {
+    it('returns healthy status with workspace counts', async () => {
       mockGetInstances.mockResolvedValue([
-        { running: true, projectPath: '/a' },
-        { running: false, projectPath: '/b' },
+        { running: true, workspacePath: '/a' },
+        { running: false, workspacePath: '/b' },
       ]);
 
       const req = makeReq('GET', '/health');
@@ -214,8 +214,8 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.status).toBe('healthy');
-      expect(parsed.activeProjects).toBe(1);
-      expect(parsed.totalProjects).toBe(2);
+      expect(parsed.activeWorkspaces).toBe(1);
+      expect(parsed.totalWorkspaces).toBe(2);
     });
   });
 
@@ -243,7 +243,7 @@ describe('tower-routes', () => {
 
   describe('GET /api/status', () => {
     it('returns instances', async () => {
-      mockGetInstances.mockResolvedValue([{ projectPath: '/p', running: true }]);
+      mockGetInstances.mockResolvedValue([{ workspacePath: '/p', running: true }]);
 
       const req = makeReq('GET', '/api/status');
       const { res, statusCode, body } = makeRes();
@@ -298,7 +298,7 @@ describe('tower-routes', () => {
         type: 'gate',
         title: 'Gate ready',
         body: 'Spec approval needed',
-        project: '/my/project',
+        workspace: '/my/workspace',
       });
 
       const ctx = makeCtx();
@@ -311,7 +311,7 @@ describe('tower-routes', () => {
         type: 'gate',
         title: 'Gate ready',
         body: 'Spec approval needed',
-        project: '/my/project',
+        workspace: '/my/workspace',
       });
     });
 
@@ -352,12 +352,12 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
-  // Project routes - path decoding
+  // Workspace routes - path decoding
   // =========================================================================
 
-  describe('project routes', () => {
+  describe('workspace routes', () => {
     it('returns 400 for missing encoded path', async () => {
-      const req = makeReq('GET', '/project/');
+      const req = makeReq('GET', '/workspace/');
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -367,16 +367,16 @@ describe('tower-routes', () => {
     it('returns 400 for invalid base64url path', async () => {
       // "relative/path" decodes to non-absolute path
       const encoded = Buffer.from('relative/path').toString('base64url');
-      const req = makeReq('GET', `/project/${encoded}/api/state`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(400);
     });
 
-    it('dispatches to project API state route', async () => {
-      const encoded = Buffer.from('/test/project').toString('base64url');
-      const req = makeReq('GET', `/project/${encoded}/api/state`);
+    it('dispatches to workspace API state route', async () => {
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
       const { res, statusCode, body } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -403,23 +403,23 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
-  // API projects
+  // API workspaces
   // =========================================================================
 
-  describe('GET /api/projects', () => {
-    it('returns project list', async () => {
+  describe('GET /api/workspaces', () => {
+    it('returns workspace list', async () => {
       mockGetInstances.mockResolvedValue([
-        { projectPath: '/p1', projectName: 'p1', running: true, proxyUrl: null, terminals: [] },
+        { workspacePath: '/p1', workspaceName: 'p1', running: true, proxyUrl: null, terminals: [] },
       ]);
 
-      const req = makeReq('GET', '/api/projects');
+      const req = makeReq('GET', '/api/workspaces');
       const { res, statusCode, body } = makeRes();
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
-      expect(parsed.projects).toHaveLength(1);
-      expect(parsed.projects[0].name).toBe('p1');
+      expect(parsed.workspaces).toHaveLength(1);
+      expect(parsed.workspaces[0].name).toBe('p1');
     });
   });
 
@@ -427,13 +427,13 @@ describe('tower-routes', () => {
   // Rate limiting on activate
   // =========================================================================
 
-  describe('POST /api/projects/:path/activate', () => {
+  describe('POST /api/workspaces/:path/activate', () => {
     it('returns 429 when rate limited', async () => {
       const { isRateLimited } = await import('../servers/tower-utils.js');
       (isRateLimited as any).mockReturnValueOnce(true);
 
-      const encoded = Buffer.from('/test/project').toString('base64url');
-      const req = makeReq('POST', `/api/projects/${encoded}/activate`);
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('POST', `/api/workspaces/${encoded}/activate`);
       const { res, statusCode, body } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -442,8 +442,8 @@ describe('tower-routes', () => {
     });
 
     it('launches instance when not rate limited', async () => {
-      const encoded = Buffer.from('/test/project').toString('base64url');
-      const req = makeReq('POST', `/api/projects/${encoded}/activate`);
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('POST', `/api/workspaces/${encoded}/activate`);
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -456,21 +456,21 @@ describe('tower-routes', () => {
   // =========================================================================
 
   describe('annotate vendor route', () => {
-    const projectPath = '/test/project';
-    const encoded = Buffer.from(projectPath).toString('base64url');
+    const workspacePath = '/test/workspace';
+    const encoded = Buffer.from(workspacePath).toString('base64url');
     const tabId = 'test-tab';
 
     beforeEach(() => {
-      mockGetProjectTerminalsEntry.mockReturnValue({
+      mockGetWorkspaceTerminalsEntry.mockReturnValue({
         architect: undefined,
         shells: new Map(),
         builders: new Map(),
-        fileTabs: new Map([[tabId, { path: '/test/project/src/main.ts' }]]),
+        fileTabs: new Map([[tabId, { path: '/test/workspace/src/main.ts' }]]),
       });
     });
 
     it('serves vendor JS files with correct content type', async () => {
-      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/prism.min.js`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/annotate/${tabId}/vendor/prism.min.js`);
       const { res, statusCode, headers } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -479,7 +479,7 @@ describe('tower-routes', () => {
     });
 
     it('serves vendor CSS files with correct content type', async () => {
-      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/prism-tomorrow.min.css`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/annotate/${tabId}/vendor/prism-tomorrow.min.css`);
       const { res, statusCode, headers } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -488,7 +488,7 @@ describe('tower-routes', () => {
     });
 
     it('blocks path traversal in vendor route', async () => {
-      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/..%2F..%2Fpackage.json`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/annotate/${tabId}/vendor/..%2F..%2Fpackage.json`);
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -496,7 +496,7 @@ describe('tower-routes', () => {
     });
 
     it('returns 404 for non-existent vendor files', async () => {
-      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/nonexistent.js`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/annotate/${tabId}/vendor/nonexistent.js`);
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
@@ -504,7 +504,7 @@ describe('tower-routes', () => {
     });
 
     it('rejects vendor files with disallowed extensions', async () => {
-      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/secret.txt`);
+      const req = makeReq('GET', `/workspace/${encoded}/api/annotate/${tabId}/vendor/secret.txt`);
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 

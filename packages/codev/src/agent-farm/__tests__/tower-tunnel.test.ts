@@ -119,7 +119,7 @@ function makeDeps(overrides: Partial<TunnelDeps> = {}): TunnelDeps {
   return {
     port: 4100,
     log: vi.fn(),
-    projectTerminals: new Map(),
+    workspaceTerminals: new Map(),
     terminalManager: null,
     ...overrides,
   };

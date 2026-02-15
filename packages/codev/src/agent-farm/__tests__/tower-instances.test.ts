@@ -1,7 +1,7 @@
 /**
  * Unit tests for tower-instances.ts (Spec 0105 Phase 3)
  *
- * Tests: registerKnownProject, getKnownProjectPaths, getInstances,
+ * Tests: registerKnownWorkspace, getKnownWorkspacePaths, getInstances,
  * getDirectorySuggestions, launchInstance, killTerminalWithShellper, stopInstance,
  * initInstances / shutdownInstances lifecycle.
  */
@@ -13,8 +13,8 @@ import os from 'node:os';
 import {
   initInstances,
   shutdownInstances,
-  registerKnownProject,
-  getKnownProjectPaths,
+  registerKnownWorkspace,
+  getKnownWorkspacePaths,
   getInstances,
   getDirectorySuggestions,
   launchInstance,
@@ -69,7 +69,7 @@ vi.mock('../servers/tower-utils.js', async () => {
 function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
   return {
     log: vi.fn(),
-    projectTerminals: new Map(),
+    workspaceTerminals: new Map(),
     getTerminalManager: vi.fn().mockReturnValue({
       getSession: vi.fn(),
       killSession: vi.fn(),
@@ -78,15 +78,15 @@ function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
       listSessions: vi.fn().mockReturnValue([]),
     }),
     shellperManager: null,
-    getProjectTerminalsEntry: vi.fn().mockReturnValue({
+    getWorkspaceTerminalsEntry: vi.fn().mockReturnValue({
       architect: undefined,
       builders: new Map(),
       shells: new Map(),
     }),
     saveTerminalSession: vi.fn(),
     deleteTerminalSession: vi.fn(),
-    deleteProjectTerminalSessions: vi.fn(),
-    getTerminalsForProject: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
+    deleteWorkspaceTerminalSessions: vi.fn(),
+    getTerminalsForWorkspace: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
     ...overrides,
   };
 }
@@ -117,7 +117,7 @@ describe('tower-instances', () => {
       const deps = makeDeps();
       initInstances(deps);
       // Verify by calling a function that requires initialization
-      expect(() => getKnownProjectPaths()).not.toThrow();
+      expect(() => getKnownWorkspacePaths()).not.toThrow();
     });
 
     it('subsequent init replaces previous deps', () => {
@@ -131,14 +131,14 @@ describe('tower-instances', () => {
   });
 
   // =========================================================================
-  // registerKnownProject
+  // registerKnownWorkspace
   // =========================================================================
 
-  describe('registerKnownProject', () => {
-    it('inserts project into known_projects table', () => {
-      registerKnownProject('/home/user/my-project');
+  describe('registerKnownWorkspace', () => {
+    it('inserts workspace into known_workspaces table', () => {
+      registerKnownWorkspace('/home/user/my-project');
 
-      expect(mockDbPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO known_projects'));
+      expect(mockDbPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO known_workspaces'));
       expect(mockDbRun).toHaveBeenCalledWith('/home/user/my-project', 'my-project');
     });
 
@@ -146,58 +146,58 @@ describe('tower-instances', () => {
       mockDbPrepare.mockImplementationOnce(() => { throw new Error('DB error'); });
 
       // Should not throw
-      expect(() => registerKnownProject('/some/path')).not.toThrow();
+      expect(() => registerKnownWorkspace('/some/path')).not.toThrow();
     });
   });
 
   // =========================================================================
-  // getKnownProjectPaths
+  // getKnownWorkspacePaths
   // =========================================================================
 
-  describe('getKnownProjectPaths', () => {
-    it('returns empty array when no projects exist', () => {
+  describe('getKnownWorkspacePaths', () => {
+    it('returns empty array when no workspaces exist', () => {
       const deps = makeDeps();
       initInstances(deps);
 
-      const paths = getKnownProjectPaths();
+      const paths = getKnownWorkspacePaths();
       expect(paths).toEqual([]);
     });
 
-    it('includes paths from known_projects table', () => {
+    it('includes paths from known_workspaces table', () => {
       const deps = makeDeps();
       initInstances(deps);
 
-      // First call returns known_projects, second returns terminal_sessions
+      // First call returns known_workspaces, second returns terminal_sessions
       mockDbAll
-        .mockReturnValueOnce([{ project_path: '/path/a' }])
+        .mockReturnValueOnce([{ workspace_path: '/path/a' }])
         .mockReturnValueOnce([]);
 
-      const paths = getKnownProjectPaths();
+      const paths = getKnownWorkspacePaths();
       expect(paths).toContain('/path/a');
     });
 
-    it('includes paths from in-memory projectTerminals', () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/path/b', { architect: undefined, builders: new Map(), shells: new Map() });
-      const deps = makeDeps({ projectTerminals });
+    it('includes paths from in-memory workspaceTerminals', () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/path/b', { architect: undefined, builders: new Map(), shells: new Map() });
+      const deps = makeDeps({ workspaceTerminals });
       initInstances(deps);
 
-      const paths = getKnownProjectPaths();
+      const paths = getKnownWorkspacePaths();
       expect(paths).toContain('/path/b');
     });
 
     it('deduplicates paths across sources', () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/path/c', { architect: undefined, builders: new Map(), shells: new Map() });
-      const deps = makeDeps({ projectTerminals });
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/path/c', { architect: undefined, builders: new Map(), shells: new Map() });
+      const deps = makeDeps({ workspaceTerminals });
       initInstances(deps);
 
       // Both DB tables return the same path
       mockDbAll
-        .mockReturnValueOnce([{ project_path: '/path/c' }])
-        .mockReturnValueOnce([{ project_path: '/path/c' }]);
+        .mockReturnValueOnce([{ workspace_path: '/path/c' }])
+        .mockReturnValueOnce([{ workspace_path: '/path/c' }]);
 
-      const paths = getKnownProjectPaths();
+      const paths = getKnownWorkspacePaths();
       // Should appear only once
       expect(paths.filter(p => p === '/path/c')).toHaveLength(1);
     });
@@ -209,7 +209,7 @@ describe('tower-instances', () => {
       mockDbPrepare.mockImplementation(() => { throw new Error('DB error'); });
 
       // Should not throw, returns whatever is in memory
-      expect(() => getKnownProjectPaths()).not.toThrow();
+      expect(() => getKnownWorkspacePaths()).not.toThrow();
     });
   });
 
@@ -223,7 +223,7 @@ describe('tower-instances', () => {
       expect(instances).toEqual([]);
     });
 
-    it('returns empty array when no projects known', async () => {
+    it('returns empty array when no workspaces known', async () => {
       const deps = makeDeps();
       initInstances(deps);
 
@@ -232,11 +232,11 @@ describe('tower-instances', () => {
     });
 
     it('skips builder worktrees', async () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/home/user/project/.builders/001', {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/home/user/project/.builders/001', {
         architect: undefined, builders: new Map(), shells: new Map(),
       });
-      const deps = makeDeps({ projectTerminals });
+      const deps = makeDeps({ workspaceTerminals });
       initInstances(deps);
 
       const instances = await getInstances();
@@ -244,11 +244,11 @@ describe('tower-instances', () => {
     });
 
     it('skips non-existent directories', async () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/nonexistent/path/project', {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/nonexistent/path/project', {
         architect: undefined, builders: new Map(), shells: new Map(),
       });
-      const deps = makeDeps({ projectTerminals });
+      const deps = makeDeps({ workspaceTerminals });
       initInstances(deps);
 
       const instances = await getInstances();
@@ -261,19 +261,19 @@ describe('tower-instances', () => {
       const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-b-'));
 
       try {
-        const projectTerminals = new Map();
-        projectTerminals.set(tmpDir, {
+        const workspaceTerminals = new Map();
+        workspaceTerminals.set(tmpDir, {
           architect: undefined, builders: new Map(), shells: new Map(),
         });
-        projectTerminals.set(tmpDir2, {
+        workspaceTerminals.set(tmpDir2, {
           architect: undefined, builders: new Map(), shells: new Map(),
         });
 
-        const getTerminalsForProject = vi.fn()
+        const getTerminalsForWorkspace = vi.fn()
           .mockResolvedValueOnce({ terminals: [], gateStatus: null })  // tmpDir: inactive
           .mockResolvedValueOnce({ terminals: [{ id: 't1' }], gateStatus: null });  // tmpDir2: active
 
-        const deps = makeDeps({ projectTerminals, getTerminalsForProject });
+        const deps = makeDeps({ workspaceTerminals, getTerminalsForWorkspace });
         initInstances(deps);
 
         const instances = await getInstances();
@@ -287,27 +287,27 @@ describe('tower-instances', () => {
       }
     });
 
-    it('populates lastUsed from known_projects.last_launched_at', async () => {
+    it('populates lastUsed from known_workspaces.last_launched_at', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-lastused-'));
 
       try {
-        const projectTerminals = new Map();
-        projectTerminals.set(tmpDir, {
+        const workspaceTerminals = new Map();
+        workspaceTerminals.set(tmpDir, {
           architect: undefined, builders: new Map(), shells: new Map(),
         });
 
-        const deps = makeDeps({ projectTerminals });
+        const deps = makeDeps({ workspaceTerminals });
         initInstances(deps);
 
         // Route mock results based on the SQL query
         mockDbPrepare.mockImplementation((sql: string) => ({
           run: mockDbRun,
           all: () => {
-            if (sql.includes('last_launched_at') && sql.includes('known_projects')) {
-              return [{ project_path: tmpDir, last_launched_at: '2026-02-14 10:30:00' }];
+            if (sql.includes('last_launched_at') && sql.includes('known_workspaces')) {
+              return [{ workspace_path: tmpDir, last_launched_at: '2026-02-14 10:30:00' }];
             }
-            if (sql.includes('known_projects')) {
-              return [{ project_path: tmpDir }];
+            if (sql.includes('known_workspaces')) {
+              return [{ workspace_path: tmpDir }];
             }
             return [];
           },
@@ -321,16 +321,16 @@ describe('tower-instances', () => {
       }
     });
 
-    it('sets lastUsed to undefined when project not in known_projects', async () => {
+    it('sets lastUsed to undefined when workspace not in known_workspaces', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-nolastused-'));
 
       try {
-        const projectTerminals = new Map();
-        projectTerminals.set(tmpDir, {
+        const workspaceTerminals = new Map();
+        workspaceTerminals.set(tmpDir, {
           architect: undefined, builders: new Map(), shells: new Map(),
         });
 
-        const deps = makeDeps({ projectTerminals });
+        const deps = makeDeps({ workspaceTerminals });
         initInstances(deps);
 
         const instances = await getInstances();
@@ -542,9 +542,9 @@ describe('tower-instances', () => {
       expect(result.error).toMatch(/No terminals found/);
     });
 
-    it('kills all terminals for a project', async () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/project/path', {
+    it('kills all terminals for a workspace', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
         architect: 'arch-1',
         builders: new Map([['b1', 'build-1']]),
         shells: new Map([['s1', 'shell-1']]),
@@ -556,7 +556,7 @@ describe('tower-instances', () => {
       };
 
       const deps = makeDeps({
-        projectTerminals,
+        workspaceTerminals,
         getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
       });
       initInstances(deps);
@@ -565,12 +565,12 @@ describe('tower-instances', () => {
       expect(result.success).toBe(true);
       expect(result.stopped).toHaveLength(3); // architect + builder + shell
       expect(mockManager.killSession).toHaveBeenCalledTimes(3);
-      expect(deps.deleteProjectTerminalSessions).toHaveBeenCalled();
+      expect(deps.deleteWorkspaceTerminalSessions).toHaveBeenCalled();
     });
 
-    it('clears project from registry after stop', async () => {
-      const projectTerminals = new Map();
-      projectTerminals.set('/project/path', {
+    it('clears workspace from registry after stop', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
         architect: 'arch-1',
         builders: new Map(),
         shells: new Map(),
@@ -582,13 +582,13 @@ describe('tower-instances', () => {
       };
 
       const deps = makeDeps({
-        projectTerminals,
+        workspaceTerminals,
         getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
       });
       initInstances(deps);
 
       await stopInstance('/project/path');
-      expect(projectTerminals.has('/project/path')).toBe(false);
+      expect(workspaceTerminals.has('/project/path')).toBe(false);
     });
   });
 });

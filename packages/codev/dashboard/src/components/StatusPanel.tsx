@@ -350,7 +350,9 @@ export function StatusPanel({ state, onRefresh, onSelectTab }: StatusPanelProps)
     <div className="dashboard-container">
       {/* Info header */}
       <div className="projects-info">
-        <h1 style={{ fontSize: 20, marginBottom: 12, color: 'var(--text-primary)' }}>Agent Farm Dashboard</h1>
+        <h1 style={{ fontSize: 20, marginBottom: 12, color: 'var(--text-primary)' }}>
+          {state.workspaceName ? `${state.workspaceName} – Agent Farm` : 'Agent Farm Dashboard'}
+        </h1>
         <p>
           Coordinate AI builders working on your codebase. The left panel shows the Architect terminal –
           tell it what you want to build. <strong>Tabs</strong> shows open terminals (Architect, Builders, utility shells).{' '}

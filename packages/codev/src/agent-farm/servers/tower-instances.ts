@@ -1,9 +1,9 @@
 /**
- * Project instance lifecycle for tower server.
+ * Workspace instance lifecycle for tower server.
  * Spec 0105: Tower Server Decomposition — Phase 3
  *
  * Contains: instance discovery (getInstances), launch/stop lifecycle,
- * known project registration, and directory suggestion autocomplete.
+ * known workspace registration, and directory suggestion autocomplete.
  */
 
 import fs from 'node:fs';
@@ -15,10 +15,10 @@ import { getGlobalDb } from '../db/index.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
-import type { ProjectTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
+import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
-  normalizeProjectPath,
-  getProjectName,
+  normalizeWorkspacePath,
+  getWorkspaceName,
   isTempDirectory,
   buildArchitectArgs,
 } from './tower-utils.js';
@@ -30,24 +30,24 @@ import {
 /** Dependencies injected by the orchestrator (tower-server.ts) */
 export interface InstanceDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
-  projectTerminals: Map<string, ProjectTerminals>;
+  workspaceTerminals: Map<string, WorkspaceTerminals>;
   getTerminalManager: () => TerminalManager;
   shellperManager: SessionManager | null;
-  /** Get or create a project's terminal registry entry */
-  getProjectTerminalsEntry: (projectPath: string) => ProjectTerminals;
+  /** Get or create a workspace's terminal registry entry */
+  getWorkspaceTerminalsEntry: (workspacePath: string) => WorkspaceTerminals;
   /** Persist a terminal session row to SQLite */
   saveTerminalSession: (
-    id: string, projectPath: string, type: 'architect' | 'builder' | 'shell',
+    id: string, workspacePath: string, type: 'architect' | 'builder' | 'shell',
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
-  /** Delete all terminal session rows for a project */
-  deleteProjectTerminalSessions: (projectPath: string) => void;
-  /** Get terminal list + gate status for a project (stays in tower-server.ts until Phase 4) */
-  getTerminalsForProject: (
-    projectPath: string, proxyUrl: string,
+  /** Delete all terminal session rows for a workspace */
+  deleteWorkspaceTerminalSessions: (workspacePath: string) => void;
+  /** Get terminal list + gate status for a workspace (stays in tower-server.ts until Phase 4) */
+  getTerminalsForWorkspace: (
+    workspacePath: string, proxyUrl: string,
   ) => Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }>;
 }
 
@@ -72,62 +72,62 @@ export function shutdownInstances(): void {
 }
 
 // ============================================================================
-// Known project registration
+// Known workspace registration
 // ============================================================================
 
 /**
- * Register a project in the known_projects table so it persists across restarts
+ * Register a workspace in the known_workspaces table so it persists across restarts
  * even when all terminal sessions are gone.
  */
-export function registerKnownProject(projectPath: string): void {
+export function registerKnownWorkspace(workspacePath: string): void {
   try {
     const db = getGlobalDb();
     db.prepare(`
-      INSERT INTO known_projects (project_path, name, last_launched_at)
+      INSERT INTO known_workspaces (workspace_path, name, last_launched_at)
       VALUES (?, ?, datetime('now'))
-      ON CONFLICT(project_path) DO UPDATE SET last_launched_at = datetime('now')
-    `).run(projectPath, path.basename(projectPath));
+      ON CONFLICT(workspace_path) DO UPDATE SET last_launched_at = datetime('now')
+    `).run(workspacePath, path.basename(workspacePath));
   } catch {
     // Table may not exist yet (pre-migration)
   }
 }
 
 /**
- * Get all known project paths from known_projects, terminal_sessions, and in-memory cache.
+ * Get all known workspace paths from known_workspaces, terminal_sessions, and in-memory cache.
  */
-export function getKnownProjectPaths(): string[] {
-  const projectPaths = new Set<string>();
+export function getKnownWorkspacePaths(): string[] {
+  const workspacePaths = new Set<string>();
 
-  // From known_projects table (persists even after all terminals are killed)
+  // From known_workspaces table (persists even after all terminals are killed)
   try {
     const db = getGlobalDb();
-    const projects = db.prepare('SELECT project_path FROM known_projects').all() as { project_path: string }[];
-    for (const p of projects) {
-      projectPaths.add(p.project_path);
+    const workspaces = db.prepare('SELECT workspace_path FROM known_workspaces').all() as { workspace_path: string }[];
+    for (const w of workspaces) {
+      workspacePaths.add(w.workspace_path);
     }
   } catch {
     // Table may not exist yet
   }
 
-  // From terminal_sessions table (catches any missed by known_projects)
+  // From terminal_sessions table (catches any missed by known_workspaces)
   try {
     const db = getGlobalDb();
-    const sessions = db.prepare('SELECT DISTINCT project_path FROM terminal_sessions').all() as { project_path: string }[];
+    const sessions = db.prepare('SELECT DISTINCT workspace_path FROM terminal_sessions').all() as { workspace_path: string }[];
     for (const s of sessions) {
-      projectPaths.add(s.project_path);
+      workspacePaths.add(s.workspace_path);
     }
   } catch {
     // Table may not exist yet
   }
 
-  // From in-memory cache (includes projects activated this session)
+  // From in-memory cache (includes workspaces activated this session)
   if (_deps) {
-    for (const [projectPath] of _deps.projectTerminals) {
-      projectPaths.add(projectPath);
+    for (const [workspacePath] of _deps.workspaceTerminals) {
+      workspacePaths.add(workspacePath);
     }
   }
 
-  return Array.from(projectPaths);
+  return Array.from(workspacePaths);
 }
 
 // ============================================================================
@@ -140,66 +140,66 @@ export function getKnownProjectPaths(): string[] {
 export async function getInstances(): Promise<InstanceStatus[]> {
   if (!_deps) return []; // Module not yet initialized (startup window)
 
-  const knownPaths = getKnownProjectPaths();
+  const knownPaths = getKnownWorkspacePaths();
   const instances: InstanceStatus[] = [];
 
-  // Build a lookup of last_launched_at from known_projects
+  // Build a lookup of last_launched_at from known_workspaces
   const lastLaunchedMap = new Map<string, string>();
   try {
     const db = getGlobalDb();
-    const rows = db.prepare('SELECT project_path, last_launched_at FROM known_projects').all() as { project_path: string; last_launched_at: string }[];
+    const rows = db.prepare('SELECT workspace_path, last_launched_at FROM known_workspaces').all() as { workspace_path: string; last_launched_at: string }[];
     for (const row of rows) {
-      lastLaunchedMap.set(row.project_path, row.last_launched_at);
+      lastLaunchedMap.set(row.workspace_path, row.last_launched_at);
     }
   } catch {
     // Table may not exist yet (pre-migration)
   }
 
-  for (const projectPath of knownPaths) {
-    // Skip builder worktrees - they're managed by their parent project
-    if (projectPath.includes('/.builders/')) {
+  for (const workspacePath of knownPaths) {
+    // Skip builder worktrees - they're managed by their parent workspace
+    if (workspacePath.includes('/.builders/')) {
       continue;
     }
 
-    // Skip projects in temp directories (e.g. test artifacts) or whose directories no longer exist
-    if (!projectPath.startsWith('remote:')) {
-      if (!fs.existsSync(projectPath)) {
+    // Skip workspaces in temp directories (e.g. test artifacts) or whose directories no longer exist
+    if (!workspacePath.startsWith('remote:')) {
+      if (!fs.existsSync(workspacePath)) {
         continue;
       }
-      if (isTempDirectory(projectPath)) {
+      if (isTempDirectory(workspacePath)) {
         continue;
       }
     }
 
-    // Encode project path for proxy URL
-    const encodedPath = Buffer.from(projectPath).toString('base64url');
-    const proxyUrl = `/project/${encodedPath}/`;
+    // Encode workspace path for proxy URL
+    const encodedPath = Buffer.from(workspacePath).toString('base64url');
+    const proxyUrl = `/workspace/${encodedPath}/`;
 
     // Get terminals and gate status from tower's registry
     // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
-    const { terminals, gateStatus } = await _deps.getTerminalsForProject(projectPath, proxyUrl);
+    const { terminals, gateStatus } = await _deps.getTerminalsForWorkspace(workspacePath, proxyUrl);
 
-    // Project is active if it has any terminals (Phase 4: no port check needed)
+    // Workspace is active if it has any terminals (Phase 4: no port check needed)
     const isActive = terminals.length > 0;
 
     instances.push({
-      projectPath,
-      projectName: getProjectName(projectPath),
+      workspacePath,
+      workspaceName: getWorkspaceName(workspacePath),
       running: isActive,
       proxyUrl,
       architectUrl: `${proxyUrl}?tab=architect`,
       terminals,
       gateStatus,
-      lastUsed: lastLaunchedMap.get(projectPath),
+      lastUsed: lastLaunchedMap.get(workspacePath),
     });
   }
 
-  // Sort: running first, then by project name
+  // Sort: running first, then by workspace name
   instances.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
-    return a.projectName.localeCompare(b.projectName);
+    return a.workspaceName.localeCompare(b.workspaceName);
   });
 
   return instances;
@@ -212,7 +212,7 @@ export async function getInstances(): Promise<InstanceStatus[]> {
 /**
  * Get directory suggestions for autocomplete.
  */
-export async function getDirectorySuggestions(inputPath: string): Promise<{ path: string; isProject: boolean }[]> {
+export async function getDirectorySuggestions(inputPath: string): Promise<{ path: string; isWorkspace: boolean }[]> {
   // Default to home directory if empty
   if (!inputPath) {
     inputPath = homedir();
@@ -256,7 +256,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
   const entries = fs.readdirSync(dirToList, { withFileTypes: true });
 
   // Filter to directories only, apply prefix filter, and check for codev/
-  const suggestions: { path: string; isProject: boolean }[] = [];
+  const suggestions: { path: string; isWorkspace: boolean }[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -266,15 +266,15 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
     if (prefix && !name.startsWith(prefix)) continue;
 
     const fullPath = path.join(dirToList, entry.name);
-    const isProject = fs.existsSync(path.join(fullPath, 'codev'));
+    const isWorkspace = fs.existsSync(path.join(fullPath, 'codev'));
 
-    suggestions.push({ path: fullPath, isProject });
+    suggestions.push({ path: fullPath, isWorkspace });
   }
 
-  // Sort: projects first, then alphabetically
+  // Sort: workspaces first, then alphabetically
   suggestions.sort((a, b) => {
-    if (a.isProject !== b.isProject) {
-      return a.isProject ? -1 : 1;
+    if (a.isWorkspace !== b.isWorkspace) {
+      return a.isWorkspace ? -1 : 1;
     }
     return a.path.localeCompare(b.path);
   });
@@ -292,33 +292,33 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server.
  * Auto-adopts non-codev directories and creates architect terminal.
  */
-export async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
+export async function launchInstance(workspacePath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
   if (!_deps) return { success: false, error: 'Tower is still starting up. Try again shortly.' };
 
   // Validate path exists
-  if (!fs.existsSync(projectPath)) {
-    return { success: false, error: `Path does not exist: ${projectPath}` };
+  if (!fs.existsSync(workspacePath)) {
+    return { success: false, error: `Path does not exist: ${workspacePath}` };
   }
 
   // Validate it's a directory
-  const stat = fs.statSync(projectPath);
+  const stat = fs.statSync(workspacePath);
   if (!stat.isDirectory()) {
-    return { success: false, error: `Not a directory: ${projectPath}` };
+    return { success: false, error: `Not a directory: ${workspacePath}` };
   }
 
   // Auto-adopt non-codev directories
-  const codevDir = path.join(projectPath, 'codev');
+  const codevDir = path.join(workspacePath, 'codev');
   let adopted = false;
   if (!fs.existsSync(codevDir)) {
     try {
-      // Run codev adopt --yes to set up the project
+      // Run codev adopt --yes to set up the workspace
       execSync('npx codev adopt --yes', {
-        cwd: projectPath,
+        cwd: workspacePath,
         stdio: 'pipe',
         timeout: 30000,
       });
       adopted = true;
-      _deps.log('INFO', `Auto-adopted codev in: ${projectPath}`);
+      _deps.log('INFO', `Auto-adopted codev in: ${workspacePath}`);
     } catch (err) {
       return { success: false, error: `Failed to adopt codev: ${(err as Error).message}` };
     }
@@ -327,14 +327,14 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
   // Phase 4 (Spec 0090): Tower manages terminals directly
   // No dashboard-server spawning - tower handles everything
   try {
-    // Ensure project has port allocation
-    const resolvedPath = fs.realpathSync(projectPath);
+    // Ensure workspace has port allocation
+    const resolvedPath = fs.realpathSync(workspacePath);
 
-    // Persist in known_projects so the project survives terminal cleanup
-    registerKnownProject(resolvedPath);
+    // Persist in known_workspaces so the workspace survives terminal cleanup
+    registerKnownWorkspace(resolvedPath);
 
-    // Initialize project terminal entry
-    const entry = _deps.getProjectTerminalsEntry(resolvedPath);
+    // Initialize workspace terminal entry
+    const entry = _deps.getWorkspaceTerminalsEntry(resolvedPath);
 
     // Create architect terminal if not already present
     if (!entry.architect) {
@@ -342,7 +342,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
 
       // Read af-config.json to get the architect command
       let architectCmd = 'claude';
-      const configPath = path.join(projectPath, 'af-config.json');
+      const configPath = path.join(workspacePath, 'af-config.json');
       if (fs.existsSync(configPath)) {
         try {
           const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -358,7 +358,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
         // Parse command string to separate command and args, inject role prompt
         const cmdParts = architectCmd.split(/\s+/);
         const cmd = cmdParts[0];
-        const cmdArgs = buildArchitectArgs(cmdParts.slice(1), projectPath);
+        const cmdArgs = buildArchitectArgs(cmdParts.slice(1), workspacePath);
 
         // Build env with CLAUDECODE removed so spawned Claude processes
         // don't detect a nested session
@@ -374,7 +374,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
               sessionId,
               command: cmd,
               args: cmdArgs,
-              cwd: projectPath,
+              cwd: workspacePath,
               env: cleanEnv,
               cols: 200,
               rows: 50,
@@ -390,7 +390,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
             // Create a PtySession backed by the shellper client
             const session = manager.createSessionRaw({
               label: 'Architect',
-              cwd: projectPath,
+              cwd: workspacePath,
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
@@ -404,17 +404,17 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
             // Clean up cache/SQLite when the shellper session exits
             if (ptySession) {
               ptySession.on('exit', () => {
-                const currentEntry = _deps!.getProjectTerminalsEntry(resolvedPath);
+                const currentEntry = _deps!.getWorkspaceTerminalsEntry(resolvedPath);
                 if (currentEntry.architect === session.id) {
                   currentEntry.architect = undefined;
                 }
                 _deps!.deleteTerminalSession(session.id);
-                _deps!.log('INFO', `Architect shellper session exited for ${projectPath}`);
+                _deps!.log('INFO', `Architect shellper session exited for ${workspacePath}`);
               });
             }
 
             shellperCreated = true;
-            _deps.log('INFO', `Created shellper-backed architect session for project: ${projectPath}`);
+            _deps.log('INFO', `Created shellper-backed architect session for workspace: ${workspacePath}`);
           } catch (shellperErr) {
             _deps.log('WARN', `Shellper creation failed for architect, falling back: ${(shellperErr as Error).message}`);
           }
@@ -426,7 +426,7 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
           const session = await manager.createSession({
             command: cmd,
             args: cmdArgs,
-            cwd: projectPath,
+            cwd: workspacePath,
             label: 'Architect',
             env: cleanEnv,
           });
@@ -437,22 +437,22 @@ export async function launchInstance(projectPath: string): Promise<{ success: bo
           const ptySession = manager.getSession(session.id);
           if (ptySession) {
             ptySession.on('exit', () => {
-              const currentEntry = _deps!.getProjectTerminalsEntry(resolvedPath);
+              const currentEntry = _deps!.getWorkspaceTerminalsEntry(resolvedPath);
               if (currentEntry.architect === session.id) {
                 currentEntry.architect = undefined;
               }
               _deps!.deleteTerminalSession(session.id);
-              _deps!.log('INFO', `Architect pty exited for ${projectPath}`);
+              _deps!.log('INFO', `Architect pty exited for ${workspacePath}`);
             });
           }
 
-          _deps.log('WARN', `Architect terminal for ${projectPath} is non-persistent (shellper unavailable)`);
+          _deps.log('WARN', `Architect terminal for ${workspacePath} is non-persistent (shellper unavailable)`);
         }
 
-        _deps.log('INFO', `Created architect terminal for project: ${projectPath}`);
+        _deps.log('INFO', `Created architect terminal for workspace: ${workspacePath}`);
       } catch (err) {
         _deps.log('WARN', `Failed to create architect terminal: ${(err as Error).message}`);
-        // Don't fail the launch - project is still active, just without architect
+        // Don't fail the launch - workspace is still active, just without architect
       }
     }
 
@@ -486,24 +486,24 @@ export async function killTerminalWithShellper(manager: TerminalManager, termina
  * Stop an agent-farm instance by killing all its terminals.
  * Phase 4 (Spec 0090): Tower manages terminals directly.
  */
-export async function stopInstance(projectPath: string): Promise<{ success: boolean; error?: string; stopped: number[] }> {
+export async function stopInstance(workspacePath: string): Promise<{ success: boolean; error?: string; stopped: number[] }> {
   if (!_deps) return { success: false, error: 'Tower is still starting up. Try again shortly.', stopped: [] };
 
   const stopped: number[] = [];
   const manager = _deps.getTerminalManager();
 
   // Resolve symlinks for consistent lookup
-  let resolvedPath = projectPath;
+  let resolvedPath = workspacePath;
   try {
-    if (fs.existsSync(projectPath)) {
-      resolvedPath = fs.realpathSync(projectPath);
+    if (fs.existsSync(workspacePath)) {
+      resolvedPath = fs.realpathSync(workspacePath);
     }
   } catch {
     // Ignore - use original path
   }
 
-  // Get project terminals
-  const entry = _deps.projectTerminals.get(resolvedPath) || _deps.projectTerminals.get(projectPath);
+  // Get workspace terminals
+  const entry = _deps.workspaceTerminals.get(resolvedPath) || _deps.workspaceTerminals.get(workspacePath);
 
   if (entry) {
     // Kill architect (disable shellper auto-restart if applicable)
@@ -533,14 +533,14 @@ export async function stopInstance(projectPath: string): Promise<{ success: bool
       }
     }
 
-    // Clear project from registry
-    _deps.projectTerminals.delete(resolvedPath);
-    _deps.projectTerminals.delete(projectPath);
+    // Clear workspace from registry
+    _deps.workspaceTerminals.delete(resolvedPath);
+    _deps.workspaceTerminals.delete(workspacePath);
 
     // TICK-001: Delete all terminal sessions from SQLite
-    _deps.deleteProjectTerminalSessions(resolvedPath);
-    if (resolvedPath !== projectPath) {
-      _deps.deleteProjectTerminalSessions(projectPath);
+    _deps.deleteWorkspaceTerminalSessions(resolvedPath);
+    if (resolvedPath !== workspacePath) {
+      _deps.deleteWorkspaceTerminalSessions(workspacePath);
     }
   }
 

@@ -104,32 +104,32 @@ describe('Tower Proxy - Terminal Port Routing', () => {
 });
 
 describe('Tower Proxy - Path Validation', () => {
-  function isValidProjectPath(path: string): boolean {
+  function isValidWorkspacePath(path: string): boolean {
     if (!path) return false;
     // Support both POSIX (/) and Windows (C:\) paths
     return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
   }
 
   it('should accept POSIX absolute paths', () => {
-    expect(isValidProjectPath('/Users/test/project')).toBe(true);
-    expect(isValidProjectPath('/home/user/project')).toBe(true);
-    expect(isValidProjectPath('/var/www/project')).toBe(true);
+    expect(isValidWorkspacePath('/Users/test/project')).toBe(true);
+    expect(isValidWorkspacePath('/home/user/project')).toBe(true);
+    expect(isValidWorkspacePath('/var/www/project')).toBe(true);
   });
 
   it('should accept Windows absolute paths', () => {
-    expect(isValidProjectPath('C:\\Users\\test\\project')).toBe(true);
-    expect(isValidProjectPath('D:/Projects/code')).toBe(true);
-    expect(isValidProjectPath('E:\\work')).toBe(true);
+    expect(isValidWorkspacePath('C:\\Users\\test\\project')).toBe(true);
+    expect(isValidWorkspacePath('D:/Projects/code')).toBe(true);
+    expect(isValidWorkspacePath('E:\\work')).toBe(true);
   });
 
   it('should reject relative paths', () => {
-    expect(isValidProjectPath('project')).toBe(false);
-    expect(isValidProjectPath('./project')).toBe(false);
-    expect(isValidProjectPath('../project')).toBe(false);
+    expect(isValidWorkspacePath('project')).toBe(false);
+    expect(isValidWorkspacePath('./project')).toBe(false);
+    expect(isValidWorkspacePath('../project')).toBe(false);
   });
 
   it('should reject empty paths', () => {
-    expect(isValidProjectPath('')).toBe(false);
+    expect(isValidWorkspacePath('')).toBe(false);
   });
 });
 
@@ -140,12 +140,12 @@ describe('Tower Proxy - URL Path Parsing', () => {
     builderNum: number | null;
     remainingPath: string;
   } {
-    if (!pathname.startsWith('/project/')) {
+    if (!pathname.startsWith('/workspace/')) {
       return { encodedPath: null, terminalType: null, builderNum: null, remainingPath: '' };
     }
 
     const pathParts = pathname.split('/');
-    // ['', 'project', base64urlPath, terminalType, ...rest]
+    // ['', 'workspace', base64urlPath, terminalType, ...rest]
     const encodedPath = pathParts[2] || null;
     const terminalType = pathParts[3] || null;
     const rest = pathParts.slice(4);
@@ -165,7 +165,7 @@ describe('Tower Proxy - URL Path Parsing', () => {
   }
 
   it('should parse dashboard path', () => {
-    const result = parseProxyPath('/project/L1VzZXJzL3Rlc3Q/');
+    const result = parseProxyPath('/workspace/L1VzZXJzL3Rlc3Q/');
     expect(result.encodedPath).toBe('L1VzZXJzL3Rlc3Q');
     // Empty string after trailing slash is falsy, so terminalType is null
     expect(result.terminalType).toBeNull();
@@ -174,7 +174,7 @@ describe('Tower Proxy - URL Path Parsing', () => {
   });
 
   it('should parse architect path', () => {
-    const result = parseProxyPath('/project/L1VzZXJzL3Rlc3Q/architect/');
+    const result = parseProxyPath('/workspace/L1VzZXJzL3Rlc3Q/architect/');
     expect(result.encodedPath).toBe('L1VzZXJzL3Rlc3Q');
     expect(result.terminalType).toBe('architect');
     expect(result.builderNum).toBeNull();
@@ -182,7 +182,7 @@ describe('Tower Proxy - URL Path Parsing', () => {
   });
 
   it('should parse builder path with number', () => {
-    const result = parseProxyPath('/project/L1VzZXJzL3Rlc3Q/builder/0/');
+    const result = parseProxyPath('/workspace/L1VzZXJzL3Rlc3Q/builder/0/');
     expect(result.encodedPath).toBe('L1VzZXJzL3Rlc3Q');
     expect(result.terminalType).toBe('builder');
     expect(result.builderNum).toBe(0);
@@ -190,7 +190,7 @@ describe('Tower Proxy - URL Path Parsing', () => {
   });
 
   it('should parse builder path with higher number', () => {
-    const result = parseProxyPath('/project/L1VzZXJzL3Rlc3Q/builder/5/ws');
+    const result = parseProxyPath('/workspace/L1VzZXJzL3Rlc3Q/builder/5/ws');
     expect(result.encodedPath).toBe('L1VzZXJzL3Rlc3Q');
     expect(result.terminalType).toBe('builder');
     expect(result.builderNum).toBe(5);
@@ -198,13 +198,13 @@ describe('Tower Proxy - URL Path Parsing', () => {
   });
 
   it('should handle additional path segments', () => {
-    const result = parseProxyPath('/project/L1VzZXJzL3Rlc3Q/architect/ws');
+    const result = parseProxyPath('/workspace/L1VzZXJzL3Rlc3Q/architect/ws');
     expect(result.encodedPath).toBe('L1VzZXJzL3Rlc3Q');
     expect(result.terminalType).toBe('architect');
     expect(result.remainingPath).toBe('ws');
   });
 
-  it('should handle non-project paths', () => {
+  it('should handle non-workspace paths', () => {
     const result = parseProxyPath('/api/status');
     expect(result.encodedPath).toBeNull();
     expect(result.terminalType).toBeNull();

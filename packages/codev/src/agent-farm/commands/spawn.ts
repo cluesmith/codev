@@ -405,7 +405,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
     '/bin/bash',
     [scriptPath],
     worktreePath,
-    { projectPath: config.projectRoot, type: 'builder', roleId: builderId },
+    { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
   );
   logger.info(`Worktree terminal session created: ${worktreeTerminalId}`);
 
@@ -533,7 +533,7 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   // Skip this check in resume mode — the worktree already exists with its own branch.
   if (!options.force && !options.resume) {
     try {
-      const { stdout } = await run('git status --porcelain', { cwd: config.projectRoot });
+      const { stdout } = await run('git status --porcelain', { cwd: config.workspaceRoot });
       if (stdout.trim().length > 0) {
         fatal(
           'Uncommitted changes detected in main worktree.\n\n' +
@@ -551,7 +551,7 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   // Prune stale worktrees before spawning to prevent "can't find session" errors
   // This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups
   try {
-    await run('git worktree prune', { cwd: config.projectRoot });
+    await run('git worktree prune', { cwd: config.workspaceRoot });
   } catch {
     // Non-fatal - continue with spawn even if prune fails
   }

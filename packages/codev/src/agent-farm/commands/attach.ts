@@ -150,7 +150,7 @@ export async function attach(options: AttachOptions): Promise<void> {
   // Open in browser (via Tower dashboard)
   const config = getConfig();
   const client = new TowerClient();
-  const url = client.getProjectUrl(config.projectRoot);
+  const url = client.getWorkspaceUrl(config.workspaceRoot);
 
   if (options.browser) {
     logger.info(`Opening Tower dashboard at ${url}...`);

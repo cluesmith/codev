@@ -16,8 +16,8 @@ export interface TowerHandle {
   stop: () => Promise<void>;
 }
 
-export interface ProjectHandle {
-  projectPath: string;
+export interface WorkspaceHandle {
+  workspacePath: string;
   towerPort: number;
   encodedPath: string;
   deactivate: () => Promise<void>;
@@ -25,8 +25,8 @@ export interface ProjectHandle {
 
 export interface TowerState {
   instances: Array<{
-    projectPath: string;
-    projectName: string;
+    workspacePath: string;
+    workspaceName: string;
     running: boolean;
     terminals: Array<{
       type: string;
@@ -128,70 +128,70 @@ export async function startTower(port?: number): Promise<TowerHandle> {
 }
 
 /**
- * Create a temporary test project directory
+ * Create a temporary test workspace directory
  */
-export function createTestProject(): string {
-  const projectPath = mkdtempSync(resolve(tmpdir(), 'codev-test-'));
+export function createTestWorkspace(): string {
+  const workspacePath = mkdtempSync(resolve(tmpdir(), 'codev-test-'));
 
   // Create minimal codev structure
-  mkdirSync(resolve(projectPath, 'codev'), { recursive: true });
-  mkdirSync(resolve(projectPath, '.agent-farm'), { recursive: true });
+  mkdirSync(resolve(workspacePath, 'codev'), { recursive: true });
+  mkdirSync(resolve(workspacePath, '.agent-farm'), { recursive: true });
 
   // Create minimal af-config.json
   writeFileSync(
-    resolve(projectPath, 'af-config.json'),
+    resolve(workspacePath, 'af-config.json'),
     JSON.stringify({
       shell: { architect: 'bash', builder: 'bash', shell: 'bash' },
     })
   );
 
-  return projectPath;
+  return workspacePath;
 }
 
 /**
- * Clean up a test project directory
+ * Clean up a test workspace directory
  */
-export function cleanupTestProject(projectPath: string): void {
+export function cleanupTestWorkspace(workspacePath: string): void {
   try {
-    rmSync(projectPath, { recursive: true, force: true });
+    rmSync(workspacePath, { recursive: true, force: true });
   } catch {
     // Ignore filesystem cleanup errors
   }
 }
 
 /**
- * Encode project path for tower proxy URL
+ * Encode workspace path for tower proxy URL
  */
-export function encodeProjectPath(projectPath: string): string {
-  return Buffer.from(projectPath).toString('base64url');
+export function encodeWorkspacePath(workspacePath: string): string {
+  return Buffer.from(workspacePath).toString('base64url');
 }
 
 /**
- * Activate a project via tower API
+ * Activate a workspace via tower API
  * Phase 4: This replaces the old startDashboard function
  */
-export async function activateProject(
+export async function activateWorkspace(
   towerPort: number,
-  projectPath: string
-): Promise<ProjectHandle> {
-  const encodedPath = encodeProjectPath(projectPath);
+  workspacePath: string
+): Promise<WorkspaceHandle> {
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const response = await fetch(
-    `http://localhost:${towerPort}/api/projects/${encodedPath}/activate`,
+    `http://localhost:${towerPort}/api/workspaces/${encodedPath}/activate`,
     { method: 'POST' }
   );
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`Failed to activate project: ${error.error || response.status}`);
+    throw new Error(`Failed to activate workspace: ${error.error || response.status}`);
   }
 
   return {
-    projectPath,
+    workspacePath,
     towerPort,
     encodedPath,
     deactivate: async () => {
       await fetch(
-        `http://localhost:${towerPort}/api/projects/${encodedPath}/deactivate`,
+        `http://localhost:${towerPort}/api/workspaces/${encodedPath}/deactivate`,
         { method: 'POST' }
       );
     },
@@ -199,15 +199,15 @@ export async function activateProject(
 }
 
 /**
- * Deactivate a project via tower API
+ * Deactivate a workspace via tower API
  */
-export async function deactivateProject(
+export async function deactivateWorkspace(
   towerPort: number,
-  projectPath: string
+  workspacePath: string
 ): Promise<{ ok: boolean; stopped?: number[]; error?: string }> {
-  const encodedPath = encodeProjectPath(projectPath);
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const response = await fetch(
-    `http://localhost:${towerPort}/api/projects/${encodedPath}/deactivate`,
+    `http://localhost:${towerPort}/api/workspaces/${encodedPath}/deactivate`,
     { method: 'POST' }
   );
   return response.json();
@@ -225,37 +225,37 @@ export async function getTowerState(towerPort: number): Promise<TowerState> {
 }
 
 /**
- * Get project state via tower API
+ * Get workspace state via tower API
  */
-export async function getProjectState(
+export async function getWorkspaceState(
   towerPort: number,
-  projectPath: string
+  workspacePath: string
 ): Promise<{
   architect: { port: number; pid: number; terminalId?: string } | null;
   builders: Array<{ id: string; terminalId?: string }>;
   utils: Array<{ id: string; terminalId?: string }>;
-  projectName?: string;
+  workspaceName?: string;
 }> {
-  const encodedPath = encodeProjectPath(projectPath);
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const response = await fetch(
-    `http://localhost:${towerPort}/project/${encodedPath}/api/state`
+    `http://localhost:${towerPort}/workspace/${encodedPath}/api/state`
   );
   if (!response.ok) {
-    throw new Error(`Failed to get project state: ${response.status}`);
+    throw new Error(`Failed to get workspace state: ${response.status}`);
   }
   return response.json();
 }
 
 /**
- * Create a shell terminal for a project via tower API
+ * Create a shell terminal for a workspace via tower API
  */
 export async function createShellTerminal(
   towerPort: number,
-  projectPath: string
+  workspacePath: string
 ): Promise<{ id: string; terminalId: string }> {
-  const encodedPath = encodeProjectPath(projectPath);
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const response = await fetch(
-    `http://localhost:${towerPort}/project/${encodedPath}/api/tabs/shell`,
+    `http://localhost:${towerPort}/workspace/${encodedPath}/api/tabs/shell`,
     { method: 'POST' }
   );
   if (!response.ok) {
@@ -270,12 +270,12 @@ export async function createShellTerminal(
  */
 export async function deleteTerminal(
   towerPort: number,
-  projectPath: string,
+  workspacePath: string,
   tabId: string
 ): Promise<void> {
-  const encodedPath = encodeProjectPath(projectPath);
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const response = await fetch(
-    `http://localhost:${towerPort}/project/${encodedPath}/api/tabs/${tabId}`,
+    `http://localhost:${towerPort}/workspace/${encodedPath}/api/tabs/${tabId}`,
     { method: 'DELETE' }
   );
   if (!response.ok && response.status !== 204) {

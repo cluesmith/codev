@@ -90,8 +90,8 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/api/tunnel/anything')).toBe(true);
     });
 
-    it('allows /api/projects', () => {
-      expect(isBlockedPath('/api/projects')).toBe(false);
+    it('allows /api/workspaces', () => {
+      expect(isBlockedPath('/api/workspaces')).toBe(false);
     });
 
     it('allows /api/state', () => {

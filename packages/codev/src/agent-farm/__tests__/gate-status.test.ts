@@ -1,5 +1,5 @@
 /**
- * Tests for getGateStatusForProject (utils/gate-status.ts)
+ * Tests for getGateStatusForWorkspace (utils/gate-status.ts)
  *
  * Phase 3 (Spec 0099): Gate status is now read from porch YAML files
  * instead of hardcoded to { hasGate: false }.
@@ -9,9 +9,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { getGateStatusForProject } from '../utils/gate-status.js';
+import { getGateStatusForWorkspace } from '../utils/gate-status.js';
 
-describe('getGateStatusForProject', () => {
+describe('getGateStatusForWorkspace', () => {
   const testDir = path.join(tmpdir(), `codev-gate-test-${Date.now()}`);
 
   beforeEach(() => {
@@ -38,7 +38,7 @@ gates:
     status: pending
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(true);
     expect(result.gateName).toBe('spec-approval');
     expect(result.builderId).toBe('0042');
@@ -61,7 +61,7 @@ gates:
     status: pending
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(true);
     expect(result.gateName).toBe('plan-approval');
     expect(result.builderId).toBe('0099');
@@ -86,12 +86,12 @@ gates:
     approved_at: '2026-02-12T10:00:00.000Z'
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(false);
   });
 
   it('should return hasGate: false when codev/projects does not exist', () => {
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(false);
   });
 
@@ -107,7 +107,7 @@ gates:
     status: pending
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.builderId).toBe('0077');
   });
 
@@ -120,7 +120,7 @@ protocol: spir
 phase: specify
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(false);
   });
 
@@ -142,7 +142,7 @@ gates:
     requested_at: '2026-02-12T18:00:00.000Z'
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(true);
     expect(result.gateName).toBe('plan-approval');
     expect(result.requestedAt).toBe('2026-02-12T18:00:00.000Z');
@@ -160,7 +160,7 @@ gates:
     status: pending
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.hasGate).toBe(true);
     expect(result.gateName).toBe('plan-approval');
     expect(result.requestedAt).toBeUndefined();
@@ -179,7 +179,7 @@ gates:
     requested_at: '2026-02-12T18:00:00.000Z'
 `);
 
-    const result = getGateStatusForProject(testDir);
+    const result = getGateStatusForWorkspace(testDir);
     expect(result.gateName).toBe('spec-approval');
   });
 });

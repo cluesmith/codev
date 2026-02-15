@@ -24,7 +24,7 @@ describe('TerminalManager', () => {
     mockPty.onData.mockImplementation(() => {});
     mockPty.onExit.mockImplementation(() => {});
     manager = new TerminalManager({
-      projectRoot: '/tmp/test-project',
+      workspaceRoot: '/tmp/test-project',
       diskLogEnabled: false,
       maxSessions: 5,
       reconnectTimeoutMs: 500,

@@ -770,7 +770,7 @@
         padding: 10px 14px;
       }
 
-      /* 2. Keep project name + status badge + Restart/Stop on one line */
+      /* 2. Keep workspace name + status badge + Restart/Stop on one line */
       .instance-header {
         flex-wrap: wrap;
         gap: 8px;
@@ -781,7 +781,7 @@
         margin-left: auto;
       }
 
-      /* 3. Hide project path row on mobile */
+      /* 3. Hide workspace path row on mobile */
       .instance-path-row {
         display: none;
       }
@@ -817,7 +817,7 @@
         padding-top: 4px;
       }
 
-      /* 6. Compact Recent Projects */
+      /* 6. Compact Recent Workspaces */
       .recent-item {
         flex-direction: row;
         align-items: center;
@@ -966,7 +966,7 @@
     <div id="content">
       <div class="loading">
         <div class="spinner"></div>
-        <p>Loading instances...</p>
+        <p>Loading workspaces...</p>
       </div>
     </div>
 
@@ -975,7 +975,7 @@
     <div class="launch-section">
       <h3>
         <span>+</span>
-        Launch New Instance
+        Launch New Workspace
       </h3>
       <div class="launch-form">
         <div class="autocomplete-wrapper">
@@ -985,7 +985,7 @@
         <button class="btn btn-primary btn-launch" onclick="launchInstance()">Launch</button>
       </div>
       <p class="launch-hint">
-        Type a path to see suggestions. Directories with <code>codev/</code> are highlighted as valid projects.
+        Type a path to see suggestions. Directories with <code>codev/</code> are highlighted as valid workspaces.
         Non-codev directories will be initialized with <code>codev adopt</code> on first launch.
       </p>
     </div>
@@ -1180,8 +1180,8 @@
         content.innerHTML = `
           <div class="empty-state">
             <div class="icon">📭</div>
-            <h2>No running instances</h2>
-            <p>Start a new instance below or run <code>af dash start</code> in a project directory.</p>
+            <h2>No running workspaces</h2>
+            <p>Start a new workspace below or run <code>af dash start</code> in a workspace directory.</p>
           </div>
         `;
       } else {
@@ -1190,7 +1190,7 @@
           : runningInstances.length === 3 ? 'instances-3'
           : 'instances-many';
         content.innerHTML = `
-          <h2 class="section-header">Running Instances</h2>
+          <h2 class="section-header">Running Workspaces</h2>
           <div class="instances ${countClass}">
             ${runningInstances.map(renderInstance).join('')}
           </div>
@@ -1202,7 +1202,7 @@
       if (recentInstances.length > 0) {
         recentsContainer.innerHTML = `
           <div class="recents-section">
-            <h2 class="section-header">Recent Projects</h2>
+            <h2 class="section-header">Recent Workspaces</h2>
             <div class="recents-list">
               ${recentInstances.map(renderRecentItem).join('')}
             </div>
@@ -1213,7 +1213,7 @@
       }
     }
 
-    // Render a single instance card
+    // Render a single workspace card
     function renderInstance(instance) {
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
@@ -1260,7 +1260,7 @@
               <span class="port-type">New Shell</span>
             </div>
             <div class="port-actions">
-              <button class="btn btn-small" onclick="createShell('${escapeHtml(instance.projectPath)}')">+ Create</button>
+              <button class="btn btn-small" onclick="createShell('${escapeHtml(instance.workspacePath)}')">+ Create</button>
             </div>
           </div>
         `;
@@ -1279,10 +1279,10 @@
       ` : '';
 
       return `
-        <div class="instance ${hasGate ? 'gate-pending' : ''}" data-project="${escapeHtml(instance.projectPath)}">
+        <div class="instance ${hasGate ? 'gate-pending' : ''}" data-project="${escapeHtml(instance.workspacePath)}">
           <div class="instance-header">
             <div class="instance-title">
-              <span class="instance-name">${escapeHtml(instance.projectName)}</span>
+              <span class="instance-name">${escapeHtml(instance.workspaceName)}</span>
               <span class="status-badge ${statusClass}">
                 <span class="status-dot ${statusClass}"></span>
                 ${statusText}
@@ -1290,19 +1290,19 @@
             </div>
             <div class="instance-actions">
               ${instance.running ? `
-                <button class="btn btn-small" onclick="restartInstance('${escapeHtml(instance.projectPath)}')">Restart</button>
-                <button class="btn btn-small btn-danger" onclick="stopInstance('${escapeHtml(instance.projectPath)}')">Stop</button>
+                <button class="btn btn-small" onclick="restartInstance('${escapeHtml(instance.workspacePath)}')">Restart</button>
+                <button class="btn btn-small btn-danger" onclick="stopInstance('${escapeHtml(instance.workspacePath)}')">Stop</button>
               ` : `
-                <button class="btn btn-small btn-primary" onclick="launchPath('${escapeHtml(instance.projectPath)}')">Start</button>
+                <button class="btn btn-small btn-primary" onclick="launchPath('${escapeHtml(instance.workspacePath)}')">Start</button>
               `}
             </div>
           </div>
           ${gateIndicatorHtml}
           <div class="instance-path-row">
-            <span class="instance-path" title="${escapeHtml(instance.projectPath)}">
-              ${escapeHtml(instance.projectPath)}
+            <span class="instance-path" title="${escapeHtml(instance.workspacePath)}">
+              ${escapeHtml(instance.workspacePath)}
             </span>
-            <button class="copy-btn" onclick="copyPath('${escapeHtml(instance.projectPath)}')" title="Copy path">📋</button>
+            <button class="copy-btn" onclick="copyPath('${escapeHtml(instance.workspacePath)}')" title="Copy path">📋</button>
           </div>
           <div class="instance-body">
             <div class="ports-list">
@@ -1321,14 +1321,14 @@
       const lastUsed = instance.lastUsed ? formatDate(instance.lastUsed) : 'Never';
 
       return `
-        <div class="recent-item" onclick="launchPath('${escapeHtml(instance.projectPath)}')" title="Click to start ${escapeHtml(instance.projectName)}">
+        <div class="recent-item" onclick="launchPath('${escapeHtml(instance.workspacePath)}')" title="Click to start ${escapeHtml(instance.workspaceName)}">
           <div class="recent-info">
-            <span class="recent-name">${escapeHtml(instance.projectName)}</span>
-            <span class="recent-path">${escapeHtml(instance.projectPath)}</span>
+            <span class="recent-name">${escapeHtml(instance.workspaceName)}</span>
+            <span class="recent-path">${escapeHtml(instance.workspacePath)}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 16px;">
             <span class="recent-time">${lastUsed}</span>
-            <button class="btn btn-primary" onclick="event.stopPropagation(); launchPath('${escapeHtml(instance.projectPath)}')">Start</button>
+            <button class="btn btn-primary" onclick="event.stopPropagation(); launchPath('${escapeHtml(instance.workspacePath)}')">Start</button>
           </div>
         </div>
       `;
@@ -1423,7 +1423,7 @@
              onclick="selectSuggestion(suggestions[${i}])">
           <span class="folder-icon">📁</span>
           <span>${escapeHtml(s.path)}</span>
-          ${s.isProject ? '<span class="project-badge">codev</span>' : ''}
+          ${s.isWorkspace ? '<span class="project-badge">codev</span>' : ''}
         </div>
       `).join('');
 
@@ -1453,12 +1453,12 @@
     }
 
     // Launch a specific path (from recents)
-    async function launchPath(projectPath) {
+    async function launchPath(workspacePath) {
       try {
         const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath })
+          body: JSON.stringify({ workspacePath })
         });
 
         const result = await response.json();
@@ -1468,9 +1468,9 @@
         }
 
         if (result.adopted) {
-          showToast('Codev adopted! Instance launching...', 'success');
+          showToast('Codev adopted! Workspace launching...', 'success');
         } else {
-          showToast('Instance launching...', 'success');
+          showToast('Workspace launching...', 'success');
         }
         setTimeout(refresh, 2000);
       } catch (err) {
@@ -1478,19 +1478,19 @@
       }
     }
 
-    // Stop an instance by project path
-    async function stopInstance(projectPath) {
+    // Stop a workspace by path
+    async function stopInstance(workspacePath) {
       try {
         const response = await authFetch('./api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath })
+          body: JSON.stringify({ workspacePath })
         });
 
         const result = await response.json();
 
         if (result.stopped && result.stopped.length > 0) {
-          showToast('Instance stopped', 'success');
+          showToast('Workspace stopped', 'success');
         } else {
           showToast('No processes found to stop', 'info');
         }
@@ -1500,14 +1500,14 @@
       }
     }
 
-    // Restart an instance
-    async function restartInstance(projectPath) {
+    // Restart a workspace
+    async function restartInstance(workspacePath) {
       try {
         // First stop
         await authFetch('./api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath })
+          body: JSON.stringify({ workspacePath })
         });
 
         // Wait a moment for processes to die
@@ -1517,7 +1517,7 @@
         const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath })
+          body: JSON.stringify({ workspacePath })
         });
 
         const result = await response.json();
@@ -1526,20 +1526,20 @@
           throw new Error(result.error || 'Restart failed');
         }
 
-        showToast('Instance restarting...', 'success');
+        showToast('Workspace restarting...', 'success');
         setTimeout(refresh, 2000);
       } catch (err) {
         showToast('Failed to restart: ' + err.message, 'error');
       }
     }
 
-    // Launch a new instance
+    // Launch a new workspace
     async function launchInstance() {
       const input = document.getElementById('project-path');
-      const projectPath = input.value.trim();
+      const workspacePath = input.value.trim();
 
-      if (!projectPath) {
-        showToast('Please enter a project path', 'error');
+      if (!workspacePath) {
+        showToast('Please enter a workspace path', 'error');
         return;
       }
 
@@ -1547,7 +1547,7 @@
         const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath })
+          body: JSON.stringify({ workspacePath })
         });
 
         const result = await response.json();
@@ -1558,9 +1558,9 @@
 
         input.value = '';
         if (result.adopted) {
-          showToast('Codev adopted! Instance launching...', 'success');
+          showToast('Codev adopted! Workspace launching...', 'success');
         } else {
-          showToast('Instance launching... Please wait a moment.', 'success');
+          showToast('Workspace launching... Please wait a moment.', 'success');
         }
 
         // Refresh after a delay to allow instance to start
@@ -1571,11 +1571,11 @@
     }
 
     // Create a new shell for a running instance (via tower proxy)
-    async function createShell(projectPath) {
+    async function createShell(workspacePath) {
       try {
-        // Use tower proxy to route to the project's dashboard API
-        const encodedPath = toBase64URL(projectPath);
-        const response = await authFetch(`./project/${encodedPath}/api/tabs/shell`, {
+        // Use tower proxy to route to the workspace's dashboard API
+        const encodedPath = toBase64URL(workspacePath);
+        const response = await authFetch(`./workspace/${encodedPath}/api/tabs/shell`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1636,7 +1636,7 @@
     }
 
     // Convert absolute paths to relative so links work behind reverse proxies.
-    // E.g. "/project/abc/" → "./project/abc/"
+    // E.g. "/workspace/abc/" → "./workspace/abc/"
     function relUrl(path) {
       if (path && path.startsWith('/')) return '.' + path;
       return path || '';
@@ -1653,7 +1653,7 @@
         .replace(/'/g, '&#39;');
     }
 
-    // Base64URL encoding (RFC 4648) for project paths
+    // Base64URL encoding (RFC 4648) for workspace paths
     // IMPORTANT: Use TextEncoder for Unicode support (btoa only handles Latin-1)
     function toBase64URL(str) {
       // Encode string to UTF-8 bytes, then to Base64, then to Base64URL
@@ -1662,12 +1662,12 @@
       return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
 
-    // Generate proxy URL for a project
+    // Generate proxy URL for a workspace
     // All terminals are now multiplexed on a single port via WebSocket (Spec 0085)
     // The React dashboard handles tab selection internally
     function getProxyUrl(instance, portType) {
-      const encodedPath = toBase64URL(instance.projectPath);
-      return `./project/${encodedPath}/`;
+      const encodedPath = toBase64URL(instance.workspacePath);
+      return `./workspace/${encodedPath}/`;
     }
 
     // Toast notifications

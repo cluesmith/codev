@@ -39,7 +39,7 @@ export async function checkDependencies(): Promise<void> {
 export async function createWorktree(config: Config, branchName: string, worktreePath: string): Promise<void> {
   logger.info('Creating branch...');
   try {
-    await run(`git branch ${branchName}`, { cwd: config.projectRoot });
+    await run(`git branch ${branchName}`, { cwd: config.workspaceRoot });
   } catch (error) {
     // Branch might already exist, that's OK
     logger.debug(`Branch creation: ${error}`);
@@ -47,18 +47,18 @@ export async function createWorktree(config: Config, branchName: string, worktre
 
   logger.info('Creating worktree...');
   try {
-    await run(`git worktree add "${worktreePath}" ${branchName}`, { cwd: config.projectRoot });
+    await run(`git worktree add "${worktreePath}" ${branchName}`, { cwd: config.workspaceRoot });
   } catch (error) {
     fatal(`Failed to create worktree: ${error}`);
   }
 
-  // Symlink .env from project root into worktree (if it exists)
-  const rootEnvPath = resolve(config.projectRoot, '.env');
+  // Symlink .env from workspace root into worktree (if it exists)
+  const rootEnvPath = resolve(config.workspaceRoot, '.env');
   const worktreeEnvPath = resolve(worktreePath, '.env');
   if (existsSync(rootEnvPath) && !existsSync(worktreeEnvPath)) {
     try {
       symlinkSync(rootEnvPath, worktreeEnvPath);
-      logger.info('Linked .env from project root');
+      logger.info('Linked .env from workspace root');
     } catch (error) {
       logger.debug(`Failed to symlink .env: ${error}`);
     }
@@ -259,11 +259,11 @@ export async function createPtySession(
   command: string,
   args: string[],
   cwd: string,
-  registration?: { projectPath: string; type: 'builder' | 'shell'; roleId: string },
+  registration?: { workspacePath: string; type: 'builder' | 'shell'; roleId: string },
 ): Promise<{ terminalId: string }> {
   const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50, persistent: true };
   if (registration) {
-    body.projectPath = registration.projectPath;
+    body.workspacePath = registration.workspacePath;
     body.type = registration.type;
     body.roleId = registration.roleId;
   }
@@ -342,7 +342,7 @@ done
     '/bin/bash',
     [scriptPath],
     worktreePath,
-    { projectPath: config.projectRoot, type: 'builder', roleId: builderId },
+    { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
   );
   logger.info(`Terminal session created: ${terminalId}`);
   return { terminalId };
@@ -362,8 +362,8 @@ export async function startShellSession(
     config,
     '/bin/bash',
     ['-c', baseCmd],
-    config.projectRoot,
-    { projectPath: config.projectRoot, type: 'shell', roleId: shellId },
+    config.workspaceRoot,
+    { workspacePath: config.workspaceRoot, type: 'shell', roleId: shellId },
   );
   logger.info(`Shell terminal session created: ${terminalId}`);
   return { terminalId };

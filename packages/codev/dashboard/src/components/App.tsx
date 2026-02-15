@@ -40,14 +40,14 @@ export function App() {
     }
   }, [refresh]);
 
-  // Set document title with project name (no emoji - favicon provides the icon)
+  // Set document title with workspace name (no emoji - favicon provides the icon)
   useEffect(() => {
-    if (state?.projectName) {
-      document.title = `${state.projectName} Agent Farm`;
+    if (state?.workspaceName) {
+      document.title = `${state.workspaceName} Agent Farm`;
     } else {
       document.title = 'Agent Farm';
     }
-  }, [state?.projectName]);
+  }, [state?.workspaceName]);
 
   // Check for fullscreen mode from URL — read synchronously to avoid a
   // layout switch (desktop → fullscreen) that unmounts/remounts Terminal

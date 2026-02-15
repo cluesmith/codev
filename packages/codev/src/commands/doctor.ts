@@ -379,7 +379,7 @@ function verifyAiModel(modelName: string): CheckResult {
 /**
  * Find the project root with a codev/ directory
  */
-function findProjectRoot(): string | null {
+function findWorkspaceRoot(): string | null {
   let current = process.cwd();
   while (current !== dirname(current)) {
     if (existsSync(resolve(current, 'codev'))) {
@@ -417,9 +417,9 @@ function checkGitRemote(): { hasRemote: boolean; remoteName?: string; remoteUrl?
 /**
  * Check codev directory structure
  */
-function checkCodevStructure(projectRoot: string): { warnings: string[] } {
+function checkCodevStructure(workspaceRoot: string): { warnings: string[] } {
   const warnings: string[] = [];
-  const codevDir = resolve(projectRoot, 'codev');
+  const codevDir = resolve(workspaceRoot, 'codev');
 
   // Check for consult-types/ directory (new location)
   const consultTypesDir = resolve(codevDir, 'consult-types');
@@ -599,12 +599,12 @@ export async function doctor(): Promise<number> {
   console.log('');
 
   // Check codev directory structure (only if we're in a codev project)
-  const projectRoot = findProjectRoot();
-  if (projectRoot && existsSync(resolve(projectRoot, 'codev'))) {
+  const workspaceRoot = findWorkspaceRoot();
+  if (workspaceRoot && existsSync(resolve(workspaceRoot, 'codev'))) {
     console.log(chalk.bold('Codev Structure') + ' (project configuration)');
     console.log('');
 
-    const structureCheck = checkCodevStructure(projectRoot);
+    const structureCheck = checkCodevStructure(workspaceRoot);
     if (structureCheck.warnings.length === 0) {
       console.log(`  ${chalk.green('✓')} Project structure OK`);
     } else {

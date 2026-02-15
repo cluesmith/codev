@@ -52,7 +52,7 @@ export interface DashboardState {
   builders: Builder[];
   utils: UtilTerminal[];
   annotations: Annotation[];
-  projectName?: string;
+  workspaceName?: string;
   gateStatus?: GateStatus;
 }
 
@@ -172,7 +172,7 @@ export async function uploadPasteImage(blob: Blob): Promise<{ path: string }> {
 export function getTerminalWsPath(tab: { type: string; terminalId?: string }): string | null {
   if (tab.terminalId) {
     // Use window.location.pathname for an absolute path that includes any
-    // reverse-proxy prefix (e.g. /t/abc123/project/xyz/).
+    // reverse-proxy prefix (e.g. /t/abc123/workspace/xyz/).
     const path = window.location.pathname;
     const base = path.endsWith('/') ? path : path + '/';
     return `${base}ws/terminal/${tab.terminalId}`;

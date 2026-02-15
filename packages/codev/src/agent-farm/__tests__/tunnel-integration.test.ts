@@ -6,7 +6,7 @@
  * - Auto-connect behavior based on cloud config
  * - Graceful shutdown disconnects tunnel
  * - Config file watcher triggers reconnect/disconnect
- * - Metadata includes project-terminal associations
+ * - Metadata includes workspace-terminal associations
  *
  * Uses a lightweight HTTP server that mirrors the tower's endpoint logic
  * to test the contract without booting the full tower.
@@ -400,8 +400,8 @@ describe('tunnel integration (Phase 4)', () => {
     });
   });
 
-  describe('metadata with project-terminal associations', () => {
-    it('sends metadata including terminal projectPath', async () => {
+  describe('metadata with workspace-terminal associations', () => {
+    it('sends metadata including terminal workspacePath', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
         serverUrl: `http://127.0.0.1:${mockServerPort}`,
@@ -410,16 +410,16 @@ describe('tunnel integration (Phase 4)', () => {
         localPort: 4100,
       });
 
-      // Simulate gatherMetadata() output with project associations
+      // Simulate gatherMetadata() output with workspace associations
       const metadata: TowerMetadata = {
-        projects: [
+        workspaces: [
           { path: '/home/user/project-a', name: 'project-a' },
           { path: '/home/user/project-b', name: 'project-b' },
         ],
         terminals: [
-          { id: 'term-1', projectPath: '/home/user/project-a' },
-          { id: 'term-2', projectPath: '/home/user/project-a' },
-          { id: 'term-3', projectPath: '/home/user/project-b' },
+          { id: 'term-1', workspacePath: '/home/user/project-a' },
+          { id: 'term-2', workspacePath: '/home/user/project-a' },
+          { id: 'term-3', workspacePath: '/home/user/project-b' },
         ],
       };
       client.sendMetadata(metadata);
@@ -430,19 +430,19 @@ describe('tunnel integration (Phase 4)', () => {
       // Verify metadata is served via H2 GET poll (TICK-001: no more META frame)
       const res = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
       const receivedMetadata = JSON.parse(res.body);
-      expect(receivedMetadata.projects).toHaveLength(2);
+      expect(receivedMetadata.workspaces).toHaveLength(2);
       expect(receivedMetadata.terminals).toHaveLength(3);
 
-      // Verify terminal-project associations
+      // Verify terminal-workspace associations
       const term1 = receivedMetadata.terminals.find((t: { id: string }) => t.id === 'term-1');
-      expect(term1?.projectPath).toBe('/home/user/project-a');
+      expect(term1?.workspacePath).toBe('/home/user/project-a');
       const term3 = receivedMetadata.terminals.find((t: { id: string }) => t.id === 'term-3');
-      expect(term3?.projectPath).toBe('/home/user/project-b');
+      expect(term3?.workspacePath).toBe('/home/user/project-b');
 
       client.disconnect();
     });
 
-    it('metadata served via GET /__tower/metadata includes projects', async () => {
+    it('metadata served via GET /__tower/metadata includes workspaces', async () => {
       const config = createTestConfig();
       const client = new TunnelClient({
         serverUrl: `http://127.0.0.1:${mockServerPort}`,
@@ -452,7 +452,7 @@ describe('tunnel integration (Phase 4)', () => {
       });
 
       client.sendMetadata({
-        projects: [{ path: '/test', name: 'test-proj' }],
+        workspaces: [{ path: '/test', name: 'test-proj' }],
         terminals: [],
       });
 
@@ -465,8 +465,8 @@ describe('tunnel integration (Phase 4)', () => {
       });
       expect(response.status).toBe(200);
       const body = JSON.parse(response.body);
-      expect(body.projects).toHaveLength(1);
-      expect(body.projects[0].name).toBe('test-proj');
+      expect(body.workspaces).toHaveLength(1);
+      expect(body.workspaces[0].name).toBe('test-proj');
 
       client.disconnect();
     });
@@ -480,9 +480,9 @@ describe('tunnel integration (Phase 4)', () => {
         localPort: 4100,
       });
 
-      // Set initial metadata with 1 project
+      // Set initial metadata with 1 workspace
       client.sendMetadata({
-        projects: [{ path: '/test', name: 'initial-proj' }],
+        workspaces: [{ path: '/test', name: 'initial-proj' }],
         terminals: [],
       });
 
@@ -493,25 +493,25 @@ describe('tunnel integration (Phase 4)', () => {
       const res1 = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
       expect(res1.status).toBe(200);
       const body1 = JSON.parse(res1.body);
-      expect(body1.projects).toHaveLength(1);
-      expect(body1.projects[0].name).toBe('initial-proj');
+      expect(body1.workspaces).toHaveLength(1);
+      expect(body1.workspaces[0].name).toBe('initial-proj');
 
-      // Update metadata with 2 projects (simulates periodic refresh)
+      // Update metadata with 2 workspaces (simulates periodic refresh)
       client.sendMetadata({
-        projects: [
+        workspaces: [
           { path: '/test', name: 'initial-proj' },
           { path: '/test2', name: 'new-proj' },
         ],
-        terminals: [{ id: 'term-1', projectPath: '/test2' }],
+        terminals: [{ id: 'term-1', workspacePath: '/test2' }],
       });
 
       // Verify updated metadata via GET
       const res2 = await mockTunnelServer.sendRequest({ path: '/__tower/metadata' });
       expect(res2.status).toBe(200);
       const body2 = JSON.parse(res2.body);
-      expect(body2.projects).toHaveLength(2);
+      expect(body2.workspaces).toHaveLength(2);
       expect(body2.terminals).toHaveLength(1);
-      expect(body2.terminals[0].projectPath).toBe('/test2');
+      expect(body2.terminals[0].workspacePath).toBe('/test2');
 
       client.disconnect();
     });

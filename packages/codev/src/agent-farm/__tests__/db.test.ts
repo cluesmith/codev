@@ -113,12 +113,15 @@ describe('Database Schema', () => {
       db.exec(GLOBAL_SCHEMA);
     });
 
-    it('should create terminal_sessions table', () => {
+    it('should create all required tables', () => {
       const tables = db.prepare(`
         SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
       `).all() as Array<{ name: string }>;
 
-      expect(tables.map(t => t.name)).toContain('terminal_sessions');
+      const tableNames = tables.map(t => t.name);
+      expect(tableNames).toContain('terminal_sessions');
+      expect(tableNames).toContain('file_tabs');
+      expect(tableNames).toContain('known_workspaces');
     });
 
     it('should create terminal_sessions indexes', () => {
@@ -127,7 +130,7 @@ describe('Database Schema', () => {
       `).all() as Array<{ name: string }>;
 
       const indexNames = indexes.map(i => i.name);
-      expect(indexNames).toContain('idx_terminal_sessions_project');
+      expect(indexNames).toContain('idx_terminal_sessions_workspace');
       expect(indexNames).toContain('idx_terminal_sessions_type');
     });
   });

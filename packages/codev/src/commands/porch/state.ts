@@ -20,15 +20,15 @@ export const PROJECTS_DIR = 'codev/projects';
 /**
  * Get the project directory path
  */
-export function getProjectDir(projectRoot: string, projectId: string, name: string): string {
-  return path.join(projectRoot, PROJECTS_DIR, `${projectId}-${name}`);
+export function getProjectDir(workspaceRoot: string, projectId: string, name: string): string {
+  return path.join(workspaceRoot, PROJECTS_DIR, `${projectId}-${name}`);
 }
 
 /**
  * Get the status.yaml path for a project
  */
-export function getStatusPath(projectRoot: string, projectId: string, name: string): string {
-  return path.join(getProjectDir(projectRoot, projectId, name), 'status.yaml');
+export function getStatusPath(workspaceRoot: string, projectId: string, name: string): string {
+  return path.join(getProjectDir(workspaceRoot, projectId, name), 'status.yaml');
 }
 
 // ============================================================================
@@ -100,7 +100,7 @@ export function createInitialState(
   protocol: Protocol,
   projectId: string,
   title: string,
-  _projectRoot?: string
+  _workspaceRoot?: string
 ): ProjectState {
   const now = new Date().toISOString();
 
@@ -137,8 +137,8 @@ export function createInitialState(
 /**
  * Find status.yaml by project ID (searches for NNNN-* directories)
  */
-export function findStatusPath(projectRoot: string, projectId: string): string | null {
-  const projectsDir = path.join(projectRoot, PROJECTS_DIR);
+export function findStatusPath(workspaceRoot: string, projectId: string): string | null {
+  const projectsDir = path.join(workspaceRoot, PROJECTS_DIR);
 
   if (!fs.existsSync(projectsDir)) {
     return null;
@@ -185,7 +185,7 @@ export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'file
 export function resolveProjectId(
   provided: string | undefined,
   cwd: string,
-  projectRoot: string,
+  workspaceRoot: string,
 ): ResolvedProjectId {
   // 1. Explicit CLI argument (highest priority)
   if (provided) return { id: provided, source: 'explicit' };
@@ -195,7 +195,7 @@ export function resolveProjectId(
   if (fromCwd) return { id: fromCwd, source: 'cwd' };
 
   // 3. Filesystem scan fallback
-  const detected = detectProjectId(projectRoot);
+  const detected = detectProjectId(workspaceRoot);
   if (detected) return { id: detected, source: 'filesystem' };
 
   // 4. Error — none of the detection methods succeeded
@@ -206,8 +206,8 @@ export function resolveProjectId(
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
-export function detectProjectId(projectRoot: string): string | null {
-  const projectsDir = path.join(projectRoot, PROJECTS_DIR);
+export function detectProjectId(workspaceRoot: string): string | null {
+  const projectsDir = path.join(workspaceRoot, PROJECTS_DIR);
 
   if (!fs.existsSync(projectsDir)) {
     return null;

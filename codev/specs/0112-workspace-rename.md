@@ -45,7 +45,9 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 | `idx_terminal_sessions_project` | `idx_terminal_sessions_workspace` |
 | `idx_file_tabs_project` | `idx_file_tabs_workspace` |
 
-**Migration**: Add a new migration version that renames columns and the table. SQLite requires CREATE-new, INSERT-SELECT, DROP-old for table renames with column renames.
+**Migration**: Add migration **v9** to `global.db` (the only database with affected tables; `state.db` is unaffected). SQLite requires CREATE-new, INSERT-SELECT, DROP-old for table renames with column renames. Follow the existing pattern used in v7/v8 migrations.
+
+**Schema comments**: Update inline comments in `GLOBAL_SCHEMA` (e.g., `"-- project this terminal belongs to"` → `"-- workspace this terminal belongs to"`, `"across all projects"` → `"across all workspaces"`).
 
 #### Type Definitions (`tower-types.ts`)
 
@@ -101,7 +103,20 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 | `handleProjectAnnotate()` | `handleWorkspaceAnnotate()` |
 | `projectPath` param (throughout) | `workspacePath` param |
 
-**URL patterns**: Keep `/project/` and `/api/projects/` URLs as-is for this phase. URL changes would break bookmarks and any external integrations. Internal naming is what matters for developer clarity.
+**URL patterns**: Rename `/project/` → `/workspace/` and `/api/projects/` → `/api/workspaces/` throughout:
+
+| File | Before | After |
+|------|--------|-------|
+| `tower-routes.ts` | `/api/projects/:path/activate` | `/api/workspaces/:path/activate` |
+| `tower-routes.ts` | `/api/projects/:path/deactivate` | `/api/workspaces/:path/deactivate` |
+| `tower-routes.ts` | `/api/projects/:path/status` | `/api/workspaces/:path/status` |
+| `tower-routes.ts` | `/project/:base64urlPath/*` | `/workspace/:base64urlPath/*` |
+| `tower-instances.ts` | `/project/${encodedPath}/` | `/workspace/${encodedPath}/` |
+| `tower-websocket.ts` | `/project/:encodedPath/ws/terminal/:id` | `/workspace/:encodedPath/ws/terminal/:id` |
+| `tower-client.ts` | `/api/projects/${encoded}/activate` etc. | `/api/workspaces/${encoded}/activate` etc. |
+| `tower-client.ts` | `/project/${encoded}/` | `/workspace/${encoded}/` |
+| `dashboard/src/lib/api.ts` | `/project/` prefix detection | `/workspace/` prefix detection |
+| Dashboard tests | `/project/` in URL test fixtures | `/workspace/` |
 
 #### Tower Utils (`tower-utils.ts`)
 
@@ -136,7 +151,16 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 | `attach.ts` | `projectPath` usage | `workspacePath` |
 | `send.ts` | `getProjectStatus` call | `getWorkspaceStatus` |
 
-**Note**: `config.projectRoot` stays as-is — it comes from the Config system which predates Tower and is about the project root directory generically, not Tower's concept of a workspace.
+**Note**: `config.projectRoot` → `config.workspaceRoot` everywhere in CLI commands (see Config section below).
+
+#### Config (`utils/config.ts` + `types.ts`)
+
+| Before | After |
+|--------|-------|
+| `Config.projectRoot` | `Config.workspaceRoot` |
+| `findProjectRoot()` | `findWorkspaceRoot()` |
+| `getConfig()` returns `projectRoot` | `getConfig()` returns `workspaceRoot` |
+| All `config.projectRoot` usages (~39 files) | `config.workspaceRoot` |
 
 #### File Tabs Utility (`utils/file-tabs.ts`)
 
@@ -153,10 +177,12 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 
 #### Dashboard (`dashboard/src/`)
 
-| Before | After |
-|--------|-------|
-| `DashboardState.projectName` | `DashboardState.workspaceName` |
-| Display references to "Project" | "Workspace" where appropriate |
+| File | Before | After |
+|------|--------|-------|
+| `lib/api.ts` | `DashboardState.projectName` | `DashboardState.workspaceName` |
+| `components/App.tsx` | `state.projectName` (document title) | `state.workspaceName` |
+| `components/StatusPanel.tsx` | `projectName` in header bar | `workspaceName` |
+| Display references to "Project" | "Workspace" where referring to repo | Keep "Projects" for work-unit list |
 
 #### Spawn/Cleanup (Ambiguous Files — Handle Carefully)
 
@@ -164,10 +190,12 @@ These files use BOTH meanings. Only rename the repo-meaning uses:
 
 | File | Keep (work-unit) | Rename (repo) |
 |------|-------------------|---------------|
-| `spawn.ts` | `projectId`, `options.project` | `config.projectRoot` usage context only |
-| `cleanup.ts` | `projectId`, `options.project` | `config.projectRoot` usage context only |
-| `spawn-worktree.ts` | `projectId` param | `registration.projectPath` → `registration.workspacePath` |
+| `spawn.ts` | `projectId`, `options.project` | `config.projectRoot` → `config.workspaceRoot`; `{ projectPath: ... }` → `{ workspacePath: ... }` in registration objects |
+| `cleanup.ts` | `projectId`, `options.project` | `config.projectRoot` → `config.workspaceRoot` |
+| `spawn-worktree.ts` | `projectId` param | `config.projectRoot` → `config.workspaceRoot`; `{ projectPath: ... }` → `{ workspacePath: ... }` in registration objects |
 | `spawn-roles.ts` | `projectId` param | (none — all uses are work-unit) |
+
+**`config.projectRoot` → `config.workspaceRoot`**: Rename throughout. This property holds the path to the git repository (workspace), so it should use the workspace vocabulary. This affects the `Config` interface in `types.ts`, `getConfig()` in `config.ts`, `findProjectRoot()` → `findWorkspaceRoot()`, and all ~39 files that reference `config.projectRoot`.
 
 ### What NOT to Rename
 
@@ -175,9 +203,7 @@ These files use BOTH meanings. Only rename the repo-meaning uses:
 - **`projectlist.md`** — this tracks work-unit projects (correct usage)
 - **`codev/projects/`** directory — porch runtime state for work-unit projects (correct usage)
 - **`-p` / `--project` CLI flag** in `af spawn` — refers to work-unit (correct usage)
-- **`config.projectRoot`** — generic config concept, not Tower-specific
-- **URL paths** (`/project/`, `/api/projects/`) — keep for backwards compatibility
-- **User-facing dashboard text** saying "Project: codev-public" — update to "Workspace: codev-public" in header only, keep "Projects" group label for the work-unit list
+- **User-facing dashboard text** saying "Projects" group label — keep for work-unit list. But "Project: codev-public" in header → "Workspace: codev-public"
 
 ### Tests
 
@@ -187,11 +213,11 @@ Update all test files that reference renamed identifiers. The TypeScript compile
 
 These locations use BOTH meanings of "project" in close proximity. The builder must carefully distinguish which occurrences to rename and which to keep:
 
-1. **`spawn.ts` lines ~140-180**: `projectId` (work-unit "0108") sits next to `config.projectRoot` (repo path) and `registration.projectPath` (repo path). Only rename the repo-meaning ones.
+1. **`spawn.ts` lines ~140-180**: `projectId` (work-unit "0108") sits next to `config.workspaceRoot` (repo path, renamed) and `registration.workspacePath` (repo path, renamed). Only rename the repo-meaning ones.
 
-2. **`cleanup.ts` lines ~120-135**: `projectId = options.project` is work-unit, but `config.projectRoot` on line ~92 is repo. The `options.project` CLI flag is work-unit — do NOT rename.
+2. **`cleanup.ts` lines ~120-135**: `projectId = options.project` is work-unit, but `config.workspaceRoot` (formerly `config.projectRoot`) on line ~92 is repo (renamed). The `options.project` CLI flag is work-unit — do NOT rename.
 
-3. **`spawn-worktree.ts` lines ~75-86 and ~260-345**: `projectId` parameter is work-unit (for porch init), but `registration.projectPath` on line ~262 is repo. Same function, different meanings.
+3. **`spawn-worktree.ts` lines ~75-86 and ~260-345**: `projectId` parameter is work-unit (for porch init), but `registration.workspacePath` (formerly `registration.projectPath`) on line ~262 is repo (renamed). Same function, different meanings.
 
 4. **`gate-status.ts`**: `getGateStatusForProject(projectPath)` takes a repo path (→ rename to `workspacePath`), but inside it reads `codev/projects/<id>/` which are work-unit directories (→ keep "projects" in path).
 
@@ -201,15 +227,16 @@ These locations use BOTH meanings of "project" in close proximity. The builder m
 
 7. **Dashboard `StatusPanel.tsx`**: The "Projects" group header refers to work-unit projects listed in `projectlist.md` — keep as "Projects". But `projectName` in the header bar refers to the repo name — rename to `workspaceName`.
 
-8. **`config.projectRoot`**: This is from the generic Config system, NOT Tower's concept. It means "root of the current working project directory." Do NOT rename — it predates the workspace concept and is used everywhere outside Tower.
+8. **`config.workspaceRoot`** (formerly `config.projectRoot`): Renamed throughout. The function `findProjectRoot()` → `findWorkspaceRoot()` and all ~39 files that reference `config.projectRoot` must be updated. The function's internal logic (looking for `codev/` directory, `.git`, etc.) stays the same.
 
 ## Scope
 
-- ~508 identifier renames across ~15 TypeScript source files
-- 1 database migration (column + table renames)
+- ~600+ identifier renames across ~40 TypeScript source files
+- 1 database migration v9 on `global.db` (column + table renames)
 - ~5 dashboard component updates
+- URL path renames (`/project/` → `/workspace/`, `/api/projects/` → `/api/workspaces/`)
+- `config.projectRoot` → `config.workspaceRoot` across ~39 files
 - Test file updates (compiler-guided)
-- No URL/API breaking changes
 - No changes to porch, projectlist, or work-unit terminology
 
 ## Acceptance Criteria

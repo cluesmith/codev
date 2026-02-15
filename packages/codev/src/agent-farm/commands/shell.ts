@@ -7,7 +7,7 @@
 
 import { getConfig } from '../utils/index.js';
 import { logger } from '../utils/logger.js';
-import { TowerClient, encodeProjectPath } from '../lib/tower-client.js';
+import { TowerClient, encodeWorkspacePath } from '../lib/tower-client.js';
 
 interface UtilOptions {
   name?: string;
@@ -19,13 +19,13 @@ interface UtilOptions {
  */
 async function tryTowerApi(
   client: TowerClient,
-  projectPath: string,
+  workspacePath: string,
   name?: string,
 ): Promise<{ ok: boolean; connectionRefused: boolean; error?: string }> {
-  const encodedPath = encodeProjectPath(projectPath);
+  const encodedPath = encodeWorkspacePath(workspacePath);
 
   const result = await client.request<{ id: string; name: string; terminalId: string }>(
-    `/project/${encodedPath}/api/tabs/shell`,
+    `/workspace/${encodedPath}/api/tabs/shell`,
     {
       method: 'POST',
       body: JSON.stringify({ name }),
@@ -50,7 +50,7 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
   const config = getConfig();
 
   const client = new TowerClient();
-  const result = await tryTowerApi(client, config.projectRoot, options.name);
+  const result = await tryTowerApi(client, config.workspaceRoot, options.name);
   if (result.ok) {
     return;
   }

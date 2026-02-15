@@ -90,11 +90,11 @@ const messageHandlers: Record<string, (ws: WebSocket, message: Message) => void>
       payload.instance_id,
       payload.instance_name,
       payload.version,
-      payload.projects || []
+      payload.workspaces || []
     );
 
     console.log(`[HQ] Instance registered: ${payload.instance_id} (${payload.instance_name || 'unnamed'})`);
-    console.log(`[HQ]   Projects: ${payload.projects?.map(p => p.name).join(', ') || 'none'}`);
+    console.log(`[HQ]   Workspaces: ${payload.workspaces?.map(w => w.name).join(', ') || 'none'}`);
 
     sendMessage(ws, createResponse(message.id, true, {
       session_id: payload.instance_id,
@@ -128,14 +128,14 @@ const messageHandlers: Record<string, (ws: WebSocket, message: Message) => void>
 
     const payload = message.payload as unknown as StatusUpdatePayload;
 
-    if (!payload.project_path || !payload.status_file || !payload.content) {
+    if (!payload.workspace_path || !payload.status_file || !payload.content) {
       sendMessage(ws, createResponse(message.id, false, undefined, 'Missing required fields'));
       return;
     }
 
     state.updateStatusFile(
       instance.instance_id,
-      payload.project_path,
+      payload.workspace_path,
       payload.status_file,
       payload.content,
       payload.git_sha
@@ -156,14 +156,14 @@ const messageHandlers: Record<string, (ws: WebSocket, message: Message) => void>
 
     const payload = message.payload as unknown as BuilderUpdatePayload;
 
-    if (!payload.project_path || !payload.builder_id || !payload.status) {
+    if (!payload.workspace_path || !payload.builder_id || !payload.status) {
       sendMessage(ws, createResponse(message.id, false, undefined, 'Missing required fields'));
       return;
     }
 
     state.updateBuilder(
       instance.instance_id,
-      payload.project_path,
+      payload.workspace_path,
       payload.builder_id,
       payload.status,
       payload.phase,

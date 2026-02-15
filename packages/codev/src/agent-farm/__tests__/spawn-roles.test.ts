@@ -111,9 +111,9 @@ describe('spawn-roles', () => {
       // Config with non-existent protocols dir
       const config = {
         codevDir: '/nonexistent/codev',
-        projectRoot: '/project',
-        buildersDir: '/project/.builders',
-        stateFile: '/project/.builders/state.json',
+        workspaceRoot: '/workspace',
+        buildersDir: '/workspace/.builders',
+        stateFile: '/workspace/.builders/state.json',
       };
       const context: TemplateContext = {
         protocol_name: 'SPIR',

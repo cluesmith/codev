@@ -52,10 +52,10 @@ function getMainRepoFromWorktree(dir: string): string | null {
 }
 
 /**
- * Find the project root by looking for codev/ directory
+ * Find the workspace root by looking for codev/ directory
  * Handles git worktrees by finding the main repository
  */
-function findProjectRoot(startDir: string = process.cwd()): string {
+function findWorkspaceRoot(startDir: string = process.cwd()): string {
   // First check if we're in a git worktree
   const mainRepo = getMainRepoFromWorktree(startDir);
   if (mainRepo && existsSync(resolve(mainRepo, 'codev'))) {
@@ -118,17 +118,17 @@ function getServersDir(): string {
 /**
  * Get the roles directory (from codev/roles/, config override, or embedded skeleton)
  */
-function getRolesDir(projectRoot: string, userConfig: UserConfig | null): string {
+function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): string {
   // Check config.json override
   if (userConfig?.roles?.dir) {
-    const configPath = resolve(projectRoot, userConfig.roles.dir);
+    const configPath = resolve(workspaceRoot, userConfig.roles.dir);
     if (existsSync(configPath)) {
       return configPath;
     }
   }
 
   // Try local codev/roles/ first
-  const rolesPath = resolve(projectRoot, 'codev/roles');
+  const rolesPath = resolve(workspaceRoot, 'codev/roles');
   if (existsSync(rolesPath)) {
     return rolesPath;
   }
@@ -146,8 +146,8 @@ function getRolesDir(projectRoot: string, userConfig: UserConfig | null): string
 /**
  * Load af-config.json from project root
  */
-function loadUserConfig(projectRoot: string): UserConfig | null {
-  const configPath = resolve(projectRoot, 'af-config.json');
+function loadUserConfig(workspaceRoot: string): UserConfig | null {
+  const configPath = resolve(workspaceRoot, 'af-config.json');
   if (existsSync(configPath)) {
     try {
       const content = readFileSync(configPath, 'utf-8');
@@ -198,8 +198,8 @@ export function setCliOverrides(overrides: Partial<ResolvedCommands>): void {
 /**
  * Get resolved commands following hierarchy: CLI > config.json > defaults
  */
-export function getResolvedCommands(projectRoot?: string): ResolvedCommands {
-  const root = projectRoot || findProjectRoot();
+export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
+  const root = workspaceRoot || findWorkspaceRoot();
   const userConfig = loadUserConfig(root);
 
   return {
@@ -216,18 +216,18 @@ export function getResolvedCommands(projectRoot?: string): ResolvedCommands {
  * Build configuration for the current project
  */
 export function getConfig(): Config {
-  const projectRoot = findProjectRoot();
-  const codevDir = resolve(projectRoot, 'codev');
-  const userConfig = loadUserConfig(projectRoot);
+  const workspaceRoot = findWorkspaceRoot();
+  const codevDir = resolve(workspaceRoot, 'codev');
+  const userConfig = loadUserConfig(workspaceRoot);
 
   return {
-    projectRoot,
+    workspaceRoot,
     codevDir,
-    buildersDir: resolve(projectRoot, '.builders'),
-    stateDir: resolve(projectRoot, '.agent-farm'),
+    buildersDir: resolve(workspaceRoot, '.builders'),
+    stateDir: resolve(workspaceRoot, '.agent-farm'),
     templatesDir: getTemplatesDir(),
     serversDir: getServersDir(),
-    bundledRolesDir: getRolesDir(projectRoot, userConfig),
+    bundledRolesDir: getRolesDir(workspaceRoot, userConfig),
     terminalBackend: userConfig?.terminal?.backend || 'node-pty',
   };
 }

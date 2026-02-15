@@ -119,7 +119,7 @@ describe('Type Definitions', () => {
   describe('Config', () => {
     it('should accept valid config objects', () => {
       const config: Config = {
-        projectRoot: '/path/to/project',
+        workspaceRoot: '/path/to/project',
         codevDir: '/path/to/project/codev',
         buildersDir: '/path/to/project/.builders',
         stateDir: '/path/to/project/.agent-farm',
@@ -129,7 +129,7 @@ describe('Type Definitions', () => {
         terminalBackend: 'node-pty',
       };
 
-      expect(config.projectRoot).toBe('/path/to/project');
+      expect(config.workspaceRoot).toBe('/path/to/project');
       expect(config.codevDir).toBe('/path/to/project/codev');
       expect(config.buildersDir).toBe('/path/to/project/.builders');
     });

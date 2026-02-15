@@ -26,15 +26,15 @@ vi.mock('../utils/shell.js', () => ({
 // Mock config
 vi.mock('../utils/config.js', () => ({
   getConfig: () => ({
-    projectRoot: '/test/project',
+    workspaceRoot: '/test/workspace',
   }),
 }));
 
 // Mock TowerClient (constructor reads local-key file)
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: class {
-    getProjectUrl(path: string) {
-      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    getWorkspaceUrl(path: string) {
+      return `http://localhost:4100/workspace/${Buffer.from(path).toString('base64url')}/`;
     }
   },
 }));
@@ -106,7 +106,7 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     await attach({ project: 'task-AAAA', browser: true });
 
     // Should open Tower dashboard, not a per-builder port
-    expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
+    expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
   });
 
   it('should fatal when builder has no terminal session', async () => {

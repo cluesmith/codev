@@ -25,9 +25,9 @@ export function getSkeletonDir(): string {
 }
 
 /**
- * Find project root by looking for codev/ directory or .git
+ * Find workspace root by looking for codev/ directory or .git
  */
-export function findProjectRoot(startDir?: string): string {
+export function findWorkspaceRoot(startDir?: string): string {
   let current = startDir || process.cwd();
 
   while (current !== path.dirname(current)) {
@@ -49,11 +49,11 @@ export function findProjectRoot(startDir?: string): string {
  * Resolve a codev file, checking local first then embedded skeleton.
  *
  * @param relativePath - Path relative to codev/ (e.g., 'roles/consultant.md')
- * @param projectRoot - Optional project root (auto-detected if not provided)
+ * @param workspaceRoot - Optional workspace root (auto-detected if not provided)
  * @returns Absolute path to the file, or null if not found
  */
-export function resolveCodevFile(relativePath: string, projectRoot?: string): string | null {
-  const root = projectRoot || findProjectRoot();
+export function resolveCodevFile(relativePath: string, workspaceRoot?: string): string | null {
+  const root = workspaceRoot || findWorkspaceRoot();
 
   // 1. Check local codev/ directory first (user overrides)
   const localPath = path.join(root, 'codev', relativePath);
@@ -75,11 +75,11 @@ export function resolveCodevFile(relativePath: string, projectRoot?: string): st
  * Read a codev file, checking local first then embedded skeleton.
  *
  * @param relativePath - Path relative to codev/ (e.g., 'roles/consultant.md')
- * @param projectRoot - Optional project root (auto-detected if not provided)
+ * @param workspaceRoot - Optional workspace root (auto-detected if not provided)
  * @returns File contents, or null if not found
  */
-export function readCodevFile(relativePath: string, projectRoot?: string): string | null {
-  const filePath = resolveCodevFile(relativePath, projectRoot);
+export function readCodevFile(relativePath: string, workspaceRoot?: string): string | null {
+  const filePath = resolveCodevFile(relativePath, workspaceRoot);
   if (!filePath) {
     return null;
   }
@@ -89,8 +89,8 @@ export function readCodevFile(relativePath: string, projectRoot?: string): strin
 /**
  * Check if a file exists in local codev/ directory (not skeleton)
  */
-export function hasLocalOverride(relativePath: string, projectRoot?: string): boolean {
-  const root = projectRoot || findProjectRoot();
+export function hasLocalOverride(relativePath: string, workspaceRoot?: string): boolean {
+  const root = workspaceRoot || findWorkspaceRoot();
   const localPath = path.join(root, 'codev', relativePath);
   return fs.existsSync(localPath);
 }

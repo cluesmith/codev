@@ -10,19 +10,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
-import { getGateStatusForProject } from '../utils/gate-status.js';
+import { getGateStatusForWorkspace } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
-  loadFileTabsForProject as loadFileTabsFromDb,
+  loadFileTabsForWorkspace as loadFileTabsFromDb,
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import type { ProjectTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeProjectPath, buildArchitectArgs } from './tower-utils.js';
+import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
+import { normalizeWorkspacePath, buildArchitectArgs } from './tower-utils.js';
 
 // ============================================================================
 // Module-private state (lifecycle driven by orchestrator)
@@ -30,8 +30,8 @@ import { normalizeProjectPath, buildArchitectArgs } from './tower-utils.js';
 
 let _deps: TerminalDeps | null = null;
 
-/** Project terminal registry — tracks which terminals belong to which project */
-const projectTerminals = new Map<string, ProjectTerminals>();
+/** Workspace terminal registry — tracks which terminals belong to which workspace */
+const workspaceTerminals = new Map<string, WorkspaceTerminals>();
 
 /** Global TerminalManager instance (lazy singleton) */
 let terminalManager: TerminalManager | null = null;
@@ -49,10 +49,10 @@ export interface TerminalDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void;
   /** Shellper session manager for persistent terminals */
   shellperManager: SessionManager | null;
-  /** Register a known project path (from tower-instances) */
-  registerKnownProject: (projectPath: string) => void;
-  /** Get all known project paths (from tower-instances) */
-  getKnownProjectPaths: () => string[];
+  /** Register a known workspace path (from tower-instances) */
+  registerKnownWorkspace: (workspacePath: string) => void;
+  /** Get all known workspace paths (from tower-instances) */
+  getKnownWorkspacePaths: () => string[];
 }
 
 // ============================================================================
@@ -82,20 +82,20 @@ export function shutdownTerminals(): void {
 // Accessors for shared state
 // ============================================================================
 
-/** Get the project terminals registry (returns the Map reference) */
-export function getProjectTerminals(): Map<string, ProjectTerminals> {
-  return projectTerminals;
+/** Get the workspace terminals registry (returns the Map reference) */
+export function getWorkspaceTerminals(): Map<string, WorkspaceTerminals> {
+  return workspaceTerminals;
 }
 
 /**
  * Get or create the global TerminalManager instance.
- * Uses a temporary directory as projectRoot since terminals can be for any project.
+ * Uses a temporary directory as workspaceRoot since terminals can be for any workspace.
  */
 export function getTerminalManager(): TerminalManager {
   if (!terminalManager) {
-    const projectRoot = process.env.HOME || '/tmp';
+    const workspaceRoot = process.env.HOME || '/tmp';
     terminalManager = new TerminalManager({
-      projectRoot,
+      workspaceRoot: workspaceRoot,
       logDir: path.join(homedir(), '.agent-farm', 'logs'),
       maxSessions: 100,
       ringBufferLines: 10000,
@@ -112,15 +112,15 @@ export function getTerminalManager(): TerminalManager {
 // ============================================================================
 
 /**
- * Get or create project terminal registry entry.
- * On first access for a project, hydrates file tabs from SQLite so
+ * Get or create workspace terminal registry entry.
+ * On first access for a workspace, hydrates file tabs from SQLite so
  * persisted tabs are available immediately (not just after /api/state).
  */
-export function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
-  let entry = projectTerminals.get(projectPath);
+export function getWorkspaceTerminalsEntry(workspacePath: string): WorkspaceTerminals {
+  let entry = workspaceTerminals.get(workspacePath);
   if (!entry) {
-    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForProject(projectPath) };
-    projectTerminals.set(projectPath, entry);
+    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForWorkspace(workspacePath) };
+    workspaceTerminals.set(workspacePath, entry);
   }
   // Migration: ensure fileTabs exists for older entries
   if (!entry.fileTabs) {
@@ -130,10 +130,10 @@ export function getProjectTerminalsEntry(projectPath: string): ProjectTerminals 
 }
 
 /**
- * Generate next shell ID for a project
+ * Generate next shell ID for a workspace
  */
-export function getNextShellId(projectPath: string): string {
-  const entry = getProjectTerminalsEntry(projectPath);
+export function getNextShellId(workspacePath: string): string {
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   let maxId = 0;
   for (const id of entry.shells.keys()) {
     const num = parseInt(id.replace('shell-', ''), 10);
@@ -144,11 +144,11 @@ export function getNextShellId(projectPath: string): string {
 
 /**
  * Save a terminal session to SQLite.
- * Guards against race conditions by checking if project is still active.
+ * Guards against race conditions by checking if workspace is still active.
  */
 export function saveTerminalSession(
   terminalId: string,
-  projectPath: string,
+  workspacePath: string,
   type: 'architect' | 'builder' | 'shell',
   roleId: string | null,
   pid: number | null,
@@ -157,18 +157,18 @@ export function saveTerminalSession(
   shellperStartTime: number | null = null,
 ): void {
   try {
-    const normalizedPath = normalizeProjectPath(projectPath);
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
 
-    // Race condition guard: only save if project is still in the active registry
+    // Race condition guard: only save if workspace is still in the active registry
     // This prevents zombie rows when stop races with session creation
-    if (!projectTerminals.has(normalizedPath) && !projectTerminals.has(projectPath)) {
-      _deps?.log('INFO', `Skipping session save - project no longer active: ${projectPath}`);
+    if (!workspaceTerminals.has(normalizedPath) && !workspaceTerminals.has(workspacePath)) {
+      _deps?.log('INFO', `Skipping session save - workspace no longer active: ${workspacePath}`);
       return;
     }
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time)
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
@@ -198,33 +198,33 @@ export function deleteTerminalSession(terminalId: string): void {
 }
 
 /**
- * Delete all terminal sessions for a project from SQLite.
+ * Delete all terminal sessions for a workspace from SQLite.
  * Normalizes path to ensure consistent cleanup regardless of how path was provided.
  */
-export function deleteProjectTerminalSessions(projectPath: string): void {
+export function deleteWorkspaceTerminalSessions(workspacePath: string): void {
   try {
-    const normalizedPath = normalizeProjectPath(projectPath);
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
     const db = getGlobalDb();
 
     // Delete both normalized and raw path to handle any inconsistencies
-    db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(normalizedPath);
-    if (normalizedPath !== projectPath) {
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(projectPath);
+    db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run(normalizedPath);
+    if (normalizedPath !== workspacePath) {
+      db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run(workspacePath);
     }
   } catch (err) {
-    _deps?.log('WARN', `Failed to delete project terminal sessions: ${(err as Error).message}`);
+    _deps?.log('WARN', `Failed to delete workspace terminal sessions: ${(err as Error).message}`);
   }
 }
 
 /**
- * Get terminal sessions from SQLite for a project.
+ * Get terminal sessions from SQLite for a workspace.
  * Normalizes path for consistent lookup.
  */
-export function getTerminalSessionsForProject(projectPath: string): DbTerminalSession[] {
+export function getTerminalSessionsForWorkspace(workspacePath: string): DbTerminalSession[] {
   try {
-    const normalizedPath = normalizeProjectPath(projectPath);
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
     const db = getGlobalDb();
-    return db.prepare('SELECT * FROM terminal_sessions WHERE project_path = ?').all(normalizedPath) as DbTerminalSession[];
+    return db.prepare('SELECT * FROM terminal_sessions WHERE workspace_path = ?').all(normalizedPath) as DbTerminalSession[];
   } catch {
     return [];
   }
@@ -238,9 +238,9 @@ export function getTerminalSessionsForProject(projectPath: string): DbTerminalSe
  * Save a file tab to SQLite for persistence across Tower restarts.
  * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
  */
-export function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
+export function saveFileTab(id: string, workspacePath: string, filePath: string, createdAt: number): void {
   try {
-    const normalizedPath = normalizeProjectPath(projectPath);
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
     saveFileTabToDb(getGlobalDb(), id, normalizedPath, filePath, createdAt);
   } catch (err) {
     _deps?.log('WARN', `Failed to save file tab: ${(err as Error).message}`);
@@ -260,12 +260,12 @@ export function deleteFileTab(id: string): void {
 }
 
 /**
- * Load file tabs for a project from SQLite.
+ * Load file tabs for a workspace from SQLite.
  * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
  */
-export function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
+export function loadFileTabsForWorkspace(workspacePath: string): Map<string, FileTab> {
   try {
-    const normalizedPath = normalizeProjectPath(projectPath);
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
     return loadFileTabsFromDb(getGlobalDb(), normalizedPath);
   } catch (err) {
     _deps?.log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
@@ -348,11 +348,11 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   for (const dbSession of shellperSessions) {
-    const projectPath = dbSession.project_path;
+    const workspacePath = dbSession.workspace_path;
 
-    // Skip sessions whose project path doesn't exist or is in temp directory
-    if (!fs.existsSync(projectPath)) {
-      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — project path no longer exists: ${projectPath}`);
+    // Skip sessions whose workspace path doesn't exist or is in temp directory
+    if (!fs.existsSync(workspacePath)) {
+      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace path no longer exists: ${workspacePath}`);
       // Kill orphaned shellper process before removing row
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
@@ -362,8 +362,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       continue;
     }
     const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => projectPath === d || projectPath.startsWith(d + '/'))) {
-      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — project is in temp directory: ${projectPath}`);
+    if (tmpDirs.some(d => workspacePath === d || workspacePath.startsWith(d + '/'))) {
+      _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace is in temp directory: ${workspacePath}`);
       // Kill orphaned shellper process before removing row
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
@@ -383,7 +383,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       let restartOptions: ReconnectRestartOptions | undefined;
       if (dbSession.type === 'architect') {
         let architectCmd = 'claude';
-        const configPath = path.join(projectPath, 'af-config.json');
+        const configPath = path.join(workspacePath, 'af-config.json');
         if (fs.existsSync(configPath)) {
           try {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -397,8 +397,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         delete cleanEnv['CLAUDECODE'];
         restartOptions = {
           command: cmdParts[0],
-          args: buildArchitectArgs(cmdParts.slice(1), projectPath),
-          cwd: projectPath,
+          args: buildArchitectArgs(cmdParts.slice(1), workspacePath),
+          cwd: workspacePath,
           env: cleanEnv,
           restartDelay: 2000,
           maxRestarts: 50,
@@ -422,14 +422,14 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
 
       // Create a PtySession backed by the reconnected shellper client
-      const session = manager.createSessionRaw({ label, cwd: projectPath });
+      const session = manager.createSessionRaw({ label, cwd: workspacePath });
       const ptySession = manager.getSession(session.id);
       if (ptySession) {
         ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
       }
 
-      // Register in projectTerminals Map
-      const entry = getProjectTerminalsEntry(projectPath);
+      // Register in workspaceTerminals Map
+      const entry = getWorkspaceTerminalsEntry(workspacePath);
       if (dbSession.type === 'architect') {
         entry.architect = session.id;
       } else if (dbSession.type === 'builder') {
@@ -440,14 +440,14 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
       // Update SQLite with new terminal ID
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      saveTerminalSession(session.id, projectPath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
+      saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
         dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
-      _deps.registerKnownProject(projectPath);
+      _deps.registerKnownWorkspace(workspacePath);
 
       // Clean up on exit
       if (ptySession) {
         ptySession.on('exit', () => {
-          const currentEntry = getProjectTerminalsEntry(projectPath);
+          const currentEntry = getWorkspaceTerminalsEntry(workspacePath);
           if (dbSession.type === 'architect' && currentEntry.architect === session.id) {
             currentEntry.architect = undefined;
           }
@@ -457,7 +457,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
       matchedSessionIds.add(dbSession.id);
       shellperReconnected++;
-      _deps.log('INFO', `Reconnected shellper session → ${session.id} (${dbSession.type} for ${path.basename(projectPath)})`);
+      _deps.log('INFO', `Reconnected shellper session → ${session.id} (${dbSession.type} for ${path.basename(workspacePath)})`);
     } catch (err) {
       _deps.log('WARN', `Failed to reconnect shellper session ${dbSession.id}: ${(err as Error).message}`);
     }
@@ -472,7 +472,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
     // Stale row — kill orphaned process if any, then delete
     if (session.pid && processExists(session.pid)) {
-      _deps.log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
+      _deps.log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.workspace_path)})`);
       try {
         process.kill(session.pid, 'SIGTERM');
         killed++;
@@ -496,36 +496,36 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 // ============================================================================
 
 /**
- * Get terminal list for a project from tower's registry.
+ * Get terminal list for a workspace from tower's registry.
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server fetch.
  * Returns architect, builders, and shells with their URLs.
  */
-export async function getTerminalsForProject(
-  projectPath: string,
+export async function getTerminalsForWorkspace(
+  workspacePath: string,
   proxyUrl: string
 ): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
   // Query SQLite first, then augment with shellper reconnection
-  const dbSessions = getTerminalSessionsForProject(projectPath);
+  const dbSessions = getTerminalSessionsForWorkspace(workspacePath);
 
   // Use normalized path for cache consistency
-  const normalizedPath = normalizeProjectPath(projectPath);
+  const normalizedPath = normalizeWorkspacePath(workspacePath);
 
   // Build a fresh entry from SQLite, then replace atomically to avoid
   // destroying in-memory state that was registered via POST /api/terminals.
   // Previous approach cleared the cache then rebuilt, which lost terminals
   // if their SQLite rows were deleted by external interference (e.g., tests).
-  const freshEntry: ProjectTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
+  const freshEntry: WorkspaceTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
 
   // Load file tabs from SQLite (persisted across restarts)
-  const existingEntry = projectTerminals.get(normalizedPath);
+  const existingEntry = workspaceTerminals.get(normalizedPath);
   if (existingEntry && existingEntry.fileTabs.size > 0) {
     // Use in-memory state if already populated (avoids redundant DB reads)
     freshEntry.fileTabs = existingEntry.fileTabs;
   } else {
-    freshEntry.fileTabs = loadFileTabsForProject(projectPath);
+    freshEntry.fileTabs = loadFileTabsForWorkspace(workspacePath);
   }
 
   for (const dbSession of dbSessions) {
@@ -541,7 +541,7 @@ export async function getTerminalsForProject(
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
           let architectCmd = 'claude';
-          const configPath = path.join(dbSession.project_path, 'af-config.json');
+          const configPath = path.join(dbSession.workspace_path, 'af-config.json');
           if (fs.existsSync(configPath)) {
             try {
               const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -555,8 +555,8 @@ export async function getTerminalsForProject(
           delete cleanEnv['CLAUDECODE'];
           restartOptions = {
             command: cmdParts[0],
-            args: buildArchitectArgs(cmdParts.slice(1), dbSession.project_path),
-            cwd: dbSession.project_path,
+            args: buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path),
+            cwd: dbSession.workspace_path,
             env: cleanEnv,
             restartDelay: 2000,
             maxRestarts: 50,
@@ -573,14 +573,14 @@ export async function getTerminalsForProject(
         if (client) {
           const replayData = client.getReplayData() ?? Buffer.alloc(0);
           const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`;
-          const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
+          const newSession = manager.createSessionRaw({ label, cwd: dbSession.workspace_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
 
             // Clean up on exit (same as startup reconciliation path)
             ptySession.on('exit', () => {
-              const currentEntry = getProjectTerminalsEntry(dbSession.project_path);
+              const currentEntry = getWorkspaceTerminalsEntry(dbSession.workspace_path);
               if (dbSession.type === 'architect' && currentEntry.architect === newSession.id) {
                 currentEntry.architect = undefined;
               }
@@ -588,7 +588,7 @@ export async function getTerminalsForProject(
             });
           }
           deleteTerminalSession(dbSession.id);
-          saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
+          saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
@@ -686,10 +686,10 @@ export async function getTerminalsForProject(
   }
 
   // Atomically replace the cache entry
-  projectTerminals.set(normalizedPath, freshEntry);
+  workspaceTerminals.set(normalizedPath, freshEntry);
 
   // Read gate status from porch YAML files
-  const gateStatus = getGateStatusForProject(projectPath);
+  const gateStatus = getGateStatusForWorkspace(workspacePath);
 
   return { terminals, gateStatus };
 }

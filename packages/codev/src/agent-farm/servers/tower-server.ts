@@ -25,20 +25,20 @@ import {
 import {
   initInstances,
   shutdownInstances,
-  registerKnownProject,
-  getKnownProjectPaths,
+  registerKnownWorkspace,
+  getKnownWorkspacePaths,
   getInstances,
 } from './tower-instances.js';
 import {
   initTerminals,
   shutdownTerminals,
-  getProjectTerminals,
+  getWorkspaceTerminals,
   getTerminalManager,
-  getProjectTerminalsEntry,
+  getWorkspaceTerminalsEntry,
   saveTerminalSession,
   deleteTerminalSession,
-  deleteProjectTerminalSessions,
-  getTerminalsForProject,
+  deleteWorkspaceTerminalSessions,
+  getTerminalsForWorkspace,
   reconcileTerminalSessions,
 } from './tower-terminals.js';
 import {
@@ -167,7 +167,7 @@ let notificationIdCounter = 0;
 /**
  * Broadcast a notification to all connected SSE clients
  */
-function broadcastNotification(notification: { type: string; title: string; body: string; project?: string }): void {
+function broadcastNotification(notification: { type: string; title: string; body: string; workspace?: string }): void {
   const id = ++notificationIdCounter;
   const data = JSON.stringify({ ...notification, id });
   const message = `id: ${id}\ndata: ${data}\n\n`;
@@ -210,7 +210,7 @@ const hasReactDashboard = fs.existsSync(reactDashboardPath);
 if (hasReactDashboard) {
   log('INFO', `React dashboard found at: ${reactDashboardPath}`);
 } else {
-  log('WARN', 'React dashboard not found - project dashboards will not work');
+  log('WARN', 'React dashboard not found - workspace dashboards will not work');
 }
 
 // ============================================================================
@@ -266,13 +266,13 @@ server.listen(port, '127.0.0.1', async () => {
   initTerminals({
     log,
     shellperManager,
-    registerKnownProject,
-    getKnownProjectPaths,
+    registerKnownWorkspace,
+    getKnownWorkspacePaths,
   });
 
   // TICK-001: Reconcile terminal sessions from previous run.
   // Must run BEFORE initInstances() so that API request handlers
-  // (getInstances → getTerminalsForProject) cannot race with reconciliation.
+  // (getInstances → getTerminalsForWorkspace) cannot race with reconciliation.
   // Without this ordering, a dashboard poll arriving during reconciliation
   // triggers on-the-fly shellper reconnection that conflicts with the
   // reconciliation's own reconnection — the shellper's single-connection
@@ -285,19 +285,19 @@ server.listen(port, '127.0.0.1', async () => {
   // (since _deps is null), preventing race conditions with reconciliation.
   initInstances({
     log,
-    projectTerminals: getProjectTerminals(),
+    workspaceTerminals: getWorkspaceTerminals(),
     getTerminalManager,
     shellperManager,
-    getProjectTerminalsEntry,
+    getWorkspaceTerminalsEntry,
     saveTerminalSession,
     deleteTerminalSession,
-    deleteProjectTerminalSessions,
-    getTerminalsForProject,
+    deleteWorkspaceTerminalSessions,
+    getTerminalsForWorkspace,
   });
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
   await initTunnel(
-    { port, log, projectTerminals: getProjectTerminals(), terminalManager: getTerminalManager() },
+    { port, log, workspaceTerminals: getWorkspaceTerminals(), terminalManager: getTerminalManager() },
     { getInstances },
   );
 });

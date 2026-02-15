@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // Types matching HQ server
-interface ProjectInfo {
+interface WorkspaceInfo {
   path: string;
   name: string;
   git_remote?: string;
@@ -26,7 +26,7 @@ interface InstanceData {
   version?: string;
   connected_at: string;
   last_ping: string;
-  projects: ProjectInfo[];
+  workspaces: WorkspaceInfo[];
   status_files: StatusFile[];
   builders: BuilderInfo[];
 }
@@ -158,7 +158,7 @@ export default function App() {
   // Handle approval click
   const handleApprove = async (
     instance_id: string,
-    project_path: string,
+    workspace_path: string,
     project_id: string,
     gate: string
   ) => {
@@ -171,7 +171,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instance_id,
-          project_path,
+          workspace_path,
           project_id,
           gate,
           approved_by: 'dashboard-user',
@@ -297,10 +297,10 @@ export default function App() {
             />
           </div>
 
-          {/* Projects */}
-          {instance.projects.map((project) => (
+          {/* Workspaces */}
+          {instance.workspaces.map((workspace) => (
             <div
-              key={project.path}
+              key={workspace.path}
               style={{
                 marginBottom: '16px',
                 padding: '16px',
@@ -309,7 +309,7 @@ export default function App() {
               }}
             >
               <h3 style={{ fontSize: '16px', fontWeight: 500, marginBottom: '12px' }}>
-                {project.name}
+                {workspace.name}
               </h3>
 
               {/* Builders */}
@@ -421,7 +421,7 @@ export default function App() {
                                     onClick={() =>
                                       handleApprove(
                                         instance.instance_id,
-                                        project.path,
+                                        workspace.path,
                                         project_id,
                                         gateName
                                       )

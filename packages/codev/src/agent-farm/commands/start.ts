@@ -1,8 +1,8 @@
 /**
- * Start command - activates a project via Tower
+ * Start command - activates a workspace via Tower
  *
- * Phase 3 (Spec 0090): Uses tower API for project activation.
- * Tower is the single daemon that manages all projects.
+ * Phase 3 (Spec 0090): Uses tower API for workspace activation.
+ * Tower is the single daemon that manages all workspaces.
  */
 
 import type { StartOptions } from '../types.js';
@@ -20,17 +20,17 @@ const DEFAULT_TOWER_PORT = 4100;
 /**
  * Start via tower API (Phase 3 - Spec 0090)
  *
- * This is the way to start projects:
+ * This is the way to start workspaces:
  * 1. Ensure tower is running
  * 2. Call tower's activate API
  * 3. Open browser to tower URL
  */
 export async function start(options: StartOptions = {}): Promise<void> {
   const config = getConfig();
-  const projectPath = config.projectRoot;
+  const workspacePath = config.workspaceRoot;
 
   logger.header('Starting Agent Farm');
-  logger.kv('Project', projectPath);
+  logger.kv('Workspace', workspacePath);
 
   // Create tower client
   const client = new TowerClient(DEFAULT_TOWER_PORT);
@@ -46,29 +46,29 @@ export async function start(options: StartOptions = {}): Promise<void> {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  // Activate project via tower API
-  logger.info('Activating project...');
-  const result = await client.activateProject(projectPath);
+  // Activate workspace via tower API
+  logger.info('Activating workspace...');
+  const result = await client.activateWorkspace(workspacePath);
 
   if (!result.ok) {
-    fatal(`Failed to activate project: ${result.error}`);
+    fatal(`Failed to activate workspace: ${result.error}`);
   }
 
   if (result.adopted) {
-    logger.info('Project auto-adopted (codev/ directory created)');
+    logger.info('Workspace auto-adopted (codev/ directory created)');
   }
 
-  // Get project URL from tower
-  const projectUrl = client.getProjectUrl(projectPath);
+  // Get workspace URL from tower
+  const workspaceUrl = client.getWorkspaceUrl(workspacePath);
 
   logger.blank();
   logger.success('Agent Farm started!');
-  logger.kv('Dashboard', projectUrl);
+  logger.kv('Dashboard', workspaceUrl);
 
   // Open browser only if Tower wasn't already running (user already has it open)
   if (!options.noBrowser && !towerRunning) {
-    await openBrowser(projectUrl);
+    await openBrowser(workspaceUrl);
   } else if (towerRunning) {
-    logger.info('Tower already running — project visible in your browser.');
+    logger.info('Tower already running — workspace visible in your browser.');
   }
 }

@@ -229,13 +229,13 @@ describe('tunnel-client integration', () => {
         method: 'POST',
         path: '/api/launch',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ projectPath: '/test' }),
+        body: JSON.stringify({ workspacePath: '/test' }),
       });
 
       expect(response.status).toBe(200);
       const body = JSON.parse(response.body);
       expect(body.method).toBe('POST');
-      expect(body.body).toBe('{"projectPath":"/test"}');
+      expect(body.body).toBe('{"workspacePath":"/test"}');
     });
 
     it('preserves response headers (filtering hop-by-hop)', async () => {
@@ -386,8 +386,8 @@ describe('tunnel-client integration', () => {
 
       // Set metadata before connecting — served via H2 GET poll
       client.sendMetadata({
-        projects: [{ path: '/test/project', name: 'test' }],
-        terminals: [{ id: 'term-1', projectPath: '/test/project' }],
+        workspaces: [{ path: '/test/project', name: 'test' }],
+        terminals: [{ id: 'term-1', workspacePath: '/test/project' }],
       });
 
       client.connect();
@@ -396,8 +396,8 @@ describe('tunnel-client integration', () => {
       // Fetch metadata via H2 GET (how codevos.ai polls)
       const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
       const metadata = JSON.parse(res.body);
-      expect(metadata.projects).toHaveLength(1);
-      expect(metadata.projects[0].name).toBe('test');
+      expect(metadata.workspaces).toHaveLength(1);
+      expect(metadata.workspaces[0].name).toBe('test');
       expect(metadata.terminals).toHaveLength(1);
     });
 
@@ -410,7 +410,7 @@ describe('tunnel-client integration', () => {
       // Fetch metadata — should be empty defaults
       const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
       const metadata = JSON.parse(res.body);
-      expect(metadata.projects).toEqual([]);
+      expect(metadata.workspaces).toEqual([]);
       expect(metadata.terminals).toEqual([]);
     });
 
@@ -422,7 +422,7 @@ describe('tunnel-client integration', () => {
 
       // Update metadata after connection (will be served on GET poll)
       client.sendMetadata({
-        projects: [{ path: '/updated', name: 'updated' }],
+        workspaces: [{ path: '/updated', name: 'updated' }],
         terminals: [],
       });
 
@@ -432,15 +432,15 @@ describe('tunnel-client integration', () => {
 
       expect(response.status).toBe(200);
       const body = JSON.parse(response.body);
-      expect(body.projects).toHaveLength(1);
-      expect(body.projects[0].name).toBe('updated');
+      expect(body.workspaces).toHaveLength(1);
+      expect(body.workspaces[0].name).toBe('updated');
     });
 
     it('pushes metadata via outbound HTTP POST on connect', async () => {
       await setupTunnel();
 
       client.sendMetadata({
-        projects: [{ path: '/pushed', name: 'pushed-project' }],
+        workspaces: [{ path: '/pushed', name: 'pushed-project' }],
         terminals: [],
       });
 
@@ -450,8 +450,8 @@ describe('tunnel-client integration', () => {
       // Wait for the async HTTP POST to arrive
       await waitFor(() => mockServer.lastPushedMetadata !== null);
 
-      expect(mockServer.lastPushedMetadata!.projects).toHaveLength(1);
-      expect(mockServer.lastPushedMetadata!.projects[0].name).toBe('pushed-project');
+      expect(mockServer.lastPushedMetadata!.workspaces).toHaveLength(1);
+      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('pushed-project');
     });
 
     it('pushes metadata via HTTP POST when sendMetadata called while connected', async () => {
@@ -464,13 +464,13 @@ describe('tunnel-client integration', () => {
       mockServer.lastPushedMetadata = null;
 
       client.sendMetadata({
-        projects: [{ path: '/live-update', name: 'live' }],
-        terminals: [{ id: 't1', projectPath: '/live-update' }],
+        workspaces: [{ path: '/live-update', name: 'live' }],
+        terminals: [{ id: 't1', workspacePath: '/live-update' }],
       });
 
       await waitFor(() => mockServer.lastPushedMetadata !== null);
 
-      expect(mockServer.lastPushedMetadata!.projects[0].name).toBe('live');
+      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('live');
       expect(mockServer.lastPushedMetadata!.terminals).toHaveLength(1);
     });
   });

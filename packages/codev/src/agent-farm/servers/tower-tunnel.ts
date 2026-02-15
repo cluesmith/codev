@@ -23,14 +23,14 @@ import {
 import { createPendingRegistration, consumePendingRegistration } from '../lib/nonce-store.js';
 import { redeemToken } from '../lib/token-exchange.js';
 import { validateDeviceName } from '../lib/device-name.js';
-import type { ProjectTerminals, InstanceStatus } from './tower-types.js';
+import type { WorkspaceTerminals, InstanceStatus } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 
 /** Minimal dependencies required by the tunnel module */
 export interface TunnelDeps {
   port: number;
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
-  projectTerminals: Map<string, ProjectTerminals>;
+  workspaceTerminals: Map<string, WorkspaceTerminals>;
   terminalManager: TerminalManager | null;
 }
 
@@ -55,23 +55,23 @@ let _getInstances: (() => Promise<InstanceStatus[]>) | null = null;
 // ============================================================================
 
 /**
- * Gather current tower metadata (projects + terminals) for codevos.ai.
+ * Gather current tower metadata (workspaces + terminals) for codevos.ai.
  */
 async function gatherMetadata(): Promise<TowerMetadata> {
   if (!_deps || !_getInstances) throw new Error('Tunnel not initialized');
 
   const instances = await _getInstances();
-  const projects = instances.map((i) => ({
-    path: i.projectPath,
-    name: i.projectName,
+  const workspaces = instances.map((i) => ({
+    path: i.workspacePath,
+    name: i.workspaceName,
   }));
 
-  // Build reverse mapping: terminal ID → project path
-  const terminalToProject = new Map<string, string>();
-  for (const [projectPath, entry] of _deps.projectTerminals) {
-    if (entry.architect) terminalToProject.set(entry.architect, projectPath);
-    for (const termId of entry.builders.values()) terminalToProject.set(termId, projectPath);
-    for (const termId of entry.shells.values()) terminalToProject.set(termId, projectPath);
+  // Build reverse mapping: terminal ID → workspace path
+  const terminalToWorkspace = new Map<string, string>();
+  for (const [workspacePath, entry] of _deps.workspaceTerminals) {
+    if (entry.architect) terminalToWorkspace.set(entry.architect, workspacePath);
+    for (const termId of entry.builders.values()) terminalToWorkspace.set(termId, workspacePath);
+    for (const termId of entry.shells.values()) terminalToWorkspace.set(termId, workspacePath);
   }
 
   const manager = _deps.terminalManager;
@@ -80,12 +80,12 @@ async function gatherMetadata(): Promise<TowerMetadata> {
     for (const session of manager.listSessions()) {
       terminals.push({
         id: session.id,
-        projectPath: terminalToProject.get(session.id) ?? '',
+        workspacePath: terminalToWorkspace.get(session.id) ?? '',
       });
     }
   }
 
-  return { projects, terminals };
+  return { workspaces, terminals };
 }
 
 /**

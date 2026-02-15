@@ -9,13 +9,13 @@ import path from 'node:path';
 const TOWER_URL = 'http://localhost:4100';
 const VIDEO_DIR = path.resolve(import.meta.dirname, '../../../../test-results/videos');
 
-// Helper to get base64url encoded project path
+// Helper to get base64url encoded workspace path
 function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
 }
 
-const PROJECT_PATH = path.resolve(import.meta.dirname, '../../../../../');
-const ENCODED_PATH = toBase64URL(PROJECT_PATH);
+const WORKSPACE_PATH = path.resolve(import.meta.dirname, '../../../../../');
+const ENCODED_PATH = toBase64URL(WORKSPACE_PATH);
 
 test.describe('Tower Desktop', () => {
   test('tower UI loads and shows running instance', async ({ page }) => {
@@ -38,7 +38,7 @@ test.describe('Tower Desktop', () => {
 
   test('tower proxy serves React dashboard', async ({ page }) => {
     // Navigate to tower proxy URL for the dashboard
-    await page.goto(`${TOWER_URL}/project/${ENCODED_PATH}/`);
+    await page.goto(`${TOWER_URL}/workspace/${ENCODED_PATH}/`);
     await page.waitForTimeout(2000);
 
     // Should load the React dashboard (not legacy)
@@ -51,7 +51,7 @@ test.describe('Tower Desktop', () => {
 
   test('tower proxy WebSocket terminal works', async ({ page }) => {
     // Get terminalId through tower proxy
-    const stateRes = await page.request.get(`${TOWER_URL}/project/${ENCODED_PATH}/api/state`);
+    const stateRes = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`);
     expect(stateRes.ok()).toBe(true);
     const state = await stateRes.json();
     
@@ -60,7 +60,7 @@ test.describe('Tower Desktop', () => {
     if (!terminalId) {
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
-        const res = await page.request.get(`${TOWER_URL}/project/${ENCODED_PATH}/api/state`);
+        const res = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`);
         const s = await res.json();
         terminalId = s.architect?.terminalId;
         if (terminalId) break;
@@ -69,7 +69,7 @@ test.describe('Tower Desktop', () => {
     expect(terminalId).toBeTruthy();
 
     // Navigate to dashboard through tower proxy
-    await page.goto(`${TOWER_URL}/project/${ENCODED_PATH}/`);
+    await page.goto(`${TOWER_URL}/workspace/${ENCODED_PATH}/`);
     await page.waitForTimeout(2000);
 
     // The xterm terminal should render
@@ -79,7 +79,7 @@ test.describe('Tower Desktop', () => {
 
   test('tower proxy shell creation works', async ({ page }) => {
     // Create shell tab through tower proxy
-    const response = await page.request.post(`${TOWER_URL}/project/${ENCODED_PATH}/api/tabs/shell`, {
+    const response = await page.request.post(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/tabs/shell`, {
       data: { name: 'tower-test-shell' },
     });
     expect(response.status()).toBe(200); // Tower returns 200 for shell creation
@@ -88,7 +88,7 @@ test.describe('Tower Desktop', () => {
     expect(body.terminalId).toBeTruthy();
 
     // Clean up
-    await page.request.delete(`${TOWER_URL}/project/${ENCODED_PATH}/api/tabs/${body.id}`);
+    await page.request.delete(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/tabs/${body.id}`);
   });
 });
 
@@ -109,7 +109,7 @@ test.describe('Tower Mobile', () => {
   });
 
   test('dashboard through tower proxy works on mobile', async ({ page }) => {
-    await page.goto(`${TOWER_URL}/project/${ENCODED_PATH}/`);
+    await page.goto(`${TOWER_URL}/workspace/${ENCODED_PATH}/`);
     await page.waitForTimeout(2000);
 
     // React dashboard should load

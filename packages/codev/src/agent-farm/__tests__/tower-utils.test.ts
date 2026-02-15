@@ -2,7 +2,7 @@
  * Unit tests for tower-utils.ts (Spec 0105 Phase 1)
  *
  * Tests: rate limiting, path normalization, temp directory detection,
- * project name extraction, MIME types, static file serving.
+ * workspace name extraction, MIME types, static file serving.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -15,8 +15,8 @@ import {
   isRateLimited,
   cleanupRateLimits,
   startRateLimitCleanup,
-  normalizeProjectPath,
-  getProjectName,
+  normalizeWorkspacePath,
+  getWorkspaceName,
   isTempDirectory,
   getLanguageForExt,
   getMimeTypeForFile,
@@ -114,36 +114,36 @@ describe('tower-utils', () => {
     });
   });
 
-  describe('normalizeProjectPath', () => {
+  describe('normalizeWorkspacePath', () => {
     it('resolves existing paths with realpath', () => {
       // Use the current directory which exists
-      const normalized = normalizeProjectPath('.');
+      const normalized = normalizeWorkspacePath('.');
       expect(path.isAbsolute(normalized)).toBe(true);
     });
 
     it('resolves non-existent paths with path.resolve', () => {
-      const normalized = normalizeProjectPath('/nonexistent/path/to/project');
-      expect(normalized).toBe('/nonexistent/path/to/project');
+      const normalized = normalizeWorkspacePath('/nonexistent/path/to/workspace');
+      expect(normalized).toBe('/nonexistent/path/to/workspace');
     });
 
     it('resolves relative paths', () => {
-      const normalized = normalizeProjectPath('relative/path');
+      const normalized = normalizeWorkspacePath('relative/path');
       expect(path.isAbsolute(normalized)).toBe(true);
     });
   });
 
-  describe('getProjectName', () => {
+  describe('getWorkspaceName', () => {
     it('extracts basename from path', () => {
-      expect(getProjectName('/Users/dev/my-project')).toBe('my-project');
+      expect(getWorkspaceName('/Users/dev/my-project')).toBe('my-project');
     });
 
     it('handles paths with trailing slash', () => {
       // path.basename handles trailing slash by taking the last segment
-      expect(getProjectName('/Users/dev/project/')).toBe('project');
+      expect(getWorkspaceName('/Users/dev/project/')).toBe('project');
     });
 
     it('handles simple names', () => {
-      expect(getProjectName('project')).toBe('project');
+      expect(getWorkspaceName('project')).toBe('project');
     });
   });
 

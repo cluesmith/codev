@@ -29,12 +29,12 @@ async function towerStatus(port?: number): Promise<void> {
     if (response.ok) {
       logger.kv('Daemon', `running on port ${towerPort}`);
       const data = (await response.json()) as {
-        instances?: Array<{ projectName: string; running: boolean; terminals: unknown[] }>;
+        instances?: Array<{ workspaceName: string; running: boolean; terminals: unknown[] }>;
       };
       if (data.instances) {
         const running = data.instances.filter((i) => i.running);
         const totalTerminals = data.instances.reduce((sum, i) => sum + (i.terminals?.length || 0), 0);
-        logger.kv('Projects', `${running.length} active / ${data.instances.length} total`);
+        logger.kv('Workspaces', `${running.length} active / ${data.instances.length} total`);
         logger.kv('Terminals', `${totalTerminals}`);
       }
     } else {

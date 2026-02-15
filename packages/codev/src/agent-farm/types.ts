@@ -48,7 +48,7 @@ export interface DashboardState {
 }
 
 export interface Config {
-  projectRoot: string;
+  workspaceRoot: string;
   codevDir: string;
   buildersDir: string;
   stateDir: string;
@@ -182,7 +182,7 @@ export interface ResolvedCommands {
  * Tutorial state for interactive onboarding
  */
 export interface TutorialState {
-  projectPath: string;
+  workspacePath: string;
   currentStep: string;
   completedSteps: string[];
   userResponses: Record<string, string>;

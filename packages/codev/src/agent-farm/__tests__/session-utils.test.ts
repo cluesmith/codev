@@ -6,12 +6,12 @@ import { describe, it, expect } from 'vitest';
 import { getBuilderSessionName, parseSessionName } from '../utils/session.js';
 import type { Config } from '../types.js';
 
-function makeConfig(projectRoot: string): Config {
+function makeConfig(workspaceRoot: string): Config {
   return {
-    projectRoot,
-    codevDir: `${projectRoot}/codev`,
-    stateDir: `${projectRoot}/.agent-farm`,
-    buildersDir: `${projectRoot}/.builders`,
+    workspaceRoot,
+    codevDir: `${workspaceRoot}/codev`,
+    stateDir: `${workspaceRoot}/.agent-farm`,
+    buildersDir: `${workspaceRoot}/.builders`,
   } as Config;
 }
 
@@ -21,12 +21,12 @@ describe('getBuilderSessionName', () => {
     expect(getBuilderSessionName(config, '0042')).toBe('builder-my-project-0042');
   });
 
-  it('should use only the basename of projectRoot', () => {
+  it('should use only the basename of workspaceRoot', () => {
     const config = makeConfig('/deeply/nested/path/to/repo');
     expect(getBuilderSessionName(config, 'bugfix-99')).toBe('builder-repo-bugfix-99');
   });
 
-  it('should handle single-segment project paths', () => {
+  it('should handle single-segment workspace paths', () => {
     const config = makeConfig('/project');
     expect(getBuilderSessionName(config, '0001')).toBe('builder-project-0001');
   });
@@ -40,7 +40,7 @@ describe('parseSessionName', () => {
       });
     });
 
-    it('should handle project names with underscores (sanitized dots)', () => {
+    it('should handle workspace names with underscores (sanitized dots)', () => {
       expect(parseSessionName('architect-codevos_ai')).toEqual({
         type: 'architect', projectBasename: 'codevos_ai', roleId: null,
       });
@@ -86,7 +86,7 @@ describe('parseSessionName', () => {
       });
     });
 
-    it('should handle project names with underscores', () => {
+    it('should handle workspace names with underscores', () => {
       expect(parseSessionName('builder-codevos_ai-bugfix-99')).toEqual({
         type: 'builder', projectBasename: 'codevos_ai', roleId: 'bugfix-99',
       });

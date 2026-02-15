@@ -22,17 +22,17 @@ export interface TowerContext {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   terminalManager: TerminalManager;
   shellperManager: SessionManager | null;
-  projectTerminals: Map<string, ProjectTerminals>;
+  workspaceTerminals: Map<string, WorkspaceTerminals>;
   db: () => Database.Database;
-  broadcastNotification: (n: { type: string; title: string; body: string; project?: string }) => void;
+  broadcastNotification: (n: { type: string; title: string; body: string; workspace?: string }) => void;
   tunnelClient: TunnelClient | null;
-  knownProjects: Set<string>;
+  knownWorkspaces: Set<string>;
   server: http.Server;
   terminalWss: WebSocketServer;
 }
 
-/** Tracks terminals belonging to a project */
-export interface ProjectTerminals {
+/** Tracks terminals belonging to a workspace */
+export interface WorkspaceTerminals {
   architect?: string;
   builders: Map<string, string>;
   shells: Map<string, string>;
@@ -62,8 +62,8 @@ export interface TerminalEntry {
 
 /** Instance status returned to tower UI */
 export interface InstanceStatus {
-  projectPath: string;
-  projectName: string;
+  workspacePath: string;
+  workspaceName: string;
   running: boolean;
   proxyUrl: string;
   architectUrl: string;
@@ -75,7 +75,7 @@ export interface InstanceStatus {
 /** SQLite terminal session row shape */
 export interface DbTerminalSession {
   id: string;
-  project_path: string;
+  workspace_path: string;
   type: 'architect' | 'builder' | 'shell';
   role_id: string | null;
   pid: number | null;

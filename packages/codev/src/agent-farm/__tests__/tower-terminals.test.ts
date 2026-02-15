@@ -3,7 +3,7 @@
  *
  * Tests: session CRUD, file tab persistence, shell ID allocation,
  * terminal manager lifecycle, reconciliation,
- * getTerminalsForProject, and initTerminals/shutdownTerminals lifecycle.
+ * getTerminalsForWorkspace, and initTerminals/shutdownTerminals lifecycle.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -13,19 +13,19 @@ import os from 'node:os';
 import {
   initTerminals,
   shutdownTerminals,
-  getProjectTerminals,
+  getWorkspaceTerminals,
   getTerminalManager,
-  getProjectTerminalsEntry,
+  getWorkspaceTerminalsEntry,
   getNextShellId,
   saveTerminalSession,
   isSessionPersistent,
   deleteTerminalSession,
-  deleteProjectTerminalSessions,
+  deleteWorkspaceTerminalSessions,
   saveFileTab,
   deleteFileTab,
-  loadFileTabsForProject,
+  loadFileTabsForWorkspace,
   processExists,
-  getTerminalSessionsForProject,
+  getTerminalSessionsForWorkspace,
   type TerminalDeps,
 } from '../servers/tower-terminals.js';
 
@@ -63,7 +63,7 @@ vi.mock('../utils/gate-status.js', () => ({
 vi.mock('../utils/file-tabs.js', () => ({
   saveFileTab: (...args: unknown[]) => mockSaveFileTabToDb(...args),
   deleteFileTab: (...args: unknown[]) => mockDeleteFileTabFromDb(...args),
-  loadFileTabsForProject: (...args: unknown[]) => mockLoadFileTabsFromDb(...args),
+  loadFileTabsForWorkspace: (...args: unknown[]) => mockLoadFileTabsFromDb(...args),
 }));
 
 // ============================================================================
@@ -74,8 +74,8 @@ function makeDeps(overrides: Partial<TerminalDeps> = {}): TerminalDeps {
   return {
     log: vi.fn(),
     shellperManager: null,
-    registerKnownProject: vi.fn(),
-    getKnownProjectPaths: vi.fn(() => []),
+    registerKnownWorkspace: vi.fn(),
+    getKnownWorkspacePaths: vi.fn(() => []),
     ...overrides,
   };
 }
@@ -89,12 +89,12 @@ describe('tower-terminals', () => {
     vi.clearAllMocks();
     // Ensure module is in clean state
     shutdownTerminals();
-    getProjectTerminals().clear();
+    getWorkspaceTerminals().clear();
   });
 
   afterEach(() => {
     shutdownTerminals();
-    getProjectTerminals().clear();
+    getWorkspaceTerminals().clear();
   });
 
   // =========================================================================
@@ -122,46 +122,46 @@ describe('tower-terminals', () => {
   });
 
   // =========================================================================
-  // getProjectTerminals (accessor)
+  // getWorkspaceTerminals (accessor)
   // =========================================================================
 
-  describe('getProjectTerminals', () => {
+  describe('getWorkspaceTerminals', () => {
     it('returns a Map', () => {
-      expect(getProjectTerminals()).toBeInstanceOf(Map);
+      expect(getWorkspaceTerminals()).toBeInstanceOf(Map);
     });
 
     it('entries persist across calls', () => {
-      const map = getProjectTerminals();
+      const map = getWorkspaceTerminals();
       map.set('/test', { builders: new Map(), shells: new Map(), fileTabs: new Map() });
-      expect(getProjectTerminals().has('/test')).toBe(true);
+      expect(getWorkspaceTerminals().has('/test')).toBe(true);
     });
   });
 
   // =========================================================================
-  // getProjectTerminalsEntry
+  // getWorkspaceTerminalsEntry
   // =========================================================================
 
-  describe('getProjectTerminalsEntry', () => {
+  describe('getWorkspaceTerminalsEntry', () => {
     it('creates new entry for unknown path', () => {
-      const entry = getProjectTerminalsEntry('/new/project');
+      const entry = getWorkspaceTerminalsEntry('/new/project');
       expect(entry).toBeDefined();
       expect(entry.builders).toBeInstanceOf(Map);
       expect(entry.shells).toBeInstanceOf(Map);
-      expect(getProjectTerminals().has('/new/project')).toBe(true);
+      expect(getWorkspaceTerminals().has('/new/project')).toBe(true);
     });
 
     it('returns existing entry', () => {
-      const entry1 = getProjectTerminalsEntry('/existing');
+      const entry1 = getWorkspaceTerminalsEntry('/existing');
       entry1.architect = 'test-id';
-      const entry2 = getProjectTerminalsEntry('/existing');
+      const entry2 = getWorkspaceTerminalsEntry('/existing');
       expect(entry2.architect).toBe('test-id');
     });
 
     it('ensures fileTabs exists for older entries', () => {
       // Simulate an older entry without fileTabs
-      const map = getProjectTerminals();
+      const map = getWorkspaceTerminals();
       map.set('/old', { builders: new Map(), shells: new Map() } as any);
-      const entry = getProjectTerminalsEntry('/old');
+      const entry = getWorkspaceTerminalsEntry('/old');
       expect(entry.fileTabs).toBeInstanceOf(Map);
     });
   });
@@ -176,14 +176,14 @@ describe('tower-terminals', () => {
     });
 
     it('increments based on existing shells', () => {
-      const entry = getProjectTerminalsEntry('/project');
+      const entry = getWorkspaceTerminalsEntry('/project');
       entry.shells.set('shell-1', 'term-1');
       entry.shells.set('shell-2', 'term-2');
       expect(getNextShellId('/project')).toBe('shell-3');
     });
 
     it('handles gaps in shell numbering', () => {
-      const entry = getProjectTerminalsEntry('/project');
+      const entry = getWorkspaceTerminalsEntry('/project');
       entry.shells.set('shell-1', 'term-1');
       entry.shells.set('shell-5', 'term-5');
       expect(getNextShellId('/project')).toBe('shell-6');
@@ -198,7 +198,7 @@ describe('tower-terminals', () => {
     it('saves to SQLite when project is active', () => {
       const deps = makeDeps();
       initTerminals(deps);
-      getProjectTerminals().set('/project', { builders: new Map(), shells: new Map(), fileTabs: new Map() });
+      getWorkspaceTerminals().set('/project', { builders: new Map(), shells: new Map(), fileTabs: new Map() });
 
       saveTerminalSession('term-1', '/project', 'architect', null, 1234);
       expect(mockDbPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT OR REPLACE'));
@@ -216,7 +216,7 @@ describe('tower-terminals', () => {
     it('handles DB errors gracefully', () => {
       const deps = makeDeps();
       initTerminals(deps);
-      getProjectTerminals().set('/project', { builders: new Map(), shells: new Map(), fileTabs: new Map() });
+      getWorkspaceTerminals().set('/project', { builders: new Map(), shells: new Map(), fileTabs: new Map() });
       mockDbRun.mockImplementation(() => { throw new Error('DB error'); });
 
       expect(() => saveTerminalSession('term-1', '/project', 'architect', null, 1234)).not.toThrow();
@@ -257,18 +257,18 @@ describe('tower-terminals', () => {
   });
 
   // =========================================================================
-  // deleteProjectTerminalSessions
+  // deleteWorkspaceTerminalSessions
   // =========================================================================
 
-  describe('deleteProjectTerminalSessions', () => {
+  describe('deleteWorkspaceTerminalSessions', () => {
     it('deletes by normalized path', () => {
-      deleteProjectTerminalSessions('/project');
-      expect(mockDbPrepare).toHaveBeenCalledWith('DELETE FROM terminal_sessions WHERE project_path = ?');
+      deleteWorkspaceTerminalSessions('/project');
+      expect(mockDbPrepare).toHaveBeenCalledWith('DELETE FROM terminal_sessions WHERE workspace_path = ?');
     });
 
     it('handles DB errors gracefully', () => {
       mockDbRun.mockImplementation(() => { throw new Error('DB error'); });
-      expect(() => deleteProjectTerminalSessions('/project')).not.toThrow();
+      expect(() => deleteWorkspaceTerminalSessions('/project')).not.toThrow();
     });
   });
 
@@ -304,9 +304,9 @@ describe('tower-terminals', () => {
     });
   });
 
-  describe('loadFileTabsForProject', () => {
+  describe('loadFileTabsForWorkspace', () => {
     it('returns a Map', () => {
-      const result = loadFileTabsForProject('/project');
+      const result = loadFileTabsForWorkspace('/project');
       expect(result).toBeInstanceOf(Map);
     });
 
@@ -314,7 +314,7 @@ describe('tower-terminals', () => {
       mockLoadFileTabsFromDb.mockImplementation(() => { throw new Error('err'); });
       const deps = makeDeps();
       initTerminals(deps);
-      const result = loadFileTabsForProject('/project');
+      const result = loadFileTabsForWorkspace('/project');
       expect(result).toBeInstanceOf(Map);
       expect(result.size).toBe(0);
     });
@@ -335,23 +335,23 @@ describe('tower-terminals', () => {
   });
 
   // =========================================================================
-  // getTerminalSessionsForProject
+  // getTerminalSessionsForWorkspace
   // =========================================================================
 
-  describe('getTerminalSessionsForProject', () => {
+  describe('getTerminalSessionsForWorkspace', () => {
     it('returns sessions from SQLite', () => {
       const mockSessions = [
-        { id: 'term-1', project_path: '/project', type: 'architect' },
+        { id: 'term-1', workspace_path: '/project', type: 'architect' },
       ];
       mockDbAll.mockReturnValue(mockSessions);
 
-      const result = getTerminalSessionsForProject('/project');
+      const result = getTerminalSessionsForWorkspace('/project');
       expect(result).toEqual(mockSessions);
     });
 
     it('returns empty array on DB error', () => {
       mockDbAll.mockImplementation(() => { throw new Error('DB error'); });
-      const result = getTerminalSessionsForProject('/project');
+      const result = getTerminalSessionsForWorkspace('/project');
       expect(result).toEqual([]);
     });
   });

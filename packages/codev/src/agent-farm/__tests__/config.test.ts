@@ -13,7 +13,7 @@ describe('getConfig', () => {
     const config = getConfig();
 
     expect(config).toBeDefined();
-    expect(config.projectRoot).toBeDefined();
+    expect(config.workspaceRoot).toBeDefined();
     expect(config.codevDir).toBeDefined();
     expect(config.buildersDir).toBeDefined();
     expect(config.stateDir).toBeDefined();
@@ -21,12 +21,12 @@ describe('getConfig', () => {
     expect(config.serversDir).toBeDefined();
   });
 
-  it('should derive paths from projectRoot', () => {
+  it('should derive paths from workspaceRoot', () => {
     const config = getConfig();
 
-    expect(config.codevDir).toBe(resolve(config.projectRoot, 'codev'));
-    expect(config.buildersDir).toBe(resolve(config.projectRoot, '.builders'));
-    expect(config.stateDir).toBe(resolve(config.projectRoot, '.agent-farm'));
+    expect(config.codevDir).toBe(resolve(config.workspaceRoot, 'codev'));
+    expect(config.buildersDir).toBe(resolve(config.workspaceRoot, '.builders'));
+    expect(config.stateDir).toBe(resolve(config.workspaceRoot, '.agent-farm'));
   });
 });
 

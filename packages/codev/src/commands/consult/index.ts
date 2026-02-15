@@ -10,7 +10,7 @@ import { spawn, execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
-import { resolveCodevFile, readCodevFile, findProjectRoot, hasLocalOverride } from '../../lib/skeleton.js';
+import { resolveCodevFile, readCodevFile, findWorkspaceRoot, hasLocalOverride } from '../../lib/skeleton.js';
 
 // Model configuration
 interface ModelConfig {
@@ -73,8 +73,8 @@ function isValidRoleName(roleName: string): boolean {
  * List available roles in codev/roles/
  * Excludes non-role files like README.md, review-types/, etc.
  */
-function listAvailableRoles(projectRoot: string): string[] {
-  const rolesDir = path.join(projectRoot, 'codev', 'roles');
+function listAvailableRoles(workspaceRoot: string): string[] {
+  const rolesDir = path.join(workspaceRoot, 'codev', 'roles');
   if (!fs.existsSync(rolesDir)) return [];
 
   const excludePatterns = ['readme', 'review-types', 'overview', 'index'];
@@ -92,7 +92,7 @@ function listAvailableRoles(projectRoot: string): string[] {
  * Load a custom role from codev/roles/<name>.md
  * Falls back to embedded skeleton if not found locally.
  */
-function loadCustomRole(projectRoot: string, roleName: string): string {
+function loadCustomRole(workspaceRoot: string, roleName: string): string {
   // Validate role name to prevent directory traversal
   if (!isValidRoleName(roleName)) {
     throw new Error(
@@ -103,10 +103,10 @@ function loadCustomRole(projectRoot: string, roleName: string): string {
 
   // Use readCodevFile which handles local-first with skeleton fallback
   const rolePath = `roles/${roleName}.md`;
-  const roleContent = readCodevFile(rolePath, projectRoot);
+  const roleContent = readCodevFile(rolePath, workspaceRoot);
 
   if (!roleContent) {
-    const available = listAvailableRoles(projectRoot);
+    const available = listAvailableRoles(workspaceRoot);
     const availableStr = available.length > 0
       ? `\n\nAvailable roles:\n${available.map(r => `  - ${r}`).join('\n')}`
       : '\n\nNo custom roles found in codev/roles/';
@@ -122,8 +122,8 @@ function loadCustomRole(projectRoot: string, roleName: string): string {
  * Load the consultant role.
  * Checks local codev/roles/consultant.md first, then falls back to embedded skeleton.
  */
-function loadRole(projectRoot: string): string {
-  const role = readCodevFile('roles/consultant.md', projectRoot);
+function loadRole(workspaceRoot: string): string {
+  const role = readCodevFile('roles/consultant.md', workspaceRoot);
   if (!role) {
     throw new Error(
       'consultant.md not found.\n' +
@@ -139,24 +139,24 @@ function loadRole(projectRoot: string): string {
  * Checks consult-types/{type}.md first (new location),
  * then falls back to roles/review-types/{type}.md (deprecated) with a warning.
  */
-function loadReviewTypePrompt(projectRoot: string, reviewType: string): string | null {
+function loadReviewTypePrompt(workspaceRoot: string, reviewType: string): string | null {
   const primaryPath = `consult-types/${reviewType}.md`;
   const fallbackPath = `roles/review-types/${reviewType}.md`;
 
   // 1. Check LOCAL consult-types/ first (preferred location)
-  if (hasLocalOverride(primaryPath, projectRoot)) {
-    return readCodevFile(primaryPath, projectRoot);
+  if (hasLocalOverride(primaryPath, workspaceRoot)) {
+    return readCodevFile(primaryPath, workspaceRoot);
   }
 
   // 2. Check LOCAL roles/review-types/ (deprecated location with warning)
-  if (hasLocalOverride(fallbackPath, projectRoot)) {
+  if (hasLocalOverride(fallbackPath, workspaceRoot)) {
     console.error(chalk.yellow('Warning: Review types in roles/review-types/ are deprecated.'));
     console.error(chalk.yellow('Move your custom types to consult-types/ for future compatibility.'));
-    return readCodevFile(fallbackPath, projectRoot);
+    return readCodevFile(fallbackPath, workspaceRoot);
   }
 
   // 3. Fall back to embedded skeleton consult-types/ (default)
-  const skeletonPrompt = readCodevFile(primaryPath, projectRoot);
+  const skeletonPrompt = readCodevFile(primaryPath, workspaceRoot);
   if (skeletonPrompt) {
     return skeletonPrompt;
   }
@@ -167,8 +167,8 @@ function loadReviewTypePrompt(projectRoot: string, reviewType: string): string |
 /**
  * Load .env file if it exists
  */
-function loadDotenv(projectRoot: string): void {
-  const envFile = path.join(projectRoot, '.env');
+function loadDotenv(workspaceRoot: string): void {
+  const envFile = path.join(workspaceRoot, '.env');
   if (!fs.existsSync(envFile)) return;
 
   const content = fs.readFileSync(envFile, 'utf-8');
@@ -198,8 +198,8 @@ function loadDotenv(projectRoot: string): void {
 /**
  * Find a spec file by number
  */
-function findSpec(projectRoot: string, number: number): string | null {
-  const specsDir = path.join(projectRoot, 'codev', 'specs');
+function findSpec(workspaceRoot: string, number: number): string | null {
+  const specsDir = path.join(workspaceRoot, 'codev', 'specs');
   const pattern = String(number).padStart(4, '0');
 
   if (fs.existsSync(specsDir)) {
@@ -216,8 +216,8 @@ function findSpec(projectRoot: string, number: number): string | null {
 /**
  * Find a plan file by number
  */
-function findPlan(projectRoot: string, number: number): string | null {
-  const plansDir = path.join(projectRoot, 'codev', 'plans');
+function findPlan(workspaceRoot: string, number: number): string | null {
+  const plansDir = path.join(workspaceRoot, 'codev', 'plans');
   const pattern = String(number).padStart(4, '0');
 
   if (fs.existsSync(plansDir)) {
@@ -234,9 +234,9 @@ function findPlan(projectRoot: string, number: number): string | null {
 /**
  * Log query to history file
  */
-function logQuery(projectRoot: string, model: string, query: string, duration?: number): void {
+function logQuery(workspaceRoot: string, model: string, query: string, duration?: number): void {
   try {
-    const logDir = path.join(projectRoot, '.consult');
+    const logDir = path.join(workspaceRoot, '.consult');
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }
@@ -272,7 +272,7 @@ function commandExists(cmd: string): boolean {
 async function runClaudeConsultation(
   queryText: string,
   role: string,
-  projectRoot: string,
+  workspaceRoot: string,
   outputPath?: string,
 ): Promise<void> {
   const chunks: string[] = [];
@@ -301,7 +301,7 @@ async function runClaudeConsultation(
         model: 'claude-opus-4-6',
         maxTurns: CLAUDE_MAX_TURNS,
         maxBudgetUsd: 25,
-        cwd: projectRoot,
+        cwd: workspaceRoot,
         env,
       },
     });
@@ -342,18 +342,18 @@ async function runClaudeConsultation(
 async function runConsultation(
   model: string,
   query: string,
-  projectRoot: string,
+  workspaceRoot: string,
   dryRun: boolean,
   reviewType?: string,
   customRole?: string,
   outputPath?: string,
 ): Promise<void> {
   // Use custom role if specified, otherwise use default consultant role
-  let role = customRole ? loadCustomRole(projectRoot, customRole) : loadRole(projectRoot);
+  let role = customRole ? loadCustomRole(workspaceRoot, customRole) : loadRole(workspaceRoot);
 
   // Append review type prompt if specified
   if (reviewType) {
-    const typePrompt = loadReviewTypePrompt(projectRoot, reviewType);
+    const typePrompt = loadReviewTypePrompt(workspaceRoot, reviewType);
     if (typePrompt) {
       role = role + '\n\n---\n\n' + typePrompt;
       console.error(`Review type: ${reviewType}`);
@@ -376,9 +376,9 @@ async function runConsultation(
     }
 
     const startTime = Date.now();
-    await runClaudeConsultation(query, role, projectRoot, outputPath);
+    await runClaudeConsultation(query, role, workspaceRoot, outputPath);
     const duration = (Date.now() - startTime) / 1000;
-    logQuery(projectRoot, model, query, duration);
+    logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
     return;
   }
@@ -466,7 +466,7 @@ async function runConsultation(
 
     proc.on('close', (code) => {
       const duration = (Date.now() - startTime) / 1000;
-      logQuery(projectRoot, model, query, duration);
+      logQuery(workspaceRoot, model, query, duration);
 
       if (tempFile && fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
@@ -504,9 +504,9 @@ async function runConsultation(
  * Get a compact diff stat summary and list of changed files.
  * Returns { stat, files } where stat is the `--stat` output and files is the list of paths.
  */
-function getDiffStat(projectRoot: string, ref: string): { stat: string; files: string[] } {
-  const stat = execSync(`git diff --stat ${ref}`, { cwd: projectRoot, encoding: 'utf-8' }).toString();
-  const nameOnly = execSync(`git diff --name-only ${ref}`, { cwd: projectRoot, encoding: 'utf-8' }).toString();
+function getDiffStat(workspaceRoot: string, ref: string): { stat: string; files: string[] } {
+  const stat = execSync(`git diff --stat ${ref}`, { cwd: workspaceRoot, encoding: 'utf-8' }).toString();
+  const nameOnly = execSync(`git diff --name-only ${ref}`, { cwd: workspaceRoot, encoding: 'utf-8' }).toString();
   const files = nameOnly.trim().split('\n').filter(Boolean);
   return { stat, files };
 }
@@ -539,7 +539,7 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
  * Build query for PR review.
  * Provides file list and instructs reviewers to read files from disk.
  */
-function buildPRQuery(prNumber: number, _projectRoot: string): string {
+function buildPRQuery(prNumber: number, _workspaceRoot: string): string {
   const prData = fetchPRData(prNumber);
 
   const fileList = prData.changedFiles.map(f => `- ${f}`).join('\n');
@@ -623,16 +623,16 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
  * Build query for implementation review.
  * Provides diff stat + file list and instructs reviewers to read files from disk.
  */
-function buildImplQuery(projectNumber: number, projectRoot: string, planPhase?: string): string {
-  const specPath = findSpec(projectRoot, projectNumber);
-  const planPath = findPlan(projectRoot, projectNumber);
+function buildImplQuery(projectNumber: number, workspaceRoot: string, planPhase?: string): string {
+  const specPath = findSpec(workspaceRoot, projectNumber);
+  const planPath = findPlan(workspaceRoot, projectNumber);
 
   // Get compact diff summary against base branch
   let diffStat = '';
   let changedFiles: string[] = [];
   try {
-    const mergeBase = execSync('git merge-base HEAD main', { cwd: projectRoot, encoding: 'utf-8' }).trim();
-    const result = getDiffStat(projectRoot, `${mergeBase}..HEAD`);
+    const mergeBase = execSync('git merge-base HEAD main', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
+    const result = getDiffStat(workspaceRoot, `${mergeBase}..HEAD`);
     diffStat = result.stat;
     changedFiles = result.files;
   } catch {
@@ -752,8 +752,8 @@ export async function consult(options: ConsultOptions): Promise<void> {
     throw new Error(`Invalid review type: ${reviewType}\nValid types: ${VALID_REVIEW_TYPES.join(', ')}`);
   }
 
-  const projectRoot = findProjectRoot();
-  loadDotenv(projectRoot);
+  const workspaceRoot = findWorkspaceRoot();
+  loadDotenv(workspaceRoot);
 
   console.error(`[${subcommand} review]`);
   console.error(`Model: ${model}`);
@@ -774,7 +774,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
       if (isNaN(prNumber)) {
         throw new Error(`Invalid PR number: ${args[0]}`);
       }
-      query = buildPRQuery(prNumber, projectRoot);
+      query = buildPRQuery(prNumber, workspaceRoot);
       break;
     }
 
@@ -786,11 +786,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
       if (isNaN(specNumber)) {
         throw new Error(`Invalid spec number: ${args[0]}`);
       }
-      const specPath = findSpec(projectRoot, specNumber);
+      const specPath = findSpec(workspaceRoot, specNumber);
       if (!specPath) {
         throw new Error(`Spec ${specNumber} not found`);
       }
-      const planPath = findPlan(projectRoot, specNumber);
+      const planPath = findPlan(workspaceRoot, specNumber);
       query = buildSpecQuery(specPath, planPath);
       console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
@@ -805,11 +805,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
       if (isNaN(planNumber)) {
         throw new Error(`Invalid plan number: ${args[0]}`);
       }
-      const planPath = findPlan(projectRoot, planNumber);
+      const planPath = findPlan(workspaceRoot, planNumber);
       if (!planPath) {
         throw new Error(`Plan ${planNumber} not found`);
       }
-      const specPath = findSpec(projectRoot, planNumber);
+      const specPath = findSpec(workspaceRoot, planNumber);
       query = buildPlanQuery(planPath, specPath);
       console.error(`Plan: ${planPath}`);
       if (specPath) console.error(`Spec: ${specPath}`);
@@ -832,9 +832,9 @@ export async function consult(options: ConsultOptions): Promise<void> {
       if (isNaN(implNumber)) {
         throw new Error(`Invalid project number: ${args[0]}`);
       }
-      const specPath = findSpec(projectRoot, implNumber);
-      const planPath = findPlan(projectRoot, implNumber);
-      query = buildImplQuery(implNumber, projectRoot, options.planPhase);
+      const specPath = findSpec(workspaceRoot, implNumber);
+      const planPath = findPlan(workspaceRoot, implNumber);
+      query = buildImplQuery(implNumber, workspaceRoot, options.planPhase);
       console.error(`Project: ${implNumber}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
@@ -869,7 +869,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, projectRoot, dryRun, reviewType, customRole, outputPath);
+  await runConsultation(model, query, workspaceRoot, dryRun, reviewType, customRole, outputPath);
 }
 
 // Exported for testing

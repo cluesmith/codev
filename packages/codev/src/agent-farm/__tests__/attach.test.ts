@@ -25,15 +25,15 @@ vi.mock('../utils/shell.js', () => ({
 // Mock config
 vi.mock('../utils/config.js', () => ({
   getConfig: () => ({
-    projectRoot: '/test/project',
+    workspaceRoot: '/test/workspace',
   }),
 }));
 
 // Mock TowerClient (constructor reads local-key file)
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: class {
-    getProjectUrl(path: string) {
-      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    getWorkspaceUrl(path: string) {
+      return `http://localhost:4100/workspace/${Buffer.from(path).toString('base64url')}/`;
     }
   },
 }));
@@ -85,7 +85,7 @@ describe('attach command', () => {
       // Attach with --browser opens Tower dashboard
       await attach({ issue: 42, browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
     });
 
     it('should error when issue not found', async () => {
@@ -114,7 +114,7 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
     });
 
     it('should find builder by prefix match', async () => {
@@ -135,7 +135,7 @@ describe('attach command', () => {
       // Use partial match
       await attach({ project: 'bugfix-173', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
     });
 
     it('should error when builder not found', async () => {
@@ -197,7 +197,7 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
     });
   });
 });

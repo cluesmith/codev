@@ -156,7 +156,7 @@ describe('spawn-worktree', () => {
   // =========================================================================
 
   describe('createWorktree', () => {
-    const config = { projectRoot: '/projects/test' } as any;
+    const config = { workspaceRoot: '/projects/test' } as any;
 
     it('creates branch and worktree', async () => {
       const { run } = await import('../utils/shell.js');

@@ -3,7 +3,7 @@
  *
  * A minimal WebSocket server that:
  * 1. Accepts connections from local Agent Farm instances
- * 2. Tracks project status in-memory
+ * 2. Tracks workspace status in-memory
  * 3. Serves a simple React dashboard
  * 4. Handles human approval flow
  */
@@ -44,15 +44,15 @@ app.get('/api/state', (_req, res) => {
 
 // API: Send approval
 app.post('/api/approve', (req, res) => {
-  const { instance_id, project_path, project_id, gate, approved_by, comment } = req.body;
+  const { instance_id, workspace_path, project_id, gate, approved_by, comment } = req.body;
 
-  if (!instance_id || !project_path || !project_id || !gate) {
+  if (!instance_id || !workspace_path || !project_id || !gate) {
     res.status(400).json({ error: 'Missing required fields' });
     return;
   }
 
   const approval: ApprovalPayload = {
-    project_path,
+    workspace_path,
     project_id,
     gate,
     approved_by: approved_by || 'dashboard-user',

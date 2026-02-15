@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('getApiBase (constants.ts)', () => {
   it('returns relative base "./" regardless of pathname', async () => {
-    // Simulate proxy path: /t/abc123/project/my-project/
+    // Simulate proxy path: /t/abc123/workspace/my-workspace/
     Object.defineProperty(window, 'location', {
-      value: { ...window.location, pathname: '/t/abc123/project/my-project/' },
+      value: { ...window.location, pathname: '/t/abc123/workspace/my-workspace/' },
       writable: true,
     });
 
@@ -36,14 +36,14 @@ describe('getTerminalWsPath (api.ts)', () => {
   it('includes full pathname prefix for WebSocket path', async () => {
     // Simulate proxy path
     Object.defineProperty(window, 'location', {
-      value: { ...window.location, pathname: '/t/abc123/project/my-project/' },
+      value: { ...window.location, pathname: '/t/abc123/workspace/my-workspace/' },
       writable: true,
     });
 
     const { getTerminalWsPath } = await import('../src/lib/api.js');
 
     const result = getTerminalWsPath({ type: 'builder', terminalId: 'term-1' });
-    expect(result).toBe('/t/abc123/project/my-project/ws/terminal/term-1');
+    expect(result).toBe('/t/abc123/workspace/my-workspace/ws/terminal/term-1');
   });
 
   it('works when accessed directly at root', async () => {
@@ -60,14 +60,14 @@ describe('getTerminalWsPath (api.ts)', () => {
 
   it('adds trailing slash to pathname without one', async () => {
     Object.defineProperty(window, 'location', {
-      value: { ...window.location, pathname: '/t/abc123/project/my-project' },
+      value: { ...window.location, pathname: '/t/abc123/workspace/my-workspace' },
       writable: true,
     });
 
     const { getTerminalWsPath } = await import('../src/lib/api.js');
 
     const result = getTerminalWsPath({ type: 'builder', terminalId: 'term-1' });
-    expect(result).toBe('/t/abc123/project/my-project/ws/terminal/term-1');
+    expect(result).toBe('/t/abc123/workspace/my-workspace/ws/terminal/term-1');
   });
 
   it('returns null when no terminalId', async () => {
@@ -78,8 +78,8 @@ describe('getTerminalWsPath (api.ts)', () => {
 
 // Regression test for GitHub issue #234:
 // Tower.html instance/terminal links must be relative, not absolute.
-// The server returns absolute paths like "/project/<encoded>/" in API responses.
-// The client's relUrl() converts these to relative "./project/<encoded>/" so
+// The server returns absolute paths like "/workspace/<encoded>/" in API responses.
+// The client's relUrl() converts these to relative "./workspace/<encoded>/" so
 // they resolve through the proxy prefix.
 describe('tower.html relUrl pattern (issue #234)', () => {
   // Mirror of the relUrl() function in tower.html
@@ -88,16 +88,16 @@ describe('tower.html relUrl pattern (issue #234)', () => {
     return path || '';
   }
 
-  it('converts absolute project URL to relative', () => {
-    expect(relUrl('/project/abc123/')).toBe('./project/abc123/');
+  it('converts absolute workspace URL to relative', () => {
+    expect(relUrl('/workspace/abc123/')).toBe('./workspace/abc123/');
   });
 
   it('converts absolute terminal URL to relative', () => {
-    expect(relUrl('/project/abc123/?tab=architect')).toBe('./project/abc123/?tab=architect');
+    expect(relUrl('/workspace/abc123/?tab=architect')).toBe('./workspace/abc123/?tab=architect');
   });
 
   it('leaves already-relative URLs unchanged', () => {
-    expect(relUrl('./project/abc123/')).toBe('./project/abc123/');
+    expect(relUrl('./workspace/abc123/')).toBe('./workspace/abc123/');
   });
 
   it('handles empty string', () => {

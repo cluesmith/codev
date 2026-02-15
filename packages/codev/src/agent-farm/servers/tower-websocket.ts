@@ -3,7 +3,7 @@
  * Spec 0105: Tower Server Decomposition — Phase 5
  *
  * Contains: bidirectional WS ↔ PTY frame bridging and
- * WebSocket upgrade routing (direct + project-scoped).
+ * WebSocket upgrade routing (direct + workspace-scoped).
  */
 
 import http from 'node:http';
@@ -12,7 +12,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getTerminalManager } from './tower-terminals.js';
-import { normalizeProjectPath } from './tower-utils.js';
+import { normalizeWorkspacePath } from './tower-utils.js';
 
 // ============================================================================
 // Frame bridging — WS ↔ PTY
@@ -104,7 +104,7 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
  * Set up the WebSocket upgrade handler on the HTTP server.
  * Parses upgrade requests and routes them to the appropriate terminal session:
  * - Direct route: /ws/terminal/:id
- * - Project-scoped route: /project/:encodedPath/ws/terminal/:id
+ * - Workspace-scoped route: /workspace/:encodedPath/ws/terminal/:id
  */
 export function setupUpgradeHandler(
   server: http.Server,
@@ -133,16 +133,16 @@ export function setupUpgradeHandler(
       return;
     }
 
-    // Phase 4 (Spec 0090): Handle project WebSocket routes directly
-    // Route: /project/:encodedPath/ws/terminal/:terminalId
-    if (!reqUrl.pathname.startsWith('/project/')) {
+    // Phase 4 (Spec 0090): Handle workspace WebSocket routes directly
+    // Route: /workspace/:encodedPath/ws/terminal/:terminalId
+    if (!reqUrl.pathname.startsWith('/workspace/')) {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
       socket.destroy();
       return;
     }
 
     const pathParts = reqUrl.pathname.split('/');
-    // ['', 'project', base64urlPath, 'ws', 'terminal', terminalId]
+    // ['', 'workspace', base64urlPath, 'ws', 'terminal', terminalId]
     const encodedPath = pathParts[2];
 
     if (!encodedPath) {
@@ -153,23 +153,23 @@ export function setupUpgradeHandler(
 
     // Decode Base64URL (RFC 4648) - NOT URL encoding
     // Wrap in try/catch to handle malformed Base64 input gracefully
-    let projectPath: string;
+    let workspacePath: string;
     try {
-      projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+      workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
       // Support both POSIX (/) and Windows (C:\) paths
-      if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
-        throw new Error('Invalid project path');
+      if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
+        throw new Error('Invalid workspace path');
       }
       // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
-      projectPath = normalizeProjectPath(projectPath);
+      workspacePath = normalizeWorkspacePath(workspacePath);
     } catch {
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
       return;
     }
 
-    // Check for terminal WebSocket route: /project/:path/ws/terminal/:id
-    const wsMatch = reqUrl.pathname.match(/^\/project\/[^/]+\/ws\/terminal\/([^/]+)$/);
+    // Check for terminal WebSocket route: /workspace/:path/ws/terminal/:id
+    const wsMatch = reqUrl.pathname.match(/^\/workspace\/[^/]+\/ws\/terminal\/([^/]+)$/);
     if (wsMatch) {
       const terminalId = wsMatch[1];
       const manager = getTerminalManager();

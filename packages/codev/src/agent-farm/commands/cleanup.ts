@@ -89,7 +89,7 @@ async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boo
 async function deleteRemoteBranch(branch: string, config: Config): Promise<void> {
   logger.info('Deleting remote branch...');
   try {
-    await run(`git push origin --delete "${branch}"`, { cwd: config.projectRoot });
+    await run(`git push origin --delete "${branch}"`, { cwd: config.workspaceRoot });
     logger.info('Remote branch deleted');
   } catch {
     logger.warn('Warning: Failed to delete remote branch (may not exist on remote)');
@@ -177,7 +177,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     if (existsSync(builder.worktree)) {
       logger.info('Removing worktree...');
       try {
-        await run(`git worktree remove "${builder.worktree}" --force`, { cwd: config.projectRoot });
+        await run(`git worktree remove "${builder.worktree}" --force`, { cwd: config.workspaceRoot });
         logger.info('Worktree removed');
       } catch {
         logger.warn('Warning: Failed to remove worktree');
@@ -188,7 +188,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     if (builder.branch) {
       logger.info('Deleting local branch...');
       try {
-        await run(`git branch -D "${builder.branch}"`, { cwd: config.projectRoot });
+        await run(`git branch -D "${builder.branch}"`, { cwd: config.workspaceRoot });
         logger.info('Local branch deleted');
       } catch {
         // Branch may not exist locally
@@ -200,11 +200,11 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
       if (!force) {
         // Check if there's a merged PR for this branch
         try {
-          const prStatus = await run(`gh pr list --head "${builder.branch}" --state merged --json number --limit 1`, { cwd: config.projectRoot });
+          const prStatus = await run(`gh pr list --head "${builder.branch}" --state merged --json number --limit 1`, { cwd: config.workspaceRoot });
           const mergedPRs = JSON.parse(prStatus.stdout);
           if (mergedPRs.length === 0) {
             // Check for open PRs
-            const openPRStatus = await run(`gh pr list --head "${builder.branch}" --state open --json number --limit 1`, { cwd: config.projectRoot });
+            const openPRStatus = await run(`gh pr list --head "${builder.branch}" --state open --json number --limit 1`, { cwd: config.workspaceRoot });
             const openPRs = JSON.parse(openPRStatus.stdout);
             if (openPRs.length > 0) {
               logger.warn(`Warning: Branch ${builder.branch} has an open PR. Skipping remote deletion.`);
@@ -250,7 +250,7 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
   // This catches any orphaned worktrees from crashes or manual kills
   if (!isShellMode) {
     try {
-      await run('git worktree prune', { cwd: config.projectRoot });
+      await run('git worktree prune', { cwd: config.workspaceRoot });
     } catch {
       // Non-fatal - prune is best-effort cleanup
     }

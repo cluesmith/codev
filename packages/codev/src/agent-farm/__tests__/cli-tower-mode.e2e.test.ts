@@ -3,7 +3,7 @@
  *
  * Tests for CLI commands using tower API:
  * - TowerClient functionality
- * - Project path encoding/decoding
+ * - Workspace path encoding/decoding
  * - API request handling
  */
 
@@ -15,8 +15,8 @@ import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 import {
   TowerClient,
-  encodeProjectPath,
-  decodeProjectPath,
+  encodeWorkspacePath,
+  decodeWorkspacePath,
 } from '../lib/tower-client.js';
 
 // Test configuration
@@ -31,7 +31,7 @@ const TOWER_SERVER_PATH = resolve(
 
 // Server process
 let towerProcess: ChildProcess | null = null;
-let testProject: string;
+let testWorkspace: string;
 
 /**
  * Check if a port is listening
@@ -105,25 +105,25 @@ async function stopServer(proc: ChildProcess | null): Promise<void> {
 }
 
 /**
- * Create a test project directory
+ * Create a test workspace directory
  */
-function createTestProject(): string {
-  const projectPath = mkdtempSync(resolve(tmpdir(), 'codev-cli-test-'));
-  mkdirSync(resolve(projectPath, 'codev'), { recursive: true });
-  mkdirSync(resolve(projectPath, '.agent-farm'), { recursive: true });
+function createTestWorkspace(): string {
+  const workspacePath = mkdtempSync(resolve(tmpdir(), 'codev-cli-test-'));
+  mkdirSync(resolve(workspacePath, 'codev'), { recursive: true });
+  mkdirSync(resolve(workspacePath, '.agent-farm'), { recursive: true });
   writeFileSync(
-    resolve(projectPath, 'af-config.json'),
+    resolve(workspacePath, 'af-config.json'),
     JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
   );
-  return projectPath;
+  return workspacePath;
 }
 
 /**
- * Clean up test project
+ * Clean up test workspace
  */
-function cleanupTestProject(projectPath: string): void {
+function cleanupTestWorkspace(workspacePath: string): void {
   try {
-    rmSync(projectPath, { recursive: true, force: true });
+    rmSync(workspacePath, { recursive: true, force: true });
   } catch {
     // Ignore cleanup errors
   }
@@ -135,38 +135,38 @@ function cleanupTestProject(projectPath: string): void {
 
 describe('CLI Tower Mode (Phase 3)', () => {
   beforeAll(async () => {
-    testProject = createTestProject();
+    testWorkspace = createTestWorkspace();
     towerProcess = await startTower(TEST_TOWER_PORT);
   });
 
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
-    cleanupTestProject(testProject);
+    cleanupTestWorkspace(testWorkspace);
     try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
     try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
     try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
   });
 
-  describe('encodeProjectPath / decodeProjectPath', () => {
+  describe('encodeWorkspacePath / decodeWorkspacePath', () => {
     it('encodes and decodes simple paths', () => {
       const path = '/Users/test/project';
-      const encoded = encodeProjectPath(path);
-      const decoded = decodeProjectPath(encoded);
+      const encoded = encodeWorkspacePath(path);
+      const decoded = decodeWorkspacePath(encoded);
       expect(decoded).toBe(path);
     });
 
     it('handles paths with special characters', () => {
       const path = '/Users/test/my project (1)/sub-dir';
-      const encoded = encodeProjectPath(path);
-      const decoded = decodeProjectPath(encoded);
+      const encoded = encodeWorkspacePath(path);
+      const decoded = decodeWorkspacePath(encoded);
       expect(decoded).toBe(path);
     });
 
     it('handles Windows paths', () => {
       const path = 'C:\\Users\\test\\project';
-      const encoded = encodeProjectPath(path);
-      const decoded = decodeProjectPath(encoded);
+      const encoded = encodeWorkspacePath(path);
+      const decoded = decodeWorkspacePath(encoded);
       expect(decoded).toBe(path);
     });
   });
@@ -197,35 +197,35 @@ describe('CLI Tower Mode (Phase 3)', () => {
         expect(health).not.toBeNull();
         expect(health!.status).toBe('healthy');
         expect(typeof health!.uptime).toBe('number');
-        expect(typeof health!.activeProjects).toBe('number');
+        expect(typeof health!.activeWorkspaces).toBe('number');
       });
     });
 
-    describe('listProjects', () => {
-      it('returns array of projects', async () => {
-        const projects = await client.listProjects();
-        expect(Array.isArray(projects)).toBe(true);
+    describe('listWorkspaces', () => {
+      it('returns array of workspaces', async () => {
+        const workspaces = await client.listWorkspaces();
+        expect(Array.isArray(workspaces)).toBe(true);
       });
     });
 
-    describe('activateProject', () => {
+    describe('activateWorkspace', () => {
       it('returns error for non-existent path', async () => {
-        const result = await client.activateProject('/nonexistent/path');
+        const result = await client.activateWorkspace('/nonexistent/path');
         expect(result.ok).toBe(false);
         expect(result.error).toBeDefined();
       });
     });
 
-    describe('deactivateProject', () => {
-      it('returns error for non-existent project', async () => {
-        const result = await client.deactivateProject('/nonexistent/path');
+    describe('deactivateWorkspace', () => {
+      it('returns error for non-existent workspace', async () => {
+        const result = await client.deactivateWorkspace('/nonexistent/path');
         expect(result.ok).toBe(false);
       });
     });
 
-    describe('getProjectStatus', () => {
-      it('returns null for non-existent project', async () => {
-        const status = await client.getProjectStatus('/nonexistent/path');
+    describe('getWorkspaceStatus', () => {
+      it('returns null for non-existent workspace', async () => {
+        const status = await client.getWorkspaceStatus('/nonexistent/path');
         expect(status).toBeNull();
       });
     });
@@ -283,9 +283,9 @@ describe('CLI Tower Mode (Phase 3)', () => {
     });
 
     describe('URL generation', () => {
-      it('generates correct project URL', () => {
-        const url = client.getProjectUrl('/Users/test/project');
-        expect(url).toMatch(/^http:\/\/localhost:\d+\/project\/.+\/$/);
+      it('generates correct workspace URL', () => {
+        const url = client.getWorkspaceUrl('/Users/test/project');
+        expect(url).toMatch(/^http:\/\/localhost:\d+\/workspace\/.+\/$/);
       });
 
       it('generates correct WebSocket URL', () => {

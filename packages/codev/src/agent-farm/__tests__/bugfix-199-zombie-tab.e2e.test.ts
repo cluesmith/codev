@@ -3,7 +3,7 @@
  *
  * When a builder's terminal session is killed, the /api/state endpoint
  * should stop returning that builder in its response. Previously, stale
- * entries persisted in the in-memory projectTerminals registry, causing
+ * entries persisted in the in-memory workspaceTerminals registry, causing
  * the dashboard to render empty "zombie" tabs.
  *
  * This test verifies that /api/state filters out builders (and shells)
@@ -82,7 +82,7 @@ function toBase64URL(str: string): string {
 
 describe('Bugfix #199: Zombie builder tab removal', () => {
   beforeAll(async () => {
-    // Create a temp directory to act as a fake project
+    // Create a temp directory to act as a fake workspace
     testProjectDir = mkdtempSync(resolve(tmpdir(), 'bugfix-199-'));
     // Create minimal git repo structure so tower can activate
     mkdirSync(resolve(testProjectDir, '.git'), { recursive: true });
@@ -100,7 +100,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
-    // Kill tmux session created by Tower's launchInstance for this temp project
+    // Kill tmux session created by Tower's launchInstance for this temp workspace
     if (testProjectDir) {
       const tmuxName = `architect-${basename(testProjectDir)}`;
       try { execSync(`tmux kill-session -t "${tmuxName}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
@@ -115,15 +115,15 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
   it('removes stale builder from /api/state after terminal exits', async () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
     const encodedPath = toBase64URL(testProjectDir);
-    const projectApiBase = `${base}/project/${encodedPath}`;
+    const workspaceApiBase = `${base}/workspace/${encodedPath}`;
 
-    // Step 1: Activate the project
-    const activateRes = await fetch(`${base}/api/projects/${encodedPath}/activate`, {
+    // Step 1: Activate the workspace
+    const activateRes = await fetch(`${base}/api/workspaces/${encodedPath}/activate`, {
       method: 'POST',
     });
     expect(activateRes.ok).toBe(true);
 
-    // Step 2: Create a builder terminal registered to this project
+    // Step 2: Create a builder terminal registered to this workspace
     // Use /bin/sleep so it stays alive long enough for us to query state
     const createRes = await fetch(`${base}/api/terminals`, {
       method: 'POST',
@@ -132,7 +132,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
         command: '/bin/sleep',
         args: ['300'],
         label: 'test-builder',
-        projectPath: testProjectDir,
+        workspacePath: testProjectDir,
         type: 'builder',
         roleId: 'bugfix-199-test',
       }),
@@ -142,7 +142,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     expect(terminal.id).toBeDefined();
 
     // Step 3: Verify the builder appears in /api/state
-    const stateRes1 = await fetch(`${projectApiBase}/api/state`);
+    const stateRes1 = await fetch(`${workspaceApiBase}/api/state`);
     expect(stateRes1.ok).toBe(true);
     const state1 = await stateRes1.json();
     const builder1 = state1.builders.find((b: { id: string }) => b.id === 'bugfix-199-test');
@@ -156,7 +156,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     expect(deleteRes.status).toBe(204);
 
     // Step 5: Verify the builder is gone from /api/state
-    const stateRes2 = await fetch(`${projectApiBase}/api/state`);
+    const stateRes2 = await fetch(`${workspaceApiBase}/api/state`);
     expect(stateRes2.ok).toBe(true);
     const state2 = await stateRes2.json();
     const builder2 = state2.builders.find((b: { id: string }) => b.id === 'bugfix-199-test');
@@ -166,9 +166,9 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
   it('removes stale shell from /api/state after terminal exits', async () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
     const encodedPath = toBase64URL(testProjectDir);
-    const projectApiBase = `${base}/project/${encodedPath}`;
+    const workspaceApiBase = `${base}/workspace/${encodedPath}`;
 
-    // Create a shell terminal registered to this project
+    // Create a shell terminal registered to this workspace
     const createRes = await fetch(`${base}/api/terminals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -176,7 +176,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
         command: '/bin/sleep',
         args: ['300'],
         label: 'test-shell',
-        projectPath: testProjectDir,
+        workspacePath: testProjectDir,
         type: 'shell',
         roleId: 'shell-199-test',
       }),
@@ -185,7 +185,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     const terminal = await createRes.json();
 
     // Verify the shell appears in /api/state
-    const stateRes1 = await fetch(`${projectApiBase}/api/state`);
+    const stateRes1 = await fetch(`${workspaceApiBase}/api/state`);
     expect(stateRes1.ok).toBe(true);
     const state1 = await stateRes1.json();
     const shell1 = state1.utils.find((u: { id: string }) => u.id === 'shell-199-test');
@@ -198,7 +198,7 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     expect(deleteRes.status).toBe(204);
 
     // Verify the shell is gone from /api/state
-    const stateRes2 = await fetch(`${projectApiBase}/api/state`);
+    const stateRes2 = await fetch(`${workspaceApiBase}/api/state`);
     expect(stateRes2.ok).toBe(true);
     const state2 = await stateRes2.json();
     const shell2 = state2.utils.find((u: { id: string }) => u.id === 'shell-199-test');

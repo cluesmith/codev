@@ -264,7 +264,7 @@ describe('TerminalManager.createSessionRaw()', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-raw-test-'));
 
     const manager = new TerminalManager({
-      projectRoot: tmpDir,
+      workspaceRoot: tmpDir,
     });
 
     const info = manager.createSessionRaw({
@@ -298,7 +298,7 @@ describe('TerminalManager.shutdown() shellper handling', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-shutdown-test-'));
 
     const manager = new TerminalManager({
-      projectRoot: tmpDir,
+      workspaceRoot: tmpDir,
     });
 
     // Create a shellper-backed session
@@ -324,7 +324,7 @@ describe('TerminalManager.shutdown() shellper handling', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-sessid-test-'));
 
     const manager = new TerminalManager({
-      projectRoot: tmpDir,
+      workspaceRoot: tmpDir,
     });
 
     // Create a session without shellperSessionId
@@ -351,7 +351,7 @@ describe('TerminalManager.shutdown() shellper handling', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detach-test-'));
 
     const manager = new TerminalManager({
-      projectRoot: tmpDir,
+      workspaceRoot: tmpDir,
     });
 
     const info = manager.createSessionRaw({

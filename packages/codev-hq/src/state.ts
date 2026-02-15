@@ -6,7 +6,7 @@
 import type { WebSocket } from 'ws';
 import type {
   ConnectedInstance,
-  ProjectInfo,
+  WorkspaceInfo,
   StatusFile,
   BuilderInfo,
 } from './types.js';
@@ -28,7 +28,7 @@ class HQState {
     instance_id: string,
     instance_name?: string,
     version?: string,
-    projects: ProjectInfo[] = []
+    workspaces: WorkspaceInfo[] = []
   ): ConnectedInstance {
     const instance: InstanceConnection = {
       ws,
@@ -37,13 +37,13 @@ class HQState {
       version,
       connected_at: new Date(),
       last_ping: new Date(),
-      projects,
+      workspaces,
       status_files: new Map(),
       builders: new Map(),
     };
 
     this.instances.set(instance_id, instance);
-    this.emit({ type: 'instance_connected', instance_id, instance_name, projects });
+    this.emit({ type: 'instance_connected', instance_id, instance_name, workspaces });
     return instance;
   }
 
@@ -81,7 +81,7 @@ class HQState {
 
   updateStatusFile(
     instance_id: string,
-    project_path: string,
+    workspace_path: string,
     status_file: string,
     content: string,
     git_sha?: string
@@ -90,12 +90,12 @@ class HQState {
     if (!instance) return;
 
     const file: StatusFile = { path: status_file, content, git_sha };
-    instance.status_files.set(`${project_path}:${status_file}`, file);
+    instance.status_files.set(`${workspace_path}:${status_file}`, file);
 
     this.emit({
       type: 'status_updated',
       instance_id,
-      project_path,
+      workspace_path,
       status_file,
       content,
     });
@@ -103,7 +103,7 @@ class HQState {
 
   updateBuilder(
     instance_id: string,
-    project_path: string,
+    workspace_path: string,
     builder_id: string,
     status: BuilderInfo['status'],
     phase?: string,
@@ -113,24 +113,24 @@ class HQState {
     if (!instance) return;
 
     const builder: BuilderInfo = { builder_id, status, phase, branch };
-    instance.builders.set(`${project_path}:${builder_id}`, builder);
+    instance.builders.set(`${workspace_path}:${builder_id}`, builder);
 
     this.emit({
       type: 'builder_updated',
       instance_id,
-      project_path,
+      workspace_path,
       builder_id,
       status,
     });
   }
 
-  // Get all status files across all instances for a given project path pattern
-  getStatusFilesByProject(project_path: string): Array<{ instance_id: string; file: StatusFile }> {
+  // Get all status files across all instances for a given workspace path pattern
+  getStatusFilesByWorkspace(workspace_path: string): Array<{ instance_id: string; file: StatusFile }> {
     const results: Array<{ instance_id: string; file: StatusFile }> = [];
 
     for (const [instance_id, instance] of this.instances) {
       for (const [key, file] of instance.status_files) {
-        if (key.startsWith(project_path)) {
+        if (key.startsWith(workspace_path)) {
           results.push({ instance_id, file });
         }
       }
@@ -166,7 +166,7 @@ class HQState {
         version: instance.version,
         connected_at: instance.connected_at.toISOString(),
         last_ping: instance.last_ping.toISOString(),
-        projects: instance.projects,
+        workspaces: instance.workspaces,
         status_files: Array.from(instance.status_files.values()),
         builders: Array.from(instance.builders.values()),
       });
@@ -178,10 +178,10 @@ class HQState {
 
 // Event types emitted on state changes
 export type StateEvent =
-  | { type: 'instance_connected'; instance_id: string; instance_name?: string; projects: ProjectInfo[] }
+  | { type: 'instance_connected'; instance_id: string; instance_name?: string; workspaces: WorkspaceInfo[] }
   | { type: 'instance_disconnected'; instance_id: string }
-  | { type: 'status_updated'; instance_id: string; project_path: string; status_file: string; content: string }
-  | { type: 'builder_updated'; instance_id: string; project_path: string; builder_id: string; status: string };
+  | { type: 'status_updated'; instance_id: string; workspace_path: string; status_file: string; content: string }
+  | { type: 'builder_updated'; instance_id: string; workspace_path: string; builder_id: string; status: string };
 
 // Snapshot of full state
 export interface StateSnapshot {
@@ -191,7 +191,7 @@ export interface StateSnapshot {
     version?: string;
     connected_at: string;
     last_ping: string;
-    projects: ProjectInfo[];
+    workspaces: WorkspaceInfo[];
     status_files: StatusFile[];
     builders: BuilderInfo[];
   }>;

@@ -23,13 +23,13 @@ const PROTOCOL_PATHS = [
  * Find and load a protocol by name
  * Fails loudly if not found or invalid.
  */
-export function loadProtocol(projectRoot: string, protocolName: string): Protocol {
-  const protocolFile = findProtocolFile(projectRoot, protocolName);
+export function loadProtocol(workspaceRoot: string, protocolName: string): Protocol {
+  const protocolFile = findProtocolFile(workspaceRoot, protocolName);
 
   if (!protocolFile) {
     throw new Error(
       `Protocol '${protocolName}' not found.\n` +
-      `Searched in: ${PROTOCOL_PATHS.map(p => path.join(projectRoot, p, protocolName)).join(', ')}`
+      `Searched in: ${PROTOCOL_PATHS.map(p => path.join(workspaceRoot, p, protocolName)).join(', ')}`
     );
   }
 
@@ -49,10 +49,10 @@ export function loadProtocol(projectRoot: string, protocolName: string): Protoco
  * Find protocol.json file in {name}/protocol.json format.
  * Falls back to alias lookup: scans all protocol.json files for a matching "alias" field.
  */
-function findProtocolFile(projectRoot: string, protocolName: string): string | null {
+function findProtocolFile(workspaceRoot: string, protocolName: string): string | null {
   // Direct lookup first
   for (const basePath of PROTOCOL_PATHS) {
-    const fullPath = path.resolve(projectRoot, basePath, protocolName, 'protocol.json');
+    const fullPath = path.resolve(workspaceRoot, basePath, protocolName, 'protocol.json');
     if (fs.existsSync(fullPath)) {
       return fullPath;
     }
@@ -60,7 +60,7 @@ function findProtocolFile(projectRoot: string, protocolName: string): string | n
 
   // Alias lookup: scan all protocol.json files for matching alias
   for (const basePath of PROTOCOL_PATHS) {
-    const protocolsDir = path.resolve(projectRoot, basePath);
+    const protocolsDir = path.resolve(workspaceRoot, basePath);
     if (!fs.existsSync(protocolsDir)) continue;
     try {
       const dirs = fs.readdirSync(protocolsDir, { withFileTypes: true })

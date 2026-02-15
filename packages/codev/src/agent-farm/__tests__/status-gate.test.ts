@@ -1,7 +1,7 @@
 /**
  * Tests for Spec 0100: Enhanced af status gate output
  *
- * Mocks TowerClient.getProjectStatus to verify gate display
+ * Mocks TowerClient.getWorkspaceStatus to verify gate display
  * includes wait time and approval command.
  */
 
@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock dependencies before importing status
 vi.mock('../utils/config.js', () => ({
-  getConfig: vi.fn(() => ({ projectRoot: '/fake/project' })),
+  getConfig: vi.fn(() => ({ workspaceRoot: '/fake/workspace' })),
 }));
 
 vi.mock('../state.js', () => ({
@@ -23,14 +23,14 @@ vi.mock('../state.js', () => ({
 
 const mockIsRunning = vi.fn();
 const mockGetHealth = vi.fn();
-const mockGetProjectStatus = vi.fn();
+const mockGetWorkspaceStatus = vi.fn();
 
 vi.mock('../lib/tower-client.js', () => {
   return {
     TowerClient: class MockTowerClient {
       isRunning = mockIsRunning;
       getHealth = mockGetHealth;
-      getProjectStatus = mockGetProjectStatus;
+      getWorkspaceStatus = mockGetWorkspaceStatus;
     },
   };
 });
@@ -57,8 +57,8 @@ describe('af status gate display (Spec 0100)', () => {
     mockGetHealth.mockResolvedValue({
       status: 'healthy',
       uptime: 300,
-      activeProjects: 1,
-      totalProjects: 1,
+      activeWorkspaces: 1,
+      totalWorkspaces: 1,
       memoryUsage: 50 * 1024 * 1024,
     });
   });
@@ -66,9 +66,9 @@ describe('af status gate display (Spec 0100)', () => {
   it('shows wait time and approval command for blocked builder with requestedAt', async () => {
     const threeMinutesAgo = new Date(Date.now() - 3 * 60_000).toISOString();
 
-    mockGetProjectStatus.mockResolvedValue({
-      path: '/fake/project',
-      name: 'test-project',
+    mockGetWorkspaceStatus.mockResolvedValue({
+      path: '/fake/workspace',
+      name: 'test-workspace',
       active: true,
       terminals: [],
       gateStatus: {
@@ -90,9 +90,9 @@ describe('af status gate display (Spec 0100)', () => {
   });
 
   it('shows gate name and command but no wait time when requestedAt is missing', async () => {
-    mockGetProjectStatus.mockResolvedValue({
-      path: '/fake/project',
-      name: 'test-project',
+    mockGetWorkspaceStatus.mockResolvedValue({
+      path: '/fake/workspace',
+      name: 'test-workspace',
       active: true,
       terminals: [],
       gateStatus: {
@@ -113,9 +113,9 @@ describe('af status gate display (Spec 0100)', () => {
   });
 
   it('shows no gate warning when no gate is pending', async () => {
-    mockGetProjectStatus.mockResolvedValue({
-      path: '/fake/project',
-      name: 'test-project',
+    mockGetWorkspaceStatus.mockResolvedValue({
+      path: '/fake/workspace',
+      name: 'test-workspace',
       active: true,
       terminals: [],
       gateStatus: {
@@ -133,9 +133,9 @@ describe('af status gate display (Spec 0100)', () => {
   it('shows "<1m" for very recent gates', async () => {
     const justNow = new Date(Date.now() - 15_000).toISOString(); // 15 seconds ago
 
-    mockGetProjectStatus.mockResolvedValue({
-      path: '/fake/project',
-      name: 'test-project',
+    mockGetWorkspaceStatus.mockResolvedValue({
+      path: '/fake/workspace',
+      name: 'test-workspace',
       active: true,
       terminals: [],
       gateStatus: {

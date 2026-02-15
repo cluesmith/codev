@@ -6,7 +6,7 @@
  *
  * Prerequisites:
  *   - af tower start (tower on :4100)
- *   - Project activated
+ *   - Workspace activated
  *   - npx playwright install chromium
  *
  * Run: npx playwright test dashboard-bugs
@@ -16,20 +16,20 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
 
 function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
 }
 
 // Dashboard is accessed through tower proxy (no separate dashboard server)
-const ENCODED_PATH = toBase64URL(PROJECT_PATH);
+const ENCODED_PATH = toBase64URL(WORKSPACE_PATH);
 // DASH_URL with trailing slash for page loads (needed for relative asset resolution)
-const DASH_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
+const DASH_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/`;
 // API_URL without trailing slash for API calls
-const API_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;
+const API_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}`;
 
-test.describe('Bug #1: Tower proxy for projects', () => {
+test.describe('Bug #1: Tower proxy for workspaces', () => {
   test('tower front page loads and lists running instances', async ({ page }) => {
     await page.goto(TOWER_URL);
     const header = page.locator('h1');
@@ -40,7 +40,7 @@ test.describe('Bug #1: Tower proxy for projects', () => {
     await expect(instance.first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('clicking Open on a project opens proxied dashboard in new tab', async ({ page }) => {
+  test('clicking Open on a workspace opens proxied dashboard in new tab', async ({ page }) => {
     await page.goto(TOWER_URL);
     await page.waitForTimeout(2000);
 
@@ -59,8 +59,8 @@ test.describe('Bug #1: Tower proxy for projects', () => {
     const root = newPage.locator('#root');
     await expect(root).toBeAttached({ timeout: 10_000 });
 
-    // URL should point to a project proxy path
-    expect(newPage.url()).toContain('/project/');
+    // URL should point to a workspace proxy path
+    expect(newPage.url()).toContain('/workspace/');
 
     // Should not contain legacy dashboard markers
     const html = await newPage.content();
@@ -70,9 +70,9 @@ test.describe('Bug #1: Tower proxy for projects', () => {
   });
 
   test('tower proxy serves React dashboard with working CSS/JS', async ({ page }) => {
-    // Test with codev-public project through proxy
-    const encoded = toBase64URL(PROJECT_PATH);
-    const proxyUrl = `${TOWER_URL}/project/${encoded}/`;
+    // Test with codev-public workspace through proxy
+    const encoded = toBase64URL(WORKSPACE_PATH);
+    const proxyUrl = `${TOWER_URL}/workspace/${encoded}/`;
 
     await page.goto(proxyUrl);
     await page.waitForTimeout(3000);
@@ -93,8 +93,8 @@ test.describe('Bug #1: Tower proxy for projects', () => {
   });
 
   test('tower proxy API endpoint works', async ({ request }) => {
-    const encoded = toBase64URL(PROJECT_PATH);
-    const res = await request.get(`${TOWER_URL}/project/${encoded}/api/state`);
+    const encoded = toBase64URL(WORKSPACE_PATH);
+    const res = await request.get(`${TOWER_URL}/workspace/${encoded}/api/state`);
     expect(res.ok()).toBe(true);
     const state = await res.json();
     expect(state).toHaveProperty('architect');
@@ -309,8 +309,8 @@ test.describe('Bug #3: Layout matches legacy dashboard', () => {
 
 test.describe('Bug #3 via Tower Proxy', () => {
   test('layout works through tower proxy', async ({ page }) => {
-    const encoded = toBase64URL(PROJECT_PATH);
-    await page.goto(`${TOWER_URL}/project/${encoded}/`);
+    const encoded = toBase64URL(WORKSPACE_PATH);
+    await page.goto(`${TOWER_URL}/workspace/${encoded}/`);
     // Wait for state to load
     await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
 

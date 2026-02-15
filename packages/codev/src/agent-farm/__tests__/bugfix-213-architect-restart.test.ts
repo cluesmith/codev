@@ -2,18 +2,18 @@
  * Bugfix #213: Architect does not auto-restart after accidental exit
  *
  * Root cause: The exit handler captured a stale `entry` reference from the
- * projectTerminals Map. getTerminalsForProject() periodically replaces the
+ * workspaceTerminals Map. getTerminalsForWorkspace() periodically replaces the
  * Map entry with a fresh object (on each dashboard poll), so the exit
  * handler's `entry.architect = undefined` modified an orphaned object
  * instead of the current Map entry. This caused launchInstance() to see
  * the dead session ID still set on the current entry, skipping restart.
  *
- * Additionally, the in-memory merge in getTerminalsForProject() did not
+ * Additionally, the in-memory merge in getTerminalsForWorkspace() did not
  * check session status, so dead sessions (kept for 30s in pty-manager)
  * were propagated to fresh entries.
  *
  * Fix:
- * 1. Exit handler re-reads the entry from the Map via getProjectTerminalsEntry()
+ * 1. Exit handler re-reads the entry from the Map via getWorkspaceTerminalsEntry()
  * 2. In-memory merge checks session.status === 'running' before preserving
  */
 
@@ -87,21 +87,21 @@ function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
 }
 
-async function getProjectState(port: number, projectDir: string): Promise<{
+async function getWorkspaceState(port: number, workspaceDir: string): Promise<{
   architect: { terminalId?: string; pid?: number } | null;
   builders: Array<{ id: string; terminalId?: string }>;
   utils: Array<{ id: string; terminalId?: string }>;
 }> {
   const base = `http://localhost:${port}`;
-  const encodedPath = toBase64URL(projectDir);
-  const res = await fetch(`${base}/project/${encodedPath}/api/state`);
+  const encodedPath = toBase64URL(workspaceDir);
+  const res = await fetch(`${base}/workspace/${encodedPath}/api/state`);
   if (!res.ok) throw new Error(`GET /api/state failed: ${res.status}`);
   return res.json();
 }
 
 describe('Bugfix #213: Architect auto-restart after exit', () => {
   beforeAll(async () => {
-    // Create a temp project with af-config.json using a short-lived command
+    // Create a temp workspace with af-config.json using a short-lived command
     // sleep 7 gives >5s uptime (avoiding crash loop protection) while
     // keeping the test fast
     testProjectDir = mkdtempSync(resolve(tmpdir(), 'bugfix-213-'));
@@ -117,7 +117,7 @@ describe('Bugfix #213: Architect auto-restart after exit', () => {
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
-    // Kill any tmux sessions created for this temp project
+    // Kill any tmux sessions created for this temp workspace
     if (testProjectDir) {
       const tmuxName = `architect-${basename(testProjectDir)}`;
       try { execSync(`tmux kill-session -t "${tmuxName}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
@@ -132,8 +132,8 @@ describe('Bugfix #213: Architect auto-restart after exit', () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
     const encodedPath = toBase64URL(testProjectDir);
 
-    // Step 1: Activate the project → creates architect running "sleep 7"
-    const activateRes = await fetch(`${base}/api/projects/${encodedPath}/activate`, {
+    // Step 1: Activate the workspace → creates architect running "sleep 7"
+    const activateRes = await fetch(`${base}/api/workspaces/${encodedPath}/activate`, {
       method: 'POST',
     });
     expect(activateRes.ok).toBe(true);
@@ -142,7 +142,7 @@ describe('Bugfix #213: Architect auto-restart after exit', () => {
     let originalTerminalId: string | undefined;
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      const state = await getProjectState(TEST_TOWER_PORT, testProjectDir);
+      const state = await getWorkspaceState(TEST_TOWER_PORT, testProjectDir);
       if (state.architect?.terminalId) {
         originalTerminalId = state.architect.terminalId;
         break;
@@ -151,11 +151,11 @@ describe('Bugfix #213: Architect auto-restart after exit', () => {
     }
     expect(originalTerminalId).toBeDefined();
 
-    // Step 3: Poll /api/state a few times to force getTerminalsForProject()
+    // Step 3: Poll /api/state a few times to force getTerminalsForWorkspace()
     // to replace the in-memory entry (this is what causes the stale reference
     // bug — each poll creates a new freshEntry object in the Map)
     for (let i = 0; i < 3; i++) {
-      await getProjectState(TEST_TOWER_PORT, testProjectDir);
+      await getWorkspaceState(TEST_TOWER_PORT, testProjectDir);
       await new Promise((r) => setTimeout(r, 500));
     }
 
@@ -167,7 +167,7 @@ describe('Bugfix #213: Architect auto-restart after exit', () => {
     let foundNew = false;
 
     while (Date.now() - sleepStart < totalWait) {
-      const state = await getProjectState(TEST_TOWER_PORT, testProjectDir);
+      const state = await getWorkspaceState(TEST_TOWER_PORT, testProjectDir);
       if (state.architect?.terminalId && state.architect.terminalId !== originalTerminalId) {
         newTerminalId = state.architect.terminalId;
         foundNew = true;

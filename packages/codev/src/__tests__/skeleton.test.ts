@@ -45,9 +45,9 @@ describe('skeleton module', () => {
     });
   });
 
-  describe('findProjectRoot', () => {
-    it('should find project root with codev/ directory', async () => {
-      const { findProjectRoot } = await import('../lib/skeleton.js');
+  describe('findWorkspaceRoot', () => {
+    it('should find workspace root with codev/ directory', async () => {
+      const { findWorkspaceRoot } = await import('../lib/skeleton.js');
 
       // Create a codev/ directory
       const codevDir = path.join(testBaseDir, 'codev');
@@ -56,12 +56,12 @@ describe('skeleton module', () => {
       const subDir = path.join(testBaseDir, 'src', 'deep', 'nested');
       fs.mkdirSync(subDir, { recursive: true });
 
-      const result = findProjectRoot(subDir);
+      const result = findWorkspaceRoot(subDir);
       expect(result).toBe(testBaseDir);
     });
 
-    it('should find project root with .git directory', async () => {
-      const { findProjectRoot } = await import('../lib/skeleton.js');
+    it('should find workspace root with .git directory', async () => {
+      const { findWorkspaceRoot } = await import('../lib/skeleton.js');
 
       // Create a .git directory
       const gitDir = path.join(testBaseDir, '.git');
@@ -70,12 +70,12 @@ describe('skeleton module', () => {
       const subDir = path.join(testBaseDir, 'src', 'components');
       fs.mkdirSync(subDir, { recursive: true });
 
-      const result = findProjectRoot(subDir);
+      const result = findWorkspaceRoot(subDir);
       expect(result).toBe(testBaseDir);
     });
 
     it('should prefer codev/ over .git', async () => {
-      const { findProjectRoot } = await import('../lib/skeleton.js');
+      const { findWorkspaceRoot } = await import('../lib/skeleton.js');
 
       // Create both codev/ and .git directories
       const codevDir = path.join(testBaseDir, 'codev');
@@ -83,17 +83,17 @@ describe('skeleton module', () => {
       fs.mkdirSync(codevDir, { recursive: true });
       fs.mkdirSync(gitDir, { recursive: true });
 
-      const result = findProjectRoot(testBaseDir);
+      const result = findWorkspaceRoot(testBaseDir);
       expect(result).toBe(testBaseDir);
     });
 
     it('should return start directory if no markers found', async () => {
-      const { findProjectRoot } = await import('../lib/skeleton.js');
+      const { findWorkspaceRoot } = await import('../lib/skeleton.js');
 
       const isolatedDir = path.join(testBaseDir, 'isolated');
       fs.mkdirSync(isolatedDir, { recursive: true });
 
-      const result = findProjectRoot(isolatedDir);
+      const result = findWorkspaceRoot(isolatedDir);
       // Should return the directory where search started
       expect(result).toBeTruthy();
     });

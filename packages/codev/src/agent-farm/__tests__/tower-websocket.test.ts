@@ -3,7 +3,7 @@
  *
  * Tests: handleTerminalWebSocket frame bridging (data, control, resize, ping/pong,
  * resume, replay, close/error cleanup) and setupUpgradeHandler routing
- * (direct /ws/terminal/:id, project-scoped /project/:path/ws/terminal/:id,
+ * (direct /ws/terminal/:id, workspace-scoped /workspace/:path/ws/terminal/:id,
  * invalid paths, bad base64, missing sessions).
  */
 
@@ -27,7 +27,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
-  normalizeProjectPath: (p: string) => p,
+  normalizeWorkspacePath: (p: string) => p,
 }));
 
 // ============================================================================
@@ -285,7 +285,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('routes project-scoped /project/:path/ws/terminal/:id', () => {
+    it('routes workspace-scoped /workspace/:path/ws/terminal/:id', () => {
       const server = makeServer();
       const wss = makeWss();
       const session = makeSession();
@@ -293,11 +293,11 @@ describe('tower-websocket', () => {
 
       setupUpgradeHandler(server, wss, 4100);
 
-      // Encode "/test/project" as base64url
-      const encodedPath = Buffer.from('/test/project').toString('base64url');
+      // Encode "/test/workspace" as base64url
+      const encodedPath = Buffer.from('/test/workspace').toString('base64url');
       const socket = makeSocket();
       server.emit('upgrade', {
-        url: `/project/${encodedPath}/ws/terminal/term-2`,
+        url: `/workspace/${encodedPath}/ws/terminal/term-2`,
         headers: {},
       }, socket, Buffer.alloc(0));
 
@@ -305,7 +305,7 @@ describe('tower-websocket', () => {
       expect(wss.handleUpgrade).toHaveBeenCalled();
     });
 
-    it('returns 404 for non-project, non-terminal WS paths', () => {
+    it('returns 404 for non-workspace, non-terminal WS paths', () => {
       const server = makeServer();
       const wss = makeWss();
 
@@ -325,7 +325,7 @@ describe('tower-websocket', () => {
       setupUpgradeHandler(server, wss, 4100);
 
       const socket = makeSocket();
-      server.emit('upgrade', { url: '/project//ws/terminal/t1', headers: {} }, socket, Buffer.alloc(0));
+      server.emit('upgrade', { url: '/workspace//ws/terminal/t1', headers: {} }, socket, Buffer.alloc(0));
 
       expect(socket.write).toHaveBeenCalledWith('HTTP/1.1 400 Bad Request\r\n\r\n');
       expect(socket.destroy).toHaveBeenCalled();
@@ -341,7 +341,7 @@ describe('tower-websocket', () => {
       const encodedPath = Buffer.from('relative/path').toString('base64url');
       const socket = makeSocket();
       server.emit('upgrade', {
-        url: `/project/${encodedPath}/ws/terminal/t1`,
+        url: `/workspace/${encodedPath}/ws/terminal/t1`,
         headers: {},
       }, socket, Buffer.alloc(0));
 
@@ -349,16 +349,16 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 404 for project path without terminal route', () => {
+    it('returns 404 for workspace path without terminal route', () => {
       const server = makeServer();
       const wss = makeWss();
 
       setupUpgradeHandler(server, wss, 4100);
 
-      const encodedPath = Buffer.from('/test/project').toString('base64url');
+      const encodedPath = Buffer.from('/test/workspace').toString('base64url');
       const socket = makeSocket();
       server.emit('upgrade', {
-        url: `/project/${encodedPath}/some/other/path`,
+        url: `/workspace/${encodedPath}/some/other/path`,
         headers: {},
       }, socket, Buffer.alloc(0));
 
@@ -366,17 +366,17 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 404 for project-scoped route with unknown session', () => {
+    it('returns 404 for workspace-scoped route with unknown session', () => {
       const server = makeServer();
       const wss = makeWss();
       mockGetSession.mockReturnValue(null);
 
       setupUpgradeHandler(server, wss, 4100);
 
-      const encodedPath = Buffer.from('/test/project').toString('base64url');
+      const encodedPath = Buffer.from('/test/workspace').toString('base64url');
       const socket = makeSocket();
       server.emit('upgrade', {
-        url: `/project/${encodedPath}/ws/terminal/unknown`,
+        url: `/workspace/${encodedPath}/ws/terminal/unknown`,
         headers: {},
       }, socket, Buffer.alloc(0));
 

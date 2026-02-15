@@ -3,7 +3,7 @@
  * Spec 0105: Tower Server Decomposition — Phase 1
  *
  * Contains: rate limiting, path normalization, temp directory detection,
- * project name extraction, MIME types, and static file serving.
+ * workspace name extraction, MIME types, and static file serving.
  */
 
 import fs from 'node:fs';
@@ -69,23 +69,23 @@ export function startRateLimitCleanup(): ReturnType<typeof setInterval> {
 // ============================================================================
 
 /**
- * Normalize a project path to its canonical form for consistent SQLite storage.
+ * Normalize a workspace path to its canonical form for consistent SQLite storage.
  * Uses realpath to resolve symlinks and relative paths.
  */
-export function normalizeProjectPath(projectPath: string): string {
+export function normalizeWorkspacePath(workspacePath: string): string {
   try {
-    return fs.realpathSync(projectPath);
+    return fs.realpathSync(workspacePath);
   } catch {
     // Path doesn't exist yet, normalize without realpath
-    return path.resolve(projectPath);
+    return path.resolve(workspacePath);
   }
 }
 
 /**
- * Get project name from path.
+ * Get workspace name from path.
  */
-export function getProjectName(projectPath: string): string {
-  return path.basename(projectPath);
+export function getWorkspaceName(workspacePath: string): string {
+  return path.basename(workspacePath);
 }
 
 // Resolve once at module load: both symlinked and real temp dir paths
@@ -99,14 +99,14 @@ const _tmpDirResolved = (() => {
 })();
 
 /**
- * Check if a project path points to a temp directory.
+ * Check if a workspace path points to a temp directory.
  */
-export function isTempDirectory(projectPath: string): boolean {
+export function isTempDirectory(workspacePath: string): boolean {
   return (
-    projectPath.startsWith(_tmpDir + '/') ||
-    projectPath.startsWith(_tmpDirResolved + '/') ||
-    projectPath.startsWith('/tmp/') ||
-    projectPath.startsWith('/private/tmp/')
+    workspacePath.startsWith(_tmpDir + '/') ||
+    workspacePath.startsWith(_tmpDirResolved + '/') ||
+    workspacePath.startsWith('/tmp/') ||
+    workspacePath.startsWith('/private/tmp/')
   );
 }
 
@@ -168,19 +168,19 @@ export const MIME_TYPES: Record<string, string> = {
 
 /**
  * Build architect command args with role prompt injected.
- * Writes the role to .architect-role.md in the project dir and adds
+ * Writes the role to .architect-role.md in the workspace dir and adds
  * --append-system-prompt to the args (matching how builders receive theirs).
  * Returns the modified args array.
  */
-export function buildArchitectArgs(baseArgs: string[], projectPath: string): string[] {
-  const codevDir = path.join(projectPath, 'codev');
+export function buildArchitectArgs(baseArgs: string[], workspacePath: string): string[] {
+  const codevDir = path.join(workspacePath, 'codev');
   const bundledRolesDir = path.resolve(import.meta.dirname, '../../../skeleton/roles');
   const config: RoleConfig = { codevDir, bundledRolesDir };
 
   const role = loadRolePrompt(config, 'architect');
   if (!role) return baseArgs;
 
-  const roleFile = path.join(projectPath, '.architect-role.md');
+  const roleFile = path.join(workspacePath, '.architect-role.md');
   fs.writeFileSync(roleFile, role.content);
 
   return [...baseArgs, '--append-system-prompt', role.content];

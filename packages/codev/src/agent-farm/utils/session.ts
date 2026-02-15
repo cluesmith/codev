@@ -10,7 +10,7 @@ import type { Config } from '../types.js';
  * Get a namespaced session name for a builder: builder-{project}-{id}
  */
 export function getBuilderSessionName(config: Config, builderId: string): string {
-  return `builder-${basename(config.projectRoot)}-${builderId}`;
+  return `builder-${basename(config.workspaceRoot)}-${builderId}`;
 }
 
 /**

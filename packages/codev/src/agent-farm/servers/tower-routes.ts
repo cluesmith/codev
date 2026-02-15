@@ -25,14 +25,14 @@ import type { SSEClient } from './tower-types.js';
 import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 import {
   isRateLimited,
-  normalizeProjectPath,
+  normalizeWorkspacePath,
   getLanguageForExt,
   getMimeTypeForFile,
   serveStaticFile,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import {
-  getKnownProjectPaths,
+  getKnownWorkspacePaths,
   getInstances,
   getDirectorySuggestions,
   launchInstance,
@@ -40,17 +40,17 @@ import {
   stopInstance,
 } from './tower-instances.js';
 import {
-  getProjectTerminals,
+  getWorkspaceTerminals,
   getTerminalManager,
-  getProjectTerminalsEntry,
+  getWorkspaceTerminalsEntry,
   getNextShellId,
   saveTerminalSession,
   isSessionPersistent,
   deleteTerminalSession,
-  deleteProjectTerminalSessions,
+  deleteWorkspaceTerminalSessions,
   saveFileTab,
   deleteFileTab,
-  getTerminalsForProject,
+  getTerminalsForWorkspace,
 } from './tower-terminals.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -67,7 +67,7 @@ export interface RouteContext {
   reactDashboardPath: string;
   hasReactDashboard: boolean;
   getShellperManager: () => SessionManager | null;
-  broadcastNotification: (notification: { type: string; title: string; body: string; project?: string }) => void;
+  broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
   addSseClient: (client: SSEClient) => void;
   removeSseClient: (id: string) => void;
 }
@@ -97,14 +97,14 @@ type RouteEntry = (
 
 const ROUTES: Record<string, RouteEntry> = {
   'GET /health':          (_req, res) => handleHealthCheck(res),
-  'GET /api/projects':    (_req, res) => handleListProjects(res),
+  'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
-  'POST /api/create':     (req, res, _url, ctx) => handleCreateProject(req, res, ctx),
+  'POST /api/create':     (req, res, _url, ctx) => handleCreateWorkspace(req, res, ctx),
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
@@ -165,10 +165,10 @@ export async function handleRequest(
       return;
     }
 
-    // Project API: /api/projects/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)
-    const projectApiMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/(activate|deactivate|status)$/);
-    if (projectApiMatch) {
-      return await handleProjectAction(req, res, ctx, projectApiMatch);
+    // Workspace API: /api/workspaces/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)
+    const workspaceApiMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(activate|deactivate|status)$/);
+    if (workspaceApiMatch) {
+      return await handleWorkspaceAction(req, res, ctx, workspaceApiMatch);
     }
 
     // Terminal-specific routes: /api/terminals/:id/* (Spec 0090 Phase 2)
@@ -177,9 +177,9 @@ export async function handleRequest(
       return await handleTerminalRoutes(req, res, url, terminalRouteMatch);
     }
 
-    // Project routes: /project/:base64urlPath/* (Spec 0090 Phase 4)
-    if (url.pathname.startsWith('/project/')) {
-      return await handleProjectRoutes(req, res, ctx, url);
+    // Workspace routes: /workspace/:base64urlPath/* (Spec 0090 Phase 4)
+    if (url.pathname.startsWith('/workspace/')) {
+      return await handleWorkspaceRoutes(req, res, ctx, url);
     }
 
     // 404 for everything else
@@ -204,61 +204,61 @@ async function handleHealthCheck(res: http.ServerResponse): Promise<void> {
     JSON.stringify({
       status: 'healthy',
       uptime: process.uptime(),
-      activeProjects: activeCount,
-      totalProjects: instances.length,
+      activeWorkspaces: activeCount,
+      totalWorkspaces: instances.length,
       memoryUsage: process.memoryUsage().heapUsed,
       timestamp: new Date().toISOString(),
     })
   );
 }
 
-async function handleListProjects(res: http.ServerResponse): Promise<void> {
+async function handleListWorkspaces(res: http.ServerResponse): Promise<void> {
   const instances = await getInstances();
-  const projects = instances.map((i) => ({
-    path: i.projectPath,
-    name: i.projectName,
+  const workspaces = instances.map((i) => ({
+    path: i.workspacePath,
+    name: i.workspaceName,
     active: i.running,
     proxyUrl: i.proxyUrl,
     terminals: i.terminals.length,
   }));
   res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ projects }));
+  res.end(JSON.stringify({ workspaces }));
 }
 
-async function handleProjectAction(
+async function handleWorkspaceAction(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
   match: RegExpMatchArray,
 ): Promise<void> {
   const [, encodedPath, action] = match;
-  let projectPath: string;
+  let workspacePath: string;
   try {
-    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
-    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
       throw new Error('Invalid path');
     }
-    projectPath = normalizeProjectPath(projectPath);
+    workspacePath = normalizeWorkspacePath(workspacePath);
   } catch {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
+    res.end(JSON.stringify({ error: 'Invalid workspace path encoding' }));
     return;
   }
 
-  // GET /api/projects/:path/status
+  // GET /api/workspaces/:path/status
   if (req.method === 'GET' && action === 'status') {
     const instances = await getInstances();
-    const instance = instances.find((i) => i.projectPath === projectPath);
+    const instance = instances.find((i) => i.workspacePath === workspacePath);
     if (!instance) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Project not found' }));
+      res.end(JSON.stringify({ error: 'Workspace not found' }));
       return;
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
-        path: instance.projectPath,
-        name: instance.projectName,
+        path: instance.workspacePath,
+        name: instance.workspaceName,
         active: instance.running,
         terminals: instance.terminals,
         gateStatus: instance.gateStatus,
@@ -267,7 +267,7 @@ async function handleProjectAction(
     return;
   }
 
-  // POST /api/projects/:path/activate
+  // POST /api/workspaces/:path/activate
   if (req.method === 'POST' && action === 'activate') {
     // Rate limiting: 10 activations per minute per client
     const clientIp = req.socket.remoteAddress || '127.0.0.1';
@@ -277,7 +277,7 @@ async function handleProjectAction(
       return;
     }
 
-    const result = await launchInstance(projectPath);
+    const result = await launchInstance(workspacePath);
     if (result.success) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, adopted: result.adopted }));
@@ -288,21 +288,21 @@ async function handleProjectAction(
     return;
   }
 
-  // POST /api/projects/:path/deactivate
+  // POST /api/workspaces/:path/deactivate
   if (req.method === 'POST' && action === 'deactivate') {
-    const knownPaths = getKnownProjectPaths();
-    const resolvedPath = fs.existsSync(projectPath) ? fs.realpathSync(projectPath) : projectPath;
+    const knownPaths = getKnownWorkspacePaths();
+    const resolvedPath = fs.existsSync(workspacePath) ? fs.realpathSync(workspacePath) : workspacePath;
     const isKnown = knownPaths.some(
-      (p) => p === projectPath || p === resolvedPath
+      (p) => p === workspacePath || p === resolvedPath
     );
 
     if (!isKnown) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'Project not found' }));
+      res.end(JSON.stringify({ ok: false, error: 'Workspace not found' }));
       return;
     }
 
-    const result = await stopInstance(projectPath);
+    const result = await stopInstance(workspacePath);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
     return;
@@ -328,7 +328,7 @@ async function handleTerminalCreate(
     const label = typeof body.label === 'string' ? body.label : undefined;
 
     // Optional session persistence via shellper
-    const projectPath = typeof body.projectPath === 'string' ? body.projectPath : null;
+    const workspacePath = typeof body.workspacePath === 'string' ? body.workspacePath : null;
     const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;
     const requestPersistence = body.persistent === true;
@@ -370,16 +370,16 @@ async function handleTerminalCreate(
         info = session;
         persistent = true;
 
-        if (projectPath && termType && roleId) {
-          const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+        if (workspacePath && termType && roleId) {
+          const entry = getWorkspaceTerminalsEntry(normalizeWorkspacePath(workspacePath));
           if (termType === 'builder') {
             entry.builders.set(roleId, session.id);
           } else {
             entry.shells.set(roleId, session.id);
           }
-          saveTerminalSession(session.id, projectPath, termType, roleId, shellperInfo.pid,
+          saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
             shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
-          ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for project ${projectPath}`);
+          ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
         ctx.log('WARN', `Shellper creation failed for terminal, falling back: ${(shellperErr as Error).message}`);
@@ -392,15 +392,15 @@ async function handleTerminalCreate(
       info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
       persistent = false;
 
-      if (projectPath && termType && roleId) {
-        const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+      if (workspacePath && termType && roleId) {
+        const entry = getWorkspaceTerminalsEntry(normalizeWorkspacePath(workspacePath));
         if (termType === 'builder') {
           entry.builders.set(roleId, info.id);
         } else {
           entry.shells.set(roleId, info.id);
         }
-        saveTerminalSession(info.id, projectPath, termType, roleId, info.pid);
-        ctx.log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shellper unavailable)`);
+        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid);
+        ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
       }
     }
 
@@ -567,7 +567,7 @@ async function handleNotify(
   const type = typeof body.type === 'string' ? body.type : 'info';
   const title = typeof body.title === 'string' ? body.title : '';
   const messageBody = typeof body.body === 'string' ? body.body : '';
-  const project = typeof body.project === 'string' ? body.project : undefined;
+  const workspace = typeof body.workspace === 'string' ? body.workspace : undefined;
 
   if (!title || !messageBody) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -580,7 +580,7 @@ async function handleNotify(
     type,
     title,
     body: messageBody,
-    project,
+    workspace,
   });
 
   ctx.log('INFO', `Notification broadcast: ${title}`);
@@ -601,25 +601,25 @@ async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {
   }
 }
 
-async function handleCreateProject(
+async function handleCreateWorkspace(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
   const body = await parseJsonBody(req);
   const parentPath = body.parent as string;
-  const projectName = body.name as string;
+  const workspaceName = body.name as string;
 
-  if (!parentPath || !projectName) {
+  if (!parentPath || !workspaceName) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: false, error: 'Missing parent or name' }));
     return;
   }
 
-  // Validate project name
-  if (!/^[a-zA-Z0-9_-]+$/.test(projectName)) {
+  // Validate workspace name
+  if (!/^[a-zA-Z0-9_-]+$/.test(workspaceName)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Invalid project name' }));
+    res.end(JSON.stringify({ success: false, error: 'Invalid workspace name' }));
     return;
   }
 
@@ -636,25 +636,25 @@ async function handleCreateProject(
     return;
   }
 
-  const projectPath = path.join(expandedParent, projectName);
+  const workspacePath = path.join(expandedParent, workspaceName);
 
-  // Check if project already exists
-  if (fs.existsSync(projectPath)) {
+  // Check if workspace already exists
+  if (fs.existsSync(workspacePath)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: `Directory already exists: ${projectPath}` }));
+    res.end(JSON.stringify({ success: false, error: `Directory already exists: ${workspacePath}` }));
     return;
   }
 
   try {
     // Run codev init (it creates the directory)
-    execSync(`codev init --yes "${projectName}"`, {
+    execSync(`codev init --yes "${workspaceName}"`, {
       cwd: expandedParent,
       stdio: 'pipe',
       timeout: 60000,
     });
 
     // Launch the instance
-    const launchResult = await launchInstance(projectPath);
+    const launchResult = await launchInstance(workspacePath);
     if (!launchResult.success) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: launchResult.error }));
@@ -662,18 +662,18 @@ async function handleCreateProject(
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, projectPath }));
+    res.end(JSON.stringify({ success: true, workspacePath }));
   } catch (err) {
     // Clean up on failure
     try {
-      if (fs.existsSync(projectPath)) {
-        fs.rmSync(projectPath, { recursive: true });
+      if (fs.existsSync(workspacePath)) {
+        fs.rmSync(workspacePath, { recursive: true });
       }
     } catch {
       // Ignore cleanup errors
     }
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: `Failed to create project: ${(err as Error).message}` }));
+    res.end(JSON.stringify({ success: false, error: `Failed to create workspace: ${(err as Error).message}` }));
   }
 }
 
@@ -682,33 +682,33 @@ async function handleLaunchInstance(
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await parseJsonBody(req);
-  let projectPath = body.projectPath as string;
+  let workspacePath = body.workspacePath as string;
 
-  if (!projectPath) {
+  if (!workspacePath) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
+    res.end(JSON.stringify({ success: false, error: 'Missing workspacePath' }));
     return;
   }
 
   // Expand ~ to home directory
-  if (projectPath.startsWith('~')) {
-    projectPath = projectPath.replace('~', homedir());
+  if (workspacePath.startsWith('~')) {
+    workspacePath = workspacePath.replace('~', homedir());
   }
 
   // Reject relative paths — tower daemon CWD is unpredictable
-  if (!path.isAbsolute(projectPath)) {
+  if (!path.isAbsolute(workspacePath)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       success: false,
-      error: `Relative paths are not supported. Use an absolute path (e.g., /Users/.../project or ~/Development/project).`,
+      error: `Relative paths are not supported. Use an absolute path (e.g., /Users/.../workspace or ~/Development/workspace).`,
     }));
     return;
   }
 
   // Normalize path (resolve .. segments, trailing slashes)
-  projectPath = path.resolve(projectPath);
+  workspacePath = path.resolve(workspacePath);
 
-  const result = await launchInstance(projectPath);
+  const result = await launchInstance(workspacePath);
   res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(result));
 }
@@ -718,11 +718,11 @@ async function handleStopInstance(
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await parseJsonBody(req);
-  const targetPath = body.projectPath as string;
+  const targetPath = body.workspacePath as string;
 
   if (!targetPath) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
+    res.end(JSON.stringify({ success: false, error: 'Missing workspacePath' }));
     return;
   }
 
@@ -749,39 +749,39 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
 }
 
 // ============================================================================
-// Project-scoped route handler
+// Workspace-scoped route handler
 // ============================================================================
 
-async function handleProjectRoutes(
+async function handleWorkspaceRoutes(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
   url: URL,
 ): Promise<void> {
   const pathParts = url.pathname.split('/');
-  // ['', 'project', base64urlPath, ...rest]
+  // ['', 'workspace', base64urlPath, ...rest]
   const encodedPath = pathParts[2];
   const subPath = pathParts.slice(3).join('/');
 
   if (!encodedPath) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Missing project path' }));
+    res.end(JSON.stringify({ error: 'Missing workspace path' }));
     return;
   }
 
   // Decode Base64URL (RFC 4648)
-  let projectPath: string;
+  let workspacePath: string;
   try {
-    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
     // Support both POSIX (/) and Windows (C:\) paths
-    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
-      throw new Error('Invalid project path');
+    if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
+      throw new Error('Invalid workspace path');
     }
     // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
-    projectPath = normalizeProjectPath(projectPath);
+    workspacePath = normalizeWorkspacePath(workspacePath);
   } catch {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
+    res.end(JSON.stringify({ error: 'Invalid workspace path encoding' }));
     return;
   }
 
@@ -789,9 +789,9 @@ async function handleProjectRoutes(
   const isApiCall = subPath.startsWith('api/') || subPath === 'api';
   const isWsPath = subPath.startsWith('ws/') || subPath === 'ws';
 
-  // Tunnel endpoints are tower-level, not project-scoped, but the React
+  // Tunnel endpoints are tower-level, not workspace-scoped, but the React
   // dashboard uses relative paths (./api/tunnel/...) which resolve to
-  // /project/<encoded>/api/tunnel/... in project context. Handle here by
+  // /workspace/<encoded>/api/tunnel/... in workspace context. Handle here by
   // extracting the tunnel sub-path and dispatching to handleTunnelEndpoint().
   if (subPath.startsWith('api/tunnel/')) {
     const tunnelSub = subPath.slice('api/tunnel/'.length); // e.g. "status", "connect", "disconnect"
@@ -799,12 +799,12 @@ async function handleProjectRoutes(
     return;
   }
 
-  // GET /file?path=<relative-path> — Read project file by path (for StatusPanel project list)
+  // GET /file?path=<relative-path> — Read workspace file by path (for StatusPanel workspace list)
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
-    const fullPath = path.resolve(projectPath, relPath);
-    // Security: ensure resolved path stays within project directory
-    if (!fullPath.startsWith(projectPath + path.sep) && fullPath !== projectPath) {
+    const fullPath = path.resolve(workspacePath, relPath);
+    // Security: ensure resolved path stays within workspace directory
+    if (!fullPath.startsWith(workspacePath + path.sep) && fullPath !== workspacePath) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('Forbidden');
       return;
@@ -824,7 +824,7 @@ async function handleProjectRoutes(
   // 1. Not an API call
   // 2. Not a WebSocket path
   // 3. React dashboard is available
-  // 4. Project doesn't need to be running for static files
+  // 4. Workspace doesn't need to be running for static files
   if (!isApiCall && !isWsPath && ctx.hasReactDashboard) {
     // Determine which static file to serve
     let staticPath: string;
@@ -847,73 +847,73 @@ async function handleProjectRoutes(
     }
   }
 
-  // Phase 4 (Spec 0090): Handle project APIs directly instead of proxying to dashboard-server
+  // Phase 4 (Spec 0090): Handle workspace APIs directly instead of proxying to dashboard-server
   if (isApiCall) {
     const apiPath = subPath.replace(/^api\/?/, '');
 
-    // GET /api/state - Return project state (architect, builders, shells)
+    // GET /api/state - Return workspace state (architect, builders, shells)
     if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
-      return handleProjectState(res, projectPath);
+      return handleWorkspaceState(res, workspacePath);
     }
 
     // POST /api/tabs/shell - Create a new shell terminal
     if (req.method === 'POST' && apiPath === 'tabs/shell') {
-      return handleProjectShellCreate(res, ctx, projectPath);
+      return handleWorkspaceShellCreate(res, ctx, workspacePath);
     }
 
     // POST /api/tabs/file - Create a file tab (Spec 0092)
     if (req.method === 'POST' && apiPath === 'tabs/file') {
-      return handleProjectFileTabCreate(req, res, ctx, projectPath);
+      return handleWorkspaceFileTabCreate(req, res, ctx, workspacePath);
     }
 
     // GET /api/file/:id - Get file content as JSON (Spec 0092)
     const fileGetMatch = apiPath.match(/^file\/([^/]+)$/);
     if (req.method === 'GET' && fileGetMatch) {
-      return handleProjectFileGet(res, ctx, projectPath, fileGetMatch[1]);
+      return handleWorkspaceFileGet(res, ctx, workspacePath, fileGetMatch[1]);
     }
 
     // GET /api/file/:id/raw - Get raw file content (for images/video) (Spec 0092)
     const fileRawMatch = apiPath.match(/^file\/([^/]+)\/raw$/);
     if (req.method === 'GET' && fileRawMatch) {
-      return handleProjectFileRaw(res, ctx, projectPath, fileRawMatch[1]);
+      return handleWorkspaceFileRaw(res, ctx, workspacePath, fileRawMatch[1]);
     }
 
     // POST /api/file/:id/save - Save file content (Spec 0092)
     const fileSaveMatch = apiPath.match(/^file\/([^/]+)\/save$/);
     if (req.method === 'POST' && fileSaveMatch) {
-      return handleProjectFileSave(req, res, ctx, projectPath, fileSaveMatch[1]);
+      return handleWorkspaceFileSave(req, res, ctx, workspacePath, fileSaveMatch[1]);
     }
 
     // DELETE /api/tabs/:id - Delete a terminal or file tab
     const deleteMatch = apiPath.match(/^tabs\/(.+)$/);
     if (req.method === 'DELETE' && deleteMatch) {
-      return handleProjectTabDelete(res, ctx, projectPath, deleteMatch[1]);
+      return handleWorkspaceTabDelete(res, ctx, workspacePath, deleteMatch[1]);
     }
 
-    // POST /api/stop - Stop all terminals for project
+    // POST /api/stop - Stop all terminals for workspace
     if (req.method === 'POST' && apiPath === 'stop') {
-      return handleProjectStopAll(res, projectPath);
+      return handleWorkspaceStopAll(res, workspacePath);
     }
 
-    // GET /api/files - Return project directory tree for file browser (Spec 0092)
+    // GET /api/files - Return workspace directory tree for file browser (Spec 0092)
     if (req.method === 'GET' && apiPath === 'files') {
-      return handleProjectFiles(res, url, projectPath);
+      return handleWorkspaceFiles(res, url, workspacePath);
     }
 
     // GET /api/git/status - Return git status for file browser (Spec 0092)
     if (req.method === 'GET' && apiPath === 'git/status') {
-      return handleProjectGitStatus(res, ctx, projectPath);
+      return handleWorkspaceGitStatus(res, ctx, workspacePath);
     }
 
     // GET /api/files/recent - Return recently opened file tabs (Spec 0092)
     if (req.method === 'GET' && apiPath === 'files/recent') {
-      return handleProjectRecentFiles(res, projectPath);
+      return handleWorkspaceRecentFiles(res, workspacePath);
     }
 
     // GET /api/annotate/:tabId/* — Serve rich annotator template and sub-APIs
     const annotateMatch = apiPath.match(/^annotate\/([^/]+)(\/(.*))?$/);
     if (annotateMatch) {
-      return handleProjectAnnotate(req, res, ctx, url, projectPath, annotateMatch);
+      return handleWorkspaceAnnotate(req, res, ctx, url, workspacePath, annotateMatch);
     }
 
     // POST /api/paste-image - Upload pasted image to temp file (Issue #252)
@@ -997,35 +997,35 @@ async function handleProjectRoutes(
 }
 
 // ============================================================================
-// Project API sub-handlers
+// Workspace API sub-handlers
 // ============================================================================
 
-async function handleProjectState(
+async function handleWorkspaceState(
   res: http.ServerResponse,
-  projectPath: string,
+  workspacePath: string,
 ): Promise<void> {
-  // Refresh cache via getTerminalsForProject (handles SQLite sync
+  // Refresh cache via getTerminalsForWorkspace (handles SQLite sync
   // and shellper reconnection in one place)
-  const encodedPath = Buffer.from(projectPath).toString('base64url');
-  const proxyUrl = `/project/${encodedPath}/`;
-  const { gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
+  const encodedPath = Buffer.from(workspacePath).toString('base64url');
+  const proxyUrl = `/workspace/${encodedPath}/`;
+  const { gateStatus } = await getTerminalsForWorkspace(workspacePath, proxyUrl);
 
   // Now read from the refreshed cache
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const manager = getTerminalManager();
   const state: {
     architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
     builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
     utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
     annotations: Array<{ id: string; file: string; port: number; pid: number }>;
-    projectName?: string;
+    workspaceName?: string;
     gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
   } = {
     architect: null,
     builders: [],
     utils: [],
     annotations: [],
-    projectName: path.basename(projectPath),
+    workspaceName: path.basename(workspacePath),
     gateStatus,
   };
 
@@ -1091,14 +1091,14 @@ async function handleProjectState(
   res.end(JSON.stringify(state));
 }
 
-async function handleProjectShellCreate(
+async function handleWorkspaceShellCreate(
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
 ): Promise<void> {
   try {
     const manager = getTerminalManager();
-    const shellId = getNextShellId(projectPath);
+    const shellId = getNextShellId(workspacePath);
     const shellCmd = process.env.SHELL || '/bin/bash';
     const shellArgs: string[] = [];
 
@@ -1116,7 +1116,7 @@ async function handleProjectShellCreate(
           sessionId,
           command: shellCmd,
           args: shellArgs,
-          cwd: projectPath,
+          cwd: workspacePath,
           env: shellEnv,
           cols: 200,
           rows: 50,
@@ -1128,16 +1128,16 @@ async function handleProjectShellCreate(
 
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,
-          cwd: projectPath,
+          cwd: workspacePath,
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
           ptySession.attachShellper(client, replayData, shellperInfo.pid, sessionId);
         }
 
-        const entry = getProjectTerminalsEntry(projectPath);
+        const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
-        saveTerminalSession(session.id, projectPath, 'shell', shellId, shellperInfo.pid,
+        saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
           shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
 
         shellCreated = true;
@@ -1160,15 +1160,15 @@ async function handleProjectShellCreate(
       const session = await manager.createSession({
         command: shellCmd,
         args: shellArgs,
-        cwd: projectPath,
+        cwd: workspacePath,
         label: `Shell ${shellId.replace('shell-', '')}`,
         env: process.env as Record<string, string>,
       });
 
-      const entry = getProjectTerminalsEntry(projectPath);
+      const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid);
-      ctx.log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shellper unavailable)`);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid);
+      ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -1186,11 +1186,11 @@ async function handleProjectShellCreate(
   }
 }
 
-async function handleProjectFileTabCreate(
+async function handleWorkspaceFileTabCreate(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
 ): Promise<void> {
   try {
     const body = await readBody(req);
@@ -1212,11 +1212,11 @@ async function handleProjectFileTabCreate(
       if (session) {
         fullPath = path.join(session.cwd, filePath);
       } else {
-        ctx.log('WARN', `Terminal session ${terminalId} not found, falling back to project root`);
-        fullPath = path.join(projectPath, filePath);
+        ctx.log('WARN', `Terminal session ${terminalId} not found, falling back to workspace root`);
+        fullPath = path.join(workspacePath, filePath);
       }
     } else {
-      fullPath = path.join(projectPath, filePath);
+      fullPath = path.join(workspacePath, filePath);
     }
 
     // Security: symlink-aware containment check
@@ -1233,26 +1233,26 @@ async function handleProjectFileTabCreate(
       }
     }
 
-    let normalizedProject: string;
+    let normalizedWorkspace: string;
     try {
-      normalizedProject = fs.realpathSync(projectPath);
+      normalizedWorkspace = fs.realpathSync(workspacePath);
     } catch {
-      normalizedProject = path.resolve(projectPath);
+      normalizedWorkspace = path.resolve(workspacePath);
     }
 
-    const isWithinProject = resolvedPath.startsWith(normalizedProject + path.sep)
-      || resolvedPath === normalizedProject;
+    const isWithinWorkspace = resolvedPath.startsWith(normalizedWorkspace + path.sep)
+      || resolvedPath === normalizedWorkspace;
 
-    if (!isWithinProject) {
+    if (!isWithinWorkspace) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Path outside project' }));
+      res.end(JSON.stringify({ error: 'Path outside workspace' }));
       return;
     }
 
     // Non-existent files still create a tab (spec 0101: file viewer shows "File not found")
     const fileExists = fs.existsSync(fullPath);
 
-    const entry = getProjectTerminalsEntry(projectPath);
+    const entry = getWorkspaceTerminalsEntry(workspacePath);
 
     // Check if already open
     for (const [id, tab] of entry.fileTabs) {
@@ -1267,7 +1267,7 @@ async function handleProjectFileTabCreate(
     const id = `file-${crypto.randomUUID()}`;
     const createdAt = Date.now();
     entry.fileTabs.set(id, { id, path: fullPath, createdAt });
-    saveFileTab(id, projectPath, fullPath, createdAt);
+    saveFileTab(id, workspacePath, fullPath, createdAt);
 
     ctx.log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
 
@@ -1280,13 +1280,13 @@ async function handleProjectFileTabCreate(
   }
 }
 
-function handleProjectFileGet(
+function handleWorkspaceFileGet(
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
   tabId: string,
 ): void {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const tab = entry.fileTabs.get(tabId);
 
   if (!tab) {
@@ -1335,13 +1335,13 @@ function handleProjectFileGet(
   }
 }
 
-function handleProjectFileRaw(
+function handleWorkspaceFileRaw(
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
   tabId: string,
 ): void {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const tab = entry.fileTabs.get(tabId);
 
   if (!tab) {
@@ -1366,14 +1366,14 @@ function handleProjectFileRaw(
   }
 }
 
-async function handleProjectFileSave(
+async function handleWorkspaceFileSave(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
   tabId: string,
 ): Promise<void> {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const tab = entry.fileTabs.get(tabId);
 
   if (!tab) {
@@ -1404,13 +1404,13 @@ async function handleProjectFileSave(
   }
 }
 
-async function handleProjectTabDelete(
+async function handleWorkspaceTabDelete(
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
   tabId: string,
 ): Promise<void> {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const manager = getTerminalManager();
 
   // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
@@ -1463,11 +1463,11 @@ async function handleProjectTabDelete(
   }
 }
 
-async function handleProjectStopAll(
+async function handleWorkspaceStopAll(
   res: http.ServerResponse,
-  projectPath: string,
+  workspacePath: string,
 ): Promise<void> {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const manager = getTerminalManager();
 
   // Kill all terminals (disable shellper auto-restart if applicable)
@@ -1482,19 +1482,19 @@ async function handleProjectStopAll(
   }
 
   // Clear registry
-  getProjectTerminals().delete(projectPath);
+  getWorkspaceTerminals().delete(workspacePath);
 
   // TICK-001: Delete all terminal sessions from SQLite
-  deleteProjectTerminalSessions(projectPath);
+  deleteWorkspaceTerminalSessions(workspacePath);
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true }));
 }
 
-function handleProjectFiles(
+function handleWorkspaceFiles(
   res: http.ServerResponse,
   url: URL,
-  projectPath: string,
+  workspacePath: string,
 ): void {
   const maxDepth = parseInt(url.searchParams.get('depth') || '3', 10);
   const ignore = new Set(['.git', 'node_modules', '.builders', 'dist', '.agent-farm', '.next', '.cache', '__pycache__']);
@@ -1514,7 +1514,7 @@ function handleProjectFiles(
         })
         .map(e => {
           const fullPath = path.join(dir, e.name);
-          const relativePath = path.relative(projectPath, fullPath);
+          const relativePath = path.relative(workspacePath, fullPath);
           if (e.isDirectory()) {
             return { name: e.name, path: relativePath, type: 'directory' as const, children: readTree(fullPath, depth - 1) };
           }
@@ -1525,20 +1525,20 @@ function handleProjectFiles(
     }
   }
 
-  const tree = readTree(projectPath, maxDepth);
+  const tree = readTree(workspacePath, maxDepth);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(tree));
 }
 
-function handleProjectGitStatus(
+function handleWorkspaceGitStatus(
   res: http.ServerResponse,
   ctx: RouteContext,
-  projectPath: string,
+  workspacePath: string,
 ): void {
   try {
     // Get git status in porcelain format for parsing
     const result = execSync('git status --porcelain', {
-      cwd: projectPath,
+      cwd: workspacePath,
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -1577,11 +1577,11 @@ function handleProjectGitStatus(
   }
 }
 
-function handleProjectRecentFiles(
+function handleWorkspaceRecentFiles(
   res: http.ServerResponse,
-  projectPath: string,
+  workspacePath: string,
 ): void {
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
 
   // Get all file tabs sorted by creation time (most recent first)
   const recentFiles = Array.from(entry.fileTabs.values())
@@ -1591,24 +1591,24 @@ function handleProjectRecentFiles(
       id: tab.id,
       path: tab.path,
       name: path.basename(tab.path),
-      relativePath: path.relative(projectPath, tab.path),
+      relativePath: path.relative(workspacePath, tab.path),
     }));
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(recentFiles));
 }
 
-function handleProjectAnnotate(
+function handleWorkspaceAnnotate(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
   url: URL,
-  projectPath: string,
+  workspacePath: string,
   annotateMatch: RegExpMatchArray,
 ): void {
   const tabId = annotateMatch[1];
   const subRoute = annotateMatch[3] || '';
-  const entry = getProjectTerminalsEntry(projectPath);
+  const entry = getWorkspaceTerminalsEntry(workspacePath);
   const tab = entry.fileTabs.get(tabId);
 
   if (!tab) {

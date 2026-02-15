@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 const TERMINAL_SESSIONS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS terminal_sessions (
   id TEXT PRIMARY KEY,
-  project_path TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,
   pid INTEGER,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   shellper_start_time INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_workspace ON terminal_sessions(workspace_path);
 `;
 
 describe('Terminal Session Persistence (TICK-001)', () => {
@@ -45,7 +45,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   describe('saveTerminalSession', () => {
     it('should insert a new terminal session', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -53,7 +53,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
       const row = db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get('term-123') as {
         id: string;
-        project_path: string;
+        workspace_path: string;
         type: string;
         role_id: string | null;
         pid: number | null;
@@ -61,14 +61,14 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
       expect(row).toBeDefined();
       expect(row.id).toBe('term-123');
-      expect(row.project_path).toBe('/path/to/project');
+      expect(row.workspace_path).toBe('/path/to/project');
       expect(row.type).toBe('architect');
       expect(row.pid).toBe(12345);
     });
 
     it('should replace existing session with same ID', () => {
       const stmt = db.prepare(`
-        INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket)
+        INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -84,7 +84,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
     it('should enforce type constraint', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -98,7 +98,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
     it('should delete a terminal session by ID', () => {
       // Insert a session
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid)
         VALUES ('term-123', '/path/to/project', 'architect', 12345)
       `).run();
 
@@ -116,11 +116,11 @@ describe('Terminal Session Persistence (TICK-001)', () => {
     });
   });
 
-  describe('deleteProjectTerminalSessions', () => {
-    it('should delete all sessions for a project', () => {
-      // Insert multiple sessions for same project
+  describe('deleteWorkspaceTerminalSessions', () => {
+    it('should delete all sessions for a workspace', () => {
+      // Insert multiple sessions for same workspace
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid)
         VALUES (?, ?, ?, ?, ?)
       `);
 
@@ -130,19 +130,19 @@ describe('Terminal Session Persistence (TICK-001)', () => {
       stmt.run('term-4', '/other/project', 'architect', null, 2001);
 
       // Delete all for /path/to/project
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run('/path/to/project');
+      db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run('/path/to/project');
 
-      // Verify only other project remains
+      // Verify only other workspace remains
       const rows = db.prepare('SELECT * FROM terminal_sessions').all();
       expect(rows).toHaveLength(1);
-      expect((rows[0] as { project_path: string }).project_path).toBe('/other/project');
+      expect((rows[0] as { workspace_path: string }).workspace_path).toBe('/other/project');
     });
   });
 
   describe('reconciliation queries', () => {
     it('should retrieve all sessions for reconciliation', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shellper_socket)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -151,7 +151,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
       const sessions = db.prepare('SELECT * FROM terminal_sessions').all() as Array<{
         id: string;
-        project_path: string;
+        workspace_path: string;
         type: string;
         shellper_socket: string | null;
         pid: number | null;
@@ -163,9 +163,9 @@ describe('Terminal Session Persistence (TICK-001)', () => {
       expect(shellperSession?.shellper_socket).toBe('/tmp/shellper-1.sock');
     });
 
-    it('should retrieve sessions by project path', () => {
+    it('should retrieve sessions by workspace path', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid)
         VALUES (?, ?, ?, ?)
       `);
 
@@ -173,7 +173,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
       stmt.run('term-2', '/project-a', 'shell', 1002);
       stmt.run('term-3', '/project-b', 'architect', 2001);
 
-      const sessions = db.prepare('SELECT * FROM terminal_sessions WHERE project_path = ?')
+      const sessions = db.prepare('SELECT * FROM terminal_sessions WHERE workspace_path = ?')
         .all('/project-a');
 
       expect(sessions).toHaveLength(2);
@@ -183,7 +183,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   describe('migration compatibility', () => {
     it('should handle sessions without shellper (non-persistent)', () => {
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, shellper_socket)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid, shellper_socket)
         VALUES ('term-1', '/project', 'shell', 1234, NULL)
       `).run();
 
@@ -195,7 +195,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
     it('should handle shellper-backed sessions', () => {
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, shellper_socket, shellper_pid, shellper_start_time)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid, shellper_socket, shellper_pid, shellper_start_time)
         VALUES ('term-1', '/project', 'architect', NULL, '/tmp/shellper-1.sock', 12345, 1700000000)
       `).run();
 
@@ -213,35 +213,35 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   });
 
   describe('path normalization', () => {
-    it('should handle different path representations for same project', () => {
+    it('should handle different path representations for same workspace', () => {
       // Simulate: architect saved with resolved path, shell with raw path
       const resolvedPath = '/Users/test/project';
       const rawPath = '/Users/test/./project'; // Non-normalized
 
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid)
         VALUES ('arch-1', ?, 'architect', 1001)
       `).run(resolvedPath);
 
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid)
         VALUES ('shell-1', ?, 'shell', 'shell-1', 1002)
       `).run(rawPath);
 
       // Query by resolved path only finds architect
-      const byResolved = db.prepare('SELECT * FROM terminal_sessions WHERE project_path = ?')
+      const byResolved = db.prepare('SELECT * FROM terminal_sessions WHERE workspace_path = ?')
         .all(resolvedPath);
       expect(byResolved).toHaveLength(1);
 
       // This demonstrates the problem that our fix addresses:
       // Deleting by one path variant leaves the other
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(resolvedPath);
+      db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run(resolvedPath);
 
       const remaining = db.prepare('SELECT * FROM terminal_sessions').all();
       expect(remaining).toHaveLength(1);
 
       // Our fix: delete by both paths to handle inconsistencies
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(rawPath);
+      db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run(rawPath);
       const afterBothDeletes = db.prepare('SELECT * FROM terminal_sessions').all();
       expect(afterBothDeletes).toHaveLength(0);
     });
@@ -251,33 +251,33 @@ describe('Terminal Session Persistence (TICK-001)', () => {
     it('should demonstrate INSERT after DELETE race (zombie row)', () => {
       // Scenario: Stop races with shell creation
       // 1. Shell creation starts (not yet saved)
-      // 2. Stop handler runs: DELETE all sessions for project
+      // 2. Stop handler runs: DELETE all sessions for workspace
       // 3. Shell creation completes: INSERT new session
-      // Result: Zombie row exists after project was stopped
+      // Result: Zombie row exists after workspace was stopped
 
-      const projectPath = '/project-a';
+      const workspacePath = '/project-a';
 
-      // Initial state: project has architect
+      // Initial state: workspace has architect
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid)
         VALUES ('arch-1', ?, 'architect', 1001)
-      `).run(projectPath);
+      `).run(workspacePath);
 
       // Step 2: Stop handler runs
-      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(projectPath);
+      db.prepare('DELETE FROM terminal_sessions WHERE workspace_path = ?').run(workspacePath);
 
       // Step 3: Shell creation completes (INSERT after DELETE)
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid)
+        INSERT INTO terminal_sessions (id, workspace_path, type, role_id, pid)
         VALUES ('shell-1', ?, 'shell', 'shell-1', 1002)
-      `).run(projectPath);
+      `).run(workspacePath);
 
       // Result: zombie row
       const remaining = db.prepare('SELECT * FROM terminal_sessions').all();
       expect(remaining).toHaveLength(1);
 
       // This is the problem our race guard fixes by checking
-      // if project is still active before saving
+      // if workspace is still active before saving
     });
   });
 
@@ -285,7 +285,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
     it('should clean up all rows during reconciliation (fresh start)', () => {
       // Insert sessions that survived a crash
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, shellper_socket)
+        INSERT INTO terminal_sessions (id, workspace_path, type, pid, shellper_socket)
         VALUES (?, ?, ?, ?, ?)
       `);
 

@@ -20,8 +20,8 @@ export interface Response {
   payload?: Record<string, unknown>;
 }
 
-// Project info sent during registration
-export interface ProjectInfo {
+// Workspace info sent during registration
+export interface WorkspaceInfo {
   path: string;
   name: string;
   git_remote?: string;
@@ -49,7 +49,7 @@ export interface ConnectedInstance {
   version?: string;
   connected_at: Date;
   last_ping: Date;
-  projects: ProjectInfo[];
+  workspaces: WorkspaceInfo[];
   status_files: Map<string, StatusFile>;
   builders: Map<string, BuilderInfo>;
 }
@@ -60,18 +60,18 @@ export interface RegisterPayload {
   instance_id: string;
   instance_name?: string;
   version?: string;
-  projects: ProjectInfo[];
+  workspaces: WorkspaceInfo[];
 }
 
 export interface StatusUpdatePayload {
-  project_path: string;
+  workspace_path: string;
   status_file: string;
   content: string;
   git_sha?: string;
 }
 
 export interface BuilderUpdatePayload {
-  project_path: string;
+  workspace_path: string;
   builder_id: string;
   status: BuilderInfo['status'];
   phase?: string;
@@ -79,7 +79,7 @@ export interface BuilderUpdatePayload {
 }
 
 export interface GateCompletedPayload {
-  project_path: string;
+  workspace_path: string;
   project_id: string;
   gate: string;
   completed_by: string;
@@ -89,7 +89,7 @@ export interface GateCompletedPayload {
 // Message payloads: HQ -> Local
 
 export interface ApprovalPayload {
-  project_path: string;
+  workspace_path: string;
   project_id: string;
   gate: string;
   approved_by: string;
@@ -98,7 +98,7 @@ export interface ApprovalPayload {
 }
 
 export interface CommandPayload {
-  project_path: string;
+  workspace_path: string;
   command: 'spawn_builder' | 'send_message' | 'run_consultation' | 'sync_status';
   args: Record<string, unknown>;
 }
