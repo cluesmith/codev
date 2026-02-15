@@ -157,7 +157,7 @@ After migration runs, verify:
 - `packages/codev/src/commands/porch/next.ts`
 - `packages/codev/src/commands/porch/plan.ts`
 - `packages/codev/src/commands/consult/index.ts` — Rename `projectRoot` function parameters → `workspaceRoot`
-- `packages/codev/src/commands/doctor.ts`
+- `packages/codev/src/commands/doctor.ts` — Has its own local `findProjectRoot()` function (distinct from `config.ts` and `skeleton.ts`); rename to `findWorkspaceRoot()`
 - `packages/codev/src/commands/import.ts` — `findProjectRoot` → `findWorkspaceRoot`, local var
 - `packages/codev/src/terminal/pty-manager.ts` — `PtyManagerConfig.projectRoot` → `workspaceRoot`, `config.projectRoot` → `config.workspaceRoot`
 - `packages/codev/src/lib/skeleton.ts` — Has its own `findProjectRoot()` (distinct from `config.ts`); rename to `findWorkspaceRoot()`. Note: `import.ts` and `consult/index.ts` import from this file, not from `config.ts`
@@ -240,25 +240,47 @@ The `codev-hq` package shares a wire protocol with `hq-connector.ts`. Since Phas
 - `packages/codev/dashboard/__tests__/StatusPanel.test.tsx` — `projectName` → `workspaceName`
 - `packages/codev/dashboard/__tests__/App.terminal-persistence.test.tsx`
 
-**Additional test files that may need updates (compiler will catch):**
+**Playwright / E2E Dashboard Tests (`__tests__/e2e/` subdirectory — hardcoded `/project/` URL strings):**
+- `packages/codev/src/agent-farm/__tests__/e2e/tower-integration.test.ts` — `/project/` URLs (10+ occurrences)
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-bugs.test.ts` — `/project/` URLs
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-terminals.test.ts` — WebSocket URLs with `/project/`
+- `packages/codev/src/agent-farm/__tests__/e2e/clickable-file-paths.test.ts`
+- `packages/codev/src/agent-farm/__tests__/e2e/cloud-status.test.ts`
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-gate-banner.test.ts`
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-autocopy.test.ts`
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-clipboard.test.ts`
+- `packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts`
+
+**Additional test files (string literals + compiler-visible):**
+- `packages/codev/src/agent-farm/__tests__/tower-utils.test.ts` — `getProjectName`, `normalizeProjectPath`
+- `packages/codev/src/agent-farm/__tests__/tower-proxy.test.ts` — `/project/` path references
+- `packages/codev/src/agent-farm/__tests__/tower-websocket.test.ts` — project-scoped URL paths
+- `packages/codev/src/agent-farm/__tests__/clipboard.test.ts` — own `findProjectRoot()` helper
+- `packages/codev/src/__tests__/skeleton.test.ts` — tests `findProjectRoot()` (9 occurrences)
 - Any other test files importing renamed types or calling renamed functions
 
 #### Verification Steps
 1. `npm run build` — zero TypeScript errors
-2. `npm test` — all tests pass
-3. Grep verification (expanded scope):
+2. `npm test` — all unit and integration tests pass
+3. Playwright E2E tests — run targeted Playwright suite to verify Tower routes and dashboard URL handling still work under `/workspace/` paths
+4. Grep verification (expanded scope):
    ```bash
    # Check src/ for repo-meaning identifiers
    grep -rn 'projectPath\|projectTerminals\|ProjectTerminals\|projectName\|getProjectUrl\|projectRoot\|findProjectRoot\|encodeProjectPath\|activeProjects\|totalProjects\|TowerProject\b' packages/codev/src/
    # Check dashboard/ for leftover /project/ URLs
    grep -rn '/project/' packages/codev/dashboard/
-   # Check for SQL column leftovers
-   grep -rn 'project_path' packages/codev/src/
+   # Check for SQL column leftovers (EXCLUDE historical migrations v1-v8 in db/index.ts which intentionally use old names)
+   grep -rn 'project_path' packages/codev/src/ --include='*.ts' | grep -v 'db/index.ts'
+   # Separately verify db/index.ts: only migrations v1-v8 should still reference project_path
+   grep -n 'project_path' packages/codev/src/agent-farm/db/index.ts
    # Check codev-hq for leftovers
    grep -rn 'project_path\|ProjectInfo' packages/codev-hq/src/
+   # Check e2e tests for leftover /project/ URLs
+   grep -rn '/project/' packages/codev/src/agent-farm/__tests__/e2e/
    ```
-   Confirm only work-unit uses remain (e.g., `projectId`, `projectlist`, `codev/projects/`)
-4. Verify `projectId` unchanged in porch files
+   **Allowed exceptions**: Historical migration SQL in `db/index.ts` (v1-v8) intentionally retains old column names — these must NOT be changed.
+   Confirm only work-unit uses remain elsewhere (e.g., `projectId`, `projectlist`, `codev/projects/`)
+5. Verify `projectId` unchanged in porch files
 
 #### Acceptance Criteria
 - [ ] `npm run build` passes
