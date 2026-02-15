@@ -104,8 +104,15 @@ function extractCodexUsage(output: string): UsageData | null {
 
   for (const line of lines) {
     const event = JSON.parse(line);
-    if (event.type === 'turn.completed' && event.usage) {
+    if (event.type === 'turn.completed') {
       foundTurn = true;
+      if (!event.usage) {
+        // Turn completed without usage data — all totals are unknowable
+        inputMissing = true;
+        cachedMissing = true;
+        outputMissing = true;
+        continue;
+      }
       if (typeof event.usage.input_tokens === 'number') {
         totalInput += event.usage.input_tokens;
       } else {
