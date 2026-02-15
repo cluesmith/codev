@@ -354,8 +354,8 @@ async function handleTerminalCreate(
           args: args || [],
           cwd,
           env: sessionEnv,
-          cols: cols || 200,
-          rows: 50,
+          cols: cols || 80,
+          rows: 24,
           restartOnExit: false,
         });
 
@@ -1245,8 +1245,8 @@ async function handleWorkspaceShellCreate(
           args: shellArgs,
           cwd: workspacePath,
           env: shellEnv,
-          cols: 200,
-          rows: 50,
+          cols: 80,
+          rows: 24,
           restartOnExit: false,
         });
 

@@ -122,8 +122,8 @@ export class TerminalManager {
       id,
       command: '', // Not used for shellper-backed sessions
       args: [],
-      cols: 200,
-      rows: 50,
+      cols: 80,
+      rows: 24,
       cwd: opts.cwd,
       env: {},
       label: opts.label,

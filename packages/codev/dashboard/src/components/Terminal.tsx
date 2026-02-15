@@ -288,8 +288,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       // the initial fit(). Uses debounced fit to avoid resize storms.
       debouncedFit();
       // After fit settles, force-send a resize to the PTY even if dimensions
-      // haven't changed. The replay buffer was generated at shepherd's hardcoded
-      // 200x50 but the browser terminal is smaller — the shell needs a SIGWINCH
+      // haven't changed. The replay buffer was generated at shellper's default
+      // 80x24 but the browser terminal may differ — the shell needs a SIGWINCH
       // to redraw at the correct size. Then scroll to the bottom.
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {

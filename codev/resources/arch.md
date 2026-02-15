@@ -283,20 +283,9 @@ The `GateWatcher` class (`packages/codev/src/agent-farm/utils/gate-watcher.ts`) 
 - **Input sanitization**: Strips ANSI escape sequences, rejects control characters
 - **Binary resolution**: Resolves `af` binary path relative to the package directory
 
-#### Known Issue: Hardcoded Initial Dimensions (cols: 200, rows: 50)
+#### Initial Terminal Dimensions
 
-All shellper sessions are spawned with `cols: 200, rows: 50` in `tower-instances.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
-
-**Symptom**: Large blank area above the first few prompts when scrolling up in a newly opened terminal.
-
-**Root cause**: Shellper spawns the PTY before the browser's actual dimensions are known (chicken-and-egg: browser can't send resize until WebSocket connects, but shellper needs cols/rows at spawn time).
-
-**Potential fixes**:
-1. Use smaller defaults (e.g., `cols: 80, rows: 24`) to minimize the gap
-2. Lazy spawn: defer PTY creation until the first RESIZE frame arrives from Tower
-3. Send a clear screen sequence (`ESC[2J ESC[H`) after the first resize
-
-**Affected code**: `tower-instances.ts` → `launchInstance()` calling `shellperManager.createSession()` — search for `cols: 200`.
+Shellper sessions are spawned with `cols: 80, rows: 24` (standard VT100 defaults) before the browser connects. The browser sends a RESIZE frame on WebSocket connect, and Terminal.tsx also force-sends a resize after replay buffer flush to ensure the shell redraws at the correct size.
 
 #### Security
 

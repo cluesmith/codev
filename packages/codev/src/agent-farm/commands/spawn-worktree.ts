@@ -261,7 +261,7 @@ export async function createPtySession(
   cwd: string,
   registration?: { workspacePath: string; type: 'builder' | 'shell'; roleId: string },
 ): Promise<{ terminalId: string }> {
-  const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50, persistent: true };
+  const body: Record<string, unknown> = { command, args, cwd, cols: 80, rows: 24, persistent: true };
   if (registration) {
     body.workspacePath = registration.workspacePath;
     body.type = registration.type;

@@ -228,20 +228,6 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: "2026-02-15"
     notes: "Standardize agent names (builder-spir-0109), add project:agent addressing, WebSocket message bus for dashboard observability, POST /api/send endpoint. Depends on 0108."
 
-  - id: "0113"
-    title: "Shellper Debug Logging"
-    summary: "Add lifecycle logging to shellper processes, capture stderr in Tower, surface exit codes/signals on session death"
-    status: conceived
-    priority: high
-    release: null
-    files:
-      spec: codev/specs/0113-shellper-debug-logging.md
-    dependencies: []
-    tags: [shellper, logging, debugging, reliability]
-    timestamps:
-      conceived_at: "2026-02-15"
-    notes: "Triggered by unexplained life architect shellper death on 2026-02-15. Currently zero diagnostic info when sessions die."
-
   - id: "0114"
     title: "Investigate Minimax for Code Reviews"
     summary: "Evaluate Minimax as a replacement for Claude in consult 3-way code reviews"
@@ -1018,6 +1004,22 @@ Completed projects not associated with any formal release.
       conceived_at: "2026-02-13"
       integrated_at: "2026-02-13"
     notes: "PR #231 merged. Agent SDK replaces CLI subprocess for Claude consultation. 7 tests."
+
+  - id: "0113"
+    title: "Shellper Debug Logging"
+    summary: "Add lifecycle logging to shellper processes, capture stderr in Tower, surface exit codes/signals on session death"
+    status: integrated
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0113-shellper-debug-logging.md
+      review: codev/reviews/0113-shellper-debug-logging.md
+    dependencies: []
+    tags: [shellper, logging, debugging, reliability]
+    timestamps:
+      conceived_at: "2026-02-15"
+      integrated_at: "2026-02-15"
+    notes: "PR #289 merged. Lifecycle logging, stderr capture, exit code/signal diagnostics for shellper sessions."
 ```
 
 ---
@@ -1115,7 +1117,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0112** - Reserve this number for your next project
+**0116** - Reserve this number for your next project
 
 ---
 
