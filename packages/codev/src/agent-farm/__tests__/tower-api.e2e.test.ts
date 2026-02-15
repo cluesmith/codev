@@ -111,15 +111,17 @@ function encodeWorkspacePath(workspacePath: string): string {
  * Create a test workspace directory
  */
 function createTestWorkspace(): string {
-  // Create inside the test directory (not OS temp) to avoid isTempDirectory filtering
-  const testBase = resolve(import.meta.dirname, '.test-projects');
+  // Create inside a dedicated test directory under homedir (not OS temp)
+  // to avoid isTempDirectory filtering AND to avoid .builders filtering
+  // when running tests inside a builder workspace.
+  const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
   mkdirSync(testBase, { recursive: true });
   const workspacePath = mkdtempSync(resolve(testBase, 'codev-api-test-'));
   mkdirSync(resolve(workspacePath, 'codev'), { recursive: true });
   mkdirSync(resolve(workspacePath, '.agent-farm'), { recursive: true });
   writeFileSync(
     resolve(workspacePath, 'af-config.json'),
-    JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+    JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
   );
   return workspacePath;
 }
@@ -265,13 +267,13 @@ describe('Tower API (Phase 1)', () => {
     let encodedPath: string;
 
     beforeEach(() => {
-      // Create test workspace inside the test directory (not OS temp) to avoid isTempDirectory filtering
-      const testBase = resolve(import.meta.dirname, '.test-projects');
+      // Create test workspace inside a dedicated test directory under homedir
+      const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
       mkdirSync(testBase, { recursive: true });
       testWorkspaceDir = mkdtempSync(resolve(testBase, 'tower-sqlite-test-'));
       mkdirSync(resolve(testWorkspaceDir, 'codev'), { recursive: true });
       writeFileSync(resolve(testWorkspaceDir, 'af-config.json'), JSON.stringify({
-        shell: { architect: 'bash', builder: 'bash', shell: 'bash' }
+        shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' }
       }));
       encodedPath = encodeWorkspacePath(testWorkspaceDir);
     });

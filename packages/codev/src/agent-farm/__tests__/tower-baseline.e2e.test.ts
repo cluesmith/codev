@@ -103,8 +103,9 @@ async function stopServer(proc: ChildProcess | null): Promise<void> {
  * Create a test workspace directory with minimal codev structure
  */
 function createTestWorkspace(): string {
-  // Create inside the test directory (not OS temp) to avoid isTempDirectory filtering
-  const testBase = resolve(import.meta.dirname, '.test-projects');
+  // Create inside a dedicated test directory under homedir (not OS temp)
+  // to avoid isTempDirectory filtering AND to avoid .builders filtering
+  const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
   mkdirSync(testBase, { recursive: true });
   const workspacePath = mkdtempSync(resolve(testBase, 'codev-baseline-test-'));
 
@@ -114,7 +115,7 @@ function createTestWorkspace(): string {
   writeFileSync(
     resolve(workspacePath, 'af-config.json'),
     JSON.stringify({
-      shell: { architect: 'bash', builder: 'bash', shell: 'bash' },
+      shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' },
     })
   );
 

@@ -98,13 +98,13 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
 
     // Step 1: Create a workspace directory OUTSIDE OS temp (to avoid isTempDirectory filtering)
     // This test verifies the "deleted directory" filter, not the temp directory filter.
-    const testBase = resolve(import.meta.dirname, '.test-projects');
+    const testBase = resolve(homedir(), '.agent-farm', 'test-workspaces');
     mkdirSync(testBase, { recursive: true });
     const tempProjectDir = realpathSync(mkdtempSync(resolve(testBase, 'bugfix-202-')));
     mkdirSync(resolve(tempProjectDir, 'codev'), { recursive: true });
     writeFileSync(
       resolve(tempProjectDir, 'af-config.json'),
-      JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+      JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
     );
 
     const encodedPath = toBase64URL(tempProjectDir);
@@ -151,7 +151,7 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
     mkdirSync(resolve(tempProjectDir, 'codev'), { recursive: true });
     writeFileSync(
       resolve(tempProjectDir, 'af-config.json'),
-      JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+      JSON.stringify({ shell: { architect: 'sh -c "sleep 3600"', builder: 'bash', shell: 'bash' } })
     );
 
     const encodedPath = toBase64URL(tempProjectDir);

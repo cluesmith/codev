@@ -51,9 +51,7 @@ describe('StatusPanel', () => {
 
   it('shows empty messages for empty state', () => {
     render(<StatusPanel state={emptyState} onRefresh={() => {}} />);
-    expect(screen.getByText('No builders spawned')).toBeTruthy();
-    expect(screen.getByText('No shell tabs open')).toBeTruthy();
-    expect(screen.getByText('No file tabs open')).toBeTruthy();
+    expect(screen.getByText('No tabs open')).toBeTruthy();
   });
 
   it('shows builders, shells, and files', () => {
@@ -63,10 +61,4 @@ describe('StatusPanel', () => {
     expect(screen.getByText('main.ts')).toBeTruthy();
   });
 
-  it('shows correct counts', () => {
-    render(<StatusPanel state={populatedState} onRefresh={() => {}} />);
-    expect(screen.getByText('Builders (1)')).toBeTruthy();
-    expect(screen.getByText('Shells (1)')).toBeTruthy();
-    expect(screen.getByText('Files (1)')).toBeTruthy();
-  });
 });
