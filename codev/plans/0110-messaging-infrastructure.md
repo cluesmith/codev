@@ -38,6 +38,7 @@ This plan implements the messaging infrastructure specified in Spec 0110. The wo
 #### Deliverables
 - [ ] New utility file `packages/codev/src/agent-farm/utils/agent-names.ts`
 - [ ] Updated builder ID generation in `commands/spawn.ts` (all 5 modes)
+- [ ] Updated `commands/send.ts` to use `resolveAgentName()` for builder lookup (prevents breakage)
 - [ ] Unit tests for agent name generation and resolution
 
 #### Implementation Details
@@ -48,7 +49,12 @@ Utility functions:
 - `buildAgentName(type: BuilderType, id: string): string` — generates canonical name in lowercase (e.g., `builder-spir-0109`, `builder-bugfix-269`). All names are stored lowercase per spec.
 - `parseAgentName(name: string): { protocol: string; id: string } | null` — parses `builder-{protocol}-{id}`
 - `parseAddress(target: string): { project?: string; agent: string }` — splits `project:agent`, normalizes agent to lowercase
-- `resolveAgentName(target: string, builders: Builder[]): Builder | null` — **case-insensitive** matching per spec: exact match first (lowercased), then prefix match for backwards compat. E.g., `Builder-SPIR-0109` matches `builder-spir-0109`.
+- `resolveAgentName(target: string, builders: Builder[]): Builder | null` — **case-insensitive** matching per spec with the following resolution order:
+  1. **Exact match** (case-insensitive): `builder-spir-0109` matches `builder-spir-0109`
+  2. **Tail match**: bare IDs match the trailing `{id}` segment of `builder-{protocol}-{id}`. E.g., `0109` matches `builder-spir-0109` because the canonical name ends with `-0109`. Similarly, `bugfix-269` matches `builder-bugfix-269` because the canonical name ends with `-bugfix-269` (the `{protocol}-{id}` portion).
+  3. **Ambiguity**: if multiple builders match via tail match, return null/error with candidates.
+
+  This is NOT prefix matching — `0109` is not a prefix of `builder-spir-0109`. It is **tail segment matching**: split the canonical name on `builder-`, then check if the remainder ends with the bare ID.
 
 **Changes to `commands/spawn.ts`**:
 
@@ -65,7 +71,13 @@ Only the `builderId` value changes. Worktree paths and branch names are **not** 
 
 Update `upsertBuilder()` calls at each spawn site to use the new `builderId` value while keeping `worktree` and `branch` parameters unchanged.
 
-**No changes to `commands/send.ts`'s `detectCurrentBuilderId()`** — since worktree paths don't change, the existing regex continues to extract the worktree directory name. The worktree name and the builderId are now different: the worktree dir is `0109` but the builderId stored in state.db is `builder-spir-0109`. The CLI resolves the builderId from state.db by matching the worktree path, not by parsing directory names.
+**Update `commands/send.ts` to use `resolveAgentName()`** — Phase 1 must also update `send.ts` to prevent breakage. The critical change:
+
+- `sendToBuilder()` currently does `state.builders.find(b => b.id === builderId)` (exact match, line 65). Replace with `resolveAgentName(builderId, state.builders)` from the new utility. This ensures bare IDs like `0109` resolve to the new `builder-spir-0109` via tail match.
+- `detectCurrentBuilderId()` extracts the worktree directory name (e.g., `0109`). Since worktree paths don't change, this still returns `0109`. But state.db now stores `builder-spir-0109`. The `resolveAgentName()` tail match handles this: `0109` matches `builder-spir-0109` because the canonical name ends with `-0109`.
+- `sendToAll()` iterates `state.builders` directly and uses `builder.id` — this works unchanged since it uses canonical IDs from state.db.
+
+This is a **minimal, essential change** in Phase 1 to keep `af send` functional. The full refactor to `POST /api/send` happens in Phase 4.
 
 #### Acceptance Criteria
 - [ ] `af spawn -p 0109` creates builder with ID `builder-spir-0109` in state.db
@@ -77,13 +89,13 @@ Update `upsertBuilder()` calls at each spawn site to use the new `builderId` val
 - [ ] All tests pass
 
 #### Test Plan
-- **Unit Tests**: `agent-names.test.ts` — test `buildAgentName()` for all builder types, `parseAgentName()` round-trip, `parseAddress()` with/without project prefix, `resolveAgentName()` exact and prefix match with case-insensitive input
+- **Unit Tests**: `agent-names.test.ts` — test `buildAgentName()` for all builder types, `parseAgentName()` round-trip, `parseAddress()` with/without project prefix, `resolveAgentName()` exact and tail match with case-insensitive input
 - **Unit Tests**: Case-insensitive matching — verify uppercase, mixed-case, and lowercase inputs all resolve correctly
-- **Unit Tests**: Mixed old/new builder IDs — verify `resolveAgentName()` correctly matches both `0109` (prefix) and `builder-spir-0109` (exact) when both old-format and new-format builders coexist in state.db during migration
+- **Unit Tests**: Mixed old/new builder IDs — verify `resolveAgentName()` correctly matches both `0109` (tail match) and `builder-spir-0109` (exact) when both old-format and new-format builders coexist in state.db during migration
 
 #### Risks
 - **Risk**: Existing builders in state.db with old naming won't match new format
-  - **Mitigation**: This only affects new spawns. Old builders stay with their IDs until cleanup. Prefix matching ensures `0109` still resolves to `builder-spir-0109`.
+  - **Mitigation**: This only affects new spawns. Old builders stay with their IDs until cleanup. Tail matching ensures `0109` still resolves to `builder-spir-0109`.
 
 ---
 
@@ -114,7 +126,7 @@ Core functions:
 1. Parse target using `parseAddress()` from Phase 1 (case-insensitive)
 2. If project specified: find workspace by basename match across `getWorkspaceTerminals()` keys. **If multiple workspaces match the same basename, return an error** (ambiguous target) rather than picking one.
 3. If no project: use `fallbackWorkspace` (sent by CLI from CWD detection). If `fallbackWorkspace` is null/missing, return error with message "Cannot resolve agent without project context."
-4. Within the workspace: match agent name against `architect`, `builders` map (exact, case-insensitive), `builders` map (prefix, case-insensitive). **If prefix match returns multiple candidates** (e.g., bare ID `01` matches both `builder-spir-0109` and `builder-spir-0110`), return an error with the list of ambiguous matches rather than picking one.
+4. Within the workspace: match agent name against `architect`, `builders` map (exact, case-insensitive), `builders` map (tail match, case-insensitive). **If tail match returns multiple candidates** (e.g., bare ID `01` matches both `builder-spir-0109` and `builder-spir-0110`), return an error with the list of ambiguous matches rather than picking one.
 
 **New route in `packages/codev/src/agent-farm/servers/tower-routes.ts`**:
 ```
@@ -150,16 +162,16 @@ Handler:
 - [ ] `POST /api/send` with `{ to: "architect", message: "test" }` writes to architect terminal
 - [ ] `POST /api/send` with `{ to: "builder-spir-0109", message: "test" }` writes to that builder
 - [ ] `POST /api/send` with `{ to: "codev-public:architect" }` resolves cross-project
-- [ ] `POST /api/send` with `{ to: "0109" }` resolves via prefix match (backwards compat)
+- [ ] `POST /api/send` with `{ to: "0109" }` resolves via tail match (backwards compat)
 - [ ] `POST /api/send` with missing `to` returns 400
 - [ ] `POST /api/send` with ambiguous project basename returns 409
-- [ ] `POST /api/send` with ambiguous agent prefix (multiple matches) returns 409
+- [ ] `POST /api/send` with ambiguous agent tail match (multiple matches) returns 409
 - [ ] `POST /api/send` with no `from` broadcasts with `from.agent = "unknown"`
 - [ ] `POST /api/send` cross-project: `from.project` in broadcast reflects sender's workspace, not destination
 - [ ] Existing `POST /api/terminals/:id/write` still works
 
 #### Test Plan
-- **Unit Tests**: `tower-messages.test.ts` — test `resolveTarget()` with exact names, prefix matches, cross-project addresses, missing targets, ambiguous basenames, ambiguous agent prefixes (multiple matches → error), null fallback workspace
+- **Unit Tests**: `tower-messages.test.ts` — test `resolveTarget()` with exact names, tail matches, cross-project addresses, missing targets, ambiguous basenames, ambiguous agent tail matches (multiple matches → error), null fallback workspace
 - **Unit Tests**: `message-format.test.ts` — test formatting functions produce expected output
 - **Unit Tests**: Input validation — missing fields, empty strings, malformed addresses return correct error codes
 
@@ -260,7 +272,7 @@ interface MessageFrame {
 #### Acceptance Criteria
 - [ ] `af send architect "msg"` works (backwards compat)
 - [ ] `af send builder-spir-0109 "msg"` works (new naming)
-- [ ] `af send 0109 "msg"` works (prefix match backwards compat)
+- [ ] `af send 0109 "msg"` works (tail match backwards compat)
 - [ ] `af send codev-public:architect "msg"` works (cross-project)
 - [ ] `af status` shows agents with new naming convention
 - [ ] `--all` flag still broadcasts to all builders
@@ -288,8 +300,8 @@ Phase 1 (Naming) ──→ Phase 2 (Tower Send) ──→ Phase 3 (Message Bus) 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | Workspace basename collision | L | L | Return 409 AMBIGUOUS error, require unique project name |
-| Bare ID prefix matches multiple builders | L | M | Return 409 AMBIGUOUS error with list of candidates |
-| State.db naming mismatch with running builders | M | L | Only new spawns get new names; prefix match handles old IDs |
+| Bare ID tail matches multiple builders | L | M | Return 409 AMBIGUOUS error with list of candidates |
+| State.db naming mismatch with running builders | M | L | Only new spawns get new names; tail match handles old IDs |
 | WebSocket subscriber memory leak | L | M | Cleanup on close/error events |
 | Message format changes break existing tooling | L | M | Existing writeTerminal API preserved |
 | Mixed old/new builder IDs during migration | M | L | Prefix match resolves both; unit tests cover coexistence |
