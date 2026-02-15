@@ -1698,6 +1698,28 @@ function handleProjectAnnotate(
     return;
   }
 
+  // Sub-route: GET /vendor/* — serve bundled vendor libraries (PrismJS, marked, DOMPurify)
+  if (req.method === 'GET' && subRoute.startsWith('vendor/')) {
+    const vendorFile = subRoute.slice('vendor/'.length);
+    // Security: only allow known file extensions and no path traversal
+    if (vendorFile.includes('..') || vendorFile.includes('/') || !/\.(js|css)$/.test(vendorFile)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Bad request');
+      return;
+    }
+    const vendorPath = path.resolve(__dirname, `../../../templates/vendor/${vendorFile}`);
+    try {
+      const content = fs.readFileSync(vendorPath);
+      const contentType = vendorFile.endsWith('.css') ? 'text/css' : 'application/javascript';
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400' });
+      res.end(content);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    }
+    return;
+  }
+
   // Default: serve the annotator HTML template
   if (req.method === 'GET' && (subRoute === '' || subRoute === undefined)) {
     try {

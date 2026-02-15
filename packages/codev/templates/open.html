@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <title>Annotate: {{FILE}}</title>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+  <link href="vendor/prism-tomorrow.min.css" rel="stylesheet">
   <!-- Markdown preview dependencies (loaded only for .md files) -->
   <script>
     if ({{IS_MARKDOWN}}) {
-      document.write('<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"><\/script>');
-      document.write('<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"><\/script>');
+      document.write('<script src="vendor/marked.min.js"><\/script>');
+      document.write('<script src="vendor/purify.min.js"><\/script>');
     }
   </script>
   <style>
@@ -547,16 +547,16 @@
     <div id="annotationsList"></div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markdown.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+  <script src="vendor/prism.min.js"></script>
+  <script src="vendor/prism-javascript.min.js"></script>
+  <script src="vendor/prism-typescript.min.js"></script>
+  <script src="vendor/prism-python.min.js"></script>
+  <script src="vendor/prism-bash.min.js"></script>
+  <script src="vendor/prism-markdown.min.js"></script>
+  <script src="vendor/prism-json.min.js"></script>
+  <script src="vendor/prism-yaml.min.js"></script>
+  <script src="vendor/prism-css.min.js"></script>
+  <script src="vendor/prism-markup.min.js"></script>
 
   <script>
     // State

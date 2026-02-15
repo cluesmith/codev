@@ -452,6 +452,67 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // Annotate vendor route (Bugfix #269)
+  // =========================================================================
+
+  describe('annotate vendor route', () => {
+    const projectPath = '/test/project';
+    const encoded = Buffer.from(projectPath).toString('base64url');
+    const tabId = 'test-tab';
+
+    beforeEach(() => {
+      mockGetProjectTerminalsEntry.mockReturnValue({
+        architect: undefined,
+        shells: new Map(),
+        builders: new Map(),
+        fileTabs: new Map([[tabId, { path: '/test/project/src/main.ts' }]]),
+      });
+    });
+
+    it('serves vendor JS files with correct content type', async () => {
+      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/prism.min.js`);
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(headers()['Content-Type']).toBe('application/javascript');
+    });
+
+    it('serves vendor CSS files with correct content type', async () => {
+      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/prism-tomorrow.min.css`);
+      const { res, statusCode, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(headers()['Content-Type']).toBe('text/css');
+    });
+
+    it('blocks path traversal in vendor route', async () => {
+      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/..%2F..%2Fpackage.json`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+    });
+
+    it('returns 404 for non-existent vendor files', async () => {
+      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/nonexistent.js`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
+    });
+
+    it('rejects vendor files with disallowed extensions', async () => {
+      const req = makeReq('GET', `/project/${encoded}/api/annotate/${tabId}/vendor/secret.txt`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+    });
+  });
+
+  // =========================================================================
   // Error handling
   // =========================================================================
 
