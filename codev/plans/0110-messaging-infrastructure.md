@@ -248,10 +248,10 @@ interface MessageFrame {
 - Replace `sendToBuilder()` logic (local state.db lookup → `writeTerminal()`) with `client.sendMessage()`
 - Replace `sendToArchitect()` logic (Tower workspace query → find architect → `writeTerminal()`) with `client.sendMessage()`
 - The `send()` main handler becomes much simpler:
-  1. Detect workspace root from CWD (for `workspace` field) — `detectWorkspaceRoot()` stays as-is
+  1. Detect workspace root from CWD — `detectWorkspaceRoot()` stays as-is. This value is used for both `workspace` (target resolution fallback) and `fromWorkspace` (sender provenance in broadcast).
   2. Detect current builder ID from worktree path (for `from` field) — `detectCurrentBuilderId()` extracts worktree dir name, then looks up the builder in state.db by worktree path to get the canonical `builderId`
-  3. Call `client.sendMessage(target, message, from, workspace, options)`
-- `sendToAll()` stays — iterates builders from state.db, calls `sendMessage()` for each
+  3. Call `client.sendMessage(target, message, from, workspace, fromWorkspace, options)` — note: `workspace` and `fromWorkspace` are the same value (the sender's workspace root). For cross-project sends (where `to` contains `project:`), `workspace` is still the sender's workspace since target resolution uses the `project:` prefix, not `workspace`.
+- `sendToAll()` stays — iterates builders from state.db, calls `sendMessage()` for each with proper `fromWorkspace`
 
 **Update `commands/status.ts`**:
 - In the legacy (no Tower) display: builder IDs already use new format from Phase 1, widen the ID column to accommodate longer names (e.g., `builder-spir-0109` = 18 chars vs old `0109` = 4 chars)
@@ -267,8 +267,9 @@ interface MessageFrame {
 - [ ] `--raw`, `--no-enter`, `--interrupt`, `--file` flags still work
 
 #### Test Plan
-- **Unit Tests**: End-to-end send flow with mocked TowerClient
+- **Unit Tests**: End-to-end send flow with mocked TowerClient — backward compat sends, new-format sends, `--all` broadcasts, `--file` flag, `--raw`/`--no-enter`/`--interrupt` flags
 - **Integration Tests**: Verify `af send` CLI uses `POST /api/send` and message appears on `/ws/messages`
+- **Integration Tests**: Cross-project scenario — register two workspaces in Tower, send from workspace A to `workspaceB:architect`, verify: (a) message arrives at correct terminal, (b) broadcast `from.project` is workspace A's name (not B's), (c) broadcast `to.project` is workspace B's name
 
 #### Risks
 - **Risk**: CLI version mismatch — old CLI calling new Tower or vice versa
