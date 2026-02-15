@@ -103,7 +103,7 @@ export async function status(): Promise<void> {
   // Builders
   if (state.builders.length > 0) {
     logger.info('Builders:');
-    const widths = [12, 20, 10, 12, 10];
+    const widths = [20, 20, 10, 12, 10];
 
     logger.row(['ID', 'Name', 'Type', 'Status', 'Phase'], widths);
     logger.row(['──', '────', '────', '──────', '─────'], widths);
