@@ -423,6 +423,9 @@ describe('heartbeat', () => {
     (client as any).state = 'connected';
     (client as any).startHeartbeat(ws);
 
+    // Spy on scheduleReconnect to count calls
+    const reconnectSpy = vi.spyOn(client as any, 'scheduleReconnect');
+
     // Trigger ping — arms a pong timeout
     vi.advanceTimersByTime(PING_INTERVAL_MS);
     expect((client as any).pongTimeout).not.toBeNull();
@@ -437,21 +440,23 @@ describe('heartbeat', () => {
 
     // The pong timeout was cleared by cleanup → stopHeartbeat
     expect((client as any).pongTimeout).toBeNull();
+    expect(reconnectSpy).toHaveBeenCalledTimes(1);
 
-    // One reconnect timer is active from scheduleReconnect
-    const reconnectTimerAfterClose = (client as any).reconnectTimer;
-    expect(reconnectTimerAfterClose).not.toBeNull();
-
-    // Even if we tried to fire the pong timeout (it's cleared, so it won't),
-    // the stale guard (ws !== this.ws since this.ws is now null) prevents
-    // a second reconnect. Verify warn was never called:
-    expect(warnSpy).not.toHaveBeenCalled();
-
-    // The reconnect timer is still the same one — not replaced by a second reconnect
-    expect((client as any).reconnectTimer).toBe(reconnectTimerAfterClose);
-
-    // Clean up
+    // Clear the reconnect timer so advancing time doesn't trigger doConnect
     (client as any).clearReconnectTimer();
+
+    // Advance past the pong timeout window — the cleared timeout must not fire.
+    // This exercises the actual race: close already handled, pong timeout window
+    // elapses, no second reconnect or warn is triggered.
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+
+    // The heartbeat timeout was cleared by cleanup, so warn was never called
+    // and scheduleReconnect was not called a second time
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(reconnectSpy).toHaveBeenCalledTimes(1);
+
+    // State is still disconnected — no second cleanup/reconnect cycle
+    expect((client as any).state).toBe('disconnected');
   });
 
   it('normal pong does not produce any log output (silent success)', () => {
