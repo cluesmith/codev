@@ -72,7 +72,7 @@ SessionManager should accept an optional `logger` callback in `SessionManagerCon
 Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignore']` — stderr is discarded. Change to capture stderr:
 
 - Spawn with `stdio: ['ignore', 'pipe', 'pipe']`
-- Buffer last 50 lines of stderr per session in SessionManager (lines truncated at 1000 chars; non-UTF-8 bytes replaced with `?`)
+- Buffer last 500 lines of stderr per session in SessionManager (lines truncated at 10000 chars; non-UTF-8 bytes replaced with `?`)
 - When a session exits, crashes, or is killed, log the stderr tail after the stderr stream emits `close` (which guarantees all buffered data has been read). If the stream is already closed at the time of the exit/kill event, log immediately. If `close` has not fired within 1000ms of the process exit, log the buffer as-is with a `(stderr incomplete)` note.
 - When `createSession` fails (shellper exits before session establishment), include the captured startup stderr in the failure log.
 - **Limitation**: Reconnected sessions (after Tower restart) will not have stderr capture, since stderr is only available for child processes spawned by this Tower instance. This is acceptable — reconnected shellpers were already running successfully.
@@ -115,6 +115,6 @@ Existing test files (`session-manager.test.ts`, `tower-shellper-integration.test
 
 New test coverage expected:
 - **stderr capture**: Verify that shellper stderr output is buffered and surfaced when the process exits (by code and by signal)
-- **stderr truncation**: Verify the 50-line / 1000-char limits
+- **stderr truncation**: Verify the 500-line / 10000-char limits
 - **reconnect failure reasons**: Verify each `return null` path in `reconnectSession` now provides a reason string in the log
 - **auto-restart logging**: Verify restart count and delay appear in log output
