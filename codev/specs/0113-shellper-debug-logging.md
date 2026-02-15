@@ -73,7 +73,9 @@ Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignor
 
 - Spawn with `stdio: ['ignore', 'pipe', 'pipe']`
 - Buffer last 50 lines of stderr per session in SessionManager (lines truncated at 1000 chars; non-UTF-8 bytes replaced with `?`)
-- When a session exits, crashes, or is killed, log the stderr tail after the stderr stream emits `close` (which guarantees all buffered data has been read). If the stream is already closed at the time of the exit/kill event, log immediately.
+- When a session exits, crashes, or is killed, log the stderr tail after the stderr stream emits `close` (which guarantees all buffered data has been read). If the stream is already closed at the time of the exit/kill event, log immediately. If `close` has not fired within 1000ms of the process exit, log the buffer as-is with a `(stderr incomplete)` note.
+- When `createSession` fails (shellper exits before session establishment), include the captured startup stderr in the failure log.
+- **Limitation**: Reconnected sessions (after Tower restart) will not have stderr capture, since stderr is only available for child processes spawned by this Tower instance. This is acceptable — reconnected shellpers were already running successfully.
   ```
   Session {id} exited (code={code}). Last stderr:
     Shellper received SIGTERM, shutting down
@@ -83,7 +85,7 @@ Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignor
 
 ### R6: Log format
 
-All shellper-side logs (R1, R2) use a simple timestamped format to stderr:
+All shellper-side logs (R1, R2) use a simple timestamped format to stderr. Stderr writes must silently ignore EPIPE errors (which occur when Tower has closed the pipe's read end, e.g., after Tower restart). A helper function should wrap `process.stderr.write()` with a try/catch for this.
 
 ```
 [2026-02-15T12:00:00.000Z] PTY spawned: pid=1234, cols=200, rows=50
