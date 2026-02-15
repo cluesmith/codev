@@ -138,7 +138,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Replace gate watcher polling with direct af send from porch when gates are hit"
     status: integrated
     priority: high
-    release: null
+    release: "v2.0.3"
     files:
       spec: codev/specs/0108-porch-gate-notifications.md
       plan: codev/plans/0108-porch-gate-notifications.md
@@ -157,7 +157,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Add WebSocket ping/pong heartbeat to tunnel client to detect and recover from silent connection drops"
     status: integrated
     priority: high
-    release: null
+    release: "v2.0.3"
     files:
       spec: codev/specs/0109-tunnel-keepalive.md
       plan: codev/plans/0109-tunnel-keepalive.md
@@ -177,7 +177,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Delete templates/dashboard/ (16 dead files replaced by React dashboard in 0085)"
     status: integrated
     priority: medium
-    release: null
+    release: "v2.0.3"
     files:
       spec: codev/specs/0111-remove-dead-vanilla-dashboard.md
       plan: codev/plans/0111-remove-dead-vanilla-dashboard.md
@@ -194,9 +194,9 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0112"
     title: "Workspace Rename (project → workspace for repos)"
     summary: "Rename all uses of 'project' meaning repository to 'workspace' across Tower, CLI, dashboard, and database"
-    status: committed
+    status: integrated
     priority: high
-    release: null
+    release: "v2.0.3"
     files:
       spec: codev/specs/0112-workspace-rename.md
       plan: codev/plans/0112-workspace-rename.md
@@ -294,6 +294,12 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v2.0.3"
+    name: "Hagia Sophia"
+    status: released
+    target_date: "2026-02-15"
+    notes: "Workspace rename (project→workspace), tunnel keepalive, gate notifications, dead code cleanup (-7500 lines), bugfixes #266/#269/#274/#277."
+
   - version: "v2.0.2"
     name: "Hagia Sophia"
     status: released
