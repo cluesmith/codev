@@ -26,8 +26,6 @@ import {
   loadFileTabsForProject,
   processExists,
   getTerminalSessionsForProject,
-  startGateWatcher,
-  stopGateWatcher,
   type TerminalDeps,
 } from '../servers/tower-terminals.js';
 
@@ -373,29 +371,6 @@ describe('tower-terminals', () => {
       const manager1 = getTerminalManager();
       const manager2 = getTerminalManager();
       expect(manager1).toBe(manager2);
-    });
-  });
-
-  // =========================================================================
-  // Gate watcher
-  // =========================================================================
-
-  describe('startGateWatcher / stopGateWatcher', () => {
-    it('starts without error when initialized', () => {
-      const deps = makeDeps();
-      initTerminals(deps);
-      expect(() => startGateWatcher()).not.toThrow();
-      stopGateWatcher(); // cleanup
-    });
-
-    it('does not start when not initialized', () => {
-      // No initTerminals called
-      expect(() => startGateWatcher()).not.toThrow();
-    });
-
-    it('stopGateWatcher is idempotent', () => {
-      expect(() => stopGateWatcher()).not.toThrow();
-      expect(() => stopGateWatcher()).not.toThrow();
     });
   });
 

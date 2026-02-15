@@ -3,7 +3,7 @@
  * Spec 0105: Tower Server Decomposition — Phase 4
  *
  * Contains: terminal session CRUD, file tab persistence, shell ID allocation,
- * terminal reconciliation, gate watcher, and terminal list assembly.
+ * terminal reconciliation, and terminal list assembly.
  */
 
 import fs from 'node:fs';
@@ -12,7 +12,6 @@ import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
 import { getGateStatusForProject } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
-import { GateWatcher } from '../utils/gate-watcher.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
@@ -36,12 +35,6 @@ const projectTerminals = new Map<string, ProjectTerminals>();
 
 /** Global TerminalManager instance (lazy singleton) */
 let terminalManager: TerminalManager | null = null;
-
-/** Gate watcher state */
-const gateWatcher = new GateWatcher((...args: Parameters<TerminalDeps['log']>) => {
-  if (_deps) _deps.log(...args);
-});
-let gateWatcherInterval: ReturnType<typeof setInterval> | null = null;
 
 // ============================================================================
 // Dependency injection interface
@@ -70,10 +63,6 @@ export function initTerminals(deps: TerminalDeps): void {
 
 /** Tear down the terminal module */
 export function shutdownTerminals(): void {
-  if (gateWatcherInterval) {
-    clearInterval(gateWatcherInterval);
-    gateWatcherInterval = null;
-  }
   if (terminalManager) {
     terminalManager.shutdown();
     terminalManager = null;
@@ -481,35 +470,6 @@ export async function reconcileTerminalSessions(): Promise<void> {
     _deps.log('INFO', `Reconciliation complete: ${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
   } else {
     _deps.log('INFO', 'No terminal sessions to reconcile');
-  }
-}
-
-// ============================================================================
-// Gate watcher
-// ============================================================================
-
-/** Start periodic gate status polling */
-export function startGateWatcher(): void {
-  if (!_deps) return;
-  gateWatcherInterval = setInterval(async () => {
-    if (!_deps) return;
-    const projectPaths = _deps.getKnownProjectPaths();
-    for (const projectPath of projectPaths) {
-      try {
-        const gateStatus = getGateStatusForProject(projectPath);
-        await gateWatcher.checkAndNotify(gateStatus, projectPath);
-      } catch (err) {
-        _deps.log('WARN', `Gate watcher error for ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }, 10_000);
-}
-
-/** Stop the gate watcher interval */
-export function stopGateWatcher(): void {
-  if (gateWatcherInterval) {
-    clearInterval(gateWatcherInterval);
-    gateWatcherInterval = null;
   }
 }
 
