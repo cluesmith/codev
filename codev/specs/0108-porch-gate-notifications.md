@@ -33,25 +33,27 @@ This happens in three places in `next.ts`:
 ### Message Format
 
 ```
-GATE: {gateName} (Builder {builderId})
-Builder {builderId} is waiting for approval.
-Run: porch approve {builderId} {gateName}
+GATE: {gateName} ({builderId})
+{builderId} is waiting for approval.
+Run: porch approve {projectNumber} {gateName}
 ```
 
-This matches the existing gate watcher message format for consistency.
+Where `builderId` uses the standardized naming from Spec 0110 (e.g., `builder-spir-0109`, `builder-bugfix-269`), and `projectNumber` is the numeric ID used by porch (e.g., `0109`, `bugfix-269`).
 
 ### Execution
 
 Use `execFile` (same as gate-watcher.ts does) to call `af send architect "..." --raw --no-enter`. Run it fire-and-forget with a 10-second timeout — gate notification is best-effort and must not block porch's state transition.
 
+The `af send` target is `architect` (current project, resolved from CWD). When Spec 0110 lands, this will naturally support cross-project addressing, but for now porch always sends to its own project's architect.
+
 ```typescript
 import { execFile } from 'node:child_process';
 
-function notifyArchitect(builderId: string, gateName: string, worktreeDir: string): void {
+function notifyArchitect(builderId: string, projectNumber: string, gateName: string, worktreeDir: string): void {
   const message = [
-    `GATE: ${gateName} (Builder ${builderId})`,
-    `Builder ${builderId} is waiting for approval.`,
-    `Run: porch approve ${builderId} ${gateName}`,
+    `GATE: ${gateName} (${builderId})`,
+    `${builderId} is waiting for approval.`,
+    `Run: porch approve ${projectNumber} ${gateName}`,
   ].join('\n');
 
   const afBinary = resolveAfBinary(); // same helper as gate-watcher.ts
@@ -69,6 +71,10 @@ function notifyArchitect(builderId: string, gateName: string, worktreeDir: strin
   );
 }
 ```
+
+### Relationship to Spec 0110
+
+This spec (0108) adds the **porch → af send** call. Spec 0110 will later enhance the entire messaging infrastructure (standardized agent names, cross-project routing, message bus). 0108 should be implemented to work with the **current** `af send` API. When 0110 lands, porch notifications will automatically benefit from the message bus and dashboard visibility.
 
 ### Gate Watcher Deprecation
 
@@ -97,7 +103,9 @@ The Tower-side notification handler (triggered when `af send` writes to the arch
 - Keep desktop notification infrastructure (it's triggered by `af send`, not by the watcher)
 
 ### Out of Scope
-- Changing how `af send` works
+- Changing how `af send` works (that's Spec 0110)
+- Standardizing agent names (that's Spec 0110)
+- Cross-project messaging (that's Spec 0110)
 - Changing the porch state machine
 - Adding new gate types
 - UI changes

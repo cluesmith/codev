@@ -1352,11 +1352,26 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     timestamps:
       conceived_at: "2026-02-15"
     notes: "Silent WebSocket death after sleep/wake or network transition leaves tunnel in stale 'connected' state. 30s ping, 10s pong timeout."
+  - id: "0110"
+    title: "Messaging Infrastructure"
+    summary: "Standardized agent naming, cross-project messaging, WebSocket message bus, POST /api/send endpoint"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0110-messaging-infrastructure.md
+      plan: null
+      review: null
+    dependencies: ["0108"]
+    tags: [messaging, af-send, dashboard, agents]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Standardize agent names (builder-spir-0109), add project:agent addressing, WebSocket message bus for dashboard observability, POST /api/send endpoint."
 ```
 
 ## Next Available Number
 
-**0110** - Reserve this number for your next project
+**0111** - Reserve this number for your next project
 
 ---
 
