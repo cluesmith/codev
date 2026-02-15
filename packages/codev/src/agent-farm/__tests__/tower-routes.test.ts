@@ -18,7 +18,9 @@ import type { RouteContext } from '../servers/tower-routes.js';
 
 const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
-  mockIsSessionPersistent, mockGetNextShellId } = vi.hoisted(() => ({
+  mockIsSessionPersistent, mockGetNextShellId,
+  mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
+  mockParseJsonBody } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -27,6 +29,10 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockGetTerminalsForWorkspace: vi.fn(),
   mockIsSessionPersistent: vi.fn(),
   mockGetNextShellId: vi.fn(),
+  mockResolveTarget: vi.fn(),
+  mockBroadcastMessage: vi.fn(),
+  mockIsResolveError: vi.fn((r: any) => 'code' in r),
+  mockParseJsonBody: vi.fn(async () => ({})),
 }));
 
 vi.mock('../servers/tower-instances.js', () => ({
@@ -59,6 +65,12 @@ vi.mock('../servers/tower-tunnel.js', () => ({
   }),
 }));
 
+vi.mock('../servers/tower-messages.js', () => ({
+  resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
+  broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
+  isResolveError: (r: any) => mockIsResolveError(r),
+}));
+
 vi.mock('../servers/tower-utils.js', () => ({
   isRateLimited: vi.fn(() => false),
   normalizeWorkspacePath: (p: string) => p,
@@ -69,7 +81,7 @@ vi.mock('../servers/tower-utils.js', () => ({
 
 vi.mock('../utils/server-utils.js', () => ({
   isRequestAllowed: vi.fn(() => true),
-  parseJsonBody: vi.fn(async () => ({})),
+  parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
 }));
 
 // ============================================================================
@@ -293,8 +305,7 @@ describe('tower-routes', () => {
 
   describe('POST /api/notify', () => {
     it('broadcasts notification via context', async () => {
-      const { parseJsonBody } = await import('../utils/server-utils.js');
-      (parseJsonBody as any).mockResolvedValueOnce({
+      mockParseJsonBody.mockResolvedValueOnce({
         type: 'gate',
         title: 'Gate ready',
         body: 'Spec approval needed',
@@ -316,8 +327,7 @@ describe('tower-routes', () => {
     });
 
     it('returns 400 when title or body is missing', async () => {
-      const { parseJsonBody } = await import('../utils/server-utils.js');
-      (parseJsonBody as any).mockResolvedValueOnce({ type: 'info' });
+      mockParseJsonBody.mockResolvedValueOnce({ type: 'info' });
 
       const req = makeReq('POST', '/api/notify');
       const { res, statusCode } = makeRes();
@@ -528,6 +538,109 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(500);
       expect(JSON.parse(body()).error).toBe('db error');
       expect(ctx.log).toHaveBeenCalledWith('ERROR', expect.stringContaining('db error'));
+    });
+  });
+
+  // ==========================================================================
+  // POST /api/send — endpoint-level validation and error contract
+  // ==========================================================================
+
+  describe('POST /api/send', () => {
+    it('returns 400 INVALID_PARAMS when "to" is missing', async () => {
+      mockParseJsonBody.mockResolvedValue({ message: 'hello' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+      expect(JSON.parse(body()).message).toContain('to');
+    });
+
+    it('returns 400 INVALID_PARAMS when "message" is missing', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+      expect(JSON.parse(body()).message).toContain('message');
+    });
+
+    it('returns 400 INVALID_PARAMS when "to" is empty string', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: '  ', message: 'hello' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+    });
+
+    it('returns 404 NOT_FOUND when target agent not found', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'unknown', message: 'test', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'Agent not found' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(404);
+      expect(JSON.parse(body()).error).toBe('NOT_FOUND');
+    });
+
+    it('returns 409 AMBIGUOUS when multiple agents match', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: '42', message: 'test', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({ code: 'AMBIGUOUS', message: 'Multiple matches' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(409);
+      expect(JSON.parse(body()).error).toBe('AMBIGUOUS');
+    });
+
+    it('returns 400 INVALID_PARAMS when no workspace context (NO_CONTEXT)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'test' });
+      mockResolveTarget.mockReturnValue({ code: 'NO_CONTEXT', message: 'No project context' });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(400);
+      // NO_CONTEXT is mapped to INVALID_PARAMS per plan's error contract
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+    });
+
+    it('returns 200 with ok:true on successful send', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234 }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.resolvedTo).toBe('architect');
+      expect(parsed.terminalId).toBe('term-001');
+      expect(mockWrite).toHaveBeenCalled();
     });
   });
 });
