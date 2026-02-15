@@ -43,7 +43,7 @@ export interface ProtocolPhase {
   type?: 'once' | 'per_plan_phase' | 'build_verify';
   build?: BuildConfig;           // Build config (for build_verify phases)
   verify?: VerifyConfig;         // Verify config (for build_verify phases)
-  max_iterations?: number;       // Max build-verify iterations (default: 7)
+  max_iterations?: number;       // Max build-verify iterations (default: 3)
   on_complete?: OnCompleteConfig; // Actions after successful verify
   gate?: string;                 // Gate name that blocks after this phase
   checks?: string[];             // Check names to run (keys into protocol.checks)

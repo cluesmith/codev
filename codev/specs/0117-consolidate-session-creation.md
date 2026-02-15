@@ -49,21 +49,58 @@ export function defaultSessionOptions(overrides?: Partial<SessionOptions>): Sess
 }
 ```
 
+## Detached Shellper Process
+
+Shellper is currently spawned as a child process of Tower. When Tower stops, shellper dies and all PTY sessions are killed. This is a regression from tmux, which ran as an independent daemon and sessions survived restarts.
+
+### Root Cause
+
+On 2026-02-15, Tower became unstable due to PTY exhaustion (`posix_openpt()` failing at `kern.tty.ptmx_max = 511`). Restarting Tower killed all builder sessions. The `while true` loop in `.builder-start.sh` respawned Claude processes, but session state was lost.
+
+### Required Change
+
+Spawn shellper as a detached process so it survives Tower restarts:
+
+1. **Spawn detached**: Use `child_process.spawn()` with `detached: true` + `unref()`. Shellper already communicates over a Unix socket, so no IPC channel is needed.
+2. **Reconnect on startup**: Tower startup checks if a shellper socket already exists. If so, reconnect to the existing process instead of spawning a new one.
+3. **PID file**: Write shellper's PID to a known location (e.g., `~/.agent-farm/shellper.pid`) for lifecycle management.
+4. **Graceful handoff**: When Tower stops, it disconnects from shellper but does NOT kill it. Sessions continue running.
+
+### Startup Sequence
+
+```
+Tower.start():
+  1. Check if shellper socket exists at expected path
+  2. If exists → try connecting
+     a. Connection succeeds → reuse existing shellper
+     b. Connection fails → stale socket, clean up and spawn new
+  3. If not exists → spawn new detached shellper
+```
+
+### Interaction with 0118 (Multi-Client)
+
+Spec 0118 adds multi-client support to shellper. That's a natural prerequisite — Tower reconnecting after restart is just "another client connecting." These two specs together restore the session persistence that tmux provided natively.
+
 ## Success Criteria
 
 - [ ] All shellper session creation flows through one shared function for default options
 - [ ] No raw `cols: DEFAULT_COLS, rows: DEFAULT_ROWS` literals outside the factory function
 - [ ] Existing tests pass without modification (behavior unchanged)
 - [ ] `spawn-worktree.ts` uses the same constants for its HTTP body
+- [ ] Shellper spawned as detached process (survives Tower restart)
+- [ ] Tower reconnects to existing shellper on startup
+- [ ] PID file written for shellper lifecycle management
+- [ ] Tower stop does NOT kill shellper
 
 ## Constraints
 
-- Pure refactor — zero behavior change
-- Must not affect session persistence or restart behavior
+- Session creation consolidation is a pure refactor — zero behavior change
+- Detached shellper changes process lifecycle but not session behavior
 - The factory function should live in the terminal module (not scattered into server code)
+- Depends on 0118 (multi-client) for full Tower reconnection support
 
 ## Scope
 
-- Small refactor, < 100 LOC changed
-- No new tests needed (behavior unchanged, existing tests cover it)
-- No new dependencies
+- Session consolidation: ~100 LOC changed
+- Detached shellper: ~150 LOC new/changed in `shellper-process.ts` and `tower-server.ts`
+- New test needed for reconnect-on-startup path

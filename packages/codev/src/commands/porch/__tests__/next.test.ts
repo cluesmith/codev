@@ -76,7 +76,7 @@ const spirProtocol = {
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
       verify: { type: 'spec-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 7,
+      max_iterations: 3,
       on_complete: { commit: true, push: true },
       gate: 'spec-approval',
     },
@@ -86,7 +86,7 @@ const spirProtocol = {
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
       verify: { type: 'plan-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 7,
+      max_iterations: 3,
       on_complete: { commit: true, push: true },
       gate: 'plan-approval',
     },
@@ -96,7 +96,7 @@ const spirProtocol = {
       type: 'per_plan_phase',
       build: { prompt: 'implement.md', artifact: 'src/**/*.ts' },
       verify: { type: 'impl-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 7,
+      max_iterations: 3,
       on_complete: { commit: true, push: true },
       checks: {
         build: { command: 'npm run build' },
@@ -454,7 +454,7 @@ describe('porch next', () => {
   it('force-advances to gate at max iterations even without unanimity', async () => {
     const state = makeState({
       build_complete: true,
-      iteration: 7,
+      iteration: 3,
     });
     setupState(testDir, state);
 
@@ -463,9 +463,9 @@ describe('porch next', () => {
     fs.mkdirSync(projectDir, { recursive: true });
     const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
     const rcContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: REQUEST_CHANGES\n---`;
-    fs.writeFileSync(path.join(projectDir, '0001-specify-iter7-gemini.txt'), approveContent);
-    fs.writeFileSync(path.join(projectDir, '0001-specify-iter7-codex.txt'), rcContent);
-    fs.writeFileSync(path.join(projectDir, '0001-specify-iter7-claude.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter3-gemini.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter3-codex.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter3-claude.txt'), approveContent);
 
     const result = await next(testDir, '0001');
 

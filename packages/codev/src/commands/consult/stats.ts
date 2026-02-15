@@ -93,7 +93,7 @@ function printLastN(rows: MetricsRow[]): void {
   console.log(`${padRight('TIMESTAMP', 20)} ${padRight('MODEL', 8)} ${padRight('TYPE', 20)} ${padRight('DURATION', 10)} ${padRight('COST', 10)} ${padRight('EXIT', 5)} PROJECT`);
 
   for (const row of rows) {
-    const ts = row.timestamp.replace('T', ' ').replace(/\.\d+Z$/, '').substring(0, 19);
+    const ts = new Date(row.timestamp).toLocaleString('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(',', '');
     const model = row.model;
     const type = row.review_type ?? '';
     const duration = `${row.duration_seconds.toFixed(1)}s`;
