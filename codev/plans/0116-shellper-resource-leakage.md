@@ -15,7 +15,7 @@ Implement Approach 1 from the spec: Periodic Cleanup + Test Hygiene + Socket Iso
 - [ ] Full E2E test suite leaves zero orphaned shellper processes or sockets
 - [ ] `cleanupStaleSockets()` runs periodically during Tower lifetime, not just at startup
 - [ ] Test Tower instances use isolated socket directories (not `~/.codev/run/`)
-- [ ] E2E test `afterAll` kills terminals via Tower API before stopping
+- [ ] E2E test `afterEach`/`afterAll` deactivates workspaces and kills terminals before stopping
 - [ ] Failed `createSession()` never leaves an orphaned shellper process (verified via PID liveness check)
 - [ ] Cleanup interval is cleared on graceful Tower shutdown
 - [ ] All tests pass with >90% coverage on new code
@@ -122,7 +122,7 @@ Note: The second catch block (lines 197-208) already kills via `process.kill(inf
 #### Deliverables
 - [ ] `SHELLPER_SOCKET_DIR` env var support in `tower-server.ts`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] 4 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll`
+- [ ] 4 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll` (`bugfix-199` also adds workspace deactivation before DELETE)
 - [ ] `tower-baseline` already has `deactivateWorkspace()` in `afterEach` — verified, no changes needed
 - [ ] `bugfix-202` adds defensive terminal DELETE in `afterAll` as failure-safe (inline deactivation is not guaranteed on assertion failure)
 - [ ] Temp socket directories cleaned up in `afterAll` for all 6 E2E files
@@ -257,7 +257,7 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 #### Acceptance Criteria
 - [ ] Test Tower instances use temp dirs for sockets, not `~/.codev/run/`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] `afterAll` in all 4 API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower
+- [ ] `afterAll` in all 4 API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower (with workspace deactivation where workspaces are activated, e.g., `bugfix-199`)
 - [ ] `tower-baseline` already deactivates properly via `afterEach` — verified
 - [ ] `bugfix-202` has defensive terminal DELETE in `afterAll` as failure-safe backup
 - [ ] Temp socket directories are cleaned up in `afterAll` for all E2E tests
