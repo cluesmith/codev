@@ -119,7 +119,7 @@ Gemini CLI supports `--output-format json` which returns structured JSON with a 
 }
 ```
 
-**Implementation**: Add `--output-format json` to the Gemini command args. Parse the JSON output to extract `stats.models.*.tokens.prompt` (input) and `stats.models.*.tokens.candidates` (output). Gemini CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+**Implementation**: Add `--output-format json` to the Gemini command args. Parse the JSON output to extract `stats.models.*.tokens.prompt` (input_tokens), `stats.models.*.tokens.candidates` (output_tokens), and `stats.models.*.tokens.cached` (cached_input_tokens). All three are required for cost computation. Gemini CLI does **not** report cost — compute it from exact tokens using the static pricing table.
 
 **Output unwrapping**: The `response` field contains the actual review text. Extract this and write it to stdout/outputPath. Do NOT write raw JSON to review files — porch expects plain-text reviews.
 
@@ -142,7 +142,7 @@ Codex CLI supports `--json` which produces a JSONL (newline-delimited JSON) stre
 
 Response text appears in `message` events with `role: "assistant"`.
 
-**Implementation**: Add `--json` to the Codex command args. Parse the JSONL output to find `turn.completed` events and sum `usage.input_tokens` and `usage.output_tokens` across all turns. Codex CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+**Implementation**: Add `--json` to the Codex command args. Parse the JSONL output to find `turn.completed` events and sum `usage.input_tokens`, `usage.cached_input_tokens`, and `usage.output_tokens` across all turns. All three are required for cost computation. Codex CLI does **not** report cost — compute it from exact tokens using the static pricing table.
 
 **Output unwrapping**: Extract assistant message text from `message` events in the JSONL stream. Write only the extracted review text to stdout/outputPath — not raw JSONL. This requires always piping stdout (not inheriting) and streaming the extracted text to the terminal in real-time as JSONL events arrive.
 
@@ -311,9 +311,9 @@ Create a `extractUsage(model: string, output: string, sdkResult?: SDKResultMessa
 
 The function should:
 
-1. For Claude: read `total_cost_usd`, `usage.input_tokens`, `usage.output_tokens` directly from the `SDKResultMessage` — no parsing needed
-2. For Gemini: parse the JSON output (`--output-format json`) and extract `stats.models.*.tokens.prompt/candidates`
-3. For Codex: parse the JSONL output (`--json`) and extract `turn.completed` events with `usage` fields
+1. For Claude: read `total_cost_usd`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens` directly from the `SDKResultMessage` — no parsing needed
+2. For Gemini: parse the JSON output (`--output-format json`) and extract `stats.models.*.tokens.prompt`, `stats.models.*.tokens.candidates`, and `stats.models.*.tokens.cached`
+3. For Codex: parse the JSONL output (`--json`) and extract `turn.completed` events with `usage.input_tokens`, `usage.cached_input_tokens`, and `usage.output_tokens`
 4. Return null (not throw) if extraction fails
 5. Log a warning to stderr on extraction failure
 
