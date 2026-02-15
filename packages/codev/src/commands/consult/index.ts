@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { resolveCodevFile, readCodevFile, findWorkspaceRoot, hasLocalOverride } from '../../lib/skeleton.js';
+import { MetricsDB } from './metrics.js';
+import { extractUsage, extractReviewText, type SDKResultLike } from './usage-extractor.js';
 
 // Model configuration
 interface ModelConfig {
@@ -50,6 +52,56 @@ interface ConsultOptions {
   output?: string;
   planPhase?: string;
   context?: string;
+  protocol?: string;
+  projectId?: string;
+}
+
+// Metrics context for passing invocation metadata to recording functions
+interface MetricsContext {
+  timestamp: string;
+  model: string;
+  reviewType: string | null;
+  subcommand: string;
+  protocol: string;
+  projectId: string | null;
+  workspacePath: string;
+}
+
+// Helper to record a metrics entry, opening and closing the DB
+function recordMetrics(ctx: MetricsContext, extra: {
+  durationSeconds: number;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  exitCode: number;
+  errorMessage: string | null;
+}): void {
+  try {
+    const db = new MetricsDB();
+    try {
+      db.record({
+        timestamp: ctx.timestamp,
+        model: ctx.model,
+        reviewType: ctx.reviewType,
+        subcommand: ctx.subcommand,
+        protocol: ctx.protocol,
+        projectId: ctx.projectId,
+        durationSeconds: extra.durationSeconds,
+        inputTokens: extra.inputTokens,
+        cachedInputTokens: extra.cachedInputTokens,
+        outputTokens: extra.outputTokens,
+        costUsd: extra.costUsd,
+        exitCode: extra.exitCode,
+        workspacePath: ctx.workspacePath,
+        errorMessage: extra.errorMessage,
+      });
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    console.error(`[warn] Failed to record metrics: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // Valid review types
@@ -274,8 +326,13 @@ async function runClaudeConsultation(
   role: string,
   workspaceRoot: string,
   outputPath?: string,
+  metricsCtx?: MetricsContext,
 ): Promise<void> {
   const chunks: string[] = [];
+  const startTime = Date.now();
+  let sdkResult: SDKResultLike | undefined;
+  let errorMessage: string | null = null;
+  let exitCode = 0;
 
   // The SDK spawns a Claude Code subprocess that checks process.env.CLAUDECODE.
   // We must remove it from process.env (not just the options env) to avoid
@@ -316,9 +373,13 @@ async function runClaudeConsultation(
         }
       }
       if (message.type === 'result') {
-        if (message.subtype !== 'success') {
+        if (message.subtype === 'success') {
+          sdkResult = message as unknown as SDKResultLike;
+        } else {
           const errors = 'errors' in message ? (message as { errors: string[] }).errors : [];
-          throw new Error(`Claude SDK error (${message.subtype}): ${errors.join(', ')}`);
+          errorMessage = `Claude SDK error (${message.subtype}): ${errors.join(', ')}`.substring(0, 500);
+          exitCode = 1;
+          throw new Error(errorMessage);
         }
       }
     }
@@ -329,9 +390,30 @@ async function runClaudeConsultation(
       fs.writeFileSync(outputPath, chunks.join(''));
       console.error(`\nOutput written to: ${outputPath}`);
     }
+  } catch (err) {
+    if (!errorMessage) {
+      errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
+      exitCode = 1;
+    }
+    throw err;
   } finally {
     if (savedClaudeCode !== undefined) {
       process.env.CLAUDECODE = savedClaudeCode;
+    }
+
+    // Record metrics (always, even on error)
+    if (metricsCtx) {
+      const duration = (Date.now() - startTime) / 1000;
+      const usage = sdkResult ? extractUsage('claude', '', sdkResult) : null;
+      recordMetrics(metricsCtx, {
+        durationSeconds: duration,
+        inputTokens: usage?.inputTokens ?? null,
+        cachedInputTokens: usage?.cachedInputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+        costUsd: usage?.costUsd ?? null,
+        exitCode,
+        errorMessage,
+      });
     }
   }
 }
@@ -347,6 +429,7 @@ async function runConsultation(
   reviewType?: string,
   customRole?: string,
   outputPath?: string,
+  metricsCtx?: MetricsContext,
 ): Promise<void> {
   // Use custom role if specified, otherwise use default consultant role
   let role = customRole ? loadCustomRole(workspaceRoot, customRole) : loadRole(workspaceRoot);
@@ -376,7 +459,7 @@ async function runConsultation(
     }
 
     const startTime = Date.now();
-    await runClaudeConsultation(query, role, workspaceRoot, outputPath);
+    await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -406,7 +489,7 @@ async function runConsultation(
     fs.writeFileSync(tempFile, role);
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
-    cmd = [config.cli, ...config.args, query];
+    cmd = [config.cli, ...config.args, '--output-format', 'json', query];
   } else if (model === 'codex') {
     // Codex uses experimental_instructions_file config flag (not env var)
     // This is the official approach per https://github.com/openai/codex/discussions/3896
@@ -419,6 +502,7 @@ async function runConsultation(
       '-c', 'model_reasoning_effort=medium', // Balance speed vs review quality
       '-c', 'sandbox=read-only', // Consult is read-only — no test execution
       '--full-auto',
+      '--json',
       query,
     ];
   } else {
@@ -447,7 +531,7 @@ async function runConsultation(
   // When outputPath is set, capture stdout to write to file (used by porch)
   const fullEnv = { ...process.env, ...env };
   const startTime = Date.now();
-  const stdoutMode = outputPath ? 'pipe' : 'inherit';
+  const stdoutMode = 'pipe'; // Always pipe to capture structured output for metrics
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
@@ -456,11 +540,38 @@ async function runConsultation(
     });
 
     const chunks: Buffer[] = [];
-    if (outputPath && proc.stdout) {
+    let codexLineBuf = '';
+
+    if (proc.stdout) {
       proc.stdout.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
-        // Also write to stdout so the user can still see output
-        process.stdout.write(chunk);
+
+        if (model === 'codex') {
+          // Stream assistant message text in real-time from JSONL
+          codexLineBuf += chunk.toString('utf-8');
+          const lines = codexLineBuf.split('\n');
+          codexLineBuf = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.type === 'message' && event.role === 'assistant') {
+                if (typeof event.content === 'string') {
+                  process.stdout.write(event.content);
+                } else if (Array.isArray(event.content)) {
+                  for (const block of event.content) {
+                    if (typeof block === 'string') process.stdout.write(block);
+                    else if (block?.type === 'text' && typeof block.text === 'string') process.stdout.write(block.text);
+                  }
+                }
+              }
+            } catch {
+              // Not valid JSON line, skip
+            }
+          }
+        }
+        // Gemini: buffer only (JSON is one blob, text emitted on close)
       });
     }
 
@@ -472,14 +583,40 @@ async function runConsultation(
         fs.unlinkSync(tempFile);
       }
 
-      // Write captured output to file
-      if (outputPath && chunks.length > 0) {
+      const rawOutput = Buffer.concat(chunks).toString('utf-8');
+
+      // Extract review text from structured output (JSON/JSONL → plain text)
+      const reviewText = extractReviewText(model, rawOutput);
+      const outputContent = reviewText ?? rawOutput; // Fallback to raw on parse failure
+
+      // Write extracted text to stdout for Gemini (was fully buffered)
+      if (model === 'gemini') {
+        process.stdout.write(outputContent);
+      }
+      // Codex: assistant text was already streamed in real-time via data handler
+
+      // Write to output file
+      if (outputPath && outputContent.length > 0) {
         const outputDir = path.dirname(outputPath);
         if (!fs.existsSync(outputDir)) {
           fs.mkdirSync(outputDir, { recursive: true });
         }
-        fs.writeFileSync(outputPath, Buffer.concat(chunks).toString('utf-8'));
+        fs.writeFileSync(outputPath, outputContent);
         console.error(`\nOutput written to: ${outputPath}`);
+      }
+
+      // Record metrics
+      if (metricsCtx) {
+        const usage = extractUsage(model, rawOutput);
+        recordMetrics(metricsCtx, {
+          durationSeconds: duration,
+          inputTokens: usage?.inputTokens ?? null,
+          cachedInputTokens: usage?.cachedInputTokens ?? null,
+          outputTokens: usage?.outputTokens ?? null,
+          costUsd: usage?.costUsd ?? null,
+          exitCode: code ?? 1,
+          errorMessage: code !== 0 ? `Process exited with code ${code}` : null,
+        });
       }
 
       console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -755,6 +892,20 @@ export async function consult(options: ConsultOptions): Promise<void> {
   const workspaceRoot = findWorkspaceRoot();
   loadDotenv(workspaceRoot);
 
+  // Capture timestamp at invocation start (before subprocess/SDK)
+  const timestamp = new Date().toISOString();
+
+  // Build metrics context with protocol/project defaults
+  const metricsCtx: MetricsContext = {
+    timestamp,
+    model,
+    reviewType: reviewType ?? null,
+    subcommand,
+    protocol: options.protocol ?? 'manual',
+    projectId: options.projectId ?? null,
+    workspacePath: workspaceRoot,
+  };
+
   console.error(`[${subcommand} review]`);
   console.error(`Model: ${model}`);
 
@@ -869,7 +1020,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, workspaceRoot, dryRun, reviewType, customRole, outputPath);
+  await runConsultation(model, query, workspaceRoot, dryRun, reviewType, customRole, outputPath, metricsCtx);
 }
 
 // Exported for testing
