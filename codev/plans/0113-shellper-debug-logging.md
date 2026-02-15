@@ -48,7 +48,7 @@ Add diagnostic logging across the shellper process lifecycle: shellper-side stde
 - After server listen (~line 155): `Socket listening: ${config.socketPath}`
 - Existing error/fatal handlers (lines 185, 190): already write to stderr — update format to use `logStderr()`
 
-**R2 — shellper-process.ts** — Accept a `log` callback in constructor or via a method. Add logging at:
+**R2 — shellper-process.ts** — Accept a `log: (msg: string) => void` callback as a constructor parameter (passed from `shellper-main.ts` as the `logStderr` function). Add logging at:
 - `handleConnection()` (line 176): `Connection accepted (replacing=${!!this.currentSocket})`
 - `socket.on('close')` (line 196): `Connection closed`
 - `handleHello()` (line 243): `HELLO: version=${hello.version}`
@@ -79,6 +79,7 @@ Add diagnostic logging across the shellper process lifecycle: shellper-side stde
 
 #### Files to Modify
 - `packages/codev/src/terminal/session-manager.ts`
+- `packages/codev/src/terminal/pty-session.ts` (pass signal through exit event)
 - `packages/codev/src/agent-farm/servers/tower-server.ts`
 - `packages/codev/src/agent-farm/servers/tower-instances.ts`
 - `packages/codev/src/agent-farm/servers/tower-terminals.ts`
@@ -103,13 +104,19 @@ Add diagnostic logging across the shellper process lifecycle: shellper-side stde
    - Client close without exit (line 154): `Session {id} shellper disconnected unexpectedly`
    - `cleanupStaleSockets()` (line 342): `Cleaned {n} stale sockets`
 
+**R4 — pty-session.ts** (prerequisite for tower-instances):
+
+- `pty-session.ts` line 138 currently emits `this.emit('exit', exitInfo.code)`, dropping the signal. Change to `this.emit('exit', exitInfo.code, exitInfo.signal)`. This is backward-compatible — existing listeners that only take one argument are unaffected by the extra argument.
+- Also add `packages/codev/src/terminal/pty-session.ts` to the files list for this phase.
+
 **R4 — tower-instances.ts**:
 
-- Line 412: Change `Architect shellper session exited for ${projectPath}` to include exit code and signal. The `ptySession.on('exit')` callback needs to capture exit info from the event argument.
+- Line 412: Change `Architect shellper session exited for ${projectPath}` to include exit code and signal: `Architect shellper session exited for ${projectPath} (code=${exitCode}, signal=${signal})`. The exit handler signature changes from `() =>` to `(exitCode, signal) =>`.
 
 **R4 — tower-terminals.ts**:
 
 - On-the-fly reconnect attempt (~line 566): `On-the-fly shellper reconnect for ${sessionId}` (already has success/failure logging at lines 595, 598 — enhance messages)
+- **R4 reconciliation summary** (line 488): The existing log already includes shellper-specific counts (`${shellperReconnected} shellper, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`). No changes needed — this R4 requirement is already satisfied by existing code.
 
 **Wiring — tower-server.ts**:
 
@@ -152,14 +159,17 @@ Add diagnostic logging across the shellper process lifecycle: shellper-side stde
 3. **Add `stderrLines: string[]` to ManagedSession interface** (line 53-61)
 
 4. **Wire stderr reader in createSession()**: After `cpSpawn()` (line 86), before `child.unref()` (line 102):
-   - Read `child.stderr` as UTF-8 line-by-line
-   - Push each line into the session's stderr buffer (truncate at 10000 chars)
+   - Call `child.stderr.setEncoding('utf8')` to decode as UTF-8 (Node replaces invalid bytes with U+FFFD `�`)
+   - Split incoming chunks on `\n` and push each line into the session's stderr buffer
+   - After decoding, replace any `\uFFFD` characters with `?` to satisfy the spec's non-UTF-8 replacement requirement
+   - Truncate each line at 10000 chars
    - Handle `child.stderr` errors silently (EPIPE, etc.)
 
-5. **Log stderr tail on exit**: In the `client.on('exit')` handler (line 139-147) and `client.on('close')` handler (line 154-161):
-   - Wait for stderr stream `close` (or 1000ms timeout)
+5. **Log stderr tail on exit**: Use a single `logStderrTail(sessionId, exitInfo)` function called from both `client.on('exit')` (line 139-147) and `client.on('close')` (line 154-161) handlers. Use a flag on ManagedSession to deduplicate (only log once per session death):
+   - Wait for stderr stream `close` (or 1000ms timeout via `setTimeout`)
    - If buffer has content, log: `Session {id} exited (code={code}). Last stderr:\n  {lines joined with \n  }`
-   - If timeout: append `(stderr incomplete)`
+   - If timeout fires before `close`: log buffer with `(stderr incomplete)` appended
+   - If stream is already closed (check `stream.destroyed`): log immediately
 
 6. **Log stderr on createSession failure**: If shellper exits before connection, include buffered startup stderr in the error log.
 
@@ -172,7 +182,12 @@ Add diagnostic logging across the shellper process lifecycle: shellper-side stde
 - Update mocks to account for `stdio: ['ignore', 'pipe', 'pipe']` (stderr is now piped)
 - Test stderr buffer: write 600 lines, verify only last 500 are retained
 - Test line truncation: write a 20000-char line, verify truncated to 10000
-- Test exit logging: verify stderr tail appears in logger output after process exit
+- Test non-UTF-8 replacement: verify `\uFFFD` replaced with `?`
+- Test exit logging by exit code: verify stderr tail appears in logger when process exits with code
+- Test exit logging by signal: verify stderr tail appears in logger when process killed by signal
+- Test stderr-close timing: stream closes before exit → log immediately
+- Test stderr-close timing: stream close delayed → 1000ms timeout fires → log with `(stderr incomplete)`
+- Test stderr tail deduplication: both `exit` and `close` fire → only one tail log emitted
 - Test each reconnect failure reason appears in logger
 - Test auto-restart logging: verify count/max/delay in logger
 
@@ -210,3 +225,4 @@ Phase 1 and Phase 2 are independent of each other. Phase 3 depends on both.
 | Existing tests break from stdio change | Medium | Low | Phase 3 updates test mocks; run full suite |
 | Stderr buffer memory growth | Low | Low | 500 lines × 10000 chars = ~5MB max per session; acceptable for 5-10 sessions |
 | EPIPE crashes in detached shellper | Low | High | R6 helper catches EPIPE; Node.js ignores SIGPIPE via libuv |
+| Duplicate stderr tail logs from exit+close race | Medium | Low | Deduplicate via `stderrTailLogged` flag on ManagedSession |
