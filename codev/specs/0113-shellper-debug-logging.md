@@ -42,7 +42,7 @@ Log to stderr (which is currently ignored — see R5):
 
 ### R3: Session lifecycle logging in Tower (`session-manager.ts`)
 
-SessionManager should accept an optional logger and log:
+SessionManager should accept an optional `logger` callback in `SessionManagerConfig` (signature: `(message: string) => void`). When provided, log:
 
 | Event | What to log |
 |-------|-------------|
@@ -72,8 +72,8 @@ SessionManager should accept an optional logger and log:
 Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignore']` — stderr is discarded. Change to capture stderr:
 
 - Spawn with `stdio: ['ignore', 'pipe', 'pipe']`
-- Buffer last N lines (e.g., 50) of stderr per session in SessionManager
-- When a session exits or crashes, include the stderr tail in the Tower log:
+- Buffer last 50 lines of stderr per session in SessionManager (lines truncated at 1000 chars; non-UTF-8 bytes replaced with `?`)
+- When a session exits, crashes, or is killed, include the stderr tail in the Tower log:
   ```
   Session {id} exited (code={code}). Last stderr:
     Shellper received SIGTERM, shutting down
@@ -105,4 +105,14 @@ Tower-side logs (R3, R4, R5) use the existing `log()` utility in tower-server.ts
 2. When a reconnection fails, the log explains why (process dead, PID reused, socket missing, connect refused)
 3. When auto-restart fires, the log shows the restart count and delay
 4. `shellper-main.ts` logs startup, SIGTERM, and PTY exit to stderr
-5. All new logging is at INFO level (not DEBUG) — this is operational logging we always want
+5. All new logging is always emitted (not gated behind a debug flag). Shellper-side logs (R1, R2) are plain timestamped text to stderr with no level token. Tower-side logs (R3, R4, R5) use the existing `log()` utility which includes level.
+
+## Testing
+
+Existing test files (`session-manager.test.ts`, `shellper-protocol.test.ts`) should be updated to account for the `stdio` config change from `'ignore'` to `'pipe'` for stderr.
+
+New test coverage expected:
+- **stderr capture**: Verify that shellper stderr output is buffered and surfaced when the process exits (by code and by signal)
+- **stderr truncation**: Verify the 50-line / 1000-char limits
+- **reconnect failure reasons**: Verify each `return null` path in `reconnectSession` now provides a reason string in the log
+- **auto-restart logging**: Verify restart count and delay appear in log output
