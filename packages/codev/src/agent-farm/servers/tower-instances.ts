@@ -9,8 +9,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+
+const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
@@ -313,9 +316,8 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
   if (!fs.existsSync(codevDir)) {
     try {
       // Run codev adopt --yes to set up the workspace
-      execSync('npx codev adopt --yes', {
+      await execAsync('npx codev adopt --yes', {
         cwd: workspacePath,
-        stdio: 'pipe',
         timeout: 30000,
       });
       adopted = true;

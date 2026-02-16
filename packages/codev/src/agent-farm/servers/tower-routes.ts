@@ -16,12 +16,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { exec, execSync } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const execAsync = promisify(exec);
-import { fileURLToPath } from 'node:url';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
@@ -777,9 +777,8 @@ async function handleCreateWorkspace(
 
   try {
     // Run codev init (it creates the directory)
-    execSync(`codev init --yes "${workspaceName}"`, {
+    await execAsync(`codev init --yes "${workspaceName}"`, {
       cwd: expandedParent,
-      stdio: 'pipe',
       timeout: 60000,
     });
 
