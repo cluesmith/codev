@@ -45,6 +45,7 @@ import {
   killTerminalWithShellper,
   stopInstance,
 } from './tower-instances.js';
+import { OverviewCache } from './overview.js';
 import {
   getWorkspaceTerminals,
   getTerminalManager,
@@ -62,6 +63,9 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Singleton cache for overview endpoint (Spec 0126 Phase 4)
+const overviewCache = new OverviewCache();
 
 // ============================================================================
 // Route context — dependencies provided by the orchestrator
@@ -108,6 +112,8 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
+  'POST /api/overview/refresh': (_req, res) => handleOverviewRefresh(res),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
@@ -538,6 +544,33 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
   const instances = await getInstances();
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ instances }));
+}
+
+async function handleOverview(res: http.ServerResponse, url: URL): Promise<void> {
+  // Accept optional ?workspace= to specify the workspace root.
+  // Falls back to first known non-builder workspace path.
+  let workspaceRoot = url.searchParams.get('workspace');
+
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+
+  if (!workspaceRoot) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [] }));
+    return;
+  }
+
+  const data = await overviewCache.getOverview(workspaceRoot);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(data));
+}
+
+function handleOverviewRefresh(res: http.ServerResponse): void {
+  overviewCache.invalidate();
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true }));
 }
 
 function handleSSEEvents(
