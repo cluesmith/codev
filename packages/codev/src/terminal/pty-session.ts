@@ -70,7 +70,7 @@ export class PtySession extends EventEmitter {
     this.createdAt = new Date().toISOString();
     this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000);
     this.diskLogEnabled = config.diskLogEnabled ?? true;
-    this.diskLogMaxBytes = config.diskLogMaxBytes ?? 50 * 1024 * 1024;
+    this.diskLogMaxBytes = config.diskLogMaxBytes ?? 50 * 1024 * 1024; // DEFAULT_DISK_LOG_MAX_BYTES
     this.reconnectTimeoutMs = config.reconnectTimeoutMs ?? 300_000;
     this.logPath = path.join(config.logDir, `${config.id}.log`);
   }

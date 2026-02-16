@@ -10,7 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
-import { defaultSessionOptions } from './index.js';
+import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
@@ -50,7 +50,7 @@ export class TerminalManager {
       maxSessions: config.maxSessions ?? 50,
       ringBufferLines: config.ringBufferLines ?? 1000,
       diskLogEnabled: config.diskLogEnabled ?? true,
-      diskLogMaxBytes: config.diskLogMaxBytes ?? 50 * 1024 * 1024,
+      diskLogMaxBytes: config.diskLogMaxBytes ?? DEFAULT_DISK_LOG_MAX_BYTES,
       reconnectTimeoutMs: config.reconnectTimeoutMs ?? 300_000,
     };
   }

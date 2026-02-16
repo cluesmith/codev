@@ -2,6 +2,9 @@
 export const DEFAULT_COLS = 80;
 export const DEFAULT_ROWS = 24;
 
+/** Default max size for per-session disk logs (50 MB). */
+export const DEFAULT_DISK_LOG_MAX_BYTES = 50 * 1024 * 1024;
+
 /** Common defaults for shellper/PTY session creation. */
 export interface SessionDefaults {
   cols: number;

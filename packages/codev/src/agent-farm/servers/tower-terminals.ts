@@ -16,7 +16,7 @@ import {
   loadFileTabsForWorkspace as loadFileTabsFromDb,
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
-import { TerminalManager } from '../../terminal/pty-manager.js';
+import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/index.js';
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
@@ -98,7 +98,7 @@ export function getTerminalManager(): TerminalManager {
       maxSessions: 100,
       ringBufferLines: 10000,
       diskLogEnabled: true,
-      diskLogMaxBytes: 50 * 1024 * 1024,
+      diskLogMaxBytes: DEFAULT_DISK_LOG_MAX_BYTES,
       reconnectTimeoutMs: 300_000,
     });
   }

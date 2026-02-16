@@ -85,18 +85,6 @@ export interface RouteContext {
 }
 
 // ============================================================================
-// Helper: read raw request body
-// ============================================================================
-
-async function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise<string>((resolve) => {
-    let data = '';
-    req.on('data', (chunk: Buffer) => data += chunk.toString());
-    req.on('end', () => resolve(data));
-  });
-}
-
-// ============================================================================
 // Route dispatch table — exact-match routes (O(1) lookup)
 // ============================================================================
 
@@ -1370,8 +1358,10 @@ async function handleWorkspaceFileTabCreate(
   workspacePath: string,
 ): Promise<void> {
   try {
-    const body = await readBody(req);
-    const { path: filePath, line, terminalId } = JSON.parse(body || '{}');
+    const body = await parseJsonBody(req);
+    const filePath = body.path as string | undefined;
+    const line = body.line;
+    const terminalId = body.terminalId as string | undefined;
 
     if (!filePath || typeof filePath !== 'string') {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1560,8 +1550,7 @@ async function handleWorkspaceFileSave(
   }
 
   try {
-    const body = await readBody(req);
-    const { content } = JSON.parse(body || '{}');
+    const { content } = await parseJsonBody(req);
 
     if (typeof content !== 'string') {
       res.writeHead(400, { 'Content-Type': 'application/json' });
