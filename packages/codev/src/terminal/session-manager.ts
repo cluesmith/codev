@@ -157,28 +157,34 @@ export class SessionManager extends EventEmitter {
       socketPath,
     });
 
-    // Spawn shellper as detached process (stderr piped for capture)
+    // Redirect shellper stderr to a log file instead of a pipe.
+    // Using 'pipe' for stderr creates a parent→child pipe dependency: when Tower
+    // exits, the pipe breaks, and the async EPIPE error on process.stderr crashes
+    // the shellper (Bugfix #324). A file FD has no such dependency.
+    const stderrLogPath = socketPath.replace('.sock', '.log');
+    let stderrFd: number | null = null;
+    try {
+      stderrFd = fs.openSync(stderrLogPath, 'a');
+    } catch {
+      // Fall back to /dev/null if log file can't be opened
+    }
+
     const child = cpSpawn(this.config.nodeExecutable, [this.config.shellperScript, shellperConfig], {
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', stderrFd ?? 'ignore'],
     });
 
-    // Start capturing stderr immediately
-    const stderrBuffer = new StderrBuffer();
-    this.wireStderrCapture(child.stderr!, stderrBuffer);
+    // Close our copy of the stderr log FD — child has its own after fork
+    if (stderrFd !== null) {
+      try { fs.closeSync(stderrFd); } catch { /* ignore */ }
+    }
 
     // Read PID + startTime from stdout
     let info: { pid: number; startTime: number };
     try {
       info = await this.readShellperInfo(child);
     } catch (err) {
-      // Include any startup stderr in the failure message
-      stderrBuffer.flush();
-      const stderrLines = stderrBuffer.getLines();
-      const stderrSuffix = stderrLines.length > 0
-        ? `. Startup stderr:\n  ${stderrLines.join('\n  ')}`
-        : '';
-      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}${stderrSuffix}`);
+      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}`);
       // Kill orphaned child process using handle (not PID — may not be available yet)
       try { child.kill('SIGKILL'); } catch { /* already dead or no permission */ }
       this.unlinkSocketIfExists(socketPath);
@@ -198,12 +204,7 @@ export class SessionManager extends EventEmitter {
       await client.connect();
     } catch (err) {
       // Rollback: kill the orphaned shellper process
-      stderrBuffer.flush();
-      const stderrLines = stderrBuffer.getLines();
-      const stderrSuffix = stderrLines.length > 0
-        ? `. Startup stderr:\n  ${stderrLines.join('\n  ')}`
-        : '';
-      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}${stderrSuffix}`);
+      this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}`);
       try { process.kill(info.pid, 'SIGKILL'); } catch { /* already dead */ }
       this.unlinkSocketIfExists(socketPath);
       throw err;
@@ -217,8 +218,8 @@ export class SessionManager extends EventEmitter {
       options: opts,
       restartCount: 0,
       restartResetTimer: null,
-      stderrBuffer,
-      stderrStream: child.stderr!,
+      stderrBuffer: null, // stderr goes to file, not pipe (Bugfix #324)
+      stderrStream: null,
       stderrTailLogged: false,
     };
 
@@ -232,6 +233,7 @@ export class SessionManager extends EventEmitter {
 
     // Forward exit events and clean up dead sessions
     client.on('exit', (exitInfo) => {
+      this.log(`Session ${opts.sessionId} exited (code=${exitInfo.code})`);
       this.logStderrTail(opts.sessionId, session, exitInfo.code);
       this.emit('session-exit', opts.sessionId, exitInfo);
       // If not auto-restarting, remove the dead session from the map
@@ -415,7 +417,8 @@ export class SessionManager extends EventEmitter {
       }
     }
 
-    // Log stderr tail if available
+    // Log exit and stderr tail if available
+    this.log(`Session ${sessionId} exited (code=-1)`);
     this.logStderrTail(sessionId, session, -1);
 
     // Disconnect client
@@ -496,6 +499,9 @@ export class SessionManager extends EventEmitter {
       } catch {
         // Permission error or already gone
       }
+      // Also clean up companion stderr log file (Bugfix #324)
+      const logPath = fullPath.replace('.sock', '.log');
+      try { fs.unlinkSync(logPath); } catch { /* ignore */ }
     }
 
     if (cleaned > 0) {
@@ -573,6 +579,13 @@ export class SessionManager extends EventEmitter {
       if (stat.isSocket()) {
         fs.unlinkSync(socketPath);
       }
+    } catch {
+      // Doesn't exist — fine
+    }
+    // Also clean up the companion stderr log file (Bugfix #324)
+    const logPath = socketPath.replace('.sock', '.log');
+    try {
+      fs.unlinkSync(logPath);
     } catch {
       // Doesn't exist — fine
     }
@@ -753,7 +766,7 @@ export class SessionManager extends EventEmitter {
       const lines = session.stderrBuffer!.getLines();
       if (lines.length === 0) return;
       const suffix = incomplete ? ' (stderr incomplete)' : '';
-      this.log(`Session ${sessionId} exited (code=${exitCode}). Last stderr${suffix}:\n  ${lines.join('\n  ')}`);
+      this.log(`Session ${sessionId} last stderr${suffix}:\n  ${lines.join('\n  ')}`);
     };
 
     // If no stream reference or stream already destroyed/closed, log immediately

@@ -1445,7 +1445,10 @@ describe('stderr tail logging (integration)', () => {
     rmrf(socketDir);
   });
 
-  it.skipIf(!!process.env.CI)('logs stderr tail when session exits normally', async () => {
+  it.skipIf(!!process.env.CI)('logs session exit without stderr tail (stderr goes to file)', async () => {
+    // Bugfix #324: stderr is redirected to a log file (not a pipe), so
+    // logStderrTail returns early (stderrBuffer is null). No "Last stderr"
+    // message is expected — diagnostics are in the .log file instead.
     const logs: string[] = [];
     const manager = new SessionManager({
       socketDir,
@@ -1467,18 +1470,19 @@ describe('stderr tail logging (integration)', () => {
       try { await manager.killSession('stderr-exit-test'); } catch { /* noop */ }
     });
 
-    // Wait for exit event + stderr processing
+    // Wait for exit event
     await new Promise<void>((resolve) => {
       manager.on('session-exit', () => resolve());
     });
-    // Wait for stderr close + log emission
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 500));
 
     expect(logs.some((m) => m.includes('Session stderr-exit-test exited (code=0)'))).toBe(true);
-    expect(logs.some((m) => m.includes('Last stderr'))).toBe(true);
+    // stderr goes to file now — no pipe-based "Last stderr" tail
+    expect(logs.some((m) => m.includes('last stderr'))).toBe(false);
   }, 15000);
 
-  it.skipIf(!!process.env.CI)('logs stderr tail when session is killed', async () => {
+  it.skipIf(!!process.env.CI)('logs session kill without stderr tail (stderr goes to file)', async () => {
+    // Bugfix #324: stderr goes to a file, not a pipe — no "Last stderr" log.
     const logs: string[] = [];
     const manager = new SessionManager({
       socketDir,
@@ -1497,16 +1501,16 @@ describe('stderr tail logging (integration)', () => {
       rows: 24,
     });
 
-    // Wait briefly for shellper to start and emit stderr startup logs
+    // Wait briefly for shellper to start
     await new Promise((r) => setTimeout(r, 500));
 
     await manager.killSession('stderr-kill-test');
-    // Wait for stderr close + log emission
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 500));
 
     // killSession logs stderr with exitCode=-1
     expect(logs.some((m) => m.includes('Session stderr-kill-test exited (code=-1)'))).toBe(true);
-    expect(logs.some((m) => m.includes('Last stderr'))).toBe(true);
+    // stderr goes to file now — no pipe-based "Last stderr" tail
+    expect(logs.some((m) => m.includes('last stderr'))).toBe(false);
   }, 15000);
 
   it.skipIf(!!process.env.CI)('does not log stderr for reconnected sessions', async () => {
@@ -1543,11 +1547,13 @@ describe('stderr tail logging (integration)', () => {
       await manager.killSession('no-stderr-test');
       await new Promise((r) => setTimeout(r, 200));
       // No stderr tail log — reconnected sessions have no stderr capture
-      expect(logs.some((m) => m.includes('Last stderr'))).toBe(false);
+      expect(logs.some((m) => m.includes('last stderr'))).toBe(false);
     }
   });
 
-  it.skipIf(!!process.env.CI)('deduplicates stderr tail logging', async () => {
+  it.skipIf(!!process.env.CI)('no stderr tail logged for file-based stderr (Bugfix #324)', async () => {
+    // Bugfix #324: stderr goes to a file — stderrBuffer is null, so
+    // logStderrTail returns early. No "Last stderr" messages at all.
     const logs: string[] = [];
     const manager = new SessionManager({
       socketDir,
@@ -1569,15 +1575,15 @@ describe('stderr tail logging (integration)', () => {
       try { await manager.killSession('stderr-dedup-test'); } catch { /* noop */ }
     });
 
-    // Wait for exit + close events + stderr processing
+    // Wait for exit event
     await new Promise<void>((resolve) => {
       manager.on('session-exit', () => resolve());
     });
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 500));
 
-    // Count how many "Last stderr" entries — should be exactly 1
-    const stderrLogCount = logs.filter((m) => m.includes('Last stderr')).length;
-    expect(stderrLogCount).toBe(1);
+    // No "Last stderr" entries — stderr goes to file, not pipe
+    const stderrLogCount = logs.filter((m) => m.includes('last stderr')).length;
+    expect(stderrLogCount).toBe(0);
   }, 15000);
 });
 

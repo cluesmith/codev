@@ -117,6 +117,17 @@ function createRealPty(): IShellperPty {
 }
 
 async function main(): Promise<void> {
+  // Bugfix #324: Prevent crashes from broken/closed stdio FDs.
+  // When Tower exits, any pipe-based stdio FDs break. Async EPIPE errors
+  // surface as unhandled 'error' events on the stream, crashing the process.
+  // Even though stderr is now redirected to a file (not a pipe), add handlers
+  // as a defensive measure against future regressions.
+  for (const stream of [process.stdout, process.stderr]) {
+    if (stream && typeof stream.on === 'function') {
+      stream.on('error', () => { /* swallow EPIPE/EBADF — stdio is non-essential */ });
+    }
+  }
+
   const configJson = process.argv[2];
   if (!configJson) {
     process.stderr.write('Usage: shellper-main.js <json-config>\n');
