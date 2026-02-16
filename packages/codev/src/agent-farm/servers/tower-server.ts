@@ -297,6 +297,15 @@ server.listen(port, '127.0.0.1', async () => {
   // and deleting the architect terminal's socket file (Bugfix #274).
   await reconcileTerminalSessions();
 
+  // Bugfix #341: Kill orphaned shellper processes not in active sessions.
+  // Must run AFTER reconciliation so that reconnected sessions are in the
+  // active map and won't be killed. Catches shellpers from crashed tests
+  // or previous Tower instances that lost their socket files.
+  const orphansKilled = await shellperManager.killOrphanedShellpers();
+  if (orphansKilled > 0) {
+    log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
+  }
+
   // Spec 0105 Phase 3: Initialize instance lifecycle module.
   // Placed after reconciliation so getInstances() returns [] during startup
   // (since _deps is null), preventing race conditions with reconciliation.
