@@ -16,10 +16,17 @@ import {
   parseLabelDefaults,
 } from '../../lib/github.js';
 import type { GitHubPR, GitHubIssueListItem } from '../../lib/github.js';
+import { loadProtocol } from '../../commands/porch/protocol.js';
 
 // =============================================================================
 // Types
 // =============================================================================
+
+export interface PlanPhase {
+  id: string;
+  title: string;
+  status: string;
+}
 
 export interface BuilderOverview {
   id: string;
@@ -29,6 +36,10 @@ export interface BuilderOverview {
   mode: 'strict' | 'soft';
   gates: Record<string, string>;
   worktreePath: string;
+  protocol: string;
+  planPhases: PlanPhase[];
+  progress: number;
+  blocked: string | null;
 }
 
 export interface PROverview {
@@ -67,6 +78,8 @@ interface ParsedStatus {
   phase: string;
   currentPlanPhase: string;
   gates: Record<string, string>;
+  gateRequestedAt: Record<string, string>;
+  planPhases: PlanPhase[];
 }
 
 /**
@@ -81,41 +94,52 @@ export function parseStatusYaml(content: string): ParsedStatus {
     phase: '',
     currentPlanPhase: '',
     gates: {},
+    gateRequestedAt: {},
+    planPhases: [],
   };
 
   const lines = content.split('\n');
-  let inGates = false;
+  let section: 'none' | 'gates' | 'plan_phases' = 'none';
   let currentGate = '';
+  let currentPlanPhase: Partial<PlanPhase> | null = null;
 
   for (const line of lines) {
     // Top-level scalar fields
     const idMatch = line.match(/^id:\s*'?(\S+?)'?\s*$/);
-    if (idMatch) { result.id = idMatch[1]; continue; }
+    if (idMatch) { result.id = idMatch[1]; section = 'none'; continue; }
 
     const titleMatch = line.match(/^title:\s*(\S.*?)\s*$/);
-    if (titleMatch) { result.title = titleMatch[1]; continue; }
+    if (titleMatch) { result.title = titleMatch[1]; section = 'none'; continue; }
 
     const protocolMatch = line.match(/^protocol:\s*(\S+)/);
-    if (protocolMatch) { result.protocol = protocolMatch[1]; continue; }
+    if (protocolMatch) { result.protocol = protocolMatch[1]; section = 'none'; continue; }
 
     const phaseMatch = line.match(/^phase:\s*(\S+)/);
-    if (phaseMatch) { result.phase = phaseMatch[1]; continue; }
+    if (phaseMatch) { result.phase = phaseMatch[1]; section = 'none'; continue; }
 
     const planPhaseMatch = line.match(/^current_plan_phase:\s*(\S+)/);
-    if (planPhaseMatch) { result.currentPlanPhase = planPhaseMatch[1]; continue; }
+    if (planPhaseMatch) { result.currentPlanPhase = planPhaseMatch[1]; section = 'none'; continue; }
 
-    // Gates section
+    // Section headers
     if (/^gates:\s*$/.test(line)) {
-      inGates = true;
+      if (currentPlanPhase) { pushPlanPhase(result, currentPlanPhase); currentPlanPhase = null; }
+      section = 'gates';
       continue;
     }
 
-    // Stop gates section at next top-level key
-    if (inGates && /^\S/.test(line) && line.trim() !== '') {
-      inGates = false;
+    if (/^plan_phases:\s*$/.test(line)) {
+      section = 'plan_phases';
+      continue;
     }
 
-    if (inGates) {
+    // Stop section at next top-level key
+    if (/^\S/.test(line) && line.trim() !== '') {
+      if (currentPlanPhase) { pushPlanPhase(result, currentPlanPhase); currentPlanPhase = null; }
+      section = 'none';
+    }
+
+    // Gates section
+    if (section === 'gates') {
       const gateNameMatch = line.match(/^\s{2}(\S+):\s*$/);
       if (gateNameMatch) {
         currentGate = gateNameMatch[1];
@@ -126,10 +150,154 @@ export function parseStatusYaml(content: string): ParsedStatus {
       if (statusMatch && currentGate) {
         result.gates[currentGate] = statusMatch[1];
       }
+
+      const requestedMatch = line.match(/^\s{4}requested_at:\s*'?(.+?)'?\s*$/);
+      if (requestedMatch && currentGate) {
+        const val = requestedMatch[1];
+        if (val !== 'null' && val !== '~') {
+          result.gateRequestedAt[currentGate] = val;
+        }
+      }
+    }
+
+    // Plan phases section
+    if (section === 'plan_phases') {
+      const itemIdMatch = line.match(/^\s{2}-\s+id:\s*(\S+)/);
+      if (itemIdMatch) {
+        if (currentPlanPhase) { pushPlanPhase(result, currentPlanPhase); }
+        currentPlanPhase = { id: itemIdMatch[1] };
+        continue;
+      }
+
+      const itemTitleMatch = line.match(/^\s{4}title:\s*(.+?)\s*$/);
+      if (itemTitleMatch && currentPlanPhase) {
+        currentPlanPhase.title = itemTitleMatch[1];
+        continue;
+      }
+
+      const itemStatusMatch = line.match(/^\s{4}status:\s*(\S+)/);
+      if (itemStatusMatch && currentPlanPhase) {
+        currentPlanPhase.status = itemStatusMatch[1];
+        continue;
+      }
     }
   }
 
+  // Flush last plan phase if we were in that section
+  if (currentPlanPhase) { pushPlanPhase(result, currentPlanPhase); }
+
   return result;
+}
+
+function pushPlanPhase(result: ParsedStatus, partial: Partial<PlanPhase>): void {
+  if (partial.id) {
+    result.planPhases.push({
+      id: partial.id,
+      title: partial.title || '',
+      status: partial.status || 'pending',
+    });
+  }
+}
+
+// =============================================================================
+// Progress and blocked detection
+// =============================================================================
+
+/**
+ * Calculate progress percentage (0-100) based on protocol phase.
+ *
+ * SPIR/spider: nuanced sub-progress with gate awareness and plan phase tracking.
+ * Other protocols: even split derived from protocol.json phases array.
+ */
+export function calculateProgress(parsed: ParsedStatus, workspaceRoot?: string): number {
+  const protocol = parsed.protocol;
+
+  if (protocol === 'spir' || protocol === 'spider') {
+    return calculateSpirProgress(parsed);
+  }
+
+  if (!protocol || !workspaceRoot) return 0;
+
+  // Load phase list dynamically from protocol.json
+  const phases = loadProtocolPhases(workspaceRoot, protocol);
+  if (!phases) return 0;
+
+  return calculateEvenProgress(parsed.phase, phases);
+}
+
+function calculateSpirProgress(parsed: ParsedStatus): number {
+  const gateRequested = (gate: string) =>
+    parsed.gates[gate] === 'pending' && !!parsed.gateRequestedAt[gate];
+
+  switch (parsed.phase) {
+    case 'specify':
+      return gateRequested('spec-approval') ? 20 : 10;
+    case 'plan':
+      return gateRequested('plan-approval') ? 45 : 35;
+    case 'implement': {
+      const total = parsed.planPhases.length;
+      if (total === 0) return 70;
+      const completed = parsed.planPhases.filter(p => p.status === 'complete').length;
+      return 50 + Math.round((completed / total) * 40);
+    }
+    case 'review':
+      return gateRequested('pr-ready') ? 95 : 92;
+    case 'complete':
+      return 100;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Even-split progress for protocols with fixed phase lists.
+ * Each phase gets an equal share of 100%, with 'complete' always = 100.
+ */
+export function calculateEvenProgress(phase: string, phases: string[]): number {
+  if (phase === 'complete') return 100;
+  const idx = phases.indexOf(phase);
+  if (idx === -1) return 0;
+  return Math.round(((idx + 1) / (phases.length + 1)) * 100);
+}
+
+/** Cache of protocol phase IDs keyed by protocol name */
+const protocolPhaseCache = new Map<string, string[]>();
+
+/**
+ * Load phase IDs from a protocol's protocol.json file.
+ * Cached per protocol name for the lifetime of the process.
+ */
+function loadProtocolPhases(workspaceRoot: string, protocolName: string): string[] | null {
+  const cached = protocolPhaseCache.get(protocolName);
+  if (cached) return cached;
+
+  try {
+    const protocol = loadProtocol(workspaceRoot, protocolName);
+    const phases = protocol.phases.map(p => p.id);
+    protocolPhaseCache.set(protocolName, phases);
+    return phases;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect if a builder is blocked on a gate (requested but not approved).
+ * Returns a human-readable label or null.
+ */
+export function detectBlocked(parsed: ParsedStatus): string | null {
+  const gateLabels: Record<string, string> = {
+    'spec-approval': 'spec review',
+    'plan-approval': 'plan review',
+    'pr-ready': 'PR review',
+  };
+
+  for (const [gate, label] of Object.entries(gateLabels)) {
+    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
+      return label;
+    }
+  }
+  return null;
 }
 
 // =============================================================================
@@ -246,6 +414,10 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         mode: 'soft',
         gates: {},
         worktreePath,
+        protocol: '',
+        planPhases: [],
+        progress: 0,
+        blocked: null,
       });
       continue;
     }
@@ -282,6 +454,10 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             mode: 'strict',
             gates: parsed.gates,
             worktreePath,
+            protocol: parsed.protocol,
+            planPhases: parsed.planPhases,
+            progress: calculateProgress(parsed, workspaceRoot),
+            blocked: detectBlocked(parsed),
           });
           found = true;
           break;
@@ -303,6 +479,10 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         mode: 'soft',
         gates: {},
         worktreePath,
+        protocol: '',
+        planPhases: [],
+        progress: 0,
+        blocked: null,
       });
     }
   }

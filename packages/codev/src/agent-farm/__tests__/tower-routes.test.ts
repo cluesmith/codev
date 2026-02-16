@@ -588,7 +588,7 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.builders).toHaveLength(1);
-      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/test/workspace');
+      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/test/workspace', expect.any(Set));
     });
 
     it('returns empty data when no workspace is known', async () => {
@@ -645,7 +645,7 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(200);
-      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/my/workspace');
+      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/my/workspace', expect.any(Set));
     });
   });
 

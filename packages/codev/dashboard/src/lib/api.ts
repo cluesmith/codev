@@ -84,10 +84,10 @@ export interface OverviewBuilder {
   mode: 'strict' | 'soft';
   gates: Record<string, string>;
   worktreePath: string;
-  protocol?: string;
-  planPhases?: string[];
-  progress?: number;
-  blocked?: boolean;
+  protocol: string;
+  planPhases: Array<{ id: string; title: string; status: string }>;
+  progress: number;
+  blocked: string | null;
 }
 
 export interface OverviewPR {
