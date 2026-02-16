@@ -9,102 +9,183 @@
 
 The `consult` CLI has accumulated complexity that makes it confusing to use and fragile in practice:
 
-1. **Too many parameters**: `--model`, `--type`, `--role`, `--context`, `--output`, `--plan-phase`, `--protocol`, `--project-id` — most users only need model + what to review
-2. **Integration reviews read wrong files**: When running `consult -m X pr 35` from the architect's main worktree, models read files from `main`, not from the PR branch. The diff is correct but file-reading instructions point at stale code.
-3. **Prompt sourcing is opaque**: Review type prompts come from `codev/consult-types/` (or deprecated `codev/roles/review-types/`), roles from `codev/roles/`, with skeleton fallbacks. Users can't tell what the model sees.
-4. **Inconsistent filesystem access**: Claude and Codex get tool-based file access (Read, Glob, Grep). Gemini gets none — it's a subprocess with JSON output. Yet all review type prompts say "read the files directly."
-5. **PR reviews don't include the diff**: `buildPRQuery()` deliberately omits the diff to avoid truncation, telling models to "read files directly." But on `main`, those files don't reflect the PR changes.
+1. **Too many parameters**: `--model`, `--type`, `--role`, `--context`, `--output`, `--plan-phase`, `--protocol`, `--project-id` — users can't tell which flags matter
+2. **Context is wrong**: PR reviews run from main, so models read stale files instead of the PR branch code
+3. **Prompt sourcing is opaque**: Review type prompts come from `codev/consult-types/` with skeleton fallbacks. Users can't tell what the model sees
+4. **Inconsistent file access**: All three models should have file access in whatever worktree they're running in
 
-## Root Cause Analysis
+## Design
 
-The core architectural issue: **consult doesn't establish a correct working context before invoking the model.** It runs from wherever the user is, passes a prompt that assumes branch-aware file access, and hopes for the best.
+Two modes: **general** and **protocol-based**.
 
-Secondary issue: the parameter space grew organically. `--type`, `--role`, `--plan-phase`, `--context`, `--protocol`, `--project-id` are all porch/automation concerns leaked into the user-facing CLI.
+### Mode 1: General (default)
 
-## Desired State
+Simple question-and-answer. No protocol context needed.
 
-### Principle: Consult always runs in the right context
-
-When reviewing a PR, consult should:
-1. Determine the PR's head branch
-2. Either checkout that branch in a temp worktree, or instruct the model to use `git show <branch>:<file>` for file reads
-3. Ensure all three models (Claude, Codex, Gemini) see the same file state
-
-### Principle: Simple CLI, complex internals
-
-User-facing interface:
 ```bash
-consult pr 35                    # Review PR (all 3 models in parallel)
-consult pr 35 -m gemini          # Review PR with specific model
-consult spec 42                  # Review spec
-consult plan 42                  # Review plan
-consult "How should I structure caching?"   # General question
+consult -m gemini --prompt "What is the best approach for caching?"
+consult -m codex --prompt-file questions.md
 ```
 
-Porch/automation flags moved to a separate namespace or environment variables:
+Flags:
+- `-m, --model` — which model (gemini, codex, claude). Required.
+- `--prompt` — inline prompt string
+- `--prompt-file` — path to a prompt file
+
+One of `--prompt` or `--prompt-file` is required in general mode.
+
+### Mode 2: Protocol-based
+
+For structured reviews that follow a protocol. The `--protocol` and `--type` together form the path to the prompt template.
+
 ```bash
-# Porch passes context via env vars, not CLI flags
-CONSULT_PROTOCOL=bugfix CONSULT_PROJECT=319 consult pr 35
+consult -m gemini --protocol spir --type spec
+consult -m codex --protocol spir --type plan
+consult -m claude --protocol bugfix --type pr
+consult -m gemini --protocol spir --type integration
+consult -m codex --protocol spir --type phase
 ```
 
-### Principle: Gemini gets file access
+Flags:
+- `-m, --model` — which model. Required.
+- `--protocol` — protocol name (spir, bugfix, tick). Required for protocol mode.
+- `--type` — review type (spec, plan, pr, integration, phase). Required for protocol mode.
+- `--issue` — issue number. Required when running from the architect (not in a builder worktree).
 
-Either:
-- (a) Run Gemini in a mode that allows file access (gemini-cli has `--sandbox` modes), or
-- (b) Pre-gather relevant file contents and inject them into the prompt, or
-- (c) Accept the limitation and document it clearly
+#### Prompt resolution
 
-## Implementation Sketch
+`--protocol` + `--type` map to a prompt template path:
+```
+codev/consult-types/<type>-review.md
+```
+(Or protocol-specific overrides at `codev/protocols/<protocol>/consult-types/<type>-review.md` if they exist.)
 
-### Phase 1: Fix the worktree problem (critical)
+#### Context resolution
 
-When `consult pr <N>` is invoked:
-1. Run `gh pr view <N> --json headRefName` to get the branch
-2. Create a temporary shallow worktree: `git worktree add --detach /tmp/consult-<N> <branch>`
-3. Run the model with `cwd` set to that worktree
-4. Clean up the worktree after the model finishes
+The consult command must figure out what artifact to review. The rules depend on where it's running:
 
-This ensures all file reads happen against the PR's actual code, not `main`.
+**In a builder worktree** (auto-detected via `.builders/` in cwd):
+- `--type spec` → finds the spec file automatically from porch state or the `codev/specs/` directory in the worktree
+- `--type plan` → finds the plan file automatically
+- `--type pr` → finds the PR associated with the current branch
+- `--type phase` → detects the current phase from porch state
+- `--type integration` → same as pr but uses the integration-review prompt
 
-### Phase 2: Simplify the CLI surface
+**From the architect** (main worktree):
+- `--issue <N>` is required — consult uses it to locate the artifact:
+  - `--type spec` → looks up `codev/specs/<N>-*.md`
+  - `--type plan` → looks up `codev/plans/<N>-*.md`
+  - `--type pr` → looks up the PR linked to issue N (via `gh pr list --search`)
+  - `--type integration` → same as pr with integration-review prompt
+  - `--type phase` → error (phases only exist in builders)
 
-- Make `consult pr` default to 3-way parallel (currently requires manual `&` syntax)
-- Drop `--type` for PR reviews — the review type should be inferred from context (PR review = `impl-review` or `integration-review` depending on caller)
-- Move `--context`, `--protocol`, `--project-id`, `--plan-phase`, `--output` to env vars for porch
-- Keep `--model` / `-m` and `--role` as the only user-facing flags
+For PR reviews (`--type pr` and `--type integration`), the model should run with cwd set to a temporary worktree of the PR branch so file reads reflect the actual PR code.
 
-### Phase 3: Unify model capabilities
+### All models get file access
 
-- Ensure all models can read files in the worktree context
-- For Gemini: either enable sandbox mode or pre-gather file contents
-- Standardize the prompt contract: "You are in a directory with the full codebase. Read any file you need."
+All three models (Claude, Codex, Gemini) must be able to read files in the worktree they're running in. The prompt contract is: "You are in a directory with the full codebase. Read any file you need."
+
+## Flags Summary
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `-m, --model` | Always | Model to use (gemini, codex, claude) |
+| `--prompt` | General mode | Inline prompt |
+| `--prompt-file` | General mode | Path to prompt file |
+| `--protocol` | Protocol mode | Protocol name |
+| `--type` | Protocol mode | Review type (spec, plan, pr, integration, phase) |
+| `--issue` | Architect + protocol | Issue number for artifact lookup |
+| `--output` | Porch only | Write output to file |
+| `--context` | Porch only | Previous iteration context file |
+| `--plan-phase` | Porch only | Scope impl review to plan phase |
+| `--project-id` | Porch only | Project ID for metrics |
+
+No env vars — all flags are explicit and visible in logs.
+
+## Porch Integration
+
+Porch calls consult programmatically with additional flags for automation:
+
+```bash
+consult -m gemini --protocol spir --type spec \
+  --project-id 42 \
+  --output "codev/projects/42-feature/42-specify-iter1-gemini.txt"
+
+consult -m codex --protocol spir --type phase \
+  --plan-phase phase1 \
+  --context "codev/projects/42-feature/42-implement-iter1-context.md" \
+  --project-id 42 \
+  --output "codev/projects/42-feature/42-phase1-iter2-codex.txt"
+```
+
+### Porch-only flags (not needed by users)
+
+| Flag | Purpose |
+|------|---------|
+| `--output <path>` | Write review output to file (porch collects results) |
+| `--context <path>` | Previous iteration context for multi-round reviews |
+| `--plan-phase <phase>` | Scope impl review to a specific plan phase |
+| `--project-id <id>` | Project ID for metrics tracking |
+
+These flags remain as explicit CLI flags (not env vars) so they're visible in logs. They're only used by porch — users don't need them.
+
+When porch runs consult inside a builder worktree, `--issue` is not needed (context is auto-detected). When porch runs consult from the architect context, it passes `--issue`.
 
 ## Success Criteria
 
-- [ ] `consult pr 35` from any directory reads files from the PR branch, not main
-- [ ] Integration reviews no longer produce findings about code that doesn't exist in the PR
-- [ ] CLI has at most 3 user-facing flags: `-m`, `--role`, `--dry-run`
-- [ ] All three models produce consistent results given the same prompt and context
-- [ ] Porch automation still works (via env vars instead of CLI flags)
+- [ ] `consult -m X --prompt "question"` works for general queries
+- [ ] `consult -m X --protocol spir --type spec` auto-detects spec in builder worktrees
+- [ ] `consult -m X --protocol spir --type spec --issue 42` finds spec from architect
+- [ ] `consult -m X --protocol spir --type pr` runs model against PR branch code, not main
+- [ ] `consult -m X --protocol spir --type phase` detects current phase in builder
+- [ ] All three models have file access in the correct worktree
+- [ ] Porch integration works without env vars — all context via explicit flags
+- [ ] Errors clearly when required context is missing (e.g., `--type spec` from architect without `--issue`)
 
 ## Constraints
 
 - Must not break porch integration — porch calls consult programmatically
 - Must not require additional API keys or new model installations
-- Temporary worktrees must be cleaned up reliably (trap on exit)
-- `consult general` should still work without any PR/branch context
+- Temporary worktrees for PR reviews must be cleaned up reliably
+- All flags visible in logs (no hidden env var state)
 
-## Risks
+## Migration
 
-| Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
-| Temp worktree creation adds latency | Medium | Low | Shallow clone, reuse if same branch |
-| Gemini file access limitations | Medium | Medium | Fall back to context injection |
-| Porch env var migration breaks existing scripts | Low | Medium | Support both CLI flags and env vars during transition |
-| Large repos make temp worktrees expensive | Low | Medium | Use `git worktree add` (lightweight) not clone |
+### What changes for porch
 
-## Open Questions
+Porch currently generates commands like:
+```bash
+consult --model gemini --type spec-review --protocol spir --project-id 42 --output "..." spec 42
+```
 
-- [ ] Should `consult pr` default to 3-way parallel? Or keep single-model as default?
-- [ ] Should we cache temp worktrees across consultations for the same PR?
-- [ ] Is there value in keeping `--type` as a user-facing flag, or should it always be inferred?
+New form:
+```bash
+consult -m gemini --protocol spir --type spec --project-id 42 --output "..."
+```
+
+Key differences:
+- No positional subcommand (`spec 42`) — replaced by `--protocol spir --type spec`
+- `--type` value changes from `spec-review` to `spec` (the `-review` suffix is implicit)
+- `--issue` only needed from architect context (builders auto-detect)
+
+### What changes for users
+
+Old: `consult -m gemini spec 42` / `consult -m codex pr 87`
+New: `consult -m gemini --protocol spir --type spec --issue 42` (from architect)
+
+For general queries:
+Old: `consult -m gemini general "question"`
+New: `consult -m gemini --prompt "question"`
+
+### What changes for protocols and prompts
+
+- Existing `codev/consult-types/*.md` templates remain unchanged
+- Protocol definitions (`protocol.json`) may need verify section updates if they reference old consult subcommands
+- `codev/resources/commands/consult.md` must be rewritten
+- CLAUDE.md/AGENTS.md consultation examples must be updated
+
+## Out of Scope
+
+- Changing the prompt template content (just the CLI and context resolution)
+- Adding new review types
+- Multi-model parallel execution (user handles that with `&` or scripting)
