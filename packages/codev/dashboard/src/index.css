@@ -1042,7 +1042,7 @@ body {
   color: var(--status-error);
 }
 
-.type-tag--feature {
+.type-tag--project {
   background: rgba(168, 85, 247, 0.12);
   color: #a855f7;
 }

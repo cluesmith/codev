@@ -22,7 +22,7 @@ const PRIORITY_CLASS: Record<string, string> = {
 
 const TYPE_CLASS: Record<string, string> = {
   bug: 'type-tag--bug',
-  feature: 'type-tag--feature',
+  project: 'type-tag--project',
 };
 
 export function BacklogList({ items }: BacklogListProps) {
