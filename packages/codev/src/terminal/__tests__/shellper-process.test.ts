@@ -105,7 +105,7 @@ async function connectAndHandshake(sockPath: string): Promise<{ socket: net.Sock
     socket.on('error', reject);
 
     socket.on('connect', () => {
-      socket.write(encodeHello({ version: PROTOCOL_VERSION }));
+      socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
     });
 
     setTimeout(() => {
@@ -123,6 +123,35 @@ function collectFramesFor(
     const frames: ParsedFrame[] = [];
     parser.on('data', (f: ParsedFrame) => frames.push(f));
     setTimeout(() => resolve(frames), durationMs);
+  });
+}
+
+/** Connect as a terminal client (clientType: 'terminal'). */
+async function connectAsTerminal(sockPath: string): Promise<{ socket: net.Socket; welcome: WelcomeMessage }> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(sockPath);
+    const parser = createFrameParser();
+    socket.pipe(parser);
+
+    let welcomed = false;
+
+    parser.on('data', (frame: ParsedFrame) => {
+      if (!welcomed && frame.type === FrameType.WELCOME) {
+        welcomed = true;
+        const welcome = parseJsonPayload<WelcomeMessage>(frame.payload);
+        resolve({ socket, welcome });
+      }
+    });
+
+    socket.on('error', reject);
+
+    socket.on('connect', () => {
+      socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'terminal' }));
+    });
+
+    setTimeout(() => {
+      if (!welcomed) reject(new Error('Handshake timeout'));
+    }, 2000);
   });
 }
 
@@ -215,7 +244,7 @@ describe('ShellperProcess', () => {
       socket.destroy();
     });
 
-    it('new connection replaces old one', async () => {
+    it('new tower connection replaces old tower connection', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
@@ -227,7 +256,7 @@ describe('ShellperProcess', () => {
       const { socket: socket2, welcome } = await connectAndHandshake(socketPath);
       expect(welcome.pid).toBe(12345);
 
-      // socket1 should be destroyed
+      // socket1 should be destroyed (tower replaced tower)
       await new Promise((r) => setTimeout(r, 50));
       expect(socket1.destroyed).toBe(true);
 
@@ -666,7 +695,7 @@ describe('ShellperProcess', () => {
       socket.destroy();
     });
 
-    it('logs connection replacing when second client connects', async () => {
+    it('logs tower replacement when second tower connects', async () => {
       const logs: string[] = [];
       shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
@@ -677,7 +706,7 @@ describe('ShellperProcess', () => {
       const { socket: socket2 } = await connectAndHandshake(socketPath);
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(logs.some((m) => m.includes('replacing=true'))).toBe(true);
+      expect(logs.some((m) => m.includes('Replacing existing tower connection'))).toBe(true);
       socket1.destroy();
       socket2.destroy();
     });
@@ -782,7 +811,7 @@ describe('ShellperProcess', () => {
       socket.destroy();
       await new Promise((r) => setTimeout(r, 100));
 
-      expect(logs.some((m) => m.includes('Connection closed'))).toBe(true);
+      expect(logs.some((m) => m.includes('closed'))).toBe(true);
     });
 
     it('uses no-op logger by default (no errors)', async () => {
@@ -817,6 +846,300 @@ describe('ShellperProcess', () => {
       // Socket file should be 0600 (owner read/write only)
       const mode = stat.mode & 0o777;
       expect(mode).toBe(0o600);
+    });
+  });
+
+  describe('multi-client support', () => {
+    it('terminal connection coexists with tower connection', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Both should be alive
+      expect(towerSocket.destroyed).toBe(false);
+      expect(termSocket.destroyed).toBe(false);
+
+      towerSocket.destroy();
+      termSocket.destroy();
+    });
+
+    it('new tower replaces old tower but not terminal', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: tower1 } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { socket: tower2 } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // tower1 should be destroyed (replaced by tower2)
+      expect(tower1.destroyed).toBe(true);
+      // terminal should still be alive
+      expect(termSocket.destroyed).toBe(false);
+      // tower2 should be alive
+      expect(tower2.destroyed).toBe(false);
+
+      tower2.destroy();
+      termSocket.destroy();
+    });
+
+    it('SIGNAL from terminal is silently ignored', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const errors: Error[] = [];
+      shellper.on('protocol-error', (err: Error) => errors.push(err));
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+
+      // Terminal sends SIGNAL — should be silently ignored
+      termSocket.write(encodeSignal({ signal: 2 }));
+
+      await new Promise((r) => setTimeout(r, 100));
+      expect(mockPty.killed).toBe(false);
+      // No protocol error emitted
+      expect(errors.length).toBe(0);
+
+      termSocket.destroy();
+    });
+
+    it('SPAWN from terminal is silently ignored', async () => {
+      let ptyCount = 0;
+      const ptys: MockPty[] = [];
+
+      shellper = new ShellperProcess(
+        () => {
+          const pty = new MockPty();
+          pty.pid = 12345 + ptyCount++;
+          ptys.push(pty);
+          return pty;
+        },
+        socketPath,
+      );
+
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+
+      termSocket.write(
+        encodeSpawn({
+          command: '/bin/zsh',
+          args: [],
+          cwd: '/tmp',
+          env: {},
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 100));
+      // Only the initial PTY should exist — no new spawn
+      expect(ptys.length).toBe(1);
+
+      termSocket.destroy();
+    });
+
+    it('broadcast DATA to multiple clients', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      const towerParser = createFrameParser();
+      towerSocket.pipe(towerParser);
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      const termParser = createFrameParser();
+      termSocket.pipe(termParser);
+
+      const towerFramesPromise = collectFramesFor(towerParser, 200);
+      const termFramesPromise = collectFramesFor(termParser, 200);
+
+      // Simulate PTY output
+      mockPty.simulateData('broadcast test');
+
+      const towerFrames = await towerFramesPromise;
+      const termFrames = await termFramesPromise;
+
+      const towerData = Buffer.concat(
+        towerFrames.filter((f) => f.type === FrameType.DATA).map((f) => f.payload),
+      ).toString();
+      const termData = Buffer.concat(
+        termFrames.filter((f) => f.type === FrameType.DATA).map((f) => f.payload),
+      ).toString();
+
+      expect(towerData).toContain('broadcast test');
+      expect(termData).toContain('broadcast test');
+
+      towerSocket.destroy();
+      termSocket.destroy();
+    });
+
+    it('broadcast EXIT to multiple clients', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      const towerParser = createFrameParser();
+      towerSocket.pipe(towerParser);
+
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      const termParser = createFrameParser();
+      termSocket.pipe(termParser);
+
+      const towerFramesPromise = collectFramesFor(towerParser, 200);
+      const termFramesPromise = collectFramesFor(termParser, 200);
+
+      mockPty.simulateExit(0);
+
+      const towerFrames = await towerFramesPromise;
+      const termFrames = await termFramesPromise;
+
+      expect(towerFrames.some((f) => f.type === FrameType.EXIT)).toBe(true);
+      expect(termFrames.some((f) => f.type === FrameType.EXIT)).toBe(true);
+
+      towerSocket.destroy();
+      termSocket.destroy();
+    });
+
+    it('independent REPLAY on each connect', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // Generate some output before any connections
+      mockPty.simulateData('replay content\n');
+
+      // Connect tower
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Connect terminal — should also get REPLAY
+      const termSocket = net.createConnection(socketPath);
+      const termParser = createFrameParser();
+      termSocket.pipe(termParser);
+
+      const termFrames: ParsedFrame[] = [];
+      termParser.on('data', (f: ParsedFrame) => termFrames.push(f));
+
+      await new Promise<void>((resolve, reject) => {
+        termSocket.on('connect', () => {
+          termSocket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'terminal' }));
+        });
+        termSocket.on('error', reject);
+        setTimeout(resolve, 200);
+      });
+
+      // Terminal should have received WELCOME and REPLAY
+      const welcomeFrame = termFrames.find((f) => f.type === FrameType.WELCOME);
+      const replayFrame = termFrames.find((f) => f.type === FrameType.REPLAY);
+      expect(welcomeFrame).toBeDefined();
+      expect(replayFrame).toBeDefined();
+      if (replayFrame) {
+        expect(replayFrame.payload.toString()).toContain('replay content');
+      }
+
+      towerSocket.destroy();
+      termSocket.destroy();
+    });
+
+    it('disconnecting one client does not affect others', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Disconnect terminal
+      termSocket.destroy();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Tower should still work — can send data
+      towerSocket.write(encodeData('still working'));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(mockPty.writtenData).toContain('still working');
+
+      // Tower should still receive data
+      const parser = createFrameParser();
+      towerSocket.pipe(parser);
+      const framesPromise = collectFramesFor(parser, 200);
+      mockPty.simulateData('response');
+      const frames = await framesPromise;
+      const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
+      expect(dataFrames.length).toBeGreaterThan(0);
+
+      towerSocket.destroy();
+    });
+
+    it('failed write removes client from broadcast', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      const { socket: termSocket } = await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Destroy terminal's writable side to force write failure
+      termSocket.destroy();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Broadcast data — should not throw, and removed client logged
+      mockPty.simulateData('after disconnect');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Tower should still receive data
+      const parser = createFrameParser();
+      towerSocket.pipe(parser);
+      const framesPromise = collectFramesFor(parser, 200);
+      mockPty.simulateData('still broadcasting');
+      const frames = await framesPromise;
+      const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
+      expect(dataFrames.length).toBeGreaterThan(0);
+
+      towerSocket.destroy();
+    });
+
+    it('pre-HELLO DATA frames are ignored', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // Connect raw socket without sending HELLO
+      const rawSocket = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => rawSocket.on('connect', resolve));
+
+      // Send DATA frame without HELLO first
+      rawSocket.write(encodeData('sneaky input'));
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      // PTY should NOT have received the data
+      expect(mockPty.writtenData.length).toBe(0);
+
+      rawSocket.destroy();
+    });
+
+    it('socket close before HELLO completes cleanly', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // Connect and immediately close without HELLO
+      const rawSocket = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => rawSocket.on('connect', resolve));
+      rawSocket.destroy();
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Should not crash — verify shellper still works
+      const { socket, welcome } = await connectAndHandshake(socketPath);
+      expect(welcome.pid).toBe(12345);
+      socket.destroy();
     });
   });
 });

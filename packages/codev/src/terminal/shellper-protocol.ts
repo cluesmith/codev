@@ -62,6 +62,7 @@ export interface ExitMessage {
 
 export interface HelloMessage {
   version: number;
+  clientType: 'tower' | 'terminal';
 }
 
 export interface WelcomeMessage {

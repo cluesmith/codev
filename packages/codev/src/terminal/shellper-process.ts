@@ -2,12 +2,16 @@
  * ShellperProcess: the testable core logic of the shellper daemon.
  *
  * Owns a single PTY via the IShellperPty interface (injected for testability).
- * Listens on a Unix socket for a single Tower connection. Handles the binary
+ * Listens on a Unix socket for multiple client connections. Handles the binary
  * wire protocol: HELLO/WELCOME handshake, DATA forwarding, RESIZE, SIGNAL,
  * SPAWN, PING/PONG, and EXIT lifecycle.
  *
- * The shellper accepts only one Tower connection at a time. A new connection
- * replaces the old one (handles rapid Tower restarts cleanly).
+ * Supports multiple simultaneous connections:
+ * - Tower connections (clientType: 'tower') can send DATA, RESIZE, SIGNAL, SPAWN
+ * - Terminal connections (clientType: 'terminal') can send DATA, RESIZE only
+ * - New tower connection replaces any existing tower connection
+ * - Terminal connections always coexist
+ * - PTY output is broadcast to all connected clients
  */
 
 import fs from 'node:fs';
@@ -55,12 +59,21 @@ export interface IShellperPty {
   pid: number;
 }
 
+// --- Connection metadata ---
+
+interface ConnectionEntry {
+  socket: net.Socket;
+  clientType: 'tower' | 'terminal';
+}
+
 // --- ShellperProcess ---
 
 export class ShellperProcess extends EventEmitter {
   private pty: IShellperPty | null = null;
   private server: net.Server | null = null;
-  private currentConnection: net.Socket | null = null;
+  private connections: Map<string, ConnectionEntry> = new Map();
+  private pendingSockets: Set<net.Socket> = new Set();
+  private nextConnectionId = 0;
   private replayBuffer: ShellperReplayBuffer;
   private cols = DEFAULT_COLS;
   private rows = DEFAULT_ROWS;
@@ -122,9 +135,7 @@ export class ShellperProcess extends EventEmitter {
       const buf = Buffer.from(data, 'utf-8');
       this.replayBuffer.append(buf);
 
-      if (this.currentConnection && !this.currentConnection.destroyed) {
-        this.currentConnection.write(encodeData(buf));
-      }
+      this.broadcast(encodeData(buf));
     });
 
     pty.onExit((exitInfo) => {
@@ -141,12 +152,30 @@ export class ShellperProcess extends EventEmitter {
         signal: exitInfo.signal != null ? String(exitInfo.signal) : null,
       });
 
-      if (this.currentConnection && !this.currentConnection.destroyed) {
-        this.currentConnection.write(exitFrame);
-      }
+      this.broadcast(exitFrame);
 
       this.emit('exit', exitInfo);
     });
+  }
+
+  /**
+   * Broadcast a frame to all connected clients.
+   * If a write fails, the connection is removed from the map.
+   */
+  private broadcast(frame: Buffer): void {
+    for (const [id, entry] of this.connections) {
+      if (entry.socket.destroyed) {
+        this.connections.delete(id);
+        continue;
+      }
+      const ok = entry.socket.write(frame);
+      if (ok === false) {
+        // Backpressure: socket buffer full — remove this client
+        this.log(`Write failed for connection ${id}, removing`);
+        entry.socket.destroy();
+        this.connections.delete(id);
+      }
+    }
   }
 
   private listen(): Promise<void> {
@@ -174,25 +203,39 @@ export class ShellperProcess extends EventEmitter {
   }
 
   /**
-   * Handle an incoming Tower connection. Only one connection is active at a
-   * time — a new connection closes the previous one.
+   * Handle an incoming connection. The socket enters a "pre-HELLO" state
+   * where it is tracked but not added to the connection map. Only after
+   * a valid HELLO frame is received does it become a full connection.
    */
   handleConnection(socket: net.Socket): void {
-    const hadPrevious = this.currentConnection != null && !this.currentConnection.destroyed;
-    this.log(`Connection accepted (replacing=${hadPrevious})`);
+    this.log('Connection accepted');
 
-    // Close previous connection if any
-    if (hadPrevious) {
-      this.currentConnection!.destroy();
-    }
-    this.currentConnection = socket;
+    // Track as pending until HELLO completes
+    this.pendingSockets.add(socket);
+
+    let connectionId: string | null = null;
+    let handshakeComplete = false;
 
     const parser = createFrameParser();
-
     socket.pipe(parser);
 
     parser.on('data', (frame: ParsedFrame) => {
-      this.handleFrame(socket, frame);
+      if (!handshakeComplete) {
+        // Pre-HELLO: only accept HELLO frames
+        if (frame.type === FrameType.HELLO) {
+          const result = this.handleHello(socket, frame.payload);
+          if (result) {
+            connectionId = result;
+            handshakeComplete = true;
+            this.pendingSockets.delete(socket);
+          }
+        }
+        // All other frames before HELLO are silently ignored
+        return;
+      }
+
+      // Post-handshake: dispatch frames with connection context
+      this.handleFrame(socket, connectionId!, frame);
     });
 
     parser.on('error', (err) => {
@@ -202,28 +245,32 @@ export class ShellperProcess extends EventEmitter {
     });
 
     socket.on('close', () => {
-      if (this.currentConnection === socket) {
-        this.currentConnection = null;
-        this.log('Connection closed');
+      this.pendingSockets.delete(socket);
+      if (connectionId && this.connections.has(connectionId)) {
+        this.connections.delete(connectionId);
+        this.log(`Connection ${connectionId} closed`);
       }
     });
 
     socket.on('error', () => {
-      if (this.currentConnection === socket) {
-        this.currentConnection = null;
+      this.pendingSockets.delete(socket);
+      if (connectionId && this.connections.has(connectionId)) {
+        this.connections.delete(connectionId);
       }
     });
   }
 
-  private handleFrame(socket: net.Socket, frame: ParsedFrame): void {
+  private handleFrame(socket: net.Socket, connId: string, frame: ParsedFrame): void {
     if (!isKnownFrameType(frame.type)) {
       // Unknown frame types are silently ignored (forward compatibility)
       return;
     }
 
+    const entry = this.connections.get(connId);
+
     switch (frame.type) {
       case FrameType.HELLO:
-        this.handleHello(socket, frame.payload);
+        // Duplicate HELLO after handshake — ignore
         break;
       case FrameType.DATA:
         this.handleData(frame.payload);
@@ -232,10 +279,16 @@ export class ShellperProcess extends EventEmitter {
         this.handleResize(socket, frame.payload);
         break;
       case FrameType.SIGNAL:
-        this.handleSignal(socket, frame.payload);
+        // Tower-only: terminal connections silently ignored
+        if (entry?.clientType === 'tower') {
+          this.handleSignal(socket, frame.payload);
+        }
         break;
       case FrameType.SPAWN:
-        this.handleSpawn(socket, frame.payload);
+        // Tower-only: terminal connections silently ignored
+        if (entry?.clientType === 'tower') {
+          this.handleSpawn(socket, frame.payload);
+        }
         break;
       case FrameType.PING:
         socket.write(encodePong());
@@ -243,23 +296,46 @@ export class ShellperProcess extends EventEmitter {
       case FrameType.PONG:
         // No-op: keepalive acknowledgement
         break;
-      // Shellper doesn't expect REPLAY, EXIT, WELCOME from Tower
+      // Shellper doesn't expect REPLAY, EXIT, WELCOME from clients
       default:
         break;
     }
   }
 
-  private handleHello(socket: net.Socket, payload: Buffer): void {
+  /**
+   * Handle HELLO frame: validate, register connection, send WELCOME + REPLAY.
+   * Returns the connection ID on success, or null on failure.
+   */
+  private handleHello(socket: net.Socket, payload: Buffer): string | null {
+    let hello: HelloMessage;
     try {
-      const hello = parseJsonPayload<HelloMessage>(payload);
-      this.log(`HELLO: version=${hello.version}`);
+      hello = parseJsonPayload<HelloMessage>(payload);
+      const clientType = hello.clientType || 'tower'; // Default to tower for backward compat
+      this.log(`HELLO: version=${hello.version}, clientType=${clientType}`);
       this.emit('hello', hello);
     } catch {
       this.log('Protocol error: Invalid HELLO payload');
       this.emit('protocol-error', new Error('Invalid HELLO payload'));
       socket.destroy();
-      return;
+      return null;
     }
+
+    const clientType = hello.clientType || 'tower';
+
+    // Tower replacement: destroy any existing tower connection
+    if (clientType === 'tower') {
+      for (const [id, entry] of this.connections) {
+        if (entry.clientType === 'tower') {
+          this.log(`Replacing existing tower connection ${id}`);
+          entry.socket.destroy();
+          this.connections.delete(id);
+        }
+      }
+    }
+
+    // Register this connection
+    const connectionId = String(this.nextConnectionId++);
+    this.connections.set(connectionId, { socket, clientType });
 
     // Send WELCOME response
     const pid = this.pty?.pid ?? -1;
@@ -278,6 +354,8 @@ export class ShellperProcess extends EventEmitter {
     if (replayData.length > 0) {
       socket.write(encodeReplay(replayData));
     }
+
+    return connectionId;
   }
 
   private handleData(payload: Buffer): void {
@@ -371,10 +449,21 @@ export class ShellperProcess extends EventEmitter {
       this.pty.kill(15); // SIGTERM
     }
 
-    if (this.currentConnection && !this.currentConnection.destroyed) {
-      this.currentConnection.destroy();
+    // Destroy all active connections
+    for (const [, entry] of this.connections) {
+      if (!entry.socket.destroyed) {
+        entry.socket.destroy();
+      }
     }
-    this.currentConnection = null;
+    this.connections.clear();
+
+    // Destroy any pre-HELLO pending sockets
+    for (const socket of this.pendingSockets) {
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    }
+    this.pendingSockets.clear();
 
     if (this.server) {
       this.server.close();
