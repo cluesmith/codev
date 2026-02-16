@@ -17,6 +17,7 @@ import {
   extractProjectIdFromWorktreeName,
   worktreeNameToRoleId,
   calculateProgress,
+  calculateEvenProgress,
   detectBlocked,
 } from '../servers/overview.js';
 
@@ -24,9 +25,10 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockLoadProtocol } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
+  mockLoadProtocol: vi.fn(),
 }));
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
@@ -37,6 +39,10 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchIssueList: mockFetchIssueList,
   };
 });
+
+vi.mock('../../commands/porch/protocol.js', () => ({
+  loadProtocol: mockLoadProtocol,
+}));
 
 // ============================================================================
 // Temp directory helper
@@ -326,54 +332,84 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'spider', phase: 'implement' }))).toBe(70);
     });
 
-    // Bugfix protocol: 4 stages (investigate=25, fix=50, pr=75, complete=100)
-    it('returns 25 for bugfix investigate phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'investigate' }))).toBe(25);
+    // Dynamic protocol loading (bugfix, tick, etc.)
+    it('loads bugfix phases from protocol.json and calculates progress', () => {
+      mockLoadProtocol.mockReturnValue({
+        name: 'bugfix',
+        phases: [
+          { id: 'investigate' },
+          { id: 'fix' },
+          { id: 'pr' },
+        ],
+      });
+
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'investigate' }), tmpDir)).toBe(25);
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'fix' }), tmpDir)).toBe(50);
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'pr' }), tmpDir)).toBe(75);
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'complete' }), tmpDir)).toBe(100);
     });
 
-    it('returns 50 for bugfix fix phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'fix' }))).toBe(50);
+    it('loads tick phases from protocol.json and calculates progress', () => {
+      mockLoadProtocol.mockReturnValue({
+        name: 'tick',
+        phases: [
+          { id: 'identify' },
+          { id: 'amend_spec' },
+          { id: 'amend_plan' },
+          { id: 'implement' },
+          { id: 'defend' },
+          { id: 'evaluate' },
+          { id: 'review' },
+        ],
+      });
+
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'identify' }), tmpDir)).toBe(13);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'amend_spec' }), tmpDir)).toBe(25);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'amend_plan' }), tmpDir)).toBe(38);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'implement' }), tmpDir)).toBe(50);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'defend' }), tmpDir)).toBe(63);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'evaluate' }), tmpDir)).toBe(75);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'review' }), tmpDir)).toBe(88);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'complete' }), tmpDir)).toBe(100);
     });
 
-    it('returns 75 for bugfix pr phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'pr' }))).toBe(75);
+    it('returns 0 when loadProtocol throws (protocol not found)', () => {
+      mockLoadProtocol.mockImplementation(() => { throw new Error('not found'); });
+      expect(calculateProgress(makeParsed({ protocol: 'nonexistent', phase: 'foo' }), tmpDir)).toBe(0);
     });
 
-    it('returns 100 for bugfix complete phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'complete' }))).toBe(100);
-    });
-
-    // Tick protocol: 6 stages (identify=17, spec-amend=33, plan-amend=50, implement=67, review=83, complete=100)
-    it('returns 17 for tick identify phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'identify' }))).toBe(17);
-    });
-
-    it('returns 33 for tick spec-amend phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'spec-amend' }))).toBe(33);
-    });
-
-    it('returns 50 for tick plan-amend phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'plan-amend' }))).toBe(50);
-    });
-
-    it('returns 67 for tick implement phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'implement' }))).toBe(67);
-    });
-
-    it('returns 83 for tick review phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'review' }))).toBe(83);
-    });
-
-    it('returns 100 for tick complete phase', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'complete' }))).toBe(100);
-    });
-
-    it('returns 0 for unsupported protocol', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'experiment', phase: 'implement' }))).toBe(0);
+    it('returns 0 when no workspaceRoot provided for non-SPIR protocol', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'fix' }))).toBe(0);
     });
 
     it('returns 0 for unknown phase', () => {
       expect(calculateProgress(makeParsed({ phase: 'unknown' }))).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // calculateEvenProgress
+  // ==========================================================================
+
+  describe('calculateEvenProgress', () => {
+    it('distributes progress evenly across phases', () => {
+      const phases = ['a', 'b', 'c'];
+      expect(calculateEvenProgress('a', phases)).toBe(25);
+      expect(calculateEvenProgress('b', phases)).toBe(50);
+      expect(calculateEvenProgress('c', phases)).toBe(75);
+    });
+
+    it('returns 100 for complete phase', () => {
+      expect(calculateEvenProgress('complete', ['a', 'b'])).toBe(100);
+    });
+
+    it('returns 0 for unknown phase', () => {
+      expect(calculateEvenProgress('unknown', ['a', 'b'])).toBe(0);
+    });
+
+    it('handles single-phase protocol', () => {
+      expect(calculateEvenProgress('only', ['only'])).toBe(50);
+      expect(calculateEvenProgress('complete', ['only'])).toBe(100);
     });
   });
 

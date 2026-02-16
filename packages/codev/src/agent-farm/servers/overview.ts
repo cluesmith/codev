@@ -16,6 +16,7 @@ import {
   parseLabelDefaults,
 } from '../../lib/github.js';
 import type { GitHubPR, GitHubIssueListItem } from '../../lib/github.js';
+import { loadProtocol } from '../../commands/porch/protocol.js';
 
 // =============================================================================
 // Types
@@ -206,22 +207,22 @@ function pushPlanPhase(result: ParsedStatus, partial: Partial<PlanPhase>): void 
  * Calculate progress percentage (0-100) based on protocol phase.
  *
  * SPIR/spider: nuanced sub-progress with gate awareness and plan phase tracking.
- * Bugfix: 4 stages (investigate=25, fix=50, pr=75, complete=100).
- * Tick: 6 stages (identify=17, spec-amend=33, plan-amend=50, implement=67, review=83, complete=100).
+ * Other protocols: even split derived from protocol.json phases array.
  */
-export function calculateProgress(parsed: ParsedStatus): number {
+export function calculateProgress(parsed: ParsedStatus, workspaceRoot?: string): number {
   const protocol = parsed.protocol;
 
   if (protocol === 'spir' || protocol === 'spider') {
     return calculateSpirProgress(parsed);
   }
-  if (protocol === 'bugfix') {
-    return calculateEvenProgress(parsed.phase, ['investigate', 'fix', 'pr']);
-  }
-  if (protocol === 'tick') {
-    return calculateEvenProgress(parsed.phase, ['identify', 'spec-amend', 'plan-amend', 'implement', 'review']);
-  }
-  return 0;
+
+  if (!protocol || !workspaceRoot) return 0;
+
+  // Load phase list dynamically from protocol.json
+  const phases = loadProtocolPhases(workspaceRoot, protocol);
+  if (!phases) return 0;
+
+  return calculateEvenProgress(parsed.phase, phases);
 }
 
 function calculateSpirProgress(parsed: ParsedStatus): number {
@@ -252,11 +253,32 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
  * Even-split progress for protocols with fixed phase lists.
  * Each phase gets an equal share of 100%, with 'complete' always = 100.
  */
-function calculateEvenProgress(phase: string, phases: string[]): number {
+export function calculateEvenProgress(phase: string, phases: string[]): number {
   if (phase === 'complete') return 100;
   const idx = phases.indexOf(phase);
   if (idx === -1) return 0;
   return Math.round(((idx + 1) / (phases.length + 1)) * 100);
+}
+
+/** Cache of protocol phase IDs keyed by protocol name */
+const protocolPhaseCache = new Map<string, string[]>();
+
+/**
+ * Load phase IDs from a protocol's protocol.json file.
+ * Cached per protocol name for the lifetime of the process.
+ */
+function loadProtocolPhases(workspaceRoot: string, protocolName: string): string[] | null {
+  const cached = protocolPhaseCache.get(protocolName);
+  if (cached) return cached;
+
+  try {
+    const protocol = loadProtocol(workspaceRoot, protocolName);
+    const phases = protocol.phases.map(p => p.id);
+    protocolPhaseCache.set(protocolName, phases);
+    return phases;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -434,7 +456,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             worktreePath,
             protocol: parsed.protocol,
             planPhases: parsed.planPhases,
-            progress: calculateProgress(parsed),
+            progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
           });
           found = true;
