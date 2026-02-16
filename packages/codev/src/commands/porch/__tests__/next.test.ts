@@ -214,7 +214,7 @@ describe('porch next', () => {
     expect(result.status).toBe('gate_pending');
     expect(result.gate).toBe('spec-approval');
     expect(result.tasks).toBeDefined();
-    expect(result.tasks![0].description).toContain('porch gate');
+    expect(result.tasks![0].description).toContain('STOP and wait for human approval');
   });
 
   // --------------------------------------------------------------------------
@@ -265,7 +265,7 @@ describe('porch next', () => {
     expect(result.status).toBe('gate_pending');
     expect(result.gate).toBe('spec-approval');
     expect(result.tasks).toBeDefined();
-    expect(result.tasks![0].description).toContain('porch gate');
+    expect(result.tasks![0].description).toContain('STOP and wait for human approval');
   });
 
   // --------------------------------------------------------------------------
