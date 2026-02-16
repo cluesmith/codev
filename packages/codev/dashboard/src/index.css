@@ -789,7 +789,7 @@ body {
 }
 
 .work-section-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -799,8 +799,6 @@ body {
   align-items: center;
   gap: 6px;
 }
-
-/* work-section-count: removed (no count badges in redesign) */
 
 .work-empty {
   color: var(--text-muted);
