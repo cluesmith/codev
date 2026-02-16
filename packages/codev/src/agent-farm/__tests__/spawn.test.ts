@@ -40,8 +40,12 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     return '--files requires --task';
   }
 
-  if ((options.noComment || options.force) && !options.issueNumber) {
-    return '--no-comment and --force require an issue number';
+  if (options.noComment && !options.issueNumber) {
+    return '--no-comment requires an issue number';
+  }
+
+  if (options.force && !options.issueNumber && !options.task) {
+    return '--force requires an issue number (not needed for --task)';
   }
 
   // --protocol cannot be used with --shell or --worktree
@@ -159,6 +163,11 @@ describe('Spawn Command', () => {
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
+      it('should accept --task with --force (Bugfix #347: task builders skip dirty worktree)', () => {
+        const options: SpawnOptions = { task: 'Quick fix', force: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
       it('should accept --protocol alone', () => {
         const options: SpawnOptions = { protocol: 'maintain' };
         expect(validateSpawnOptions(options)).toBeNull();
@@ -227,13 +236,13 @@ describe('Spawn Command', () => {
       it('should reject --no-comment without issue number', () => {
         const options: SpawnOptions = { task: 'Fix bug', noComment: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('--no-comment and --force require an issue number');
+        expect(error).toContain('--no-comment requires an issue number');
       });
 
-      it('should reject --force without issue number', () => {
-        const options: SpawnOptions = { task: 'Fix bug', force: true };
+      it('should reject --force without issue number or task', () => {
+        const options: SpawnOptions = { protocol: 'maintain', force: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('--no-comment and --force require an issue number');
+        expect(error).toContain('--force requires an issue number');
       });
 
       it('should reject --files without --task', () => {

@@ -40,6 +40,7 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
 export interface CleanupOptions {
   project?: string;
   issue?: number;
+  task?: string;
   force?: boolean;
 }
 
@@ -119,9 +120,35 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
     if (!builder) {
       fatal(`Bugfix builder not found for issue #${options.issue}`);
     }
+  } else if (options.task) {
+    // Find task builder by worktree name (e.g., "task-bEPd")
+    const taskName = options.task;
+    // Task builder IDs are "builder-task-<lowercased shortId>" (via buildAgentName)
+    // Extract the shortId from the worktree name (e.g., "task-bEPd" → "bEPd" → "bepd")
+    const shortId = taskName.startsWith('task-') ? taskName.slice(5) : taskName;
+    const normalizedId = `builder-task-${shortId.toLowerCase()}`;
+    builder = state.builders.find((b) => b.id === normalizedId);
+
+    if (!builder) {
+      // Fallback: check by worktree path containing the task name
+      builder = state.builders.find((b) => b.worktree.endsWith(`/${taskName}`) || b.worktree.endsWith(`/${taskName}/`));
+    }
+
+    if (!builder) {
+      fatal(`Task builder not found for: ${taskName}`);
+    }
   } else if (options.project) {
     const projectId = options.project;
     builder = state.builders.find((b) => b.id === projectId);
+
+    if (!builder) {
+      // Try normalized task ID (e.g., "task-bEPd" → "builder-task-bepd")
+      if (projectId.startsWith('task-')) {
+        const shortId = projectId.slice(5);
+        const normalizedId = `builder-task-${shortId.toLowerCase()}`;
+        builder = state.builders.find((b) => b.id === normalizedId);
+      }
+    }
 
     if (!builder) {
       // Try to find by name pattern
@@ -132,7 +159,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
       fatal(`Builder not found for project: ${projectId}`);
     }
   } else {
-    fatal('Must specify either --project or --issue');
+    fatal('Must specify either --project, --issue, or --task');
   }
 
   await cleanupBuilder(builder, options.force, options.issue);
@@ -142,8 +169,12 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
   const config = getConfig();
   const isShellMode = builder.type === 'shell';
   const isBugfixMode = builder.type === 'bugfix';
+  const isTaskMode = builder.type === 'task';
+  // Ephemeral builders (bugfix, task) get full cleanup: remove worktree + delete branches
+  const isEphemeral = isBugfixMode || isTaskMode;
 
-  logger.header(`Cleaning up ${isShellMode ? 'Shell' : isBugfixMode ? 'Bugfix Builder' : 'Builder'} ${builder.id}`);
+  const typeLabel = isShellMode ? 'Shell' : isBugfixMode ? 'Bugfix Builder' : isTaskMode ? 'Task Builder' : 'Builder';
+  logger.header(`Cleaning up ${typeLabel} ${builder.id}`);
   logger.kv('Name', builder.name);
   if (!isShellMode) {
     logger.kv('Worktree', builder.worktree);
@@ -171,8 +202,8 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // For bugfix mode: actually remove worktree and delete remote branch
-  if (isBugfixMode && !isShellMode) {
+  // For ephemeral builders (bugfix, task): actually remove worktree and delete branches
+  if (isEphemeral && !isShellMode) {
     // Remove worktree
     if (existsSync(builder.worktree)) {
       logger.info('Removing worktree...');
@@ -195,10 +226,14 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
       }
     }
 
-    // Delete remote branch (verify PR is merged first unless --force)
+    // Delete remote branch
+    // Task builders typically don't push to remote, so skip PR verification for them
     if (builder.branch) {
-      if (!force) {
-        // Check if there's a merged PR for this branch
+      if (isTaskMode) {
+        // Task builders are ephemeral — always delete remote branch if it exists
+        await deleteRemoteBranch(builder.branch, config);
+      } else if (!force) {
+        // Bugfix: verify PR is merged first unless --force
         try {
           const prStatus = await run(`gh pr list --head "${builder.branch}" --state merged --json number --limit 1`, { cwd: config.workspaceRoot });
           const mergedPRs = JSON.parse(prStatus.stdout);

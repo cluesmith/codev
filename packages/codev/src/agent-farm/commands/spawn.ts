@@ -125,8 +125,12 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal('--files requires --task');
   }
 
-  if ((options.noComment || options.force) && !options.issueNumber) {
-    fatal('--no-comment and --force require an issue number');
+  if (options.noComment && !options.issueNumber) {
+    fatal('--no-comment requires an issue number');
+  }
+
+  if (options.force && !options.issueNumber && !options.task) {
+    fatal('--force requires an issue number (not needed for --task)');
   }
 
   // --protocol cannot be used with --shell or --worktree
@@ -665,8 +669,11 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   // Refuse to spawn if the main worktree has uncommitted changes.
   // Builders work in git worktrees branched from HEAD — uncommitted changes
   // (specs, plans, codev updates) won't be visible to the builder.
-  // Skip this check in resume mode — the worktree already exists with its own branch.
-  if (!options.force && !options.resume) {
+  // Skip this check for:
+  //   - --force: explicit override
+  //   - --resume: worktree already exists with its own branch
+  //   - --task: ephemeral tasks don't depend on committed specs/plans
+  if (!options.force && !options.resume && !options.task) {
     try {
       const { stdout } = await run('git status --porcelain', { cwd: config.workspaceRoot });
       if (stdout.trim().length > 0) {

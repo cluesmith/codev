@@ -281,20 +281,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Clean up a builder worktree and branch')
     .option('-p, --project <id>', 'Builder ID to clean up')
     .option('-i, --issue <number>', 'Cleanup bugfix builder for a GitHub issue')
+    .option('-t, --task <id>', 'Cleanup task builder (e.g., task-bEPd)')
     .option('-f, --force', 'Force cleanup even if branch not merged')
     .action(async (options) => {
       const { cleanup } = await import('./commands/cleanup.js');
       try {
         const issue = options.issue ? parseInt(options.issue, 10) : undefined;
-        if (!options.project && !issue) {
-          logger.error('Must specify either --project (-p) or --issue (-i)');
+        const specifiedCount = [options.project, issue, options.task].filter(Boolean).length;
+        if (specifiedCount === 0) {
+          logger.error('Must specify one of --project (-p), --issue (-i), or --task (-t)');
           process.exit(1);
         }
-        if (options.project && issue) {
-          logger.error('--project and --issue are mutually exclusive');
+        if (specifiedCount > 1) {
+          logger.error('--project, --issue, and --task are mutually exclusive');
           process.exit(1);
         }
-        await cleanup({ project: options.project, issue, force: options.force });
+        await cleanup({ project: options.project, issue, task: options.task, force: options.force });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
