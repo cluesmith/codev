@@ -27,8 +27,8 @@ describe('bugfix PR prompt (#335)', () => {
   it('should require CMAP verdicts before notification', () => {
     const content = fs.readFileSync(promptPath, 'utf-8');
 
-    // Must tell builders NOT to notify before having verdicts
-    expect(content).toMatch(/DO NOT.*notify.*until.*CMAP verdicts/is);
+    // Step 4 must explicitly prohibit sending the notification before verdicts are in
+    expect(content).toMatch(/DO NOT send this notification until you have all three CMAP verdicts/i);
   });
 
   it('should require per-model verdicts in the notification message', () => {
