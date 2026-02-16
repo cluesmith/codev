@@ -24,7 +24,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 1,
       "on_complete": {
         "commit": true,
         "push": true
@@ -46,7 +46,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 1,
       "on_complete": {
         "commit": true,
         "push": true
@@ -73,7 +73,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 1,
       "on_complete": {
         "commit": true,
         "push": true
@@ -110,7 +110,7 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
-      "max_iterations": 3,
+      "max_iterations": 1,
       "on_complete": {
         "commit": true,
         "push": true
@@ -147,7 +147,7 @@
   },
   "defaults": {
     "mode": "strict",
-    "max_iterations": 3,
+    "max_iterations": 1,
     "verify": {
       "models": ["gemini", "codex", "claude"],
       "parallel": true

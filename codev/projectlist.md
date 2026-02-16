@@ -292,7 +292,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0118"
     title: "Shellper Multi-Client Connections"
     summary: "Replace single-connection model with multi-client Map, enabling af attach and simultaneous dashboard+terminal viewing"
-    status: committed
+    status: implementing
     priority: high
     release: null
     files:
@@ -302,6 +302,7 @@ Projects currently in development (conceived through committed), sorted by prior
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
+      implementing_at: "2026-02-15"
     notes: "Shellper currently accepts one connection (Tower). Need multiple clients like tmux. Enables af attach in terminal."
 
   - id: "0120"

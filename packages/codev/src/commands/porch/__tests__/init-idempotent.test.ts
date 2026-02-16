@@ -71,7 +71,7 @@ const spirProtocol = {
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
       verify: { type: 'spec-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 3,
+      max_iterations: 1,
       gate: 'spec-approval',
     },
     {
@@ -80,7 +80,7 @@ const spirProtocol = {
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
       verify: { type: 'plan-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 3,
+      max_iterations: 1,
       gate: 'plan-approval',
     },
     {
@@ -89,7 +89,7 @@ const spirProtocol = {
       type: 'per_plan_phase',
       build: { prompt: 'implement.md' },
       verify: { type: 'impl-review', models: ['gemini', 'codex', 'claude'] },
-      max_iterations: 3,
+      max_iterations: 1,
     },
   ],
 };
