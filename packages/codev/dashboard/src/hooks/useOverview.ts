@@ -11,7 +11,12 @@ export function useOverview() {
   const poll = useCallback(async () => {
     try {
       const result = await fetchOverview();
-      setData(result);
+      setData(prev => {
+        if (prev !== null && JSON.stringify(prev) === JSON.stringify(result)) {
+          return prev;
+        }
+        return result;
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch overview');
