@@ -16,7 +16,7 @@ const populatedState: DashboardState = {
   architect: { port: 4201, pid: 1234 },
   builders: [
     {
-      id: 'B1', name: 'Builder 0085', port: 4210, pid: 2345,
+      id: 'B1', name: 'builder-spir-0085', port: 4210, pid: 2345,
       status: 'implementing', phase: 'phase-1', worktree: '.builders/0085',
       branch: 'builder/0085', type: 'spec',
     },
@@ -56,7 +56,7 @@ describe('StatusPanel', () => {
 
   it('shows builders, shells, and files', () => {
     render(<StatusPanel state={populatedState} onRefresh={() => {}} />);
-    expect(screen.getByText('Builder 0085')).toBeTruthy();
+    expect(screen.getByText('builder-spir-0085')).toBeTruthy();
     expect(screen.getByText('Shell 1')).toBeTruthy();
     expect(screen.getByText('main.ts')).toBeTruthy();
   });

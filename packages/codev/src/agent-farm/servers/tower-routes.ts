@@ -1190,7 +1190,7 @@ async function handleWorkspaceState(
     if (session) {
       state.builders.push({
         id: builderId,
-        name: `Builder ${builderId}`,
+        name: builderId,
         port: 0,
         pid: session.pid || 0,
         status: 'running',
