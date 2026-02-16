@@ -25,7 +25,11 @@ describe('Bugfix #324: shellper survives parent exit', () => {
 
   afterEach(() => {
     if (shellperPid !== null) {
-      try { process.kill(shellperPid, 'SIGKILL'); } catch { /* already dead */ }
+      // Kill the entire process group (shellper + its PTY child).
+      // detached:true puts shellper in its own process group, so -pid
+      // targets that group — preventing orphaned child processes.
+      try { process.kill(-shellperPid, 'SIGTERM'); } catch { /* already dead */ }
+      try { process.kill(-shellperPid, 'SIGKILL'); } catch { /* already dead */ }
       shellperPid = null;
     }
     if (tmpDir && fs.existsSync(tmpDir)) {
