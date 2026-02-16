@@ -289,7 +289,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   // Pre-initialize porch so the builder doesn't need to figure out project ID
   if (!options.resume) {
-    const porchProjectName = specName.replace(new RegExp(`^${projectId}-`), '');
+    const porchProjectName = specName.replace(new RegExp(`^0*${projectId}-`), '');
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
