@@ -22,7 +22,6 @@ import {
   isBuildVerify,
   getBuildConfig,
   getVerifyConfig,
-  getMaxIterations,
   getOnCompleteConfig,
   getPhaseChecks,
 } from './protocol.js';
@@ -348,7 +347,6 @@ async function handleBuildVerify(
   statusPath: string,
 ): Promise<PorchNextResponse> {
   const verifyConfig = getVerifyConfig(protocol, state.phase);
-  const maxIterations = getMaxIterations(protocol, state.phase);
 
   // Determine plan phase context for per_plan_phase protocols
   const planPhase = isPhased(protocol, state.phase)
@@ -489,62 +487,43 @@ async function handleBuildVerify(
       return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
-    // Some request changes — check max iterations escape
-    if (state.iteration >= maxIterations) {
-      // Max iterations — proceed to gate if one exists, otherwise force-advance
-      const gateName = getPhaseGate(protocol, state.phase);
-      if (gateName && state.gates[gateName]?.status !== 'approved') {
-        state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
-        state.build_complete = false;
-        state.iteration = 1;
-        state.history = [];
-        writeState(statusPath, state);
-        notifyArchitect(state.id, gateName, workspaceRoot);
-
-        return {
-          status: 'gate_pending',
-          phase: state.phase,
+    // Some request changes — check for rebuttal file first
+    const rebuttalFile = findRebuttalFile(workspaceRoot, state, state.iteration);
+    if (rebuttalFile) {
+      // Rebuttal exists — record reviews in history and advance (no second consultation)
+      const currentPhase = state.current_plan_phase || undefined;
+      const existingRecord = state.history.find(
+        h => h.iteration === state.iteration &&
+             (h.plan_phase || undefined) === currentPhase
+      );
+      if (existingRecord) {
+        existingRecord.reviews = reviews;
+      } else {
+        state.history.push({
           iteration: state.iteration,
-          plan_phase: state.current_plan_phase || undefined,
-          gate: gateName,
-          tasks: [{
-            subject: `Request human approval: ${gateName} (max iterations reached)`,
-            activeForm: `Requesting ${gateName} approval`,
-            description: `Max iterations (${maxIterations}) reached without unanimous approval.\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} needs approval (max iterations reached). Waiting for review."\n\nSTOP and wait for human approval.`,
-          }],
-        };
+          plan_phase: currentPhase,
+          build_output: '',
+          reviews,
+        });
       }
-
-      // No gate for this phase (e.g., per_plan_phase implement) — force-advance
-      // to prevent infinite loops when one model keeps blocking.
+      writeState(statusPath, state);
       return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
-    // Increment iteration and emit fix tasks
-    state.iteration++;
-    state.build_complete = false;
+    // No rebuttal yet — emit "write rebuttal" task (do NOT increment iteration)
+    // This MUST come before the max_iterations safety valve so the builder
+    // gets a chance to write a rebuttal before force-advance kicks in.
+    const reviewInfo = reviews.map(r => {
+      const phase = state.current_plan_phase || state.phase;
+      const fileName = `${state.id}-${phase}-iter${state.iteration}-${r.model}.txt`;
+      return `- ${fileName} (${r.verdict})`;
+    }).join('\n');
 
-    // Record reviews in history (scoped by plan_phase for disambiguation)
-    const currentPhase = state.current_plan_phase || undefined;
-    const existingRecord = state.history.find(
-      h => h.iteration === state.iteration - 1 &&
-           (h.plan_phase || undefined) === currentPhase
-    );
-    if (existingRecord) {
-      existingRecord.reviews = reviews;
-    } else {
-      state.history.push({
-        iteration: state.iteration - 1,
-        plan_phase: currentPhase,
-        build_output: '',
-        reviews,
-      });
-    }
+    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
+    const phase = state.current_plan_phase || state.phase;
+    const rebuttalFileName = `${state.id}-${phase}-iter${state.iteration}-rebuttals.md`;
+    const rebuttalPath = path.join(projectDir, rebuttalFileName);
 
-    writeState(statusPath, state);
-
-    // Emit fix tasks (prompt will include history with feedback)
-    const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
     return {
       status: 'tasks',
       phase: state.phase,
@@ -552,15 +531,15 @@ async function handleBuildVerify(
       plan_phase: state.current_plan_phase || undefined,
       tasks: [
         {
-          subject: `${phaseConfig.name}: Fix issues from review (iteration ${state.iteration})`,
-          activeForm: `Fixing review issues (iteration ${state.iteration})`,
-          description: prompt,
+          subject: `Write rebuttal for review feedback (iteration ${state.iteration})`,
+          activeForm: `Writing rebuttal for iteration ${state.iteration}`,
+          description: `Reviews requested changes. Read the feedback and write a rebuttal.\n\nReview files:\n${reviewInfo}\n\nWrite your rebuttal to:\n  ${rebuttalPath}\n\nIn the rebuttal:\n- Address each REQUEST_CHANGES point\n- Note what you changed (if anything)\n- Explain why you disagree (if applicable)\n\nThen run: porch done ${state.id}`,
           sequential: true,
         },
         {
           subject: `Signal build complete`,
           activeForm: 'Signaling build complete',
-          description: `Run: porch done ${state.id}\n\nThis validates checks and marks the build as complete for re-verification.`,
+          description: `Run: porch done ${state.id}\n\nThis marks the rebuttal as complete for re-verification.`,
           sequential: true,
         },
       ],

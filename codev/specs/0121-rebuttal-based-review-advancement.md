@@ -1,5 +1,5 @@
 ---
-approved: 2026-02-16
+approved: 2026-02-15
 validated: [architect]
 ---
 
@@ -7,15 +7,9 @@ validated: [architect]
 
 ## Problem
 
-The current porch review cycle is wasteful:
+With `max_iterations=1`, porch runs 3-way consultations (Gemini + Codex + Claude) but the builder never reads the feedback. We pay for 3 API calls per phase that produce reviews nobody acts on. The reviews are captured in files but porch force-advances regardless, so the feedback is wasted.
 
-1. **max_iterations=1**: Reviews are captured but never read by the builder. We pay for 3 API calls per phase (Gemini + Codex + Claude) that produce feedback nobody acts on.
-
-2. **max_iterations=2**: The builder reads feedback and revises, but then a second consultation runs. Since we force-advance after iter 2 regardless, the second consultation's results are thrown away. That's 3 more wasted API calls.
-
-3. **max_iterations=3+**: Codex returns REQUEST_CHANGES on nearly every iteration (partly due to parsing bugs, partly moving goalposts). Analysis across projects 0110, 0116, 0117, 0118 showed iterations 3+ never add value.
-
-The core issue: **the consultation is the exit condition**, but it should be **the builder's engagement with the feedback** that is the exit condition.
+The core issue: **the consultation produces feedback**, but **nothing forces the builder to engage with it**.
 
 ## Solution
 
@@ -62,7 +56,7 @@ reviews come in → allApprove? → yes → advance
                                                          no  → emit "write rebuttal" task
 ```
 
-The `max_iterations` config becomes irrelevant for the normal flow — the rebuttal IS the escape hatch. We keep `max_iterations` as a safety valve only (set to something like 5) in case the builder somehow loops.
+The `max_iterations` config stays at 1 — the rebuttal replaces the iteration loop entirely. One consultation round, then advance via approval or rebuttal.
 
 ### What Porch Emits When Reviews Request Changes
 
@@ -94,7 +88,7 @@ Description:
 When `porch next` or `porch done` runs after reviews are in and at least one is REQUEST_CHANGES:
 
 1. Look for rebuttal file matching pattern: `<id>-<phase>-iter<N>-rebuttals.md`
-2. If found and non-empty (>50 bytes to prevent empty-file gaming): **advance**
+2. If found: **advance**
 3. If not found: emit "write rebuttal" task
 
 ### What Changes
@@ -103,8 +97,8 @@ When `porch next` or `porch done` runs after reviews are in and at least one is 
 |------|--------|
 | `packages/codev/src/commands/porch/next.ts` | After reviews come in with REQUEST_CHANGES, check for rebuttal file before incrementing iteration. If rebuttal exists, call `handleVerifyApproved()`. If not, emit "write rebuttal" task instead of "fix issues" task. |
 | `packages/codev/src/commands/porch/next.ts` | The "fix issues" code path (lines ~523-560) becomes the "write rebuttal" code path. Builder is told to write rebuttal, not to revise the artifact. |
-| `codev/protocols/spir/protocol.json` | `max_iterations` set to 5 (safety valve only, should never be hit in practice) |
-| `codev-skeleton/protocols/spir/protocol.json` | Same |
+| `codev/protocols/spir/protocol.json` | No change — `max_iterations` stays at 1 |
+| `codev-skeleton/protocols/spir/protocol.json` | No change — `max_iterations` stays at 1 |
 
 ### What Does NOT Change
 
@@ -118,7 +112,7 @@ When `porch next` or `porch done` runs after reviews are in and at least one is 
 ## Success Criteria
 
 1. When reviews come back with REQUEST_CHANGES, porch emits a "write rebuttal" task
-2. When builder writes a rebuttal file (>50 bytes), `porch done` advances past the review
+2. When builder writes a rebuttal file, `porch done` advances past the review
 3. No second consultation round runs after the rebuttal
 4. If all 3 reviewers APPROVE, porch advances immediately (no rebuttal needed)
 5. Existing tests updated, new tests for rebuttal detection
