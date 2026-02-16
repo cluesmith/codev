@@ -14,6 +14,7 @@ import {
   parseStatusYaml,
   discoverBuilders,
   deriveBacklog,
+  extractProjectIdFromWorktreeName,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -48,10 +49,12 @@ function createBuilderWorktree(
   root: string,
   builderName: string,
   statusYaml?: string,
+  projectDirName?: string,
 ): string {
   const builderDir = path.join(root, '.builders', builderName);
   if (statusYaml) {
-    const projectDir = path.join(builderDir, 'codev', 'projects', `test-project`);
+    const dirName = projectDirName || 'test-project';
+    const projectDir = path.join(builderDir, 'codev', 'projects', dirName);
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, 'status.yaml'), statusYaml);
   } else {
@@ -140,6 +143,52 @@ describe('overview', () => {
   });
 
   // ==========================================================================
+  // extractProjectIdFromWorktreeName
+  // ==========================================================================
+
+  describe('extractProjectIdFromWorktreeName', () => {
+    it('extracts zero-padded ID from SPIR worktree', () => {
+      expect(extractProjectIdFromWorktreeName('spir-126-slug')).toBe('0126');
+    });
+
+    it('zero-pads short SPIR numbers', () => {
+      expect(extractProjectIdFromWorktreeName('spir-1-feature')).toBe('0001');
+    });
+
+    it('preserves 4+ digit SPIR numbers', () => {
+      expect(extractProjectIdFromWorktreeName('spir-9999-big')).toBe('9999');
+    });
+
+    it('extracts zero-padded ID from TICK worktree', () => {
+      expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('0130');
+    });
+
+    it('extracts builder-bugfix-N from bugfix worktree', () => {
+      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('builder-bugfix-296');
+    });
+
+    it('extracts legacy numeric ID', () => {
+      expect(extractProjectIdFromWorktreeName('0110')).toBe('0110');
+    });
+
+    it('extracts legacy numeric ID with slug', () => {
+      expect(extractProjectIdFromWorktreeName('0110-legacy-name')).toBe('0110');
+    });
+
+    it('returns null for task worktrees', () => {
+      expect(extractProjectIdFromWorktreeName('task-NAvW')).toBeNull();
+    });
+
+    it('returns null for worktree worktrees', () => {
+      expect(extractProjectIdFromWorktreeName('worktree-foIg')).toBeNull();
+    });
+
+    it('returns null for unknown prefixes', () => {
+      expect(extractProjectIdFromWorktreeName('unknown-123-slug')).toBeNull();
+    });
+  });
+
+  // ==========================================================================
   // discoverBuilders
   // ==========================================================================
 
@@ -148,7 +197,7 @@ describe('overview', () => {
       expect(discoverBuilders(tmpDir)).toEqual([]);
     });
 
-    it('discovers strict mode builder with status.yaml', () => {
+    it('discovers strict mode builder with matching project dir', () => {
       createBuilderWorktree(tmpDir, 'spir-126-project-mgmt', [
         "id: '0126'",
         'title: project-management-rework',
@@ -160,7 +209,7 @@ describe('overview', () => {
         '    status: approved',
         '  pr-ready:',
         '    status: pending',
-      ].join('\n'));
+      ].join('\n'), '0126-project-management-rework');
 
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
@@ -171,24 +220,25 @@ describe('overview', () => {
       expect(builders[0].gates['pr-ready']).toBe('pending');
     });
 
-    it('discovers soft mode builder without status.yaml', () => {
-      createBuilderWorktree(tmpDir, 'soft-builder-42');
+    it('discovers soft mode builder for task/worktree types', () => {
+      createBuilderWorktree(tmpDir, 'task-AbCd');
 
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
-      expect(builders[0].id).toBe('soft-builder-42');
+      expect(builders[0].id).toBe('task-AbCd');
       expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueNumber).toBeNull();
       expect(builders[0].phase).toBe('');
     });
 
-    it('discovers multiple builders', () => {
+    it('discovers multiple builders with correct matching', () => {
       createBuilderWorktree(tmpDir, 'spir-100-feature', [
-        "id: '100'",
+        "id: '0100'",
         'protocol: spir',
         'phase: implement',
         'current_plan_phase: phase_1',
         'gates:',
-      ].join('\n'));
+      ].join('\n'), '0100-feature');
 
       createBuilderWorktree(tmpDir, 'bugfix-200-fix');
 
@@ -199,16 +249,142 @@ describe('overview', () => {
       const soft = builders.find(b => b.mode === 'soft');
       expect(strict?.issueNumber).toBe(100);
       expect(soft?.id).toBe('bugfix-200-fix');
+      expect(soft?.issueNumber).toBe(200);
     });
 
-    it('treats builder with codev/projects but no status.yaml as soft', () => {
-      const builderDir = path.join(tmpDir, '.builders', 'no-status');
-      fs.mkdirSync(path.join(builderDir, 'codev', 'projects', 'test'), { recursive: true });
-      // No status.yaml
+    it('does not pick up wrong project dir (regression: #326)', () => {
+      // Simulate the bug scenario: worktree has multiple inherited project dirs
+      // The worktree is spir-126 but codev/projects/ also has 0087 (from main)
+      const builderDir = path.join(tmpDir, '.builders', 'spir-126-feature');
+      const projectsBase = path.join(builderDir, 'codev', 'projects');
+
+      // Create "inherited" project dir (from git, first alphabetically)
+      const wrongDir = path.join(projectsBase, '0087-porch-timeout');
+      fs.mkdirSync(wrongDir, { recursive: true });
+      fs.writeFileSync(path.join(wrongDir, 'status.yaml'), [
+        "id: '0087'",
+        'title: porch-timeout-termination-retries',
+        'protocol: spider',
+        'phase: complete',
+      ].join('\n'));
+
+      // Create the correct project dir for this worktree
+      const rightDir = path.join(projectsBase, '0126-feature');
+      fs.mkdirSync(rightDir, { recursive: true });
+      fs.writeFileSync(path.join(rightDir, 'status.yaml'), [
+        "id: '0126'",
+        'title: project-management-rework',
+        'protocol: spir',
+        'phase: implement',
+        'current_plan_phase: tower_endpoint',
+      ].join('\n'));
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      // Must match 0126, NOT 0087
+      expect(builders[0].id).toBe('0126');
+      expect(builders[0].issueNumber).toBe(126);
+      expect(builders[0].mode).toBe('strict');
+    });
+
+    it('discovers bugfix builder matching builder-bugfix-N project dir', () => {
+      // Bugfix worktree with matching project dir (as created by af spawn)
+      const builderDir = path.join(tmpDir, '.builders', 'bugfix-326-fix-discover');
+      const projectsBase = path.join(builderDir, 'codev', 'projects');
+
+      // Inherited from main
+      const inheritedDir = path.join(projectsBase, '0087-porch-timeout');
+      fs.mkdirSync(inheritedDir, { recursive: true });
+      fs.writeFileSync(path.join(inheritedDir, 'status.yaml'), [
+        "id: '0087'",
+        'protocol: spider',
+        'phase: complete',
+      ].join('\n'));
+
+      // The bugfix's own project dir (created by porch init via af spawn)
+      const bugfixDir = path.join(projectsBase, 'builder-bugfix-326-fix-discover');
+      fs.mkdirSync(bugfixDir, { recursive: true });
+      fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), [
+        'id: builder-bugfix-326',
+        'title: fix-discover',
+        'protocol: bugfix',
+        'phase: investigate',
+      ].join('\n'));
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].id).toBe('builder-bugfix-326');
+      expect(builders[0].issueNumber).toBe(326);
+      expect(builders[0].mode).toBe('strict');
+    });
+
+    it('falls back to soft mode with issue number when no project dir matches', () => {
+      // Bugfix worktree with no matching project dir (only inherited ones)
+      const builderDir = path.join(tmpDir, '.builders', 'bugfix-300-some-fix');
+      const projectsBase = path.join(builderDir, 'codev', 'projects');
+
+      // Only inherited project dir from main
+      const wrongDir = path.join(projectsBase, '0087-porch-timeout');
+      fs.mkdirSync(wrongDir, { recursive: true });
+      fs.writeFileSync(path.join(wrongDir, 'status.yaml'), [
+        "id: '0087'",
+        'protocol: spider',
+        'phase: complete',
+      ].join('\n'));
 
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
       expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueNumber).toBe(300);
+      expect(builders[0].id).toBe('bugfix-300-some-fix');
+    });
+
+    it('treats builder with codev/projects but no matching status.yaml as soft', () => {
+      const builderDir = path.join(tmpDir, '.builders', 'spir-999-no-match');
+      fs.mkdirSync(path.join(builderDir, 'codev', 'projects', 'unrelated'), { recursive: true });
+      // No status.yaml at all
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].mode).toBe('soft');
+      expect(builders[0].issueNumber).toBe(999);
+    });
+
+    it('handles multiple worktrees each matching their own project (not all #87)', () => {
+      // This is the core regression test for issue #326
+      const worktrees = [
+        { name: 'spir-87-timeout', projDir: '0087-porch-timeout', id: '0087', issue: 87 },
+        { name: 'spir-126-rework', projDir: '0126-project-rework', id: '0126', issue: 126 },
+        { name: 'tick-130-amend', projDir: '0130-codex-integration', id: '0130', issue: 130 },
+      ];
+
+      for (const wt of worktrees) {
+        const builderDir = path.join(tmpDir, '.builders', wt.name);
+        const projectsBase = path.join(builderDir, 'codev', 'projects');
+
+        // Each worktree has ALL project dirs (simulating git inheritance)
+        for (const other of worktrees) {
+          const dir = path.join(projectsBase, other.projDir);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'status.yaml'), [
+            `id: '${other.id}'`,
+            `title: ${other.projDir.replace(/^\d+-/, '')}`,
+            'protocol: spir',
+            'phase: implement',
+          ].join('\n'));
+        }
+      }
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(3);
+
+      // Each builder should match its OWN project, not all showing #87
+      for (const wt of worktrees) {
+        const builder = builders.find(b => b.issueNumber === wt.issue);
+        expect(builder).toBeDefined();
+        expect(builder!.id).toBe(wt.id);
+        expect(builder!.mode).toBe('strict');
+      }
     });
   });
 
@@ -303,12 +479,12 @@ describe('overview', () => {
   describe('OverviewCache', () => {
     it('returns builders, PRs, and backlog', async () => {
       createBuilderWorktree(tmpDir, 'spir-42-test', [
-        "id: '42'",
+        "id: '0042'",
         'protocol: spir',
         'phase: implement',
         'current_plan_phase: coding',
         'gates:',
-      ].join('\n'));
+      ].join('\n'), '0042-test');
 
       mockFetchPRList.mockResolvedValue([
         { number: 10, title: '[Spec 42] Add feature', reviewDecision: 'APPROVED', body: '' },
@@ -384,12 +560,12 @@ describe('overview', () => {
       mockFetchIssueList.mockResolvedValue(null);
 
       createBuilderWorktree(tmpDir, 'spir-1-test', [
-        "id: '1'",
+        "id: '0001'",
         'protocol: spir',
         'phase: specify',
         'current_plan_phase: draft',
         'gates:',
-      ].join('\n'));
+      ].join('\n'), '0001-test');
 
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
