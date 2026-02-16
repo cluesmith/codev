@@ -165,7 +165,9 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
  */
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
-  const match = normalized.match(/\/\.builders\/(bugfix-(\d+)|(\d{4}))(\/|$)/);
+  // Bugfix worktrees: .builders/bugfix-{N}-{slug} (slug is optional for legacy paths)
+  // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
+  const match = normalized.match(/\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/);
   if (!match) return null;
   // Bugfix worktrees use "bugfix-N" as the porch project ID
   if (match[2]) return `bugfix-${match[2]}`;

@@ -303,6 +303,14 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/bugfix-12345')).toBe('bugfix-12345');
     });
 
+    it('should detect bugfix ID from worktree with slug suffix', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-332-fix-login-bug')).toBe('bugfix-332');
+    });
+
+    it('should detect bugfix ID from slug-suffixed worktree subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-332-fix-login-bug/src/commands/')).toBe('bugfix-332');
+    });
+
     it('should return null for task worktrees', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
     });
@@ -363,6 +371,11 @@ updated_at: "${state.updated_at}"
 
     it('step 2: CWD bugfix worktree resolves to full bugfix ID', () => {
       const result = resolveProjectId(undefined, '/repo/.builders/bugfix-42', singleProjectRoot);
+      expect(result).toEqual({ id: 'bugfix-42', source: 'cwd' });
+    });
+
+    it('step 2: CWD bugfix worktree with slug suffix resolves to bugfix ID', () => {
+      const result = resolveProjectId(undefined, '/repo/.builders/bugfix-42-fix-login-bug', singleProjectRoot);
       expect(result).toEqual({ id: 'bugfix-42', source: 'cwd' });
     });
 

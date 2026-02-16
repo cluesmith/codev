@@ -611,9 +611,12 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   } else {
     await createWorktree(config, branchName, worktreePath);
 
-    // Pre-initialize porch so the builder doesn't need to figure out project ID
+    // Pre-initialize porch so the builder doesn't need to figure out project ID.
+    // Use bugfix-{N} as the porch project ID (not the builder agent name).
+    // This aligns with porch's CWD-based detection from worktree paths.
+    const porchProjectId = `bugfix-${issueNumber}`;
     const slug = slugify(issue.title);
-    await initPorchInWorktree(worktreePath, protocol, builderId, slug);
+    await initPorchInWorktree(worktreePath, protocol, porchProjectId, slug);
   }
 
   const templateContext: TemplateContext = {
