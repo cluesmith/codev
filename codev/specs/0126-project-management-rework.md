@@ -97,6 +97,8 @@ Labels are set at issue creation and rarely changed:
 - `priority:high` / `priority:medium` / `priority:low` — set once, maybe updated occasionally
 - Open/Closed — the only state transition GitHub needs to know about
 
+**Label defaults**: If no `type:*` label → treated as `feature`. If no `priority:*` label → treated as `medium`. Multiple labels of the same kind → first one wins (alphabetical).
+
 Detailed phase tracking (specify → plan → implement → review) stays in porch's `status.yaml` for strict mode. Soft mode has no tracking. Dashboard derives status from filesystem + Tower state.
 
 ### Simplified spawn CLI
@@ -117,9 +119,12 @@ The number is a positional argument, not a flag. `af spawn 315` replaces both `a
 **TICK amendments**: Create a new issue for the amendment work, then spawn with `--amends <original>`. The new issue tracks the work, the original spec is modified in-place, and the review file uses the new issue number.
 
 The spawn flow:
-1. Checks for `codev/specs/315-*.md` on disk
-2. Fetches GitHub issue #315 for context (title, body, comments)
-3. Uses the explicitly specified protocol
+1. Validate: `--protocol` is required (fail if missing)
+2. Resolve spec: glob `codev/specs/<N>-*.md` (strips leading zeros for legacy specs, e.g., `af spawn 76` matches `0076-*.md`)
+3. Fetch context: `gh issue view <N> --json title,body,comments` (non-fatal if issue doesn't exist — spec-only mode)
+4. Dispatch: use the explicitly specified `--protocol` to choose the code path (SPIR, BUGFIX, TICK, etc.)
+
+The `--protocol` flag replaces the old implicit detection. There is no ambiguity about which code path runs — the human chooses explicitly.
 
 Keep `-p` and `--issue` as hidden aliases for backwards compatibility.
 
@@ -221,7 +226,39 @@ GET /api/overview
 }
 ```
 
-Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list`. Backlog: cached `gh issue list` (open issues — both features and bugs) cross-referenced with `codev/specs/` glob and `.builders/` to determine what's conceived, ready, or unfixed.
+Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list --json number,title,reviewDecision,body`. Backlog: cached `gh issue list --json number,title,labels,createdAt` (open issues — both features and bugs) cross-referenced with `codev/specs/` glob and `.builders/` to determine what's conceived, ready, or unfixed.
+
+**PR-to-issue linkage**: Parse the PR body for GitHub's closing keywords (`Fixes #N`, `Closes #N`, `Resolves #N`). Also check the PR title for `[Spec N]` or `[Bugfix #N]` patterns (existing commit message convention). If no linkage found, `linkedIssue` is `null`.
+
+**Cache behavior**: Both PR and issue data use the same 60s TTL. Tower stores the cache in memory (not on disk). Manual refresh: the dashboard sends a `POST /api/overview/refresh` to invalidate the cache and re-fetch.
+
+**Degraded mode**: If `gh` CLI fails (not authenticated, network down, rate limited), the `/api/overview` endpoint still returns `builders` (from Tower state) but `pendingPRs` and `backlog` are empty arrays with an `"error"` field explaining why. The dashboard shows "GitHub unavailable" inline where PR/backlog sections would be.
+
+### `getProjectSummary()` replacement
+
+The current `getProjectSummary()` in `porch/prompts.ts` extracts a `summary` field from projectlist.md YAML. It is replaced with a two-step lookup:
+
+1. **GitHub issue** (primary): `gh issue view <N> --json title,body` → use `title` as the summary. The full `body` is available for the builder prompt but the summary is just the title.
+2. **Spec file** (fallback): If the GitHub issue doesn't exist (e.g., legacy specs), read the first heading and first paragraph from `codev/specs/<N>-*.md` as the summary.
+3. **Neither**: If neither exists, use the project title from `status.yaml` as a minimal summary.
+
+This function is only called in strict mode (porch). Soft mode never calls it.
+
+### Migration
+
+There is no migration step. `projectlist.md` becomes a dead file:
+
+- **Existing repos**: `projectlist.md` stays on disk as historical reference. No code reads it. No command deletes it. Over time, users can archive or delete it manually.
+- **`projectlist-archive.md`**: Same treatment — dead file, no longer created or read.
+- **`codev init`**: No longer creates `projectlist.md` or `projectlist-archive.md`.
+- **`codev adopt`**: No longer creates these files. Does not delete existing ones.
+- **`codev doctor`**: Does NOT warn about `projectlist.md` existing — it's harmless. Does check that `gh` CLI is authenticated (new check).
+
+### Legacy spec compatibility
+
+Existing specs use zero-padded 4-digit IDs (e.g., `0076`). GitHub issues use plain integers (e.g., `76`). The spec file lookup strips leading zeros before globbing: `af spawn 76` matches `codev/specs/0076-*.md`. The `stripLeadingZeros()` function already exists in the codebase.
+
+For legacy specs with no corresponding GitHub issue, spawn works in spec-only mode — the spec file provides all context, and the `gh issue view` step is non-fatal.
 
 ## Success Criteria
 
@@ -250,9 +287,59 @@ Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list`. Backlog
 | `gh` CLI not authenticated | Medium | Medium | `codev doctor` checks, clear error messages |
 | Soft builders have no phase info | Expected | None | Show as "running" without phase detail |
 | PR/issue cache staleness | Low | Low | 60s TTL + refresh on demand |
+| Network down / offline | Low | Medium | Degraded mode: builders still shown, PRs/backlog empty with error message |
+| Rate limiting mid-session | Very Low | Low | Cached data served until TTL, error on next refresh |
+
+## Testing Expectations
+
+- **Playwright**: Work view layout, builder cards, PR list, backlog rendering, collapsible file panel, responsive layout
+- **Unit tests**: `getProjectSummary()` replacement (GitHub fetch, spec-file fallback, neither), PR-to-issue linkage parsing, label defaults, `stripLeadingZeros()` matching
+- **Integration tests**: `af spawn` positional arg with `--protocol`, legacy `-p` alias, `/api/overview` endpoint with mocked `gh` output, degraded mode (gh failure)
+- **E2E**: Full spawn → build → PR flow using issue numbers
 
 ## Resolved Questions
 
 - **Labels**: Create on first use — no setup step needed
 - **Issue closure**: Merging the PR closes the linked issue automatically
 - **Backlog filtering**: Show all open issues (features + bugs)
+- **Supersedes 0119**: No work from 0119 was started (it was abandoned before implementation). Nothing to discard or roll in.
+- **Issue number vs legacy ID collision**: Issue #76 and spec `0076-feature.md` are expected to refer to the same thing. If they're unrelated, the spec file takes precedence (it's the implementation artifact).
+- **"Open" button**: Opens the builder's Claude session as a new tab in the dashboard's tab bar (not a browser tab).
+- **File panel search bar**: Reuses the existing `af open` search functionality, just repositioned into the collapsible panel.
+
+## Consultation Log
+
+### Iteration 1 — 3-way spec review (Gemini, Codex, Claude)
+
+**Gemini** (APPROVE): No issues. Called the spec comprehensive and feasible.
+
+**Codex** (REQUEST_CHANGES): Identified four gaps:
+1. PR-to-issue linkage rules undefined
+2. No behavior for missing/ambiguous labels
+3. No testing strategy section
+4. Insufficient error handling spec for `gh` failures and caching
+
+**Claude** (COMMENT): Identified three medium-severity gaps:
+1. Migration path for existing repos unspecified
+2. Unified positional arg collapses spec vs. issue-only code paths — resolution logic unclear
+3. `getProjectSummary()` replacement lacks detail (what from issue body? what does fallback mean?)
+
+Also flagged lower-severity items: `projectlist-archive.md` fate, offline behavior, cache TTL for backlog, legacy spec matching semantics, "Open" button ambiguity.
+
+**Changes made in response:**
+
+| Feedback | Change |
+|----------|--------|
+| PR-to-issue linkage (Codex) | Added linkage rules: parse `Fixes #N`/`Closes #N` from PR body + `[Spec N]`/`[Bugfix #N]` from PR title |
+| Label defaults (Codex) | Added: no `type:*` → feature, no `priority:*` → medium, multiple → first alphabetical |
+| Testing strategy (Codex) | Added "Testing Expectations" section with Playwright, unit, integration, and E2E categories |
+| `gh` failure handling (Codex) | Added "Degraded mode" paragraph: endpoint returns builders but empty PR/backlog with error field |
+| Migration path (Claude) | Added "Migration" section: `projectlist.md` becomes dead file, no migration step, no deletion |
+| Spawn resolution (Claude) | Rewrote spawn flow as numbered steps: `--protocol` is required, drives code path, no ambiguity |
+| `getProjectSummary()` (Claude) | Added replacement section: GitHub issue title (primary) → spec file heading (fallback) → status.yaml title (last resort) |
+| `projectlist-archive.md` (Claude) | Addressed in Migration section: same treatment as `projectlist.md` |
+| Offline/degraded (Claude) | Covered by degraded mode addition |
+| Cache TTL (Claude) | Added: both PR and issue use same 60s TTL, in-memory, manual refresh via `POST /api/overview/refresh` |
+| Legacy spec matching (Claude) | Added "Legacy spec compatibility" section: `stripLeadingZeros()` matching, spec-only mode when no issue exists |
+| "Open" button ambiguity (Claude) | Added to Resolved Questions: opens in dashboard tab bar, not browser tab |
+| File panel search bar (Claude) | Added to Resolved Questions: reuses existing `af open` search |
