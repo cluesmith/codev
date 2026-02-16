@@ -337,6 +337,20 @@ Projects currently in development (conceived through committed), sorted by prior
       committed_at: "2026-02-16"
     notes: "PR #308 merged. Codex JSONL parsing replaced with SDK structured events."
 
+  - id: "0123"
+    title: "Codebase Dedup & Magic Constants"
+    summary: "Find duplicate code and magic constants scattered across the codebase, propose consolidation"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+    dependencies: []
+    tags: [refactor, code-hygiene, maintenance]
+    timestamps:
+      conceived_at: "2026-02-16"
+    notes: "Investigate duplicated logic and magic constants. Builder produces a proposal for refactoring."
+
 # Low Priority
 
   - id: "0062"
@@ -1225,7 +1239,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0123** - Reserve this number for your next project
+**0124** - Reserve this number for your next project
 
 ---
 
