@@ -225,6 +225,17 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
 
   // Protocol complete
   if (state.phase === 'complete' || !phaseConfig) {
+    // Bugfix builders are done after PR + CMAP — architect handles merge/cleanup
+    if (state.protocol === 'bugfix') {
+      return {
+        status: 'complete',
+        phase: state.phase,
+        iteration: state.iteration,
+        summary: `Project ${state.id} has completed the ${state.protocol} protocol. The architect will review, merge, and clean up.`,
+        tasks: [],
+      };
+    }
+
     return {
       status: 'complete',
       phase: state.phase,

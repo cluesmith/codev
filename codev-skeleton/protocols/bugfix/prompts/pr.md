@@ -63,11 +63,15 @@ Review the consultation results:
 
 ### 4. Notify Architect
 
-After CMAP review is complete and feedback is addressed, notify the architect:
+After CMAP review is complete and feedback is addressed, send a **single** notification
+with both the PR link and the review verdict:
 
 ```bash
-af send architect "PR #<number> ready for review (fixes issue #{{issue.number}})"
+af send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: <verdict summary, e.g. 'all approve' or '2 approve, 1 request changes (addressed)'>"
 ```
+
+**This is the only notification you send.** After this, your work is done — the architect
+takes it from here (reviews, merges, cleans up).
 
 ## Signals
 

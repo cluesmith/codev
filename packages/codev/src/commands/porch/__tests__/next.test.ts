@@ -721,4 +721,72 @@ describe('porch next', () => {
     expect(result.tasks![0].subject).toContain('Identify Target');
     expect(result.tasks![0].description).toContain('porch done');
   });
+
+  // --------------------------------------------------------------------------
+  // Bugfix complete — no merge task, no second notification (#319)
+  // --------------------------------------------------------------------------
+
+  it('returns empty tasks for completed bugfix protocol (no merge instruction)', async () => {
+    const bugfixProtocol = {
+      name: 'bugfix',
+      version: '1.1.0',
+      phases: [
+        {
+          id: 'investigate',
+          name: 'Investigate',
+          type: 'once',
+          transition: { on_complete: 'fix' },
+        },
+        {
+          id: 'fix',
+          name: 'Fix',
+          type: 'once',
+          transition: { on_complete: 'pr' },
+        },
+        {
+          id: 'pr',
+          name: 'Create PR',
+          type: 'once',
+          transition: { on_complete: null },
+        },
+      ],
+    };
+    setupProtocol(testDir, 'bugfix', bugfixProtocol);
+
+    const state: ProjectState = {
+      id: 'builder-bugfix-42',
+      title: 'login-spaces',
+      protocol: 'bugfix',
+      phase: 'complete',
+      plan_phases: [],
+      current_plan_phase: null,
+      gates: {},
+      iteration: 1,
+      build_complete: false,
+      history: [],
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    setupState(testDir, state);
+
+    const result = await next(testDir, 'builder-bugfix-42');
+
+    expect(result.status).toBe('complete');
+    expect(result.tasks).toEqual([]);
+    // Must NOT contain merge instructions or af send — builder is done
+    expect(result.summary).not.toContain('Merge');
+    expect(result.summary).toContain('architect');
+  });
+
+  it('returns merge task for completed non-bugfix protocol', async () => {
+    const state = makeState({ phase: 'complete' });
+    setupState(testDir, state);
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('complete');
+    expect(result.tasks!.length).toBe(1);
+    expect(result.tasks![0].subject).toContain('Merge');
+    expect(result.tasks![0].description).toContain('gh pr merge');
+  });
 });
