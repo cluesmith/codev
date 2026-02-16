@@ -230,6 +230,34 @@ describe('tower-websocket', () => {
       // Should not try to send replay when connection is closed
       expect(ws.send).not.toHaveBeenCalled();
     });
+
+    it('drops data frames when WebSocket bufferedAmount exceeds high water mark (Bugfix #313)', () => {
+      const ws = makeWs();
+      const session = makeSession();
+      const req = makeReq();
+
+      handleTerminalWebSocket(ws, session, req);
+
+      // Get the client adapter that was passed to session.attach
+      const client = session.attach.mock.calls[0][0];
+
+      // Normal send should work
+      ws.bufferedAmount = 0;
+      client.send('small data');
+      expect(ws.send).toHaveBeenCalledTimes(1);
+
+      // Send with bufferedAmount above 1MB threshold should be dropped
+      ws.send.mockClear();
+      ws.bufferedAmount = 2 * 1024 * 1024; // 2MB
+      client.send('large data that should be dropped');
+      expect(ws.send).not.toHaveBeenCalled();
+
+      // Should resume sending after buffer drains
+      ws.send.mockClear();
+      ws.bufferedAmount = 0;
+      client.send('resumed data');
+      expect(ws.send).toHaveBeenCalledTimes(1);
+    });
   });
 
   // =========================================================================

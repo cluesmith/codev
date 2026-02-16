@@ -1106,7 +1106,7 @@ describe('ShellperProcess', () => {
       towerSocket.destroy();
     });
 
-    it('failed write removes client from map', async () => {
+    it('backpressure pauses writes instead of destroying socket (Bugfix #313)', async () => {
       const logs: string[] = [];
       shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
@@ -1115,45 +1115,56 @@ describe('ShellperProcess', () => {
       await connectAsTerminal(socketPath);
       await new Promise((r) => setTimeout(r, 50));
 
-      // Access the server-side connections map (white-box test for branch coverage)
-      // We need to patch the server-side socket's write, not the client-side socket
       const connections = (shellper as any).connections as Map<
         string,
-        { socket: net.Socket; clientType: string }
+        { socket: net.Socket; clientType: string; paused: boolean }
       >;
       expect(connections.size).toBe(2);
 
-      // Find the terminal connection entry and patch its server-side socket.write
+      // Find the terminal connection and make write() return false (backpressure)
       let termConnId: string | undefined;
+      let drainCb: (() => void) | undefined;
       for (const [id, entry] of connections) {
         if (entry.clientType === 'terminal') {
           termConnId = id;
           entry.socket.write = (() => false) as typeof entry.socket.write;
+          // Capture the 'drain' listener so we can trigger it later
+          const origOnce = entry.socket.once.bind(entry.socket);
+          entry.socket.once = ((event: string, cb: () => void) => {
+            if (event === 'drain') drainCb = cb;
+            return origOnce(event, cb);
+          }) as typeof entry.socket.once;
           break;
         }
       }
       expect(termConnId).toBeDefined();
 
-      // Trigger broadcast — server-side write returns false, exercises ok === false branch
+      // Trigger broadcast — write returns false → connection gets paused
       mockPty.simulateData('backpressure test');
       await new Promise((r) => setTimeout(r, 100));
 
-      // Verify the log message from the ok === false branch (line 174 of shellper-process.ts)
-      expect(logs.some((msg) => msg.includes('Write failed') && msg.includes('removing'))).toBe(
-        true,
-      );
+      // Connection should be paused, NOT destroyed or removed
+      expect(connections.has(termConnId!)).toBe(true);
+      expect(connections.get(termConnId!)!.paused).toBe(true);
+      expect(logs.some((msg) => msg.includes('backpressure') && msg.includes('pausing'))).toBe(true);
 
-      // Connection should have been removed from the map
-      expect(connections.has(termConnId!)).toBe(false);
+      // Subsequent broadcasts should skip the paused connection (drop frames)
+      mockPty.simulateData('dropped frame');
+      await new Promise((r) => setTimeout(r, 50));
 
-      // Tower should still receive subsequent broadcasts
+      // Tower should still receive data
       const parser = createFrameParser();
       towerSocket.pipe(parser);
       const framesPromise = collectFramesFor(parser, 200);
-      mockPty.simulateData('after backpressure');
+      mockPty.simulateData('tower still works');
       const frames = await framesPromise;
       const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
       expect(dataFrames.length).toBeGreaterThan(0);
+
+      // Simulate drain event — connection should resume
+      if (drainCb) drainCb();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(connections.get(termConnId!)!.paused).toBe(false);
 
       towerSocket.destroy();
     });
