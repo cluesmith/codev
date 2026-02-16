@@ -73,6 +73,9 @@ describe('Bugfix #324: shellper survives parent exit', () => {
     // Close our copy of the stderr log FD (child has its own after fork)
     fs.closeSync(stderrFd);
 
+    // Bugfix #341: Capture child PID immediately for afterEach cleanup.
+    if (child.pid) shellperPid = child.pid;
+
     // Read PID + startTime from shellper stdout
     const info = await new Promise<{ pid: number; startTime: number }>((resolve, reject) => {
       let data = '';
@@ -169,6 +172,11 @@ describe('Bugfix #324: shellper survives parent exit', () => {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    // Bugfix #341: Capture child PID immediately for afterEach cleanup.
+    // If stdout parsing fails, the afterEach still needs to kill the process
+    // group to prevent orphaned shellper processes from accumulating.
+    if (child.pid) shellperPid = child.pid;
 
     // Read PID info from stdout
     const info = await new Promise<{ pid: number; startTime: number }>((resolve, reject) => {
