@@ -150,9 +150,10 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const tickMatch = dirName.match(/^tick-(\d+)/);
   if (tickMatch) return tickMatch[1].padStart(4, '0');
 
-  // Bugfix: bugfix-296-slug → "bugfix-296"
+  // Bugfix: bugfix-296-slug → "builder-bugfix-296"
+  // Porch project dirs are created via buildAgentName('bugfix', N) → "builder-bugfix-N"
   const bugfixMatch = dirName.match(/^bugfix-(\d+)/);
-  if (bugfixMatch) return `bugfix-${bugfixMatch[1]}`;
+  if (bugfixMatch) return `builder-bugfix-${bugfixMatch[1]}`;
 
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);

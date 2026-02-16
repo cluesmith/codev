@@ -163,8 +163,8 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('0130');
     });
 
-    it('extracts bugfix-N from bugfix worktree', () => {
-      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('bugfix-296');
+    it('extracts builder-bugfix-N from bugfix worktree', () => {
+      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('builder-bugfix-296');
     });
 
     it('extracts legacy numeric ID', () => {
@@ -284,6 +284,37 @@ describe('overview', () => {
       // Must match 0126, NOT 0087
       expect(builders[0].id).toBe('0126');
       expect(builders[0].issueNumber).toBe(126);
+      expect(builders[0].mode).toBe('strict');
+    });
+
+    it('discovers bugfix builder matching builder-bugfix-N project dir', () => {
+      // Bugfix worktree with matching project dir (as created by af spawn)
+      const builderDir = path.join(tmpDir, '.builders', 'bugfix-326-fix-discover');
+      const projectsBase = path.join(builderDir, 'codev', 'projects');
+
+      // Inherited from main
+      const inheritedDir = path.join(projectsBase, '0087-porch-timeout');
+      fs.mkdirSync(inheritedDir, { recursive: true });
+      fs.writeFileSync(path.join(inheritedDir, 'status.yaml'), [
+        "id: '0087'",
+        'protocol: spider',
+        'phase: complete',
+      ].join('\n'));
+
+      // The bugfix's own project dir (created by porch init via af spawn)
+      const bugfixDir = path.join(projectsBase, 'builder-bugfix-326-fix-discover');
+      fs.mkdirSync(bugfixDir, { recursive: true });
+      fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), [
+        'id: builder-bugfix-326',
+        'title: fix-discover',
+        'protocol: bugfix',
+        'phase: investigate',
+      ].join('\n'));
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].id).toBe('builder-bugfix-326');
+      expect(builders[0].issueNumber).toBe(326);
       expect(builders[0].mode).toBe('strict');
     });
 
