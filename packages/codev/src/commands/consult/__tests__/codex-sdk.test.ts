@@ -64,14 +64,17 @@ async function* mockEvents(events: unknown[]): AsyncGenerator<unknown> {
 // Track what the mock was configured with
 let mockRunStreamedFn: ReturnType<typeof vi.fn>;
 let mockStartThreadFn: ReturnType<typeof vi.fn>;
+let mockConstructorArgs: unknown;
+let mockStartThreadArgs: unknown;
 
 // Mock the @openai/codex-sdk module with a proper class
 vi.mock('@openai/codex-sdk', () => {
   class MockCodex {
-    constructor() {
-      // Constructor is a no-op
+    constructor(...args: unknown[]) {
+      mockConstructorArgs = args[0];
     }
-    startThread() {
+    startThread(...args: unknown[]) {
+      mockStartThreadArgs = args[0];
       return mockStartThreadFn();
     }
   }
@@ -232,5 +235,38 @@ describe('runCodexConsultation() with mocked SDK', () => {
     } catch {
       // Expected — metrics should still be recorded in finally
     }
+  });
+
+  it('throws on stream error event (ThreadErrorEvent)', async () => {
+    setupMockCodex([
+      { type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'Started...' } },
+      { type: 'error', message: 'Unrecoverable stream failure' },
+    ]);
+
+    await expect(
+      runCodexConsultation('test query', 'You are a reviewer', tmpDir),
+    ).rejects.toThrow('Unrecoverable stream failure');
+  });
+
+  it('passes correct config to Codex constructor and startThread', async () => {
+    setupMockCodex([
+      { type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 50 } },
+    ]);
+
+    await runCodexConsultation('test query', 'You are a reviewer', tmpDir);
+
+    // Verify constructor receives experimental_instructions_file in config
+    expect(mockConstructorArgs).toBeDefined();
+    expect((mockConstructorArgs as Record<string, unknown>).config).toBeDefined();
+    const config = (mockConstructorArgs as Record<string, Record<string, unknown>>).config;
+    expect(config.experimental_instructions_file).toBeDefined();
+    expect(typeof config.experimental_instructions_file).toBe('string');
+
+    // Verify startThread receives model, sandboxMode, and workingDirectory
+    expect(mockStartThreadArgs).toBeDefined();
+    const threadArgs = mockStartThreadArgs as Record<string, unknown>;
+    expect(threadArgs.model).toBe('gpt-5.2-codex');
+    expect(threadArgs.sandboxMode).toBe('read-only');
+    expect(threadArgs.workingDirectory).toBe(tmpDir);
   });
 });

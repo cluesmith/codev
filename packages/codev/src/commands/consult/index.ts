@@ -377,6 +377,11 @@ export async function runCodexConsultation(
         exitCode = 1;
         throw new Error(errorMessage);
       }
+      if (event.type === 'error') {
+        errorMessage = event.message ?? 'Codex stream error';
+        exitCode = 1;
+        throw new Error(errorMessage);
+      }
     }
 
     // Write output file
