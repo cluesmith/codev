@@ -127,4 +127,32 @@ describe('parseLabelDefaults', () => {
       { name: 'priority:high' },
     ])).toEqual({ type: 'feature', priority: 'high' });
   });
+
+  it('matches bare "bug" label when no type: prefix exists', () => {
+    expect(parseLabelDefaults([{ name: 'bug' }])).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('matches bare "project" label when no type: prefix exists', () => {
+    expect(parseLabelDefaults([{ name: 'project' }])).toEqual({
+      type: 'project',
+      priority: 'medium',
+    });
+  });
+
+  it('prefers type: prefixed label over bare label', () => {
+    expect(parseLabelDefaults([
+      { name: 'bug' },
+      { name: 'type:project' },
+    ])).toEqual({ type: 'project', priority: 'medium' });
+  });
+
+  it('ignores bare labels that are not known types', () => {
+    expect(parseLabelDefaults([
+      { name: 'help-wanted' },
+      { name: 'good-first-issue' },
+    ])).toEqual({ type: 'feature', priority: 'medium' });
+  });
 });

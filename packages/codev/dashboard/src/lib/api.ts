@@ -93,6 +93,7 @@ export interface OverviewBuilder {
 export interface OverviewPR {
   number: number;
   title: string;
+  url: string;
   reviewStatus: string;
   linkedIssue: number | null;
   createdAt: string;

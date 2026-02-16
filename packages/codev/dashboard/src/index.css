@@ -929,6 +929,12 @@ body {
   gap: 4px;
 }
 
+a.pr-row {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
 .pr-row {
   display: flex;
   align-items: center;
