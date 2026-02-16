@@ -49,47 +49,6 @@ body {
   width: 100%;
 }
 
-/* Spec 0100: Gate notification banner */
-.gate-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: #92400e;
-  color: #fef3c7;
-  font-size: 13px;
-  flex-shrink: 0;
-  z-index: 10;
-}
-
-.gate-banner-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.gate-banner-message {
-  flex-shrink: 0;
-}
-
-.gate-banner-wait {
-  padding: 2px 8px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.gate-banner-cmd {
-  margin-left: auto;
-  padding: 2px 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  user-select: all;
-  flex-shrink: 0;
-}
-
 /* App layout */
 .app {
   display: flex;
