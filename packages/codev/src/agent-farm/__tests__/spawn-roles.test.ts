@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderTemplate, buildPromptFromTemplate, buildResumeNotice, resolveMode } from '../commands/spawn-roles.js';
+import { renderTemplate, buildPromptFromTemplate, buildResumeNotice, resolveMode, findSpecFile } from '../commands/spawn-roles.js';
 import type { TemplateContext } from '../commands/spawn-roles.js';
 
 // Mock dependencies
@@ -22,6 +22,9 @@ vi.mock('../utils/logger.js', () => ({
 vi.mock('../utils/roles.js', () => ({
   loadRolePrompt: vi.fn(() => ({ content: 'builder role', source: 'codev' })),
 }));
+
+// We need fs mocks for findSpecFile tests but must preserve real behavior for other tests.
+// Use spyOn approach within the findSpecFile describe block instead.
 
 describe('spawn-roles', () => {
   beforeEach(() => {
@@ -161,21 +164,74 @@ describe('spawn-roles', () => {
 
     it('uses protocol default mode when no flags', () => {
       const protocol = { defaults: { mode: 'strict' as const } };
-      expect(resolveMode({ issue: 42 }, protocol)).toBe('strict');
+      expect(resolveMode({ issueNumber: 42, protocol: 'spir' }, protocol)).toBe('strict');
     });
 
-    it('defaults to strict for spec mode', () => {
-      expect(resolveMode({ project: '0001' }, null)).toBe('strict');
+    it('defaults to strict for issue-based non-bugfix spawns', () => {
+      expect(resolveMode({ issueNumber: 1, protocol: 'spir' }, null)).toBe('strict');
     });
 
-    it('defaults to soft for other modes', () => {
-      expect(resolveMode({ issue: 42 }, null)).toBe('soft');
+    it('defaults to soft for bugfix and other modes', () => {
+      expect(resolveMode({ issueNumber: 42, protocol: 'bugfix' }, null)).toBe('soft');
       expect(resolveMode({ task: 'fix' }, null)).toBe('soft');
     });
 
     it('explicit flag overrides protocol default', () => {
       const protocol = { defaults: { mode: 'strict' as const } };
       expect(resolveMode({ soft: true }, protocol)).toBe('soft');
+    });
+  });
+
+  // =========================================================================
+  // findSpecFile — zero-padded ID matching
+  // =========================================================================
+
+  describe('findSpecFile', () => {
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      const os = await import('node:os');
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-roles-test-'));
+      fs.mkdirSync(path.join(tmpDir, 'specs'), { recursive: true });
+    });
+
+    it('matches exact ID prefix (e.g., "0076" → "0076-feature.md")', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.writeFileSync(path.join(tmpDir, 'specs', '0076-feature.md'), '');
+      const result = await findSpecFile(tmpDir, '0076');
+      expect(result).toBe(path.join(tmpDir, 'specs', '0076-feature.md'));
+    });
+
+    it('matches stripped ID to zero-padded file (e.g., "76" → "0076-feature.md")', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.writeFileSync(path.join(tmpDir, 'specs', '0076-feature.md'), '');
+      const result = await findSpecFile(tmpDir, '76');
+      expect(result).toBe(path.join(tmpDir, 'specs', '0076-feature.md'));
+    });
+
+    it('matches non-padded ID to non-padded file (e.g., "42" → "42-bugfix.md")', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.writeFileSync(path.join(tmpDir, 'specs', '42-bugfix.md'), '');
+      const result = await findSpecFile(tmpDir, '42');
+      expect(result).toBe(path.join(tmpDir, 'specs', '42-bugfix.md'));
+    });
+
+    it('returns null when no spec matches', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.writeFileSync(path.join(tmpDir, 'specs', '0099-other.md'), '');
+      const result = await findSpecFile(tmpDir, '76');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when specs directory does not exist', async () => {
+      const result = await findSpecFile('/nonexistent-codev-dir', '76');
+      expect(result).toBeNull();
     });
   });
 });

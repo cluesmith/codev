@@ -163,43 +163,63 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   // Spawn command
-  program
+  const spawnCmd = program
     .command('spawn')
     .description('Spawn a new builder')
-    .option('-p, --project <id>', 'Spawn builder for a spec')
-    .option('-i, --issue <number>', 'Spawn builder for a GitHub issue (bugfix mode)')
+    .argument('[number]', 'Issue number (positional)')
+    .option('--protocol <name>', 'Protocol to use (spir, bugfix, tick, maintain, experiment)')
     .option('--task <text>', 'Spawn builder with a task description')
-    .option('--protocol <name>', 'Spawn builder to run a protocol')
     .option('--shell', 'Spawn a bare Claude session')
     .option('--worktree', 'Spawn worktree session')
+    .option('--amends <number>', 'Original spec number for TICK amendments')
     .option('--files <files>', 'Context files (comma-separated)')
-    .option('--no-comment', 'Skip commenting on issue (bugfix mode only)')
+    .option('--no-comment', 'Skip commenting on issue')
     .option('--force', 'Skip safety checks (dirty worktree, collision detection)')
-    .option('--use-protocol <name>', 'Override default protocol (e.g., --use-protocol tick)')
     .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
     .option('--strict', 'Use strict mode (porch orchestrates)')
     .option('--resume', 'Resume builder in existing worktree (skip worktree creation)')
-    .option('--no-role', 'Skip loading role prompt')
-    .action(async (options) => {
+    .option('--no-role', 'Skip loading role prompt');
+
+  // Catch removed flags with helpful migration messages
+  spawnCmd.hook('preAction', (_thisCmd, actionCmd) => {
+    const rawArgs = actionCmd.args || [];
+    const allArgs = process.argv.slice(2);
+    for (const arg of allArgs) {
+      if (arg === '-p' || arg === '--project') {
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol spir`);
+        process.exit(1);
+      }
+      if (arg === '-i' || arg === '--issue') {
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol bugfix`);
+        process.exit(1);
+      }
+    }
+  });
+
+  spawnCmd.action(async (numberArg: string | undefined, options: Record<string, unknown>) => {
       const { spawn } = await import('./commands/spawn.js');
       try {
-        const files = options.files ? options.files.split(',').map((f: string) => f.trim()) : undefined;
-        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
+        const files = options.files ? (options.files as string).split(',').map((f: string) => f.trim()) : undefined;
+        const issueNumber = numberArg ? parseInt(numberArg, 10) : undefined;
+        if (numberArg && (isNaN(issueNumber!) || issueNumber! <= 0)) {
+          logger.error(`Invalid issue number: ${numberArg}`);
+          process.exit(1);
+        }
+        const amends = options.amends ? parseInt(options.amends as string, 10) : undefined;
         await spawn({
-          project: options.project,
-          issue,
-          task: options.task,
-          protocol: options.protocol,
-          shell: options.shell,
-          worktree: options.worktree,
+          issueNumber,
+          protocol: options.protocol as string | undefined,
+          task: options.task as string | undefined,
+          shell: options.shell as boolean | undefined,
+          worktree: options.worktree as boolean | undefined,
+          amends,
           files,
-          noComment: !options.comment,
-          force: options.force,
-          useProtocol: options.useProtocol,
-          soft: options.soft,
-          strict: options.strict,
-          resume: options.resume,
-          noRole: !options.role,
+          noComment: !(options.comment as boolean),
+          force: options.force as boolean | undefined,
+          soft: options.soft as boolean | undefined,
+          strict: options.strict as boolean | undefined,
+          resume: options.resume as boolean | undefined,
+          noRole: !(options.role as boolean),
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

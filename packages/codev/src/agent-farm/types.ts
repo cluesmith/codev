@@ -63,30 +63,33 @@ export interface StartOptions {
 }
 
 export interface SpawnOptions {
-  // Mode flags (mutually exclusive)
-  project?: string;     // Spec-based mode: --project / -p
-  task?: string;        // Task mode: --task
-  protocol?: string;    // Protocol mode: --protocol
-  shell?: boolean;      // Shell mode: --shell (no worktree, no prompt)
-  worktree?: boolean;   // Worktree mode: --worktree (worktree, no prompt)
-  issue?: number;       // Bugfix mode: --issue / -i
+  // Primary input: issue number as positional arg
+  issueNumber?: number;   // Positional arg: `af spawn 315`
+
+  // Protocol selection (required for issue-based spawns)
+  protocol?: string;      // --protocol spir|bugfix|tick|maintain|experiment
+
+  // Alternative modes (no issue number needed)
+  task?: string;          // Task mode: --task
+  shell?: boolean;        // Shell mode: --shell (no worktree, no prompt)
+  worktree?: boolean;     // Worktree mode: --worktree (worktree, no prompt)
+
+  // TICK-specific
+  amends?: number;        // --amends <original-spec-number>
 
   // Task mode options
-  files?: string[];     // Context files for task mode: --files
+  files?: string[];       // Context files for task mode: --files
 
-  // Bugfix mode options
-  noComment?: boolean;  // Skip "On it" comment on issue: --no-comment
-  force?: boolean;      // Override collision detection: --force
-
-  // Protocol override
-  useProtocol?: string; // Override default protocol: --use-protocol
+  // Issue-based options
+  noComment?: boolean;    // Skip "On it" comment on issue: --no-comment
+  force?: boolean;        // Override collision detection: --force
 
   // Mode control
-  soft?: boolean;       // Soft mode: AI follows protocol, architect verifies: --soft
-  strict?: boolean;     // Strict mode: porch orchestrates: --strict
+  soft?: boolean;         // Soft mode: AI follows protocol, architect verifies: --soft
+  strict?: boolean;       // Strict mode: porch orchestrates: --strict
 
   // Resume mode
-  resume?: boolean;    // Resume existing worktree: --resume
+  resume?: boolean;       // Resume existing worktree: --resume
 
   // General options
   noRole?: boolean;

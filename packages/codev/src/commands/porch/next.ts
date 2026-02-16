@@ -343,7 +343,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   }
 
   // Handle 'once' phases (TICK, BUGFIX)
-  return handleOncePhase(workspaceRoot, state, protocol, phaseConfig);
+  return await handleOncePhase(workspaceRoot, state, protocol, phaseConfig);
 }
 
 /**
@@ -372,7 +372,7 @@ async function handleBuildVerify(
 
   // --- NEED BUILD ---
   if (!state.build_complete) {
-    const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
+    const prompt = await buildPhasePrompt(workspaceRoot, state, protocol);
     const tasks: PorchTask[] = [];
 
     // Main build task with full phase prompt
@@ -653,14 +653,14 @@ async function handleVerifyApproved(
  * Handle 'once' phases (TICK, BUGFIX).
  * These don't have build/verify config — emit a single task.
  */
-function handleOncePhase(
+async function handleOncePhase(
   workspaceRoot: string,
   state: ProjectState,
   protocol: Protocol,
   phaseConfig: ProtocolPhase,
-): PorchNextResponse {
+): Promise<PorchNextResponse> {
   // Try to load a prompt file for this phase
-  const prompt = buildPhasePrompt(workspaceRoot, state, protocol);
+  const prompt = await buildPhasePrompt(workspaceRoot, state, protocol);
 
   // If prompt is just a generic fallback, try to use phase steps from protocol
   let description = prompt;

@@ -3,7 +3,7 @@ import type { DashboardState, Builder, UtilTerminal, Annotation } from '../lib/a
 
 export interface Tab {
   id: string;
-  type: 'dashboard' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity';
+  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity';
   label: string;
   closable: boolean;
   terminalId?: string;
@@ -16,7 +16,7 @@ export interface Tab {
 
 function buildTabs(state: DashboardState | null): Tab[] {
   const tabs: Tab[] = [
-    { id: 'dashboard', type: 'dashboard', label: 'Dashboard', closable: false },
+    { id: 'work', type: 'work', label: 'Work', closable: false },
   ];
 
   if (state?.architect) {
@@ -65,7 +65,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
 }
 
 export function useTabs(state: DashboardState | null) {
-  const [activeTabId, setActiveTabId] = useState<string>('dashboard');
+  const [activeTabId, setActiveTabId] = useState<string>('work');
   const knownTabIds = useRef<Set<string> | null>(null);
   const urlTabHandled = useRef(false);
   const tabs = buildTabs(state);
@@ -95,7 +95,7 @@ export function useTabs(state: DashboardState | null) {
 
   // Auto-switch to genuinely new tabs (created after page load).
   // Wait for real state (non-null) before seeding known tabs — otherwise the
-  // empty first render seeds with just ['dashboard'], and the second render
+  // empty first render seeds with just ['work'], and the second render
   // (with actual state) treats all existing tabs as "new" and auto-selects them.
   useEffect(() => {
     const currentIds = new Set(tabs.map(t => t.id));

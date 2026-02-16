@@ -12,6 +12,7 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadRolePrompt } from '../utils/roles.js';
+import { stripLeadingZeros } from '../utils/agent-names.js';
 
 // =============================================================================
 // Template Rendering
@@ -202,7 +203,9 @@ export function loadProtocolRole(config: Config, protocolName: string): { conten
 // =============================================================================
 
 /**
- * Find a spec file by project ID
+ * Find a spec file by project ID.
+ * Handles legacy zero-padded IDs: `af spawn 76` matches `0076-feature.md`.
+ * Strips leading zeros from both the input ID and spec file prefixes for comparison.
  */
 export async function findSpecFile(codevDir: string, projectId: string): Promise<string | null> {
   const specsDir = resolve(codevDir, 'specs');
@@ -212,17 +215,20 @@ export async function findSpecFile(codevDir: string, projectId: string): Promise
   }
 
   const files = await readdir(specsDir);
+  const strippedId = stripLeadingZeros(projectId);
 
-  // Try exact match first (e.g., "0001-feature.md")
+  // Try exact match first (e.g., projectId="0076" matches "0076-feature.md")
   for (const file of files) {
-    if (file.startsWith(projectId) && file.endsWith('.md')) {
+    if (file.startsWith(projectId + '-') && file.endsWith('.md')) {
       return resolve(specsDir, file);
     }
   }
 
-  // Try partial match (e.g., just "0001")
+  // Try zero-stripped match (e.g., projectId="76" matches "0076-feature.md")
   for (const file of files) {
-    if (file.startsWith(projectId + '-') && file.endsWith('.md')) {
+    if (!file.endsWith('.md')) continue;
+    const filePrefix = file.split('-')[0];
+    if (stripLeadingZeros(filePrefix) === strippedId) {
       return resolve(specsDir, file);
     }
   }
@@ -274,53 +280,6 @@ export function loadProtocol(config: Config, protocolName: string): ProtocolDefi
 }
 
 /**
- * Resolve which protocol to use based on precedence:
- * 1. Explicit --protocol flag when used as override (with other input modes)
- * 2. Explicit --use-protocol flag (backwards compatibility)
- * 3. Spec file **Protocol**: header (for --project mode)
- * 4. Hardcoded defaults (spir for specs, bugfix for issues)
- */
-export async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
-  const inputModes = [
-    options.project, options.task, options.shell, options.worktree, options.issue,
-  ].filter(Boolean);
-  const protocolAsOverride = options.protocol && inputModes.length > 0;
-
-  if (protocolAsOverride) {
-    validateProtocol(config, options.protocol!);
-    return options.protocol!.toLowerCase();
-  }
-
-  if (options.useProtocol) {
-    validateProtocol(config, options.useProtocol);
-    return options.useProtocol.toLowerCase();
-  }
-
-  if (options.project) {
-    const specFile = await findSpecFile(config.codevDir, options.project);
-    if (specFile) {
-      const specContent = readFileSync(specFile, 'utf-8');
-      const match = specContent.match(/\*\*Protocol\*\*:\s*(\w+)/i);
-      if (match) {
-        const protocolFromSpec = match[1].toLowerCase();
-        try {
-          validateProtocol(config, protocolFromSpec);
-          return protocolFromSpec;
-        } catch {
-          logger.warn(`Warning: Protocol "${match[1]}" from spec not found, using default`);
-        }
-      }
-    }
-  }
-
-  if (options.project) return 'spir';
-  if (options.issue) return 'bugfix';
-  if (options.protocol) return options.protocol.toLowerCase();
-  if (options.task) return 'spir';
-  return 'spir';
-}
-
-/**
  * Resolve the builder mode (strict vs soft)
  * Precedence: explicit flags > protocol defaults > input type defaults
  */
@@ -338,6 +297,7 @@ export function resolveMode(
     return protocol.defaults.mode;
   }
 
-  if (options.project) return 'strict';
+  // Issue-based spawns with non-bugfix protocol default to strict
+  if (options.issueNumber && options.protocol !== 'bugfix') return 'strict';
   return 'soft';
 }

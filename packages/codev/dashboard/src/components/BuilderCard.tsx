@@ -1,34 +1,49 @@
-import type { Builder } from '../lib/api.js';
+import type { OverviewBuilder } from '../lib/api.js';
 
 interface BuilderCardProps {
-  builder: Builder;
+  builder: OverviewBuilder;
+  onOpen?: (builder: OverviewBuilder) => void;
 }
 
-const statusColors: Record<string, string> = {
-  spawning: '#22c55e',
-  implementing: '#f97316',
-  blocked: '#ef4444',
-  'pr-ready': '#eab308',
-  complete: '#22c55e',
-};
+function GateBadge({ name, status }: { name: string; status: string }) {
+  const label = name.replace(/-/g, ' ');
+  return (
+    <span className={`gate-badge gate-${status}`}>
+      {label}: {status}
+    </span>
+  );
+}
 
-export function BuilderCard({ builder }: BuilderCardProps) {
-  const color = statusColors[builder.status] ?? '#6b7280';
+export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
+  const gateEntries = Object.entries(builder.gates).filter(([, s]) => s === 'pending' || s === 'approved');
+  const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
+  const displayTitle = builder.issueTitle || builder.id;
 
   return (
     <div className="builder-card">
-      <div className="builder-header">
-        <span
-          className="status-dot"
-          style={{ backgroundColor: color }}
-          aria-label={`Status: ${builder.status}`}
-        />
-        <span className="builder-name">{builder.name || builder.id}</span>
+      <div className="builder-card-header">
+        <div className="builder-card-id">{displayId}</div>
+        <span className={`builder-mode-badge mode-${builder.mode}`}>{builder.mode}</span>
+        {onOpen && (
+          <button className="builder-open-btn" onClick={() => onOpen(builder)}>
+            Open
+          </button>
+        )}
       </div>
-      <div className="builder-meta">
-        <span className="builder-status">{builder.status}</span>
-        {builder.phase && <span className="builder-phase">{builder.phase}</span>}
-      </div>
+      <div className="builder-card-title">{displayTitle}</div>
+      {builder.mode === 'strict' && builder.phase && (
+        <div className="builder-card-phase">Phase: {builder.phase}</div>
+      )}
+      {builder.mode === 'soft' && (
+        <div className="builder-card-phase soft">running</div>
+      )}
+      {gateEntries.length > 0 && (
+        <div className="builder-card-gates">
+          {gateEntries.map(([name, status]) => (
+            <GateBadge key={name} name={name} status={status} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

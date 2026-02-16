@@ -13,8 +13,6 @@ import { prompt, confirm } from '../lib/cli-prompts.js';
 import {
   createUserDirs,
   createProjectsDir,
-  copyProjectlist,
-  copyProjectlistArchive,
   copyConsultTypes,
   copyResourceTemplates,
   copyRoles,
@@ -92,20 +90,6 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   const projectsDirResult = createProjectsDir(targetDir);
   if (projectsDirResult.created) {
     console.log(chalk.green('  +'), 'codev/projects/');
-    fileCount++;
-  }
-
-  // Create projectlist.md
-  const projectlistResult = copyProjectlist(targetDir, skeletonDir);
-  if (projectlistResult.copied) {
-    console.log(chalk.green('  +'), 'codev/projectlist.md');
-    fileCount++;
-  }
-
-  // Create projectlist-archive.md
-  const archiveResult = copyProjectlistArchive(targetDir, skeletonDir);
-  if (archiveResult.copied) {
-    console.log(chalk.green('  +'), 'codev/projectlist-archive.md');
     fileCount++;
   }
 

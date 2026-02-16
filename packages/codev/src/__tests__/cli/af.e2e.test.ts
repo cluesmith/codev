@@ -54,7 +54,8 @@ describe('af command (CLI)', () => {
   it('spawn --help shows options', () => {
     const result = runAf(['spawn', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('project');
+    // Spec 0126: spawn now uses positional arg + --protocol instead of -p/--project
+    expect(result.stdout).toContain('protocol');
   });
 
   it('cleanup --help shows options', () => {

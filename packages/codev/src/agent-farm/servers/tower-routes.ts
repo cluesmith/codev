@@ -45,6 +45,7 @@ import {
   killTerminalWithShellper,
   stopInstance,
 } from './tower-instances.js';
+import { OverviewCache } from './overview.js';
 import {
   getWorkspaceTerminals,
   getTerminalManager,
@@ -62,6 +63,9 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Singleton cache for overview endpoint (Spec 0126 Phase 4)
+const overviewCache = new OverviewCache();
 
 // ============================================================================
 // Route context — dependencies provided by the orchestrator
@@ -108,6 +112,8 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
+  'POST /api/overview/refresh': (_req, res) => handleOverviewRefresh(res),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
@@ -540,6 +546,32 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
   res.end(JSON.stringify({ instances }));
 }
 
+async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverride?: string): Promise<void> {
+  // Accept workspace from: explicit override (workspace-scoped route), ?workspace= param, or first known path.
+  let workspaceRoot = workspaceOverride || url.searchParams.get('workspace');
+
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+
+  if (!workspaceRoot) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [] }));
+    return;
+  }
+
+  const data = await overviewCache.getOverview(workspaceRoot);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(data));
+}
+
+function handleOverviewRefresh(res: http.ServerResponse): void {
+  overviewCache.invalidate();
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true }));
+}
+
 function handleSSEEvents(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -927,7 +959,7 @@ async function handleWorkspaceRoutes(
     return;
   }
 
-  // GET /file?path=<relative-path> — Read workspace file by path (for StatusPanel workspace list)
+  // GET /file?path=<relative-path> — Read workspace file by path
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
     const fullPath = path.resolve(workspacePath, relPath);
@@ -1096,6 +1128,16 @@ async function handleWorkspaceRoutes(
         }
       });
       return;
+    }
+
+    // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
+    if (req.method === 'GET' && apiPath === 'overview') {
+      return handleOverview(res, url, workspacePath);
+    }
+
+    // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)
+    if (req.method === 'POST' && apiPath === 'overview/refresh') {
+      return handleOverviewRefresh(res);
     }
 
     // Unhandled API route

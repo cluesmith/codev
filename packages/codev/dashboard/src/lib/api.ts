@@ -74,6 +74,55 @@ export async function fetchState(): Promise<DashboardState> {
   return res.json();
 }
 
+// Spec 0126: Overview endpoint types and fetchers for Work view
+
+export interface OverviewBuilder {
+  id: string;
+  issueNumber: number | null;
+  issueTitle: string | null;
+  phase: string;
+  mode: 'strict' | 'soft';
+  gates: Record<string, string>;
+  worktreePath: string;
+}
+
+export interface OverviewPR {
+  number: number;
+  title: string;
+  reviewStatus: string;
+  linkedIssue: number | null;
+}
+
+export interface OverviewBacklogItem {
+  number: number;
+  title: string;
+  type: string;
+  priority: string;
+  hasSpec: boolean;
+  hasBuilder: boolean;
+  createdAt: string;
+}
+
+export interface OverviewData {
+  builders: OverviewBuilder[];
+  pendingPRs: OverviewPR[];
+  backlog: OverviewBacklogItem[];
+  errors?: { prs?: string; issues?: string };
+}
+
+export async function fetchOverview(): Promise<OverviewData> {
+  const res = await fetch(apiUrl('api/overview'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch overview: ${res.status}`);
+  return res.json();
+}
+
+export async function refreshOverview(): Promise<void> {
+  await fetch(apiUrl('api/overview/refresh'), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+}
+
 export async function createShellTab(): Promise<{ id: string; port: number; name: string }> {
   const res = await fetch(apiUrl('api/tabs/shell'), {
     method: 'POST',

@@ -69,7 +69,8 @@ describe('init command', () => {
         expect(fs.existsSync(path.join(projectDir, 'codev', 'specs'))).toBe(true);
         expect(fs.existsSync(path.join(projectDir, 'codev', 'plans'))).toBe(true);
         expect(fs.existsSync(path.join(projectDir, 'codev', 'reviews'))).toBe(true);
-        expect(fs.existsSync(path.join(projectDir, 'codev', 'projectlist.md'))).toBe(true);
+        // Spec 0126: projectlist.md is no longer created
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'projectlist.md'))).toBe(false);
         // Note: resources/ is NOT created in minimal structure (created by user if needed)
       } finally {
         process.chdir(originalCwd);

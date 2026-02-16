@@ -20,7 +20,8 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
   mockIsSessionPersistent, mockGetNextShellId,
   mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
-  mockParseJsonBody } = vi.hoisted(() => ({
+  mockParseJsonBody,
+  mockOverviewGetOverview, mockOverviewInvalidate } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -33,6 +34,8 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockBroadcastMessage: vi.fn(),
   mockIsResolveError: vi.fn((r: any) => 'code' in r),
   mockParseJsonBody: vi.fn(async () => ({})),
+  mockOverviewGetOverview: vi.fn(async () => ({ builders: [], pendingPRs: [], backlog: [] })),
+  mockOverviewInvalidate: vi.fn(),
 }));
 
 vi.mock('../servers/tower-instances.js', () => ({
@@ -83,6 +86,13 @@ vi.mock('../servers/tower-utils.js', () => ({
 vi.mock('../utils/server-utils.js', () => ({
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
+}));
+
+vi.mock('../servers/overview.js', () => ({
+  OverviewCache: class {
+    getOverview = mockOverviewGetOverview;
+    invalidate = mockOverviewInvalidate;
+  },
 }));
 
 // ============================================================================
@@ -556,6 +566,98 @@ describe('tower-routes', () => {
       const { deleteTerminalSession, removeTerminalFromRegistry } = await import('../servers/tower-terminals.js');
       expect(deleteTerminalSession).not.toHaveBeenCalled();
       expect(removeTerminalFromRegistry).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // Overview endpoints (Spec 0126 Phase 4)
+  // =========================================================================
+
+  describe('GET /api/overview', () => {
+    it('returns overview data with workspace from query param', async () => {
+      mockOverviewGetOverview.mockResolvedValueOnce({
+        builders: [{ id: '42', issueNumber: 42 }],
+        pendingPRs: [],
+        backlog: [],
+      });
+
+      const req = makeReq('GET', '/api/overview?workspace=/test/workspace');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.builders).toHaveLength(1);
+      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/test/workspace');
+    });
+
+    it('returns empty data when no workspace is known', async () => {
+      const req = makeReq('GET', '/api/overview');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.builders).toEqual([]);
+      expect(parsed.pendingPRs).toEqual([]);
+      expect(parsed.backlog).toEqual([]);
+    });
+
+    it('works via workspace-scoped route', async () => {
+      mockOverviewGetOverview.mockResolvedValueOnce({
+        builders: [{ id: '99', issueNumber: 99 }],
+        pendingPRs: [],
+        backlog: [],
+      });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/overview`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.builders).toHaveLength(1);
+    });
+
+    it('refresh works via workspace-scoped route', async () => {
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('POST', `/workspace/${encoded}/api/overview/refresh`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(JSON.parse(body()).ok).toBe(true);
+      expect(mockOverviewInvalidate).toHaveBeenCalled();
+    });
+
+    it('falls back to first known workspace when no query param', async () => {
+      const { getKnownWorkspacePaths } = await import('../servers/tower-instances.js');
+      (getKnownWorkspacePaths as any).mockReturnValueOnce(['/my/workspace']);
+      mockOverviewGetOverview.mockResolvedValueOnce({
+        builders: [],
+        pendingPRs: [],
+        backlog: [],
+      });
+
+      const req = makeReq('GET', '/api/overview');
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(mockOverviewGetOverview).toHaveBeenCalledWith('/my/workspace');
+    });
+  });
+
+  describe('POST /api/overview/refresh', () => {
+    it('invalidates cache and returns ok', async () => {
+      const req = makeReq('POST', '/api/overview/refresh');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(JSON.parse(body()).ok).toBe(true);
+      expect(mockOverviewInvalidate).toHaveBeenCalledTimes(1);
     });
   });
 

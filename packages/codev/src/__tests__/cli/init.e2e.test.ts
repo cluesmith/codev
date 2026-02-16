@@ -35,13 +35,8 @@ describe('codev init (CLI)', () => {
     expect(existsSync(join(base, 'codev/specs'))).toBe(true);
     expect(existsSync(join(base, 'codev/plans'))).toBe(true);
     expect(existsSync(join(base, 'codev/reviews'))).toBe(true);
-    expect(existsSync(join(base, 'codev/projectlist.md'))).toBe(true);
-  });
-
-  it('creates projectlist.md with proper content', () => {
-    runCodev(['init', 'my-project', '--yes'], env.dir, env.env);
-    const content = readFileSync(join(env.dir, 'my-project/codev/projectlist.md'), 'utf-8');
-    expect(content).toContain('# Project List');
+    // Spec 0126: projectlist.md is no longer created
+    expect(existsSync(join(base, 'codev/projectlist.md'))).toBe(false);
   });
 
   it('creates CLAUDE.md', () => {

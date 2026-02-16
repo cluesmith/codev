@@ -111,8 +111,7 @@ ruff check --select F401   # Find unused imports
 
 | Task | Parallelizable | Human Review? | Description |
 |------|----------------|---------------|-------------|
-| Update projectlist.md status | Yes | No | Update project statuses |
-| Archive terminal projects | Yes | No | Move completed/abandoned to terminal section |
+| Update GitHub Issue statuses | Yes | No | Close completed issues, update labels |
 
 ### Framework Tasks
 

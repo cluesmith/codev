@@ -10,7 +10,7 @@ Write a detailed specification for the assigned project. The spec must be comple
 
 Read these files to understand the task:
 1. `codev/status/{project-id}-*.md` - Current project state and any notes
-2. `codev/projectlist.md` - Project entry with initial description
+2. The GitHub Issue for this project (if available)
 3. Any existing context files mentioned in the project entry
 
 ## Output Requirements

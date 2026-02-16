@@ -244,7 +244,7 @@ Existing standalone TICK projects (created before this protocol change) are gran
 1. Identify the "parent spec" the TICK logically extends
 2. Move TICK content into an amendment entry in the parent spec
 3. Archive the standalone files with a note: "Migrated to spec NNN as TICK-NNN"
-4. Update projectlist.md to reflect the change
+4. Update the GitHub Issue to reflect the change
 
 ## Benefits
 

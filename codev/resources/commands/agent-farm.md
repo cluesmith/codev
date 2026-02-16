@@ -144,16 +144,23 @@ Does NOT clean up worktrees - use `af cleanup` for that.
 Spawn a new builder.
 
 ```bash
-af spawn [options]
+af spawn [number] [options]
 ```
 
+**Arguments:**
+- `[number]` - Issue number (positional)
+
 **Options:**
-- `-p, --project <id>` - Spawn builder for a spec (e.g., `0042`)
+- `--protocol <name>` - Protocol to use (spir, bugfix, tick, maintain, experiment)
 - `--task <text>` - Spawn builder with a task description
-- `--protocol <name>` - Spawn builder to run a protocol
+- `--amends <number>` - Original spec number for TICK amendments
 - `--shell` - Spawn a bare Claude session
 - `--worktree` - Spawn worktree session
 - `--files <files>` - Context files (comma-separated)
+- `--soft` - Use soft mode (AI follows protocol, you verify compliance)
+- `--strict` - Use strict mode (porch orchestrates, default)
+- `--resume` - Resume an existing builder worktree
+- `--force` - Skip safety checks (dirty worktree, collision detection)
 - `--no-role` - Skip loading role prompt
 
 **Description:**
@@ -166,8 +173,14 @@ Creates a new builder in an isolated git worktree. The builder gets:
 **Examples:**
 
 ```bash
-# Spawn builder for spec 0042
-af spawn -p 0042
+# Spawn builder for SPIR project (issue #42)
+af spawn 42 --protocol spir
+
+# Spawn builder for a bugfix
+af spawn 42 --protocol bugfix
+
+# Spawn TICK amendment to spec 30
+af spawn 42 --protocol tick --amends 30
 
 # Spawn with task description
 af spawn --task "Fix login bug in auth module"
@@ -176,7 +189,10 @@ af spawn --task "Fix login bug in auth module"
 af spawn --shell
 
 # Spawn with context files
-af spawn -p 0042 --files "src/auth.ts,tests/auth.test.ts"
+af spawn 42 --protocol spir --files "src/auth.ts,tests/auth.test.ts"
+
+# Resume an existing builder
+af spawn 42 --resume
 ```
 
 ---
@@ -553,7 +569,7 @@ Or override via CLI flags:
 
 ```bash
 af start --architect-cmd "claude --model opus"
-af spawn -p 0042 --builder-cmd "claude --model haiku"
+af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 ```
 
 ---

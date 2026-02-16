@@ -30,7 +30,6 @@ Creates a minimal codev project structure:
 - `codev/specs/` - Specification files
 - `codev/plans/` - Implementation plans
 - `codev/reviews/` - Review documents
-- `codev/projectlist.md` - Project tracking
 - `CLAUDE.md` / `AGENTS.md` - AI agent instructions
 - `.gitignore` - Standard ignores
 

@@ -1,26 +1,29 @@
 /**
  * Spawn command — orchestrator module.
- * Spec 0105: Tower Server Decomposition — Phase 7
+ * Spec 0126: Project Management Rework — Phase 2 (Spawn CLI Rework)
  *
- * Modes:
- * - spec:     --project/-p  Spawn for a spec file (existing behavior)
- * - task:     --task        Spawn with an ad-hoc task description
- * - protocol: --protocol    Spawn to run a protocol (cleanup, experiment, etc.)
- * - shell:    --shell       Bare Claude session (no prompt, no worktree)
+ * Modes (protocol-driven for issue-based spawns):
+ * - spec:     af spawn 315 --protocol spir     (feature)
+ * - bugfix:   af spawn 315 --protocol bugfix   (bug fix)
+ * - task:     af spawn --task "..."             (ad-hoc task)
+ * - protocol: af spawn --protocol maintain      (protocol-only run)
+ * - shell:    af spawn --shell                  (bare session)
+ * - worktree: af spawn --worktree              (worktree, no prompt)
  *
  * Role/prompt logic extracted to spawn-roles.ts.
  * Worktree/git logic extracted to spawn-worktree.ts.
  */
 
 import { resolve, basename } from 'node:path';
-import { existsSync, writeFileSync } from 'node:fs';
-import type { SpawnOptions, Builder, BuilderType, Config } from '../types.js';
+import { existsSync, writeFileSync, readdirSync } from 'node:fs';
+import type { SpawnOptions, BuilderType, Config } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
+import { fetchGitHubIssue as fetchGitHubIssueNonFatal } from '../../lib/github.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -29,7 +32,6 @@ import {
   findSpecFile,
   validateProtocol,
   loadProtocol,
-  resolveProtocol,
   resolveMode,
 } from './spawn-roles.js';
 import {
@@ -69,66 +71,153 @@ function generateShortId(): string {
 }
 
 /**
- * Validate spawn options - ensure exactly one input mode is selected
- * Note: --protocol serves dual purpose:
- *   1. As an input mode when used alone (e.g., `af spawn --protocol experiment`)
- *   2. As a protocol override when combined with other input modes (e.g., `af spawn -p 0001 --protocol tick`)
+ * Validate spawn options for the new positional-arg interface.
+ *
+ * Rules:
+ * - issueNumber, task, shell, worktree are mutually exclusive
+ * - --protocol is required when issueNumber is present (unless --resume or --soft)
+ * - --protocol alone (no issueNumber) is valid as a protocol-only run
+ * - --amends requires --protocol tick
  */
 function validateSpawnOptions(options: SpawnOptions): void {
-  // Count input modes (excluding --protocol which can be used as override)
+  // Count primary input modes
   const inputModes = [
-    options.project,
+    options.issueNumber,
     options.task,
     options.shell,
     options.worktree,
-    options.issue,
   ].filter(Boolean);
 
-  // --protocol alone is a valid input mode
+  // --protocol alone (no other input) is a valid mode
   const protocolAlone = options.protocol && inputModes.length === 0;
 
   if (inputModes.length === 0 && !protocolAlone) {
-    fatal('Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree\n\nRun "af spawn --help" for examples.');
+    fatal(
+      'Must specify an issue number or one of: --task, --protocol, --shell, --worktree\n\n' +
+      'Usage:\n' +
+      '  af spawn 315 --protocol spir      # Feature with SPIR protocol\n' +
+      '  af spawn 315 --protocol bugfix    # Bug fix\n' +
+      '  af spawn --task "fix the bug"     # Ad-hoc task\n' +
+      '  af spawn --protocol maintain      # Protocol-only run\n' +
+      '  af spawn --shell                  # Bare session\n\n' +
+      'Run "af spawn --help" for more options.'
+    );
   }
 
   if (inputModes.length > 1) {
-    fatal('Flags --project, --issue, --task, --shell, --worktree are mutually exclusive');
+    fatal('Issue number, --task, --shell, and --worktree are mutually exclusive');
+  }
+
+  // --protocol is required for issue-based spawns (unless --resume or --soft)
+  if (options.issueNumber && !options.protocol && !options.resume && !options.soft) {
+    fatal(
+      '--protocol is required when spawning with an issue number.\n\n' +
+      'Usage:\n' +
+      '  af spawn 315 --protocol spir      # Feature\n' +
+      '  af spawn 315 --protocol bugfix    # Bug fix\n' +
+      '  af spawn 315 --protocol tick --amends 42  # Amendment\n' +
+      '  af spawn 315 --resume             # Resume (reads protocol from worktree)\n' +
+      '  af spawn 315 --soft               # Soft mode (defaults to SPIR)'
+    );
   }
 
   if (options.files && !options.task) {
     fatal('--files requires --task');
   }
 
-  if ((options.noComment || options.force) && !options.issue) {
-    fatal('--no-comment and --force require --issue');
+  if ((options.noComment || options.force) && !options.issueNumber) {
+    fatal('--no-comment and --force require an issue number');
   }
 
-  // --protocol as override cannot be used with --shell or --worktree
-  if (options.protocol && inputModes.length > 0 && (options.shell || options.worktree)) {
-    fatal('--protocol cannot be used with --shell or --worktree (no protocol applies)');
+  // --protocol cannot be used with --shell or --worktree
+  if (options.protocol && (options.shell || options.worktree)) {
+    fatal('--protocol cannot be used with --shell or --worktree');
   }
 
-  // --use-protocol is now deprecated in favor of --protocol as universal override
-  // Keep for backwards compatibility but prefer --protocol
-  if (options.useProtocol && (options.shell || options.worktree)) {
-    fatal('--use-protocol cannot be used with --shell or --worktree (no protocol applies)');
+  // --amends requires --protocol tick
+  if (options.amends && options.protocol !== 'tick') {
+    fatal('--amends requires --protocol tick');
+  }
+
+  // --strict and --soft are mutually exclusive
+  if (options.strict && options.soft) {
+    fatal('--strict and --soft are mutually exclusive');
   }
 }
 
 /**
- * Determine the spawn mode from options
- * Note: --protocol can be used as both an input mode (alone) or an override (with other modes)
+ * Determine the spawn mode from options.
+ * Protocol drives the mode for issue-based spawns.
  */
 function getSpawnMode(options: SpawnOptions): BuilderType {
-  // Primary input modes take precedence over --protocol as override
-  if (options.project) return 'spec';
-  if (options.issue) return 'bugfix';
   if (options.task) return 'task';
   if (options.shell) return 'shell';
   if (options.worktree) return 'worktree';
-  // --protocol alone is the protocol input mode
+
+  if (options.issueNumber) {
+    // Protocol drives mode for issue-based spawns
+    if (options.protocol === 'bugfix') return 'bugfix';
+    return 'spec';
+  }
+
+  // --protocol alone (no issue number) is protocol mode
   if (options.protocol) return 'protocol';
   throw new Error('No mode specified');
+}
+
+/**
+ * Resolve the protocol for issue-based spawns.
+ * For --soft without --protocol, defaults to SPIR when a spec file exists.
+ * For --resume without --protocol, infers from existing worktree directory.
+ */
+async function resolveIssueProtocol(
+  options: SpawnOptions,
+  config: Config,
+): Promise<string> {
+  // Explicit --protocol always wins
+  if (options.protocol) {
+    validateProtocol(config, options.protocol);
+    return options.protocol.toLowerCase();
+  }
+
+  // --soft without --protocol: SPIR if spec file exists, bugfix otherwise
+  if (options.soft && options.issueNumber) {
+    const specFile = await findSpecFile(config.codevDir, String(options.issueNumber));
+    return specFile ? 'spir' : 'bugfix';
+  }
+
+  // --resume without --protocol: infer from existing worktree
+  if (options.resume && options.issueNumber) {
+    const inferred = inferProtocolFromWorktree(config, options.issueNumber);
+    if (inferred) return inferred;
+    fatal(
+      `Cannot infer protocol for issue #${options.issueNumber}.\n` +
+      'No matching worktree found in .builders/. Specify --protocol explicitly.'
+    );
+  }
+
+  fatal('--protocol is required');
+  throw new Error('unreachable');
+}
+
+/**
+ * Infer protocol from an existing worktree directory name.
+ * Worktree naming: <protocol>-<id>-<slug> or bugfix-<id>-<slug>
+ * Handles legacy zero-padded IDs: worktree `spir-0076-feature` matches issueNumber=76.
+ */
+function inferProtocolFromWorktree(config: Config, issueNumber: number): string | null {
+  if (!existsSync(config.buildersDir)) return null;
+  const strippedId = stripLeadingZeros(String(issueNumber));
+  const dirs = readdirSync(config.buildersDir);
+  // Match patterns like: spir-315-feature-name, bugfix-315-slug, spir-0076-feature
+  const match = dirs.find(d => {
+    const parts = d.split('-');
+    return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
+  });
+  if (match) {
+    return match.split('-')[0];
+  }
+  return null;
 }
 
 // =============================================================================
@@ -136,20 +225,27 @@ function getSpawnMode(options: SpawnOptions): BuilderType {
 // =============================================================================
 
 /**
- * Spawn builder for a spec (existing behavior)
+ * Spawn builder for a spec (SPIR, TICK, and other non-bugfix protocols)
  */
 async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
-  const projectId = options.project!;
-  const specFile = await findSpecFile(config.codevDir, projectId);
+  const issueNumber = options.issueNumber!;
+  const projectId = String(issueNumber);
+  const protocol = await resolveIssueProtocol(options, config);
+
+  // For TICK amendments, resolve spec by the amends number (the original spec)
+  const specLookupId = (protocol === 'tick' && options.amends)
+    ? String(options.amends)
+    : projectId;
+
+  // Resolve spec file (supports legacy zero-padded IDs)
+  const specFile = await findSpecFile(config.codevDir, specLookupId);
   if (!specFile) {
-    fatal(`Spec not found for project: ${projectId}`);
+    fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
   }
 
   const specName = basename(specFile, '.md');
-  const protocol = await resolveProtocol(options, config);
   const strippedId = stripLeadingZeros(projectId);
   const builderId = buildAgentName('spec', projectId, protocol);
-  // Slug from spec name: e.g., '0109-messaging-infrastructure' → 'messaging-infrastructure'
   const specSlug = specName.replace(/^[0-9]+-/, '');
   const worktreeName = `${protocol}-${strippedId}-${specSlug}`;
   const branchName = `builder/${worktreeName}`;
@@ -159,7 +255,8 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
   const hasPlan = existsSync(planFile);
 
-  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (spec)`);
+  logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (${protocol})`);
+  logger.kv('Issue', `#${issueNumber}`);
   logger.kv('Spec', specFile);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
@@ -185,6 +282,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
+  // Fetch GitHub issue context (non-fatal, for enriching the builder prompt)
+  const ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
+  if (ghIssue) {
+    logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
+  }
+
   const specRelPath = `codev/specs/${specName}.md`;
   const planRelPath = `codev/plans/${specName}.md`;
   const templateContext: TemplateContext = {
@@ -195,6 +298,13 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     spec: { path: specRelPath, name: specName },
   };
   if (hasPlan) templateContext.plan = { path: planRelPath, name: specName };
+  if (ghIssue) {
+    templateContext.issue = {
+      number: issueNumber,
+      title: ghIssue.title,
+      body: ghIssue.body || '(No description provided)',
+    };
+  }
 
   const initialPrompt = buildPromptFromTemplate(config, protocol, templateContext);
   const resumeNotice = options.resume ? `\n${buildResumeNotice(projectId)}\n` : '';
@@ -209,7 +319,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   upsertBuilder({
     id: builderId, name: specName, status: 'implementing', phase: 'init',
-    worktree: worktreePath, branch: branchName, type: 'spec', terminalId,
+    worktree: worktreePath, branch: branchName, type: 'spec', issueNumber, terminalId,
   });
 
   logger.blank();
@@ -252,12 +362,13 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
     taskDescription += `\n\nRelevant files to consider:\n${options.files.map(f => `- ${f}`).join('\n')}`;
   }
 
-  const hasExplicitProtocol = options.protocol || options.useProtocol;
+  const hasExplicitProtocol = !!options.protocol;
   const resumeNotice = options.resume ? `\n${buildResumeNotice(builderId)}\n` : '';
   let builderPrompt: string;
 
   if (hasExplicitProtocol) {
-    const protocol = await resolveProtocol(options, config);
+    validateProtocol(config, options.protocol!);
+    const protocol = options.protocol!.toLowerCase();
     const protocolDef = loadProtocol(config, protocol);
     const mode = resolveMode(options, protocolDef);
     const templateContext: TemplateContext = {
@@ -291,7 +402,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
 }
 
 /**
- * Spawn builder to run a protocol
+ * Spawn builder to run a protocol (no issue number)
  */
 async function spawnProtocol(options: SpawnOptions, config: Config): Promise<void> {
   const protocolName = options.protocol!;
@@ -377,7 +488,6 @@ async function spawnShell(options: SpawnOptions, config: Config): Promise<void> 
 
 /**
  * Spawn a worktree session (has worktree/branch, but no initial prompt)
- * Use case: Small features without spec/plan, like quick fixes
  */
 async function spawnWorktree(options: SpawnOptions, config: Config): Promise<void> {
   const shortId = generateShortId();
@@ -432,7 +542,8 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
  * Spawn builder for a GitHub issue (bugfix mode)
  */
 async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void> {
-  const issueNumber = options.issue!;
+  const issueNumber = options.issueNumber!;
+  const protocol = await resolveIssueProtocol(options, config);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Bugfix Builder for Issue #${issueNumber}`);
 
@@ -459,7 +570,6 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   const branchName = `builder/${worktreeName}`;
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
-  const protocol = await resolveProtocol(options, config);
   const protocolDef = loadProtocol(config, protocol);
   const mode = resolveMode(options, protocolDef);
 
@@ -571,7 +681,6 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   }
 
   // Prune stale worktrees before spawning to prevent "can't find session" errors
-  // This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups
   try {
     await run('git worktree prune', { cwd: config.workspaceRoot });
   } catch {

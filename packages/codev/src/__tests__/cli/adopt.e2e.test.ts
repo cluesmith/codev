@@ -41,7 +41,8 @@ describe('codev adopt (CLI)', () => {
     expect(existsSync(join(projectDir, 'codev/specs'))).toBe(true);
     expect(existsSync(join(projectDir, 'codev/plans'))).toBe(true);
     expect(existsSync(join(projectDir, 'codev/reviews'))).toBe(true);
-    expect(existsSync(join(projectDir, 'codev/projectlist.md'))).toBe(true);
+    // Spec 0126: projectlist.md is no longer created
+    expect(existsSync(join(projectDir, 'codev/projectlist.md'))).toBe(false);
   });
 
   it('preserves existing README', () => {
@@ -65,12 +66,10 @@ describe('codev adopt (CLI)', () => {
     expect(existsSync(join(projectDir, 'AGENTS.md'))).toBe(true);
   });
 
-  it('creates projectlist.md', () => {
+  it('does not create projectlist.md (Spec 0126)', () => {
     const projectDir = createExistingProject('existing-project');
     runCodev(['adopt', '--yes'], projectDir, env.env);
-    expect(existsSync(join(projectDir, 'codev/projectlist.md'))).toBe(true);
-    const content = readFileSync(join(projectDir, 'codev/projectlist.md'), 'utf-8');
-    expect(content).toContain('# Project List');
+    expect(existsSync(join(projectDir, 'codev/projectlist.md'))).toBe(false);
   });
 
   it('second run fails with update suggestion', () => {

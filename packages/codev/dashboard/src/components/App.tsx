@@ -7,7 +7,7 @@ import { getTerminalWsPath, createFileTab } from '../lib/api.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
 import { Terminal } from './Terminal.js';
-import { StatusPanel } from './StatusPanel.js';
+import { WorkView } from './WorkView.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 
@@ -117,8 +117,8 @@ export function App() {
             </div>
           );
         })}
-        {activeTab?.type === 'dashboard' && (
-          <StatusPanel state={state} onRefresh={refresh} onSelectTab={selectTab} />
+        {activeTab?.type === 'work' && (
+          <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
         )}
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
       </>

@@ -32,30 +32,6 @@ dist/
 *.swo
 `;
 
-/**
- * Inline fallback template for projectlist.md
- */
-const PROJECTLIST_FALLBACK = `# Project List
-
-Track all projects here. See codev documentation for status values.
-
-\`\`\`yaml
-projects:
-  - id: "0001"
-    title: "Example Project"
-    summary: "Brief description"
-    status: conceived
-    priority: medium
-    files:
-      spec: null
-      plan: null
-      review: null
-    dependencies: []
-    tags: []
-    notes: "Replace with your first project"
-\`\`\`
-`;
-
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
 }
@@ -89,72 +65,6 @@ export function createUserDirs(
   }
 
   return { created, skipped };
-}
-
-interface CopyProjectlistOptions {
-  skipExisting?: boolean;
-}
-
-interface CopyProjectlistResult {
-  copied: boolean;
-  skipped?: boolean;
-  usedFallback?: boolean;
-}
-
-/**
- * Copy projectlist.md from skeleton template, with inline fallback
- */
-export function copyProjectlist(
-  targetDir: string,
-  skeletonDir: string,
-  options: CopyProjectlistOptions = {}
-): CopyProjectlistResult {
-  const { skipExisting = false } = options;
-  const projectlistPath = path.join(targetDir, 'codev', 'projectlist.md');
-
-  if (skipExisting && fs.existsSync(projectlistPath)) {
-    return { copied: false, skipped: true };
-  }
-
-  const templatePath = path.join(skeletonDir, 'templates', 'projectlist.md');
-  if (fs.existsSync(templatePath)) {
-    fs.copyFileSync(templatePath, projectlistPath);
-    return { copied: true };
-  }
-
-  // Fallback to inline template
-  fs.writeFileSync(projectlistPath, PROJECTLIST_FALLBACK);
-  return { copied: true, usedFallback: true };
-}
-
-interface CopyProjectlistArchiveResult {
-  copied: boolean;
-  skipped?: boolean;
-  templateNotFound?: boolean;
-}
-
-/**
- * Copy projectlist-archive.md from skeleton template
- */
-export function copyProjectlistArchive(
-  targetDir: string,
-  skeletonDir: string,
-  options: CopyProjectlistOptions = {}
-): CopyProjectlistArchiveResult {
-  const { skipExisting = false } = options;
-  const archivePath = path.join(targetDir, 'codev', 'projectlist-archive.md');
-
-  if (skipExisting && fs.existsSync(archivePath)) {
-    return { copied: false, skipped: true };
-  }
-
-  const templatePath = path.join(skeletonDir, 'templates', 'projectlist-archive.md');
-  if (!fs.existsSync(templatePath)) {
-    return { copied: false, templateNotFound: true };
-  }
-
-  fs.copyFileSync(templatePath, archivePath);
-  return { copied: true };
 }
 
 interface CopyConsultTypesOptions {

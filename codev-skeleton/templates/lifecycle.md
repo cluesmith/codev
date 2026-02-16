@@ -100,7 +100,7 @@ Projects can also end up in terminal states if they won't be completed:
 
 ### Abandoned
 
-The project was canceled or rejected. It will not be implemented. The notes field in `projectlist.md` should explain why.
+The project was canceled or rejected. It will not be implemented. Close the GitHub Issue with a comment explaining why.
 
 ### On-Hold
 
@@ -125,12 +125,12 @@ conceived → [HUMAN APPROVES] → specified → planned → implementing → im
 
 ## Managing Projects
 
-All project tracking happens in `codev/projectlist.md`. To manage projects:
+Project tracking uses **GitHub Issues**. To manage projects:
 
-- **Add a project:** Tell the Architect what you want to build
-- **Update status:** Ask the Architect to update the project status
+- **Add a project:** Create a GitHub Issue describing what you want to build
+- **Update status:** Update issue labels and comments as work progresses
 - **Approve stages:** Review the spec/plan and tell the Architect to mark it approved
-- **View progress:** Check the Projects tab in the dashboard or read `projectlist.md`
+- **View progress:** Check the Work tab in the dashboard or `gh issue list`
 
 ---
 

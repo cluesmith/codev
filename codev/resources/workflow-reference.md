@@ -10,7 +10,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                                                                                     │
 │  → 1. CONCEIVED                                                                     │
 │         User describes project concept                                              │
-│         Architect adds to projectlist, writes spec                                  │
+│         Architect creates GitHub Issue, writes spec                                 │
 │         Architect does 3-way spec review                                            │
 │         ⏸️  HUMAN GATE: Approve spec                                                │
 │                                                                                     │
@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn -p XXXX                                  │
+│         Architect spawns builder: af spawn XXXX --protocol spir                     │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -80,7 +80,7 @@ AI agents must stop and wait for human action at these gates.
 af dash start
 
 # Spawn a builder for a project
-af spawn -p 0044
+af spawn 44 --protocol spir
 
 # Check all builder statuses
 af status

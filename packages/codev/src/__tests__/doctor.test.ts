@@ -215,6 +215,92 @@ describe('doctor command', () => {
     });
   });
 
+  describe('gh auth check (Spec 0126)', () => {
+    it('should warn when gh is not authenticated', async () => {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          throw new Error('not authenticated');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'git': 'git version 2.40.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      const hasGhWarning = logOutput.some(line =>
+        line.includes('gh') && line.includes('not authenticated')
+      );
+      expect(hasGhWarning).toBe(true);
+    });
+
+    it('should show authenticated when gh auth succeeds', async () => {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) {
+          return Buffer.from('/usr/bin/command');
+        }
+        if (cmd.includes('gh auth status')) {
+          return Buffer.from('Logged in to github.com account testuser (keyring)');
+        }
+        return Buffer.from('');
+      });
+
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.0.0',
+          'git': 'git version 2.40.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+
+      vi.resetModules();
+
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+
+      const hasGhAuth = logOutput.some(line =>
+        line.includes('gh') && line.includes('authenticated')
+      );
+      expect(hasGhAuth).toBe(true);
+    });
+  });
+
   describe('codev structure checks (Spec 0056)', () => {
     const testBaseDir = path.join(tmpdir(), `codev-doctor-test-${Date.now()}`);
     let originalCwd: string;

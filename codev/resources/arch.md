@@ -9,7 +9,7 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 **To understand Codev quickly:**
 1. Read `codev/resources/cheatsheet.md` - Core philosophies, concepts, and tool reference
 2. Read `CLAUDE.md` (or `AGENTS.md`) - Development workflow and Git safety rules
-3. Check `codev/projectlist.md` - Current project status and what's being worked on
+3. Check GitHub Issues - Current project status and what's being worked on
 
 **To understand a specific subsystem:**
 - **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
@@ -17,7 +17,7 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 - **Protocols**: Read the relevant protocol in `codev/protocols/{spir,tick,maintain,experiment}/protocol.md`
 
 **To add a new feature to Codev:**
-1. Reserve a project number in `codev/projectlist.md`
+1. Create a GitHub Issue describing the feature
 2. Create spec using template from `codev/protocols/spir/templates/spec.md`
 3. Follow SPIR protocol: Specify → Plan → Implement → Review
 
@@ -37,7 +37,6 @@ For debugging common issues, start here:
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
-| **"Projectlist not parsing"** | `packages/codev/src/lib/projectlist-parser.ts` | YAML parsing, project entry format |
 | **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
 
 **Common debugging commands:**
@@ -81,7 +80,6 @@ tail -f ~/.agent-farm/tower.log
 | **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
 | **SessionManager** | Tower-side orchestrator for shellper process lifecycle (spawn, reconnect, kill, auto-restart) |
 | **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
-| **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
 
 ## Invariants & Constraints
 
@@ -384,7 +382,7 @@ Git worktrees provide isolated working directories for each builder, enabling pa
 
 #### Worktree Creation
 
-When spawning a builder (`af spawn -p 0003`):
+When spawning a builder (`af spawn 3 --protocol spir`):
 
 1. **Generate IDs**: Create builder ID and branch name
    ```
@@ -426,8 +424,8 @@ Builders can run in two modes:
 
 | Mode | Flag | Behavior |
 |------|------|----------|
-| **Strict** (default) | `af spawn -p XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn --soft -p XXXX` | AI follows protocol - architect verifies compliance |
+| **Strict** (default) | `af spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn XXXX --protocol spir --soft` | AI follows protocol - architect verifies compliance |
 
 **Strict mode** (default for `--project`): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously.
 
@@ -619,15 +617,19 @@ packages/codev/dashboard/
 │   │   ├── App.tsx              # Root layout (split pane desktop, single pane mobile)
 │   │   ├── Terminal.tsx         # xterm.js wrapper with WebSocket client
 │   │   ├── TabBar.tsx           # Tab management (builders, shells, annotations)
-│   │   ├── StatusPanel.tsx      # Project/builder status from projectlist.md
+│   │   ├── WorkView.tsx         # Work view: builders, PRs, backlog (Spec 0126)
+│   │   ├── BuilderCard.tsx      # Builder card with phase/gate indicators (Spec 0126)
+│   │   ├── PRList.tsx           # Pending PR list with review status (Spec 0126)
+│   │   ├── BacklogList.tsx      # Backlog grouped by readiness (Spec 0126)
 │   │   ├── FileTree.tsx         # File browser
 │   │   └── SplitPane.tsx        # Resizable panes
 │   ├── hooks/
 │   │   ├── useTabs.ts           # Tab state from /api/state polling
 │   │   ├── useBuilderStatus.ts  # Builder status polling
+│   │   ├── useOverview.ts       # Overview data polling (Spec 0126)
 │   │   └── useMediaQuery.ts     # Responsive breakpoints
 │   ├── lib/
-│   │   ├── api.ts               # REST client + getTerminalWsPath() helper
+│   │   ├── api.ts               # REST client + getTerminalWsPath() + overview API
 │   │   └── constants.ts         # Breakpoints, configuration
 │   └── main.tsx
 ├── dist/                         # Built assets (served by tower-server)
@@ -651,11 +653,12 @@ packages/codev/dashboard/
 - File tabs (annotation viewers)
 - Each tab carries a `persistent?: boolean` field sourced from `/api/state`
 
-**StatusPanel**:
-- Parses `codev/projectlist.md` YAML entries for stage/priority/dependencies
-- Active/Completed/Terminal sections with collapsible `<details>`
-- Spec/plan/review/PR links in stage cells
-- Sorted by furthest-along stage
+**Work View** (Spec 0126):
+- Default tab, replaces legacy StatusPanel
+- Three sections: Active Builders, Pending PRs, Backlog & Open Bugs
+- Data from `/api/overview` endpoint (GitHub + filesystem derived)
+- Collapsible file panel at bottom with search bar
+- `+ Shell` button in header for creating shell terminals
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
@@ -956,9 +959,13 @@ const CONFIG = {
 | `dashboard/src/components/App.tsx` | Root layout with split pane |
 | `dashboard/src/components/Terminal.tsx` | xterm.js + WebSocket client with DA filtering. Accepts `persistent` prop; shows warning banner when `false` (Spec 0104). |
 | `dashboard/src/components/TabBar.tsx` | Tab bar with close buttons |
-| `dashboard/src/components/StatusPanel.tsx` | Project status from projectlist.md |
+| `dashboard/src/components/WorkView.tsx` | Work view: builders, PRs, backlog (Spec 0126) |
+| `dashboard/src/components/BuilderCard.tsx` | Builder card with phase/gate indicators (Spec 0126) |
+| `dashboard/src/components/PRList.tsx` | Pending PR list with review status (Spec 0126) |
+| `dashboard/src/components/BacklogList.tsx` | Backlog grouped by readiness (Spec 0126) |
 | `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state. Tab interface includes `persistent?: boolean` (Spec 0104). |
-| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath(). Builder, UtilTerminal, ArchitectState interfaces include `persistent?: boolean` (Spec 0104). |
+| `dashboard/src/hooks/useOverview.ts` | Overview data polling from /api/overview (Spec 0126) |
+| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath() + overview API (Spec 0126). |
 
 #### Templates
 
@@ -1115,8 +1122,7 @@ codev/                                  # Project root (git repository)
 │   │   │   │   └── migrate.ts          # JSON → SQLite migration
 │   │   │   └── __tests__/              # Vitest unit tests
 │   │   └── lib/                        # Shared library code
-│   │       ├── templates.ts            # Template file handling
-│   │       └── projectlist-parser.ts   # Parse projectlist.md
+│   │       └── templates.ts            # Template file handling
 │   ├── bin/                            # CLI entry points
 │   │   ├── codev.js                    # codev command
 │   │   ├── af.js                       # af command
@@ -1153,7 +1159,7 @@ codev/                                  # Project root (git repository)
 │   ├── resources/                      # Reference materials
 │   │   ├── arch.md                     # This file
 │   │   └── llms.txt                    # LLM-friendly documentation
-│   └── projectlist.md                  # Master project tracking
+│   └── projects/                       # Active project state (managed by porch)
 ├── codev-skeleton/                     # Template for distribution
 │   ├── bin/                            # CLI wrapper
 │   │   └── agent-farm                  # Thin wrapper script
@@ -1174,8 +1180,7 @@ codev/                                  # Project root (git repository)
 │   ├── plans/                          # Empty (placeholder)
 │   ├── reviews/                        # Empty (placeholder)
 │   ├── resources/                      # Empty (placeholder)
-│   ├── agents/                         # Agent templates
-│   └── projectlist.md                  # Template project list
+│   └── agents/                         # Agent templates
 ├── .agent-farm/                        # Project-scoped state (gitignored)
 │   └── state.db                        # SQLite database for architect/builder/util status
 ├── ~/.agent-farm/                      # Global registry (user home)
@@ -1257,7 +1262,7 @@ codev/                                  # Project root (git repository)
 
 **Workflow**:
 1. **Identify** - Architect identifies issue #N
-2. **Spawn** - `af spawn --issue N` creates worktree and notifies issue
+2. **Spawn** - `af spawn N --protocol bugfix` creates worktree and notifies issue
 3. **Fix** - Builder investigates, fixes, writes regression test
 4. **Review** - Builder runs CMAP, creates PR
 5. **Merge** - Architect reviews, builder merges
@@ -1265,7 +1270,7 @@ codev/                                  # Project root (git repository)
 
 **Key Features**:
 - No spec/plan documents required
-- Issue is the source of truth (not projectlist.md)
+- GitHub Issue is the source of truth
 - CMAP review at PR stage only (lighter than SPIR)
 - Branch naming: `builder/bugfix-<N>-<slug>`
 - Worktree: `.builders/bugfix-<N>/`
@@ -1332,11 +1337,10 @@ af start                      # Start architect dashboard
 af stop                       # Stop all agent-farm processes
 
 # Managing builders
-af spawn -p 0003              # Spawn builder (strict mode - porch orchestrates, default)
-af spawn --soft -p 0003       # Soft mode - AI follows protocol, you verify compliance
-af spawn -p 0003 -t "name"    # Strict mode with title (if no spec exists yet)
-af spawn --issue 42           # Spawn builder for GitHub issue (BUGFIX protocol)
-af spawn -i 42                # Short form for --issue
+af spawn 3 --protocol spir              # Spawn builder (strict mode, default)
+af spawn 3 --protocol spir --soft       # Soft mode - AI follows protocol, you verify compliance
+af spawn 42 --protocol bugfix           # Spawn builder for GitHub issue (BUGFIX protocol)
+af spawn 42 --protocol tick --amends 30 # TICK amendment to spec 30
 af status                     # Check all agent status
 af cleanup --project 0003     # Clean up builder (checks for uncommitted work)
 af cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
@@ -1375,7 +1379,7 @@ af db stats                   # Show database statistics
 
 # Command overrides
 af start --architect-cmd "claude --model opus"
-af spawn -p 0003 --builder-cmd "claude --model sonnet"
+af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
 #### Configuration (`codev/config.json`)
@@ -1977,7 +1981,8 @@ try {
 
 - `.agent-farm/state.db` - Builder/util state (local, per-project)
 - `~/.agent-farm/global.db` - Global port registry (cross-project)
-- `codev/projectlist.md` - Project tracking (YAML in markdown, human-editable)
+- `codev/projects/<id>/status.yaml` - Active project state (managed by porch)
+- GitHub Issues - Project tracking (source of truth, Spec 0126)
 
 ### Template Processing
 
@@ -2265,7 +2270,7 @@ See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
 
 **v1.6.0 (Gothic)**:
 - BUGFIX protocol for GitHub Issue-based bugfixes (Spec 0065)
-- CLI: `af spawn --issue N`, `af cleanup --issue N`
+- CLI: `af spawn N --protocol bugfix`, `af cleanup --issue N`
 - Tower subcommands with improved logging
 - Tutorial system scaffolded (Spec 0006 preparation)
 

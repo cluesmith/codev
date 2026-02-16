@@ -114,7 +114,7 @@ Architect-Builder orchestration. Used by both **humans and agents**—agents use
 |---------|-------------|
 | `af dash start` | Start dashboard (port 4200, 4300, etc.) |
 | `af dash stop` | Stop all processes |
-| `af spawn -p <id>` | Spawn a builder for project |
+| `af spawn <id> --protocol <name>` | Spawn a builder for project |
 | `af status` | Check status of all builders |
 | `af send <target> <msg>` | Send message (builder↔architect) |
 | `af cleanup -p <id>` | Clean up a builder worktree |

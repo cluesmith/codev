@@ -14,6 +14,7 @@ import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord 
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir } from './state.js';
+import { fetchGitHubIssue } from '../../lib/github.js';
 
 /** Locations to search for protocol prompts */
 const PROTOCOL_PATHS = [
@@ -23,37 +24,57 @@ const PROTOCOL_PATHS = [
 ];
 
 /**
- * Get project summary from projectlist.md.
- * Returns the summary field for the given project ID.
+ * Get project summary from GitHub Issues, with spec-file fallback.
+ *
+ * Resolution order:
+ * 1. GitHub issue title (via gh CLI) — primary source
+ * 2. Spec file first heading — fallback for legacy/offline specs
+ * 3. Project title from status.yaml — last resort
  */
-function getProjectSummary(workspaceRoot: string, projectId: string): string | null {
-  const projectlistPath = path.join(workspaceRoot, 'codev', 'projectlist.md');
-  if (!fs.existsSync(projectlistPath)) {
-    return null;
+export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
+  // 1. Try GitHub issue
+  const issueNumber = parseInt(projectId, 10);
+  if (!isNaN(issueNumber)) {
+    const issue = await fetchGitHubIssue(issueNumber);
+    if (issue?.title) {
+      return issue.title;
+    }
   }
 
-  try {
-    const content = fs.readFileSync(projectlistPath, 'utf-8');
-
-    // Look for the project entry by ID
-    // Format: - id: "0076" followed by summary: "..."
-    const idPattern = new RegExp(`- id: ["']?${projectId}["']?`, 'i');
-    const idMatch = content.match(idPattern);
-    if (!idMatch) {
-      return null;
+  // 2. Fallback: read first heading from spec file
+  const specsDir = path.join(workspaceRoot, 'codev', 'specs');
+  if (fs.existsSync(specsDir)) {
+    try {
+      const files = fs.readdirSync(specsDir);
+      // Match by project ID prefix (handles zero-padded IDs like 0076)
+      const specFile = files.find(f => {
+        if (!f.endsWith('.md')) return false;
+        // Extract leading numeric prefix (handles both 42-name.md and 0042.name.md)
+        const numMatch = f.match(/^(\d+)/);
+        if (!numMatch) return false;
+        const normalizedPrefix = numMatch[1].replace(/^0+/, '') || '0';
+        const normalizedId = projectId.replace(/^0+/, '') || '0';
+        return normalizedPrefix === normalizedId;
+      });
+      if (specFile) {
+        const content = fs.readFileSync(path.join(specsDir, specFile), 'utf-8');
+        // Extract first heading
+        const headingMatch = content.match(/^#\s+(?:Specification:\s*)?(.+)$/m);
+        if (headingMatch) {
+          return headingMatch[1].trim();
+        }
+      }
+    } catch {
+      // Spec file read failed, continue to fallback
     }
-
-    // Find the summary after this ID (within the next ~500 chars)
-    const afterId = content.slice(idMatch.index!, idMatch.index! + 500);
-    const summaryMatch = afterId.match(/summary:\s*["'](.+?)["']/);
-    if (summaryMatch) {
-      return summaryMatch[1];
-    }
-
-    return null;
-  } catch {
-    return null;
   }
+
+  // 3. Last resort: project title from status.yaml
+  if (projectTitle) {
+    return projectTitle;
+  }
+
+  return null;
 }
 
 /**
@@ -189,18 +210,18 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
  * For build-verify phases with iteration > 1, lists previous build outputs
  * and review files so Claude can read them for context.
  */
-export function buildPhasePrompt(
+export async function buildPhasePrompt(
   workspaceRoot: string,
   state: ProjectState,
   protocol: Protocol
-): string {
+): Promise<string> {
   const phaseConfig = getPhaseConfig(protocol, state.phase);
   if (!phaseConfig) {
     return buildFallbackPrompt(state, 'unknown');
   }
 
-  // Get project summary from projectlist.md
-  const summary = getProjectSummary(workspaceRoot, state.id);
+  // Get project summary from GitHub Issues (with spec-file fallback)
+  const summary = await getProjectSummary(workspaceRoot, state.id, state.title);
 
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
@@ -326,7 +347,7 @@ You are executing the ${phaseName} phase of the ${state.protocol.toUpperCase()} 
     prompt += `- **Plan Phase**: ${planPhase.id} - ${planPhase.title}\n`;
   }
 
-  // Add goal from projectlist.md summary
+  // Add goal from GitHub issue / spec summary
   if (summary) {
     prompt += `\n## Goal\n\n${summary}\n`;
   }

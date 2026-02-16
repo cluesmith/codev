@@ -1,5 +1,6 @@
 /**
  * Tests for spawn command - validates spawn options and mode detection
+ * Updated for Spec 0126: positional arg + --protocol interface
  *
  * These are unit tests for the spawn validation logic. Integration tests
  * that spawn actual builders require git and Tower to be running.
@@ -7,49 +8,50 @@
 
 import { describe, it, expect } from 'vitest';
 import type { SpawnOptions, BuilderType } from '../types.js';
+import { stripLeadingZeros } from '../utils/agent-names.js';
 
 // Re-implement the validation logic for testing (avoids importing with side effects)
-// Updated to match the new protocol-agnostic approach:
-// - --protocol serves dual purpose: input mode (alone) OR override (with other inputs)
-// - --use-protocol is backwards-compatible alias for --protocol override
-// - --strict and --soft control orchestration mode
 function validateSpawnOptions(options: SpawnOptions): string | null {
-  // Count input modes (excluding --protocol which can be used as override)
+  // Count primary input modes
   const inputModes = [
-    options.project,
+    options.issueNumber,
     options.task,
     options.shell,
     options.worktree,
-    options.issue,
   ].filter(Boolean);
 
-  // --protocol alone is a valid input mode
+  // --protocol alone (no other input) is a valid mode
   const protocolAlone = options.protocol && inputModes.length === 0;
 
   if (inputModes.length === 0 && !protocolAlone) {
-    return 'Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree';
+    return 'Must specify an issue number or one of: --task, --protocol, --shell, --worktree';
   }
 
   if (inputModes.length > 1) {
-    return 'Flags --project, --issue, --task, --shell, --worktree are mutually exclusive';
+    return 'Issue number, --task, --shell, and --worktree are mutually exclusive';
+  }
+
+  // --protocol is required for issue-based spawns (unless --resume or --soft)
+  if (options.issueNumber && !options.protocol && !options.resume && !options.soft) {
+    return '--protocol is required when spawning with an issue number';
   }
 
   if (options.files && !options.task) {
     return '--files requires --task';
   }
 
-  if ((options.noComment || options.force) && !options.issue) {
-    return '--no-comment and --force require --issue';
+  if ((options.noComment || options.force) && !options.issueNumber) {
+    return '--no-comment and --force require an issue number';
   }
 
-  // --protocol as override cannot be used with --shell or --worktree
-  if (options.protocol && inputModes.length > 0 && (options.shell || options.worktree)) {
-    return '--protocol cannot be used with --shell or --worktree (no protocol applies)';
+  // --protocol cannot be used with --shell or --worktree
+  if (options.protocol && (options.shell || options.worktree)) {
+    return '--protocol cannot be used with --shell or --worktree';
   }
 
-  // --use-protocol backwards compatibility
-  if (options.useProtocol && (options.shell || options.worktree)) {
-    return '--use-protocol cannot be used with --shell or --worktree (no protocol applies)';
+  // --amends requires --protocol tick
+  if (options.amends && options.protocol !== 'tick') {
+    return '--amends requires --protocol tick';
   }
 
   // --strict and --soft are mutually exclusive
@@ -61,13 +63,15 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
 }
 
 function getSpawnMode(options: SpawnOptions): BuilderType {
-  // Primary input modes take precedence over --protocol as override
-  if (options.project) return 'spec';
-  if (options.issue) return 'bugfix';
   if (options.task) return 'task';
   if (options.shell) return 'shell';
   if (options.worktree) return 'worktree';
-  // --protocol alone is the protocol input mode
+
+  if (options.issueNumber) {
+    if (options.protocol === 'bugfix') return 'bugfix';
+    return 'spec';
+  }
+
   if (options.protocol) return 'protocol';
   throw new Error('No mode specified');
 }
@@ -83,7 +87,6 @@ function slugify(title: string): string {
 }
 
 function generateShortId(): string {
-  // Generate random 24-bit number and base64 encode to 4 chars
   const num = Math.floor(Math.random() * 0xFFFFFF);
   const bytes = new Uint8Array([num >> 16, (num >> 8) & 0xFF, num & 0xFF]);
   return btoa(String.fromCharCode(...bytes))
@@ -95,12 +98,54 @@ function generateShortId(): string {
 
 describe('Spawn Command', () => {
   describe('validateSpawnOptions', () => {
-    describe('valid options', () => {
-      it('should accept --project alone', () => {
-        const options: SpawnOptions = { project: '0009' };
+    describe('valid options — positional arg + protocol', () => {
+      it('should accept issue number + --protocol spir', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir' };
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
+      it('should accept issue number + --protocol bugfix', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'bugfix' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --protocol tick + --amends', () => {
+        const options: SpawnOptions = { issueNumber: 320, protocol: 'tick', amends: 315 };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --soft (no protocol needed)', () => {
+        const options: SpawnOptions = { issueNumber: 315, soft: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --resume (no protocol needed)', () => {
+        const options: SpawnOptions = { issueNumber: 315, resume: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --protocol + --soft', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', soft: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --protocol + --strict', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', strict: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --protocol + --no-comment', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'bugfix', noComment: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept issue number + --protocol + --force', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'bugfix', force: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+    });
+
+    describe('valid options — alternative modes', () => {
       it('should accept --task alone', () => {
         const options: SpawnOptions = { task: 'Fix the authentication bug' };
         expect(validateSpawnOptions(options)).toBeNull();
@@ -109,13 +154,13 @@ describe('Spawn Command', () => {
       it('should accept --task with --files', () => {
         const options: SpawnOptions = {
           task: 'Fix bug',
-          files: ['src/auth.ts', 'src/login.ts']
+          files: ['src/auth.ts', 'src/login.ts'],
         };
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
       it('should accept --protocol alone', () => {
-        const options: SpawnOptions = { protocol: 'cleanup' };
+        const options: SpawnOptions = { protocol: 'maintain' };
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
@@ -128,109 +173,102 @@ describe('Spawn Command', () => {
         const options: SpawnOptions = { worktree: true };
         expect(validateSpawnOptions(options)).toBeNull();
       });
-
-      it('should accept --issue alone', () => {
-        const options: SpawnOptions = { issue: 42 };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with --no-comment', () => {
-        const options: SpawnOptions = { issue: 42, noComment: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with --force', () => {
-        const options: SpawnOptions = { issue: 42, force: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with both --no-comment and --force', () => {
-        const options: SpawnOptions = { issue: 42, noComment: true, force: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
     });
 
     describe('invalid options', () => {
       it('should reject empty options', () => {
         const options: SpawnOptions = {};
         const error = validateSpawnOptions(options);
-        expect(error).toContain('Must specify one of');
+        expect(error).toContain('Must specify');
       });
 
-      it('should reject --project + --task', () => {
-        const options: SpawnOptions = { project: '0009', task: 'Fix bug' };
+      it('should reject issue number without --protocol (and no --resume/--soft)', () => {
+        const options: SpawnOptions = { issueNumber: 315 };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--protocol is required');
+      });
+
+      it('should reject issue number + --task (mutually exclusive)', () => {
+        const options: SpawnOptions = { issueNumber: 315, task: 'Fix bug' };
         const error = validateSpawnOptions(options);
         expect(error).toContain('mutually exclusive');
       });
 
-      it('should reject --project + --shell', () => {
-        const options: SpawnOptions = { project: '0009', shell: true };
+      it('should reject issue number + --shell (mutually exclusive)', () => {
+        const options: SpawnOptions = { issueNumber: 315, shell: true };
         const error = validateSpawnOptions(options);
         expect(error).toContain('mutually exclusive');
       });
 
-      it('should reject --protocol + --shell (protocol as override)', () => {
-        const options: SpawnOptions = { protocol: 'cleanup', shell: true };
+      it('should reject --task + --shell (mutually exclusive)', () => {
+        const options: SpawnOptions = { task: 'Fix bug', shell: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
+        expect(error).toContain('mutually exclusive');
       });
 
-      it('should reject --protocol + --worktree (protocol as override)', () => {
-        const options: SpawnOptions = { protocol: 'cleanup', worktree: true };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
-      });
-
-      it('should reject --shell + --worktree', () => {
+      it('should reject --shell + --worktree (mutually exclusive)', () => {
         const options: SpawnOptions = { shell: true, worktree: true };
         const error = validateSpawnOptions(options);
         expect(error).toContain('mutually exclusive');
       });
 
-      it('should reject --project + --worktree', () => {
-        const options: SpawnOptions = { project: '0009', worktree: true };
+      it('should reject --protocol + --shell', () => {
+        const options: SpawnOptions = { protocol: 'spir', shell: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('mutually exclusive');
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
       });
 
-      it('should reject --issue + --project', () => {
-        const options: SpawnOptions = { issue: 42, project: '0009' };
+      it('should reject --protocol + --worktree', () => {
+        const options: SpawnOptions = { protocol: 'spir', worktree: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('mutually exclusive');
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
       });
 
-      it('should reject --issue + --task', () => {
-        const options: SpawnOptions = { issue: 42, task: 'Fix bug' };
+      it('should reject --no-comment without issue number', () => {
+        const options: SpawnOptions = { task: 'Fix bug', noComment: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('mutually exclusive');
+        expect(error).toContain('--no-comment and --force require an issue number');
       });
 
-      it('should reject --no-comment without --issue', () => {
-        const options: SpawnOptions = { project: '0009', noComment: true };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--no-comment and --force require --issue');
-      });
-
-      it('should reject --force without --issue', () => {
+      it('should reject --force without issue number', () => {
         const options: SpawnOptions = { task: 'Fix bug', force: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('--no-comment and --force require --issue');
+        expect(error).toContain('--no-comment and --force require an issue number');
       });
 
       it('should reject --files without --task', () => {
         const options: SpawnOptions = {
-          project: '0009',
-          files: ['src/file.ts']
+          issueNumber: 315,
+          protocol: 'spir',
+          files: ['src/file.ts'],
         };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--files requires --task');
       });
 
+      it('should reject --amends without --protocol tick', () => {
+        const options: SpawnOptions = { issueNumber: 320, protocol: 'spir', amends: 315 };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--amends requires --protocol tick');
+      });
+
+      it('should reject --amends with --protocol bugfix', () => {
+        const options: SpawnOptions = { issueNumber: 320, protocol: 'bugfix', amends: 315 };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--amends requires --protocol tick');
+      });
+
+      it('should reject --strict with --soft', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', strict: true, soft: true };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--strict and --soft are mutually exclusive');
+      });
+
       it('should reject triple mode specification', () => {
         const options: SpawnOptions = {
-          project: '0009',
+          issueNumber: 315,
           task: 'Fix bug',
-          shell: true
+          shell: true,
         };
         const error = validateSpawnOptions(options);
         expect(error).toContain('mutually exclusive');
@@ -239,28 +277,41 @@ describe('Spawn Command', () => {
   });
 
   describe('getSpawnMode', () => {
-    it('should return "spec" for --project', () => {
-      expect(getSpawnMode({ project: '0009' })).toBe('spec');
+    it('returns "spec" for issue + --protocol spir', () => {
+      expect(getSpawnMode({ issueNumber: 315, protocol: 'spir' })).toBe('spec');
     });
 
-    it('should return "task" for --task', () => {
+    it('returns "spec" for issue + --protocol tick', () => {
+      expect(getSpawnMode({ issueNumber: 315, protocol: 'tick' })).toBe('spec');
+    });
+
+    it('returns "bugfix" for issue + --protocol bugfix', () => {
+      expect(getSpawnMode({ issueNumber: 315, protocol: 'bugfix' })).toBe('bugfix');
+    });
+
+    it('returns "task" for --task', () => {
       expect(getSpawnMode({ task: 'Fix bug' })).toBe('task');
     });
 
-    it('should return "protocol" for --protocol', () => {
-      expect(getSpawnMode({ protocol: 'cleanup' })).toBe('protocol');
+    it('returns "protocol" for --protocol alone', () => {
+      expect(getSpawnMode({ protocol: 'maintain' })).toBe('protocol');
     });
 
-    it('should return "shell" for --shell', () => {
+    it('returns "shell" for --shell', () => {
       expect(getSpawnMode({ shell: true })).toBe('shell');
     });
 
-    it('should return "worktree" for --worktree', () => {
+    it('returns "worktree" for --worktree', () => {
       expect(getSpawnMode({ worktree: true })).toBe('worktree');
     });
 
-    it('should throw for empty options', () => {
+    it('throws for empty options', () => {
       expect(() => getSpawnMode({})).toThrow('No mode specified');
+    });
+
+    it('--task takes precedence over --protocol', () => {
+      // task + protocol is valid: protocol overrides the task's default
+      expect(getSpawnMode({ task: 'Fix bug', protocol: 'spir' })).toBe('task');
     });
   });
 
@@ -271,10 +322,8 @@ describe('Spawn Command', () => {
     });
 
     it('should generate URL-safe base64 characters', () => {
-      // Generate many IDs to check character set
       for (let i = 0; i < 100; i++) {
         const id = generateShortId();
-        // Should only contain URL-safe base64: a-z, A-Z, 0-9, -, _
         expect(id).toMatch(/^[a-zA-Z0-9_-]{4}$/);
       }
     });
@@ -284,8 +333,6 @@ describe('Spawn Command', () => {
       for (let i = 0; i < 100; i++) {
         ids.add(generateShortId());
       }
-      // With 4 base64 chars (64^4 = ~16M possibilities), 100 IDs should be unique
-      // Allow for very rare collisions (99+ unique out of 100)
       expect(ids.size).toBeGreaterThanOrEqual(99);
     });
 
@@ -300,12 +347,11 @@ describe('Spawn Command', () => {
   });
 
   describe('bugfix mode', () => {
-    it('should return "bugfix" for --issue', () => {
-      expect(getSpawnMode({ issue: 42 })).toBe('bugfix');
+    it('returns "bugfix" for issue + --protocol bugfix', () => {
+      expect(getSpawnMode({ issueNumber: 42, protocol: 'bugfix' })).toBe('bugfix');
     });
 
     it('slugify converts issue title to URL-safe slug', () => {
-      // Slugify truncates to 30 chars, so result ends with trailing dash due to truncation
       const result = slugify('Login fails when username has spaces');
       expect(result.length).toBeLessThanOrEqual(30);
       expect(result).toMatch(/^login-fails-when-username-has/);
@@ -367,10 +413,9 @@ describe('Spawn Command', () => {
   });
 
   describe('branch naming', () => {
-    it('spec mode uses builder/{id}-{spec-name}', () => {
-      const specName = '0009-terminal-click';
-      const branchName = `builder/${specName}`;
-      expect(branchName).toBe('builder/0009-terminal-click');
+    it('spec mode uses builder/{protocol}-{id}-{spec-name}', () => {
+      const branchName = 'builder/spir-315-feature-name';
+      expect(branchName).toBe('builder/spir-315-feature-name');
     });
 
     it('task mode uses builder/task-{rand4}', () => {
@@ -386,7 +431,6 @@ describe('Spawn Command', () => {
     });
 
     it('shell mode has no branch (empty string)', () => {
-      // Shell mode doesn't create a worktree or branch
       const branch = '';
       expect(branch).toBe('');
     });
@@ -398,179 +442,52 @@ describe('Spawn Command', () => {
     });
   });
 
-  describe('session naming', () => {
-    it('builder sessions use builder-{id}', () => {
-      const builderId = '0009';
-      const sessionName = `builder-${builderId}`;
-      expect(sessionName).toBe('builder-0009');
+  describe('--amends option (TICK protocol)', () => {
+    it('accepts --amends with --protocol tick', () => {
+      const options: SpawnOptions = { issueNumber: 320, protocol: 'tick', amends: 315 };
+      expect(validateSpawnOptions(options)).toBeNull();
     });
 
-    it('shell sessions use shell-{rand4}', () => {
-      const shortId = generateShortId();
-      const sessionName = `shell-${shortId}`;
-      expect(sessionName).toMatch(/^shell-[a-zA-Z0-9_-]{4}$/);
+    it('rejects --amends without --protocol', () => {
+      const options: SpawnOptions = { issueNumber: 320, amends: 315 };
+      // --protocol is also required, so first error triggers
+      const error = validateSpawnOptions(options);
+      expect(error).toBeTruthy();
     });
 
-    it('worktree sessions use builder-worktree-{rand4}', () => {
-      const shortId = generateShortId();
-      const builderId = `worktree-${shortId}`;
-      const sessionName = `builder-${builderId}`;
-      expect(sessionName).toMatch(/^builder-worktree-[a-zA-Z0-9_-]{4}$/);
-    });
-  });
-
-  describe('protocol override (--use-protocol)', () => {
-    describe('valid combinations', () => {
-      it('should accept --project with --use-protocol', () => {
-        const options: SpawnOptions = { project: '0009', useProtocol: 'tick' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with --use-protocol', () => {
-        const options: SpawnOptions = { issue: 42, useProtocol: 'spir' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --task with --use-protocol', () => {
-        const options: SpawnOptions = { task: 'Fix bug', useProtocol: 'experiment' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --protocol without --use-protocol (protocol-only mode)', () => {
-        const options: SpawnOptions = { protocol: 'maintain' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-    });
-
-    describe('invalid combinations', () => {
-      it('should reject --shell with --use-protocol', () => {
-        const options: SpawnOptions = { shell: true, useProtocol: 'spir' };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
-      });
-
-      it('should reject --worktree with --use-protocol', () => {
-        const options: SpawnOptions = { worktree: true, useProtocol: 'spir' };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
-      });
+    it('rejects --amends with --protocol spir', () => {
+      const options: SpawnOptions = { issueNumber: 320, protocol: 'spir', amends: 315 };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--amends requires --protocol tick');
     });
   });
 
-  describe('soft mode (--soft)', () => {
-    describe('valid combinations', () => {
-      it('should accept --project with --soft', () => {
-        const options: SpawnOptions = { project: '0009', soft: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
+  describe('soft mode', () => {
+    it('allows issue number + --soft (no --protocol needed)', () => {
+      const options: SpawnOptions = { issueNumber: 315, soft: true };
+      expect(validateSpawnOptions(options)).toBeNull();
+    });
 
-      it('should accept --issue with --soft', () => {
-        const options: SpawnOptions = { issue: 42, soft: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
+    it('allows issue number + --soft + --protocol', () => {
+      const options: SpawnOptions = { issueNumber: 315, soft: true, protocol: 'spir' };
+      expect(validateSpawnOptions(options)).toBeNull();
+    });
 
-      it('should accept --task with --soft', () => {
-        const options: SpawnOptions = { task: 'Fix bug', soft: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --project with both --soft and --use-protocol', () => {
-        const options: SpawnOptions = { project: '0009', soft: true, useProtocol: 'tick' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
+    it('allows --task + --soft', () => {
+      const options: SpawnOptions = { task: 'Fix bug', soft: true };
+      expect(validateSpawnOptions(options)).toBeNull();
     });
   });
 
-  describe('strict mode (--strict)', () => {
-    describe('valid combinations', () => {
-      it('should accept --project with --strict', () => {
-        const options: SpawnOptions = { project: '0009', strict: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with --strict', () => {
-        const options: SpawnOptions = { issue: 42, strict: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --task with --strict', () => {
-        const options: SpawnOptions = { task: 'Fix bug', strict: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --project with both --strict and --protocol override', () => {
-        const options: SpawnOptions = { project: '0009', strict: true, protocol: 'tick' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
+  describe('resume mode', () => {
+    it('allows issue number + --resume (no --protocol needed)', () => {
+      const options: SpawnOptions = { issueNumber: 315, resume: true };
+      expect(validateSpawnOptions(options)).toBeNull();
     });
 
-    describe('invalid combinations', () => {
-      it('should reject --strict with --soft', () => {
-        const options: SpawnOptions = { project: '0009', strict: true, soft: true };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--strict and --soft are mutually exclusive');
-      });
-    });
-  });
-
-  describe('--protocol as universal override', () => {
-    describe('valid combinations', () => {
-      it('should accept --project with --protocol override', () => {
-        const options: SpawnOptions = { project: '0009', protocol: 'tick' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --issue with --protocol override', () => {
-        const options: SpawnOptions = { issue: 42, protocol: 'spir' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --task with --protocol override', () => {
-        const options: SpawnOptions = { task: 'Fix bug', protocol: 'experiment' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --protocol alone as input mode', () => {
-        const options: SpawnOptions = { protocol: 'maintain' };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-
-      it('should accept --project with --protocol and --strict', () => {
-        const options: SpawnOptions = { project: '0009', protocol: 'tick', strict: true };
-        expect(validateSpawnOptions(options)).toBeNull();
-      });
-    });
-
-    describe('invalid combinations', () => {
-      it('should reject --shell with --protocol override', () => {
-        const options: SpawnOptions = { shell: true, protocol: 'spir' };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
-      });
-
-      it('should reject --worktree with --protocol override', () => {
-        const options: SpawnOptions = { worktree: true, protocol: 'spir' };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
-      });
-    });
-
-    describe('mode detection with --protocol override', () => {
-      it('--project + --protocol still returns spec mode', () => {
-        expect(getSpawnMode({ project: '0009', protocol: 'tick' })).toBe('spec');
-      });
-
-      it('--issue + --protocol still returns bugfix mode', () => {
-        expect(getSpawnMode({ issue: 42, protocol: 'spir' })).toBe('bugfix');
-      });
-
-      it('--task + --protocol still returns task mode', () => {
-        expect(getSpawnMode({ task: 'Fix bug', protocol: 'experiment' })).toBe('task');
-      });
-
-      it('--protocol alone returns protocol mode', () => {
-        expect(getSpawnMode({ protocol: 'maintain' })).toBe('protocol');
-      });
+    it('allows issue number + --resume + --protocol', () => {
+      const options: SpawnOptions = { issueNumber: 315, resume: true, protocol: 'spir' };
+      expect(validateSpawnOptions(options)).toBeNull();
     });
   });
 
@@ -580,84 +497,74 @@ describe('Spawn Command', () => {
       options: SpawnOptions,
       protocol: { defaults?: { mode?: 'strict' | 'soft' } } | null,
     ): 'strict' | 'soft' {
-      // 1. Explicit flags always win
       if (options.strict && options.soft) {
         throw new Error('--strict and --soft are mutually exclusive');
       }
-      if (options.strict) {
-        return 'strict';
-      }
-      if (options.soft) {
-        return 'soft';
-      }
+      if (options.strict) return 'strict';
+      if (options.soft) return 'soft';
 
-      // 2. Protocol defaults from protocol.json
       if (protocol?.defaults?.mode) {
         return protocol.defaults.mode;
       }
 
-      // 3. Input type defaults: only spec mode defaults to strict
-      if (options.project) {
-        return 'strict';
-      }
-
-      // All other modes default to soft
+      // Issue-based spawns with non-bugfix protocol default to strict
+      if (options.issueNumber && options.protocol !== 'bugfix') return 'strict';
       return 'soft';
     }
 
     describe('explicit --strict flag', () => {
-      it('--strict overrides issue default to soft', () => {
-        const options: SpawnOptions = { issue: 42, strict: true };
+      it('--strict overrides default soft', () => {
+        const options: SpawnOptions = { issueNumber: 42, protocol: 'bugfix', strict: true };
         expect(resolveMode(options, null)).toBe('strict');
       });
 
       it('--strict overrides protocol soft default', () => {
-        const options: SpawnOptions = { issue: 42, strict: true };
+        const options: SpawnOptions = { issueNumber: 42, protocol: 'bugfix', strict: true };
         const protocol = { defaults: { mode: 'soft' as const } };
         expect(resolveMode(options, protocol)).toBe('strict');
       });
 
       it('--strict + --soft throws error', () => {
-        const options: SpawnOptions = { project: '0009', strict: true, soft: true };
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', strict: true, soft: true };
         expect(() => resolveMode(options, null)).toThrow('--strict and --soft are mutually exclusive');
       });
     });
 
     describe('explicit --soft flag', () => {
       it('--soft overrides spec default to strict', () => {
-        const options: SpawnOptions = { project: '0009', soft: true };
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', soft: true };
         expect(resolveMode(options, null)).toBe('soft');
       });
 
       it('--soft overrides protocol defaults', () => {
-        const options: SpawnOptions = { project: '0009', soft: true };
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', soft: true };
         const protocol = { defaults: { mode: 'strict' as const } };
         expect(resolveMode(options, protocol)).toBe('soft');
       });
     });
 
     describe('protocol defaults', () => {
-      it('uses protocol default mode when no --soft flag', () => {
-        const options: SpawnOptions = { issue: 42 };
+      it('uses protocol default mode when no flags', () => {
+        const options: SpawnOptions = { issueNumber: 42, protocol: 'bugfix' };
         const protocol = { defaults: { mode: 'strict' as const } };
         expect(resolveMode(options, protocol)).toBe('strict');
       });
 
       it('protocol soft default overrides input type default', () => {
-        const options: SpawnOptions = { project: '0009' };
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir' };
         const protocol = { defaults: { mode: 'soft' as const } };
         expect(resolveMode(options, protocol)).toBe('soft');
       });
     });
 
     describe('input type defaults', () => {
-      it('spec mode defaults to strict', () => {
-        const options: SpawnOptions = { project: '0009' };
+      it('spec mode (issue + non-bugfix protocol) defaults to strict', () => {
+        const options: SpawnOptions = { issueNumber: 315, protocol: 'spir' };
         expect(resolveMode(options, null)).toBe('strict');
       });
 
-      it('issue mode defaults to soft', () => {
-        const options: SpawnOptions = { issue: 42 };
+      it('bugfix mode defaults to soft', () => {
+        const options: SpawnOptions = { issueNumber: 42, protocol: 'bugfix' };
         expect(resolveMode(options, null)).toBe('soft');
       });
 
@@ -683,5 +590,56 @@ describe('Spawn Command', () => {
     });
   });
 
-});
+  describe('inferProtocolFromWorktree (unit logic)', () => {
+    // Re-implement inferProtocolFromWorktree for isolated testing
+    function inferProtocolFromWorktree(dirs: string[], issueNumber: number): string | null {
+      const strippedId = stripLeadingZeros(String(issueNumber));
+      const match = dirs.find(d => {
+        const parts = d.split('-');
+        return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
+      });
+      if (match) return match.split('-')[0];
+      return null;
+    }
 
+    it('matches worktree with non-padded ID (e.g., spir-315-feature)', () => {
+      expect(inferProtocolFromWorktree(['spir-315-feature-name'], 315)).toBe('spir');
+    });
+
+    it('matches worktree with zero-padded ID (e.g., spir-0076-feature for issueNumber=76)', () => {
+      expect(inferProtocolFromWorktree(['spir-0076-feature-name'], 76)).toBe('spir');
+    });
+
+    it('matches bugfix worktree (e.g., bugfix-42-fix-login)', () => {
+      expect(inferProtocolFromWorktree(['bugfix-42-fix-login'], 42)).toBe('bugfix');
+    });
+
+    it('returns null when no worktree matches', () => {
+      expect(inferProtocolFromWorktree(['spir-100-other'], 42)).toBeNull();
+    });
+
+    it('returns null for empty directory listing', () => {
+      expect(inferProtocolFromWorktree([], 42)).toBeNull();
+    });
+  });
+
+  describe('TICK --amends spec resolution logic', () => {
+    it('TICK with --amends resolves spec by amends number, not issue number', () => {
+      // For: af spawn 320 --protocol tick --amends 315
+      // The spec lookup should use "315" not "320"
+      const options: SpawnOptions = { issueNumber: 320, protocol: 'tick', amends: 315 };
+      const specLookupId = (options.protocol === 'tick' && options.amends)
+        ? String(options.amends)
+        : String(options.issueNumber);
+      expect(specLookupId).toBe('315');
+    });
+
+    it('non-TICK protocols resolve spec by issue number', () => {
+      const options: SpawnOptions = { issueNumber: 315, protocol: 'spir' };
+      const specLookupId = (options.protocol === 'tick' && options.amends)
+        ? String(options.amends)
+        : String(options.issueNumber);
+      expect(specLookupId).toBe('315');
+    });
+  });
+});

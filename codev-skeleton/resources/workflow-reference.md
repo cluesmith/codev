@@ -10,7 +10,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                                                                                     │
 │  → 1. CONCEIVED                                                                     │
 │         User describes project concept                                              │
-│         Architect adds to projectlist, writes spec                                  │
+│         Architect creates GitHub Issue, writes spec                                 │
 │         Architect does 3-way spec review                                            │
 │         ⏸️  HUMAN GATE: Approve spec                                                │
 │                                                                                     │

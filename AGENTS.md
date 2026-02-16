@@ -43,14 +43,18 @@ cd packages/codev
 npm run build
 npm pack
 
-# 2. Stop Tower, install, clean up, restart (minimize downtime)
-af tower stop
+# 2. Install (Tower stays up — running process already loaded old code)
 npm install -g ./cluesmith-codev-*.tgz
-rm ./cluesmith-codev-*.tgz
-af tower start
+
+# 3. Restart (only this step needs downtime)
+af tower stop && af tower start
 ```
 
-Build and pack **before** stopping Tower so it's down for the minimum time. Do NOT use `npm link` — it breaks global installs.
+- Install while Tower is running — it doesn't affect the running process
+- Do NOT stop Tower before installing — unnecessary downtime
+- Do NOT delete the tarball — keep it for debugging if restart fails
+- Do NOT build between stop and start
+- Do NOT use `npm link` — it breaks global installs
 
 ### Testing
 
@@ -70,29 +74,24 @@ You are working in the Codev project itself, with multiple development protocols
 
 Key locations:
 - Protocol details: `codev/protocols/` (Choose appropriate protocol)
-- **Project tracking**: `codev/projectlist.md` (Master list of all projects)
+- **Project tracking**: GitHub Issues (source of truth for all projects)
 - Specifications go in: `codev/specs/`
 - Plans go in: `codev/plans/`
 - Reviews go in: `codev/reviews/`
 
 ### Project Tracking
 
-**Two complementary tracking systems:**
+**GitHub Issues are the source of truth for project tracking.**
 
-1. **`codev/projectlist.md`** - Master list of ALL projects (planning and history)
-   - Contains status, priority, dependencies, and notes for every project
-   - Reserve project numbers here BEFORE creating spec files
-   - Update when project lifecycle changes (conceived → specified → committed → integrated)
-
-2. **`codev/projects/<id>/status.yaml`** - Runtime state for ACTIVE porch projects
-   - Detailed phase tracking (specify:draft, plan:consult, implement:phase_1, etc.)
-   - Gate status (pending, passed, failed)
-   - Managed automatically by porch
+- Issues with the `spec` label have approved specifications
+- Issues with the `plan` label have approved plans
+- Active builders are tracked via `codev/projects/<id>/status.yaml` (managed by porch)
+- The dashboard Work view shows builders, PRs, and backlog derived from GitHub + filesystem state
 
 **When to use which:**
-- **Starting work**: Check `codev/projectlist.md` for priorities and incomplete work
+- **Starting work**: Check GitHub Issues for priorities and backlog
 - **During implementation**: Use `porch status <id>` for detailed phase status
-- **After completion**: Update `codev/projectlist.md` status field
+- **After completion**: Close the GitHub Issue when PR is merged
 
 **🚨 CRITICAL: Two human approval gates exist:**
 - **conceived → specified**: AI creates spec, but ONLY the human can approve it
@@ -133,7 +132,7 @@ validated: [gemini, codex, claude]
 - No spec/plan artifacts needed
 - Single builder can fix independently
 
-**BUGFIX uses GitHub Issues as source of truth**, not projectlist.md. See `codev/protocols/bugfix/protocol.md`.
+**BUGFIX uses GitHub Issues as source of truth.** See `codev/protocols/bugfix/protocol.md`.
 
 ### Use TICK for (amendments to existing specs):
 - **Amendments** to an existing SPIR spec that is already `integrated`
@@ -184,7 +183,7 @@ project-root/
 │   │   └── maintain/       # Codebase maintenance (code + docs)
 │   ├── maintain/            # MAINTAIN protocol runtime artifacts
 │   │   └── .trash/         # Soft-deleted files (gitignored, 30-day retention)
-│   ├── projectlist.md      # Master project tracking (status, priority, dependencies)
+│   ├── projects/           # Active project state (managed by porch)
 │   ├── specs/              # Feature specifications (WHAT to build)
 │   ├── plans/              # Implementation plans (HOW to build)
 │   ├── reviews/            # Reviews and lessons learned from each feature
@@ -267,6 +266,20 @@ For detailed commands, configuration, and architecture, see:
 - `codev/resources/arch.md` - Terminal architecture, state management
 - `codev/resources/workflow-reference.md` - Stage-by-stage workflow
 
+### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
+
+**When a worktree already exists for a project:**
+1. Use `af spawn XXXX --resume`
+2. If `--resume` fails → **ASK THE USER**
+3. Only destroy if the user explicitly says to
+
+**NEVER run without EXPLICIT user request:**
+- `git worktree remove` (with or without --force)
+- `git branch -D` on builder branches
+- `af cleanup` followed by fresh spawn
+
+**You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
+
 ### Pre-Spawn Rule
 
 **Commit all local changes before `af spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).
@@ -274,13 +287,17 @@ For detailed commands, configuration, and architecture, see:
 ### Key Commands
 
 ```bash
-af dash start              # Start the architect dashboard
-af spawn -p 0003           # Spawn builder (strict mode, default)
-af spawn --soft -p 0003    # Spawn builder (soft mode)
-af spawn --issue 42        # Spawn builder for a bugfix
-af status                  # Check all builders
-af cleanup --project 0003  # Clean up after merge
+af dash start                        # Start the architect dashboard
+af spawn 42 --protocol spir          # Spawn builder for SPIR project
+af spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
+af spawn 42 --protocol bugfix        # Spawn builder for a bugfix
+af spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+af status                            # Check all builders
+af cleanup --project 0042            # Clean up after merge
+af open file.ts            # Open file in annotation viewer (NOT system open)
 ```
+
+**IMPORTANT:** When the user says `af open`, always run the `af open` command — do NOT substitute the system `open` command.
 
 ### Configuration
 
@@ -360,8 +377,8 @@ Use **tokei** for measuring codebase size: `tokei -e "tests/lib" -e "node_module
 # Check if there's already a PR for this
 gh pr list --search "XXXX"
 
-# Check projectlist for status
-cat codev/projectlist.md | grep -A5 "XXXX"
+# Check GitHub Issues for status
+gh issue list --search "XXXX"
 
 # Check if implementation already exists
 git log --oneline --all | grep -i "feature-name"

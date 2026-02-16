@@ -63,7 +63,7 @@ wait
 ## Responsibilities
 
 1. **Decide what to build** - Identify features, prioritize work
-2. **Maintain project list** - Track all projects in `codev/projectlist.md`
+2. **Track projects** - Use GitHub Issues as the project registry
 3. **Spawn builders** - Choose soft or strict mode based on needs
 4. **Approve gates** - (Strict mode) Review specs and plans, approve to continue
 5. **Monitor progress** - Track builder status, unblock when stuck
@@ -75,7 +75,7 @@ wait
 ### 1. Starting a New Feature
 
 ```bash
-# 1. Reserve project number in projectlist.md
+# 1. Create a GitHub Issue for the feature
 # 2. Spawn the builder
 
 # Default: Strict mode (porch-driven with gates)
@@ -158,21 +158,21 @@ af cleanup -p 42
 3. **DO NOT use `af send` for long messages** - Use GitHub PR comments instead
 
 ### ALWAYS Do These:
-1. **Reserve project numbers first** - Update projectlist.md before spawning
+1. **Create GitHub Issues first** - Track projects as issues before spawning
 2. **Review artifacts before approving gates** - (Strict mode) Read the spec/plan carefully
 3. **Use PR comments for feedback** - Not terminal send-keys
 4. **Let builders own their work** - Guide, don't take over
 
 ## Project Tracking
 
-**`codev/projectlist.md` is the canonical source of truth.**
+**GitHub Issues are the canonical source of truth for project tracking.**
 
 ```bash
 # See what needs work
-cat codev/projectlist.md
+gh issue list --label "priority:high"
 
-# Find high-priority items
-grep -A5 "priority: high" codev/projectlist.md
+# View a specific project
+gh issue view 42
 ```
 
 Update status as projects progress:
