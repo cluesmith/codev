@@ -161,15 +161,15 @@ describe('spawn-roles', () => {
 
     it('uses protocol default mode when no flags', () => {
       const protocol = { defaults: { mode: 'strict' as const } };
-      expect(resolveMode({ issue: 42 }, protocol)).toBe('strict');
+      expect(resolveMode({ issueNumber: 42, protocol: 'spir' }, protocol)).toBe('strict');
     });
 
-    it('defaults to strict for spec mode', () => {
-      expect(resolveMode({ project: '0001' }, null)).toBe('strict');
+    it('defaults to strict for issue-based non-bugfix spawns', () => {
+      expect(resolveMode({ issueNumber: 1, protocol: 'spir' }, null)).toBe('strict');
     });
 
-    it('defaults to soft for other modes', () => {
-      expect(resolveMode({ issue: 42 }, null)).toBe('soft');
+    it('defaults to soft for bugfix and other modes', () => {
+      expect(resolveMode({ issueNumber: 42, protocol: 'bugfix' }, null)).toBe('soft');
       expect(resolveMode({ task: 'fix' }, null)).toBe('soft');
     });
 
