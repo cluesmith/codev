@@ -84,6 +84,10 @@ export interface OverviewBuilder {
   mode: 'strict' | 'soft';
   gates: Record<string, string>;
   worktreePath: string;
+  protocol?: string;
+  planPhases?: string[];
+  progress?: number;
+  blocked?: boolean;
 }
 
 export interface OverviewPR {
@@ -91,6 +95,7 @@ export interface OverviewPR {
   title: string;
   reviewStatus: string;
   linkedIssue: number | null;
+  createdAt: string;
 }
 
 export interface OverviewBacklogItem {

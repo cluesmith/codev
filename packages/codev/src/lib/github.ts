@@ -31,6 +31,7 @@ export interface GitHubPR {
   title: string;
   reviewDecision: string;
   body: string;
+  createdAt: string;
 }
 
 export interface GitHubIssueListItem {
@@ -81,7 +82,7 @@ export async function fetchPRList(cwd?: string): Promise<GitHubPR[] | null> {
   try {
     const { stdout } = await execFileAsync('gh', [
       'pr', 'list',
-      '--json', 'number,title,reviewDecision,body',
+      '--json', 'number,title,reviewDecision,body,createdAt',
     ], { cwd });
     return JSON.parse(stdout);
   } catch {

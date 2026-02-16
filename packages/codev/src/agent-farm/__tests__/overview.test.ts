@@ -534,7 +534,7 @@ describe('overview', () => {
       ].join('\n'), '0042-test');
 
       mockFetchPRList.mockResolvedValue([
-        { number: 10, title: '[Spec 42] Add feature', reviewDecision: 'APPROVED', body: '' },
+        { number: 10, title: '[Spec 42] Add feature', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([
         { number: 99, title: 'Backlog item', labels: [], createdAt: '2026-01-01T00:00:00Z' },
@@ -636,7 +636,7 @@ describe('overview', () => {
 
       // Second call: gh succeeds
       mockFetchPRList.mockResolvedValueOnce([
-        { number: 1, title: 'Test', reviewDecision: '', body: '' },
+        { number: 1, title: 'Test', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
       ]);
 
       const data2 = await cache.getOverview(tmpDir);
@@ -646,7 +646,7 @@ describe('overview', () => {
 
     it('filters backlog issues that are linked to PRs', async () => {
       mockFetchPRList.mockResolvedValue([
-        { number: 10, title: 'Fix', reviewDecision: '', body: 'Fixes #42' },
+        { number: 10, title: 'Fix', reviewDecision: '', body: 'Fixes #42', createdAt: '2026-01-10T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([
         { number: 42, title: 'Bug 42', labels: [], createdAt: '2026-01-01T00:00:00Z' },
@@ -666,9 +666,9 @@ describe('overview', () => {
 
     it('parses PR review statuses', async () => {
       mockFetchPRList.mockResolvedValue([
-        { number: 1, title: 'Approved', reviewDecision: 'APPROVED', body: '' },
-        { number: 2, title: 'Changes', reviewDecision: 'CHANGES_REQUESTED', body: '' },
-        { number: 3, title: 'Pending', reviewDecision: '', body: '' },
+        { number: 1, title: 'Approved', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-01T00:00:00Z' },
+        { number: 2, title: 'Changes', reviewDecision: 'CHANGES_REQUESTED', body: '', createdAt: '2026-01-02T00:00:00Z' },
+        { number: 3, title: 'Pending', reviewDecision: '', body: '', createdAt: '2026-01-03T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([]);
 
