@@ -289,6 +289,19 @@ describe('overview', () => {
       }))).toBe(50);
     });
 
+    it('returns 74 for implement phase with 3 of 5 complete', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'complete' },
+          { id: 'p2', title: 'B', status: 'complete' },
+          { id: 'p3', title: 'C', status: 'complete' },
+          { id: 'p4', title: 'D', status: 'in_progress' },
+          { id: 'p5', title: 'E', status: 'pending' },
+        ],
+      }))).toBe(74);
+    });
+
     it('returns 66 for implement phase with 2 of 5 complete', () => {
       expect(calculateProgress(makeParsed({
         phase: 'implement',
