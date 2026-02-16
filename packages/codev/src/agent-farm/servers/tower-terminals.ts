@@ -375,13 +375,19 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     _deps.log('INFO', `Found ${shellperSessions.length} shellper session(s) in SQLite — reconnecting...`);
   }
 
+  // Pre-filter: remove sessions with invalid workspace paths synchronously
+  interface ProbeTask {
+    dbSession: DbTerminalSession;
+    restartOptions?: ReconnectRestartOptions;
+  }
+  const probeTasks: ProbeTask[] = [];
+
   for (const dbSession of shellperSessions) {
     const workspacePath = dbSession.workspace_path;
 
     // Skip sessions whose workspace path doesn't exist or is in temp directory
     if (!fs.existsSync(workspacePath)) {
       _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace path no longer exists: ${workspacePath}`);
-      // Kill orphaned shellper process before removing row
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
       }
@@ -392,7 +398,6 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
     if (tmpDirs.some(d => workspacePath === d || workspacePath.startsWith(d + '/'))) {
       _deps.log('INFO', `Skipping shellper session ${dbSession.id} — workspace is in temp directory: ${workspacePath}`);
-      // Kill orphaned shellper process before removing row
       if (dbSession.shellper_pid && processExists(dbSession.shellper_pid)) {
         try { process.kill(dbSession.shellper_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
       }
@@ -406,89 +411,115 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       continue;
     }
 
-    try {
-      // For architect sessions, restore auto-restart behavior after reconnection
-      let restartOptions: ReconnectRestartOptions | undefined;
-      if (dbSession.type === 'architect') {
-        let architectCmd = 'claude';
-        const configPath = path.join(workspacePath, 'af-config.json');
-        if (fs.existsSync(configPath)) {
-          try {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            if (config.shell?.architect) {
-              architectCmd = config.shell.architect;
-            }
-          } catch { /* use default */ }
-        }
-        const cmdParts = architectCmd.split(/\s+/);
-        const cleanEnv = { ...process.env } as Record<string, string>;
-        delete cleanEnv['CLAUDECODE'];
-        restartOptions = {
-          command: cmdParts[0],
-          args: buildArchitectArgs(cmdParts.slice(1), workspacePath),
-          cwd: workspacePath,
-          env: cleanEnv,
-          restartDelay: 2000,
-          maxRestarts: 50,
-        };
-      }
-
-      const client = await _deps.shellperManager.reconnectSession(
-        dbSession.id,
-        dbSession.shellper_socket!,
-        dbSession.shellper_pid!,
-        dbSession.shellper_start_time!,
-        restartOptions,
-      );
-
-      if (!client) {
-        _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
-        continue; // Will be cleaned up in Phase 2
-      }
-
-      const replayData = client.getReplayData() ?? Buffer.alloc(0);
-      const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown');
-
-      // Create a PtySession backed by the reconnected shellper client
-      const session = manager.createSessionRaw({ label, cwd: workspacePath });
-      const ptySession = manager.getSession(session.id);
-      if (ptySession) {
-        ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
-      }
-
-      // Register in workspaceTerminals Map
-      const entry = getWorkspaceTerminalsEntry(workspacePath);
-      if (dbSession.type === 'architect') {
-        entry.architect = session.id;
-      } else if (dbSession.type === 'builder') {
-        entry.builders.set(dbSession.role_id || dbSession.id, session.id);
-      } else if (dbSession.type === 'shell') {
-        entry.shells.set(dbSession.role_id || dbSession.id, session.id);
-      }
-
-      // Update SQLite with new terminal ID
-      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
-      saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-        dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
-      _deps.registerKnownWorkspace(workspacePath);
-
-      // Clean up on exit
-      if (ptySession) {
-        ptySession.on('exit', () => {
-          const currentEntry = getWorkspaceTerminalsEntry(workspacePath);
-          if (dbSession.type === 'architect' && currentEntry.architect === session.id) {
-            currentEntry.architect = undefined;
+    // Build restart options for architect sessions (synchronous, no I/O)
+    let restartOptions: ReconnectRestartOptions | undefined;
+    if (dbSession.type === 'architect') {
+      let architectCmd = 'claude';
+      const configPath = path.join(workspacePath, 'af-config.json');
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (config.shell?.architect) {
+            architectCmd = config.shell.architect;
           }
-          deleteTerminalSession(session.id);
-        });
+        } catch { /* use default */ }
       }
-
-      matchedSessionIds.add(dbSession.id);
-      shellperReconnected++;
-      _deps.log('INFO', `Reconnected shellper session → ${session.id} (${dbSession.type} for ${path.basename(workspacePath)})`);
-    } catch (err) {
-      _deps.log('WARN', `Failed to reconnect shellper session ${dbSession.id}: ${(err as Error).message}`);
+      const cmdParts = architectCmd.split(/\s+/);
+      const cleanEnv = { ...process.env } as Record<string, string>;
+      delete cleanEnv['CLAUDECODE'];
+      restartOptions = {
+        command: cmdParts[0],
+        args: buildArchitectArgs(cmdParts.slice(1), workspacePath),
+        cwd: workspacePath,
+        env: cleanEnv,
+        restartDelay: 2000,
+        maxRestarts: 50,
+      };
     }
+
+    probeTasks.push({ dbSession, restartOptions });
+  }
+
+  // Probe shellper sockets in parallel with bounded concurrency (Spec 0122 Phase 2)
+  const CONCURRENCY_LIMIT = 5;
+  type ProbeResult = { dbSession: DbTerminalSession; client: import('../../terminal/shellper-client.js').IShellperClient | null; restartOptions?: ReconnectRestartOptions };
+  const probeResults: ProbeResult[] = [];
+
+  for (let i = 0; i < probeTasks.length; i += CONCURRENCY_LIMIT) {
+    const batch = probeTasks.slice(i, i + CONCURRENCY_LIMIT);
+    const results = await Promise.allSettled(
+      batch.map(async (task): Promise<ProbeResult> => {
+        const client = await _deps!.shellperManager!.reconnectSession(
+          task.dbSession.id,
+          task.dbSession.shellper_socket!,
+          task.dbSession.shellper_pid!,
+          task.dbSession.shellper_start_time!,
+          task.restartOptions,
+        );
+        return { dbSession: task.dbSession, client, restartOptions: task.restartOptions };
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        probeResults.push(result.value);
+      } else {
+        // Find the corresponding task for error logging
+        const idx = results.indexOf(result);
+        const task = batch[idx];
+        _deps.log('WARN', `Failed to reconnect shellper session ${task.dbSession.id}: ${result.reason?.message ?? result.reason}`);
+      }
+    }
+  }
+
+  // Process probe results sequentially (shared state mutations)
+  for (const { dbSession, client } of probeResults) {
+    if (!client) {
+      _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
+      continue; // Will be cleaned up in Phase 2
+    }
+
+    const workspacePath = dbSession.workspace_path;
+    const replayData = client.getReplayData() ?? Buffer.alloc(0);
+    const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown');
+
+    // Create a PtySession backed by the reconnected shellper client
+    const session = manager.createSessionRaw({ label, cwd: workspacePath });
+    const ptySession = manager.getSession(session.id);
+    if (ptySession) {
+      ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
+    }
+
+    // Register in workspaceTerminals Map
+    const entry = getWorkspaceTerminalsEntry(workspacePath);
+    if (dbSession.type === 'architect') {
+      entry.architect = session.id;
+    } else if (dbSession.type === 'builder') {
+      entry.builders.set(dbSession.role_id || dbSession.id, session.id);
+    } else if (dbSession.type === 'shell') {
+      entry.shells.set(dbSession.role_id || dbSession.id, session.id);
+    }
+
+    // Update SQLite with new terminal ID
+    db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
+    saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
+      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
+    _deps.registerKnownWorkspace(workspacePath);
+
+    // Clean up on exit
+    if (ptySession) {
+      ptySession.on('exit', () => {
+        const currentEntry = getWorkspaceTerminalsEntry(workspacePath);
+        if (dbSession.type === 'architect' && currentEntry.architect === session.id) {
+          currentEntry.architect = undefined;
+        }
+        deleteTerminalSession(session.id);
+      });
+    }
+
+    matchedSessionIds.add(dbSession.id);
+    shellperReconnected++;
+    _deps.log('INFO', `Reconnected shellper session → ${session.id} (${dbSession.type} for ${path.basename(workspacePath)})`);
   }
 
   // ---- Phase 2: Sweep stale SQLite rows ----

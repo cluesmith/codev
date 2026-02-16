@@ -463,5 +463,145 @@ describe('tower-terminals', () => {
       const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
       await expect(reconcileTerminalSessions()).resolves.toBeUndefined();
     });
+
+    it('probes shellper sockets with bounded concurrency', async () => {
+      // Reset mocks that may have been set to throw by prior tests
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      // Track concurrent probe count to verify bounded concurrency
+      let activeConcurrency = 0;
+      let maxConcurrency = 0;
+      const probeOrder: string[] = [];
+
+      const mockReconnectSession = vi.fn(async (sessionId: string) => {
+        activeConcurrency++;
+        maxConcurrency = Math.max(maxConcurrency, activeConcurrency);
+        probeOrder.push(sessionId);
+        // Simulate network delay
+        await new Promise(r => setTimeout(r, 10));
+        activeConcurrency--;
+        return null; // All sessions are stale
+      });
+
+      const mockShellperManager = {
+        reconnectSession: mockReconnectSession,
+      };
+
+      const deps = makeDeps({ shellperManager: mockShellperManager as any });
+      initTerminals(deps);
+
+      // Create 8 shellper sessions in DB (more than concurrency limit of 5)
+      const sessions = Array.from({ length: 8 }, (_, i) => ({
+        id: `session-${i}`,
+        workspace_path: '/existing/project', // must exist for fs.existsSync
+        type: 'builder' as const,
+        role_id: `builder-${i}`,
+        pid: 1000 + i,
+        shellper_socket: `/tmp/shellper-${i}.sock`,
+        shellper_pid: 2000 + i,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }));
+
+      mockDbAll.mockReturnValue(sessions);
+
+      // Mock fs.existsSync for workspace paths
+      const origExistsSync = fs.existsSync;
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/existing/project') return true;
+        if (String(p).endsWith('af-config.json')) return false;
+        return origExistsSync(p);
+      });
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // All 8 sessions should have been probed
+      expect(mockReconnectSession).toHaveBeenCalledTimes(8);
+
+      // Concurrency should not exceed 5 (the limit)
+      expect(maxConcurrency).toBeLessThanOrEqual(5);
+      expect(maxConcurrency).toBeGreaterThan(1); // Should actually run in parallel
+
+      // All sessions probed
+      expect(probeOrder).toHaveLength(8);
+
+      vi.restoreAllMocks();
+    });
+
+    it('processes probe results sequentially after parallel probing', async () => {
+      // Reset mocks that may have been set to throw by prior tests
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      // Mock a shellper client that returns successfully
+      const makeClient = () => ({
+        getReplayData: () => Buffer.alloc(0),
+        connected: true,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        signal: vi.fn(),
+        spawn: vi.fn(),
+        ping: vi.fn(),
+        setReplayData: vi.fn(),
+        on: vi.fn(),
+        emit: vi.fn(),
+        removeAllListeners: vi.fn(),
+        removeListener: vi.fn(),
+        addListener: vi.fn(),
+        once: vi.fn(),
+        off: vi.fn(),
+        listenerCount: vi.fn().mockReturnValue(0),
+      });
+
+      const mockReconnectSession = vi.fn(async () => {
+        await new Promise(r => setTimeout(r, 5));
+        return makeClient();
+      });
+
+      const mockShellperManager = {
+        reconnectSession: mockReconnectSession,
+      };
+
+      const deps = makeDeps({ shellperManager: mockShellperManager as any });
+      initTerminals(deps);
+
+      // 3 sessions — small enough to stay within concurrency limit
+      const sessions = Array.from({ length: 3 }, (_, i) => ({
+        id: `recon-${i}`,
+        workspace_path: '/real/project',
+        type: 'builder' as const,
+        role_id: `builder-${i}`,
+        pid: 3000 + i,
+        shellper_socket: `/tmp/shellper-recon-${i}.sock`,
+        shellper_pid: 4000 + i,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }));
+
+      mockDbAll.mockReturnValue(sessions);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/real/project') return true;
+        if (String(p).endsWith('af-config.json')) return false;
+        return false;
+      });
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      // All 3 should have been probed
+      expect(mockReconnectSession).toHaveBeenCalledTimes(3);
+
+      // Verify log messages show successful reconnection
+      expect(deps.log).toHaveBeenCalledWith('INFO', expect.stringContaining('Reconnected shellper session'));
+
+      vi.restoreAllMocks();
+    });
   });
 });
