@@ -20,6 +20,13 @@ import { addSubscriber, removeSubscriber } from './tower-messages.js';
 // ============================================================================
 
 /**
+ * Maximum bytes to buffer in a WebSocket before dropping data frames.
+ * Terminal output is ephemeral — dropping frames under backpressure is
+ * preferable to unbounded memory growth or connection stalls.
+ */
+const WS_HIGH_WATER_MARK = 1 * 1024 * 1024; // 1 MB
+
+/**
  * Handle WebSocket connection to a terminal session.
  * Uses hybrid binary protocol (Spec 0085):
  * - 0x00 prefix: Control frame (JSON)
@@ -28,12 +35,12 @@ import { addSubscriber, removeSubscriber } from './tower-messages.js';
 export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
   const resumeSeq = req.headers['x-session-resume'];
 
-  // Create a client adapter for the PTY session
-  // Uses binary protocol for data frames
+  // Create a client adapter for the PTY session.
+  // Checks bufferedAmount to prevent unbounded memory growth when
+  // the browser can't consume data fast enough (Bugfix #313).
   const client = {
     send: (data: Buffer | string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        // Encode as binary data frame (0x01 prefix)
+      if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < WS_HIGH_WATER_MARK) {
         ws.send(encodeData(data));
       }
     },

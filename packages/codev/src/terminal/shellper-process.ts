@@ -64,6 +64,7 @@ export interface IShellperPty {
 interface ConnectionEntry {
   socket: net.Socket;
   clientType: 'tower' | 'terminal';
+  paused: boolean;
 }
 
 // --- ShellperProcess ---
@@ -160,7 +161,7 @@ export class ShellperProcess extends EventEmitter {
 
   /**
    * Broadcast a frame to all connected clients.
-   * If a write fails, the connection is removed from the map.
+   * Connections under backpressure have frames dropped until drained.
    */
   private broadcast(frame: Buffer): void {
     for (const [id, entry] of this.connections) {
@@ -168,12 +169,23 @@ export class ShellperProcess extends EventEmitter {
         this.connections.delete(id);
         continue;
       }
+      if (entry.paused) {
+        // Connection under backpressure — drop frame.
+        // Terminal output is ephemeral; the client will recover
+        // when subsequent frames arrive after drain.
+        continue;
+      }
       const ok = entry.socket.write(frame);
       if (ok === false) {
-        // Backpressure: socket buffer full — remove this client
-        this.log(`Write failed for connection ${id}, removing`);
-        entry.socket.destroy();
-        this.connections.delete(id);
+        // Socket buffer above highWaterMark — pause this connection.
+        // Data was still queued, but we stop writing until drained.
+        entry.paused = true;
+        this.log(`Connection ${id} backpressure — pausing writes`);
+        entry.socket.once('drain', () => {
+          if (this.connections.has(id)) {
+            entry.paused = false;
+          }
+        });
       }
     }
   }
@@ -335,7 +347,7 @@ export class ShellperProcess extends EventEmitter {
 
     // Register this connection
     const connectionId = String(this.nextConnectionId++);
-    this.connections.set(connectionId, { socket, clientType });
+    this.connections.set(connectionId, { socket, clientType, paused: false });
 
     // Send WELCOME response
     const pid = this.pty?.pid ?? -1;
