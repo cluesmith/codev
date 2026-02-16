@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codev — Work View (Spike)</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --text-dim: #6e7681;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .layout {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    header h1 { font-size: 16px; font-weight: 600; }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .workspace-name {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .btn-shell {
+      font-size: 12px;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .btn-shell:hover { border-color: var(--text-muted); color: var(--text); }
+
+    /* Top: work panel (2/3) */
+    .panel-work {
+      flex: 2;
+      overflow-y: auto;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Bottom: file panel placeholder (1/3) */
+    .panel-files {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+
+    .section-header {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      margin-top: 16px;
+    }
+
+    .section-header:first-child { margin-top: 0; }
+
+    /* Builder cards */
+    .builder-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .builder-card:hover { border-color: var(--accent); }
+
+    .builder-card.has-gate { border-left: 3px solid var(--yellow); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-active {
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .dot-gate {
+      background: var(--yellow);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .card-number {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .card-title {
+      flex: 1;
+      font-size: 13px;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .card-phase {
+      font-size: 11px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .card-gate {
+      font-size: 11px;
+      color: var(--yellow);
+      white-space: nowrap;
+    }
+
+    .card-dim {
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+
+    .btn-terminal {
+      font-size: 11px;
+      color: var(--accent);
+      background: rgba(88, 166, 255, 0.08);
+      border: 1px solid rgba(88, 166, 255, 0.2);
+      padding: 3px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-terminal:hover { background: rgba(88, 166, 255, 0.18); }
+
+    /* PR cards */
+    .pr-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pr-card:hover { border-color: var(--accent); }
+
+    .review-approved { font-size: 11px; color: var(--green); white-space: nowrap; }
+    .review-pending { font-size: 11px; color: var(--yellow); white-space: nowrap; }
+
+    /* Backlog rows */
+    .backlog-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      border-radius: 6px;
+    }
+
+    .backlog-row:hover { background: var(--surface); }
+
+    .type-tag {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .tag-bug { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .tag-feature { background: rgba(188, 140, 255, 0.12); color: var(--purple); }
+
+    .priority-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .p-high { background: var(--red); }
+    .p-med { background: var(--yellow); }
+    .p-low { background: var(--text-dim); }
+
+    /* File panel placeholder */
+    .file-placeholder {
+      color: var(--text-dim);
+      font-size: 13px;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .file-tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .file-tab {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+
+    .file-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+
+    .file-tab:hover { color: var(--text); }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .layout { height: auto; }
+      body { overflow: auto; }
+      .panel-work, .panel-files { padding: 12px; overflow-y: visible; flex: none; }
+      header { padding: 10px 12px; }
+      .builder-card, .pr-card { flex-wrap: wrap; }
+      .card-title { min-width: 60%; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <header>
+    <h1>codev-public</h1>
+    <div class="header-right">
+      <a href="#" class="btn-shell">+ Shell</a>
+    </div>
+  </header>
+
+  <!-- TOP: Work panel (2/3) -->
+  <div class="panel-work">
+
+    <div class="section-header">Builders</div>
+
+    <div class="builder-card has-gate">
+      <span class="dot dot-gate"></span>
+      <span class="card-number">#340</span>
+      <span class="card-title">Refactor session manager lifecycle hooks</span>
+      <span class="card-gate">plan-approval</span>
+      <a href="#" class="btn-terminal">Open</a>
+    </div>
+
+    <div class="builder-card">
+      <span class="dot dot-active"></span>
+      <span class="card-number">#338</span>
+      <span class="card-title">Add backpressure handling to shellper write path</span>
+      <span class="card-phase">implement</span>
+      <a href="#" class="btn-terminal">Open</a>
+    </div>
+
+    <div class="builder-card">
+      <span class="dot dot-active"></span>
+      <span class="card-number">#342</span>
+      <span class="card-title">Fix terminal resize flicker on reconnect</span>
+      <span class="card-dim">running</span>
+      <a href="#" class="btn-terminal">Open</a>
+    </div>
+
+    <div class="section-header">Pull Requests</div>
+
+    <div class="pr-card">
+      <span class="card-number">#335</span>
+      <span class="card-title">Consolidate terminal reconnect tests</span>
+      <span class="review-approved">approved</span>
+      <span class="card-dim">2h</span>
+    </div>
+
+    <div class="pr-card">
+      <span class="card-number">#337</span>
+      <span class="card-title">Add offline fallback for consult metrics</span>
+      <span class="review-pending">reviewing</span>
+      <span class="card-dim">35m</span>
+    </div>
+
+    <div class="section-header">Backlog &amp; Bugs</div>
+
+    <div class="backlog-row">
+      <span class="priority-dot p-high"></span>
+      <span class="card-number">#345</span>
+      <span class="type-tag tag-bug">bug</span>
+      <span class="card-title">Terminal output garbled after rapid resize events</span>
+      <span class="card-dim">2d</span>
+    </div>
+
+    <div class="backlog-row">
+      <span class="priority-dot p-med"></span>
+      <span class="card-number">#343</span>
+      <span class="type-tag tag-bug">bug</span>
+      <span class="card-title">Shellper replay buffer drops frames under high throughput</span>
+      <span class="card-dim">3d</span>
+    </div>
+
+    <div class="backlog-row">
+      <span class="priority-dot p-med"></span>
+      <span class="card-number">#330</span>
+      <span class="type-tag tag-feature">feature</span>
+      <span class="card-title">Rework consult CLI</span>
+      <span class="card-dim">5d</span>
+    </div>
+
+    <div class="backlog-row">
+      <span class="priority-dot p-med"></span>
+      <span class="card-number">#326</span>
+      <span class="type-tag tag-feature">feature</span>
+      <span class="card-title">Project management rework</span>
+      <span class="card-dim">5d</span>
+    </div>
+
+    <div class="backlog-row">
+      <span class="priority-dot p-low"></span>
+      <span class="card-number">#318</span>
+      <span class="type-tag tag-feature">feature</span>
+      <span class="card-title">Cloud tunnel authentication with device pairing</span>
+      <span class="card-dim">12d</span>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM: File panel (1/3) -->
+  <div class="panel-files">
+    <div class="file-tab-bar">
+      <span class="file-tab active">0125-consult-rework.md</span>
+      <span class="file-tab">0126-project-management.md</span>
+    </div>
+    <div class="file-placeholder">
+      File content rendered here (af open)
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

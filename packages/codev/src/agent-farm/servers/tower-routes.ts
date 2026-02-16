@@ -16,9 +16,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+
+const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
@@ -773,9 +776,8 @@ async function handleCreateWorkspace(
 
   try {
     // Run codev init (it creates the directory)
-    execSync(`codev init --yes "${workspaceName}"`, {
+    await execAsync(`codev init --yes "${workspaceName}"`, {
       cwd: expandedParent,
-      stdio: 'pipe',
       timeout: 60000,
     });
 
@@ -1652,14 +1654,14 @@ function handleWorkspaceFiles(
   res.end(JSON.stringify(tree));
 }
 
-function handleWorkspaceGitStatus(
+async function handleWorkspaceGitStatus(
   res: http.ServerResponse,
   ctx: RouteContext,
   workspacePath: string,
-): void {
+): Promise<void> {
   try {
     // Get git status in porcelain format for parsing
-    const result = execSync('git status --porcelain', {
+    const { stdout: result } = await execAsync('git status --porcelain', {
       cwd: workspacePath,
       encoding: 'utf-8',
       timeout: 5000,

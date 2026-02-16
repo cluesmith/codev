@@ -15,7 +15,7 @@ This repository has a dual nature that's important to understand:
 1. **`codev/`** - This is OUR instance of Codev
    - This is where WE (the Codev project) keep our specs, plans, reviews, and resources
    - When working on Codev features, you work in this directory
-   - Example: `codev/specs/0001-test-infrastructure.md` is a feature spec for Codev itself
+   - Example: `codev/specs/1-test-infrastructure.md` is a feature spec for Codev itself
 
 2. **`codev-skeleton/`** - This is the template for OTHER projects
    - This is what gets copied to other projects when they install Codev
@@ -211,10 +211,10 @@ project-root/
 
 ## File Naming Convention
 
-Use sequential numbering with descriptive names:
-- Specification: `codev/specs/0001-feature-name.md`
-- Plan: `codev/plans/0001-feature-name.md`
-- Review: `codev/reviews/0001-feature-name.md`
+Use sequential numbering with descriptive names (no leading zeros):
+- Specification: `codev/specs/42-feature-name.md`
+- Plan: `codev/plans/42-feature-name.md`
+- Review: `codev/reviews/42-feature-name.md`
 
 **CRITICAL: Keep Specs and Plans Separate**
 - Specs define WHAT to build (requirements, acceptance criteria)
@@ -298,7 +298,10 @@ af spawn --soft -p 0003    # Spawn builder (soft mode)
 af spawn --issue 42        # Spawn builder for a bugfix
 af status                  # Check all builders
 af cleanup --project 0003  # Clean up after merge
+af open file.ts            # Open file in annotation viewer (NOT system open)
 ```
+
+**IMPORTANT:** When the user says `af open`, always run the `af open` command — do NOT substitute the system `open` command.
 
 ### Configuration
 
@@ -336,7 +339,7 @@ git add --all     # ABSOLUTELY FORBIDDEN
 
 **MANDATORY APPROACH - ALWAYS ADD FILES EXPLICITLY**:
 ```bash
-git add codev/specs/0001-feature.md
+git add codev/specs/42-feature.md
 git add src/components/TodoList.tsx
 ```
 
@@ -344,14 +347,14 @@ git add src/components/TodoList.tsx
 
 ### Commit Messages
 ```
-[Spec 0001] Initial specification draft
-[Spec 0001][Phase: user-auth] feat: Add password hashing
+[Spec 42] Initial specification draft
+[Spec 42][Phase: user-auth] feat: Add password hashing
 [Bugfix #42] Fix: URL-encode username before API call
 ```
 
 ### Branch Naming
 ```
-spir/0001-feature-name/phase-name
+spir/42-feature-name/phase-name
 builder/bugfix-42-description
 ```
 

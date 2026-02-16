@@ -1159,8 +1159,8 @@ Projects that have been abandoned or put on hold.
   - id: "0119"
     title: "GitHub Issues as Project Tracking"
     summary: "Use GitHub Issues for project tracking instead of projectlist.md"
-    status: on-hold
-    priority: medium
+    status: abandoned
+    priority: low
     files:
       spec: codev/specs/0119-github-issues-project-tracking.md
     tags: [project-tracking, github]
