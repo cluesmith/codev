@@ -4,10 +4,20 @@ interface PRListProps {
   prs: OverviewPR[];
 }
 
-const REVIEW_BADGES: Record<string, { label: string; className: string }> = {
-  APPROVED: { label: 'Approved', className: 'review-approved' },
-  CHANGES_REQUESTED: { label: 'Changes', className: 'review-changes' },
-  REVIEW_REQUIRED: { label: 'Review needed', className: 'review-pending' },
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${Math.max(1, mins)}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+const STATUS_MAP: Record<string, { label: string; className: string }> = {
+  APPROVED: { label: 'approved', className: 'pr-status--approved' },
+  CHANGES_REQUESTED: { label: 'changes', className: 'pr-status--changes' },
+  REVIEW_REQUIRED: { label: 'reviewing', className: 'pr-status--reviewing' },
 };
 
 export function PRList({ prs }: PRListProps) {
@@ -16,21 +26,15 @@ export function PRList({ prs }: PRListProps) {
   }
 
   return (
-    <div className="pr-list">
+    <div className="pr-rows">
       {prs.map(pr => {
-        const badge = REVIEW_BADGES[pr.reviewStatus] ?? REVIEW_BADGES.REVIEW_REQUIRED;
+        const status = STATUS_MAP[pr.reviewStatus] ?? STATUS_MAP.REVIEW_REQUIRED;
         return (
-          <div key={pr.number} className="pr-item">
-            <div className="pr-item-header">
-              <span className="pr-number">#{pr.number}</span>
-              <span className={`review-badge ${badge.className}`}>{badge.label}</span>
-            </div>
-            <div className="pr-item-title">{pr.title}</div>
-            {pr.linkedIssue && (
-              <div className="pr-linked-issue">
-                Linked: Issue #{pr.linkedIssue}
-              </div>
-            )}
+          <div key={pr.number} className="pr-row">
+            <span className="pr-row-number">#{pr.number}</span>
+            <span className="pr-row-title">{pr.title}</span>
+            <span className={`pr-row-status ${status.className}`}>{status.label}</span>
+            <span className="pr-row-age">{timeAgo(pr.createdAt)}</span>
           </div>
         );
       })}

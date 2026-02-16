@@ -65,12 +65,9 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
 
         {/* Active Builders */}
         <section className="work-section">
-          <h3 className="work-section-title">
-            Active Builders
-            <span className="work-section-count">{overview?.builders?.length ?? 0}</span>
-          </h3>
+          <h3 className="work-section-title">Builders</h3>
           {overview?.builders && overview.builders.length > 0 ? (
-            <div className="builder-grid">
+            <div className="builder-rows">
               {overview.builders.map(builder => (
                 <BuilderCard
                   key={builder.id}
@@ -84,12 +81,9 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           )}
         </section>
 
-        {/* Pending PRs */}
+        {/* Pull Requests */}
         <section className="work-section">
-          <h3 className="work-section-title">
-            Pending PRs
-            <span className="work-section-count">{overview?.pendingPRs?.length ?? 0}</span>
-          </h3>
+          <h3 className="work-section-title">Pull Requests</h3>
           {overview?.errors?.prs ? (
             <p className="work-unavailable">{overview.errors.prs}</p>
           ) : (
@@ -97,12 +91,9 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           )}
         </section>
 
-        {/* Backlog & Open Bugs */}
+        {/* Backlog & Bugs */}
         <section className="work-section">
-          <h3 className="work-section-title">
-            Backlog & Open Bugs
-            <span className="work-section-count">{overview?.backlog?.length ?? 0}</span>
-          </h3>
+          <h3 className="work-section-title">Backlog &amp; Bugs</h3>
           {overview?.errors?.issues ? (
             <p className="work-unavailable">{overview.errors.issues}</p>
           ) : (

@@ -5,44 +5,43 @@ interface BuilderCardProps {
   onOpen?: (builder: OverviewBuilder) => void;
 }
 
-function GateBadge({ name, status }: { name: string; status: string }) {
-  const label = name.replace(/-/g, ' ');
-  return (
-    <span className={`gate-badge gate-${status}`}>
-      {label}: {status}
-    </span>
-  );
+function phaseLabel(builder: OverviewBuilder): string {
+  if (builder.mode === 'soft') return 'running';
+  if (!builder.phase) return '';
+  const phases = builder.planPhases;
+  if (phases.length === 0) return builder.phase;
+  const idx = phases.findIndex(p => p.id === builder.phase);
+  if (idx === -1) return builder.phase;
+  return `${builder.phase} (${idx + 1}/${phases.length})`;
 }
 
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
-  const gateEntries = Object.entries(builder.gates).filter(([, s]) => s === 'pending' || s === 'approved');
   const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
+  const isBlocked = builder.blocked !== null;
+  const pct = Math.round(builder.progress * 100);
 
   return (
-    <div className="builder-card">
-      <div className="builder-card-header">
-        <div className="builder-card-id">{displayId}</div>
-        <span className={`builder-mode-badge mode-${builder.mode}`}>{builder.mode}</span>
-        {onOpen && (
-          <button className="builder-open-btn" onClick={() => onOpen(builder)}>
-            Open
-          </button>
+    <div className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
+      <span className="builder-row-id">{displayId}</span>
+      <span className="builder-row-title">{displayTitle}</span>
+      <div className="builder-row-progress">
+        <div className="progress-bar">
+          <div
+            className={`progress-fill${isBlocked ? ' progress-fill--blocked' : ''}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {isBlocked ? (
+          <span className="builder-row-blocked">Blocked: {builder.blocked}</span>
+        ) : (
+          <span className="builder-row-phase">{phaseLabel(builder)}</span>
         )}
       </div>
-      <div className="builder-card-title">{displayTitle}</div>
-      {builder.mode === 'strict' && builder.phase && (
-        <div className="builder-card-phase">Phase: {builder.phase}</div>
-      )}
-      {builder.mode === 'soft' && (
-        <div className="builder-card-phase soft">running</div>
-      )}
-      {gateEntries.length > 0 && (
-        <div className="builder-card-gates">
-          {gateEntries.map(([name, status]) => (
-            <GateBadge key={name} name={name} status={status} />
-          ))}
-        </div>
+      {onOpen && (
+        <button className="builder-row-open" onClick={() => onOpen(builder)}>
+          Open
+        </button>
       )}
     </div>
   );
