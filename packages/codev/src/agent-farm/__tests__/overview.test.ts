@@ -456,5 +456,38 @@ describe('overview', () => {
       expect(data.pendingPRs[1].reviewStatus).toBe('CHANGES_REQUESTED');
       expect(data.pendingPRs[2].reviewStatus).toBe('REVIEW_REQUIRED');
     });
+
+    it('passes workspace root as cwd to gh CLI calls', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      expect(mockFetchPRList).toHaveBeenCalledWith(tmpDir);
+      expect(mockFetchIssueList).toHaveBeenCalledWith(tmpDir);
+    });
+
+    it('invalidates cache when workspace root changes', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      // Create a second tmp dir to simulate workspace switch
+      const tmpDir2 = makeTmpDir();
+      try {
+        await cache.getOverview(tmpDir2);
+
+        // Both fetches should be called twice (once per workspace)
+        expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+        expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
+        expect(mockFetchPRList).toHaveBeenLastCalledWith(tmpDir2);
+        expect(mockFetchIssueList).toHaveBeenLastCalledWith(tmpDir2);
+      } finally {
+        fs.rmSync(tmpDir2, { recursive: true, force: true });
+      }
+    });
   });
 });
