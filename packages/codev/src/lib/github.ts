@@ -29,6 +29,7 @@ export interface GitHubIssue {
 export interface GitHubPR {
   number: number;
   title: string;
+  url: string;
   reviewDecision: string;
   body: string;
   createdAt: string;
@@ -82,7 +83,7 @@ export async function fetchPRList(cwd?: string): Promise<GitHubPR[] | null> {
   try {
     const { stdout } = await execFileAsync('gh', [
       'pr', 'list',
-      '--json', 'number,title,reviewDecision,body,createdAt',
+      '--json', 'number,title,url,reviewDecision,body,createdAt',
     ], { cwd });
     return JSON.parse(stdout);
   } catch {
@@ -165,18 +166,27 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
  * - No priority:* label → "medium"
  * - Multiple labels of same kind → first alphabetical
  */
+/** Labels that map directly to a type without the `type:` prefix. */
+const BARE_TYPE_LABELS = new Set(['bug', 'project']);
+
 export function parseLabelDefaults(labels: Array<{ name: string }>): {
   type: string;
   priority: string;
 } {
-  const typeLabels = labels
-    .map(l => l.name)
+  const names = labels.map(l => l.name);
+
+  const typeLabels = names
     .filter(n => n.startsWith('type:'))
     .map(n => n.slice(5))
     .sort();
 
-  const priorityLabels = labels
-    .map(l => l.name)
+  // Fall back to bare label names (e.g. "bug", "project") if no type: prefix found
+  if (typeLabels.length === 0) {
+    const bare = names.filter(n => BARE_TYPE_LABELS.has(n)).sort();
+    if (bare.length > 0) typeLabels.push(bare[0]);
+  }
+
+  const priorityLabels = names
     .filter(n => n.startsWith('priority:'))
     .map(n => n.slice(9))
     .sort();

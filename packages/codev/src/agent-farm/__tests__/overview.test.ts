@@ -915,7 +915,7 @@ describe('overview', () => {
       ].join('\n'), '0042-test');
 
       mockFetchPRList.mockResolvedValue([
-        { number: 10, title: '[Spec 42] Add feature', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
+        { number: 10, title: '[Spec 42] Add feature', url: 'https://github.com/org/repo/pull/10', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([
         { number: 99, title: 'Backlog item', labels: [], createdAt: '2026-01-01T00:00:00Z' },
@@ -1017,7 +1017,7 @@ describe('overview', () => {
 
       // Second call: gh succeeds
       mockFetchPRList.mockResolvedValueOnce([
-        { number: 1, title: 'Test', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
+        { number: 1, title: 'Test', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
       ]);
 
       const data2 = await cache.getOverview(tmpDir);
@@ -1027,7 +1027,7 @@ describe('overview', () => {
 
     it('filters backlog issues that are linked to PRs', async () => {
       mockFetchPRList.mockResolvedValue([
-        { number: 10, title: 'Fix', reviewDecision: '', body: 'Fixes #42', createdAt: '2026-01-10T00:00:00Z' },
+        { number: 10, title: 'Fix', url: 'https://github.com/org/repo/pull/10', reviewDecision: '', body: 'Fixes #42', createdAt: '2026-01-10T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([
         { number: 42, title: 'Bug 42', labels: [], createdAt: '2026-01-01T00:00:00Z' },
@@ -1045,11 +1045,23 @@ describe('overview', () => {
       expect(data.pendingPRs[0].linkedIssue).toBe(42);
     });
 
+    it('passes through PR url field', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 5, title: 'Test PR', url: 'https://github.com/org/repo/pull/5', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-05T00:00:00Z' },
+      ]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs[0].url).toBe('https://github.com/org/repo/pull/5');
+    });
+
     it('parses PR review statuses', async () => {
       mockFetchPRList.mockResolvedValue([
-        { number: 1, title: 'Approved', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-01T00:00:00Z' },
-        { number: 2, title: 'Changes', reviewDecision: 'CHANGES_REQUESTED', body: '', createdAt: '2026-01-02T00:00:00Z' },
-        { number: 3, title: 'Pending', reviewDecision: '', body: '', createdAt: '2026-01-03T00:00:00Z' },
+        { number: 1, title: 'Approved', url: 'https://github.com/org/repo/pull/1', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-01T00:00:00Z' },
+        { number: 2, title: 'Changes', url: 'https://github.com/org/repo/pull/2', reviewDecision: 'CHANGES_REQUESTED', body: '', createdAt: '2026-01-02T00:00:00Z' },
+        { number: 3, title: 'Pending', url: 'https://github.com/org/repo/pull/3', reviewDecision: '', body: '', createdAt: '2026-01-03T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([]);
 

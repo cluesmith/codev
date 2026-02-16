@@ -45,6 +45,7 @@ export interface BuilderOverview {
 export interface PROverview {
   number: number;
   title: string;
+  url: string;
   reviewStatus: string;
   linkedIssue: number | null;
   createdAt: string;
@@ -586,6 +587,7 @@ export class OverviewCache {
       pendingPRs = prs.map(pr => ({
         number: pr.number,
         title: pr.title,
+        url: pr.url,
         reviewStatus: pr.reviewDecision || 'REVIEW_REQUIRED',
         linkedIssue: parseLinkedIssue(pr.body || '', pr.title),
         createdAt: pr.createdAt,
