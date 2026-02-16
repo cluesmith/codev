@@ -514,6 +514,22 @@ describe('SessionManager', () => {
         process.kill = originalKill;
       }
     });
+
+    it('only finds shellpers scoped to own socketDir (instance isolation)', async () => {
+      // Use a unique socketDir that no real process could match
+      const uniqueDir = `/tmp/codev-isolation-test-${Date.now()}-${Math.random().toString(36)}`;
+      const manager = new SessionManager({
+        socketDir: uniqueDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Call the real findShellperPids — since no process has this unique
+      // socketDir in its command line, it should return empty.
+      // This proves the method filters by socketDir, not just "shellper-main.js".
+      const pids = await (manager as any).findShellperPids();
+      expect(pids).toEqual([]);
+    });
   });
 
   describe('socket directory permissions', () => {

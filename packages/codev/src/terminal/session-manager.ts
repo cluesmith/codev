@@ -539,11 +539,15 @@ export class SessionManager extends EventEmitter {
   /**
    * Bugfix #341: Kill orphaned shellper-main.js processes.
    *
-   * Finds all shellper-main.js processes on the system and kills any whose
-   * PIDs are NOT in the active sessions map. This catches shellpers that
-   * lost their socket file but are still running (reparented to init/launchd).
+   * Finds shellper-main.js processes scoped to THIS Tower instance's socketDir
+   * and kills any whose PIDs are NOT in the active sessions map. This catches
+   * shellpers that lost their socket file but are still running (reparented to
+   * init/launchd).
    *
-   * Uses `pgrep -f shellper-main.js` (macOS/Linux) to enumerate processes.
+   * IMPORTANT: Only kills shellpers belonging to this instance (identified by
+   * socketDir in their command line args). Other Tower instances' shellpers
+   * are left untouched.
+   *
    * Returns the number of orphans killed.
    */
   async killOrphanedShellpers(): Promise<number> {
@@ -582,18 +586,26 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Find PIDs of all shellper-main.js processes using pgrep.
+   * Find PIDs of shellper-main.js processes belonging to THIS Tower instance.
+   *
+   * Uses `ps -eo pid,args` and filters for lines containing both
+   * "shellper-main.js" and this instance's socketDir. This prevents
+   * killing shellpers owned by other Tower instances.
    */
   private findShellperPids(): Promise<number[]> {
     return new Promise((resolve) => {
-      execFile('pgrep', ['-f', 'shellper-main\\.js'], (err, stdout) => {
+      execFile('ps', ['-eo', 'pid,args'], (err, stdout) => {
         if (err || !stdout.trim()) {
           resolve([]);
           return;
         }
-        const pids = stdout.trim().split('\n')
-          .map(line => parseInt(line.trim(), 10))
-          .filter(pid => !isNaN(pid) && pid > 0);
+        const pids: number[] = [];
+        for (const line of stdout.trim().split('\n')) {
+          if (line.includes('shellper-main.js') && line.includes(this.config.socketDir)) {
+            const pid = parseInt(line.trim(), 10);
+            if (!isNaN(pid) && pid > 0) pids.push(pid);
+          }
+        }
         resolve(pids);
       });
     });
