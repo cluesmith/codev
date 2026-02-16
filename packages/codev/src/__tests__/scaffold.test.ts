@@ -409,13 +409,14 @@ describe('Scaffold Utilities', () => {
 
   // Regression: Spec 0126 — projectlist.md should no longer be created by init/adopt
   describe('projectlist removal (Spec 0126)', () => {
-    it('projectlist.md template should not exist in skeleton', () => {
-      // Verify the template was removed from the skeleton
-      const templatePath = path.join(mockSkeletonDir, 'templates', 'projectlist.md');
-      // Note: Our test beforeEach still creates this file for backward-compat tests.
-      // The actual skeleton at codev-skeleton/templates/ should not have it.
-      // This test documents the intent; the skeleton removal is verified by the build.
-      expect(true).toBe(true);
+    it('init no longer imports copyProjectlist', async () => {
+      // Verify that init.ts source no longer references copyProjectlist
+      const initSource = fs.readFileSync(
+        path.resolve(__dirname, '..', 'commands', 'init.ts'),
+        'utf-8'
+      );
+      expect(initSource).not.toContain('copyProjectlist');
+      expect(initSource).not.toContain('copyProjectlistArchive');
     });
 
     it('copyProjectlist returns not-copied when template is missing', () => {

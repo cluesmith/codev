@@ -198,10 +198,12 @@ function checkDependency(dep: Dependency): CheckResult {
   // Special case for gh auth status
   if (dep.name === 'gh') {
     try {
-      execSync('gh auth status', { stdio: 'pipe' });
-      return { status: 'ok', version: 'authenticated' };
+      const authOutput = execSync('gh auth status', { stdio: 'pipe', encoding: 'utf-8' });
+      const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);
+      const username = accountMatch ? accountMatch[1] : null;
+      return { status: 'ok', version: username ? `authenticated as ${username}` : 'authenticated' };
     } catch {
-      return { status: 'warn', version: 'not authenticated', note: 'gh auth login' };
+      return { status: 'warn', version: 'not authenticated', note: 'run: gh auth login' };
     }
   }
 
