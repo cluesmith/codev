@@ -13,6 +13,7 @@ import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
+import { fetchGitHubIssueOrThrow, type GitHubIssue } from '../../lib/github.js';
 
 // Tower port — the single HTTP server since Spec 0090
 export const DEFAULT_TOWER_PORT = 4100;
@@ -90,23 +91,8 @@ export async function initPorchInWorktree(
   }
 }
 
-// =============================================================================
-// GitHub Issue Utilities
-// =============================================================================
-
-/**
- * GitHub issue structure from gh issue view --json
- */
-export interface GitHubIssue {
-  title: string;
-  body: string;
-  state: string;
-  comments: Array<{
-    body: string;
-    createdAt: string;
-    author: { login: string };
-  }>;
-}
+// Re-export GitHubIssue type for backward compatibility with tests
+export type { GitHubIssue } from '../../lib/github.js';
 
 /**
  * Generate a slug from an issue title (max 30 chars, lowercase, alphanumeric + hyphens)
@@ -137,12 +123,12 @@ export function findExistingBugfixWorktree(buildersDir: string, issueNumber: num
 }
 
 /**
- * Fetch a GitHub issue via gh CLI
+ * Fetch a GitHub issue via gh CLI (fatal on failure).
+ * Delegates to shared github utility but wraps with fatal() for spawn context.
  */
 export async function fetchGitHubIssue(issueNumber: number): Promise<GitHubIssue> {
   try {
-    const result = await run(`gh issue view ${issueNumber} --json title,body,state,comments`);
-    return JSON.parse(result.stdout);
+    return await fetchGitHubIssueOrThrow(issueNumber);
   } catch (error) {
     fatal(`Failed to fetch issue #${issueNumber}. Ensure 'gh' CLI is installed and authenticated.`);
     throw error; // TypeScript doesn't know fatal() never returns
