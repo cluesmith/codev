@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Builder } from '../types.js';
+import { EventEmitter } from 'node:events';
 
 // Mock state module
 const mockBuilders: Builder[] = [];
@@ -54,9 +55,88 @@ vi.mock('../utils/logger.js', () => ({
   fatal: vi.fn((msg: string) => { throw new Error(msg || 'Fatal error'); }),
 }));
 
+// Mock DB — configurable per test
+const mockDbGet = vi.fn();
+vi.mock('../db/index.js', () => ({
+  getGlobalDb: () => ({
+    prepare: () => ({ get: mockDbGet }),
+  }),
+}));
+
+// Mock normalizeWorkspacePath
+vi.mock('../servers/tower-utils.js', () => ({
+  normalizeWorkspacePath: (p: string) => p,
+}));
+
+// Configurable fs mock
+const mockExistsSync = vi.fn().mockReturnValue(false);
+const mockAccessSync = vi.fn();
+const mockReaddirSync = vi.fn().mockReturnValue([]);
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: (...args: unknown[]) => mockExistsSync(...args),
+      accessSync: (...args: unknown[]) => mockAccessSync(...args),
+      readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
+    },
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+    accessSync: (...args: unknown[]) => mockAccessSync(...args),
+    readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
+  };
+});
+
+// Mock ShellperClient as a class
+const mockShellperConnect = vi.fn();
+const mockShellperDisconnect = vi.fn();
+const mockShellperWrite = vi.fn();
+const mockShellperResize = vi.fn();
+const mockShellperWaitForReplay = vi.fn();
+
+let lastShellperInstance: EventEmitter | null = null;
+
+vi.mock('../../terminal/shellper-client.js', () => ({
+  ShellperClient: class MockShellperClient extends EventEmitter {
+    socketPath: string;
+    clientType: string;
+    connected = true;
+
+    constructor(socketPath: string, clientType: string = 'tower') {
+      super();
+      this.socketPath = socketPath;
+      this.clientType = clientType;
+      lastShellperInstance = this;
+    }
+
+    connect() { return mockShellperConnect(); }
+    disconnect() { mockShellperDisconnect(); }
+    write(data: string | Buffer) { mockShellperWrite(data); }
+    resize(cols: number, rows: number) { mockShellperResize(cols, rows); }
+    waitForReplay(ms?: number) { return mockShellperWaitForReplay(ms); }
+    signal() {}
+    spawn() {}
+    ping() {}
+    getReplayData() { return null; }
+  },
+}));
+
 describe('attach command', () => {
   beforeEach(() => {
     mockBuilders.length = 0;
+    mockDbGet.mockReset();
+    mockExistsSync.mockReset().mockReturnValue(false);
+    mockAccessSync.mockReset();
+    mockReaddirSync.mockReset().mockReturnValue([]);
+    mockShellperConnect.mockReset().mockResolvedValue({
+      pid: 12345, cols: 80, rows: 24, version: 1, startTime: Date.now(),
+    });
+    mockShellperDisconnect.mockReset();
+    mockShellperWrite.mockReset();
+    mockShellperResize.mockReset();
+    mockShellperWaitForReplay.mockReset().mockResolvedValue(Buffer.alloc(0));
+    lastShellperInstance = null;
     vi.clearAllMocks();
   });
 
@@ -66,7 +146,6 @@ describe('attach command', () => {
 
   describe('findBuilderByIssue', () => {
     it('should find builder by issue number', async () => {
-      // Add a bugfix builder
       mockBuilders.push({
         id: 'bugfix-42',
         name: 'Bugfix #42: Test issue',
@@ -78,11 +157,9 @@ describe('attach command', () => {
         issueNumber: 42,
       });
 
-      // Import after mocks are set up
       const { attach } = await import('../commands/attach.js');
       const { openBrowser } = await import('../utils/shell.js');
 
-      // Attach with --browser opens Tower dashboard
       await attach({ issue: 42, browser: true });
 
       expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
@@ -132,7 +209,6 @@ describe('attach command', () => {
       const { attach } = await import('../commands/attach.js');
       const { openBrowser } = await import('../utils/shell.js');
 
-      // Use partial match
       await attach({ project: 'bugfix-173', browser: true });
 
       expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
@@ -198,6 +274,295 @@ describe('attach command', () => {
       await attach({ project: '0073', browser: true });
 
       expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+  });
+
+  describe('findShellperSocket', () => {
+    it('should return socket path from SQLite when available', async () => {
+      const { findShellperSocket } = await import('../commands/attach.js');
+
+      mockDbGet.mockReturnValue({ shellper_socket: '/tmp/shellper-test.sock' });
+      mockExistsSync.mockImplementation((p) => p === '/tmp/shellper-test.sock');
+
+      const builder: Builder = {
+        id: '0116',
+        name: 'test-builder',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/0116',
+        branch: 'builder/0116-test',
+        type: 'spec',
+      };
+
+      const result = findShellperSocket(builder);
+      expect(result).toBe('/tmp/shellper-test.sock');
+    });
+
+    it('should pass workspace_path and role_id to SQLite query', async () => {
+      const { findShellperSocket } = await import('../commands/attach.js');
+
+      mockDbGet.mockReturnValue(undefined);
+
+      const builder: Builder = {
+        id: 'spir-118',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/spir-118',
+        branch: 'builder/spir-118',
+        type: 'spec',
+      };
+
+      findShellperSocket(builder);
+
+      expect(mockDbGet).toHaveBeenCalledWith('/workspace/.builders/spir-118', 'spir-118');
+    });
+
+    it('should return null when no socket found in DB or filesystem', async () => {
+      const { findShellperSocket } = await import('../commands/attach.js');
+
+      mockDbGet.mockReturnValue(undefined);
+      mockExistsSync.mockReturnValue(false);
+
+      const builder: Builder = {
+        id: '0099',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/0099',
+        branch: 'builder/0099',
+        type: 'spec',
+      };
+
+      const result = findShellperSocket(builder);
+      expect(result).toBeNull();
+    });
+
+    it('should skip stale socket paths that no longer exist', async () => {
+      const { findShellperSocket } = await import('../commands/attach.js');
+
+      mockDbGet.mockReturnValue({ shellper_socket: '/tmp/stale-shellper.sock' });
+      mockExistsSync.mockReturnValue(false);
+
+      const builder: Builder = {
+        id: '0099',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/0099',
+        branch: 'builder/0099',
+        type: 'spec',
+      };
+
+      const result = findShellperSocket(builder);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('attachTerminal', () => {
+    let exitSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    });
+
+    afterEach(() => {
+      exitSpy.mockRestore();
+    });
+
+    it('should create ShellperClient with terminal clientType', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(lastShellperInstance).toBeTruthy();
+      expect((lastShellperInstance as any).clientType).toBe('terminal');
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it('should call connect on the client', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperConnect).toHaveBeenCalled();
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it('should wait for replay data', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperWaitForReplay).toHaveBeenCalledWith(500);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it('should call disconnect on error', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      mockShellperConnect.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(attachTerminal('/tmp/bad.sock')).rejects.toThrow('Connection refused');
+
+      expect(mockShellperDisconnect).toHaveBeenCalled();
+    });
+
+    it('should exit cleanly on EXIT frame from shellper', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(mockShellperDisconnect).toHaveBeenCalled();
+    });
+
+    it('should forward DATA frames from client to stdout', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      const testData = Buffer.from('hello terminal');
+      lastShellperInstance!.emit('data', testData);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(stdoutSpy).toHaveBeenCalledWith(testData);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+      stdoutSpy.mockRestore();
+    });
+
+    it('should forward stdin data to client.write', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Emit data on process.stdin (it's an EventEmitter)
+      const inputData = Buffer.from('ls\n');
+      process.stdin.emit('data', inputData);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperWrite).toHaveBeenCalledWith(inputData);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it('should detach on Ctrl-\\ key', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Send detach key (Ctrl-\, 0x1c)
+      process.stdin.emit('data', Buffer.from([0x1c]));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(mockShellperDisconnect).toHaveBeenCalled();
+      // Should NOT forward the detach key to the client
+      expect(mockShellperWrite).not.toHaveBeenCalled();
+    });
+
+    it('should send resize on terminal size change', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      // Set up stdout columns/rows
+      const origCols = process.stdout.columns;
+      const origRows = process.stdout.rows;
+      Object.defineProperty(process.stdout, 'columns', { value: 120, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: 40, configurable: true });
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Initial resize should have been sent
+      expect(mockShellperResize).toHaveBeenCalledWith(120, 40);
+
+      // Simulate terminal resize
+      mockShellperResize.mockClear();
+      Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: 24, configurable: true });
+      process.stdout.emit('resize');
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperResize).toHaveBeenCalledWith(80, 24);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Restore
+      Object.defineProperty(process.stdout, 'columns', { value: origCols, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: origRows, configurable: true });
+    });
+
+    it('should restore raw mode on cleanup (when TTY)', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      // Mock process.stdin as a TTY
+      const origIsTTY = process.stdin.isTTY;
+      const mockSetRawMode = vi.fn();
+      const origSetRawMode = process.stdin.setRawMode;
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      process.stdin.setRawMode = mockSetRawMode as any;
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Raw mode should have been enabled
+      expect(mockSetRawMode).toHaveBeenCalledWith(true);
+
+      // Trigger cleanup via exit
+      mockSetRawMode.mockClear();
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Raw mode should have been restored (set to false)
+      expect(mockSetRawMode).toHaveBeenCalledWith(false);
+
+      // Restore originals
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      process.stdin.setRawMode = origSetRawMode as any;
+    });
+  });
+
+  describe('terminal mode (default, no --browser)', () => {
+    it('should error when no shellper socket found', async () => {
+      mockBuilders.push({
+        id: '0116',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/0116',
+        branch: 'builder/0116',
+        type: 'spec',
+      });
+
+      mockDbGet.mockReturnValue(undefined);
+      mockExistsSync.mockReturnValue(false);
+
+      const { attach } = await import('../commands/attach.js');
+      const { fatal } = await import('../utils/logger.js');
+
+      await expect(attach({ project: '0116' })).rejects.toThrow();
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('No shellper socket found'));
     });
   });
 });

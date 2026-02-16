@@ -55,6 +55,35 @@ vi.mock('../utils/logger.js', () => ({
   fatal: (...args: any[]) => mockFatal(...args),
 }));
 
+// Mock DB (needed by findShellperSocket)
+vi.mock('../db/index.js', () => ({
+  getGlobalDb: () => ({
+    prepare: () => ({ get: () => undefined }),
+  }),
+}));
+
+// Mock normalizeWorkspacePath (needed by findShellperSocket)
+vi.mock('../servers/tower-utils.js', () => ({
+  normalizeWorkspacePath: (p: string) => p,
+}));
+
+// Mock fs to prevent real filesystem access in findShellperSocket
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    default: { ...actual, existsSync: () => false, accessSync: () => {}, readdirSync: () => [] },
+    existsSync: () => false,
+    accessSync: () => {},
+    readdirSync: () => [],
+  };
+});
+
+// Mock ShellperClient (imported by attach.ts for terminal mode)
+vi.mock('../../terminal/shellper-client.js', () => ({
+  ShellperClient: class { constructor() {} connect() {} disconnect() {} },
+}));
+
 describe('Bugfix #195: attach command handles PTY-backed builders', () => {
   beforeEach(() => {
     mockBuilders.length = 0;
@@ -122,6 +151,6 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
 
     const { attach } = await import('../commands/attach.js');
 
-    await expect(attach({ project: 'task-BBBB' })).rejects.toThrow('no terminal session');
+    await expect(attach({ project: 'task-BBBB' })).rejects.toThrow('No shellper socket found');
   });
 });

@@ -1,13 +1,23 @@
 /**
  * Attach command - attach to a running builder terminal
+ *
+ * Default mode: connect directly to shellper Unix socket as a terminal client.
+ * --browser mode: open Tower dashboard in browser.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { homedir } from 'node:os';
 import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
 import { loadState, getBuilder, getBuilders } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { ShellperClient } from '../../terminal/shellper-client.js';
+import type { DbTerminalSession } from '../servers/tower-types.js';
+import { normalizeWorkspacePath } from '../servers/tower-utils.js';
+import { getGlobalDb } from '../db/index.js';
 import chalk from 'chalk';
 
 export interface AttachOptions {
@@ -90,7 +100,7 @@ async function displayBuilderList(): Promise<void> {
 
   logger.blank();
   logger.info('Attach with:');
-  logger.info('  af attach -p <id>         # by builder/project ID');
+  logger.info('  af attach -p <id>         # terminal mode (direct)');
   logger.info('  af attach --issue <num>   # by issue number');
   logger.info('  af attach -p <id> --browser  # open in browser');
 }
@@ -114,6 +124,170 @@ function getTypeColor(type: string): (text: string) => string {
       return chalk.gray;
     default:
       return chalk.white;
+  }
+}
+
+/**
+ * Find the shellper socket path for a builder.
+ *
+ * Discovery order:
+ * 1. SQLite terminal_sessions table (workspace-scoped)
+ * 2. Fallback: scan ~/.codev/run/shellper-*.sock
+ */
+export function findShellperSocket(builder: Builder): string | null {
+  // 1. Try SQLite lookup
+  try {
+    const db = getGlobalDb();
+    const workspacePath = normalizeWorkspacePath(builder.worktree);
+
+    const session = db.prepare(`
+      SELECT shellper_socket FROM terminal_sessions
+      WHERE workspace_path = ? AND role_id = ? AND shellper_socket IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1
+    `).get(workspacePath, builder.id) as Pick<DbTerminalSession, 'shellper_socket'> | undefined;
+
+    if (session?.shellper_socket && fs.existsSync(session.shellper_socket)) {
+      return session.shellper_socket;
+    }
+  } catch {
+    // SQLite unavailable — fall through to scan
+  }
+
+  // 2. Fallback: scan ~/.codev/run/ for matching sockets
+  const runDir = path.join(homedir(), '.codev', 'run');
+  try {
+    if (!fs.existsSync(runDir)) return null;
+    const files = fs.readdirSync(runDir);
+    for (const file of files) {
+      if (file.startsWith('shellper-') && file.endsWith('.sock')) {
+        const sockPath = path.join(runDir, file);
+        // Check if socket file exists and is accessible
+        try {
+          fs.accessSync(sockPath, fs.constants.R_OK | fs.constants.W_OK);
+          return sockPath;
+        } catch {
+          continue;
+        }
+      }
+    }
+  } catch {
+    // Directory not readable
+  }
+
+  return null;
+}
+
+const DETACH_KEY = 0x1c; // Ctrl-\
+
+/**
+ * Attach to a shellper process in terminal mode.
+ *
+ * Connects as a 'terminal' client, enters raw mode, pipes stdin/stdout,
+ * handles SIGWINCH for resize, and detaches on Ctrl-\.
+ */
+export async function attachTerminal(socketPath: string): Promise<void> {
+  const client = new ShellperClient(socketPath, 'terminal');
+
+  // Track terminal state for cleanup
+  let rawModeEnabled = false;
+
+  function restoreTerminal(): void {
+    if (rawModeEnabled && process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      rawModeEnabled = false;
+    }
+    process.stdin.pause();
+  }
+
+  function cleanup(): void {
+    restoreTerminal();
+    client.disconnect();
+    process.stdout.write('\n');
+  }
+
+  // Ensure terminal is restored on process exit
+  process.on('exit', restoreTerminal);
+
+  try {
+    const welcome = await client.connect();
+    logger.info(`Attached to shellper (PID ${welcome.pid}, ${welcome.cols}x${welcome.rows})`);
+    logger.info('Detach with Ctrl-\\');
+    logger.blank();
+
+    // Write replay buffer to stdout
+    const replay = await client.waitForReplay(500);
+    if (replay.length > 0) {
+      process.stdout.write(replay);
+    }
+
+    // Enter raw mode
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+      rawModeEnabled = true;
+    }
+    process.stdin.resume();
+
+    // Pipe PTY output to stdout
+    client.on('data', (buf: Buffer) => {
+      process.stdout.write(buf);
+    });
+
+    // Handle PTY exit
+    client.on('exit', () => {
+      cleanup();
+      process.removeListener('exit', restoreTerminal);
+      logger.info('Session ended.');
+      process.exit(0);
+    });
+
+    // Handle connection close
+    client.on('close', () => {
+      cleanup();
+      process.removeListener('exit', restoreTerminal);
+      logger.info('Connection closed.');
+      process.exit(0);
+    });
+
+    // Handle connection error
+    client.on('error', (err: Error) => {
+      cleanup();
+      process.removeListener('exit', restoreTerminal);
+      logger.error(`Connection error: ${err.message}`);
+      process.exit(1);
+    });
+
+    // Pipe stdin to shellper as DATA frames
+    process.stdin.on('data', (chunk: Buffer) => {
+      // Check for detach key (Ctrl-\)
+      if (chunk.length === 1 && chunk[0] === DETACH_KEY) {
+        cleanup();
+        process.removeListener('exit', restoreTerminal);
+        logger.info('Detached.');
+        process.exit(0);
+        return;
+      }
+      client.write(chunk);
+    });
+
+    // Send RESIZE on terminal size change
+    const onResize = () => {
+      if (process.stdout.columns && process.stdout.rows) {
+        client.resize(process.stdout.columns, process.stdout.rows);
+      }
+    };
+    process.stdout.on('resize', onResize);
+
+    // Send initial resize to match local terminal
+    onResize();
+
+    // Keep the process alive — stdin in raw mode keeps the event loop running
+    await new Promise<void>(() => {
+      // Never resolves — process exits via cleanup paths above
+    });
+  } catch (err) {
+    cleanup();
+    process.removeListener('exit', restoreTerminal);
+    throw err;
   }
 }
 
@@ -147,25 +321,27 @@ export async function attach(options: AttachOptions): Promise<void> {
     return; // TypeScript doesn't know fatal() never returns
   }
 
-  // Open in browser (via Tower dashboard)
-  const config = getConfig();
-  const client = new TowerClient();
-  const url = client.getWorkspaceUrl(config.workspaceRoot);
-
+  // --browser: open Tower dashboard
   if (options.browser) {
+    const config = getConfig();
+    const towerClient = new TowerClient();
+    const url = towerClient.getWorkspaceUrl(config.workspaceRoot);
     logger.info(`Opening Tower dashboard at ${url}...`);
     await openBrowser(url);
     logger.success('Opened Tower dashboard in browser');
     return;
   }
 
-  // Default: open in browser (Tower dashboard is the primary terminal interface)
-  if (!builder.terminalId) {
-    fatal(`Builder ${builder.id} has no terminal session. Try opening in browser with --browser`);
+  // Default: terminal attach mode
+  const socketPath = findShellperSocket(builder);
+  if (!socketPath) {
+    fatal(`No shellper socket found for builder ${builder.id}. Is the builder running?`);
+    return;
   }
 
-  logger.info(`Builder ${builder.id} terminal is available in the Tower dashboard.`);
-  logger.info(`Opening ${url}...`);
-  await openBrowser(url);
-  logger.success('Opened Tower dashboard in browser');
+  try {
+    await attachTerminal(socketPath);
+  } catch (err) {
+    fatal(`Failed to attach to builder ${builder.id}: ${(err as Error).message}`);
+  }
 }

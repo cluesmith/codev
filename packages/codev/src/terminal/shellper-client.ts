@@ -52,7 +52,10 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   private _connected = false;
   private replayData: Buffer | null = null;
 
-  constructor(private readonly socketPath: string) {
+  constructor(
+    private readonly socketPath: string,
+    private readonly clientType: 'tower' | 'terminal' = 'tower',
+  ) {
     super();
   }
 
@@ -108,7 +111,7 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
       socket.on('connect', () => {
         socket.pipe(parser);
         // Send HELLO to initiate handshake
-        socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
+        socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType }));
       });
 
       socket.on('close', () => {
