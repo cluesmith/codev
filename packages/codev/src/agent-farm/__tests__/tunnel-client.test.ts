@@ -7,6 +7,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import http from 'node:http';
+import net from 'node:net';
 import WebSocket from 'ws';
 import {
   calculateBackoff,
@@ -16,6 +18,7 @@ import {
   PING_INTERVAL_MS,
   PONG_TIMEOUT_MS,
 } from '../lib/tunnel-client.js';
+import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 
 describe('tunnel-client unit tests', () => {
   describe('calculateBackoff', () => {
@@ -481,5 +484,468 @@ describe('heartbeat', () => {
     expect((client as any).state).toBe('connected');
 
     (client as any).stopHeartbeat();
+  });
+});
+
+// === Integration tests (consolidated from tunnel-client.integration.test.ts) ===
+
+/** Wait for a condition to be true within a timeout */
+async function waitFor(
+  fn: () => boolean,
+  timeoutMs = 10000,
+  intervalMs = 50,
+): Promise<void> {
+  const start = Date.now();
+  while (!fn()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+/** Create a simple HTTP server that echoes requests */
+function createIntegrationEchoServer(): http.Server {
+  return http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf-8');
+      res.writeHead(200, { 'content-type': 'application/json', 'x-echo': 'true' });
+      res.end(
+        JSON.stringify({
+          method: req.method,
+          path: req.url,
+          headers: req.headers,
+          body,
+        }),
+      );
+    });
+  });
+}
+
+async function startServer(server: http.Server): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (addr && typeof addr !== 'string') resolve(addr.port);
+    });
+  });
+}
+
+async function stopServer(server: http.Server): Promise<void> {
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
+describe('tunnel-client integration', () => {
+  let mockServer: MockTunnelServer;
+  let echoServer: http.Server;
+  let echoPort: number;
+  let integrationClient: TunnelClient;
+
+  beforeEach(async () => {
+    echoServer = createIntegrationEchoServer();
+    echoPort = await startServer(echoServer);
+  });
+
+  afterEach(async () => {
+    if (integrationClient) integrationClient.disconnect();
+    if (mockServer) await mockServer.stop();
+    await stopServer(echoServer);
+    vi.restoreAllMocks();
+  });
+
+  async function setupTunnel(serverOpts: ConstructorParameters<typeof MockTunnelServer>[0] = {}): Promise<void> {
+    mockServer = new MockTunnelServer(serverOpts);
+    const port = await mockServer.start();
+
+    integrationClient = new TunnelClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      apiKey: serverOpts.acceptKey ?? 'ctk_test_key',
+      towerId: '',
+      localPort: echoPort,
+    });
+  }
+
+  describe('circuit breaker', () => {
+    it('sets auth_failed state on invalid API key', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await setupTunnel({ forceError: 'invalid_api_key' });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'auth_failed');
+
+      expect(integrationClient.getState()).toBe('auth_failed');
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('API key is invalid or revoked'),
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('does not retry after auth failure', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await setupTunnel({ forceError: 'invalid_api_key' });
+
+      const stateChanges: Array<{ state: string; prev: string }> = [];
+      integrationClient.onStateChange((state, prev) => {
+        stateChanges.push({ state, prev });
+      });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'auth_failed');
+
+      // Wait a bit to ensure no reconnection attempt
+      await new Promise((r) => setTimeout(r, 200));
+
+      // State should still be auth_failed
+      expect(integrationClient.getState()).toBe('auth_failed');
+      const authFailedCount = stateChanges.filter((s) => s.state === 'auth_failed').length;
+      expect(authFailedCount).toBe(1);
+      errorSpy.mockRestore();
+    });
+
+    it('can be reset to allow reconnection', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await setupTunnel({ forceError: 'invalid_api_key' });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'auth_failed');
+
+      integrationClient.resetCircuitBreaker();
+      expect(integrationClient.getState()).toBe('disconnected');
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('HTTP proxying', () => {
+    it('proxies GET request to local server', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const response = await mockServer.sendRequest({
+        path: '/api/state',
+      });
+
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.method).toBe('GET');
+      expect(body.path).toBe('/api/state');
+    });
+
+    it('proxies POST request with body', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const response = await mockServer.sendRequest({
+        method: 'POST',
+        path: '/api/launch',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspacePath: '/test' }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.method).toBe('POST');
+      expect(body.body).toBe('{"workspacePath":"/test"}');
+    });
+
+    it('preserves response headers (filtering hop-by-hop)', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const response = await mockServer.sendRequest({ path: '/test' });
+
+      expect(response.headers['x-echo']).toBe('true');
+      expect(response.headers['content-type']).toBe('application/json');
+      // Hop-by-hop headers should not be present
+      expect(response.headers['connection']).toBeUndefined();
+      expect(response.headers['transfer-encoding']).toBeUndefined();
+    });
+  });
+
+  describe('reconnection', () => {
+    it('reconnects after server disconnects', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      // Simulate disconnect
+      mockServer.disconnectAll();
+      await waitFor(() => integrationClient.getState() === 'disconnected');
+
+      // Start a new mock server on the same port
+      const oldPort = mockServer.port;
+      await mockServer.stop();
+      mockServer = new MockTunnelServer();
+      await new Promise<void>((resolve, reject) => {
+        (mockServer as any).httpServer.listen(oldPort, '127.0.0.1', () => resolve());
+        (mockServer as any).httpServer.on('error', reject);
+      });
+      mockServer.port = oldPort;
+
+      // Client should reconnect automatically
+      await waitFor(() => integrationClient.getState() === 'connected', 10000);
+      expect(integrationClient.getState()).toBe('connected');
+    });
+  });
+
+  describe('metadata', () => {
+    it('serves initial metadata via GET /__tower/metadata after connect', async () => {
+      await setupTunnel();
+
+      integrationClient.sendMetadata({
+        workspaces: [{ path: '/test/project', name: 'test' }],
+        terminals: [{ id: 'term-1', workspacePath: '/test/project' }],
+      });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
+      const metadata = JSON.parse(res.body);
+      expect(metadata.workspaces).toHaveLength(1);
+      expect(metadata.workspaces[0].name).toBe('test');
+      expect(metadata.terminals).toHaveLength(1);
+    });
+
+    it('serves empty metadata when none is set', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
+      const metadata = JSON.parse(res.body);
+      expect(metadata.workspaces).toEqual([]);
+      expect(metadata.terminals).toEqual([]);
+    });
+
+    it('serves metadata via GET /__tower/metadata for polling', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      integrationClient.sendMetadata({
+        workspaces: [{ path: '/updated', name: 'updated' }],
+        terminals: [],
+      });
+
+      const response = await mockServer.sendRequest({
+        path: '/__tower/metadata',
+      });
+
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.workspaces).toHaveLength(1);
+      expect(body.workspaces[0].name).toBe('updated');
+    });
+
+    it('pushes metadata via outbound HTTP POST on connect', async () => {
+      await setupTunnel();
+
+      integrationClient.sendMetadata({
+        workspaces: [{ path: '/pushed', name: 'pushed-project' }],
+        terminals: [],
+      });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      await waitFor(() => mockServer.lastPushedMetadata !== null);
+
+      expect(mockServer.lastPushedMetadata!.workspaces).toHaveLength(1);
+      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('pushed-project');
+    });
+
+    it('pushes metadata via HTTP POST when sendMetadata called while connected', async () => {
+      await setupTunnel();
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      mockServer.lastPushedMetadata = null;
+
+      integrationClient.sendMetadata({
+        workspaces: [{ path: '/live-update', name: 'live' }],
+        terminals: [{ id: 't1', workspacePath: '/live-update' }],
+      });
+
+      await waitFor(() => mockServer.lastPushedMetadata !== null);
+
+      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('live');
+      expect(mockServer.lastPushedMetadata!.terminals).toHaveLength(1);
+    });
+  });
+
+  describe('WebSocket CONNECT proxy', () => {
+    let wsServer: http.Server;
+    let wsPort: number;
+    let upgradeSockets: net.Socket[];
+
+    beforeEach(async () => {
+      upgradeSockets = [];
+      wsServer = http.createServer();
+      wsServer.on('upgrade', (req, socket, head) => {
+        upgradeSockets.push(socket);
+        socket.write(
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          '\r\n',
+        );
+        socket.on('data', (data) => {
+          socket.write(data);
+        });
+        socket.on('error', () => {});
+      });
+
+      wsPort = await startServer(wsServer);
+    });
+
+    afterEach(async () => {
+      for (const s of upgradeSockets) {
+        if (!s.destroyed) s.destroy();
+      }
+      await stopServer(wsServer);
+    });
+
+    it('proxies WebSocket CONNECT with bidirectional data', async () => {
+      mockServer = new MockTunnelServer();
+      const port = await mockServer.start();
+
+      integrationClient = new TunnelClient({
+        serverUrl: `http://127.0.0.1:${port}`,
+        apiKey: 'ctk_test_key',
+        towerId: '',
+        localPort: wsPort,
+      });
+
+      integrationClient.connect();
+      await waitFor(() => integrationClient.getState() === 'connected');
+
+      const stream = mockServer.sendConnect('/ws/terminal/test');
+
+      await new Promise<void>((resolve, reject) => {
+        stream.on('response', (headers) => {
+          expect(headers[':status']).toBe(200);
+          resolve();
+        });
+        stream.on('error', reject);
+        setTimeout(() => reject(new Error('CONNECT timeout')), 5000);
+      });
+
+      const echoed = await new Promise<string>((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+          resolve(chunk.toString('utf-8'));
+        });
+        stream.write('hello tunnel');
+        setTimeout(() => reject(new Error('Echo timeout')), 5000);
+      });
+
+      expect(echoed).toBe('hello tunnel');
+      stream.destroy();
+    });
+
+    it('returns 404 when WebSocket upgrade is refused by local server', async () => {
+      const noUpgradeServer = http.createServer((req, res) => {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not found');
+      });
+      const noUpgradePort = await startServer(noUpgradeServer);
+
+      try {
+        mockServer = new MockTunnelServer();
+        const port = await mockServer.start();
+
+        integrationClient = new TunnelClient({
+          serverUrl: `http://127.0.0.1:${port}`,
+          apiKey: 'ctk_test_key',
+          towerId: '',
+          localPort: noUpgradePort,
+        });
+
+        integrationClient.connect();
+        await waitFor(() => integrationClient.getState() === 'connected');
+
+        const stream = mockServer.sendConnect('/ws/terminal/nonexistent');
+
+        const status = await new Promise<number>((resolve, reject) => {
+          stream.on('response', (headers) => {
+            resolve(headers[':status'] as number);
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('Response timeout')), 5000);
+        });
+
+        expect(status).toBe(404);
+        stream.destroy();
+      } finally {
+        await stopServer(noUpgradeServer);
+      }
+    });
+
+    it('forwards custom headers through WebSocket CONNECT proxy', async () => {
+      let receivedHeaders: http.IncomingHttpHeaders = {};
+      const headerServer = http.createServer();
+      headerServer.on('upgrade', (req, socket) => {
+        receivedHeaders = req.headers;
+        upgradeSockets.push(socket);
+        socket.write(
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          '\r\n',
+        );
+        socket.resume();
+        socket.on('error', () => {});
+      });
+      const headerPort = await startServer(headerServer);
+
+      try {
+        mockServer = new MockTunnelServer();
+        const port = await mockServer.start();
+
+        integrationClient = new TunnelClient({
+          serverUrl: `http://127.0.0.1:${port}`,
+          apiKey: 'ctk_test_key',
+          towerId: '',
+          localPort: headerPort,
+        });
+
+        integrationClient.connect();
+        await waitFor(() => integrationClient.getState() === 'connected');
+
+        const stream = mockServer.sendConnect('/ws/terminal/test', {
+          'x-session-resume': '42',
+          'x-custom-header': 'test-value',
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          stream.on('response', (headers) => {
+            expect(headers[':status']).toBe(200);
+            resolve();
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('CONNECT timeout')), 5000);
+        });
+
+        expect(receivedHeaders['x-session-resume']).toBe('42');
+        expect(receivedHeaders['x-custom-header']).toBe('test-value');
+        stream.destroy();
+      } finally {
+        for (const s of upgradeSockets) {
+          if (!s.destroyed) s.destroy();
+        }
+        await stopServer(headerServer);
+      }
+    });
   });
 });

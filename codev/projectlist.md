@@ -337,6 +337,21 @@ Projects currently in development (conceived through committed), sorted by prior
       committed_at: "2026-02-16"
     notes: "PR #308 merged. Codex JSONL parsing replaced with SDK structured events."
 
+  - id: "0124"
+    title: "Test Suite Consolidation"
+    summary: "Remove ~285 obsolete, redundant, trivial, and over-mocked tests to make the suite leaner"
+    status: specified
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0124-test-suite-consolidation.md
+    dependencies: []
+    tags: [testing, maintenance, cleanup]
+    timestamps:
+      conceived_at: "2026-02-16"
+      specified_at: "2026-02-16"
+    notes: "Evaluation found 16% of tests removable. Focus on bugfix tests, terminal/tunnel consolidation, trivial removal."
+
   - id: "0123"
     title: "Codebase Dedup & Magic Constants"
     summary: "Find duplicate code and magic constants scattered across the codebase, propose consolidation"
@@ -1239,7 +1254,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0124** - Reserve this number for your next project
+**0125** - Reserve this number for your next project
 
 ---
 

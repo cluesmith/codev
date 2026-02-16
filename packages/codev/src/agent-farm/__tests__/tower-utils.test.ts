@@ -16,11 +16,7 @@ import {
   cleanupRateLimits,
   startRateLimitCleanup,
   normalizeWorkspacePath,
-  getWorkspaceName,
   isTempDirectory,
-  getLanguageForExt,
-  getMimeTypeForFile,
-  MIME_TYPES,
   serveStaticFile,
 } from '../servers/tower-utils.js';
 
@@ -132,21 +128,6 @@ describe('tower-utils', () => {
     });
   });
 
-  describe('getWorkspaceName', () => {
-    it('extracts basename from path', () => {
-      expect(getWorkspaceName('/Users/dev/my-project')).toBe('my-project');
-    });
-
-    it('handles paths with trailing slash', () => {
-      // path.basename handles trailing slash by taking the last segment
-      expect(getWorkspaceName('/Users/dev/project/')).toBe('project');
-    });
-
-    it('handles simple names', () => {
-      expect(getWorkspaceName('project')).toBe('project');
-    });
-  });
-
   describe('isTempDirectory', () => {
     it('detects /tmp/ paths', () => {
       expect(isTempDirectory('/tmp/test-project')).toBe(true);
@@ -167,49 +148,6 @@ describe('tower-utils', () => {
 
     it('rejects paths that merely contain tmp', () => {
       expect(isTempDirectory('/Users/dev/tmp-stuff/project')).toBe(false);
-    });
-  });
-
-  describe('getLanguageForExt', () => {
-    it('returns known language identifiers', () => {
-      expect(getLanguageForExt('ts')).toBe('typescript');
-      expect(getLanguageForExt('js')).toBe('javascript');
-      expect(getLanguageForExt('py')).toBe('python');
-      expect(getLanguageForExt('rs')).toBe('rust');
-    });
-
-    it('returns extension itself for unknown languages', () => {
-      expect(getLanguageForExt('xyz')).toBe('xyz');
-    });
-
-    it('returns plaintext for empty/undefined extension', () => {
-      expect(getLanguageForExt('')).toBe('plaintext');
-    });
-  });
-
-  describe('getMimeTypeForFile', () => {
-    it('returns correct MIME type for known extensions', () => {
-      expect(getMimeTypeForFile('image.png')).toBe('image/png');
-      expect(getMimeTypeForFile('video.mp4')).toBe('video/mp4');
-      expect(getMimeTypeForFile('doc.pdf')).toBe('application/pdf');
-    });
-
-    it('returns octet-stream for unknown extensions', () => {
-      expect(getMimeTypeForFile('file.xyz')).toBe('application/octet-stream');
-    });
-
-    it('handles uppercase extensions via toLowerCase', () => {
-      expect(getMimeTypeForFile('IMAGE.PNG')).toBe('image/png');
-    });
-  });
-
-  describe('MIME_TYPES', () => {
-    it('contains expected content types', () => {
-      expect(MIME_TYPES['.html']).toBe('text/html');
-      expect(MIME_TYPES['.js']).toBe('application/javascript');
-      expect(MIME_TYPES['.css']).toBe('text/css');
-      expect(MIME_TYPES['.json']).toBe('application/json');
-      expect(MIME_TYPES['.svg']).toBe('image/svg+xml');
     });
   });
 

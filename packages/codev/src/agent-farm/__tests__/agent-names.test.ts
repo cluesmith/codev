@@ -5,7 +5,6 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  stripLeadingZeros,
   buildAgentName,
   parseAgentName,
   parseAddress,
@@ -26,25 +25,6 @@ function makeBuilder(id: string, overrides?: Partial<Builder>): Builder {
     ...overrides,
   };
 }
-
-describe('stripLeadingZeros', () => {
-  it('strips leading zeros from numeric IDs', () => {
-    expect(stripLeadingZeros('0109')).toBe('109');
-    expect(stripLeadingZeros('0001')).toBe('1');
-    expect(stripLeadingZeros('0000')).toBe('0');
-    expect(stripLeadingZeros('42')).toBe('42');
-  });
-
-  it('preserves zero', () => {
-    expect(stripLeadingZeros('0')).toBe('0');
-  });
-
-  it('does not strip from non-numeric IDs', () => {
-    expect(stripLeadingZeros('AbCd')).toBe('AbCd');
-    expect(stripLeadingZeros('0xAB')).toBe('0xAB');
-    expect(stripLeadingZeros('abc123')).toBe('abc123');
-  });
-});
 
 describe('buildAgentName', () => {
   it('generates spec builder names with default spir protocol', () => {
@@ -82,9 +62,6 @@ describe('buildAgentName', () => {
     expect(buildAgentName('bugfix', '042')).toBe('builder-bugfix-42');
   });
 
-  it('returns lowercase names', () => {
-    expect(buildAgentName('task', 'ABCD')).toBe('builder-task-abcd');
-  });
 });
 
 describe('parseAgentName', () => {

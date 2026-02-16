@@ -15,21 +15,6 @@ describe('nonce-store', () => {
     vi.restoreAllMocks();
   });
 
-  describe('createPendingRegistration', () => {
-    it('returns a UUID nonce', () => {
-      const nonce = createPendingRegistration('my-tower', 'https://cloud.codevos.ai');
-      expect(nonce).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      );
-    });
-
-    it('generates unique nonces for each call', () => {
-      const nonce1 = createPendingRegistration('tower-1', 'https://cloud.codevos.ai');
-      const nonce2 = createPendingRegistration('tower-2', 'https://cloud.codevos.ai');
-      expect(nonce1).not.toBe(nonce2);
-    });
-  });
-
   describe('consumePendingRegistration', () => {
     it('returns the registration data for a valid nonce', () => {
       const nonce = createPendingRegistration('my-tower', 'https://cloud.codevos.ai');

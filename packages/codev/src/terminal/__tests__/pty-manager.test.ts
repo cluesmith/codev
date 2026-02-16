@@ -35,45 +35,6 @@ describe('TerminalManager', () => {
     manager.shutdown();
   });
 
-  it('creates a session', async () => {
-    const info = await manager.createSession({ label: 'test' });
-    expect(info.id).toBeTruthy();
-    expect(info.pid).toBe(99999);
-    expect(info.label).toBe('test');
-    expect(info.status).toBe('running');
-    expect(info.cols).toBe(80);
-    expect(info.rows).toBe(24);
-  });
-
-  it('lists sessions', async () => {
-    await manager.createSession({ label: 'a' });
-    await manager.createSession({ label: 'b' });
-    const list = manager.listSessions();
-    expect(list.length).toBe(2);
-    expect(list.map(s => s.label)).toEqual(['a', 'b']);
-  });
-
-  it('gets a session by ID', async () => {
-    const info = await manager.createSession({ label: 'findme' });
-    const session = manager.getSession(info.id);
-    expect(session).toBeTruthy();
-    expect(session!.label).toBe('findme');
-  });
-
-  it('returns undefined for unknown session', () => {
-    expect(manager.getSession('nonexistent')).toBeUndefined();
-  });
-
-  it('kills a session', async () => {
-    const info = await manager.createSession({ label: 'killme' });
-    expect(manager.killSession(info.id)).toBe(true);
-    expect(manager.getSession(info.id)).toBeUndefined();
-  });
-
-  it('returns false when killing nonexistent session', () => {
-    expect(manager.killSession('nope')).toBe(false);
-  });
-
   it('resizes a session', async () => {
     const info = await manager.createSession({});
     const updated = manager.resizeSession(info.id, 120, 40);
@@ -92,32 +53,6 @@ describe('TerminalManager', () => {
     }
     await expect(manager.createSession({ label: 'too-many' }))
       .rejects.toThrow('Maximum 5 sessions reached');
-  });
-
-  it('creates sessions with custom dimensions', async () => {
-    const info = await manager.createSession({ cols: 120, rows: 40 });
-    expect(info.cols).toBe(120);
-    expect(info.rows).toBe(40);
-  });
-
-  it('gets output from ring buffer', async () => {
-    const info = await manager.createSession({});
-    // No output yet
-    const output = manager.getOutput(info.id);
-    expect(output).toBeTruthy();
-    expect(output!.lines).toEqual([]);
-    expect(output!.total).toBe(0);
-  });
-
-  it('returns null for output of nonexistent session', () => {
-    expect(manager.getOutput('nope')).toBeNull();
-  });
-
-  it('shuts down all sessions', async () => {
-    await manager.createSession({ label: 'a' });
-    await manager.createSession({ label: 'b' });
-    manager.shutdown();
-    expect(manager.listSessions()).toEqual([]);
   });
 
   describe('REST API handler', () => {

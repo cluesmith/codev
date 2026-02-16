@@ -3,41 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeDeviceName, validateDeviceName } from '../lib/device-name.js';
-
-describe('normalizeDeviceName', () => {
-  it('trims whitespace', () => {
-    expect(normalizeDeviceName('  my-tower  ')).toBe('my-tower');
-  });
-
-  it('converts to lowercase', () => {
-    expect(normalizeDeviceName('My-Tower')).toBe('my-tower');
-  });
-
-  it('replaces spaces with hyphens', () => {
-    expect(normalizeDeviceName('my tower name')).toBe('my-tower-name');
-  });
-
-  it('replaces underscores with hyphens', () => {
-    expect(normalizeDeviceName('my_tower_name')).toBe('my-tower-name');
-  });
-
-  it('strips invalid characters', () => {
-    expect(normalizeDeviceName('my@tower!name#123')).toBe('mytowername123');
-  });
-
-  it('handles consecutive spaces/underscores as single hyphen', () => {
-    expect(normalizeDeviceName('my   tower___name')).toBe('my-tower-name');
-  });
-
-  it('returns empty string for all-invalid input', () => {
-    expect(normalizeDeviceName('!!!@@@###')).toBe('');
-  });
-
-  it('handles mixed case with special chars', () => {
-    expect(normalizeDeviceName('  My Work_Station (v2)  ')).toBe('my-work-station-v2');
-  });
-});
+import { validateDeviceName } from '../lib/device-name.js';
 
 describe('validateDeviceName', () => {
   it('accepts valid simple names', () => {

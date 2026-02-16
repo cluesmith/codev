@@ -10,43 +10,14 @@ import { Readable } from 'node:stream';
 import {
   escapeHtml,
   parseJsonBody,
-  isRequestAllowed,
 } from '../utils/server-utils.js';
 
 describe('Server Utilities', () => {
   describe('escapeHtml', () => {
-    it('should escape ampersands', () => {
-      expect(escapeHtml('foo & bar')).toBe('foo &amp; bar');
-    });
-
-    it('should escape less than', () => {
-      expect(escapeHtml('<script>')).toBe('&lt;script&gt;');
-    });
-
-    it('should escape greater than', () => {
-      expect(escapeHtml('a > b')).toBe('a &gt; b');
-    });
-
-    it('should escape double quotes', () => {
-      expect(escapeHtml('say "hello"')).toBe('say &quot;hello&quot;');
-    });
-
-    it('should escape single quotes', () => {
-      expect(escapeHtml("it's")).toBe('it&#39;s');
-    });
-
     it('should escape all special characters in combination', () => {
       expect(escapeHtml('<a href="test.html?a=1&b=2">it\'s a link</a>')).toBe(
         '&lt;a href=&quot;test.html?a=1&amp;b=2&quot;&gt;it&#39;s a link&lt;/a&gt;'
       );
-    });
-
-    it('should handle empty string', () => {
-      expect(escapeHtml('')).toBe('');
-    });
-
-    it('should handle string with no special characters', () => {
-      expect(escapeHtml('hello world')).toBe('hello world');
     });
   });
 
@@ -101,60 +72,4 @@ describe('Server Utilities', () => {
     });
   });
 
-  describe('isRequestAllowed', () => {
-    function createMockRequest(headers: Record<string, string>): http.IncomingMessage {
-      return { headers } as http.IncomingMessage;
-    }
-
-    it('should allow requests from localhost host', () => {
-      const req = createMockRequest({ host: 'localhost:4200' });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests from 127.0.0.1 host', () => {
-      const req = createMockRequest({ host: '127.0.0.1:4200' });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests from any host (server binds to localhost only)', () => {
-      // Security is handled by binding to 127.0.0.1, not by checking headers
-      const req = createMockRequest({ host: 'evil.com' });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests with localhost origin', () => {
-      const req = createMockRequest({
-        host: 'localhost:4200',
-        origin: 'http://localhost:4200',
-      });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests with 127.0.0.1 origin', () => {
-      const req = createMockRequest({
-        host: 'localhost:4200',
-        origin: 'http://127.0.0.1:4200',
-      });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests with any origin (server binds to localhost only)', () => {
-      // Security is handled by binding to 127.0.0.1, not by checking headers
-      const req = createMockRequest({
-        host: 'localhost:4200',
-        origin: 'http://evil.com',
-      });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests without origin header (CLI/curl)', () => {
-      const req = createMockRequest({ host: 'localhost:4200' });
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-
-    it('should allow requests without any headers', () => {
-      const req = createMockRequest({});
-      expect(isRequestAllowed(req)).toBe(true);
-    });
-  });
 });
