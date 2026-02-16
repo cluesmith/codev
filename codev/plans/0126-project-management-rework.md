@@ -124,15 +124,21 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
   - Keep `project` and `issue` for backward compat (they map to `issueNumber` internally)
   - Make `protocol` the canonical protocol field (deprecate `useProtocol`)
 
-**Modify**: `packages/codev/src/agent-farm/commands/af-cli.ts` (or wherever the CLI is defined)
-- Add positional argument: `af spawn [number]`
+**Modify**: `packages/codev/src/agent-farm/cli.ts`
+- Change Commander command definition from `.command('spawn')` to `.command('spawn').argument('[number]', 'Issue number')`
+- Note: this changes the `.action()` signature from `(options) => ...` to `(number, options) => ...`
 - Add `--protocol` option (required when using positional arg)
 - Register `-p` and `--issue` as hidden aliases that map to `issueNumber`
 - Add `--amends` option for TICK protocol
 
+**Modify**: `packages/codev/src/agent-farm/types.ts`
+- Add `amends?: number` to `SpawnOptions` interface for TICK `--amends` flag
+
 **Modify**: `packages/codev/src/agent-farm/commands/spawn.ts`
-- Update `validateInputOptions()` to handle unified `issueNumber`
-- Update `determineMode()`: protocol flag drives mode selection, not the presence of spec vs issue
+- Update `validateSpawnOptions()` (line 76) to handle unified `issueNumber`
+- Update `getSpawnMode()` (line 121): protocol flag drives mode selection, not the presence of spec vs issue
+- **`--resume` handling**: When `--resume` is specified, protocol is NOT required — it's read from the existing worktree's `status.yaml` (already initialized). No implicit detection needed.
+- **`--soft` handling**: `--soft` is a mode modifier, not a protocol. It still requires `--protocol` to be specified (e.g., `af spawn 315 --protocol spir --soft`). The spec example `af spawn 315 --soft` is shorthand for `af spawn 315 --protocol spir --soft` (SPIR is the default for `--soft` when a spec file exists).
 - Update `spawnSpec()` to use `issueNumber` + `--protocol`
 - Merge relevant parts of `spawnBugfix()` into a unified flow
 - The spawn flow becomes:
@@ -148,7 +154,8 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 - [ ] `af spawn -p 0076` still works (hidden alias, matches `0076-*.md`)
 - [ ] `af spawn --issue 42` still works (hidden alias)
 - [ ] `af spawn 315` without `--protocol` gives clear error message
-- [ ] `af spawn 315 --resume` works
+- [ ] `af spawn 315 --resume` works (reads protocol from existing worktree, no `--protocol` needed)
+- [ ] `af spawn 315 --soft` works (defaults to SPIR when spec file exists)
 - [ ] `af spawn --task "fix bug"` still works (no positional arg needed)
 - [ ] `af spawn --shell` still works
 - [ ] `af spawn --protocol maintain` still works (no positional arg needed)
@@ -193,7 +200,7 @@ Hidden aliases ensure old commands keep working. If the new positional arg cause
 - Report: "GitHub CLI: authenticated as <username>" or "GitHub CLI: not authenticated (run `gh auth login`)"
 - Non-fatal: doctor reports the issue but doesn't block
 
-**Modify**: `codev-skeleton/codev/` (template directory)
+**Modify**: `codev-skeleton/templates/` (template directory)
 - Remove `projectlist.md` template file if it exists in the skeleton
 
 #### Acceptance Criteria
@@ -311,9 +318,11 @@ Remove the two routes from tower-routes.ts. No existing functionality is modifie
 - Main component with three sections stacked vertically in top 2/3
 - Uses `GET /api/overview` (polled every 5s, same as current StatusPanel)
 - `+ Shell` button in header (reuses existing shell creation logic)
+- **Info header removed**: The old `.projects-info` div (StatusPanel.tsx lines 352-371) with explanatory text and doc links is NOT replicated in WorkView. The Work view is self-explanatory.
+- **Relationship to `/api/state`**: The existing `/api/state` endpoint (polled every 1s by `useBuilderStatus`) continues to power terminal tab management and the architect panel. `/api/overview` is a separate, slower (5s) poll that adds GitHub-derived data (PRs, backlog) and enriches builder data with porch phase/gate info. The Work view consumes both: `/api/state` for tab structure, `/api/overview` for the Work view sections. No duplication — different data at different cadences.
 
-**New file**: `packages/codev/dashboard/src/components/BuilderCard.tsx`
-- Shows: builder ID, issue title, phase, mode (strict/soft)
+**Rewrite**: `packages/codev/dashboard/src/components/BuilderCard.tsx` (file already exists with different interface)
+- Rewrite to show: builder ID, issue title, phase, mode (strict/soft)
 - Gate indicators: inline badges for pending/passed gates
 - "Open" button: opens builder terminal as new tab in dashboard tab bar
 - Soft mode: shows "running" with no phase detail
@@ -331,7 +340,7 @@ Remove the two routes from tower-routes.ts. No existing functionality is modifie
 - Remove dedicated `'files'` tab creation (file viewing integrated into Work view)
 - Keep `'file'` type for individual file tabs opened via `af open`
 
-**Modify**: `packages/codev/dashboard/src/App.tsx`
+**Modify**: `packages/codev/dashboard/src/components/App.tsx`
 - Render `WorkView` when `activeTab.type === 'work'` (replaces StatusPanel)
 - Update tab bar to show "Work" instead of "Dashboard"
 - Remove separate Files tab button from navigation
@@ -407,6 +416,19 @@ Revert App.tsx and useTabs.ts changes; old StatusPanel.tsx is still in git histo
 - Update spawn examples
 - Remove projectlist.md references
 
+**Modify**: `codev/resources/commands/agent-farm.md`
+- Update `af spawn` syntax to show positional arg + `--protocol`
+- Document `--amends` flag for TICK
+- Update examples
+
+**Modify**: `codev/resources/commands/overview.md`
+- Update spawn quick reference
+- Remove projectlist.md mentions
+
+**Modify**: `codev/resources/commands/codev.md`
+- Update `codev init` description (no longer creates projectlist.md)
+- Update `codev doctor` description (new `gh` auth check)
+
 #### Acceptance Criteria
 - [ ] No code references to projectlist.md remain (grep confirms)
 - [ ] All tests pass
@@ -477,6 +499,9 @@ Phase 6 depends on all other phases.
 - [ ] AGENTS.md — same as CLAUDE.md (keep in sync)
 - [ ] codev/resources/arch.md — new GitHub layer, overview endpoint, Work view
 - [ ] codev/resources/workflow-reference.md — updated spawn examples
+- [ ] codev/resources/commands/agent-farm.md — `af spawn` CLI reference
+- [ ] codev/resources/commands/overview.md — spawn quick reference
+- [ ] codev/resources/commands/codev.md — init/doctor changes
 - [ ] Builder role definition — updated spawn instructions
 
 ## Change Log
