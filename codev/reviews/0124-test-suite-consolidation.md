@@ -68,12 +68,40 @@ Reduced 5 files:
 - Codex/Claude wanted tower route consolidation. Rebutted: audit found no overlap — service vs HTTP dispatch layers are complementary.
 - Claude flagged message-format.test.ts deletion as borderline. Acknowledged but maintained — stable string template code with no branching.
 
+## Spec Compliance
+
+- [x] Remove obsolete bugfix regression test files — 6 files deleted
+- [x] Consolidate terminal/session test overlap — pty-session.test.ts deleted, pty-manager.test.ts reduced
+- [x] Consolidate tunnel test overlap — integration file merged, edge-cases trimmed
+- [x] Remove trivial tests (type checks, string ops, lookup tables) — 69 tests removed
+- [x] Audit tower-instances vs tower-routes for overlap — no overlap found
+- [x] "When in doubt, keep the test" guardrail applied consistently
+- [x] All tests pass after consolidation
+- [ ] Net reduction >=200 (achieved 127 — see Deviation section)
+
 ## Lessons Learned
 
+### What Went Well
+- Phase 1 (bugfix file removal) and Phase 4 (trivial tests) were clean and straightforward
+- The conservative approach preserved coverage while achieving meaningful cleanup
+- 3-way consultation caught real issues (and some hallucinated ones that improved rebuttal rigor)
+
+### Challenges Encountered
+- **Phase 3 plan misattribution**: Resolved by auditing actual file contents vs plan assumptions. The plan's tunnel-edge-cases estimate was based on tests that live in tunnel-client.test.ts.
+- **Phase 4 tower route consolidation**: Resolved by performing the audit and documenting that no overlap exists. The files test complementary layers.
+
+### What Would Be Done Differently
+- Verify plan estimates against actual file contents before committing to targets
+- Include a preliminary audit step in the plan where test files are actually read before estimating removals
+- Set targets as ranges rather than point estimates
+
+### Methodology Insights
 1. **Plan estimates based on file-level scanning can misattribute tests.** Phase 3's estimate was wrong because the plan listed tests by file without verifying which describe blocks were in which file.
-
 2. **"When in doubt, keep the test" is the right default.** It's better to remove fewer tests with confidence than to hit a numeric target by removing borderline tests.
-
 3. **Complementary test layers look like overlap from the outside.** tower-instances and tower-routes seemed duplicative until the audit showed they test different layers (service vs controller).
-
 4. **Type-check tests have zero value in TypeScript.** Tests that only assign values to typed variables and assert the assignment are testing the compiler, not the code.
+
+## Follow-up Items
+
+- Consider a future pass at the `isRequestAllowed` function itself — it always returns `true`, so the function may be removable (not just the tests)
+- The `normalizeDeviceName` function could potentially be inlined since its tests were removed, but it's still called in production code
