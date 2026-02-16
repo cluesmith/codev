@@ -102,36 +102,43 @@ Detailed phase tracking (specify → plan → implement → review) stays in por
 ### Simplified spawn CLI
 
 ```bash
-af spawn 315                    # Positional arg. Find spec, fetch issue, spawn.
-af spawn 315 --soft             # Soft mode
-af spawn 315 --resume           # Resume existing worktree
-af spawn 315 --use-protocol tick  # Override protocol
-af spawn --task "fix the bug"   # Ad-hoc (no issue)
-af spawn --protocol maintain    # Protocol-only run
-af spawn --shell                # Bare session
+af spawn 315 --protocol spir           # Feature: SPIR protocol
+af spawn 315 --protocol bugfix         # Bug: BUGFIX protocol
+af spawn 320 --protocol tick --amends 315  # Amendment: TICK on spec 315, tracked as issue 320
+af spawn 315 --soft                    # Soft mode (no porch)
+af spawn 315 --resume                  # Resume existing worktree
+af spawn --task "fix the bug"          # Ad-hoc (no issue)
+af spawn --protocol maintain           # Protocol-only run
+af spawn --shell                       # Bare session
 ```
 
-The number is a positional argument, not a flag. `af spawn 315` replaces both `af spawn -p 315` and `af spawn --issue 315`. It:
+The number is a positional argument, not a flag. `af spawn 315` replaces both `af spawn -p 315` and `af spawn --issue 315`. Protocol must be specified explicitly via `--protocol` — no magic auto-detection. The architect AI should recommend protocols based on convention (SPIR for features, BUGFIX for bugs, TICK for amendments) but the human always chooses.
+
+**TICK amendments**: Create a new issue for the amendment work, then spawn with `--amends <original>`. The new issue tracks the work, the original spec is modified in-place, and the review file uses the new issue number.
+
+The spawn flow:
 1. Checks for `codev/specs/315-*.md` on disk
-2. If found → spec mode (SPIR/TICK based on protocol detection)
-3. If not found → fetches GitHub issue → bugfix mode
-4. Either way, the issue provides context (title, body, comments)
+2. Fetches GitHub issue #315 for context (title, body, comments)
+3. Uses the explicitly specified protocol
 
 Keep `-p` and `--issue` as hidden aliases for backwards compatibility.
 
-### Dashboard: Single "Work view"
+### Dashboard layout changes
 
 > **Visual mockup**: See `codev/spikes/work-view/mockup.html` for the interactive spike.
 
-The existing dashboard tabs (Projects, Terminals, etc.) are replaced by a single **Work view** — one page that shows everything the architect needs. No tab navigation.
+The top navigation tabs remain. The **Projects** and **Terminals** tabs are removed and replaced by a new **Work** tab. The **Files** tab moves from a top-level tab to a collapsible panel within the Work tab.
 
-File tabs (`af open`) are unaffected — they remain as a separate feature for viewing annotated files.
+**Layout (2/3 – 1/3 vertical split):**
+
+- **Top 2/3: Work view** — everything the architect needs on one screen
+- **Bottom 1/3: File panel** — annotated file viewer (`af open`), collapsible to just the file search bar. When collapsed, the Work view expands to fill the full height.
 
 **Work view sections (top to bottom):**
 
 1. **Active builders** — what's running, what phase, with terminal links
    - Source: Tower workspace state + porch `status.yaml` from active worktrees
-   - Click a builder to open its terminal (replaces the old Terminals tab)
+   - "Open" button opens the builder's Claude session as a new tab at the top (replaces the old Terminals tab)
    - Soft mode builders shown as "running" (no phase detail)
    - Blocked gates shown inline on the builder card
 
@@ -146,10 +153,19 @@ File tabs (`af open`) are unaffected — they remain as a separate feature for v
    - Open bugs with no active builder = unfixed
    - Shows: issue title, type (feature/bug), priority label, age
 
-**What the Work view replaces:**
-- Projects tab → backlog/bugs section (derived from GitHub Issues + filesystem)
-- Terminals tab → builder cards with embedded terminal links
+**Header actions:**
+- `+ Shell` button in the Work view header — opens a new shell tab at the top (same as existing `+ Shell` button in the Tabs section)
+
+**What changes:**
+- Projects tab → removed (replaced by backlog/bugs section in Work view)
+- Terminals tab → removed (builder cards with "Open" button replace it)
+- Files tab → moved from top-level tab to collapsible panel within Work tab
+- Info header → removed (the explanatory text and doc links at the top of the dashboard)
 - Gate indicators → inline on builder cards
+
+**What does NOT change:**
+- Top navigation tabs (still present, Work replaces Projects/Terminals/Files)
+- `af open` functionality (opens file in a new tab at the top, just repositioned within Work tab)
 
 **What the Work view does NOT show:**
 - Completed/integrated work (closed issues — use `gh issue list --state closed`)
@@ -207,40 +223,6 @@ GET /api/overview
 
 Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list`. Backlog: cached `gh issue list` (open issues — both features and bugs) cross-referenced with `codev/specs/` glob and `.builders/` to determine what's conceived, ready, or unfixed.
 
-## Implementation
-
-### Phase 1: Decouple porch from projectlist.md
-
-1. Rewrite `getProjectSummary()` to use `gh issue view <id> --json title,body`
-2. Fallback: if no GitHub issue, read spec file first paragraph for summary
-3. In-memory cache in porch process (no persistent cache needed)
-
-### Phase 2: Simplify spawn CLI
-
-1. Add positional argument to `af spawn` — the issue/project number
-2. Unified flow: check for spec file → if missing, fetch GitHub issue → determine protocol
-3. Keep `-p` and `--issue` as hidden aliases for backwards compat
-4. On spawn: comment on the issue ("Builder spawned")
-5. On cleanup with merged PR: close the issue
-
-### Phase 3: Dashboard rework
-
-1. Add Tower endpoint `GET /api/overview`:
-   - Active builders from Tower state + `status.yaml`
-   - Pending PRs from cached `gh pr list`
-   - Backlog from cached `gh issue list` cross-referenced with spec files on disk
-2. Replace StatusPanel with sections: builders, gates, PRs, backlog
-3. Remove projectlist.md polling
-
-### Phase 4: Cleanup
-
-1. Remove projectlist.md template from `codev-skeleton/templates/`
-2. Remove `projectlist-archive.md` template
-3. Update `codev init/adopt` to skip projectlist scaffolding
-4. Update all protocol docs, CLAUDE.md, AGENTS.md references
-5. Remove `copyProjectlist()` from scaffold.ts
-6. Archive this repo's `codev/projectlist.md`
-
 ## Success Criteria
 
 - [ ] No code reads projectlist.md
@@ -255,11 +237,9 @@ Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list`. Backlog
 
 ## Constraints
 
-- Must work offline (spec files on disk, Tower state, no GitHub needed for core function)
-- Must not break existing `af spawn -p` for numbered specs already on disk
-- `gh` CLI must be installed (already a requirement)
+- GitHub is required — `gh` CLI must be installed and authenticated
 - GitHub API rate limits: 5000/hr authenticated — sufficient for cached queries
-- Must support repos that don't use GitHub (skip GH features, keep file-based workflow)
+- Must not break existing `af spawn -p` for numbered specs already on disk
 - Soft mode builders need zero tracking infrastructure
 - Work view must be responsive / usable on mobile (check builder status, approve gates, see PRs on the go)
 
@@ -267,14 +247,12 @@ Builder data: Tower state + `status.yaml`. PR data: cached `gh pr list`. Backlog
 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| GitHub API unavailable | Low | Medium | Fall back to spec files, Tower state still works |
 | `gh` CLI not authenticated | Medium | Medium | `codev doctor` checks, clear error messages |
 | Soft builders have no phase info | Expected | None | Show as "running" without phase detail |
-| Non-GitHub repos | Medium | Medium | Feature-detect, skip GH features, file-based workflow |
 | PR/issue cache staleness | Low | Low | 60s TTL + refresh on demand |
 
-## Open Questions
+## Resolved Questions
 
-- [ ] Should `codev init` create GitHub labels automatically, or require explicit `codev setup-labels`?
-- [ ] Should `af cleanup` auto-close the GitHub issue, or leave that to the human?
-- [ ] For the backlog section, should we filter by labels or show all open issues (features + bugs)?
+- **Labels**: Create on first use — no setup step needed
+- **Issue closure**: Merging the PR closes the linked issue automatically
+- **Backlog filtering**: Show all open issues (features + bugs)
