@@ -600,8 +600,10 @@ export class SessionManager extends EventEmitter {
           return;
         }
         const pids: number[] = [];
+        // Use socketDir + '/' to prevent prefix overlaps (e.g. /run matching /run2)
+        const scopeMarker = this.config.socketDir.endsWith('/') ? this.config.socketDir : this.config.socketDir + '/';
         for (const line of stdout.trim().split('\n')) {
-          if (line.includes('shellper-main.js') && line.includes(this.config.socketDir)) {
+          if (line.includes('shellper-main.js') && line.includes(scopeMarker)) {
             const pid = parseInt(line.trim(), 10);
             if (!isNaN(pid) && pid > 0) pids.push(pid);
           }

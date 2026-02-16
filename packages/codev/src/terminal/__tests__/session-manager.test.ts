@@ -67,6 +67,11 @@ class MockPty implements IShellperPty {
 describe('SessionManager', () => {
   let socketDir: string;
   let cleanupFns: (() => void)[] = [];
+  // Bugfix #341: Track shellper PIDs for cleanup. When PTY commands exit
+  // naturally, removeDeadSession() deletes the session from the map, but
+  // the detached shellper process stays alive. killSession() in afterEach
+  // can't find it. We must kill by PID to prevent orphans.
+  const shellperPids = new Set<number>();
 
   beforeEach(() => {
     socketDir = tmpDir();
@@ -77,6 +82,12 @@ describe('SessionManager', () => {
     for (const fn of cleanupFns) {
       try { await fn(); } catch { /* noop */ }
     }
+    // Kill any orphaned shellper processes from this test
+    for (const pid of shellperPids) {
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* already dead */ }
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* already dead */ }
+    }
+    shellperPids.clear();
     // Small delay for sockets to close
     await new Promise((r) => setTimeout(r, 100));
     rmrf(socketDir);
@@ -590,6 +601,8 @@ describe('SessionManager', () => {
         cols: 80,
         rows: 24,
       });
+      const info1 = manager.getSessionInfo('int-test-1');
+      if (info1) shellperPids.add(info1.pid);
       cleanupFns.push(async () => {
         try { await manager.killSession('int-test-1'); } catch { /* noop */ }
       });
@@ -619,6 +632,8 @@ describe('SessionManager', () => {
         cols: 80,
         rows: 24,
       });
+      const info2 = manager.getSessionInfo('int-test-2');
+      if (info2) shellperPids.add(info2.pid);
       cleanupFns.push(async () => {
         try { await manager.killSession('int-test-2'); } catch { /* noop */ }
       });
@@ -939,6 +954,8 @@ describe('SessionManager', () => {
         restartDelay: 100,
         maxRestarts: 2,
       });
+      const mrInfo = manager.getSessionInfo('maxrestart-test');
+      if (mrInfo) shellperPids.add(mrInfo.pid);
       cleanupFns.push(async () => {
         try { await manager.killSession('maxrestart-test'); } catch { /* noop */ }
       });
@@ -1590,6 +1607,8 @@ describe('StderrBuffer', () => {
 describe('stderr tail logging (integration)', () => {
   let socketDir: string;
   let cleanupFns: (() => void)[] = [];
+  // Bugfix #341: Track shellper PIDs to kill in afterEach (see SessionManager describe)
+  const stderrShellperPids = new Set<number>();
 
   const shellperScript = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -1605,6 +1624,11 @@ describe('stderr tail logging (integration)', () => {
     for (const fn of cleanupFns) {
       try { await fn(); } catch { /* noop */ }
     }
+    for (const pid of stderrShellperPids) {
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* already dead */ }
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* already dead */ }
+    }
+    stderrShellperPids.clear();
     await new Promise((r) => setTimeout(r, 100));
     rmrf(socketDir);
   });
@@ -1630,6 +1654,8 @@ describe('stderr tail logging (integration)', () => {
       cols: 80,
       rows: 24,
     });
+    const seInfo = manager.getSessionInfo('stderr-exit-test');
+    if (seInfo) stderrShellperPids.add(seInfo.pid);
     cleanupFns.push(async () => {
       try { await manager.killSession('stderr-exit-test'); } catch { /* noop */ }
     });
@@ -1664,6 +1690,8 @@ describe('stderr tail logging (integration)', () => {
       cols: 80,
       rows: 24,
     });
+    const skInfo = manager.getSessionInfo('stderr-kill-test');
+    if (skInfo) stderrShellperPids.add(skInfo.pid);
 
     // Wait briefly for shellper to start
     await new Promise((r) => setTimeout(r, 500));
@@ -1735,6 +1763,8 @@ describe('stderr tail logging (integration)', () => {
       cols: 80,
       rows: 24,
     });
+    const sdInfo = manager.getSessionInfo('stderr-dedup-test');
+    if (sdInfo) stderrShellperPids.add(sdInfo.pid);
     cleanupFns.push(async () => {
       try { await manager.killSession('stderr-dedup-test'); } catch { /* noop */ }
     });
