@@ -136,6 +136,56 @@ export function parseStatusYaml(content: string): ParsedStatus {
 // =============================================================================
 
 /**
+ * Map a worktree directory name to its expected terminal role_id.
+ * Must match what buildAgentName() produces during spawn so we can
+ * cross-reference worktrees against active terminal sessions.
+ *
+ * All values are lowercased to match buildAgentName() convention.
+ *
+ * Examples:
+ *   spir-126-slug         → "builder-spir-126"
+ *   tick-130-slug         → "builder-tick-130"
+ *   bugfix-296-slug       → "builder-bugfix-296"
+ *   task-NAvW             → "builder-task-navw"
+ *   worktree-foIg         → "worktree-foig"
+ *   0110-legacy           → "builder-spir-110"
+ *   experiment-AbCd       → "builder-experiment-abcd"
+ */
+export function worktreeNameToRoleId(dirName: string): string | null {
+  const lower = dirName.toLowerCase();
+
+  // SPIR: spir-126-slug → builder-spir-126
+  const spirMatch = lower.match(/^spir-(\d+)/);
+  if (spirMatch) return `builder-spir-${Number(spirMatch[1])}`;
+
+  // TICK: tick-130-slug → builder-tick-130
+  const tickMatch = lower.match(/^tick-(\d+)/);
+  if (tickMatch) return `builder-tick-${Number(tickMatch[1])}`;
+
+  // Bugfix: bugfix-296-slug → builder-bugfix-296
+  const bugfixMatch = lower.match(/^bugfix-(\d+)/);
+  if (bugfixMatch) return `builder-bugfix-${Number(bugfixMatch[1])}`;
+
+  // Task: task-NAvW → builder-task-navw
+  const taskMatch = lower.match(/^task-([a-z0-9]+)/);
+  if (taskMatch) return `builder-task-${taskMatch[1]}`;
+
+  // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
+  const worktreeMatch = lower.match(/^worktree-([a-z0-9]+)/);
+  if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
+
+  // Legacy numeric: 0110-slug → builder-spir-110 (assume spir)
+  const numericMatch = lower.match(/^(\d+)(?:-|$)/);
+  if (numericMatch) return `builder-spir-${Number(numericMatch[1])}`;
+
+  // Generic protocol: experiment-AbCd → builder-experiment-abcd
+  const genericMatch = lower.match(/^([a-z]+)-([a-z0-9]+)/);
+  if (genericMatch) return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+
+  return null;
+}
+
+/**
  * Extract project ID from a worktree directory name.
  * Used to match worktrees to their correct codev/projects/{ID}-* directory.
  *
@@ -317,8 +367,13 @@ export class OverviewCache {
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
+   *
+   * @param activeBuilderRoleIds - Set of lowercased role_ids for builders with
+   *   live terminal sessions. When provided, only worktrees matching an active
+   *   session are included. When omitted, all discovered worktrees are returned
+   *   (backward-compatible / unit-test friendly).
    */
-  async getOverview(workspaceRoot: string): Promise<OverviewData> {
+  async getOverview(workspaceRoot: string, activeBuilderRoleIds?: Set<string>): Promise<OverviewData> {
     // Invalidate cache when workspace changes (prevents cross-workspace stale data)
     if (this.lastWorkspaceRoot !== null && this.lastWorkspaceRoot !== workspaceRoot) {
       this.invalidate();
@@ -327,8 +382,14 @@ export class OverviewCache {
 
     const errors: { prs?: string; issues?: string } = {};
 
-    // 1. Discover builders from .builders/ directory
-    const builders = discoverBuilders(workspaceRoot);
+    // 1. Discover builders from .builders/ directory, then filter to live sessions
+    let builders = discoverBuilders(workspaceRoot);
+    if (activeBuilderRoleIds) {
+      builders = builders.filter(b => {
+        const roleId = worktreeNameToRoleId(path.basename(b.worktreePath));
+        return roleId !== null && activeBuilderRoleIds.has(roleId);
+      });
+    }
     const activeBuilderIssues = new Set(
       builders
         .map(b => b.issueNumber)

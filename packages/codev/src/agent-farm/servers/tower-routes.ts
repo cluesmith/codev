@@ -561,7 +561,17 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     return;
   }
 
-  const data = await overviewCache.getOverview(workspaceRoot);
+  // Build set of active builder role_ids (lowercased) from live terminal sessions
+  const wsTerminals = getWorkspaceTerminals();
+  const entry = wsTerminals.get(normalizeWorkspacePath(workspaceRoot));
+  const activeBuilderRoleIds = new Set<string>();
+  if (entry) {
+    for (const key of entry.builders.keys()) {
+      activeBuilderRoleIds.add(key.toLowerCase());
+    }
+  }
+
+  const data = await overviewCache.getOverview(workspaceRoot, activeBuilderRoleIds);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }

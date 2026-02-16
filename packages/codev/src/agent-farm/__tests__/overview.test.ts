@@ -15,6 +15,7 @@ import {
   discoverBuilders,
   deriveBacklog,
   extractProjectIdFromWorktreeName,
+  worktreeNameToRoleId,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -185,6 +186,52 @@ describe('overview', () => {
 
     it('returns null for unknown prefixes', () => {
       expect(extractProjectIdFromWorktreeName('unknown-123-slug')).toBeNull();
+    });
+  });
+
+  // ==========================================================================
+  // worktreeNameToRoleId
+  // ==========================================================================
+
+  describe('worktreeNameToRoleId', () => {
+    it('maps SPIR worktree to builder-spir-N', () => {
+      expect(worktreeNameToRoleId('spir-126-project-mgmt')).toBe('builder-spir-126');
+    });
+
+    it('strips leading zeros from SPIR numbers', () => {
+      expect(worktreeNameToRoleId('spir-0001-feature')).toBe('builder-spir-1');
+    });
+
+    it('maps TICK worktree to builder-tick-N', () => {
+      expect(worktreeNameToRoleId('tick-130-codex-integration')).toBe('builder-tick-130');
+    });
+
+    it('maps bugfix worktree to builder-bugfix-N', () => {
+      expect(worktreeNameToRoleId('bugfix-296-some-fix')).toBe('builder-bugfix-296');
+    });
+
+    it('maps task worktree to builder-task-shortid (lowercased)', () => {
+      expect(worktreeNameToRoleId('task-NAvW')).toBe('builder-task-navw');
+    });
+
+    it('maps worktree to worktree-shortid (lowercased, no builder- prefix)', () => {
+      expect(worktreeNameToRoleId('worktree-foIg')).toBe('worktree-foig');
+    });
+
+    it('maps legacy numeric to builder-spir-N', () => {
+      expect(worktreeNameToRoleId('0110-legacy-name')).toBe('builder-spir-110');
+    });
+
+    it('maps bare legacy numeric', () => {
+      expect(worktreeNameToRoleId('0110')).toBe('builder-spir-110');
+    });
+
+    it('maps generic protocol worktree to builder-protocol-shortid', () => {
+      expect(worktreeNameToRoleId('experiment-AbCd')).toBe('builder-experiment-abcd');
+    });
+
+    it('returns null for empty string', () => {
+      expect(worktreeNameToRoleId('')).toBeNull();
     });
   });
 
@@ -642,6 +689,52 @@ describe('overview', () => {
 
       expect(mockFetchPRList).toHaveBeenCalledWith(tmpDir);
       expect(mockFetchIssueList).toHaveBeenCalledWith(tmpDir);
+    });
+
+    it('filters builders to only those with active terminal sessions', async () => {
+      // Create 3 worktrees: spir-42, bugfix-99, task-AbCd
+      createBuilderWorktree(tmpDir, 'spir-42-feature', [
+        "id: '0042'",
+        'protocol: spir',
+        'phase: implement',
+        'current_plan_phase: coding',
+        'gates:',
+      ].join('\n'), '0042-feature');
+
+      createBuilderWorktree(tmpDir, 'bugfix-99-fix', [
+        'id: builder-bugfix-99',
+        'title: fix-something',
+        'protocol: bugfix',
+        'phase: investigate',
+      ].join('\n'), 'builder-bugfix-99-fix-something');
+
+      createBuilderWorktree(tmpDir, 'task-AbCd');
+
+      // Without filter: all 3 worktrees discovered
+      const cache = new OverviewCache();
+      const unfiltered = await cache.getOverview(tmpDir);
+      expect(unfiltered.builders).toHaveLength(3);
+
+      // With filter: only spir-42 has an active session
+      cache.invalidate();
+      const activeSet = new Set(['builder-spir-42']);
+      const filtered = await cache.getOverview(tmpDir, activeSet);
+      expect(filtered.builders).toHaveLength(1);
+      expect(filtered.builders[0].issueNumber).toBe(42);
+    });
+
+    it('returns no builders when activeBuilderRoleIds is empty', async () => {
+      createBuilderWorktree(tmpDir, 'spir-42-feature', [
+        "id: '0042'",
+        'protocol: spir',
+        'phase: implement',
+        'current_plan_phase: coding',
+        'gates:',
+      ].join('\n'), '0042-feature');
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir, new Set());
+      expect(data.builders).toHaveLength(0);
     });
 
     it('invalidates cache when workspace root changes', async () => {
