@@ -75,13 +75,14 @@ export async function fetchGitHubIssueOrThrow(issueNumber: number): Promise<GitH
 /**
  * Fetch open PRs for the current repo.
  * Returns null on failure.
+ * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchPRList(): Promise<GitHubPR[] | null> {
+export async function fetchPRList(cwd?: string): Promise<GitHubPR[] | null> {
   try {
     const { stdout } = await execFileAsync('gh', [
       'pr', 'list',
       '--json', 'number,title,reviewDecision,body',
-    ]);
+    ], { cwd });
     return JSON.parse(stdout);
   } catch {
     return null;
@@ -91,14 +92,15 @@ export async function fetchPRList(): Promise<GitHubPR[] | null> {
 /**
  * Fetch open issues for the current repo.
  * Returns null on failure.
+ * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchIssueList(): Promise<GitHubIssueListItem[] | null> {
+export async function fetchIssueList(cwd?: string): Promise<GitHubIssueListItem[] | null> {
   try {
     const { stdout } = await execFileAsync('gh', [
       'issue', 'list',
       '--json', 'number,title,labels,createdAt',
       '--limit', '200',
-    ]);
+    ], { cwd });
     return JSON.parse(stdout);
   } catch {
     return null;

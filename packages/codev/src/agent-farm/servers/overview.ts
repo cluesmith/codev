@@ -312,12 +312,19 @@ export function deriveBacklog(
 export class OverviewCache {
   private prCache: { data: GitHubPR[]; fetchedAt: number } | null = null;
   private issueCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
+  private lastWorkspaceRoot: string | null = null;
   private readonly TTL = 60_000;
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
    */
   async getOverview(workspaceRoot: string): Promise<OverviewData> {
+    // Invalidate cache when workspace changes (prevents cross-workspace stale data)
+    if (this.lastWorkspaceRoot !== null && this.lastWorkspaceRoot !== workspaceRoot) {
+      this.invalidate();
+    }
+    this.lastWorkspaceRoot = workspaceRoot;
+
     const errors: { prs?: string; issues?: string } = {};
 
     // 1. Discover builders from .builders/ directory
@@ -328,9 +335,9 @@ export class OverviewCache {
         .filter((n): n is number => n !== null),
     );
 
-    // 2. Fetch PRs (cached)
+    // 2. Fetch PRs (cached, scoped to workspace)
     let pendingPRs: PROverview[] = [];
-    const prs = await this.fetchPRsCached();
+    const prs = await this.fetchPRsCached(workspaceRoot);
     if (prs === null) {
       errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
     } else {
@@ -348,9 +355,9 @@ export class OverviewCache {
         .filter((n): n is number => n !== null),
     );
 
-    // 3. Fetch issues and derive backlog (cached)
+    // 3. Fetch issues and derive backlog (cached, scoped to workspace)
     let backlog: BacklogItem[] = [];
-    const issues = await this.fetchIssuesCached();
+    const issues = await this.fetchIssuesCached(workspaceRoot);
     if (issues === null) {
       errors.issues = 'GitHub CLI unavailable — could not fetch issues';
     } else {
@@ -376,26 +383,26 @@ export class OverviewCache {
   // Private cache helpers
   // ===========================================================================
 
-  private async fetchPRsCached(): Promise<GitHubPR[] | null> {
+  private async fetchPRsCached(cwd: string): Promise<GitHubPR[] | null> {
     const now = Date.now();
     if (this.prCache && (now - this.prCache.fetchedAt) < this.TTL) {
       return this.prCache.data;
     }
 
-    const data = await fetchPRList();
+    const data = await fetchPRList(cwd);
     if (data !== null) {
       this.prCache = { data, fetchedAt: now };
     }
     return data;
   }
 
-  private async fetchIssuesCached(): Promise<GitHubIssueListItem[] | null> {
+  private async fetchIssuesCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
     const now = Date.now();
     if (this.issueCache && (now - this.issueCache.fetchedAt) < this.TTL) {
       return this.issueCache.data;
     }
 
-    const data = await fetchIssueList();
+    const data = await fetchIssueList(cwd);
     if (data !== null) {
       this.issueCache = { data, fetchedAt: now };
     }
