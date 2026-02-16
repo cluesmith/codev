@@ -43,7 +43,7 @@ Replaced `projectlist.md` as the project tracking registry with GitHub Issues. R
 
 ## Technical Debt
 
-- **Excluded tests still reference projectlist.md**: `init.test.ts`, `init.e2e.test.ts`, `adopt.e2e.test.ts` expect `projectlist.md` to be created. These are excluded from the test suite but should be updated when the tests are un-excluded.
+- **Excluded unit test still references projectlist.md**: `init.test.ts` expects `projectlist.md` to be created. This test is excluded from the test suite as flaky and should be updated when un-excluded. (E2E tests `init.e2e.test.ts`, `adopt.e2e.test.ts`, and `af.e2e.test.ts` were fixed during review phase.)
 - **Skeleton docs still reference projectlist.md**: `codev-skeleton/` roles, protocols, and command docs reference the old workflow. Should be updated in a coordinated release.
 - **PR linked issue not clickable**: Needs repo URL added to the overview API response.
 - **No Playwright tests for Work view**: Should be added to the integration test suite post-merge.
@@ -54,4 +54,4 @@ Replaced `projectlist.md` as the project tracking registry with GitHub Issues. R
 - Add Playwright tests for Work view (requires Tower infrastructure)
 - Consider adding repo URL to overview API for clickable PR linked issues
 - Reconcile CLAUDE.md/AGENTS.md divergence (MAINTAIN protocol)
-- Un-exclude and fix init.test.ts / E2E tests for new scaffold behavior
+- Un-exclude and fix init.test.ts for new scaffold behavior
