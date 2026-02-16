@@ -14,8 +14,6 @@ import { confirm } from '../lib/cli-prompts.js';
 import {
   createUserDirs,
   createProjectsDir,
-  copyProjectlist,
-  copyProjectlistArchive,
   copyConsultTypes,
   copyResourceTemplates,
   copyRoles,
@@ -128,20 +126,6 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   const projectsDirResult = createProjectsDir(targetDir, { skipExisting: true });
   if (projectsDirResult.created) {
     console.log(chalk.green('  +'), 'codev/projects/');
-    fileCount++;
-  }
-
-  // Create projectlist.md - skip if exists
-  const projectlistResult = copyProjectlist(targetDir, skeletonDir, { skipExisting: true });
-  if (projectlistResult.copied) {
-    console.log(chalk.green('  +'), 'codev/projectlist.md');
-    fileCount++;
-  }
-
-  // Create projectlist-archive.md - skip if exists
-  const archiveResult = copyProjectlistArchive(targetDir, skeletonDir, { skipExisting: true });
-  if (archiveResult.copied) {
-    console.log(chalk.green('  +'), 'codev/projectlist-archive.md');
     fileCount++;
   }
 

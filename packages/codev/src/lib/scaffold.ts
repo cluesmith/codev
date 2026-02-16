@@ -32,30 +32,6 @@ dist/
 *.swo
 `;
 
-/**
- * Inline fallback template for projectlist.md
- */
-const PROJECTLIST_FALLBACK = `# Project List
-
-Track all projects here. See codev documentation for status values.
-
-\`\`\`yaml
-projects:
-  - id: "0001"
-    title: "Example Project"
-    summary: "Brief description"
-    status: conceived
-    priority: medium
-    files:
-      spec: null
-      plan: null
-      review: null
-    dependencies: []
-    tags: []
-    notes: "Replace with your first project"
-\`\`\`
-`;
-
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
 }
@@ -122,9 +98,7 @@ export function copyProjectlist(
     return { copied: true };
   }
 
-  // Fallback to inline template
-  fs.writeFileSync(projectlistPath, PROJECTLIST_FALLBACK);
-  return { copied: true, usedFallback: true };
+  return { copied: false };
 }
 
 interface CopyProjectlistArchiveResult {
