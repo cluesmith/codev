@@ -18,6 +18,7 @@ import {
   getCloudConfigPath,
   getOrCreateMachineId,
   maskApiKey,
+  DEFAULT_CLOUD_URL,
   type CloudConfig,
 } from '../lib/cloud-config.js';
 import { createPendingRegistration, consumePendingRegistration } from '../lib/nonce-store.js';
@@ -25,6 +26,7 @@ import { redeemToken } from '../lib/token-exchange.js';
 import { validateDeviceName } from '../lib/device-name.js';
 import type { WorkspaceTerminals, InstanceStatus } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
+import { escapeHtml, readBody } from '../utils/server-utils.js';
 
 /** Minimal dependencies required by the tunnel module */
 export interface TunnelDeps {
@@ -44,7 +46,7 @@ let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
 const METADATA_REFRESH_MS = 30_000;
-const DEFAULT_SERVER_URL = 'https://cloud.codevos.ai';
+const DEFAULT_SERVER_URL = DEFAULT_CLOUD_URL;
 
 /** Stored references set by initTunnel() */
 let _deps: TunnelDeps | null = null;
@@ -274,24 +276,7 @@ export function shutdownTunnel(): void {
   _getInstances = null;
 }
 
-/**
- * Read the request body as a string.
- */
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-    req.on('error', reject);
-  });
-}
 
-/**
- * Generate a minimal HTML response page.
- */
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 function htmlPage(title: string, body: string): string {
   return `<!DOCTYPE html>

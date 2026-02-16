@@ -10,6 +10,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
+import { getTypeColor } from '../utils/display.js';
 import { openBrowser } from '../utils/shell.js';
 import { loadState, getBuilder, getBuilders } from '../state.js';
 import { getConfig } from '../utils/config.js';
@@ -105,27 +106,6 @@ async function displayBuilderList(): Promise<void> {
   logger.info('  af attach -p <id> --browser  # open in browser');
 }
 
-/**
- * Get color function for builder type
- */
-function getTypeColor(type: string): (text: string) => string {
-  switch (type) {
-    case 'spec':
-      return chalk.cyan;
-    case 'bugfix':
-      return chalk.red;
-    case 'task':
-      return chalk.magenta;
-    case 'protocol':
-      return chalk.yellow;
-    case 'worktree':
-      return chalk.blue;
-    case 'shell':
-      return chalk.gray;
-    default:
-      return chalk.white;
-  }
-}
 
 /**
  * Find the shellper socket path for a builder.

@@ -8,6 +8,7 @@ import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { getTypeColor } from '../utils/display.js';
 import chalk from 'chalk';
 
 /**
@@ -166,19 +167,3 @@ function getStatusColor(status: string, running: boolean): (text: string) => str
   }
 }
 
-function getTypeColor(type: string): (text: string) => string {
-  switch (type) {
-    case 'spec':
-      return chalk.cyan;
-    case 'task':
-      return chalk.magenta;
-    case 'protocol':
-      return chalk.yellow;
-    case 'worktree':
-      return chalk.blue;
-    case 'shell':
-      return chalk.gray;
-    default:
-      return chalk.white;
-  }
-}

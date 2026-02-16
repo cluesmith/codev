@@ -19,6 +19,27 @@ export function escapeHtml(str: string): string {
 }
 
 /**
+ * Read raw request body as a string with size limit.
+ */
+export function readBody(req: http.IncomingMessage, maxSize = 1024 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxSize) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
+  });
+}
+
+/**
  * Parse JSON body from request with size limit
  * @param req - HTTP incoming message
  * @param maxSize - Maximum body size in bytes (default 1MB)

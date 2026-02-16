@@ -70,6 +70,7 @@ vi.mock('../lib/cloud-config.js', () => ({
   getCloudConfigPath: (...args: unknown[]) => mockGetCloudConfigPath(...args),
   getOrCreateMachineId: (...args: unknown[]) => mockGetOrCreateMachineId(...args),
   maskApiKey: (...args: unknown[]) => mockMaskApiKey(...args),
+  DEFAULT_CLOUD_URL: 'https://cloud.codevos.ai',
 }));
 
 vi.mock('../lib/tunnel-client.js', () => ({

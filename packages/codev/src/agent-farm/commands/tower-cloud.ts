@@ -15,13 +15,14 @@ import {
   deleteCloudConfig,
   maskApiKey,
   getOrCreateMachineId,
+  DEFAULT_CLOUD_URL,
   type CloudConfig,
 } from '../lib/cloud-config.js';
 import { redeemToken } from '../lib/token-exchange.js';
 import { getTowerClient, type TowerTunnelStatus } from '../lib/tower-client.js';
 import { prompt, confirm } from '../../lib/cli-prompts.js';
 
-const CODEVOS_URL = process.env.CODEVOS_URL || 'https://cloud.codevos.ai';
+const CODEVOS_URL = process.env.CODEVOS_URL || DEFAULT_CLOUD_URL;
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 
 /**
@@ -86,7 +87,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
 
   // Resolve service URL: CLI --service flag > CODEVOS_URL env var > existing config > default
   // Normalize to HTTPS — HTTP POST requests get downgraded to GET by 301 redirects
-  const rawUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://cloud.codevos.ai';
+  const rawUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || DEFAULT_CLOUD_URL;
   const serverUrl = rawUrl.replace(/^http:\/\/(?!localhost)/, 'https://');
 
   // Start ephemeral callback server

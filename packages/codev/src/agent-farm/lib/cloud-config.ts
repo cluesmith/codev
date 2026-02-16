@@ -17,6 +17,8 @@ import {
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AGENT_FARM_DIR } from './tower-client.js';
+
+export const DEFAULT_CLOUD_URL = 'https://cloud.codevos.ai';
 const CLOUD_CONFIG_FILENAME = 'cloud-config.json';
 const MACHINE_ID_FILENAME = 'machine-id';
 
