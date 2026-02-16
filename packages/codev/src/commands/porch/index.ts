@@ -291,10 +291,10 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
   }
 
   // Advance to next protocol phase
-  advanceProtocolPhase(state, protocol, statusPath);
+  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath);
 }
 
-function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPath: string): void {
+function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string): void {
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
@@ -312,7 +312,7 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
 
   // If entering a phased phase (implement), extract plan phases
   if (isPhased(protocol, nextPhase.id)) {
-    const planPath = findPlanFile(process.cwd(), state.id, state.title);
+    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
     if (planPath) {
       state.plan_phases = extractPhasesFromFile(planPath);
       // extractPhasesFromFile already marks first phase as in_progress
@@ -336,7 +336,7 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
     console.log(chalk.bold(`YOUR TASK: ${firstPhase.id} - "${firstPhase.title}"`));
 
     // Show phase content from plan
-    const planPath = findPlanFile(process.cwd(), state.id, state.title);
+    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
     if (planPath) {
       const content = fs.readFileSync(planPath, 'utf-8');
       const phaseContent = getPhaseContent(content, firstPhase.id);
