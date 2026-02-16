@@ -34,7 +34,7 @@ import {
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
-import { notifyArchitect } from './notify.js';
+
 import type {
   ProjectState,
   Protocol,
@@ -302,7 +302,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         tasks: [{
           subject: `Request human approval: ${gateName}`,
           activeForm: `Requesting ${gateName} approval`,
-          description: `Run: porch gate ${state.id}\nThis will open the artifact for human review.\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} ready for review. Waiting for approval."\n\nSTOP and wait for human approval before proceeding.`,
+          description: `Gate ${gateName} is pending. The architect has already been notified.\n\nSTOP and wait for human approval before proceeding.`,
         }],
       };
     }
@@ -618,7 +618,6 @@ async function handleVerifyApproved(
     state.iteration = 1;
     state.history = [];
     writeState(statusPath, state);
-    notifyArchitect(state.id, gateName, workspaceRoot);
 
     return {
       status: 'gate_pending',
@@ -628,7 +627,7 @@ async function handleVerifyApproved(
       tasks: [{
         subject: `Request human approval: ${gateName}`,
         activeForm: `Requesting ${gateName} approval`,
-        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nRun: porch gate ${state.id}\n\nNotify the architect:\n\naf send architect "Project ${state.id}: ${gateName} ready for approval. All reviewers approved."\n\nSTOP and wait for human approval.`,
+        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`,
       }],
     };
   }
