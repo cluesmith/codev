@@ -305,10 +305,26 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: "2026-02-15"
     notes: "Shellper currently accepts one connection (Tower). Need multiple clients like tmux. Enables af attach in terminal."
 
+  - id: "0121"
+    title: "Rebuttal-Based Review Advancement"
+    summary: "Allow porch review phase to advance when consultation rebuttals are addressed, instead of requiring all-approve"
+    status: committed
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0121-rebuttal-based-review-advancement.md
+    dependencies: []
+    tags: [porch, review, consultation]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+      committed_at: "2026-02-16"
+    notes: "PR #307 merged. Review phase accepts rebuttals to consultation findings instead of requiring unanimous approval."
+
   - id: "0120"
     title: "Codex SDK Integration"
     summary: "Replace Codex CLI subprocess with @openai/codex-sdk for reliable streaming, structured output, and no JSONL parsing"
-    status: specified
+    status: committed
     priority: high
     release: null
     files:
@@ -318,7 +334,8 @@ Projects currently in development (conceived through committed), sorted by prior
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
-    notes: "Codex JSONL parsing has caused repeated bugs (#297, #298). SDK provides structured events like Claude Agent SDK."
+      committed_at: "2026-02-16"
+    notes: "PR #308 merged. Codex JSONL parsing replaced with SDK structured events."
 
 # Low Priority
 
@@ -1108,6 +1125,18 @@ Completed projects not associated with any formal release.
 Projects that have been abandoned or put on hold.
 
 ```yaml
+  - id: "0119"
+    title: "GitHub Issues as Project Tracking"
+    summary: "Use GitHub Issues for project tracking instead of projectlist.md"
+    status: on-hold
+    priority: medium
+    files:
+      spec: codev/specs/0119-github-issues-project-tracking.md
+    tags: [project-tracking, github]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "On hold. Builder and worktree deleted."
+
   - id: "0023"
     title: "Consult Tool (Stateful)"
     summary: "Add stateful session support to consult tool"
@@ -1196,7 +1225,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0121** - Reserve this number for your next project
+**0123** - Reserve this number for your next project
 
 ---
 
