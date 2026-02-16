@@ -20,18 +20,13 @@ export function BacklogList({ items }: BacklogListProps) {
   }
 
   // Group: "Ready to start" (has spec, no builder) above "Backlog" (no spec)
-  const ready = items.filter(i => i.hasSpec && !i.hasBuilder);
-  const backlog = items.filter(i => !i.hasSpec && !i.hasBuilder);
-  const building = items.filter(i => i.hasBuilder);
+  // Active builders are shown in the Builders section, not here
+  const nonBuilding = items.filter(i => !i.hasBuilder);
+  const ready = nonBuilding.filter(i => i.hasSpec);
+  const backlog = nonBuilding.filter(i => !i.hasSpec);
 
   return (
     <div className="backlog-list">
-      {building.length > 0 && (
-        <div className="backlog-group">
-          <h4 className="backlog-group-title">In Progress ({building.length})</h4>
-          {building.map(item => <BacklogItem key={item.number} item={item} />)}
-        </div>
-      )}
       {ready.length > 0 && (
         <div className="backlog-group">
           <h4 className="backlog-group-title">Ready to Start ({ready.length})</h4>

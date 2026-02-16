@@ -1473,6 +1473,26 @@ body {
   color: var(--text-secondary);
 }
 
+.work-file-panel-search {
+  flex: 1;
+  margin-left: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 3px 8px;
+  outline: none;
+}
+
+.work-file-panel-search::placeholder {
+  color: var(--text-muted);
+}
+
+.work-file-panel-search:focus {
+  border-color: var(--accent);
+}
+
 .work-file-panel-content {
   flex: 1;
   overflow-y: auto;

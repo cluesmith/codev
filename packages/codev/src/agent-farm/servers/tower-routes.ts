@@ -546,10 +546,9 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
   res.end(JSON.stringify({ instances }));
 }
 
-async function handleOverview(res: http.ServerResponse, url: URL): Promise<void> {
-  // Accept optional ?workspace= to specify the workspace root.
-  // Falls back to first known non-builder workspace path.
-  let workspaceRoot = url.searchParams.get('workspace');
+async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverride?: string): Promise<void> {
+  // Accept workspace from: explicit override (workspace-scoped route), ?workspace= param, or first known path.
+  let workspaceRoot = workspaceOverride || url.searchParams.get('workspace');
 
   if (!workspaceRoot) {
     const knownPaths = getKnownWorkspacePaths();
@@ -1129,6 +1128,16 @@ async function handleWorkspaceRoutes(
         }
       });
       return;
+    }
+
+    // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
+    if (req.method === 'GET' && apiPath === 'overview') {
+      return handleOverview(res, url, workspacePath);
+    }
+
+    // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)
+    if (req.method === 'POST' && apiPath === 'overview/refresh') {
+      return handleOverviewRefresh(res);
     }
 
     // Unhandled API route

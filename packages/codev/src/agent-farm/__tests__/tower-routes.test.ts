@@ -603,6 +603,34 @@ describe('tower-routes', () => {
       expect(parsed.backlog).toEqual([]);
     });
 
+    it('works via workspace-scoped route', async () => {
+      mockOverviewGetOverview.mockResolvedValueOnce({
+        builders: [{ id: '99', issueNumber: 99 }],
+        pendingPRs: [],
+        backlog: [],
+      });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/overview`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.builders).toHaveLength(1);
+    });
+
+    it('refresh works via workspace-scoped route', async () => {
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('POST', `/workspace/${encoded}/api/overview/refresh`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      expect(JSON.parse(body()).ok).toBe(true);
+      expect(mockOverviewInvalidate).toHaveBeenCalled();
+    });
+
     it('falls back to first known workspace when no query param', async () => {
       const { getKnownWorkspacePaths } = await import('../servers/tower-instances.js');
       (getKnownWorkspacePaths as any).mockReturnValueOnce(['/my/workspace']);

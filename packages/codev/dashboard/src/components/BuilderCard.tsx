@@ -15,7 +15,7 @@ function GateBadge({ name, status }: { name: string; status: string }) {
 }
 
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
-  const pendingGates = Object.entries(builder.gates).filter(([, s]) => s === 'pending');
+  const gateEntries = Object.entries(builder.gates).filter(([, s]) => s === 'pending' || s === 'approved');
   const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
 
@@ -37,9 +37,9 @@ export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
       {builder.mode === 'soft' && (
         <div className="builder-card-phase soft">running</div>
       )}
-      {pendingGates.length > 0 && (
+      {gateEntries.length > 0 && (
         <div className="builder-card-gates">
-          {pendingGates.map(([name, status]) => (
+          {gateEntries.map(([name, status]) => (
             <GateBadge key={name} name={name} status={status} />
           ))}
         </div>

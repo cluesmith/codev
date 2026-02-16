@@ -28,7 +28,7 @@ export function PRList({ prs }: PRListProps) {
             <div className="pr-item-title">{pr.title}</div>
             {pr.linkedIssue && (
               <div className="pr-linked-issue">
-                Issue #{pr.linkedIssue}
+                Linked: Issue #{pr.linkedIssue}
               </div>
             )}
           </div>

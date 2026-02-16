@@ -113,12 +113,27 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
 
       {/* Collapsible File Panel */}
       <div className={`work-file-panel ${filePanelOpen ? 'expanded' : 'collapsed'}`}>
-        <div
-          className="work-file-panel-header"
-          onClick={() => setFilePanelOpen(!filePanelOpen)}
-        >
-          <span className="work-file-panel-toggle">{filePanelOpen ? '▼' : '▲'}</span>
-          <span className="work-file-panel-label">Files</span>
+        <div className="work-file-panel-header">
+          <span
+            className="work-file-panel-toggle"
+            onClick={() => setFilePanelOpen(!filePanelOpen)}
+          >
+            {filePanelOpen ? '▼' : '▲'}
+          </span>
+          <span
+            className="work-file-panel-label"
+            onClick={() => setFilePanelOpen(!filePanelOpen)}
+          >
+            Files
+          </span>
+          {!filePanelOpen && (
+            <input
+              className="work-file-panel-search"
+              type="text"
+              placeholder="Search files..."
+              onFocus={() => setFilePanelOpen(true)}
+            />
+          )}
         </div>
         {filePanelOpen && (
           <div className="work-file-panel-content">
