@@ -1077,7 +1077,7 @@ describe('ShellperProcess', () => {
       towerSocket.destroy();
     });
 
-    it('failed write removes client from broadcast', async () => {
+    it('destroyed client is removed from broadcast', async () => {
       const logs: string[] = [];
       shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
@@ -1086,19 +1086,71 @@ describe('ShellperProcess', () => {
       const { socket: termSocket } = await connectAsTerminal(socketPath);
       await new Promise((r) => setTimeout(r, 50));
 
-      // Destroy terminal's writable side to force write failure
+      // Destroy the terminal socket — broadcast should detect and clean up
       termSocket.destroy();
       await new Promise((r) => setTimeout(r, 50));
 
-      // Broadcast data — should not throw, and removed client logged
+      // Trigger broadcast — destroyed terminal socket should be skipped
       mockPty.simulateData('after disconnect');
       await new Promise((r) => setTimeout(r, 100));
 
-      // Tower should still receive data
+      // Tower should still receive data (broadcast didn't throw)
       const parser = createFrameParser();
       towerSocket.pipe(parser);
       const framesPromise = collectFramesFor(parser, 200);
       mockPty.simulateData('still broadcasting');
+      const frames = await framesPromise;
+      const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
+      expect(dataFrames.length).toBeGreaterThan(0);
+
+      towerSocket.destroy();
+    });
+
+    it('failed write removes client from map', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: towerSocket } = await connectAndHandshake(socketPath);
+      await connectAsTerminal(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Access the server-side connections map (white-box test for branch coverage)
+      // We need to patch the server-side socket's write, not the client-side socket
+      const connections = (shellper as any).connections as Map<
+        string,
+        { socket: net.Socket; clientType: string }
+      >;
+      expect(connections.size).toBe(2);
+
+      // Find the terminal connection entry and patch its server-side socket.write
+      let termConnId: string | undefined;
+      for (const [id, entry] of connections) {
+        if (entry.clientType === 'terminal') {
+          termConnId = id;
+          entry.socket.write = (() => false) as typeof entry.socket.write;
+          break;
+        }
+      }
+      expect(termConnId).toBeDefined();
+
+      // Trigger broadcast — server-side write returns false, exercises ok === false branch
+      mockPty.simulateData('backpressure test');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Verify the log message from the ok === false branch (line 174 of shellper-process.ts)
+      expect(logs.some((msg) => msg.includes('Write failed') && msg.includes('removing'))).toBe(
+        true,
+      );
+
+      // Connection should have been removed from the map
+      expect(connections.has(termConnId!)).toBe(false);
+
+      // Tower should still receive subsequent broadcasts
+      const parser = createFrameParser();
+      towerSocket.pipe(parser);
+      const framesPromise = collectFramesFor(parser, 200);
+      mockPty.simulateData('after backpressure');
       const frames = await framesPromise;
       const dataFrames = frames.filter((f) => f.type === FrameType.DATA);
       expect(dataFrames.length).toBeGreaterThan(0);
