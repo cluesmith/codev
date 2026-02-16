@@ -340,7 +340,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0124"
     title: "Test Suite Consolidation"
     summary: "Remove ~285 obsolete, redundant, trivial, and over-mocked tests to make the suite leaner"
-    status: specified
+    status: integrated
     priority: medium
     release: null
     files:
@@ -350,7 +350,9 @@ Projects currently in development (conceived through committed), sorted by prior
     timestamps:
       conceived_at: "2026-02-16"
       specified_at: "2026-02-16"
-    notes: "Evaluation found 16% of tests removable. Focus on bugfix tests, terminal/tunnel consolidation, trivial removal."
+      committed_at: "2026-02-16"
+      integrated_at: "2026-02-16"
+    notes: "PR #312 merged. Net reduction of ~127 tests (below 200 target — documented as architect decision)."
 
   - id: "0123"
     title: "Codebase Dedup & Magic Constants"
