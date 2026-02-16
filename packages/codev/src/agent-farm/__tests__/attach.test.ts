@@ -512,6 +512,35 @@ describe('attach command', () => {
       Object.defineProperty(process.stdout, 'columns', { value: origCols, configurable: true });
       Object.defineProperty(process.stdout, 'rows', { value: origRows, configurable: true });
     });
+
+    it('should restore raw mode on cleanup (when TTY)', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      // Mock process.stdin as a TTY
+      const origIsTTY = process.stdin.isTTY;
+      const mockSetRawMode = vi.fn();
+      const origSetRawMode = process.stdin.setRawMode;
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      process.stdin.setRawMode = mockSetRawMode as any;
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Raw mode should have been enabled
+      expect(mockSetRawMode).toHaveBeenCalledWith(true);
+
+      // Trigger cleanup via exit
+      mockSetRawMode.mockClear();
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Raw mode should have been restored (set to false)
+      expect(mockSetRawMode).toHaveBeenCalledWith(false);
+
+      // Restore originals
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      process.stdin.setRawMode = origSetRawMode as any;
+    });
   });
 
   describe('terminal mode (default, no --browser)', () => {
