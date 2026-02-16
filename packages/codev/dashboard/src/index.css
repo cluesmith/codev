@@ -783,6 +783,72 @@ body {
   color: var(--text-primary);
 }
 
+/* Tip of the Day banner */
+.tip-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 16px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.tip-banner-label {
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.tip-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tip-banner-text code {
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.tip-banner-nav {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 2px;
+}
+
+.tip-banner-nav:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.tip-banner-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+
+.tip-banner-dismiss:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
 /* Work sections */
 .work-section {
   margin-bottom: 20px;
