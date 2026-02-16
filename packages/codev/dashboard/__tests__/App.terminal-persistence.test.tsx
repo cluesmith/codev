@@ -19,7 +19,7 @@ vi.mock('../src/hooks/useBuilderStatus.js', () => ({
       architect: { port: 4201, pid: 1234, terminalId: 'arch-1' },
       builders: [
         {
-          id: 'B1', name: 'Builder 1', port: 4210, pid: 2345,
+          id: 'B1', name: 'builder-spir-001', port: 4210, pid: 2345,
           status: 'running', phase: 'phase-1', worktree: '.builders/0001',
           branch: 'builder/0001', type: 'spec', terminalId: 'term-b1',
         },

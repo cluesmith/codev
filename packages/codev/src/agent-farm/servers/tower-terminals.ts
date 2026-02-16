@@ -447,7 +447,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       }
 
       const replayData = client.getReplayData() ?? Buffer.alloc(0);
-      const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
+      const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown');
 
       // Create a PtySession backed by the reconnected shellper client
       const session = manager.createSessionRaw({ label, cwd: workspacePath });
@@ -601,7 +601,7 @@ export async function getTerminalsForWorkspace(
         );
         if (client) {
           const replayData = client.getReplayData() ?? Buffer.alloc(0);
-          const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`;
+          const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id);
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.workspace_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
@@ -650,7 +650,7 @@ export async function getTerminalsForWorkspace(
       terminals.push({
         type: 'builder',
         id: builderId,
-        label: `Builder ${builderId}`,
+        label: builderId,
         url: `${proxyUrl}?tab=${builderId}`,
         active: true,
       });
@@ -691,7 +691,7 @@ export async function getTerminalsForWorkspace(
           terminals.push({
             type: 'builder',
             id: builderId,
-            label: `Builder ${builderId}`,
+            label: builderId,
             url: `${proxyUrl}?tab=${builderId}`,
             active: true,
           });

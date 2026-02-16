@@ -27,7 +27,7 @@ function buildTabs(state: DashboardState | null): Tab[] {
     tabs.push({
       id: builder.id,
       type: 'builder',
-      label: builder.name || `Builder ${builder.id}`,
+      label: builder.name || builder.id,
       closable: true,
       projectId: builder.id,
       terminalId: builder.terminalId,
