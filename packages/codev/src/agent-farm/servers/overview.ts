@@ -184,7 +184,12 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         const content = fs.readFileSync(statusFile, 'utf-8');
         const parsed = parseStatusYaml(content);
 
-        const issueNumber = parsed.id ? parseInt(parsed.id, 10) : null;
+        let issueNumber: number | null = parsed.id ? parseInt(parsed.id, 10) : null;
+        if (issueNumber !== null && Number.isNaN(issueNumber)) {
+          // Bugfix-style IDs like "builder-bugfix-315" — extract trailing number
+          const trailingNum = parsed.id!.match(/(\d+)$/);
+          issueNumber = trailingNum ? parseInt(trailingNum[1], 10) : null;
+        }
 
         builders.push({
           id: parsed.id || entry.name,

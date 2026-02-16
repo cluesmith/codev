@@ -103,7 +103,7 @@ describe('App - Terminal Tab Persistence (Bugfix #205)', () => {
     });
 
     // Switch to dashboard
-    fireEvent.click(screen.getByTestId('tab-dashboard'));
+    fireEvent.click(screen.getByTestId('tab-work'));
 
     // Terminal should STILL be in the DOM (not unmounted)
     expect(screen.queryByTestId('terminal-/ws/terminal/term-b1')).toBeTruthy();
@@ -114,7 +114,7 @@ describe('App - Terminal Tab Persistence (Bugfix #205)', () => {
     expect((pane as HTMLElement).style.display).toBe('none');
 
     // Dashboard should be visible
-    expect(screen.getByTestId('status-panel')).toBeTruthy();
+    expect(screen.getByTestId('work-view')).toBeTruthy();
   });
 
   it('preserves the same terminal DOM element across tab switches', async () => {
@@ -130,7 +130,7 @@ describe('App - Terminal Tab Persistence (Bugfix #205)', () => {
     const terminalBefore = screen.getByTestId('terminal-/ws/terminal/term-b1');
 
     // Switch away and back
-    fireEvent.click(screen.getByTestId('tab-dashboard'));
+    fireEvent.click(screen.getByTestId('tab-work'));
     fireEvent.click(screen.getByTestId('tab-B1'));
 
     // Should be the exact same DOM element (no unmount/remount)
@@ -152,7 +152,7 @@ describe('App - Terminal Tab Persistence (Bugfix #205)', () => {
     expect((pane as HTMLElement).style.display).toBe('');
 
     // Switch away → hidden
-    fireEvent.click(screen.getByTestId('tab-dashboard'));
+    fireEvent.click(screen.getByTestId('tab-work'));
     expect((pane as HTMLElement).style.display).toBe('none');
 
     // Switch back → visible again

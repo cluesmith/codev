@@ -47,9 +47,15 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
     try {
       const files = fs.readdirSync(specsDir);
       // Match by project ID prefix (handles zero-padded IDs like 0076)
-      const specFile = files.find(f =>
-        f.endsWith('.md') && (f.startsWith(projectId + '-') || f.startsWith(projectId + '.'))
-      );
+      const specFile = files.find(f => {
+        if (!f.endsWith('.md')) return false;
+        // Extract leading numeric prefix (handles both 42-name.md and 0042.name.md)
+        const numMatch = f.match(/^(\d+)/);
+        if (!numMatch) return false;
+        const normalizedPrefix = numMatch[1].replace(/^0+/, '') || '0';
+        const normalizedId = projectId.replace(/^0+/, '') || '0';
+        return normalizedPrefix === normalizedId;
+      });
       if (specFile) {
         const content = fs.readFileSync(path.join(specsDir, specFile), 'utf-8');
         // Extract first heading
