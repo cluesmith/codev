@@ -88,6 +88,14 @@ const spirProtocol = {
       verify: { type: 'impl', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
     },
+    {
+      id: 'review',
+      name: 'Review',
+      type: 'build_verify',
+      build: { prompt: 'review.md', artifact: 'codev/reviews/${PROJECT_ID}-*.md' },
+      verify: { type: 'pr', models: ['gemini', 'codex', 'claude'] },
+      max_iterations: 1,
+    },
   ],
 };
 
@@ -250,5 +258,76 @@ describe('porch rollback (bugfix #401)', () => {
     const updated = readState(statusPath);
     expect(updated.phase).toBe('plan');
     expect(updated.gates['plan-approval'].status).toBe('pending');
+  });
+
+  it('re-extracts plan phases when rolling back to a per_plan_phase phase', async () => {
+    // Set up a plan file with phases
+    const plansDir = path.join(testDir, 'codev', 'plans');
+    fs.mkdirSync(plansDir, { recursive: true });
+    const planContent = `# Plan
+
+## Phases
+
+\`\`\`json
+{"phases": [
+  {"id": "phase_1", "title": "Core types"},
+  {"id": "phase_2", "title": "State management"},
+  {"id": "phase_3", "title": "CLI wiring"}
+]}
+\`\`\`
+`;
+    fs.writeFileSync(path.join(plansDir, '0042-test-feature.md'), planContent);
+
+    const state = makeState({
+      phase: 'review',
+      plan_phases: [
+        { id: 'phase_1', title: 'Core types', status: 'complete' },
+        { id: 'phase_2', title: 'State management', status: 'complete' },
+        { id: 'phase_3', title: 'CLI wiring', status: 'complete' },
+      ],
+      current_plan_phase: null,
+      gates: {
+        'spec-approval': { status: 'approved', approved_at: '2026-01-20T10:00:00Z' },
+        'plan-approval': { status: 'approved', approved_at: '2026-01-20T11:00:00Z' },
+      },
+    });
+    const statusPath = getStatusPath(testDir, '0042', 'test-feature');
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    writeState(statusPath, state);
+
+    await rollback(testDir, '0042', 'implement');
+
+    const updated = readState(statusPath);
+    expect(updated.phase).toBe('implement');
+    expect(updated.plan_phases).toHaveLength(3);
+    expect(updated.plan_phases[0].id).toBe('phase_1');
+    expect(updated.plan_phases[0].status).toBe('in_progress');
+    expect(updated.plan_phases[1].status).toBe('pending');
+    expect(updated.current_plan_phase).toBe('phase_1');
+  });
+
+  it('clears history on rollback', async () => {
+    const state = makeState({
+      phase: 'plan',
+      history: [
+        {
+          iteration: 1,
+          build_output: '/tmp/build.txt',
+          reviews: [{ model: 'gemini', verdict: 'APPROVE' as const, file: '/tmp/review.txt' }],
+        },
+      ],
+      gates: {
+        'spec-approval': { status: 'approved', approved_at: '2026-01-20T10:00:00Z' },
+        'plan-approval': { status: 'pending' },
+      },
+    });
+    const statusPath = getStatusPath(testDir, '0042', 'test-feature');
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    writeState(statusPath, state);
+
+    await rollback(testDir, '0042', 'specify');
+
+    const updated = readState(statusPath);
+    expect(updated.history).toEqual([]);
   });
 });

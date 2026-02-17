@@ -545,8 +545,26 @@ export async function rollback(
   state.phase = targetPhase;
   state.iteration = 1;
   state.build_complete = false;
-  state.plan_phases = [];
-  state.current_plan_phase = null;
+  state.history = [];
+
+  // If rolling back to a phased phase, re-extract plan phases from plan file
+  if (isPhased(protocol, targetPhase)) {
+    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
+    if (planPath) {
+      state.plan_phases = extractPhasesFromFile(planPath);
+      if (state.plan_phases.length > 0) {
+        state.current_plan_phase = state.plan_phases[0].id;
+      } else {
+        state.current_plan_phase = null;
+      }
+    } else {
+      state.plan_phases = [];
+      state.current_plan_phase = null;
+    }
+  } else {
+    state.plan_phases = [];
+    state.current_plan_phase = null;
+  }
 
   writeState(statusPath, state);
 
