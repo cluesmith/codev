@@ -14,7 +14,7 @@ Comprehensive analysis of the Codev development system's performance over a two-
 - **Bugfix pipeline: 66% of fixes ship in under 30 minutes** (median 13 min, PR creation to merge). Outliers were overnight PRs waiting for architect review (#217 at 5.4h, #266 at 7.6h) or multi-iteration CMAP reviews (#280, #282 at ~1.6h each). The pipeline is genuinely autonomous: issue filed → builder spawned → fix implemented → 3-way review → merged.
 - **22 of 26 builders (85%) completed fully autonomously** — the 4 interventions were caused by infrastructure issues (broken tests, consultation timeouts, merge artifacts), not builder capability gaps
 - **20 pre-merge bugs caught** by multi-agent consultation: 1 security issue, 8 runtime failures, 11 quality/completeness gaps
-- **Reviewer specialization confirmed** — each model catches different bug categories:
+- **Reviewer complementarity**: No single reviewer caught all bugs. Codex excels at edge-case exhaustiveness, Claude at runtime semantics analysis, and Gemini at architectural perspective — genuinely non-overlapping capabilities.
   - **Codex**: Security edge cases, test completeness, exhaustive sweeps (11 of 20 catches)
   - **Claude**: Runtime semantics, type safety, critical missing parameters (5 catches, including the highest-severity ones)
   - **Gemini**: Architecture, build-breaking deletions, documentation (4 catches, near-zero false positives)
