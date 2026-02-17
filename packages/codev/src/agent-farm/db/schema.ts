@@ -125,4 +125,17 @@ CREATE TABLE IF NOT EXISTS known_workspaces (
   name TEXT NOT NULL,
   last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Cron tasks (Spec 399)
+-- Tracks scheduled task state across all workspaces
+CREATE TABLE IF NOT EXISTS cron_tasks (
+  id TEXT PRIMARY KEY,
+  workspace_path TEXT NOT NULL,
+  task_name TEXT NOT NULL,
+  last_run INTEGER,
+  last_result TEXT,
+  last_output TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(workspace_path, task_name)
+);
 `;

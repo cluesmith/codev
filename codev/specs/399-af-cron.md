@@ -13,9 +13,16 @@ Automated monitoring tasks that should run periodically (CI health checks, build
 
 Add a lightweight cron scheduler to Tower that runs workspace-defined tasks on a schedule and delivers results via `af send` to the architect.
 
-### Architecture
+### Design Decision: Tower-Resident Scheduler
 
-Tower already has interval-based patterns (rate limit cleanup, shellper periodic cleanup). `af cron` follows the same pattern — a scheduler loop that ticks on an interval, checks for due tasks, and executes them.
+**Why not system cron?** We evaluated wrapping system crontab but rejected it:
+- **Environment**: System cron runs with minimal env — no user PATH, no `GITHUB_TOKEN`, no `gh` in PATH. Tasks would fail silently.
+- **Sync friction**: Every YAML add/edit/remove requires `af cron install`. Forgotten syncs = stale/broken crontab entries.
+- **Lifecycle mismatch**: System cron keeps firing when Tower is down, producing zombie executions that can't deliver.
+
+**Why Tower-resident**: Tower already runs interval-based patterns (rate limit cleanup, shellper cleanup). The scheduler follows the same pattern — zero setup, inherits Tower's full environment, auto-detects YAML changes, and stops when Tower stops. The "reimplementing cron" concern is minimal: the isDue check is ~20 lines, not a general-purpose scheduler.
+
+### Architecture
 
 ```
 Tower Server
@@ -23,7 +30,7 @@ Tower Server
 └── CronScheduler (new)
     ├── loads task definitions from .af-cron/ per workspace
     ├── tracks last-run timestamps in SQLite
-    └── executes tasks → sends results via af send to architect
+    └── executes tasks async → sends results via af send to architect
 ```
 
 ### Task Definition Format
@@ -82,9 +89,9 @@ No need for a full cron library — a minimal parser handling `*`, `*/N`, and fi
 1. **Tick interval**: Scheduler checks every 60 seconds
 2. **Per-workspace**: Loads `.af-cron/*.yaml` from each known workspace
 3. **Deduplication**: Tracks `last_run` per task in SQLite — only runs if schedule says it's due
-4. **Execution**: Spawns shell command via `child_process.execSync` (with timeout)
+4. **Execution**: Spawns shell command via async `child_process.exec` (non-blocking, with timeout). Does NOT use `execSync` — the Node.js event loop stays responsive while tasks run.
 5. **Condition check**: If `condition` is set, evaluates it. If falsy, skip notification
-6. **Delivery**: Calls Tower's internal send handler to deliver message to target terminal
+6. **Delivery**: Sends message via the shared send mechanism (format + write + broadcast) to target terminal
 7. **Logging**: Results logged to Tower log file
 
 ### SQLite Schema
@@ -96,7 +103,8 @@ CREATE TABLE cron_tasks (
   task_name TEXT NOT NULL,
   last_run INTEGER,                 -- unix timestamp
   last_result TEXT,                 -- 'success' | 'failure' | 'skipped'
-  last_output TEXT,                 -- truncated stdout
+  last_output TEXT,                 -- truncated stdout (max 4KB)
+  enabled INTEGER NOT NULL DEFAULT 1, -- CLI enable/disable override
   UNIQUE(workspace_path, task_name)
 );
 ```
@@ -118,6 +126,8 @@ af cron disable <task-name>     # Disable without deleting
 GET  /api/cron/tasks              # List tasks (optional ?workspace= filter)
 GET  /api/cron/tasks/:name/status # Get task status and history
 POST /api/cron/tasks/:name/run    # Manually trigger a task
+POST /api/cron/tasks/:name/enable # Enable a task
+POST /api/cron/tasks/:name/disable # Disable a task
 ```
 
 ### Dashboard Integration
@@ -132,15 +142,16 @@ This is optional and can be a follow-up.
 ## What Changes
 
 1. **New module**: `packages/codev/src/agent-farm/servers/tower-cron.ts` — scheduler, task loading, execution
-2. **Tower server**: Start scheduler in listen callback, stop in gracefulShutdown
-3. **Tower routes**: Add `/api/cron/*` routes
-4. **SQLite migrations**: Add `cron_tasks` table
-5. **AF CLI**: Add `af cron` subcommand
-6. **Skeleton**: Add `.af-cron/` to gitignore template, add example task files
+2. **New module**: `packages/codev/src/agent-farm/servers/tower-cron-parser.ts` — minimal cron expression parser
+3. **Tower server**: Start scheduler in listen callback, stop in gracefulShutdown
+4. **Tower routes**: Add `/api/cron/*` routes
+5. **SQLite migrations**: Add `cron_tasks` table
+6. **AF CLI**: Add `af cron` subcommand
+7. **Skeleton**: Add example `.af-cron/` task files
 
 ## What Stays The Same
 
-- `af send` mechanism (reused as-is)
+- `af send` mechanism (reused via shared send utility)
 - Workspace detection
 - Tower startup/shutdown lifecycle (just adds one more interval)
 - No changes to builder or architect roles
@@ -148,7 +159,7 @@ This is optional and can be a follow-up.
 ## Scope
 
 - Cron parser: minimal, no external dependencies
-- Execution: synchronous shell commands with timeout (no parallel task execution)
+- Execution: async shell commands with timeout (non-blocking)
 - No retry logic — if a task fails, it reports the failure and waits for next schedule
 - Dashboard integration deferred to follow-up
 
@@ -156,6 +167,7 @@ This is optional and can be a follow-up.
 
 - [ ] `.af-cron/*.yaml` files are loaded per workspace
 - [ ] Tasks execute on schedule and deliver messages via `af send`
+- [ ] Task execution is non-blocking (async `exec`, not `execSync`)
 - [ ] Conditional notifications work (only alert when condition is true)
 - [ ] `af cron list` shows configured tasks
 - [ ] `af cron status` shows last run times and results

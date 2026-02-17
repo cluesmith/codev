@@ -50,6 +50,9 @@ import {
   stopInstance,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
+import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
+import { getGlobalDb } from '../db/index.js';
+import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
   getTerminalManager,
@@ -139,6 +142,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
+  'GET /api/cron/tasks':  (_req, res, url) => handleCronList(res, url),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
 };
@@ -207,6 +211,12 @@ export async function handleRequest(
     const terminalRouteMatch = url.pathname.match(/^\/api\/terminals\/([^/]+)(\/.*)?$/);
     if (terminalRouteMatch) {
       return await handleTerminalRoutes(req, res, url, terminalRouteMatch);
+    }
+
+    // Cron task routes: /api/cron/tasks/:name/* (Spec 399)
+    const cronTaskMatch = url.pathname.match(/^\/api\/cron\/tasks\/([^/]+)\/(status|run|enable|disable)$/);
+    if (cronTaskMatch) {
+      return await handleCronTaskAction(req, res, url, cronTaskMatch);
     }
 
     // Workspace routes: /workspace/:base64urlPath/* (Spec 0090 Phase 4)
@@ -1995,4 +2005,168 @@ function handleWorkspaceAnnotate(
     }
     return;
   }
+}
+
+// ============================================================================
+// Cron route handlers (Spec 399)
+// ============================================================================
+
+function handleCronList(res: http.ServerResponse, url: URL): void {
+  const workspaceFilter = url.searchParams.get('workspace') || undefined;
+
+  const tasks = getAllTasks();
+  const filtered = workspaceFilter
+    ? tasks.filter(t => t.workspacePath === workspaceFilter)
+    : tasks;
+
+  // Merge with SQLite state
+  const db = getGlobalDb();
+  const result = filtered.map(task => {
+    const taskId = getTaskId(task.workspacePath, task.name);
+    const row = db.prepare(
+      'SELECT last_run, last_result, enabled FROM cron_tasks WHERE id = ?',
+    ).get(taskId) as { last_run: number | null; last_result: string | null; enabled: number } | undefined;
+
+    return {
+      name: task.name,
+      schedule: task.schedule,
+      enabled: row ? row.enabled === 1 : task.enabled,
+      last_run: row?.last_run ?? null,
+      last_result: row?.last_result ?? null,
+      workspacePath: task.workspacePath,
+    };
+  });
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
+}
+
+async function handleCronTaskAction(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  match: RegExpMatchArray,
+): Promise<void> {
+  const taskName = decodeURIComponent(match[1]);
+  const action = match[2]; // status | run | enable | disable
+  const workspace = url.searchParams.get('workspace') || undefined;
+
+  // Find the task across workspaces
+  const allTasks = getAllTasks();
+  const matchingTasks = allTasks.filter(t => {
+    if (t.name !== taskName) return false;
+    if (workspace && t.workspacePath !== workspace) return false;
+    return true;
+  });
+
+  if (matchingTasks.length === 0) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Cron task '${taskName}' not found` }));
+    return;
+  }
+
+  if (matchingTasks.length > 1 && !workspace) {
+    res.writeHead(409, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'AMBIGUOUS',
+      message: `Multiple tasks named '${taskName}' found. Specify ?workspace= to disambiguate.`,
+      workspaces: matchingTasks.map(t => t.workspacePath),
+    }));
+    return;
+  }
+
+  const task = matchingTasks[0];
+
+  switch (action) {
+    case 'status':
+      return handleCronTaskStatus(res, task);
+    case 'run':
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+      return await handleCronRun(res, task);
+    case 'enable':
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+      return handleCronEnable(res, task);
+    case 'disable':
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+      return handleCronDisable(res, task);
+    default:
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'NOT_FOUND' }));
+  }
+}
+
+function handleCronTaskStatus(res: http.ServerResponse, task: CronTask): void {
+  const taskId = getTaskId(task.workspacePath, task.name);
+  const db = getGlobalDb();
+  const row = db.prepare(
+    'SELECT last_run, last_result, last_output, enabled FROM cron_tasks WHERE id = ?',
+  ).get(taskId) as {
+    last_run: number | null;
+    last_result: string | null;
+    last_output: string | null;
+    enabled: number;
+  } | undefined;
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    name: task.name,
+    schedule: task.schedule,
+    command: task.command,
+    enabled: row ? row.enabled === 1 : task.enabled,
+    last_run: row?.last_run ?? null,
+    last_result: row?.last_result ?? null,
+    last_output: row?.last_output ?? null,
+    workspacePath: task.workspacePath,
+    target: task.target,
+    timeout: task.timeout,
+  }));
+}
+
+async function handleCronRun(res: http.ServerResponse, task: CronTask): Promise<void> {
+  try {
+    const { result, output } = await executeTask(task);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, result, output }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'EXECUTION_FAILED', message: (err as Error).message }));
+  }
+}
+
+function handleCronEnable(res: http.ServerResponse, task: CronTask): void {
+  const taskId = getTaskId(task.workspacePath, task.name);
+  const db = getGlobalDb();
+  db.prepare(`
+    INSERT INTO cron_tasks (id, workspace_path, task_name, enabled)
+    VALUES (?, ?, ?, 1)
+    ON CONFLICT(id) DO UPDATE SET enabled = 1
+  `).run(taskId, task.workspacePath, task.name);
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true, name: task.name, enabled: true }));
+}
+
+function handleCronDisable(res: http.ServerResponse, task: CronTask): void {
+  const taskId = getTaskId(task.workspacePath, task.name);
+  const db = getGlobalDb();
+  db.prepare(`
+    INSERT INTO cron_tasks (id, workspace_path, task_name, enabled)
+    VALUES (?, ?, ?, 0)
+    ON CONFLICT(id) DO UPDATE SET enabled = 0
+  `).run(taskId, task.workspacePath, task.name);
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true, name: task.name, enabled: false }));
 }

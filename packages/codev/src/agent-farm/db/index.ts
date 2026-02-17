@@ -360,7 +360,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 9;
+  const GLOBAL_CURRENT_VERSION = 10;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -612,6 +612,25 @@ function ensureGlobalDatabase(): Database.Database {
     });
     migrate();
     console.log('[info] Renamed project_path → workspace_path in global tables (Spec 0112)');
+  }
+
+  // Migration v10: Add cron_tasks table (Spec 399)
+  const v10 = db.prepare('SELECT version FROM _migrations WHERE version = 10').get();
+  if (!v10) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cron_tasks (
+        id TEXT PRIMARY KEY,
+        workspace_path TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        last_run INTEGER,
+        last_result TEXT,
+        last_output TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(workspace_path, task_name)
+      );
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (10)').run();
+    console.log('[info] Created cron_tasks table (Spec 399)');
   }
 
   return db;

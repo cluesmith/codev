@@ -122,6 +122,37 @@ describe('Database Schema', () => {
       expect(tableNames).toContain('terminal_sessions');
       expect(tableNames).toContain('file_tabs');
       expect(tableNames).toContain('known_workspaces');
+      expect(tableNames).toContain('cron_tasks');
+    });
+
+    it('should create cron_tasks with correct columns and constraints', () => {
+      // Insert a valid cron task
+      db.prepare(`
+        INSERT INTO cron_tasks (id, workspace_path, task_name, enabled)
+        VALUES ('test-id', '/tmp/ws', 'CI Health Check', 1)
+      `).run();
+
+      const row = db.prepare('SELECT * FROM cron_tasks WHERE id = ?').get('test-id') as Record<string, unknown>;
+      expect(row.workspace_path).toBe('/tmp/ws');
+      expect(row.task_name).toBe('CI Health Check');
+      expect(row.enabled).toBe(1);
+      expect(row.last_run).toBeNull();
+      expect(row.last_result).toBeNull();
+      expect(row.last_output).toBeNull();
+    });
+
+    it('should enforce unique constraint on workspace_path + task_name', () => {
+      db.prepare(`
+        INSERT INTO cron_tasks (id, workspace_path, task_name, enabled)
+        VALUES ('id-1', '/tmp/ws', 'task-a', 1)
+      `).run();
+
+      expect(() => {
+        db.prepare(`
+          INSERT INTO cron_tasks (id, workspace_path, task_name, enabled)
+          VALUES ('id-2', '/tmp/ws', 'task-a', 1)
+        `).run();
+      }).toThrow();
     });
 
     it('should create terminal_sessions indexes', () => {

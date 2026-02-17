@@ -22,6 +22,8 @@ import {
   initTunnel,
   shutdownTunnel,
 } from './tower-tunnel.js';
+import { initCron, shutdownCron } from './tower-cron.js';
+import { resolveTarget } from './tower-messages.js';
 import {
   initInstances,
   shutdownInstances,
@@ -139,13 +141,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
   stopSendBuffer();
 
-  // 5. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
+  // 5. Stop cron scheduler (Spec 399)
+  shutdownCron();
+
+  // 6. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
   shutdownTunnel();
 
-  // 6. Tear down instance module (Spec 0105 Phase 3)
+  // 7. Tear down instance module (Spec 0105 Phase 3)
   shutdownInstances();
 
-  // 7. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
+  // 8. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
 
   log('INFO', 'Graceful shutdown complete');
@@ -323,6 +328,14 @@ server.listen(port, '127.0.0.1', async () => {
     deleteTerminalSession,
     deleteWorkspaceTerminalSessions,
     getTerminalsForWorkspace,
+  });
+
+  // Spec 399: Initialize cron scheduler after instances are ready
+  initCron({
+    log,
+    getKnownWorkspacePaths,
+    resolveTarget,
+    getTerminalManager: () => getTerminalManager(),
   });
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
