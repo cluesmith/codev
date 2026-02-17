@@ -69,7 +69,8 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
       const frame = decodeFrame(Buffer.from(rawData));
 
       if (frame.type === 'data') {
-        // Write raw input to terminal
+        // Record user input for typing awareness (Spec 403)
+        session.recordUserInput();
         session.write(frame.data.toString('utf-8'));
       } else if (frame.type === 'control') {
         // Handle control messages
@@ -89,6 +90,7 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
     } catch {
       // If decode fails, try treating as raw UTF-8 input (for simpler clients)
       try {
+        session.recordUserInput();
         session.write(rawData.toString('utf-8'));
       } catch {
         // Ignore malformed input

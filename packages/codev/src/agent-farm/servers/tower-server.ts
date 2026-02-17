@@ -44,7 +44,7 @@ import {
 import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
-import { handleRequest } from './tower-routes.js';
+import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
@@ -135,6 +135,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 4. Stop rate limit cleanup and shellper periodic cleanup
   clearInterval(rateLimitCleanupInterval);
   if (shellperCleanupInterval) clearInterval(shellperCleanupInterval);
+
+  // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
+  stopSendBuffer();
 
   // 5. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
   shutdownTunnel();
@@ -284,6 +287,9 @@ server.listen(port, '127.0.0.1', async () => {
     registerKnownWorkspace,
     getKnownWorkspacePaths,
   });
+
+  // Spec 403: Start send buffer for typing-aware message delivery
+  startSendBuffer(log);
 
   // TICK-001: Reconcile terminal sessions from previous run.
   // Must run BEFORE initInstances() so that API request handlers

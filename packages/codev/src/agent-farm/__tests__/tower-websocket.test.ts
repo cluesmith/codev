@@ -49,6 +49,7 @@ function makeSession(): any {
     detach: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),
+    recordUserInput: vi.fn(),
   };
 }
 
@@ -147,7 +148,23 @@ describe('tower-websocket', () => {
       // Emit a data frame (0x01 prefix)
       ws.emit('message', encodeDataFrame('hello'));
 
+      expect(session.recordUserInput).toHaveBeenCalledTimes(1);
       expect(session.write).toHaveBeenCalledWith('hello');
+    });
+
+    it('does not record user input for control frames', () => {
+      const ws = makeWs();
+      const session = makeSession();
+      const req = makeReq();
+
+      handleTerminalWebSocket(ws, session, req);
+
+      ws.emit('message', encodeControlFrame({
+        type: 'resize',
+        payload: { cols: 120, rows: 40 },
+      }));
+
+      expect(session.recordUserInput).not.toHaveBeenCalled();
     });
 
     it('handles resize control frames', () => {

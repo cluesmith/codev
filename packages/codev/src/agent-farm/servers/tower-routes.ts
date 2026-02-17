@@ -38,6 +38,9 @@ import {
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
+import { SendBuffer } from './send-buffer.js';
+import type { BufferedMessage } from './send-buffer.js';
+import type { PtySession } from '../../terminal/pty-session.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -67,6 +70,32 @@ const __dirname = path.dirname(__filename);
 
 // Singleton cache for overview endpoint (Spec 0126 Phase 4)
 const overviewCache = new OverviewCache();
+
+// Singleton send buffer for typing-aware message delivery (Spec 403)
+const sendBuffer = new SendBuffer();
+
+/** Deliver a buffered message to a session (write + broadcast + log). */
+function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
+  session.write(msg.formattedMessage);
+  if (!msg.noEnter) {
+    session.write('\r');
+  }
+  broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
+}
+
+/** Start the send buffer flush timer (called from tower-server during init). */
+export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void): void {
+  sendBuffer.start(
+    (id) => getTerminalManager().getSession(id),
+    deliverBufferedMessage,
+    log,
+  );
+}
+
+/** Stop the send buffer and deliver remaining messages (called from tower-server during shutdown). */
+export function stopSendBuffer(): void {
+  sendBuffer.stop();
+}
 
 // ============================================================================
 // Route context — dependencies provided by the orchestrator
@@ -712,24 +741,10 @@ async function handleSend(
     formattedMessage = raw ? message : formatArchitectMessage(message, undefined, false);
   }
 
-  // Optionally interrupt first
-  if (interrupt) {
-    session.write('\x03'); // Ctrl+C
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  // Write the message to the terminal
-  session.write(formattedMessage);
-
-  // Send Enter to submit (unless noEnter)
-  if (!noEnter) {
-    session.write('\r');
-  }
-
-  // Broadcast structured message to WebSocket subscribers
+  // Build broadcast payload (used for both immediate and deferred delivery)
   const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
-  broadcastMessage({
-    type: 'message',
+  const broadcastPayload = {
+    type: 'message' as const,
     from: {
       project: path.basename(senderWorkspace),
       agent: from ?? 'unknown',
@@ -741,15 +756,45 @@ async function handleSend(
     content: message,
     metadata: { raw, source: 'api' },
     timestamp: new Date().toISOString(),
-  });
+  };
+  const logMessage = `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`;
 
-  ctx.log('INFO', `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+  // Optionally interrupt first — bypass buffering entirely
+  if (interrupt) {
+    session.write('\x03'); // Ctrl+C
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  // Check if user is idle — deliver immediately or buffer (Spec 403)
+  const shouldDefer = !interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs);
+
+  if (shouldDefer) {
+    // User is actively typing — buffer for deferred delivery
+    sendBuffer.enqueue({
+      sessionId: result.terminalId,
+      formattedMessage,
+      noEnter,
+      timestamp: Date.now(),
+      broadcastPayload,
+      logMessage,
+    });
+    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+  } else {
+    // User is idle (or interrupt) — deliver immediately
+    session.write(formattedMessage);
+    if (!noEnter) {
+      session.write('\r');
+    }
+    broadcastMessage(broadcastPayload);
+    ctx.log('INFO', logMessage);
+  }
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
     terminalId: result.terminalId,
     resolvedTo: result.agent,
+    deferred: shouldDefer,
   }));
 }
 

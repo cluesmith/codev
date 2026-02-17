@@ -60,6 +60,7 @@ export class PtySession extends EventEmitter {
   private readonly reconnectTimeoutMs: number;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
+  private _lastInputAt = 0;
 
   constructor(private readonly config: PtySessionConfig) {
     super();
@@ -347,6 +348,21 @@ export class PtySession extends EventEmitter {
 
   get clientCount(): number {
     return this.clients.size;
+  }
+
+  /** Record that a user sent input to this session. */
+  recordUserInput(): void {
+    this._lastInputAt = Date.now();
+  }
+
+  /** Whether the user has been idle (no input) for at least thresholdMs. */
+  isUserIdle(thresholdMs: number): boolean {
+    return Date.now() - this._lastInputAt >= thresholdMs;
+  }
+
+  /** Timestamp (epoch ms) of the last user input, or 0 if none. */
+  get lastInputAt(): number {
+    return this._lastInputAt;
   }
 
   private cleanup(): void {

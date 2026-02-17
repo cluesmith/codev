@@ -777,7 +777,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234 }),
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -790,6 +790,59 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.resolvedTo).toBe('architect');
       expect(parsed.terminalId).toBe('term-001');
+      expect(parsed.deferred).toBe(false);
+      expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('returns deferred:true when user is actively typing (Spec 403)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.deferred).toBe(true);
+      // Message should NOT be written to session when deferred
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('delivers immediately when interrupt:true even if user is typing (Spec 403)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'urgent', workspace: '/tmp/ws',
+        options: { interrupt: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.deferred).toBe(false);
+      // Should have written Ctrl+C and the message
       expect(mockWrite).toHaveBeenCalled();
     });
   });
