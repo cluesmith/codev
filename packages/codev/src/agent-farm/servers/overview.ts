@@ -621,9 +621,15 @@ export class OverviewCache {
         .filter((n): n is number => n !== null),
     );
 
-    // 2. Fetch PRs (cached, scoped to workspace)
+    // 2. Fetch PRs, issues, and recently closed in parallel (each is independently cached)
+    const [prs, issues, closed] = await Promise.all([
+      this.fetchPRsCached(workspaceRoot),
+      this.fetchIssuesCached(workspaceRoot),
+      this.fetchRecentlyClosedCached(workspaceRoot),
+    ]);
+
+    // 3. Process PRs
     let pendingPRs: PROverview[] = [];
-    const prs = await this.fetchPRsCached(workspaceRoot);
     if (prs === null) {
       errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
     } else {
@@ -643,9 +649,8 @@ export class OverviewCache {
         .filter((n): n is number => n !== null),
     );
 
-    // 3. Fetch issues and derive backlog (cached, scoped to workspace)
+    // 4. Process issues and derive backlog
     let backlog: BacklogItem[] = [];
-    const issues = await this.fetchIssuesCached(workspaceRoot);
     if (issues === null) {
       errors.issues = 'GitHub CLI unavailable — could not fetch issues';
     } else {
@@ -661,9 +666,8 @@ export class OverviewCache {
       }
     }
 
-    // 4. Fetch recently closed issues (cached, scoped to workspace)
+    // 5. Process recently closed issues
     let recentlyClosed: RecentlyClosedItem[] = [];
-    const closed = await this.fetchRecentlyClosedCached(workspaceRoot);
     if (closed !== null) {
       recentlyClosed = closed.map(issue => {
         const { type } = parseLabelDefaults(issue.labels);

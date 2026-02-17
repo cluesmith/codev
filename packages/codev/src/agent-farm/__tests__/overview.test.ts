@@ -1292,5 +1292,40 @@ describe('overview', () => {
         fs.rmSync(tmpDir2, { recursive: true, force: true });
       }
     });
+
+    it('fetches PRs, issues, and recently closed in parallel (Bugfix #400)', async () => {
+      // Track the order of mock call starts and completions to verify concurrency.
+      // If calls are sequential, each starts after the previous completes.
+      // If parallel, all three start before any completes.
+      const callLog: string[] = [];
+
+      mockFetchPRList.mockImplementation(() => {
+        callLog.push('pr-start');
+        return new Promise(resolve => {
+          setTimeout(() => { callLog.push('pr-end'); resolve([]); }, 50);
+        });
+      });
+      mockFetchIssueList.mockImplementation(() => {
+        callLog.push('issue-start');
+        return new Promise(resolve => {
+          setTimeout(() => { callLog.push('issue-end'); resolve([]); }, 50);
+        });
+      });
+      mockFetchRecentlyClosed.mockImplementation(() => {
+        callLog.push('closed-start');
+        return new Promise(resolve => {
+          setTimeout(() => { callLog.push('closed-end'); resolve([]); }, 50);
+        });
+      });
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      // All three starts should come before any ends (parallel execution)
+      const starts = callLog.filter(e => e.endsWith('-start'));
+      const firstEnd = callLog.findIndex(e => e.endsWith('-end'));
+      expect(starts).toHaveLength(3);
+      expect(firstEnd).toBeGreaterThanOrEqual(3); // all 3 starts before first end
+    });
   });
 });
