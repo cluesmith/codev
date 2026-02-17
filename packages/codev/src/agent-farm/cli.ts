@@ -364,6 +364,103 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Cron commands (Spec 399)
+  const cronCmd = program
+    .command('cron')
+    .description('Scheduled workspace tasks');
+
+  cronCmd
+    .command('list')
+    .description('List configured cron tasks')
+    .option('--all', 'Show tasks across all workspaces')
+    .option('-w, --workspace <path>', 'Filter by workspace path')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (options) => {
+      const { cronList } = await import('./commands/cron.js');
+      try {
+        await cronList({
+          all: options.all,
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  cronCmd
+    .command('status <name>')
+    .description('Show status and last run info for a task')
+    .option('-w, --workspace <path>', 'Workspace path (required if task name is ambiguous)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (name, options) => {
+      const { cronStatus } = await import('./commands/cron.js');
+      try {
+        await cronStatus(name, {
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  cronCmd
+    .command('run <name>')
+    .description('Trigger immediate execution of a task')
+    .option('-w, --workspace <path>', 'Workspace path (required if task name is ambiguous)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (name, options) => {
+      const { cronRun } = await import('./commands/cron.js');
+      try {
+        await cronRun(name, {
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  cronCmd
+    .command('enable <name>')
+    .description('Enable a disabled task')
+    .option('-w, --workspace <path>', 'Workspace path (required if task name is ambiguous)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (name, options) => {
+      const { cronEnable } = await import('./commands/cron.js');
+      try {
+        await cronEnable(name, {
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  cronCmd
+    .command('disable <name>')
+    .description('Disable a task without deleting')
+    .option('-w, --workspace <path>', 'Workspace path (required if task name is ambiguous)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (name, options) => {
+      const { cronDisable } = await import('./commands/cron.js');
+      try {
+        await cronDisable(name, {
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Tower command - cross-project dashboard
   const towerCmd = program
     .command('tower')
