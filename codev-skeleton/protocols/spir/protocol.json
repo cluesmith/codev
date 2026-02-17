@@ -17,7 +17,7 @@
       "type": "build_verify",
       "build": {
         "prompt": "specify.md",
-        "artifact": "codev/specs/${PROJECT_ID}-*.md"
+        "artifact": "codev/specs/${PROJECT_TITLE}.md"
       },
       "verify": {
         "type": "spec-review",
@@ -39,7 +39,7 @@
       "type": "build_verify",
       "build": {
         "prompt": "plan.md",
-        "artifact": "codev/plans/${PROJECT_ID}-*.md"
+        "artifact": "codev/plans/${PROJECT_TITLE}.md"
       },
       "verify": {
         "type": "plan-review",
@@ -52,9 +52,9 @@
         "push": true
       },
       "checks": {
-        "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
-        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md",
-        "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_ID}-*.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
+        "plan_exists": "test -f codev/plans/${PROJECT_TITLE}.md",
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_TITLE}.md",
+        "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_TITLE}.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
       },
       "gate": "plan-approval",
       "next": "implement"
@@ -103,7 +103,7 @@
       "type": "build_verify",
       "build": {
         "prompt": "review.md",
-        "artifact": "codev/reviews/${PROJECT_ID}-*.md"
+        "artifact": "codev/reviews/${PROJECT_TITLE}.md"
       },
       "verify": {
         "type": "pr-ready",
