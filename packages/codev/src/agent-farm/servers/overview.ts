@@ -547,7 +547,7 @@ export function deriveBacklog(
   return issues
     .filter(issue => !prLinkedIssues.has(issue.number))
     .map(issue => {
-      const { type, priority } = parseLabelDefaults(issue.labels);
+      const { type, priority } = parseLabelDefaults(issue.labels, issue.title);
       const specFile = specFiles.get(issue.number);
       const planFile = planFiles.get(issue.number);
       const reviewFile = reviewFiles.get(issue.number);
