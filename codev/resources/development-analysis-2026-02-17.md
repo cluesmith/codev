@@ -16,6 +16,10 @@ Comprehensive analysis of the Codev development system's performance over a two-
 - **Bugfix pipeline: 66% of fixes ship in under 30 minutes**, median 13 minutes from PR creation to merge
 - **Context recovery: 100% success rate** — all 4 specs that exhausted context windows recovered via porch `status.yaml`
 - **False positive rate improved** from ~25% to ~18%, driven by the rebuttal mechanism (Spec 0121) and Codex JSONL parsing fix (Spec 0120)
+- **Reviewer specialization confirmed** — each model catches different bug categories:
+  - **Codex**: Security edge cases, test completeness, exhaustive sweeps (11 of 20 catches)
+  - **Claude**: Runtime semantics, type safety, critical missing parameters (5 catches, including the highest-severity ones)
+  - **Gemini**: Architecture, build-breaking deletions, documentation (4 catches, near-zero false positives)
 - **16 post-merge escapes** (8 code defects, 8 design gaps) — predominantly process lifecycle bugs and async timing issues where static code review is weakest
 - **Throughput equivalent to a 3–4 person elite engineering team** based on industry PR-merge benchmarks (see Section 4.4)
 
@@ -164,7 +168,7 @@ Phase decomposition serves two purposes: enabling incremental consultation (catc
 |--------|-------|
 | Total consultation rounds (impl phases) | ~200 |
 | Rounds resulting in APPROVE (all 3) | ~120 (60%) |
-| Rounds with ≥1 REQUEST_CHANGES | ~80 (40%) |
+| Rounds with 1+ REQUEST_CHANGES | ~80 (40%) |
 | Rounds with false-positive REQUEST_CHANGES | ~35 (18%) |
 | Average iterations per phase | 2.3 |
 | Median iterations per phase | 2 |
