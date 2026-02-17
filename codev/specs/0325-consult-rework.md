@@ -132,17 +132,16 @@ The consult command must figure out what artifact to review. The rules depend on
 
 **Multiple matches**: If a glob like `codev/specs/<N>-*.md` returns multiple files, the command errors with a list of matches and asks the user to resolve.
 
-For PR reviews (`--type pr` and `--type integration`), the model runs with cwd set to a temporary worktree of the PR branch so file reads reflect the actual PR code. See "Temporary worktree lifecycle" below.
+For PR reviews (`--type pr` and `--type integration`), the model receives the PR diff as context and reads other files from the local filesystem. See "PR review context" below.
 
-### Temporary worktree lifecycle
+### PR review context
 
-PR reviews (`--type pr` and `--type integration`) need the model to see the actual PR branch code, not the current branch. The consult command handles this by creating a temporary git worktree:
+PR reviews (`--type pr` and `--type integration`) give the model two things:
 
-1. **Creation**: `git worktree add --detach <tmp-path> <pr-branch>` where `<tmp-path>` is `.consult-tmp/<pr-number>-<timestamp>` relative to the git top-level directory (determined via `git rev-parse --show-toplevel`). The `.consult-tmp/` directory must be listed in `.gitignore`.
-2. **Model execution**: The model runs with `cwd` set to the temporary worktree.
-3. **Cleanup (success)**: After the model completes, the worktree is removed via `git worktree remove <tmp-path>`.
-4. **Cleanup (failure)**: Register cleanup in a `finally` block. Also register `SIGINT`/`SIGTERM` handlers to clean up on process kill. If the process is hard-killed (SIGKILL), the worktree may linger — `git worktree prune` (run by git periodically) handles stale entries.
-5. **Conflict handling**: If the PR branch cannot be checked out (e.g., deleted remote branch), error clearly: "Cannot create worktree for PR #N: branch not found."
+1. **The PR diff**: Fetched via `gh pr diff <number>` and included in the prompt as context. This shows exactly what changed.
+2. **Local filesystem access**: The model runs with `cwd` set to the current worktree (wherever consult was invoked). It can read any file from disk to understand surrounding code.
+
+No temporary worktrees are created. The model reviews the PR as a PR (diff-based) and uses file access for additional context about the codebase.
 
 ### All models get file access
 
@@ -249,7 +248,7 @@ Key differences:
 - [ ] `consult -m X --protocol spir --type spec` auto-detects spec in builder worktrees
 - [ ] `consult -m X --protocol spir --type spec --issue 42` finds spec from architect
 - [ ] `consult -m X --protocol spir --type impl` reviews implementation via git diff
-- [ ] `consult -m X --protocol spir --type pr` runs model against PR branch code, not main
+- [ ] `consult -m X --protocol spir --type pr` passes PR diff to model with local file access
 - [ ] `consult -m X --protocol spir --type phase` detects current phase and scopes diff to phase commit
 - [ ] `consult -m X --type integration` works without `--protocol` (shared prompt)
 - [ ] All three models (including Gemini) have file access in the correct worktree
@@ -269,13 +268,13 @@ Key differences:
 - [ ] Errors when `--protocol`/`--type` contain invalid characters (path traversal prevention)
 - [ ] Errors when prompt template file not found in resolved location
 - [ ] Errors when `--protocol` is provided without `--type`
-- [ ] Temporary PR worktree is cleaned up on success, error, and signal (SIGINT/SIGTERM)
+- [ ] PR diff is correctly fetched and included in model prompt
 
 ## Constraints
 
 - Must not break porch integration — porch calls consult programmatically
 - Must not require additional API keys or new model installations
-- Temporary worktrees for PR reviews must be cleaned up reliably
+- PR reviews must include the actual PR diff (via `gh pr diff`), not stale code
 - All flags visible in logs (no hidden env var state)
 - Claude SDK nesting guard bypass (`CLAUDECODE` env var removal) must be preserved
 - If SDK dangling handles prevent clean process exit, add `process.exit(0)` after completion as a workaround
