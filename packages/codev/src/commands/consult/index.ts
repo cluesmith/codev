@@ -573,10 +573,8 @@ async function runConsultation(
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
     // Use --output-format json to capture token usage/cost in structured output.
-    // Only use --yolo in protocol mode (structured reviews).
-    // General mode must NOT use --yolo to prevent unintended file writes (#370).
-    const yoloArgs = generalMode ? [] : ['--yolo'];
-    cmd = [config.cli, ...yoloArgs, '--output-format', 'json', ...config.args, query];
+    // Never use --yolo — it allows Gemini to write files (#370).
+    cmd = [config.cli, '--output-format', 'json', ...config.args, query];
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
