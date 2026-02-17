@@ -136,7 +136,7 @@
           "description": "CLI integration tests"
         }
       },
-      "gate": "pr-ready",
+      "gate": "pr",
       "next": null
     }
   ],

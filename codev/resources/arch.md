@@ -364,7 +364,7 @@ All state operations are synchronous for simplicity:
 #### Builder Lifecycle States
 
 ```
-spawning → implementing → blocked → implementing → pr-ready → complete
+spawning → implementing → blocked → implementing → pr → complete
                ↑______________|
 ```
 
@@ -373,7 +373,7 @@ spawning → implementing → blocked → implementing → pr-ready → complete
 | `spawning` | Worktree created, builder starting |
 | `implementing` | Actively working on spec |
 | `blocked` | Needs architect help |
-| `pr-ready` | Implementation complete, awaiting review |
+| `pr` | Implementation complete, awaiting review |
 | `complete` | Merged, ready for cleanup |
 
 ### Worktree Management
@@ -1454,7 +1454,7 @@ af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 - Full `af` command reference
 
 **builder.md** - Builder role with status lifecycle:
-- Status definitions: spawning, implementing, blocked, pr-ready, complete
+- Status definitions: spawning, implementing, blocked, pr, complete
 - Working in isolated git worktrees
 - When and how to report blocked status
 - Deliverables and constraints

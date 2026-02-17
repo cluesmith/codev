@@ -73,7 +73,7 @@ describe('af status naming display (Phase 4)', () => {
       architect: null,
       builders: [
         { id: 'builder-spir-109', name: '109-messaging', type: 'spec', worktree: '/project/.builders/spir-109', terminalId: 'term-1', status: 'implementing', phase: 'impl' },
-        { id: 'builder-bugfix-42', name: '42-fix-auth', type: 'issue', worktree: '/project/.builders/bugfix-42', terminalId: 'term-2', status: 'pr-ready', phase: 'review' },
+        { id: 'builder-bugfix-42', name: '42-fix-auth', type: 'issue', worktree: '/project/.builders/bugfix-42', terminalId: 'term-2', status: 'pr', phase: 'review' },
       ],
       utils: [],
       annotations: [],

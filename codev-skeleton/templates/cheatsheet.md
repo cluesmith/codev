@@ -76,10 +76,12 @@ A **role** defines who does what work and what tools/permissions they have.
 | **Consultant** | External reviewers providing second opinions on specs, plans, implementations |
 
 **Consultant Flavors** (via `--type`):
-- `spec-review` - Review specification completeness
-- `plan-review` - Review implementation plan feasibility
-- `impl-review` - Review code for spec adherence
-- `integration-review` - Review for architectural fit
+- `spec` - Review specification completeness
+- `plan` - Review implementation plan feasibility
+- `impl` - Review code for spec adherence
+- `pr` - Review pull request before merge
+- `phase` - Phase-scoped review (builder only)
+- `integration` - Review for architectural fit
 
 ### Context Hierarchy
 

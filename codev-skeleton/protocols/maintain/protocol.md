@@ -420,9 +420,9 @@ After completing all tasks and validation, run a 3-way consultation review:
 
 ```bash
 # Run all three in parallel
-consult --model gemini --type impl-review pr <branch-name> &
-consult --model codex --type impl-review pr <branch-name> &
-consult --model claude --type impl-review pr <branch-name> &
+consult -m gemini --protocol maintain --type pr &
+consult -m codex --protocol maintain --type pr &
+consult -m claude --protocol maintain --type pr &
 wait
 ```
 

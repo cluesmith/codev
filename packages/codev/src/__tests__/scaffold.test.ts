@@ -53,15 +53,12 @@ describe('Scaffold Utilities', () => {
       '# {{PROJECT_NAME}} Instructions\n\nAgents template'
     );
 
-    // Create mock consult-types directory
+    // Create mock consult-types directory (only integration-review remains in shared dir;
+    // protocol-specific types moved to per-protocol dirs in Spec 325)
     fs.mkdirSync(path.join(mockSkeletonDir, 'consult-types'), { recursive: true });
     fs.writeFileSync(
-      path.join(mockSkeletonDir, 'consult-types', 'spec-review.md'),
-      '# Spec Review\n\nSpec review prompt'
-    );
-    fs.writeFileSync(
-      path.join(mockSkeletonDir, 'consult-types', 'impl-review.md'),
-      '# Impl Review\n\nImpl review prompt'
+      path.join(mockSkeletonDir, 'consult-types', 'integration-review.md'),
+      '# Integration Review\n\nIntegration review prompt'
     );
 
     // Create mock roles directory
@@ -124,25 +121,22 @@ describe('Scaffold Utilities', () => {
 
       const result = copyConsultTypes(targetDir, mockSkeletonDir);
 
-      expect(result.copied).toContain('spec-review.md');
-      expect(result.copied).toContain('impl-review.md');
+      expect(result.copied).toContain('integration-review.md');
       expect(result.directoryCreated).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'))).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types', 'impl-review.md'))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'consult-types', 'integration-review.md'))).toBe(true);
     });
 
     it('should skip existing files in adopt mode', () => {
       const targetDir = path.join(tempDir, 'project');
       fs.mkdirSync(path.join(targetDir, 'codev', 'consult-types'), { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'), 'custom content');
+      fs.writeFileSync(path.join(targetDir, 'codev', 'consult-types', 'integration-review.md'), 'custom content');
 
       const result = copyConsultTypes(targetDir, mockSkeletonDir, { skipExisting: true });
 
-      expect(result.copied).toContain('impl-review.md');
-      expect(result.skipped).toContain('spec-review.md');
+      expect(result.skipped).toContain('integration-review.md');
       expect(result.directoryCreated).toBe(false);
       // Verify existing file was not overwritten
-      expect(fs.readFileSync(path.join(targetDir, 'codev', 'consult-types', 'spec-review.md'), 'utf-8')).toBe('custom content');
+      expect(fs.readFileSync(path.join(targetDir, 'codev', 'consult-types', 'integration-review.md'), 'utf-8')).toBe('custom content');
     });
 
     it('should handle missing source directory gracefully', () => {

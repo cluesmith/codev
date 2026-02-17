@@ -125,12 +125,7 @@
         "parallel": true,
         "max_rounds": 1
       },
-      "gate": {
-        "name": "pr-ready",
-        "description": "Amendment ready for PR",
-        "requires": ["tests_pass", "review_complete"],
-        "next": null
-      }
+      "gate": "pr"
     }
   ],
   "signals": {

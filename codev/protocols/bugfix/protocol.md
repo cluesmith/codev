@@ -401,9 +401,9 @@ BUGFIX uses **PR-only CMAP reviews**, which is intentionally lighter than SPIR's
 **3-Way Review Pattern**:
 ```bash
 # Run all three in parallel, in background
-consult --model gemini --type pr-ready pr 50 &
-consult --model codex --type pr-ready pr 50 &
-consult --model claude --type pr-ready pr 50 &
+consult -m gemini --protocol bugfix --type pr &
+consult -m codex --protocol bugfix --type pr &
+consult -m claude --protocol bugfix --type pr &
 wait
 ```
 

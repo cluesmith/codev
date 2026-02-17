@@ -47,9 +47,9 @@ EOF
 Run 3-way parallel consultation on the PR:
 
 ```bash
-consult --model gemini pr <PR_NUMBER> &
-consult --model codex pr <PR_NUMBER> &
-consult --model claude pr <PR_NUMBER> &
+consult -m gemini --protocol bugfix --type pr &
+consult -m codex --protocol bugfix --type pr &
+consult -m claude --protocol bugfix --type pr &
 ```
 
 All three should run in the background (`run_in_background: true`).

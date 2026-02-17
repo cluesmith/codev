@@ -167,7 +167,7 @@ wait
 ## Builder Lifecycle
 
 ```
-spawning → implementing → blocked → implementing → pr-ready → complete
+spawning → implementing → blocked → implementing → pr → complete
                 ↑______________|
 ```
 
@@ -176,7 +176,7 @@ spawning → implementing → blocked → implementing → pr-ready → complete
 | `spawning` | Worktree created, builder starting up |
 | `implementing` | Actively working on the spec |
 | `blocked` | Stuck, needs architect help |
-| `pr-ready` | Implementation complete, ready for review |
+| `pr` | Implementation complete, ready for review |
 | `complete` | Merged, worktree can be cleaned up |
 
 ## Git Workflow

@@ -118,7 +118,7 @@ Before PR:
 
 **IMPORTANT: Create the PR BEFORE signaling completion.** The PR must exist so that
 porch consultation reviews the actual PR, and the architect can review a real PR
-when the pr-ready gate fires.
+when the pr gate fires.
 
 ```bash
 gh pr create --title "[Spec {{project_id}}] {{title}}" --body "$(cat <<'EOF'

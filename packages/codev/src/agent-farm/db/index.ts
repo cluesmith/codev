@@ -219,7 +219,7 @@ function ensureLocalDatabase(): Database.Database {
           port INTEGER NOT NULL DEFAULT 0,
           pid INTEGER NOT NULL DEFAULT 0,
           status TEXT NOT NULL DEFAULT 'spawning'
-            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr-ready', 'complete')),
+            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
           phase TEXT NOT NULL DEFAULT '',
           worktree TEXT NOT NULL,
           branch TEXT NOT NULL,
@@ -289,6 +289,57 @@ function ensureLocalDatabase(): Database.Database {
       }
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (6)').run();
+  }
+
+  // Migration v7: Rename builder status 'pr-ready' → 'pr' (Bugfix #368)
+  const v7 = db.prepare('SELECT version FROM _migrations WHERE version = 7').get();
+  if (!v7) {
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
+      .get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql?.includes('pr-ready')) {
+      // SQLite can't alter CHECK constraints, so recreate table
+      db.exec(`
+        CREATE TABLE builders_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'spawning'
+            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
+          phase TEXT NOT NULL DEFAULT '',
+          worktree TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'spec'
+            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
+          task_text TEXT,
+          protocol_name TEXT,
+          issue_number INTEGER,
+          terminal_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO builders_new
+          SELECT id, name, port, pid,
+            CASE WHEN status = 'pr-ready' THEN 'pr' ELSE status END,
+            phase, worktree, branch, type, task_text, protocol_name,
+            issue_number, terminal_id, started_at, updated_at
+          FROM builders;
+        DROP TABLE builders;
+        ALTER TABLE builders_new RENAME TO builders;
+        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
+        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
+        CREATE TRIGGER IF NOT EXISTS builders_updated_at
+          AFTER UPDATE ON builders
+          FOR EACH ROW
+          BEGIN
+            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
+          END;
+      `);
+      console.log('[info] Migrated builders table: renamed status pr-ready to pr');
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (7)').run();
   }
 
   return db;

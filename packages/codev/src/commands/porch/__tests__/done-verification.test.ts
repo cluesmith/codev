@@ -48,7 +48,7 @@ function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
     gates: {
       'spec-approval': { status: 'pending' as const },
       'plan-approval': { status: 'pending' as const },
-      'pr-ready': { status: 'pending' as const },
+      'pr': { status: 'pending' as const },
     },
     iteration: 1,
     build_complete: false,
@@ -120,7 +120,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);
@@ -147,7 +147,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);
@@ -179,7 +179,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'pending' as const },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);

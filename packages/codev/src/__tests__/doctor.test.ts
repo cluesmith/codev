@@ -378,7 +378,7 @@ describe('doctor command', () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles', 'review-types'), { recursive: true });
       fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'consult-types', 'spec-review.md'),
+        path.join(testBaseDir, 'codev', 'consult-types', 'integration-review.md'),
         '# Spec Review'
       );
       fs.writeFileSync(
@@ -502,7 +502,7 @@ describe('doctor command', () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'consult-types', 'spec-review.md'),
+        path.join(testBaseDir, 'codev', 'consult-types', 'integration-review.md'),
         '# Spec Review'
       );
       // No roles/review-types/ directory

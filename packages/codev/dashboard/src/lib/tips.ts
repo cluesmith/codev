@@ -26,12 +26,12 @@ export const tips: string[] = [
   'Porch drives SPIR, TICK, and BUGFIX protocols via a state machine with automatic consultations',
 
   // consult usage
-  'Use `consult --type integration-review pr N` for 3-way PR reviews with Gemini, Codex, and Claude',
-  'Run `consult --model gemini spec 42` to get a Gemini review of your specification',
-  'Use `consult --type spec-review spec 42` for a focused specification review',
-  'Run `consult --type plan-review plan 42` to get feedback on your implementation plan',
+  'Use `consult -m gemini --type integration` for integration reviews with Gemini',
+  'Run `consult -m gemini --protocol spir --type spec` to get a Gemini review of your specification',
+  'Use `consult -m codex --protocol spir --type spec` for a focused specification review',
+  'Run `consult -m claude --protocol spir --type plan` to get feedback on your implementation plan',
   'The `consult` CLI supports three models: `gemini`, `codex`, and `claude`',
-  'Use `consult general "your question"` to ask any model a general question with codebase context',
+  'Use `consult -m gemini --prompt "your question"` to ask Gemini a general question with codebase context',
   'Say "cmap the PR" to run all three consultations in parallel in the background',
   'Consultations are enabled by default in SPIR — say "without consultation" to skip them',
 
