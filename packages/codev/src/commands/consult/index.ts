@@ -193,13 +193,15 @@ function loadDotenv(workspaceRoot: string): void {
  */
 function findSpec(workspaceRoot: string, number: number): string | null {
   const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  const pattern = String(number).padStart(4, '0');
+  const unpadded = String(number);
+  const padded = unpadded.padStart(4, '0');
 
   if (fs.existsSync(specsDir)) {
-    const matches = fs.readdirSync(specsDir).filter(f => f.startsWith(pattern) && f.endsWith('.md'));
+    const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.md'));
+    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`));
     if (matches.length > 1) {
       const list = matches.map(f => `  - codev/specs/${f}`).join('\n');
-      throw new Error(`Multiple spec files match '${pattern}*':\n${list}`);
+      throw new Error(`Multiple spec files match '${unpadded}' or '${padded}':\n${list}`);
     }
     if (matches.length === 1) {
       return path.join(specsDir, matches[0]);
@@ -214,13 +216,15 @@ function findSpec(workspaceRoot: string, number: number): string | null {
  */
 function findPlan(workspaceRoot: string, number: number): string | null {
   const plansDir = path.join(workspaceRoot, 'codev', 'plans');
-  const pattern = String(number).padStart(4, '0');
+  const unpadded = String(number);
+  const padded = unpadded.padStart(4, '0');
 
   if (fs.existsSync(plansDir)) {
-    const matches = fs.readdirSync(plansDir).filter(f => f.startsWith(pattern) && f.endsWith('.md'));
+    const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.md'));
+    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`));
     if (matches.length > 1) {
       const list = matches.map(f => `  - codev/plans/${f}`).join('\n');
-      throw new Error(`Multiple plan files match '${pattern}*':\n${list}`);
+      throw new Error(`Multiple plan files match '${unpadded}' or '${padded}':\n${list}`);
     }
     if (matches.length === 1) {
       return path.join(plansDir, matches[0]);

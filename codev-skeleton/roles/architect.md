@@ -28,15 +28,16 @@ Builders work autonomously in isolated git worktrees. The Architect:
 ### Agent Farm CLI (`af`)
 
 ```bash
-af spawn 1                             # Strict mode (default) - porch-driven
-af spawn 1 --resume                    # Resume existing porch state
-af spawn 1 --soft                      # Soft mode - protocol-guided
+af spawn 1                          # Strict mode (default) - porch-driven
+af spawn 1 -t "feature"             # Strict mode with title (no spec yet)
+af spawn 1 --resume                 # Resume existing porch state
+af spawn 1 --soft                   # Soft mode - protocol-guided
 af spawn --task "fix the bug"             # Ad-hoc task builder (soft mode)
 af spawn --worktree                       # Worktree with no initial prompt
 af status                                 # Check all builders
-af cleanup --project 1                    # Remove completed builder
+af cleanup -p 0001                        # Remove completed builder
 af dash start/stop                        # Dashboard management
-af send 1 "message"                    # Short message to builder
+af send 0001 "message"                    # Short message to builder
 ```
 
 **Note:** `af`, `consult`, `porch`, and `codev` are global commands. They work from any directory.
@@ -44,8 +45,8 @@ af send 1 "message"                    # Short message to builder
 ### Porch CLI (for strict mode)
 
 ```bash
-porch status 1                           # Check project state
-porch approve 1 spec-approval            # Approve a gate
+porch status 0001                           # Check project state
+porch approve 0001 spec-approval            # Approve a gate
 porch pending                               # List pending gates
 ```
 
@@ -80,6 +81,9 @@ wait
 # Default: Strict mode (porch-driven with gates)
 af spawn 42
 
+# With project title (if no spec exists yet)
+af spawn 42 -t "user-authentication"
+
 # Or: Soft mode (builder follows protocol independently)
 af spawn 42 --soft
 ```
@@ -91,26 +95,26 @@ The builder stops at gates requiring approval:
 **spec-approval** - After builder writes the spec
 ```bash
 # Review the spec in the builder's worktree
-cat worktrees/spir_42_user-authentication/codev/specs/42-user-authentication.md
+cat worktrees/spir_0042_user-authentication/codev/specs/0042-user-authentication.md
 
 # Approve if satisfactory
-porch approve 42 spec-approval
+porch approve 0042 spec-approval
 ```
 
 **plan-approval** - After builder writes the plan
 ```bash
 # Review the plan
-cat worktrees/spir_42_user-authentication/codev/plans/42-user-authentication.md
+cat worktrees/spir_0042_user-authentication/codev/plans/0042-user-authentication.md
 
 # Approve if satisfactory
-porch approve 42 plan-approval
+porch approve 0042 plan-approval
 ```
 
 ### 3. Monitoring Progress
 
 ```bash
 af status              # Overview of all builders
-porch status 42      # Detailed state for one project (strict mode)
+porch status 0042      # Detailed state for one project (strict mode)
 ```
 
 ### 4. Integration Review
@@ -135,7 +139,7 @@ Integration looks good. No conflicts with existing modules.
 Architect integration review"
 
 # Notify builder
-af send 42 "PR approved, please merge"
+af send 0042 "PR approved, please merge"
 ```
 
 ### 5. Cleanup
@@ -143,7 +147,7 @@ af send 42 "PR approved, please merge"
 After builder merges and work is integrated:
 
 ```bash
-af cleanup -p 42
+af cleanup -p 0042
 ```
 
 ## Critical Rules
