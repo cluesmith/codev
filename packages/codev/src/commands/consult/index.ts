@@ -26,7 +26,7 @@ interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
-  gemini: { cli: 'gemini', args: ['--yolo'], envVar: 'GEMINI_SYSTEM_MD' },
+  gemini: { cli: 'gemini', args: [], envVar: 'GEMINI_SYSTEM_MD' },
 };
 
 // Models that use an Agent SDK instead of CLI subprocess
@@ -526,6 +526,7 @@ async function runConsultation(
   role: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  generalMode?: boolean,
 ): Promise<void> {
   // SDK-based models
   if (model === 'claude') {
@@ -568,7 +569,10 @@ async function runConsultation(
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
     // No --output-format json — let Gemini output text directly
-    cmd = [config.cli, ...config.args, query];
+    // Only use --yolo in protocol mode (structured reviews).
+    // General mode must NOT use --yolo to prevent unintended file writes (#370).
+    const yoloArgs = generalMode ? [] : ['--yolo'];
+    cmd = [config.cli, ...yoloArgs, ...config.args, query];
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
@@ -1294,7 +1298,8 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, workspaceRoot, role, options.output, metricsCtx);
+  const isGeneralMode = !hasType;
+  await runConsultation(model, query, workspaceRoot, role, options.output, metricsCtx, isGeneralMode);
 }
 
 // Exported for testing
