@@ -43,7 +43,7 @@ function TerminalControls({
   };
 
   return (
-    <div className="terminal-controls">
+    <div className="terminal-controls" style={{ position: 'absolute', top: 8, right: 20, zIndex: 10, display: 'flex', gap: 4 }}>
       <button
         className="terminal-control-btn"
         onPointerDown={handleRefresh}
