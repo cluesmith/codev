@@ -359,3 +359,28 @@ Key findings:
 - Gemini quota exhaustion from SPIR consultations prevented one review
 
 Full results: `codev/resources/vibe-vs-spir-r3-comparison-2026-02.md`
+
+## Feb 2026 Results — Round 4
+
+The fourth run only re-evaluated the SPIR/Codev side — CC scores were reused from R3 since they've been stable across R1-R3 (overall 5.7-5.9). All 6 reviews completed successfully (first time in the experiment). The Gemini model issue from R3 was resolved. Used codev v2.0.9.
+
+| Dimension | CC (avg) | SPIR (avg) | Delta |
+|-----------|:----------:|:----------:|:-----:|
+| Bugs | 6.7 | 7.3 | **+0.7** |
+| Code Quality | 7.0 | 7.7 | +0.7 |
+| Maintainability | 7.3 | 7.3 | 0.0 |
+| Tests | 5.0 | 6.7 | **+1.7** |
+| Extensibility | 5.7 | 6.3 | +0.7 |
+| NL Interface | 6.3 | 6.7 | +0.3 |
+| Deployment | 2.7 | 6.7 | **+4.0** |
+| **Overall** | **5.8** | **7.0** | **+1.2** |
+
+Key findings:
+- Deployment is the largest delta (+4.0) — SPIR produced Dockerfile, dockerignore, standalone output
+- Overall delta back to +1.2, confirming R3's +0.4 was a measurement artifact (missing Gemini review)
+- All 6 reviews completed — resolves R3's reviewer asymmetry problem
+- SPIR R4 is the most concise SPIR implementation (1,249 lines vs CC's 1,294 — first time SPIR is smaller)
+- Bug scores recover: +0.7 (vs R3's -2.2), consensus bugs favor Codev (3 vs 5)
+- 4-round overall average delta: +1.2 (SPIR consistently better)
+
+Full results: `codev/resources/vibe-vs-spir-r4-comparison-2026-02.md`
