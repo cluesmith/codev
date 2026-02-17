@@ -20,7 +20,8 @@ import net from 'node:net';
 import WebSocket from 'ws';
 
 // Use a unique port to avoid conflicts with other e2e test suites
-const TEST_TOWER_PORT = 14500;
+// Port 14500 is used by cli-tower-mode.e2e.test.ts — use 14600 here
+const TEST_TOWER_PORT = 14600;
 const STARTUP_TIMEOUT = 15_000;
 
 const TOWER_SERVER_PATH = resolve(
