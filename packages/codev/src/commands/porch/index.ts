@@ -493,6 +493,90 @@ export async function approve(
 }
 
 /**
+ * porch rollback <id> <phase>
+ * Rewinds project to an earlier phase, clearing downstream gates and resetting build state.
+ */
+export async function rollback(
+  workspaceRoot: string,
+  projectId: string,
+  targetPhase: string
+): Promise<void> {
+  const statusPath = findStatusPath(workspaceRoot, projectId);
+  if (!statusPath) {
+    throw new Error(`Project ${projectId} not found.`);
+  }
+
+  const state = readState(statusPath);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
+
+  // Validate target phase exists in protocol
+  const targetConfig = getPhaseConfig(protocol, targetPhase);
+  if (!targetConfig) {
+    const validPhases = protocol.phases.map(p => p.id).join(', ');
+    throw new Error(`Unknown phase: ${targetPhase}\nValid phases: ${validPhases}`);
+  }
+
+  // Find indices to validate rollback direction
+  const currentIndex = protocol.phases.findIndex(p => p.id === state.phase);
+  const targetIndex = protocol.phases.findIndex(p => p.id === targetPhase);
+
+  // Handle completed projects (phase not in protocol phases array)
+  if (state.phase === 'complete') {
+    // Allow rollback from complete state to any valid phase
+  } else if (currentIndex === -1) {
+    throw new Error(`Current phase '${state.phase}' not found in protocol.`);
+  } else if (targetIndex >= currentIndex) {
+    throw new Error(
+      `Cannot rollback forward. Current phase: ${state.phase}, target: ${targetPhase}\n` +
+      `Use 'porch done' to advance phases.`
+    );
+  }
+
+  // Clear gates at or after the target phase
+  for (let i = targetIndex; i < protocol.phases.length; i++) {
+    const phase = protocol.phases[i];
+    if (phase.gate && state.gates[phase.gate]) {
+      state.gates[phase.gate] = { status: 'pending' };
+    }
+  }
+
+  // Reset state to target phase
+  const previousPhase = state.phase;
+  state.phase = targetPhase;
+  state.iteration = 1;
+  state.build_complete = false;
+  state.history = [];
+
+  // If rolling back to a phased phase, re-extract plan phases from plan file
+  if (isPhased(protocol, targetPhase)) {
+    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
+    if (planPath) {
+      state.plan_phases = extractPhasesFromFile(planPath);
+      if (state.plan_phases.length > 0) {
+        state.current_plan_phase = state.plan_phases[0].id;
+      } else {
+        state.current_plan_phase = null;
+      }
+    } else {
+      state.plan_phases = [];
+      state.current_plan_phase = null;
+    }
+  } else {
+    state.plan_phases = [];
+    state.current_plan_phase = null;
+  }
+
+  writeState(statusPath, state);
+
+  console.log('');
+  console.log(chalk.green(`ROLLED BACK: ${previousPhase} → ${targetPhase}`));
+  console.log(`  Project: ${state.id}`);
+  console.log(`  Protocol: ${state.protocol}`);
+  console.log(`\n  Run: porch status ${state.id}`);
+  console.log('');
+}
+
+/**
  * porch init <protocol> <id> <name>
  * Initialize a new project.
  *
@@ -661,6 +745,11 @@ export async function cli(args: string[]): Promise<void> {
         await approve(workspaceRoot, rest[0], rest[1], hasHumanFlag);
         break;
 
+      case 'rollback':
+        if (!rest[0] || !rest[1]) throw new Error('Usage: porch rollback <id> <phase>');
+        await rollback(workspaceRoot, rest[0], rest[1]);
+        break;
+
       case 'init':
         if (!rest[0] || !rest[1] || !rest[2]) {
           throw new Error('Usage: porch init <protocol> <id> <name>');
@@ -678,6 +767,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  done [id]                Signal build complete (validates checks, advances)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
+        console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
         console.log('');
         console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
