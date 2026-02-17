@@ -81,8 +81,8 @@ describe('parseLinkedIssue', () => {
 });
 
 describe('parseLabelDefaults', () => {
-  it('returns defaults for empty labels', () => {
-    expect(parseLabelDefaults([])).toEqual({ type: 'issue', priority: 'medium' });
+  it('defaults to project when no labels and no title', () => {
+    expect(parseLabelDefaults([])).toEqual({ type: 'project', priority: 'medium' });
   });
 
   it('extracts type:bug label', () => {
@@ -92,9 +92,9 @@ describe('parseLabelDefaults', () => {
     });
   });
 
-  it('extracts priority:high label', () => {
+  it('defaults to project when only priority label and no title', () => {
     expect(parseLabelDefaults([{ name: 'priority:high' }])).toEqual({
-      type: 'issue',
+      type: 'project',
       priority: 'high',
     });
   });
@@ -121,11 +121,11 @@ describe('parseLabelDefaults', () => {
     ])).toEqual({ type: 'bug', priority: 'medium' });
   });
 
-  it('picks first alphabetical for multiple priority labels', () => {
+  it('defaults to project for multiple priority labels without type', () => {
     expect(parseLabelDefaults([
       { name: 'priority:medium' },
       { name: 'priority:high' },
-    ])).toEqual({ type: 'issue', priority: 'high' });
+    ])).toEqual({ type: 'project', priority: 'high' });
   });
 
   it('matches bare "bug" label when no type: prefix exists', () => {
@@ -149,10 +149,87 @@ describe('parseLabelDefaults', () => {
     ])).toEqual({ type: 'project', priority: 'medium' });
   });
 
-  it('ignores bare labels that are not known types', () => {
+  it('defaults to project for unrecognized bare labels without title', () => {
     expect(parseLabelDefaults([
       { name: 'help-wanted' },
       { name: 'good-first-issue' },
-    ])).toEqual({ type: 'issue', priority: 'medium' });
+    ])).toEqual({ type: 'project', priority: 'medium' });
+  });
+
+  it('infers bug from title with "fix" keyword', () => {
+    expect(parseLabelDefaults([], 'Fix login timeout')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers bug from title with "broken" keyword', () => {
+    expect(parseLabelDefaults([], 'Dashboard broken on mobile')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers bug from title with "error" keyword', () => {
+    expect(parseLabelDefaults([], 'Error when saving settings')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers bug from title with "crash" keyword', () => {
+    expect(parseLabelDefaults([], 'App crash on startup')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers bug from title with "regression" keyword', () => {
+    expect(parseLabelDefaults([], 'Regression in auth flow')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers bug from title with "not working" keyword', () => {
+    expect(parseLabelDefaults([], 'Search not working after update')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
+  });
+
+  it('infers project from title without bug keywords', () => {
+    expect(parseLabelDefaults([], 'Add dark mode support')).toEqual({
+      type: 'project',
+      priority: 'medium',
+    });
+  });
+
+  it('infers project from title with "implement" keyword', () => {
+    expect(parseLabelDefaults([], 'Implement user authentication')).toEqual({
+      type: 'project',
+      priority: 'medium',
+    });
+  });
+
+  it('explicit label takes precedence over title heuristic', () => {
+    expect(parseLabelDefaults([{ name: 'type:project' }], 'Fix broken auth')).toEqual({
+      type: 'project',
+      priority: 'medium',
+    });
+  });
+
+  it('bare label takes precedence over title heuristic', () => {
+    expect(parseLabelDefaults([{ name: 'project' }], 'Fix broken auth')).toEqual({
+      type: 'project',
+      priority: 'medium',
+    });
+  });
+
+  it('title heuristic is case-insensitive', () => {
+    expect(parseLabelDefaults([], 'FIX: Broken tooltip')).toEqual({
+      type: 'bug',
+      priority: 'medium',
+    });
   });
 });

@@ -185,15 +185,25 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
 /**
  * Extract type and priority from GitHub issue labels.
  *
+ * Type resolution order:
+ * 1. Explicit `type:*` label (e.g. `type:bug`)
+ * 2. Bare label matching known types (e.g. `bug`, `project`)
+ * 3. Title-based heuristic — bug keywords → "bug", otherwise "project"
+ *
  * Defaults:
- * - No type:* label → "issue"
  * - No priority:* label → "medium"
  * - Multiple labels of same kind → first alphabetical
  */
 /** Labels that map directly to a type without the `type:` prefix. */
 const BARE_TYPE_LABELS = new Set(['bug', 'project']);
 
-export function parseLabelDefaults(labels: Array<{ name: string }>): {
+/** Title keywords that suggest a bug report. */
+const BUG_TITLE_PATTERNS = /\b(fix|bug|broken|error|crash|fail|wrong|issue|regression|not working)\b/i;
+
+export function parseLabelDefaults(
+  labels: Array<{ name: string }>,
+  title?: string,
+): {
   type: string;
   priority: string;
 } {
@@ -210,13 +220,19 @@ export function parseLabelDefaults(labels: Array<{ name: string }>): {
     if (bare.length > 0) typeLabels.push(bare[0]);
   }
 
+  // If still no type, infer from title keywords
+  let type = typeLabels[0];
+  if (!type) {
+    type = title && BUG_TITLE_PATTERNS.test(title) ? 'bug' : 'project';
+  }
+
   const priorityLabels = names
     .filter(n => n.startsWith('priority:'))
     .map(n => n.slice(9))
     .sort();
 
   return {
-    type: typeLabels[0] || 'issue',
+    type,
     priority: priorityLabels[0] || 'medium',
   };
 }
