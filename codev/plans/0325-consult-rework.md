@@ -80,7 +80,11 @@ Four phases: (1) migrate prompt templates into protocol directories and update p
 - `codev-skeleton/protocols/bugfix/protocol.json` — same
 - `codev-skeleton/protocols/maintain/protocol.json` — same
 
-**Note on tick:** The tick protocol has no `protocol.json` — only `protocol.md` and templates. No verify.type updates needed for tick. Consult-types files are still created for tick so `consult -m X --protocol tick --type spec` works when users run reviews manually.
+**Note on tick:** The tick protocol currently has no `protocol.json`. This work creates one based on the SPIR pattern (specify → plan → implement → review with verify cycles), adapted for tick's amendment workflow. This ensures porch can drive tick projects and that verify.type values are set correctly.
+
+**New files for tick:**
+- `codev/protocols/tick/protocol.json` — new protocol definition with verify.type values using new short names
+- `codev-skeleton/protocols/tick/protocol.json` — skeleton mirror
 
 **Modify (protocol-schema.json):**
 - `codev-skeleton/protocols/protocol-schema.json` — update `verify.type` enum to match new values
@@ -89,6 +93,7 @@ Four phases: (1) migrate prompt templates into protocol directories and update p
 - [ ] Each protocol has its own `consult-types/` directory with correct prompt files
 - [ ] Old shared files removed (except `integration-review.md`)
 - [ ] All protocol.json `verify.type` values use new short names (spec, plan, impl, pr)
+- [ ] Tick protocol has a new `protocol.json` in both `codev/` and `codev-skeleton/`
 - [ ] Skeleton mirrors all changes
 - [ ] `integration-review.md` remains in shared `codev/consult-types/`
 
