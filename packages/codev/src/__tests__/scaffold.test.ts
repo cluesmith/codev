@@ -304,12 +304,26 @@ describe('Scaffold Utilities', () => {
     it('should not duplicate entries if already present', () => {
       const targetDir = path.join(tempDir, 'project');
       fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, '.gitignore'), '.agent-farm/\n');
+      fs.writeFileSync(path.join(targetDir, '.gitignore'), '.agent-farm/\n.consult/\ncodev/.update-hashes.json\ncodev/projects/*/\n.builders/\n');
 
       const result = updateGitignore(targetDir);
 
       expect(result.updated).toBe(false);
       expect(result.alreadyPresent).toBe(true);
+    });
+
+    // Regression: Issue #383 — existing repos missing codev/projects/*/ must get it on adopt
+    it('should append missing codev/projects/*/ to existing codev gitignore (issue #383)', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(targetDir, { recursive: true });
+      // Old-style gitignore that has .agent-farm/ but not codev/projects/*/
+      fs.writeFileSync(path.join(targetDir, '.gitignore'), '.agent-farm/\n.consult/\n.builders/\n');
+
+      const result = updateGitignore(targetDir);
+
+      expect(result.updated).toBe(true);
+      const content = fs.readFileSync(path.join(targetDir, '.gitignore'), 'utf-8');
+      expect(content).toContain('codev/projects/*/');
     });
 
     it('should create .gitignore if it does not exist', () => {
@@ -328,6 +342,11 @@ describe('Scaffold Utilities', () => {
       expect(CODEV_GITIGNORE_ENTRIES).toContain('.agent-farm/');
       expect(CODEV_GITIGNORE_ENTRIES).toContain('.consult/');
       expect(CODEV_GITIGNORE_ENTRIES).toContain('.builders/');
+    });
+
+    // Regression: Issue #383 — porch project state must not be versioned
+    it('should gitignore codev/projects/*/ to prevent state leaks across worktrees (issue #383)', () => {
+      expect(CODEV_GITIGNORE_ENTRIES).toContain('codev/projects/*/');
     });
   });
 

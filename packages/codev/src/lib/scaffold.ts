@@ -13,6 +13,7 @@ export const CODEV_GITIGNORE_ENTRIES = `# Codev
 .agent-farm/
 .consult/
 codev/.update-hashes.json
+codev/projects/*/
 .builders/
 `;
 
@@ -244,12 +245,27 @@ export function updateGitignore(targetDir: string): UpdateGitignoreResult {
   }
 
   const existing = fs.readFileSync(gitignorePath, 'utf-8');
-  if (existing.includes('.agent-farm/')) {
-    return { updated: false, created: false, alreadyPresent: true };
+  if (!existing.includes('.agent-farm/')) {
+    // Fresh repo — append the full block
+    fs.appendFileSync(gitignorePath, '\n' + CODEV_GITIGNORE_ENTRIES);
+    return { updated: true, created: false, alreadyPresent: false };
   }
 
-  fs.appendFileSync(gitignorePath, '\n' + CODEV_GITIGNORE_ENTRIES);
-  return { updated: true, created: false, alreadyPresent: false };
+  // Existing codev repo — check for missing entries and append them
+  const missingEntries: string[] = [];
+  for (const line of CODEV_GITIGNORE_ENTRIES.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#') && !existing.includes(trimmed)) {
+      missingEntries.push(trimmed);
+    }
+  }
+
+  if (missingEntries.length > 0) {
+    fs.appendFileSync(gitignorePath, '\n# Codev (updated)\n' + missingEntries.join('\n') + '\n');
+    return { updated: true, created: false, alreadyPresent: false };
+  }
+
+  return { updated: false, created: false, alreadyPresent: true };
 }
 
 interface CreateProjectsDirOptions {
