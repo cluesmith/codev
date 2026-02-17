@@ -3,7 +3,7 @@ import { useOverview } from '../hooks/useOverview.js';
 import { createShellTab } from '../lib/api.js';
 import type { OverviewBuilder, DashboardState } from '../lib/api.js';
 import { BuilderCard } from './BuilderCard.js';
-import { PRList } from './PRList.js';
+import { NeedsAttentionList } from './NeedsAttentionList.js';
 import { BacklogList } from './BacklogList.js';
 import { RecentlyClosedList } from './RecentlyClosedList.js';
 import { FileTree } from './FileTree.js';
@@ -97,13 +97,16 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           )}
         </section>
 
-        {/* Pull Requests */}
+        {/* Needs Attention */}
         <section className="work-section">
-          <h3 className="work-section-title">Pull Requests</h3>
+          <h3 className="work-section-title">Needs Attention</h3>
           {overview?.errors?.prs ? (
             <p className="work-unavailable">{overview.errors.prs}</p>
           ) : (
-            <PRList prs={overview?.pendingPRs ?? []} />
+            <NeedsAttentionList
+              prs={overview?.pendingPRs ?? []}
+              builders={overview?.builders ?? []}
+            />
           )}
         </section>
 

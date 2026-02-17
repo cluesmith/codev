@@ -41,6 +41,7 @@ export interface BuilderOverview {
   planPhases: PlanPhase[];
   progress: number;
   blocked: string | null;
+  blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;
 }
@@ -335,6 +336,20 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
 }
 
 /**
+ * Detect when the current blocked gate was first requested.
+ * Returns the ISO timestamp string or null if not blocked.
+ */
+export function detectBlockedSince(parsed: ParsedStatus): string | null {
+  const gateNames = ['spec-approval', 'plan-approval', 'pr'];
+  for (const gate of gateNames) {
+    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
+      return parsed.gateRequestedAt[gate];
+    }
+  }
+  return null;
+}
+
+/**
  * Compute total idle time (ms) from gate wait periods.
  * Includes completed gate waits (requested_at → approved_at) and
  * any currently-pending gate wait (requested_at → now).
@@ -479,6 +494,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        blockedSince: null,
         startedAt: null,
         idleMs: 0,
       });
@@ -529,6 +545,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             planPhases: parsed.planPhases,
             progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
+            blockedSince: detectBlockedSince(parsed),
             startedAt: parsed.startedAt || null,
             idleMs: computeIdleMs(parsed),
           });
@@ -556,6 +573,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        blockedSince: null,
         startedAt: null,
         idleMs: 0,
       });

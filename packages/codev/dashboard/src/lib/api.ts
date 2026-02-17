@@ -88,6 +88,7 @@ export interface OverviewBuilder {
   planPhases: Array<{ id: string; title: string; status: string }>;
   progress: number;
   blocked: string | null;
+  blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;
 }
