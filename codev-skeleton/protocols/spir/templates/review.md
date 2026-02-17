@@ -33,7 +33,7 @@ All times [timezone], [date range].
 | — | **GATE: [gate-name]** (human approval required) |
 | HH:MM | Implementation begins |
 | HH:MM | Phase N complete after N iterations |
-| HH:MM | **GATE: pr-ready** |
+| HH:MM | **GATE: pr** |
 
 ### Autonomous Operation
 
@@ -43,7 +43,7 @@ All times [timezone], [date range].
 | Human gate wait | ~Nh Nm | Idle — waiting for approval |
 | Implementation → PR | ~Nh Nm | N phases, N consultation rounds |
 
-**Total wall clock** (first commit to pr-ready): **Xh Ym**
+**Total wall clock** (first commit to pr): **Xh Ym**
 **Total autonomous work time** (excluding gate waits): **~Xh Ym**
 **Context window resets**: [N] (resumed automatically / required manual restart)
 

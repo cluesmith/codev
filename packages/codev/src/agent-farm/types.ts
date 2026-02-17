@@ -7,7 +7,7 @@ export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 
 export interface Builder {
   id: string;
   name: string;
-  status: 'spawning' | 'implementing' | 'blocked' | 'pr-ready' | 'complete';
+  status: 'spawning' | 'implementing' | 'blocked' | 'pr' | 'complete';
   phase: string;
   worktree: string;
   branch: string;

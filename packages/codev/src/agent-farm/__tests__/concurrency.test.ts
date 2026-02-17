@@ -92,10 +92,10 @@ describe('Concurrency', () => {
       // Multiple operations on same builder
       upsert('B001', 'implementing');
       upsert('B001', 'blocked');
-      upsert('B001', 'pr-ready');
+      upsert('B001', 'pr');
 
       const builder = db.prepare('SELECT * FROM builders WHERE id = ?').get('B001') as any;
-      expect(builder.status).toBe('pr-ready');
+      expect(builder.status).toBe('pr');
     });
   });
 

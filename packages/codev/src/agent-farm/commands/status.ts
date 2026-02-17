@@ -158,7 +158,7 @@ function getStatusColor(status: string, running: boolean): (text: string) => str
       return chalk.blue;
     case 'blocked':
       return chalk.yellow;
-    case 'pr-ready':
+    case 'pr':
       return chalk.green;
     case 'complete':
       return chalk.green;

@@ -124,7 +124,7 @@ describe('overview', () => {
         '    status: approved',
         '  plan-approval:',
         '    status: approved',
-        '  pr-ready:',
+        '  pr:',
         '    status: pending',
         'iteration: 1',
       ].join('\n');
@@ -133,7 +133,7 @@ describe('overview', () => {
       expect(result.gates).toEqual({
         'spec-approval': 'approved',
         'plan-approval': 'approved',
-        'pr-ready': 'pending',
+        'pr': 'pending',
       });
     });
 
@@ -185,7 +185,7 @@ describe('overview', () => {
         '  plan-approval:',
         '    status: pending',
         "    requested_at: '2026-02-16T04:24:06.254Z'",
-        '  pr-ready:',
+        '  pr:',
         '    status: pending',
         'iteration: 1',
       ].join('\n');
@@ -193,7 +193,7 @@ describe('overview', () => {
       const result = parseStatusYaml(yaml);
       expect(result.gateRequestedAt['spec-approval']).toBe('2026-02-16T03:47:00.754Z');
       expect(result.gateRequestedAt['plan-approval']).toBe('2026-02-16T04:24:06.254Z');
-      expect(result.gateRequestedAt['pr-ready']).toBeUndefined();
+      expect(result.gateRequestedAt['pr']).toBeUndefined();
     });
 
     it('returns empty planPhases when section is absent', () => {
@@ -332,8 +332,8 @@ describe('overview', () => {
     it('returns 95 for review phase (gate requested)', () => {
       expect(calculateProgress(makeParsed({
         phase: 'review',
-        gates: { 'pr-ready': 'pending' },
-        gateRequestedAt: { 'pr-ready': '2026-01-01T00:00:00Z' },
+        gates: { 'pr': 'pending' },
+        gateRequestedAt: { 'pr': '2026-01-01T00:00:00Z' },
       }))).toBe(95);
     });
 
@@ -471,10 +471,10 @@ describe('overview', () => {
       }))).toBe('plan review');
     });
 
-    it('returns "PR review" when pr-ready is pending and requested', () => {
+    it('returns "PR review" when pr is pending and requested', () => {
       expect(detectBlocked(makeParsed({
-        gates: { 'pr-ready': 'pending' },
-        gateRequestedAt: { 'pr-ready': '2026-01-01T00:00:00Z' },
+        gates: { 'pr': 'pending' },
+        gateRequestedAt: { 'pr': '2026-01-01T00:00:00Z' },
       }))).toBe('PR review');
     });
 
@@ -600,7 +600,7 @@ describe('overview', () => {
         'gates:',
         '  spec-approval:',
         '    status: approved',
-        '  pr-ready:',
+        '  pr:',
         '    status: pending',
       ].join('\n'), '0126-project-management-rework');
 
@@ -610,7 +610,7 @@ describe('overview', () => {
       expect(builders[0].issueNumber).toBe(126);
       expect(builders[0].phase).toBe('tower_endpoint');
       expect(builders[0].mode).toBe('strict');
-      expect(builders[0].gates['pr-ready']).toBe('pending');
+      expect(builders[0].gates['pr']).toBe('pending');
       expect(builders[0].protocol).toBe('spir');
       expect(builders[0].progress).toBe(70);
       expect(builders[0].blocked).toBeNull();

@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS builders (
   port INTEGER NOT NULL DEFAULT 0,
   pid INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'spawning'
-    CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr-ready', 'complete')),
+    CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
   phase TEXT NOT NULL DEFAULT '',
   worktree TEXT NOT NULL,
   branch TEXT NOT NULL,

@@ -7,7 +7,7 @@ Track active builder agents here. Update manually or via `architect status`.
 - **spawning**: Worktree being created, terminal starting
 - **implementing**: Builder is working
 - **blocked**: Builder waiting for architect input
-- **pr-ready**: Builder has created a PR
+- **pr**: Builder has created a PR
 - **reviewing**: Architect is reviewing the PR
 - **complete**: PR merged, ready for cleanup
 

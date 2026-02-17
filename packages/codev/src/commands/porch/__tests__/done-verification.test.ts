@@ -48,7 +48,7 @@ function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
     gates: {
       'spec-approval': { status: 'pending' as const },
       'plan-approval': { status: 'pending' as const },
-      'pr-ready': { status: 'pending' as const },
+      'pr': { status: 'pending' as const },
     },
     iteration: 1,
     build_complete: false,
@@ -69,7 +69,7 @@ const spirProtocol = {
       name: 'Specify',
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
-      verify: { type: 'spec-review', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'spec', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       gate: 'spec-approval',
     },
@@ -78,7 +78,7 @@ const spirProtocol = {
       name: 'Plan',
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
-      verify: { type: 'plan-review', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'plan', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       gate: 'plan-approval',
     },
@@ -120,7 +120,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);
@@ -147,7 +147,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);
@@ -179,7 +179,7 @@ describe('porch done — verification enforcement', () => {
       gates: {
         'spec-approval': { status: 'pending' as const },
         'plan-approval': { status: 'pending' as const },
-        'pr-ready': { status: 'pending' as const },
+        'pr': { status: 'pending' as const },
       },
     });
     setupState(testDir, state);

@@ -54,7 +54,7 @@ function makeState(overrides: Partial<ProjectState> = {}): ProjectState {
     gates: {
       'spec-approval': { status: 'pending' as const },
       'plan-approval': { status: 'pending' as const },
-      'pr-ready': { status: 'pending' as const },
+      'pr': { status: 'pending' as const },
     },
     iteration: 1,
     build_complete: false,
@@ -75,7 +75,7 @@ const spirProtocol = {
       name: 'Specify',
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
-      verify: { type: 'spec-review', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'spec', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       gate: 'spec-approval',
@@ -85,7 +85,7 @@ const spirProtocol = {
       name: 'Plan',
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
-      verify: { type: 'plan-review', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'plan', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       gate: 'plan-approval',
@@ -95,7 +95,7 @@ const spirProtocol = {
       name: 'Implement',
       type: 'per_plan_phase',
       build: { prompt: 'implement.md', artifact: 'src/**/*.ts' },
-      verify: { type: 'impl-review', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'impl', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       checks: {
@@ -108,10 +108,10 @@ const spirProtocol = {
       name: 'Review',
       type: 'build_verify',
       build: { prompt: 'review.md', artifact: 'codev/reviews/${PROJECT_ID}-*.md' },
-      verify: { type: 'pr-ready', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'pr', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
-      gate: 'pr-ready',
+      gate: 'pr',
     },
   ],
 };
@@ -255,7 +255,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'pending', requested_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
     });
     setupState(testDir, state);
@@ -277,7 +277,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'pending' },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
     });
     setupState(testDir, state);
@@ -322,7 +322,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'approved', approved_at: new Date().toISOString() },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
       plan_phases: [
         { id: 'phase_1', title: 'Core types', status: 'in_progress' },
@@ -354,7 +354,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'approved', approved_at: new Date().toISOString() },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
       plan_phases: [
         { id: 'phase_1', title: 'Core types', status: 'in_progress' },
@@ -392,7 +392,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'approved', approved_at: new Date().toISOString() },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
       plan_phases: [
         { id: 'phase_1', title: 'Core types', status: 'complete' },
@@ -490,7 +490,7 @@ describe('porch next', () => {
       gates: {
         'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
         'plan-approval': { status: 'approved', approved_at: new Date().toISOString() },
-        'pr-ready': { status: 'pending' },
+        'pr': { status: 'pending' },
       },
       plan_phases: [
         { id: 'phase_1', title: 'Core types', status: 'in_progress' },

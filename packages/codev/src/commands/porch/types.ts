@@ -21,7 +21,7 @@ export interface BuildConfig {
  * Verify config for build_verify phases - 3-way consultation
  */
 export interface VerifyConfig {
-  type: string;             // Review type (e.g., "spec-review", "plan-review")
+  type: string;             // Review type (e.g., "spec", "plan", "impl", "pr")
   models: string[];         // ["gemini", "codex", "claude"]
   parallel?: boolean;       // Run consultations in parallel (default: true)
 }

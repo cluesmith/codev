@@ -242,7 +242,7 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
       return 50 + Math.round((completed / total) * 40);
     }
     case 'review':
-      return gateRequested('pr-ready') ? 95 : 92;
+      return gateRequested('pr') ? 95 : 92;
     case 'complete':
       return 100;
     default:
@@ -290,7 +290,7 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
   const gateLabels: Record<string, string> = {
     'spec-approval': 'spec review',
     'plan-approval': 'plan review',
-    'pr-ready': 'PR review',
+    'pr': 'PR review',
   };
 
   for (const [gate, label] of Object.entries(gateLabels)) {

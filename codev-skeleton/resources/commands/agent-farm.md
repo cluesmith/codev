@@ -199,7 +199,7 @@ Displays the current state of all builders and the architect:
 ├────────┼──────────────┼─────────────┼─────────┤
 │ arch   │ Architect    │ running     │ main    │
 │ 42   │ auth-feature │ implementing│ builder/42-auth │
-│ 43   │ api-refactor │ pr-ready    │ builder/43-api  │
+│ 43   │ api-refactor │ pr    │ builder/43-api  │
 └────────┴──────────────┴─────────────┴─────────┘
 ```
 
@@ -207,7 +207,7 @@ Status values:
 - `spawning` - Worktree created, builder starting
 - `implementing` - Actively working
 - `blocked` - Stuck, needs architect help
-- `pr-ready` - Implementation complete
+- `pr` - Implementation complete
 - `complete` - Merged, can be cleaned up
 
 ---

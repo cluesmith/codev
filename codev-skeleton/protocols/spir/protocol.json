@@ -126,7 +126,7 @@
           "optional": true
         }
       },
-      "gate": "pr-ready",
+      "gate": "pr",
       "next": null
     }
   ],

@@ -31,7 +31,7 @@ Adds codev to the **current directory**. Detects existing CLAUDE.md/AGENTS.md an
 Updates framework files (protocols, roles, skills) from the installed `@cluesmith/codev` package. **Never touches user data** (specs, plans, reviews). If you've customized a framework file, creates a `.codev-new` version for manual merge.
 
 ### codev doctor
-Checks that all required dependencies are installed: Node.js (>=18), tmux (>=3), git (>=2.5), gh (authenticated), and at least one AI CLI (Claude, Gemini, or Codex).
+Checks that all required dependencies are installed: Node.js (>=18), git (>=2.5), gh (authenticated), and at least one AI CLI (Claude, Gemini, or Codex).
 
 ## Common Mistakes
 

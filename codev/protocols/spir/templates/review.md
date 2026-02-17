@@ -209,7 +209,7 @@ All times [timezone].
 | [HH:MM] | Phase 2 complete after [N] iterations |
 | — | **Context window expired** — session resumed automatically |
 | [HH:MM] | Review document written |
-| [HH:MM] | **GATE: pr-ready** (awaiting human approval) |
+| [HH:MM] | **GATE: pr** (awaiting human approval) |
 
 ### Autonomous Operation
 
@@ -219,7 +219,7 @@ All times [timezone].
 | Human gate wait | [Xh Xm] | Idle — waiting for spec-approval + plan-approval |
 | Implementation → PR | [Xh Xm] | [N] phases, [N] consultation rounds, review document, PR creation |
 
-**Total wall clock** (first commit to pr-ready): [time]
+**Total wall clock** (first commit to pr): [time]
 **Total autonomous work time** (excluding gate wait): [time]
 **Context windows used**: [N] (expired [N] times, resumed automatically)
 

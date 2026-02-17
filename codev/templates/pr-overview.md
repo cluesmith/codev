@@ -57,15 +57,15 @@ To use this template for architect-mediated reviews:
 
 ```bash
 # Fill out this template and save as overview.md, then:
-consult --model gemini pr 68 --context overview.md
+consult -m gemini --type pr --context overview.md
 
 # Or pipe directly:
-cat overview.md | consult --model gemini pr 68 --context -
+cat overview.md | consult -m gemini --type pr --context -
 
 # For 3-way parallel reviews:
-consult --model gemini pr 68 --context overview.md &
-consult --model codex pr 68 --context overview.md &
-consult --model claude pr 68 --context overview.md &
+consult -m gemini --type pr --context overview.md &
+consult -m codex --type pr --context overview.md &
+consult -m claude --type pr --context overview.md &
 wait
 ```
 

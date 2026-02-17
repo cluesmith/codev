@@ -69,13 +69,13 @@ Brings external models into the conversation for review and validation:
 
 ```bash
 # Consult Gemini or Codex
-./codev/bin/consult gemini "Review this spec for issues..."
-./codev/bin/consult codex "Review this implementation..."
+consult -m gemini --prompt "Review this spec for issues..."
+consult -m codex --prompt "Review this implementation..."
 
 # Parallel 3-way review
-./codev/bin/consult gemini "$QUERY" &
-./codev/bin/consult codex "$QUERY" &
-./codev/bin/consult claude "$QUERY" &
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
 ```
 
