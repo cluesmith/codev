@@ -19,6 +19,7 @@ import {
   calculateProgress,
   calculateEvenProgress,
   detectBlocked,
+  detectBlockedSince,
   computeIdleMs,
 } from '../servers/overview.js';
 
@@ -574,6 +575,71 @@ describe('overview', () => {
           'plan-approval': '2026-01-02T00:00:00Z',
         },
       }))).toBe('spec review');
+    });
+  });
+
+  // ==========================================================================
+  // detectBlockedSince (Bugfix #409)
+  // ==========================================================================
+
+  describe('detectBlockedSince', () => {
+    function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {
+      return {
+        id: '0100',
+        title: 'test',
+        protocol: 'spir',
+        phase: 'specify',
+        currentPlanPhase: '',
+        gates: {},
+        gateRequestedAt: {},
+        gateApprovedAt: {},
+        planPhases: [],
+        startedAt: '2026-02-17T00:00:00.000Z',
+        ...overrides,
+      };
+    }
+
+    it('returns null when no gates are pending', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'spec-approval': 'approved' },
+      }))).toBeNull();
+    });
+
+    it('returns null when gate is pending but not requested', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'spec-approval': 'pending' },
+      }))).toBeNull();
+    });
+
+    it('returns requested_at timestamp for pending spec-approval', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'spec-approval': 'pending' },
+        gateRequestedAt: { 'spec-approval': '2026-02-15T10:30:00Z' },
+      }))).toBe('2026-02-15T10:30:00Z');
+    });
+
+    it('returns requested_at timestamp for pending plan-approval', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'spec-approval': 'approved', 'plan-approval': 'pending' },
+        gateRequestedAt: { 'plan-approval': '2026-02-16T08:00:00Z' },
+      }))).toBe('2026-02-16T08:00:00Z');
+    });
+
+    it('returns requested_at timestamp for pending PR gate', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'pr': 'pending' },
+        gateRequestedAt: { 'pr': '2026-02-17T12:00:00Z' },
+      }))).toBe('2026-02-17T12:00:00Z');
+    });
+
+    it('returns first blocked gate timestamp when multiple are pending', () => {
+      expect(detectBlockedSince(makeParsed({
+        gates: { 'spec-approval': 'pending', 'plan-approval': 'pending' },
+        gateRequestedAt: {
+          'spec-approval': '2026-02-15T10:00:00Z',
+          'plan-approval': '2026-02-16T10:00:00Z',
+        },
+      }))).toBe('2026-02-15T10:00:00Z');
     });
   });
 
