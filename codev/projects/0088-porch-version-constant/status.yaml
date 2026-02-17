@@ -1,0 +1,28 @@
+id: '0088'
+title: porch-version-constant
+protocol: spider
+phase: complete
+plan_phases:
+  - id: phase_1
+    title: Add version constant
+    status: complete
+  - id: phase_2
+    title: Display version and add test
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-01T23:12:18.415Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-01T23:12:18.418Z'
+  pr-ready:
+    status: approved
+    requested_at: '2026-02-01T23:47:56.951Z'
+    approved_at: '2026-02-01T23:47:56.954Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-01T23:12:10.319Z'
+updated_at: '2026-02-01T23:47:57.111Z'

@@ -1,0 +1,34 @@
+id: '0092'
+title: terminal-file-links
+protocol: spider
+phase: complete
+plan_phases:
+  - id: phase_1
+    title: Port Consolidation
+    status: complete
+  - id: phase_2
+    title: Terminal Links
+    status: complete
+  - id: phase_3
+    title: File Browser Enhancement
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-06T17:56:31.234Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-07T00:08:39.803Z'
+  pr-ready:
+    status: approved
+    approved_at: '2026-02-07T00:16:19.257Z'
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    build_output: >-
+      /Users/mwk/Development/cluesmith/codev-public/.builders/0092/codev/projects/0092-terminal-file-links/0092-plan-iter-1.txt
+    reviews: []
+started_at: '2026-02-06T17:56:14.884Z'
+updated_at: '2026-02-07T00:16:21.456Z'

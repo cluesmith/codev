@@ -33,9 +33,10 @@ packages/codev/dashboard/package-lock.json
 # Checklister runtime state (per-project JSON files)
 codev/checklists/*.json
 
-# Porch execution logs
+# Porch execution logs (not project state - that's versioned)
 codev/executions/
 codev-skeleton/executions/
 
-# Porch project state (runtime only — each builder creates its own)
-codev/projects/*/
+# Porch project iteration transcripts (bulk logs, not authored artifacts)
+# status.yaml IS versioned; .txt iteration logs are not
+codev/projects/*/*.txt

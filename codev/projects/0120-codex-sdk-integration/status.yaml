@@ -1,0 +1,92 @@
+id: '0120'
+title: codex-sdk-integration
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Install SDK and implement runCodexConsultation
+    status: complete
+  - id: phase_2
+    title: Clean up JSONL parsing and update tests
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-15T22:34:24.253Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-02-15T22:46:02.755Z'
+    approved_at: '2026-02-15T22:48:20.801Z'
+  pr-ready:
+    status: approved
+    approved_at: '2026-02-16T02:36:00.000Z'
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_1-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter2-claude.txt
+started_at: '2026-02-15T22:28:30.155Z'
+updated_at: '2026-02-16T02:02:42.178Z'

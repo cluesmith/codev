@@ -1,0 +1,34 @@
+id: '0087'
+title: porch-timeout-termination-retries
+protocol: spider
+phase: complete
+plan_phases:
+  - id: phase_1
+    title: Build Timeout in claude.ts
+    status: complete
+  - id: phase_2
+    title: Retry Loop + Circuit Breaker in run.ts
+    status: complete
+  - id: phase_3
+    title: AWAITING_INPUT Detection
+    status: complete
+  - id: phase_4
+    title: Tests
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-01T18:13:51.933Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-01T18:13:51.937Z'
+  pr-ready:
+    status: approved
+    requested_at: '2026-02-01T21:38:51.730Z'
+    approved_at: '2026-02-01T21:38:51.732Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-01T18:13:35.947Z'
+updated_at: '2026-02-01T21:38:51.732Z'
