@@ -56,8 +56,9 @@ export class SendBuffer {
     }
   }
 
-  /** Start the periodic flush timer. */
+  /** Start the periodic flush timer. Clears any existing timer first. */
   start(getSession: GetSessionFn, deliver: DeliverFn, log: LogFn): void {
+    if (this.flushTimer) clearInterval(this.flushTimer);
     this.getSession = getSession;
     this.deliver = deliver;
     this.log = log;
@@ -98,6 +99,9 @@ export class SendBuffer {
         // Deliver all messages in order
         for (const msg of messages) {
           this.deliver(session, msg);
+          if (this.log && msg.logMessage) {
+            this.log('INFO', msg.logMessage);
+          }
         }
         if (this.log && !forceAll) {
           const reason = maxAgeExceeded ? 'max age exceeded' : 'user idle';
