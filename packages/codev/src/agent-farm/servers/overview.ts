@@ -378,22 +378,21 @@ export function worktreeNameToRoleId(dirName: string): string | null {
  * Returns the project dir prefix (to match `{ID}-*`) or null for soft-mode builders.
  */
 export function extractProjectIdFromWorktreeName(dirName: string): string | null {
-  // SPIR: spir-126-slug → "0126" (zero-padded)
+  // SPIR: spir-386-slug → try both "386" and "0386" (porch may or may not zero-pad)
   const spirMatch = dirName.match(/^spir-(\d+)/);
-  if (spirMatch) return spirMatch[1].padStart(4, '0');
+  if (spirMatch) return spirMatch[1];
 
-  // TICK: tick-130-slug → "0130" (zero-padded)
+  // TICK: tick-130-slug → try both "130" and "0130"
   const tickMatch = dirName.match(/^tick-(\d+)/);
-  if (tickMatch) return tickMatch[1].padStart(4, '0');
+  if (tickMatch) return tickMatch[1];
 
-  // Bugfix: bugfix-296-slug → "builder-bugfix-296"
-  // Porch project dirs are created via buildAgentName('bugfix', N) → "builder-bugfix-N"
+  // Bugfix: bugfix-382-slug → "bugfix-382" (porch uses this, not "builder-bugfix-382")
   const bugfixMatch = dirName.match(/^bugfix-(\d+)/);
-  if (bugfixMatch) return `builder-bugfix-${bugfixMatch[1]}`;
+  if (bugfixMatch) return `bugfix-${bugfixMatch[1]}`;
 
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
-  if (numericMatch) return numericMatch[1].padStart(4, '0');
+  if (numericMatch) return numericMatch[1];
 
   // task-NAvW, worktree-foIg → null (soft mode)
   return null;
@@ -441,14 +440,20 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
 
     const projectsDir = path.join(worktreePath, 'codev', 'projects');
 
-    // Try to find matching status.yaml by project ID prefix
+    // Try to find matching status.yaml by project ID prefix.
+    // Porch may create dirs with or without zero-padding (e.g. "386-slug" or "0386-slug"),
+    // and bugfix dirs may be "bugfix-382-slug" or "builder-bugfix-382-slug".
+    const paddedId = /^\d+$/.test(projectId) ? projectId.padStart(4, '0') : null;
     let found = false;
     if (fs.existsSync(projectsDir)) {
       try {
         const projectEntries = fs.readdirSync(projectsDir, { withFileTypes: true });
         for (const projEntry of projectEntries) {
           if (!projEntry.isDirectory()) continue;
-          if (!projEntry.name.startsWith(`${projectId}-`)) continue;
+          const name = projEntry.name;
+          const matches = name.startsWith(`${projectId}-`)
+            || (paddedId && name.startsWith(`${paddedId}-`));
+          if (!matches) continue;
 
           const statusFile = path.join(projectsDir, projEntry.name, 'status.yaml');
           if (!fs.existsSync(statusFile)) continue;
