@@ -16,8 +16,8 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 | Mode | Command | Use When |
 |------|---------|----------|
-| **Strict** (default) | `af spawn -p XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn --soft -p XXXX` | AI follows protocol - you verify compliance |
+| **Strict** (default) | `af spawn XXXX` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn XXXX --soft` | AI follows protocol - you verify compliance |
 
 **Strict mode** (default): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously without intervention.
 
@@ -28,14 +28,13 @@ Builders work autonomously in isolated git worktrees. The Architect:
 ### Agent Farm CLI (`af`)
 
 ```bash
-af spawn -p 1                          # Strict mode (default) - porch-driven
-af spawn -p 1 -t "feature"             # Strict mode with title (no spec yet)
-af spawn -p 1 --resume                 # Resume existing porch state
-af spawn --soft -p 1                   # Soft mode - protocol-guided
+af spawn 1                             # Strict mode (default) - porch-driven
+af spawn 1 --resume                    # Resume existing porch state
+af spawn 1 --soft                      # Soft mode - protocol-guided
 af spawn --task "fix the bug"             # Ad-hoc task builder (soft mode)
 af spawn --worktree                       # Worktree with no initial prompt
 af status                                 # Check all builders
-af cleanup -p 1                        # Remove completed builder
+af cleanup --project 1                    # Remove completed builder
 af dash start/stop                        # Dashboard management
 af send 1 "message"                    # Short message to builder
 ```
@@ -79,13 +78,10 @@ wait
 # 2. Spawn the builder
 
 # Default: Strict mode (porch-driven with gates)
-af spawn -p 42
-
-# With project title (if no spec exists yet)
-af spawn -p 42 -t "user-authentication"
+af spawn 42
 
 # Or: Soft mode (builder follows protocol independently)
-af spawn --soft -p 42
+af spawn 42 --soft
 ```
 
 ### 2. Approving Gates (Strict Mode Only)
@@ -216,8 +212,8 @@ Before approving implementations with UX requirements:
 
 | Task | Command |
 |------|---------|
-| Start feature (strict, default) | `af spawn -p <id>` |
-| Start feature (soft) | `af spawn --soft -p <id>` |
+| Start feature (strict, default) | `af spawn <id>` |
+| Start feature (soft) | `af spawn <id> --soft` |
 | Check all builders | `af status` |
 | Check one project | `porch status <id>` |
 | Approve spec | `porch approve <id> spec-approval` |

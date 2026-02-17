@@ -29,8 +29,8 @@ The `spawn` command supports five modes for different workflows:
 
 ```bash
 # Spec mode (standard workflow)
-af spawn -p 0009                    # Spawn builder for spec 0009
-af spawn --project 0009             # Long form
+af spawn 9                          # Spawn builder for issue #9
+af spawn 9 --protocol spir          # Explicit protocol
 
 # Task mode (ad-hoc tasks)
 af spawn --task "Fix the login bug"
@@ -152,7 +152,7 @@ af tutorial --reset             # Start tutorial fresh
 
 ## Configuration
 
-Customize commands via `codev/config.json`:
+Customize commands via `af-config.json` (project root):
 
 ```json
 {
@@ -182,6 +182,6 @@ Agent-farm uses SQLite databases for state:
 
 - `.agent-farm/state.db` - Local runtime state (SQLite)
 - `~/.agent-farm/global.db` - Global port registry (SQLite)
-- `codev/config.json` - Project configuration
+- `af-config.json` - Project configuration
 - `codev/templates/` - Dashboard and annotation templates
 - `codev/roles/` - Architect and builder role prompts

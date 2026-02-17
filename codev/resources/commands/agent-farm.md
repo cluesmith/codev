@@ -43,7 +43,7 @@ af dash start [options]
 Starts the agent-farm dashboard with:
 - Architect terminal (Claude session with architect role)
 - Web-based UI for monitoring builders
-- tmux session management
+- Shellper session management
 
 The dashboard is accessible via browser at `http://localhost:<port>`.
 
@@ -132,7 +132,7 @@ af dash stop
 **Description:**
 
 Stops all running agent-farm processes including:
-- tmux sessions
+- Terminal sessions (Shellper processes)
 - Dashboard servers
 
 Does NOT clean up worktrees - use `af cleanup` for that.
@@ -553,7 +553,7 @@ af db stats [options]
 
 ## Configuration
 
-Customize commands via `codev/config.json`:
+Customize commands via `af-config.json` (project root):
 
 ```json
 {
@@ -568,7 +568,7 @@ Customize commands via `codev/config.json`:
 Or override via CLI flags:
 
 ```bash
-af start --architect-cmd "claude --model opus"
+af dash start --architect-cmd "claude --model opus"
 af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 ```
 
@@ -578,9 +578,9 @@ af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 
 | File | Description |
 |------|-------------|
-| `.agent-farm/state.json` | Project runtime state |
-| `~/.agent-farm/ports.json` | Global port registry |
-| `codev/config.json` | Project configuration |
+| `.agent-farm/state.db` | Project runtime state (SQLite) |
+| `~/.agent-farm/global.db` | Global port registry (SQLite) |
+| `af-config.json` | Project configuration |
 
 ---
 

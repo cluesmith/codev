@@ -169,39 +169,6 @@ codev update --force
 
 ---
 
-### codev tower
-
-Cross-project dashboard showing all agent-farm instances.
-
-```bash
-codev tower [options]
-```
-
-**Options:**
-- `-p, --port <port>` - Port to run on (default: 4100)
-- `--stop` - Stop the tower dashboard
-
-**Description:**
-
-Starts a web-based dashboard that shows all running agent-farm instances across different projects. Useful when working on multiple codev projects simultaneously.
-
-The tower aggregates status from the global port registry at `~/.agent-farm/ports.json`.
-
-**Examples:**
-
-```bash
-# Start tower dashboard
-codev tower
-
-# Start on custom port
-codev tower -p 4200
-
-# Stop the dashboard
-codev tower --stop
-```
-
----
-
 ## See Also
 
 - [af](agent-farm.md) - Agent Farm commands

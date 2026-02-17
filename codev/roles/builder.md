@@ -8,12 +8,12 @@ Builders run in one of two modes, determined by how they were spawned:
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Strict** (default) | `af spawn -p XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn --soft -p XXXX` | AI follows protocol - architect verifies compliance |
+| **Strict** (default) | `af spawn XXXX` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn XXXX --soft` | AI follows protocol - architect verifies compliance |
 
 ## Strict Mode (Default)
 
-Spawned with: `af spawn -p XXXX`
+Spawned with: `af spawn XXXX`
 
 In strict mode, porch orchestrates your work and drives the protocol to completion autonomously. Your job is simple: **run porch until the project completes**.
 
@@ -68,7 +68,7 @@ You must:
 
 ## Soft Mode
 
-Spawned with: `af spawn --soft -p XXXX` or `af spawn --task "..."`
+Spawned with: `af spawn XXXX --soft` or `af spawn --task "..."`
 
 In soft mode, you follow the protocol document yourself. The architect monitors your work and verifies you're adhering to the protocol correctly.
 

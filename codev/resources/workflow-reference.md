@@ -118,7 +118,7 @@ af open src/path/to/file.ts
 codev import /path/to/other-project
 
 # Import from GitHub
-codev import github:cluesmith/ansari-project
+codev import github:cluesmith/codev
 
 # Preview without running Claude
 codev import github:owner/repo --dry-run

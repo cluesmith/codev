@@ -94,7 +94,7 @@ Watch a brief overview of what Codev is and how it works.
 
 ### 💬 Participate
 
-Join the conversation in [GitHub Discussions](https://github.com/ansari-project/codev/discussions) or our [Discord community](https://discord.gg/mJ92DhDa6n)! Share your specs, ask questions, and learn from the community.
+Join the conversation in [GitHub Discussions](https://github.com/cluesmith/codev/discussions) or our [Discord community](https://discord.gg/mJ92DhDa6n)! Share your specs, ask questions, and learn from the community.
 
 **Get notified of new discussions**: Click the **Watch** button at the top of this repo → **Custom** → check **Discussions**.
 
@@ -151,7 +151,7 @@ your-project/
 │   ├── specs/              # Feature specifications
 │   ├── plans/              # Implementation plans
 │   ├── reviews/            # Review and lessons learned
-│   └── projectlist.md      # Project tracking
+│   └── resources/           # Reference materials
 ├── AGENTS.md               # AI agent instructions (AGENTS.md standard)
 ├── CLAUDE.md               # AI agent instructions (Claude Code)
 └── [your code]
@@ -173,7 +173,7 @@ In much the same way an operating system has a memory hierarchy, Codev repos hav
 
 ![Context Hierarchy](codev/resources/context-hierarchy.png)
 
-**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with an entry in the project list, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews.
+**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with a GitHub issue, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews.
 
 ## Key Features
 
@@ -276,20 +276,19 @@ This repository has a dual nature:
 <details>
 <summary><strong>Test Infrastructure</strong> (click to expand)</summary>
 
-Our comprehensive test suite (64 tests) validates the Codev installation process:
+Our test suite validates the Codev CLI and Agent Farm:
 
-- **Framework**: Shell-based testing with bats-core (zero dependencies)
-- **Coverage**: SPIR protocol, CLAUDE.md preservation, agent installation
-- **Isolation**: XDG sandboxing ensures tests never touch real user directories
-- **CI/CD Ready**: Tests run in seconds with clear TAP output
+- **Framework**: Vitest (unit tests) + Playwright (E2E tests)
+- **Coverage**: CLI commands, porch protocol orchestration, Agent Farm dashboard
+- **Isolation**: Tests run in isolated environments
 
 ```bash
-./scripts/run-tests.sh      # Fast tests (< 30 seconds)
-./scripts/run-all-tests.sh  # All tests including Claude CLI
-./scripts/install-hooks.sh  # Install pre-commit hook
+# From packages/codev/
+npm test              # Run unit tests
+npm run test:e2e      # Run E2E tests
 ```
 
-See `tests/README.md` for details.
+See [Testing Guide](codev/resources/testing-guide.md) for details.
 
 </details>
 
@@ -324,7 +323,7 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 - **Automatic prompting** - builders start with instructions to implement their assigned spec
 
 **Current limitations:**
-- Currently optimized for **Claude Code** (uses `-p` flag, `--append-system-prompt`, etc.)
+- Currently optimized for **Claude Code** (uses `--append-system-prompt`, `--dangerously-skip-permissions`, etc.)
 - Uses **shellper processes** for persistent terminal sessions (node-pty handles terminal I/O)
 - macOS-focused (should work on Linux but less tested)
 
@@ -342,7 +341,7 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 af dash start
 
 # Spawn a builder for a spec
-af spawn --project 0003
+af spawn 3
 
 # Check status
 af status
@@ -391,7 +390,7 @@ Builders need permission-skipping flags to run autonomously without human approv
 | Claude Code | `--dangerously-skip-permissions` | Skip permission prompts for file/command operations |
 | Gemini CLI | `--yolo` | Enable autonomous mode without confirmations |
 
-Configure in `codev/config.json`:
+Configure in `af-config.json` (created by `codev init` or `codev adopt`):
 ```json
 {
   "shell": {
@@ -413,7 +412,7 @@ Or for Gemini:
 
 **Warning**: These flags allow the AI to execute commands and modify files without asking. Only use in development environments where you trust the AI's actions.
 
-See [INSTALL.md](INSTALL.md#architect-builder-pattern-optional) for full documentation.
+See [CLI Reference](codev/resources/commands/agent-farm.md) for full documentation.
 
 ## Releases
 
@@ -439,7 +438,7 @@ Releases are named after great examples of architecture from around the world. S
 
 ## Contributing
 
-We welcome contributions of any kind! Talk to us on [Discord](https://discord.gg/mJ92DhDa6n) or [open an issue](https://github.com/ansari-project/codev/issues).
+We welcome contributions of any kind! Talk to us on [Discord](https://discord.gg/mJ92DhDa6n) or [open an issue](https://github.com/cluesmith/codev/issues).
 
 We especially welcome contributions to **Agent Farm** - help us make it work with more AI CLIs and platforms.
 

@@ -89,7 +89,7 @@ In much the same way an operating system has a memory hierarchy, Codev repos hav
 
 ![Context Hierarchy](context-hierarchy.png)
 
-**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with an entry in the project list, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews. 
+**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with a GitHub issue, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews.
 
 ---
 
@@ -106,7 +106,6 @@ Project management commands. Typically used by **humans** to set up and maintain
 | `codev doctor` | Check dependencies and configuration |
 | `codev update` | Update Codev framework |
 | `codev import` | Import specs from another project |
-| `codev tower` | Cross-project dashboard |
 
 ### agent-farm (af)
 

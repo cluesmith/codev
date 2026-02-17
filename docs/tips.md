@@ -4,7 +4,7 @@ Practical tips for getting the most out of Codev and Agent Farm.
 
 ## Skip Permission Prompts
 
-Add `--dangerously-skip-permissions` to your `codev/config.json` to reduce permission prompts:
+Add `--dangerously-skip-permissions` to your `af-config.json` to reduce permission prompts:
 
 ```json
 {
@@ -60,7 +60,7 @@ The `af consult` variant runs in a visible dashboard terminal so you can observe
 Spawn a builder directly from a spec number:
 
 ```bash
-af spawn -p 0042
+af spawn 42
 ```
 
 The builder gets its own isolated git worktree, automatically receives the spec and plan context, and starts implementing immediately.
@@ -122,10 +122,11 @@ af dash start   # Fresh start
 
 ### Orphaned Sessions
 
-Nuclear option if things are really stuck:
+If things are really stuck, restart Tower:
 
 ```bash
-tmux kill-server  # Kills ALL tmux sessions
+af dash stop    # Stop Tower and all shellper sessions
+af dash start   # Fresh start
 ```
 
 ### Port Conflicts
@@ -149,8 +150,8 @@ af db stats          # Show database statistics
 
 ### Advanced: Architect Knows the Internals
 
-The Architect agent has detailed knowledge of the Agent Farm UI internals, including tmux and ttyd. You can ask it to do interesting things like:
-- Rearrange terminal layouts
-- Send commands to specific panes
-- Create custom dashboard configurations
+The Architect agent has detailed knowledge of the Agent Farm UI internals, including the Shellper session manager and Tower dashboard. You can ask it to do interesting things like:
 - Debug terminal rendering issues
+- Inspect shellper session state
+- Create custom dashboard configurations
+- Manage builder lifecycle

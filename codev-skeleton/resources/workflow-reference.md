@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn -p XXXX                                  │
+│         Architect spawns builder: af spawn XXXX                                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -80,7 +80,7 @@ AI agents must stop and wait for human action at these gates.
 af dash start
 
 # Spawn a builder for a project
-af spawn -p 44
+af spawn 44 --protocol spir
 
 # Check all builder statuses
 af status
@@ -118,7 +118,7 @@ af open src/path/to/file.ts
 codev import /path/to/other-project
 
 # Import from GitHub
-codev import github:cluesmith/ansari-project
+codev import github:cluesmith/codev
 
 # Preview without running Claude
 codev import github:owner/repo --dry-run

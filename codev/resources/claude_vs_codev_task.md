@@ -1,5 +1,7 @@
 # Claude vs Codev: Comparative Evaluation Task
 
+> **Historical document** (February 2026): This runbook describes how the VIBE vs SPIR comparison experiments were conducted. It references tmux (since replaced by Shellper) and `consult general` (since replaced by `consult -m <model> --prompt`). The methodology and results remain valid; only the terminal management tooling has changed.
+
 > A repeatable process for comparing plain Claude ("vibe coding") against Codev's SPIR protocol. Both builders receive the same application prompt. The resulting codebases are reviewed independently by three AI models (Claude, Codex, Gemini) across seven quality dimensions.
 
 ## The Prompt

@@ -16,7 +16,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0043] Establish baselines BEFORE optimizing - before/after data makes impact clear
 - [From 0065/PR-133] NEVER skip CMAP reviews - they catch issues manual review misses (e.g., stale commits in PR, scope creep)
 - [From 0085] When guessing fails, build a minimal repro - capturing raw data beats speculation (crab icon fix took 5 failed attempts, then 1 repro solved it)
-- [From scroll saga] Intermittent bugs = external state mutation. Grep for everything that touches the state before attempting fixes. The scroll issue took ~10 hours because we kept fixing the renderer instead of finding what was flipping tmux settings (`-g mouse on` in architect.ts — one flag, one character)
+- [From scroll saga] Intermittent bugs = external state mutation. Grep for everything that touches the state before attempting fixes. The scroll issue took ~10 hours because we kept fixing the renderer instead of finding what was flipping terminal settings (one flag, one character)
 - [From scroll saga] Consult external models EARLY. Three AI consultations found the root cause in minutes; solo debugging produced three failed quick fixes over hours
 - [From scroll saga] Never spawn builders for symptom fixes. If you don't understand the root cause, more code won't help — PRs #220 and #225 were wasted work
 
@@ -35,7 +35,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0048] Three-container architecture (viewMode, editor, preview) provides clean separation for multi-mode UIs
 - [From 0039] Embedding templates in npm packages ensures offline capability and version consistency
 - [From 0060] When modularizing large files, group by concern (CSS together, JS together) not by feature
-- [From 0085] PTY sessions need full locale environment (LANG=en_US.UTF-8) — tmux uses client locale to decide Unicode vs ASCII rendering
+- [From 0085] PTY sessions need full locale environment (LANG=en_US.UTF-8) — terminal multiplexers use client locale to decide Unicode vs ASCII rendering
 
 ## Process
 
@@ -57,9 +57,9 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0050] State-change hooks should run after every state update, not just on init
 - [From 0055] Be selective about file exclusions - exclude heavyweight directories, not all dotfiles
 - [From 0057] Follow git's branch naming rules - use pattern-based rejection, not whitelist
-- [From 0002-001] Shell escaping in tmux: complex content with backticks/quotes needs launch scripts
+- [From 0002-001] Shell escaping in terminal multiplexers: complex content with backticks/quotes needs launch scripts
 - [From 0085] xterm.js `customGlyphs: true` renders block elements (▀▄█) procedurally — crisp at any size, no font dependency
-- [From scroll saga] tmux `-g` flag sets options GLOBALLY across ALL sessions. Always use `-t <session>` for per-session settings. One `-g mouse on` poisoned every tmux session on the machine
+- [From scroll saga] Global terminal multiplexer flags can poison ALL sessions. Always use session-scoped settings. One global flag poisoned every session on the machine
 
 ## Documentation
 

@@ -94,7 +94,6 @@ Verifies that all required dependencies are installed and properly configured:
 
 **Core Dependencies (required):**
 - Node.js (>= 18.0.0)
-- ttyd (>= 1.7.0)
 - git (>= 2.5.0)
 - gh (GitHub CLI, authenticated)
 
@@ -121,7 +120,6 @@ Codev Doctor - Checking your environment
 Core Dependencies (required for Agent Farm)
 
   ✓ Node.js      20.10.0
-  ✓ ttyd         1.7.4
   ✓ git          2.42.0
   ✓ gh           authenticated
   ✓ @cluesmith/codev  1.0.0
@@ -167,39 +165,6 @@ codev update
 
 # Force overwrite (discard local changes)
 codev update --force
-```
-
----
-
-### codev tower
-
-Cross-project dashboard showing all agent-farm instances.
-
-```bash
-codev tower [options]
-```
-
-**Options:**
-- `-p, --port <port>` - Port to run on (default: 4100)
-- `--stop` - Stop the tower dashboard
-
-**Description:**
-
-Starts a web-based dashboard that shows all running agent-farm instances across different projects. Useful when working on multiple codev projects simultaneously.
-
-The tower aggregates status from the global port registry at `~/.agent-farm/ports.json`.
-
-**Examples:**
-
-```bash
-# Start tower dashboard
-codev tower
-
-# Start on custom port
-codev tower -p 4200
-
-# Stop the dashboard
-codev tower --stop
 ```
 
 ---

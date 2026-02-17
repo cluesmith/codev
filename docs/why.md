@@ -127,7 +127,7 @@ This isn't lazy. It's dogfooding. If natural language is code, then installation
 
 ### Methodology Evolution Built-In
 
-Remember how the Review phase updates the protocol itself? We've automated this. The `spider-protocol-updater` agent analyzes SP(IDE)R implementations in other repositories, identifies improvements, and suggests protocol updates.
+Remember how the Review phase updates the protocol itself? Every project's lessons learned feed back into the protocol and templates. The MAINTAIN protocol automates this by syncing documentation, extracting wisdom from reviews, and keeping architecture docs current.
 
 Your methodology evolves based on collective learning. Not theoretical improvements, but battle-tested refinements from real projects.
 
@@ -145,18 +145,18 @@ Every project has a CLAUDE.md file with project-specific guidance. Style prefere
 
 Want to try SP(IDE)R yourself?
 
-1. Visit: [`github.com/ansari-project/codev`](https://github.com/ansari-project/codev)
-2. Tell your AI: "Follow the instructions in [INSTALL.md](https://github.com/ansari-project/codev/blob/main/INSTALL.md)"
-3. Start with SP(IDE)R-SOLO for single-agent workflows
-4. Review our examples to see the methodology in action
+1. Install: `npm install -g @cluesmith/codev`
+2. Initialize: `codev init` (new project) or `codev adopt` (existing project)
+3. Verify: `codev doctor`
+4. Start with SPIR for structured development, or tell your AI: *"I want to build X using the SPIR protocol"*
 
 We built a functional todo app without directly touching code, while maintaining comprehensive tests, clear architecture, and thorough documentation. You can too.
 
 ## Join the Movement
 
 Codev is in its early stages, and we're learning from every implementation. If you try SP(IDE)R:
-- Star the [GitHub repository](https://github.com/ansari-project/codev) to stay updated
-- [File issues](https://github.com/ansari-project/codev/issues) with your experiences, suggestions, or questions
+- Star the [GitHub repository](https://github.com/cluesmith/codev) to stay updated
+- [File issues](https://github.com/cluesmith/codev/issues) with your experiences, suggestions, or questions
 - Share your SP(IDE)R implementations - we analyze them to evolve the protocol
 - Email us at hi@waleed.dk with feedback
 - Join the conversation about the future of specification-driven development

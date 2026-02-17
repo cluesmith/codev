@@ -44,9 +44,9 @@ A Role (Architect, Builder, Consultant) shapes **how the agent thinks and operat
 | **Artifacts** | May produce output | Produces specs, plans, reviews |
 | **External review** | No | Multi-model consultation built in |
 
-A Protocol like SPIDER defines a complete development lifecycle:
+A Protocol like SPIR defines a complete development lifecycle:
 ```
-Specify (human approval) → Plan (human approval) → Implement → Defend → Evaluate → Review
+Specify (human approval) → Plan (human approval) → Implement (with IDE loop) → Review
 ```
 
 Skills are more like shortcuts or macros. Protocols are methodologies.
@@ -72,4 +72,4 @@ Think of Claude Code as the engine. Codev is the operating system that orchestra
 
 ## More questions?
 
-Join the conversation in [GitHub Discussions](https://github.com/ansari-project/codev/discussions).
+Join the conversation in [GitHub Discussions](https://github.com/cluesmith/codev/discussions).

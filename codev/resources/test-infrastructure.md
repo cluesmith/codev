@@ -30,7 +30,7 @@ Codev has four test layers, each serving a different purpose:
 |------|-------|----------------|
 | CLI commands | `src/__tests__/init.test.ts`, `adopt.test.ts`, `doctor.test.ts`, `update.test.ts`, `scaffold.test.ts`, `templates.test.ts`, `import.test.ts` | `codev init`, `codev adopt`, `codev doctor`, etc. |
 | Consultation | `src/__tests__/consult.test.ts`, `generate-image.test.ts` | `consult` CLI, image generation |
-| Projectlist | `src/__tests__/projectlist-parser.test.ts` | YAML/markdown parsing of projectlist.md |
+| Projectlist | `src/__tests__/projectlist-parser.test.ts` | YAML/markdown parsing (legacy projectlist format) |
 | Agent Farm | `src/agent-farm/__tests__/spawn.test.ts`, `state.test.ts`, `config.test.ts`, `types.test.ts`, `roles.test.ts`, `port-registry.test.ts`, `db.test.ts`, `migrate.test.ts`, `start.test.ts`, `attach.test.ts`, `server-utils.test.ts` | Builder spawning, state management, config, ports, SQLite |
 | Terminal | `src/terminal/__tests__/pty-manager.test.ts`, `pty-session.test.ts`, `ring-buffer.test.ts`, `ws-protocol.test.ts` | PTY lifecycle, WebSocket protocol, output buffering |
 | Porch | `src/commands/porch/__tests__/protocol.test.ts`, `checks.test.ts`, `state.test.ts`, `plan.test.ts`, `next.test.ts`, `parse-verdict.test.ts`, `build-counter.test.ts` | Protocol loading, phase transitions, check running, verdict parsing |
@@ -61,7 +61,7 @@ The default vitest config **excludes** tests that need a running tower:
 |------|---------------|
 | `tower-baseline.test.ts` | Server startup, health endpoint, project activation/deactivation lifecycle |
 | `tower-api.test.ts` | Full REST API: project CRUD, terminal creation, WebSocket connections |
-| `tower-terminals.test.ts` | Terminal session management, tmux integration, output streaming |
+| `tower-terminals.test.ts` | Terminal session management, PTY/Shellper lifecycle, output streaming |
 | `cli-tower-mode.test.ts` | CLI `af tower` command startup and shutdown |
 | `bugfix-202-stale-temp-projects.test.ts` | Stale temp directory filtering (spawns its own tower on port 14600) |
 

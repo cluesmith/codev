@@ -20,7 +20,6 @@ Example configuration for a GCP dev instance:
 - npm 10.x
 - Claude Code
 - Codex CLI
-- tmux
 - git
 
 ### Quick Start
@@ -30,7 +29,7 @@ Example configuration for a GCP dev instance:
 gcloud compute ssh <instance-name> --zone=us-west1-b
 
 # Or use af for Agent Farm
-af start --remote <username>@<external-ip>:/home/<username>/dev/your-project
+af dash start --remote <username>@<external-ip>:/home/<username>/dev/your-project
 
 # Set API keys (first time only)
 gcloud compute ssh <instance-name> --zone=us-west1-b --command='
@@ -75,7 +74,7 @@ gcloud compute disks snapshot <instance-name> --zone=us-west1-b --snapshot-names
 
 - 4+ vCPU, 8GB+ RAM for running multiple builder agents
 - SSD storage for responsive git/sqlite operations
-- SSH access for `af start --remote`
+- SSH access for `af dash start --remote`
 - Ability to snapshot/destroy to minimize costs
 
 ## Recommendations
@@ -155,7 +154,6 @@ apt update && apt upgrade -y
 # Essential tools
 apt install -y \
   git \
-  tmux \
   curl \
   build-essential \
   sqlite3
@@ -190,7 +188,7 @@ echo "Setup complete. Clone your repos and configure API keys."
 
 ```bash
 # Start agent farm on remote instance
-af start --remote dev@your-instance-ip:/path/to/project
+af dash start --remote dev@your-instance-ip:/path/to/project
 
 # This:
 # 1. SSHs into the remote machine
@@ -237,4 +235,4 @@ export GEMINI_API_KEY="..."
 
 ---
 
-*Generated from 3-way consultation (Gemini, Codex, Claude) - December 2024*
+*Generated from 3-way consultation (Gemini, Codex, Claude) - December 2024. Updated February 2026 (removed tmux dependency — Agent Farm now uses Shellper for terminal management).*

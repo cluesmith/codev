@@ -144,11 +144,13 @@ Does NOT clean up worktrees - use `af cleanup` for that.
 Spawn a new builder.
 
 ```bash
-af spawn [options]
+af spawn [issue-number] [options]
 ```
 
+**Arguments:**
+- `issue-number` - Issue number to build (positional, e.g., `42`)
+
 **Options:**
-- `-p, --project <id>` - Spawn builder for a spec (e.g., `42`)
 - `--task <text>` - Spawn builder with a task description
 - `--protocol <name>` - Spawn builder to run a protocol
 - `--shell` - Spawn a bare Claude session
@@ -166,8 +168,8 @@ Creates a new builder in an isolated git worktree. The builder gets:
 **Examples:**
 
 ```bash
-# Spawn builder for spec 42
-af spawn -p 42
+# Spawn builder for issue #42
+af spawn 42
 
 # Spawn with task description
 af spawn --task "Fix login bug in auth module"
@@ -176,7 +178,7 @@ af spawn --task "Fix login bug in auth module"
 af spawn --shell
 
 # Spawn with context files
-af spawn -p 42 --files "src/auth.ts,tests/auth.test.ts"
+af spawn 42 --files "src/auth.ts,tests/auth.test.ts"
 ```
 
 ---
@@ -527,8 +529,8 @@ Customize commands via `af-config.json` at the project root:
 Or override via CLI flags:
 
 ```bash
-af start --architect-cmd "claude --model opus"
-af spawn -p 42 --builder-cmd "claude --model haiku"
+af dash start --architect-cmd "claude --model opus"
+af spawn 42 --builder-cmd "claude --model haiku"
 ```
 
 ---
@@ -537,8 +539,8 @@ af spawn -p 42 --builder-cmd "claude --model haiku"
 
 | File | Description |
 |------|-------------|
-| `.agent-farm/state.json` | Project runtime state |
-| `~/.agent-farm/ports.json` | Global port registry |
+| `.agent-farm/state.db` | Project runtime state (SQLite) |
+| `~/.agent-farm/global.db` | Global port registry (SQLite) |
 | `af-config.json` | Agent Farm configuration (project root) |
 
 ---

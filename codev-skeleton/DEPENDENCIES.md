@@ -120,7 +120,7 @@ claude --version
 **Installation:**
 
 ```bash
-npm install -g @anthropic-ai/gemini-cli
+npm install -g @google/gemini-cli
 
 # Verify
 gemini --version
@@ -218,7 +218,7 @@ Ensure no firewall is blocking the ports (default: 4200-4299):
 lsof -i :4200
 
 # Clean up stale port allocations
-./codev/bin/agent-farm ports cleanup
+af ports cleanup
 ```
 
 ### gh authentication issues

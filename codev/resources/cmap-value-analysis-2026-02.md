@@ -2,7 +2,7 @@
 
 Data-driven analysis of multi-agent consultation (CMAP) value over a two-week development sprint. Measures pre-merge catches vs. post-merge escapes to quantify consultation ROI.
 
-**Scope**: Spec projects 0094-0103, bugfix issues #187-#243 (19 issues, 16 bugfix PRs). tmux scroll saga (#220, #225, #232) excluded as an outlier documented separately in lessons-learned.md.
+**Scope**: Spec projects 0094-0103, bugfix issues #187-#243 (19 issues, 16 bugfix PRs). Terminal scroll saga (#220, #225, #232) excluded as an outlier documented separately in lessons-learned.md.
 
 ---
 
@@ -78,12 +78,12 @@ Issues surfaced by 3-way consultation during spec development that would have sh
 | #190 | #191 | CLAUDE.md stale instructions | Documentation cleanup, not code bug |
 | #202 | #208 | E2E temp dirs shown as Recent Projects | Test infrastructure side effect |
 | #203 | #206 | Copy/paste broken in dashboard | Pre-existing xterm.js gap; never had clipboard handling |
-| #228 | #229 | Stale input characters on architect start | tmux DA query timing; environment-specific |
+| #228 | #229 | Stale input characters on architect start | Terminal DA query timing; environment-specific |
 | #236 | #238 | machineId is hostname+arch, not UUID | Design flaw in original implementation; security-adjacent |
 | #237 | #239 | `af spawn` should pre-initialize porch | Workflow friction, not a bug per se |
 | #240 | #241 | Diff truncation causes false reviews | Meta-bug in consultation infrastructure itself |
 
-### Excluded (tmux scroll saga)
+### Excluded (terminal scroll saga)
 
 | Issue | PR | Reason |
 |-------|-----|--------|

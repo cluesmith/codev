@@ -31,11 +31,11 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 
 | Protocol | Purpose | When to Use |
 |----------|---------|-------------|
-| **SPIDER** | Multi-phase development with consultation | Complex features, architecture changes, unclear requirements |
+| **SPIR** | Multi-phase development with consultation | Complex features, architecture changes, unclear requirements |
 | **TICK** | Fast autonomous implementation | Small features, bug fixes, well-defined tasks |
 | **EXPERIMENT** | Disciplined experimentation | Prototypes, research spikes, evaluating approaches |
 
-**Note**: To skip consultation in SPIDER, say "without consultation" when starting work.
+**Note**: To skip consultation in SPIR, say "without consultation" when starting work.
 
 ### Roles
 
@@ -57,10 +57,10 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 Enables the Architect-Builder pattern with isolated execution environments:
 
 ```bash
-af start              # Launch the architect dashboard
-af spawn -p 0003      # Create a builder for spec 0003
+af dash start         # Launch the architect dashboard
+af spawn 3            # Create a builder for project 3
 af status             # See what everyone is doing
-af cleanup -p 0003    # Clean up when done
+af cleanup -p 3       # Clean up when done
 ```
 
 #### Consult
