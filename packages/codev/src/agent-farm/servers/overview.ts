@@ -42,6 +42,7 @@ export interface BuilderOverview {
   progress: number;
   blocked: string | null;
   startedAt: string | null;
+  idleMs: number;
 }
 
 export interface PROverview {
@@ -97,6 +98,7 @@ interface ParsedStatus {
   currentPlanPhase: string;
   gates: Record<string, string>;
   gateRequestedAt: Record<string, string>;
+  gateApprovedAt: Record<string, string>;
   planPhases: PlanPhase[];
   startedAt: string;
 }
@@ -114,6 +116,7 @@ export function parseStatusYaml(content: string): ParsedStatus {
     currentPlanPhase: '',
     gates: {},
     gateRequestedAt: {},
+    gateApprovedAt: {},
     planPhases: [],
     startedAt: '',
   };
@@ -179,6 +182,14 @@ export function parseStatusYaml(content: string): ParsedStatus {
         const val = requestedMatch[1];
         if (val !== 'null' && val !== '~') {
           result.gateRequestedAt[currentGate] = val;
+        }
+      }
+
+      const approvedMatch = line.match(/^\s{4}approved_at:\s*'?(.+?)'?\s*$/);
+      if (approvedMatch && currentGate) {
+        const val = approvedMatch[1];
+        if (val !== 'null' && val !== '~') {
+          result.gateApprovedAt[currentGate] = val;
         }
       }
     }
@@ -323,6 +334,34 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
   return null;
 }
 
+/**
+ * Compute total idle time (ms) from gate wait periods.
+ * Includes completed gate waits (requested_at → approved_at) and
+ * any currently-pending gate wait (requested_at → now).
+ */
+export function computeIdleMs(parsed: ParsedStatus): number {
+  let idle = 0;
+  const allGates = new Set([
+    ...Object.keys(parsed.gateRequestedAt),
+    ...Object.keys(parsed.gateApprovedAt),
+  ]);
+
+  for (const gate of allGates) {
+    const requested = parsed.gateRequestedAt[gate];
+    if (!requested) continue;
+
+    const approved = parsed.gateApprovedAt[gate];
+    const start = new Date(requested).getTime();
+    const end = approved ? new Date(approved).getTime() : Date.now();
+
+    if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+      idle += end - start;
+    }
+  }
+
+  return idle;
+}
+
 // =============================================================================
 // Builder discovery
 // =============================================================================
@@ -441,6 +480,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         progress: 0,
         blocked: null,
         startedAt: null,
+        idleMs: 0,
       });
       continue;
     }
@@ -490,6 +530,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
             startedAt: parsed.startedAt || null,
+            idleMs: computeIdleMs(parsed),
           });
           found = true;
           break;
@@ -516,6 +557,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         progress: 0,
         blocked: null,
         startedAt: null,
+        idleMs: 0,
       });
     }
   }
