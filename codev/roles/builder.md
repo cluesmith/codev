@@ -97,21 +97,21 @@ cat codev/protocols/spir/protocol.md
 Run 3-way consultations at checkpoints:
 ```bash
 # After writing spec
-consult --model gemini --type spec-review spec XXXX &
-consult --model codex --type spec-review spec XXXX &
-consult --model claude --type spec-review spec XXXX &
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
 
 # After writing plan
-consult --model gemini --type plan-review plan XXXX &
-consult --model codex --type plan-review plan XXXX &
-consult --model claude --type plan-review plan XXXX &
+consult -m gemini --protocol spir --type plan &
+consult -m codex --protocol spir --type plan &
+consult -m claude --protocol spir --type plan &
 wait
 
 # After implementation
-consult --model gemini --type impl-review pr N &
-consult --model codex --type impl-review pr N &
-consult --model claude --type impl-review pr N &
+consult -m gemini --protocol spir --type pr &
+consult -m codex --protocol spir --type pr &
+consult -m claude --protocol spir --type pr &
 wait
 ```
 

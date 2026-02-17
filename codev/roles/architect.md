@@ -54,9 +54,9 @@ porch pending                               # List pending gates
 
 ```bash
 # 3-way parallel integration review of builder's PR
-consult --model gemini --type integration-review pr 35 &
-consult --model codex --type integration-review pr 35 &
-consult --model claude --type integration-review pr 35 &
+consult -m gemini --type integration pr 35 &
+consult -m codex --type integration pr 35 &
+consult -m claude --type integration pr 35 &
 wait
 ```
 
@@ -123,9 +123,9 @@ When the builder creates a PR:
 
 ```bash
 # Run 3-way integration review
-consult --model gemini --type integration-review pr 83 &
-consult --model codex --type integration-review pr 83 &
-consult --model claude --type integration-review pr 83 &
+consult -m gemini --type integration pr 83 &
+consult -m codex --type integration pr 83 &
+consult -m claude --type integration pr 83 &
 wait
 
 # Post findings as PR comment
@@ -223,6 +223,6 @@ Before approving implementations with UX requirements:
 | Approve spec | `porch approve <id> spec-approval` |
 | Approve plan | `porch approve <id> plan-approval` |
 | See pending gates | `porch pending` |
-| Integration review | `consult --model X --type integration-review pr N` |
+| Integration review | `consult -m X --type integration pr N` |
 | Message builder | `af send <id> "short message"` |
 | Cleanup builder | `af cleanup -p <id>` |
