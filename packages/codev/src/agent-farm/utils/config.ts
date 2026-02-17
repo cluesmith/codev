@@ -52,24 +52,47 @@ function getMainRepoFromWorktree(dir: string): string | null {
 }
 
 /**
- * Find the workspace root by looking for codev/ directory
- * Handles git worktrees by finding the main repository
+ * Find the workspace root by looking for codev/ directory.
+ *
+ * When in a git worktree, finds the worktree root (via .git marker) and
+ * checks if it has its own codev/ directory. Builder worktrees are full
+ * git checkouts with their own codev/, so we use the worktree root —
+ * not the main repo. This prevents file writes from leaking to the main
+ * tree when tools run inside builder worktrees.
+ *
+ * See: https://github.com/cluesmith/codev-public/issues/407
  */
 function findWorkspaceRoot(startDir: string = process.cwd()): string {
-  // First check if we're in a git worktree
   const mainRepo = getMainRepoFromWorktree(startDir);
-  if (mainRepo && existsSync(resolve(mainRepo, 'codev'))) {
-    return mainRepo;
+
+  if (mainRepo) {
+    // We're in a git worktree. Find the worktree root by walking up to
+    // the .git file (worktrees have a .git file, not a directory).
+    let dir = startDir;
+    while (dir !== '/') {
+      if (existsSync(resolve(dir, '.git'))) {
+        // Found the worktree root. If it has its own codev/, use it
+        // instead of resolving to the main repo.
+        if (existsSync(resolve(dir, 'codev'))) {
+          return dir;
+        }
+        break;
+      }
+      dir = dirname(dir);
+    }
+
+    // Worktree doesn't have codev/ — fall back to main repo
+    if (existsSync(resolve(mainRepo, 'codev'))) {
+      return mainRepo;
+    }
   }
 
+  // Not in a worktree: walk up looking for codev/ or .git
   let dir = startDir;
-
   while (dir !== '/') {
-    // Check for codev/ directory (indicates project using codev)
     if (existsSync(resolve(dir, 'codev'))) {
       return dir;
     }
-    // Check for .git as fallback
     if (existsSync(resolve(dir, '.git'))) {
       return dir;
     }
@@ -247,3 +270,6 @@ export async function ensureDirectories(config: Config): Promise<void> {
     await mkdir(dir, { recursive: true });
   }
 }
+
+// Exported for testing
+export { findWorkspaceRoot as _findWorkspaceRoot };
