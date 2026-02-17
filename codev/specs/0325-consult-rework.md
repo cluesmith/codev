@@ -73,6 +73,12 @@ Flags:
 
 **Mode conflict**: If both general flags (`--prompt`/`--prompt-file`) and protocol flags (`--type`) are provided, the command errors with a clear message. The two modes are mutually exclusive.
 
+**Additional validation**:
+- `--protocol` without `--type` is an error (protocol narrows prompt lookup but needs a type to resolve)
+- `--issue` in general mode is silently ignored (no harm, no effect)
+- `consult stats -m <model>` ignores `-m` (stats mode doesn't invoke a model)
+- Porch-only flags (`--context`, `--plan-phase`, `--output`, `--project-id`) in general mode are silently ignored
+
 #### Prompt resolution
 
 Prompt lookup depends on whether `--protocol` is provided:
@@ -90,6 +96,7 @@ Each protocol owns its prompts in a `consult-types/` subdirectory:
 | `spir` | spec-review, plan-review, impl-review, phase-review, pr-review |
 | `bugfix` | impl-review, pr-review |
 | `tick` | spec-review, plan-review, impl-review, pr-review |
+| `maintain` | impl-review, pr-review |
 | shared (`codev/consult-types/`) | integration-review |
 
 Notes:
@@ -97,6 +104,8 @@ Notes:
 - `pr-review.md` replaces the old `pr-ready.md` for naming consistency
 - The old top-level `codev/consult-types/` retains only `integration-review.md`
 - The old files (`spec-review.md`, `plan-review.md`, `impl-review.md`, `pr-ready.md`) in the top-level directory are removed
+- `tick` currently has no `protocol.json` or `consult-types/` directory — this work creates `codev/protocols/tick/consult-types/` with the listed prompt files
+- `maintain` currently reads from the shared `codev/consult-types/` — this work creates `codev/protocols/maintain/consult-types/` with its own prompt files
 
 #### Context resolution
 
@@ -114,12 +123,12 @@ The consult command must figure out what artifact to review. The rules depend on
 - `--issue <N>` is required — consult uses it to locate the artifact:
   - `--type spec` — globs `codev/specs/<N>-*.md`. Errors if zero or multiple matches.
   - `--type plan` — globs `codev/plans/<N>-*.md`. Same error handling.
-  - `--type impl` — uses `--issue` to find the builder branch, gets diff from merge-base
+  - `--type impl` — uses `--issue` to find the builder branch via `gh pr list --search "<N>" --json headRefName --jq '.[0].headRefName'`, gets diff from merge-base. Errors if no PR found for the issue.
   - `--type pr` — looks up the PR via `gh pr list --search "<N>" --json number,headRefName --jq '.[0]'`. Errors if not found.
   - `--type integration` — same as pr with integration-review template
   - `--type phase` — error ("phases only exist in builders, and require the phase commit to exist")
 
-**Builder detection**: A worktree is identified as a builder context if `cwd` contains `/.builders/` in the path. If `--issue` is explicitly provided in a builder worktree, it overrides the auto-detected context.
+**Builder detection**: A worktree is identified as a builder context if `cwd` contains `/.builders/` in the path. If `--issue` is explicitly provided in a builder worktree, it overrides the auto-detected context and the command behaves as if running from the architect. This means `--type phase` with `--issue` always errors, even inside a builder worktree, since the override puts consult in architect mode.
 
 **Multiple matches**: If a glob like `codev/specs/<N>-*.md` returns multiple files, the command errors with a list of matches and asks the user to resolve.
 
@@ -129,7 +138,7 @@ For PR reviews (`--type pr` and `--type integration`), the model runs with cwd s
 
 PR reviews (`--type pr` and `--type integration`) need the model to see the actual PR branch code, not the current branch. The consult command handles this by creating a temporary git worktree:
 
-1. **Creation**: `git worktree add --detach <tmp-path> <pr-branch>` where `<tmp-path>` is `.consult-tmp/<pr-number>-<timestamp>` relative to the workspace root.
+1. **Creation**: `git worktree add --detach <tmp-path> <pr-branch>` where `<tmp-path>` is `.consult-tmp/<pr-number>-<timestamp>` relative to the git top-level directory (determined via `git rev-parse --show-toplevel`). The `.consult-tmp/` directory must be listed in `.gitignore`.
 2. **Model execution**: The model runs with `cwd` set to the temporary worktree.
 3. **Cleanup (success)**: After the model completes, the worktree is removed via `git worktree remove <tmp-path>`.
 4. **Cleanup (failure)**: Register cleanup in a `finally` block. Also register `SIGINT`/`SIGTERM` handlers to clean up on process kill. If the process is hard-killed (SIGKILL), the worktree may linger — `git worktree prune` (run by git periodically) handles stale entries.
@@ -259,6 +268,7 @@ Key differences:
 - [ ] Errors when PR not found for current branch or issue
 - [ ] Errors when `--protocol`/`--type` contain invalid characters (path traversal prevention)
 - [ ] Errors when prompt template file not found in resolved location
+- [ ] Errors when `--protocol` is provided without `--type`
 - [ ] Temporary PR worktree is cleaned up on success, error, and signal (SIGINT/SIGTERM)
 
 ## Constraints
@@ -268,7 +278,7 @@ Key differences:
 - Temporary worktrees for PR reviews must be cleaned up reliably
 - All flags visible in logs (no hidden env var state)
 - Claude SDK nesting guard bypass (`CLAUDECODE` env var removal) must be preserved
-- Forced `process.exit(0)` after completion must be preserved (SDK dangling handle workaround)
+- If SDK dangling handles prevent clean process exit, add `process.exit(0)` after completion as a workaround
 
 ## Migration
 
@@ -338,10 +348,19 @@ The `-review` suffix is always appended when resolving the template file.
 
 Files that need modification:
 - `packages/codev/src/commands/consult/index.ts` — Main CLI rewrite (command parsing, mode routing, context resolution)
-- `packages/codev/src/commands/porch/next.ts` — Porch command generation (line ~445)
+- `packages/codev/src/commands/porch/next.ts` — Porch command generation (line ~445), `getConsultArtifactType()` removal/repurposing
 - `packages/codev/src/cli.ts` — Commander.js command registration
+- `codev/protocols/spir/protocol.json` — Update `verify.type` values (`spec-review` → `spec`, `plan-review` → `plan`, `impl-review` → `impl`, `pr-ready` → `pr`)
+- `codev/protocols/bugfix/protocol.json` — Update `verify.type` values (`impl-review` → `impl`)
+- `codev/protocols/maintain/protocol.json` — Update `verify.type` values (`impl-review` → `impl`)
 - `codev/resources/commands/consult.md` — CLI documentation
 - `codev-skeleton/resources/commands/consult.md` — Skeleton CLI documentation
+
+New files to create:
+- `codev/protocols/tick/consult-types/` — New directory with spec-review, plan-review, impl-review, pr-review prompt files
+- `codev/protocols/maintain/consult-types/` — New directory with impl-review, pr-review prompt files
+- `codev/protocols/spir/consult-types/phase-review.md` — New phase review prompt (copy of impl-review.md)
+- `codev/protocols/spir/consult-types/pr-review.md` — Renamed from pr-ready.md
 
 ## Out of Scope
 
