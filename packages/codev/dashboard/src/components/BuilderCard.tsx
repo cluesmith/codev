@@ -5,14 +5,28 @@ interface BuilderCardProps {
   onOpen?: (builder: OverviewBuilder) => void;
 }
 
-function phaseLabel(builder: OverviewBuilder): string {
+function stateLabel(builder: OverviewBuilder): string {
+  if (builder.blocked) return `Blocked: ${builder.blocked}`;
   if (builder.mode === 'soft') return 'running';
-  if (!builder.phase) return '';
+  if (!builder.phase) return 'starting';
   const phases = builder.planPhases;
   if (phases.length === 0) return builder.phase;
   const idx = phases.findIndex(p => p.id === builder.phase);
   if (idx === -1) return builder.phase;
   return `${builder.phase} (${idx + 1}/${phases.length})`;
+}
+
+function elapsed(startedAt: string | null): string {
+  if (!startedAt) return '-';
+  const ms = Date.now() - new Date(startedAt).getTime();
+  if (ms < 0) return '-';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (hours < 24) return `${hours}h ${rem}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
 }
 
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
@@ -22,27 +36,31 @@ export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
   const pct = Math.min(100, Math.max(0, Math.round(builder.progress ?? 0)));
 
   return (
-    <div className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
-      <span className="builder-row-id">{displayId}</span>
-      <span className="builder-row-title">{displayTitle}</span>
-      <div className="builder-row-progress">
+    <tr className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
+      <td className="builder-col-id">{displayId}</td>
+      <td className="builder-col-title">{displayTitle}</td>
+      <td className="builder-col-state">
+        <span className={isBlocked ? 'builder-state-blocked' : 'builder-state-active'}>
+          {stateLabel(builder)}
+        </span>
+      </td>
+      <td className="builder-col-progress">
         <div className="progress-bar">
           <div
             className={`progress-fill${isBlocked ? ' progress-fill--blocked' : ''}`}
             style={{ width: `${pct}%` }}
           />
         </div>
-        {isBlocked ? (
-          <span className="builder-row-blocked">Blocked: {builder.blocked}</span>
-        ) : (
-          <span className="builder-row-phase">{phaseLabel(builder)}</span>
+        <span className="progress-pct">{pct}%</span>
+      </td>
+      <td className="builder-col-elapsed">{elapsed(builder.startedAt)}</td>
+      <td className="builder-col-actions">
+        {onOpen && (
+          <button className="builder-row-open" onClick={() => onOpen(builder)}>
+            Open
+          </button>
         )}
-      </div>
-      {onOpen && (
-        <button className="builder-row-open" onClick={() => onOpen(builder)}>
-          Open
-        </button>
-      )}
-    </div>
+      </td>
+    </tr>
   );
 }

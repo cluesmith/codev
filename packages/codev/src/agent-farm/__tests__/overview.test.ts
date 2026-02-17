@@ -135,6 +135,23 @@ describe('overview', () => {
       expect(result.currentPlanPhase).toBe('tower_endpoint');
     });
 
+    it('parses started_at field (Bugfix #388)', () => {
+      const yaml = [
+        'id: bugfix-388',
+        'protocol: bugfix',
+        'phase: fix',
+        "started_at: '2026-02-17T08:54:32.623Z'",
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.startedAt).toBe('2026-02-17T08:54:32.623Z');
+    });
+
+    it('returns empty startedAt when not present', () => {
+      const result = parseStatusYaml('id: test\nphase: fix');
+      expect(result.startedAt).toBe('');
+    });
+
     it('parses gates section', () => {
       const yaml = [
         "id: '0126'",
@@ -784,6 +801,20 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('soft');
       expect(builders[0].issueNumber).toBe(300);
       expect(builders[0].id).toBe('bugfix-300-some-fix');
+    });
+
+    it('includes startedAt from status.yaml (Bugfix #388)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-501-test', [
+        'id: bugfix-501',
+        'title: test-elapsed',
+        'protocol: bugfix',
+        'phase: fix',
+        "started_at: '2026-02-17T08:54:32.623Z'",
+      ].join('\n'), 'bugfix-501-test-elapsed');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].startedAt).toBe('2026-02-17T08:54:32.623Z');
     });
 
     it('uses protocol phase when currentPlanPhase is "null" string (Bugfix #388)', () => {

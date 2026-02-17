@@ -41,6 +41,7 @@ export interface BuilderOverview {
   planPhases: PlanPhase[];
   progress: number;
   blocked: string | null;
+  startedAt: string | null;
 }
 
 export interface PROverview {
@@ -97,6 +98,7 @@ interface ParsedStatus {
   gates: Record<string, string>;
   gateRequestedAt: Record<string, string>;
   planPhases: PlanPhase[];
+  startedAt: string;
 }
 
 /**
@@ -113,6 +115,7 @@ export function parseStatusYaml(content: string): ParsedStatus {
     gates: {},
     gateRequestedAt: {},
     planPhases: [],
+    startedAt: '',
   };
 
   const lines = content.split('\n');
@@ -136,6 +139,9 @@ export function parseStatusYaml(content: string): ParsedStatus {
 
     const planPhaseMatch = line.match(/^current_plan_phase:\s*(\S+)/);
     if (planPhaseMatch) { result.currentPlanPhase = planPhaseMatch[1]; section = 'none'; continue; }
+
+    const startedMatch = line.match(/^started_at:\s*'?(.+?)'?\s*$/);
+    if (startedMatch) { result.startedAt = startedMatch[1]; section = 'none'; continue; }
 
     // Section headers
     if (/^gates:\s*$/.test(line)) {
@@ -434,6 +440,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        startedAt: null,
       });
       continue;
     }
@@ -482,6 +489,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             planPhases: parsed.planPhases,
             progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
+            startedAt: parsed.startedAt || null,
           });
           found = true;
           break;
@@ -507,6 +515,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        startedAt: null,
       });
     }
   }

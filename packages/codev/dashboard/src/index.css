@@ -930,52 +930,82 @@ body {
 }
 
 /* Builder rows */
-.builder-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* Builder table layout (Bugfix #388) */
+.builder-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 4px;
 }
 
-.builder-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 14px;
-}
-
-.builder-row:hover {
-  border-color: var(--accent);
-}
-
-.builder-row--blocked {
-  border-left: 3px solid var(--status-waiting);
-}
-
-.builder-row-id {
-  font-size: 13px;
+.builder-table thead th {
+  font-size: 11px;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--text-secondary);
+  text-align: left;
+  padding: 0 10px 4px;
   white-space: nowrap;
 }
 
-.builder-row-title {
-  flex: 1;
+.builder-row td {
+  background: var(--bg-secondary);
+  padding: 8px 10px;
   font-size: 13px;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.builder-row td:first-child {
+  border-left: 1px solid var(--border-color);
+  border-radius: 8px 0 0 8px;
+}
+
+.builder-row td:last-child {
+  border-right: 1px solid var(--border-color);
+  border-radius: 0 8px 8px 0;
+}
+
+.builder-row:hover td {
+  border-color: var(--accent);
+}
+
+.builder-row--blocked td:first-child {
+  border-left: 3px solid var(--status-waiting);
+}
+
+.builder-col-id {
+  font-weight: 500;
+  color: var(--accent);
+  white-space: nowrap;
+  width: 60px;
+}
+
+.builder-col-title {
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 0;
+  width: 40%;
 }
 
-.builder-row-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.builder-col-state {
   white-space: nowrap;
-  flex-shrink: 0;
+  width: 140px;
+}
+
+.builder-state-active {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.builder-state-blocked {
+  font-size: 12px;
+  color: var(--status-waiting);
+}
+
+.builder-col-progress {
+  width: 120px;
+  white-space: nowrap;
 }
 
 .progress-bar {
@@ -984,7 +1014,8 @@ body {
   background: var(--bg-tertiary);
   border-radius: 2px;
   overflow: hidden;
-  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .progress-fill {
@@ -998,14 +1029,23 @@ body {
   background: var(--status-waiting);
 }
 
-.builder-row-phase {
+.progress-pct {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--text-secondary);
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
-.builder-row-blocked {
-  font-size: 11px;
-  color: var(--status-waiting);
+.builder-col-elapsed {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  width: 70px;
+}
+
+.builder-col-actions {
+  width: 60px;
+  text-align: right;
 }
 
 .builder-row-open {
@@ -1017,7 +1057,6 @@ body {
   border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .builder-row-open:hover {
@@ -1312,12 +1351,19 @@ a.pr-row {
     gap: 8px;
   }
 
-  .builder-row,
   .pr-row {
     flex-wrap: wrap;
   }
 
-  .builder-row-title,
+  .builder-table {
+    font-size: 12px;
+  }
+
+  .builder-col-elapsed,
+  .builder-table thead th:nth-child(5) {
+    display: none;
+  }
+
   .pr-row-title,
   .backlog-row-title {
     min-width: 60%;

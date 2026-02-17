@@ -71,15 +71,27 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
         <section className="work-section">
           <h3 className="work-section-title">Builders</h3>
           {overview?.builders && overview.builders.length > 0 ? (
-            <div className="builder-rows">
-              {overview.builders.map(builder => (
-                <BuilderCard
-                  key={builder.id}
-                  builder={builder}
-                  onOpen={handleOpenBuilder}
-                />
-              ))}
-            </div>
+            <table className="builder-table">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Title</th>
+                  <th>State</th>
+                  <th>Progress</th>
+                  <th>Elapsed</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {overview.builders.map(builder => (
+                  <BuilderCard
+                    key={builder.id}
+                    builder={builder}
+                    onOpen={handleOpenBuilder}
+                  />
+                ))}
+              </tbody>
+            </table>
           ) : (
             <p className="work-empty">No active builders</p>
           )}
