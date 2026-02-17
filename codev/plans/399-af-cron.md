@@ -101,7 +101,7 @@ Implement a lightweight cron scheduler for Tower that loads task definitions fro
 - [ ] YAML task loading from `.af-cron/*.yaml` per workspace
 - [ ] Task execution via `child_process.execSync` with timeout
 - [ ] Condition evaluation against command output
-- [ ] Message delivery to target terminal via `resolveTarget` + `session.write`
+- [ ] Message delivery to target terminal via shared send utility (format + write + broadcast)
 - [ ] SQLite state tracking (last_run, last_result, last_output)
 - [ ] Unit tests for scheduler logic
 
@@ -132,7 +132,7 @@ interface CronDeps {
 ```
 
 Key functions:
-- `initCron(deps: CronDeps): void` — starts the 60-second tick interval, runs `@startup` tasks
+- `initCron(deps: CronDeps): void` — starts the 60-second tick interval, runs `@startup` tasks (always runs once per Tower start, ignoring `last_run`)
 - `shutdownCron(): void` — clears the interval
 - `loadWorkspaceTasks(workspacePath: string): CronTask[]` — reads `.af-cron/*.yaml`, validates fields, returns task list
 - `tick(): void` — called every 60s; iterates all workspaces, loads tasks, checks `isDue()`, executes due tasks
@@ -151,17 +151,29 @@ Key functions:
 - Return value is truthy/falsy — if truthy, send notification
 - If no condition, always notify
 
-**Message Delivery**:
+**Message Delivery** (must match the full `handleSend` pipeline in `tower-routes.ts`):
 - Call `resolveTarget(task.target, task.workspacePath)` to get terminal ID
 - Get session via `getTerminalManager().getSession(terminalId)`
-- Format as builder message (from `af-cron`) and write to session
+- Format with `formatBuilderMessage('af-cron', message)` from `utils/message-format.ts`
+- Write formatted message to session + `\r` (Enter key) to submit
+- Call `broadcastMessage()` from `tower-messages.ts` to notify WebSocket subscribers (dashboard)
 - If target terminal not found, log warning and skip (don't fail the whole tick)
+- Extract this into a shared `deliverMessage()` helper that both cron and `handleSend` can use, to avoid duplicating the format+write+broadcast logic
+
+**Output Truncation**:
+- Truncate `last_output` to 4KB before storing in SQLite to prevent DB bloat from large command outputs
+- Replace `${output}` in message template with command stdout before delivery
+
+**YAML Reload Strategy**:
+- Task definitions are reloaded from `.af-cron/*.yaml` on every 60-second tick (no caching)
+- This is a conscious simplicity choice: changes to task files take effect within 60 seconds without Tower restart
+- Filesystem reads are lightweight for the expected number of workspaces and task files
 
 #### Acceptance Criteria
 - [ ] `.af-cron/*.yaml` files are loaded per workspace on each tick
 - [ ] Tasks execute on schedule based on `isDue()` check
 - [ ] Command output is captured and condition is evaluated
-- [ ] Messages are delivered to target terminal via session.write
+- [ ] Messages are delivered to target terminal with proper formatting, Enter key, and WebSocket broadcast
 - [ ] SQLite is updated with last_run, last_result, last_output
 - [ ] Disabled tasks (both YAML `enabled: false` and DB `enabled = 0`) are skipped
 - [ ] Command timeouts work (don't hang Tower)
@@ -171,6 +183,7 @@ Key functions:
 - **Unit Tests**: `loadWorkspaceTasks` — test with valid/invalid YAML, missing fields, disabled tasks
 - **Unit Tests**: `executeTask` — mock `child_process.execSync`, test condition evaluation, message delivery
 - **Unit Tests**: `tick` — mock workspace paths and task files, verify only due tasks execute
+- **Unit Tests**: `@startup` path — verify startup tasks run once at init, ignoring `last_run` state
 - **Integration Tests**: End-to-end: create `.af-cron/` files, run tick, verify SQLite state and message delivery
 
 #### Risks
@@ -193,6 +206,8 @@ Key functions:
 - [ ] `GET /api/cron/tasks` route — list tasks with optional `?workspace=` filter
 - [ ] `GET /api/cron/tasks/:name/status` route — task status and last run info
 - [ ] `POST /api/cron/tasks/:name/run` route — manually trigger a task
+- [ ] `POST /api/cron/tasks/:name/enable` route — enable a disabled task
+- [ ] `POST /api/cron/tasks/:name/disable` route — disable a task
 - [ ] Tower logs cron activity
 
 #### Implementation Details
@@ -205,20 +220,24 @@ Key functions:
 **Tower Routes** (`packages/codev/src/agent-farm/servers/tower-routes.ts`):
 - Add to `ROUTES` dispatch table:
   - `'GET /api/cron/tasks'` → `handleCronList`
-  - `'POST /api/cron/tasks/run'` → `handleCronRun` (uses body `{ name, workspace }`)
-- Add pattern-based route for:
-  - `/api/cron/tasks/:name/status` → `handleCronTaskStatus`
+- Add pattern-based routes for (matching existing `:name` param style from spec):
+  - `GET /api/cron/tasks/:name/status` → `handleCronTaskStatus`
+  - `POST /api/cron/tasks/:name/run` → `handleCronRun`
+  - `POST /api/cron/tasks/:name/enable` → `handleCronEnable`
+  - `POST /api/cron/tasks/:name/disable` → `handleCronDisable`
 
 **Route Handlers** (in `tower-routes.ts` or a new `tower-cron-routes.ts`):
 - `handleCronList`: Query `.af-cron/` across workspaces + join with SQLite state. Return JSON array of tasks with name, schedule, enabled, last_run, last_result.
 - `handleCronTaskStatus`: Return detailed status for a single task including last_output.
 - `handleCronRun`: Call `executeTask()` directly for the named task, return result.
+- `handleCronEnable`/`handleCronDisable`: Update `enabled` column in `cron_tasks` SQLite table. Workspace from `?workspace=` query param or body.
 
 #### Acceptance Criteria
 - [ ] Tower starts and stops the cron scheduler without errors
 - [ ] `GET /api/cron/tasks` returns task list with SQLite state merged
 - [ ] `GET /api/cron/tasks/:name/status` returns individual task details
 - [ ] `POST /api/cron/tasks/:name/run` triggers immediate execution and returns result
+- [ ] `POST /api/cron/tasks/:name/enable` and `disable` toggle task enabled state in SQLite
 - [ ] Tower log shows cron initialization and task execution activity
 
 #### Test Plan
@@ -257,15 +276,12 @@ Key functions:
 **CLI Handler** (`packages/codev/src/agent-farm/commands/cron.ts`):
 - New module with functions: `cronList`, `cronStatus`, `cronRun`, `cronEnable`, `cronDisable`
 - Uses `TowerClient` to call the Tower API routes (`GET /api/cron/tasks`, `POST /api/cron/tasks/run`, etc.)
-- `enable`/`disable` call a new `POST /api/cron/tasks/:name/toggle` route or directly update SQLite via a dedicated API endpoint
+- `enable`/`disable` use `POST /api/cron/tasks/:name/enable` and `POST /api/cron/tasks/:name/disable` (Phase 3 routes)
 - Format output using `logger` utility (table format for list/status)
 
-**Tower API** (addition to Phase 3 routes):
-- `POST /api/cron/tasks/:name/enable` and `POST /api/cron/tasks/:name/disable` — toggle task enabled state in SQLite
-
 **Skeleton** (`codev-skeleton/`):
-- Add `.af-cron/` to `.gitignore` template
-- Add an example task file at `codev-skeleton/.af-cron/ci-health.yaml.example`
+- Create new `.gitignore` file in `codev-skeleton/` (does not exist yet) with `.af-cron/` entry
+- Add example task file at `codev-skeleton/.af-cron/ci-health.yaml.example`
 
 #### Acceptance Criteria
 - [ ] `af cron list` displays tasks for current workspace in table format
@@ -323,4 +339,4 @@ Phase 1 (Schema + Parser) ──→ Phase 2 (Scheduler) ──→ Phase 3 (Tower
 - `packages/codev/src/agent-farm/servers/tower-server.ts` — Wire initCron/shutdownCron
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` — Add /api/cron/* routes
 - `packages/codev/src/agent-farm/cli.ts` — Add cron subcommand group
-- `codev-skeleton/.gitignore` (or template) — Add .af-cron/ exclusion
+- `codev-skeleton/.gitignore` — New file, add .af-cron/ exclusion
