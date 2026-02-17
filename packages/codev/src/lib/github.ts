@@ -38,8 +38,10 @@ export interface GitHubPR {
 export interface GitHubIssueListItem {
   number: number;
   title: string;
+  url: string;
   labels: Array<{ name: string }>;
   createdAt: string;
+  closedAt?: string;
 }
 
 // =============================================================================
@@ -100,10 +102,32 @@ export async function fetchIssueList(cwd?: string): Promise<GitHubIssueListItem[
   try {
     const { stdout } = await execFileAsync('gh', [
       'issue', 'list',
-      '--json', 'number,title,labels,createdAt',
+      '--json', 'number,title,url,labels,createdAt',
       '--limit', '200',
     ], { cwd });
     return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch recently closed issues (last 24 hours).
+ * Returns null on failure.
+ * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
+ */
+export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueListItem[] | null> {
+  try {
+    const { stdout } = await execFileAsync('gh', [
+      'issue', 'list',
+      '--state', 'closed',
+      '--json', 'number,title,url,labels,createdAt,closedAt',
+      '--limit', '50',
+    ], { cwd });
+    const issues: GitHubIssueListItem[] = JSON.parse(stdout);
+    // Filter to last 24 hours
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return issues.filter(i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff);
   } catch {
     return null;
   }

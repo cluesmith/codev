@@ -12,6 +12,7 @@ import path from 'node:path';
 import {
   fetchPRList,
   fetchIssueList,
+  fetchRecentlyClosed,
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../../lib/github.js';
@@ -54,17 +55,32 @@ export interface PROverview {
 export interface BacklogItem {
   number: number;
   title: string;
+  url: string;
   type: string;
   priority: string;
   hasSpec: boolean;
+  hasPlan: boolean;
+  hasReview: boolean;
   hasBuilder: boolean;
   createdAt: string;
+  specPath?: string;
+  planPath?: string;
+  reviewPath?: string;
+}
+
+export interface RecentlyClosedItem {
+  number: number;
+  title: string;
+  url: string;
+  type: string;
+  closedAt: string;
 }
 
 export interface OverviewData {
   builders: BuilderOverview[];
   pendingPRs: PROverview[];
   backlog: BacklogItem[];
+  recentlyClosed: RecentlyClosedItem[];
   errors?: { prs?: string; issues?: string };
 }
 
@@ -496,6 +512,26 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
 // =============================================================================
 
 /**
+ * Scan a codev artifact directory and return a map of issue number → filename.
+ */
+function scanArtifactDir(dirPath: string): Map<number, string> {
+  const result = new Map<number, string>();
+  if (!fs.existsSync(dirPath)) return result;
+  try {
+    const files = fs.readdirSync(dirPath);
+    for (const file of files) {
+      if (!file.endsWith('.md')) continue;
+      const numStr = file.split('-')[0];
+      const num = parseInt(numStr, 10);
+      if (!Number.isNaN(num)) result.set(num, file);
+    }
+  } catch {
+    // Silently continue
+  }
+  return result;
+}
+
+/**
  * Derive backlog from open GitHub issues cross-referenced with specs and builders.
  */
 export function deriveBacklog(
@@ -504,36 +540,33 @@ export function deriveBacklog(
   activeBuilderIssues: Set<number>,
   prLinkedIssues: Set<number>,
 ): BacklogItem[] {
-  const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  const specNumbers = new Set<number>();
-
-  if (fs.existsSync(specsDir)) {
-    try {
-      const files = fs.readdirSync(specsDir);
-      for (const file of files) {
-        if (!file.endsWith('.md')) continue;
-        const numStr = file.split('-')[0];
-        const num = parseInt(numStr, 10);
-        if (!Number.isNaN(num)) specNumbers.add(num);
-      }
-    } catch {
-      // Silently continue
-    }
-  }
+  const specFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'specs'));
+  const planFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'plans'));
+  const reviewFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'reviews'));
 
   return issues
     .filter(issue => !prLinkedIssues.has(issue.number))
     .map(issue => {
       const { type, priority } = parseLabelDefaults(issue.labels);
-      return {
+      const specFile = specFiles.get(issue.number);
+      const planFile = planFiles.get(issue.number);
+      const reviewFile = reviewFiles.get(issue.number);
+      const item: BacklogItem = {
         number: issue.number,
         title: issue.title,
+        url: issue.url,
         type,
         priority,
-        hasSpec: specNumbers.has(issue.number),
+        hasSpec: !!specFile,
+        hasPlan: !!planFile,
+        hasReview: !!reviewFile,
         hasBuilder: activeBuilderIssues.has(issue.number),
         createdAt: issue.createdAt,
       };
+      if (specFile) item.specPath = `codev/specs/${specFile}`;
+      if (planFile) item.planPath = `codev/plans/${planFile}`;
+      if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;
+      return item;
     });
 }
 
@@ -544,6 +577,7 @@ export function deriveBacklog(
 export class OverviewCache {
   private prCache: { data: GitHubPR[]; fetchedAt: number } | null = null;
   private issueCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
+  private closedCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
   private lastWorkspaceRoot: string | null = null;
   private readonly TTL = 60_000;
 
@@ -609,7 +643,23 @@ export class OverviewCache {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
     }
 
-    const result: OverviewData = { builders, pendingPRs, backlog };
+    // 4. Fetch recently closed issues (cached, scoped to workspace)
+    let recentlyClosed: RecentlyClosedItem[] = [];
+    const closed = await this.fetchRecentlyClosedCached(workspaceRoot);
+    if (closed !== null) {
+      recentlyClosed = closed.map(issue => {
+        const { type } = parseLabelDefaults(issue.labels);
+        return {
+          number: issue.number,
+          title: issue.title,
+          url: issue.url,
+          type,
+          closedAt: issue.closedAt!,
+        };
+      });
+    }
+
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed };
     if (Object.keys(errors).length > 0) {
       result.errors = errors;
     }
@@ -622,6 +672,7 @@ export class OverviewCache {
   invalidate(): void {
     this.prCache = null;
     this.issueCache = null;
+    this.closedCache = null;
   }
 
   // ===========================================================================
@@ -650,6 +701,19 @@ export class OverviewCache {
     const data = await fetchIssueList(cwd);
     if (data !== null) {
       this.issueCache = { data, fetchedAt: now };
+    }
+    return data;
+  }
+
+  private async fetchRecentlyClosedCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
+    const now = Date.now();
+    if (this.closedCache && (now - this.closedCache.fetchedAt) < this.TTL) {
+      return this.closedCache.data;
+    }
+
+    const data = await fetchRecentlyClosed(cwd);
+    if (data !== null) {
+      this.closedCache = { data, fetchedAt: now };
     }
     return data;
   }

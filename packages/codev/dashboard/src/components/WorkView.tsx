@@ -5,6 +5,7 @@ import type { OverviewBuilder, DashboardState } from '../lib/api.js';
 import { BuilderCard } from './BuilderCard.js';
 import { PRList } from './PRList.js';
 import { BacklogList } from './BacklogList.js';
+import { RecentlyClosedList } from './RecentlyClosedList.js';
 import { FileTree } from './FileTree.js';
 import { TipBanner } from './TipBanner.js';
 
@@ -100,9 +101,17 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
           {overview?.errors?.issues ? (
             <p className="work-unavailable">{overview.errors.issues}</p>
           ) : (
-            <BacklogList items={overview?.backlog ?? []} />
+            <BacklogList items={overview?.backlog ?? []} onRefresh={onRefresh} />
           )}
         </section>
+
+        {/* Recently Closed */}
+        {overview?.recentlyClosed && overview.recentlyClosed.length > 0 && (
+          <section className="work-section">
+            <h3 className="work-section-title">Recently Closed</h3>
+            <RecentlyClosedList items={overview.recentlyClosed} />
+          </section>
+        )}
       </div>
 
       {/* Collapsible File Panel */}

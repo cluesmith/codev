@@ -102,17 +102,32 @@ export interface OverviewPR {
 export interface OverviewBacklogItem {
   number: number;
   title: string;
+  url: string;
   type: string;
   priority: string;
   hasSpec: boolean;
+  hasPlan: boolean;
+  hasReview: boolean;
   hasBuilder: boolean;
   createdAt: string;
+  specPath?: string;
+  planPath?: string;
+  reviewPath?: string;
+}
+
+export interface OverviewRecentlyClosed {
+  number: number;
+  title: string;
+  url: string;
+  type: string;
+  closedAt: string;
 }
 
 export interface OverviewData {
   builders: OverviewBuilder[];
   pendingPRs: OverviewPR[];
   backlog: OverviewBacklogItem[];
+  recentlyClosed: OverviewRecentlyClosed[];
   errors?: { prs?: string; issues?: string };
 }
 

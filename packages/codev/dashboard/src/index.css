@@ -1100,13 +1100,50 @@ a.pr-row {
 .backlog-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
+  gap: 6px;
+  padding: 4px 14px;
   border-radius: 6px;
 }
 
 .backlog-row:hover {
   background: var(--bg-secondary);
+}
+
+.backlog-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.backlog-row-main:hover .backlog-row-title {
+  color: var(--accent);
+}
+
+.backlog-artifacts {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.backlog-artifact-link {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.backlog-artifact-link:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .backlog-priority-dot {
@@ -1166,6 +1203,35 @@ a.pr-row {
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* Recently Closed */
+.recently-closed-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recently-closed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.recently-closed-row:hover {
+  background: var(--bg-secondary);
+  opacity: 1;
+}
+
+.recently-closed-check {
+  font-size: 11px;
+  color: var(--status-active);
+  flex-shrink: 0;
 }
 
 /* Collapsible file panel */

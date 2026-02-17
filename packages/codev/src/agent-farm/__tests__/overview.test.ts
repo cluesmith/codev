@@ -25,9 +25,10 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockLoadProtocol } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockLoadProtocol } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
+  mockFetchRecentlyClosed: vi.fn(),
   mockLoadProtocol: vi.fn(),
 }));
 
@@ -37,6 +38,7 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     ...actual,
     fetchPRList: mockFetchPRList,
     fetchIssueList: mockFetchIssueList,
+    fetchRecentlyClosed: mockFetchRecentlyClosed,
   };
 });
 
@@ -78,6 +80,22 @@ function createSpecFile(root: string, issueNumber: number, name: string): void {
   fs.writeFileSync(path.join(specsDir, `${issueNumber}-${name}.md`), `# ${name}`);
 }
 
+function createPlanFile(root: string, issueNumber: number, name: string): void {
+  const plansDir = path.join(root, 'codev', 'plans');
+  fs.mkdirSync(plansDir, { recursive: true });
+  fs.writeFileSync(path.join(plansDir, `${issueNumber}-${name}.md`), `# ${name}`);
+}
+
+function createReviewFile(root: string, issueNumber: number, name: string): void {
+  const reviewsDir = path.join(root, 'codev', 'reviews');
+  fs.mkdirSync(reviewsDir, { recursive: true });
+  fs.writeFileSync(path.join(reviewsDir, `${issueNumber}-${name}.md`), `# ${name}`);
+}
+
+function issueItem(number: number, title: string, labels: Array<{ name: string }> = []): { number: number; title: string; url: string; labels: Array<{ name: string }>; createdAt: string } {
+  return { number, title, url: `https://github.com/org/repo/issues/${number}`, labels, createdAt: '2026-01-01T00:00:00Z' };
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -88,6 +106,7 @@ describe('overview', () => {
     tmpDir = makeTmpDir();
     mockFetchPRList.mockResolvedValue([]);
     mockFetchIssueList.mockResolvedValue([]);
+    mockFetchRecentlyClosed.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -824,26 +843,43 @@ describe('overview', () => {
     it('marks issues with matching spec files', () => {
       createSpecFile(tmpDir, 42, 'my-feature');
 
-      const issues = [
-        { number: 42, title: 'My Feature', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-        { number: 43, title: 'No Spec', labels: [], createdAt: '2026-01-02T00:00:00Z' },
-      ];
+      const issues = [issueItem(42, 'My Feature'), issueItem(43, 'No Spec')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog).toHaveLength(2);
 
       const issue42 = backlog.find(b => b.number === 42)!;
       expect(issue42.hasSpec).toBe(true);
+      expect(issue42.specPath).toBe('codev/specs/42-my-feature.md');
 
       const issue43 = backlog.find(b => b.number === 43)!;
       expect(issue43.hasSpec).toBe(false);
+      expect(issue43.specPath).toBeUndefined();
+    });
+
+    it('includes url from issue', () => {
+      const issues = [issueItem(42, 'Test')];
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].url).toBe('https://github.com/org/repo/issues/42');
+    });
+
+    it('detects plan and review files', () => {
+      createSpecFile(tmpDir, 42, 'my-feature');
+      createPlanFile(tmpDir, 42, 'my-feature');
+      createReviewFile(tmpDir, 42, 'my-feature');
+
+      const issues = [issueItem(42, 'My Feature')];
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].hasSpec).toBe(true);
+      expect(backlog[0].hasPlan).toBe(true);
+      expect(backlog[0].hasReview).toBe(true);
+      expect(backlog[0].specPath).toBe('codev/specs/42-my-feature.md');
+      expect(backlog[0].planPath).toBe('codev/plans/42-my-feature.md');
+      expect(backlog[0].reviewPath).toBe('codev/reviews/42-my-feature.md');
     });
 
     it('marks issues with active builders', () => {
-      const issues = [
-        { number: 100, title: 'Active', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-        { number: 200, title: 'Idle', labels: [], createdAt: '2026-01-02T00:00:00Z' },
-      ];
+      const issues = [issueItem(100, 'Active'), issueItem(200, 'Idle')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set([100]), new Set());
       const active = backlog.find(b => b.number === 100)!;
@@ -854,10 +890,7 @@ describe('overview', () => {
     });
 
     it('filters out issues that have linked PRs', () => {
-      const issues = [
-        { number: 50, title: 'Has PR', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-        { number: 60, title: 'No PR', labels: [], createdAt: '2026-01-02T00:00:00Z' },
-      ];
+      const issues = [issueItem(50, 'Has PR'), issueItem(60, 'No PR')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set([50]));
       expect(backlog).toHaveLength(1);
@@ -865,14 +898,7 @@ describe('overview', () => {
     });
 
     it('parses type and priority from labels', () => {
-      const issues = [
-        {
-          number: 70,
-          title: 'Bug',
-          labels: [{ name: 'type:bug' }, { name: 'priority:high' }],
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      ];
+      const issues = [issueItem(70, 'Bug', [{ name: 'type:bug' }, { name: 'priority:high' }])];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog[0].type).toBe('bug');
@@ -880,9 +906,7 @@ describe('overview', () => {
     });
 
     it('defaults to feature/medium when labels are missing', () => {
-      const issues = [
-        { number: 80, title: 'No labels', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-      ];
+      const issues = [issueItem(80, 'No labels')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog[0].type).toBe('feature');
@@ -890,13 +914,13 @@ describe('overview', () => {
     });
 
     it('handles missing codev/specs directory', () => {
-      const issues = [
-        { number: 90, title: 'Test', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-      ];
+      const issues = [issueItem(90, 'Test')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog).toHaveLength(1);
       expect(backlog[0].hasSpec).toBe(false);
+      expect(backlog[0].hasPlan).toBe(false);
+      expect(backlog[0].hasReview).toBe(false);
     });
   });
 
@@ -905,7 +929,7 @@ describe('overview', () => {
   // ==========================================================================
 
   describe('OverviewCache', () => {
-    it('returns builders, PRs, and backlog', async () => {
+    it('returns builders, PRs, backlog, and recentlyClosed', async () => {
       createBuilderWorktree(tmpDir, 'spir-42-test', [
         "id: '0042'",
         'protocol: spir',
@@ -917,8 +941,9 @@ describe('overview', () => {
       mockFetchPRList.mockResolvedValue([
         { number: 10, title: '[Spec 42] Add feature', url: 'https://github.com/org/repo/pull/10', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
       ]);
-      mockFetchIssueList.mockResolvedValue([
-        { number: 99, title: 'Backlog item', labels: [], createdAt: '2026-01-01T00:00:00Z' },
+      mockFetchIssueList.mockResolvedValue([issueItem(99, 'Backlog item')]);
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 88, title: 'Fixed bug', url: 'https://github.com/org/repo/issues/88', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
       ]);
 
       const cache = new OverviewCache();
@@ -932,6 +957,11 @@ describe('overview', () => {
 
       expect(data.backlog).toHaveLength(1);
       expect(data.backlog[0].number).toBe(99);
+      expect(data.backlog[0].url).toContain('/issues/99');
+
+      expect(data.recentlyClosed).toHaveLength(1);
+      expect(data.recentlyClosed[0].number).toBe(88);
+      expect(data.recentlyClosed[0].type).toBe('bug');
 
       expect(data.errors).toBeUndefined();
     });
@@ -1030,8 +1060,8 @@ describe('overview', () => {
         { number: 10, title: 'Fix', url: 'https://github.com/org/repo/pull/10', reviewDecision: '', body: 'Fixes #42', createdAt: '2026-01-10T00:00:00Z' },
       ]);
       mockFetchIssueList.mockResolvedValue([
-        { number: 42, title: 'Bug 42', labels: [], createdAt: '2026-01-01T00:00:00Z' },
-        { number: 43, title: 'Bug 43', labels: [], createdAt: '2026-01-02T00:00:00Z' },
+        issueItem(42, 'Bug 42'),
+        issueItem(43, 'Bug 43'),
       ]);
 
       const cache = new OverviewCache();
