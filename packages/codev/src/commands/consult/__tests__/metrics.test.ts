@@ -191,6 +191,22 @@ describe('extractUsage for Gemini', () => {
     const usage = extractUsage('gemini', JSON.stringify({ response: 'text' }));
     expect(usage).toBeNull();
   });
+
+  it('clamps cost to non-negative when cached exceeds input', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review',
+      stats: {
+        models: {
+          'gemini-3-flash-preview': {
+            tokens: { prompt: 1000, candidates: 100, cached: 3000 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    expect(usage!.costUsd).toBeGreaterThanOrEqual(0);
+  });
 });
 
 // Test 4: extractUsage() for Codex returns null (usage captured by SDK)

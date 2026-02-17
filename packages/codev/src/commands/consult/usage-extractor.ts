@@ -13,7 +13,8 @@
  */
 
 // Gemini per-model pricing (USD per 1M tokens)
-// Maps model name prefixes to pricing tiers
+// Maps model name prefixes to pricing tiers.
+// Longer prefixes must appear before shorter ones (e.g., flash-lite before flash).
 const GEMINI_PRICING: Record<string, { inputPer1M: number; cachedInputPer1M: number; outputPer1M: number }> = {
   'gemini-3-pro':    { inputPer1M: 1.25,  cachedInputPer1M: 0.315,  outputPer1M: 5.00 },
   'gemini-2.5-pro':  { inputPer1M: 1.25,  cachedInputPer1M: 0.315,  outputPer1M: 5.00 },
@@ -83,14 +84,14 @@ function extractGeminiUsage(output: string): UsageData | null {
     const cached = typeof tokens.cached === 'number' ? tokens.cached : 0;
     const candidates = typeof tokens.candidates === 'number' ? tokens.candidates : 0;
 
-    if (input > 0 || candidates > 0) hasTokenData = true;
+    if (input > 0 || candidates > 0 || cached > 0) hasTokenData = true;
 
     totalInput += input;
     totalCached += cached;
     totalOutput += candidates;
 
     const pricing = getGeminiPricing(key);
-    const uncached = input - cached;
+    const uncached = Math.max(0, input - cached);
     totalCost += (uncached / 1_000_000) * pricing.inputPer1M
                + (cached / 1_000_000) * pricing.cachedInputPer1M
                + (candidates / 1_000_000) * pricing.outputPer1M;
