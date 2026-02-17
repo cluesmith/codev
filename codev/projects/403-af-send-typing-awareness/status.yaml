@@ -1,0 +1,58 @@
+id: '403'
+title: af-send-typing-awareness
+protocol: spir
+phase: review
+plan_phases:
+  - id: input_tracking
+    title: 'Phase 1: Input Tracking on PtySession'
+    status: complete
+  - id: message_buffering
+    title: 'Phase 2: Message Buffering and Delivery'
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-17T15:53:54.959Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-17T18:35:37.354Z'
+  pr:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: input_tracking
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-input_tracking-iter1-gemini.txt
+      - model: codex
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-input_tracking-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-input_tracking-iter1-claude.txt
+  - iteration: 1
+    plan_phase: message_buffering
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-message_buffering-iter1-gemini.txt
+      - model: codex
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-message_buffering-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/spir-403-af-send-typing-awareness/codev/projects/403-af-send-typing-awareness/403-message_buffering-iter1-claude.txt
+started_at: '2026-02-17T15:53:28.398Z'
+updated_at: '2026-02-17T18:58:15.365Z'
