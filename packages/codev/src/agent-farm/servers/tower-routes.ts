@@ -1141,7 +1141,12 @@ async function handleWorkspaceRoutes(
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)
     if (req.method === 'POST' && apiPath === 'overview/refresh') {
-      return handleOverviewRefresh(res);
+      return handleOverviewRefresh(res, ctx);
+    }
+
+    // GET /api/events - SSE push notifications (Bugfix #388)
+    if (req.method === 'GET' && apiPath === 'events') {
+      return handleSSEEvents(req, res, ctx);
     }
 
     // Unhandled API route

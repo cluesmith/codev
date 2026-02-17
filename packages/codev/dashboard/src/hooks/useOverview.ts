@@ -25,8 +25,9 @@ export function useOverview() {
   }, []);
 
   // Bugfix #388: Subscribe to SSE events for push-based updates.
-  // When the server broadcasts 'overview-changed', immediately invalidate
-  // the cache and re-fetch instead of waiting for the next poll cycle.
+  // When the server broadcasts 'overview-changed', the cache has already been
+  // invalidated server-side — just re-fetch (don't POST back, which would
+  // trigger another broadcast and create a loop).
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
 
@@ -38,7 +39,7 @@ export function useOverview() {
         const payload = JSON.parse(event.data);
         if (payload.type === 'overview-changed' && !refreshInFlight.current) {
           refreshInFlight.current = true;
-          refreshOverview().then(() => poll()).finally(() => {
+          poll().finally(() => {
             refreshInFlight.current = false;
           });
         }
