@@ -83,16 +83,16 @@ const SOFT_MODE_PROMPT = `You are implementing Spec 9990 for a project. Follow t
 3. Implement Phase 1: Create src/version.ts with BENCHMARK_VERSION = '1.0.0'
 4. Implement Phase 2: Create src/__tests__/version.test.ts
 5. Run \`npm run build\` and \`npm test\` to verify
-6. Run 3-way consultation (consult commands) for impl-review:
-   - consult --model gemini --type impl-review impl 9990
-   - consult --model codex --type impl-review impl 9990
-   - consult --model claude --type impl-review impl 9990
+6. Run 3-way consultation (consult commands) for impl review:
+   - consult -m gemini --protocol spir --type impl
+   - consult -m codex --protocol spir --type impl
+   - consult -m claude --protocol spir --type impl
    Run all three in parallel.
 7. Create a review document at codev/reviews/9990-benchmark-version-constant.md
-8. Run 3-way pr-ready consultation:
-   - consult --model gemini --type pr-ready impl 9990
-   - consult --model codex --type pr-ready impl 9990
-   - consult --model claude --type pr-ready impl 9990
+8. Run 3-way pr consultation:
+   - consult -m gemini --protocol spir --type pr
+   - consult -m codex --protocol spir --type pr
+   - consult -m claude --protocol spir --type pr
    Run all three in parallel.
 9. Commit all changes with message "[Spec 9990] Benchmark version constant"
 

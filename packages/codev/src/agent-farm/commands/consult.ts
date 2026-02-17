@@ -9,23 +9,30 @@ import { logger, fatal } from '../utils/logger.js';
 
 interface ConsultOptions {
   model: string;
+  prompt?: string;
+  protocol?: string;
   type?: string;
 }
 
 /**
- * Run a consult command as a direct subprocess
+ * Run a consult command as a direct subprocess.
+ *
+ * Uses flag-based mode routing (Spec 325):
+ * - General mode: --prompt "text"
+ * - Protocol mode: --protocol <name> --type <type>
  */
-export async function consult(
-  subcommand: string,
-  target: string,
-  options: ConsultOptions
-): Promise<void> {
-  // Build the consult command arguments
-  const args = ['--model', options.model];
+export async function consult(options: ConsultOptions): Promise<void> {
+  const args = ['-m', options.model];
+
+  if (options.protocol) {
+    args.push('--protocol', options.protocol);
+  }
   if (options.type) {
     args.push('--type', options.type);
   }
-  args.push(subcommand, target);
+  if (options.prompt) {
+    args.push('--prompt', options.prompt);
+  }
 
   logger.info(`Running: consult ${args.join(' ')}`);
 

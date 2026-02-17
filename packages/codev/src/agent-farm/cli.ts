@@ -234,18 +234,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Consult command - runs consult in a dashboard terminal
+  // Consult command - runs consult as a subprocess
   program
-    .command('consult <subcommand> <target>')
-    .description('Run consult command in a dashboard terminal')
+    .command('consult')
+    .description('Run consult command as a subprocess')
     .requiredOption('-m, --model <model>', 'Model to use (gemini, codex, claude)')
-    .option('-t, --type <type>', 'Review type (spec-review, plan-review, impl-review, pr-ready, integration-review)')
-    .action(async (subcommand, target, options) => {
+    .option('--protocol <name>', 'Protocol name: spir, bugfix, tick, maintain')
+    .option('-t, --type <type>', 'Review type: spec, plan, impl, pr, phase, integration')
+    .option('--prompt <text>', 'Inline prompt (general mode)')
+    .action(async (options) => {
       const { consult } = await import('./commands/consult.js');
       try {
-        await consult(subcommand, target, {
+        await consult({
           model: options.model,
+          protocol: options.protocol,
           type: options.type,
+          prompt: options.prompt,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

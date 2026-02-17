@@ -424,7 +424,6 @@ async function handleBuildVerify(
       const tasks: PorchTask[] = [];
 
       // Build consultation commands with --output so review files land where porch expects them
-      const consultType = getConsultArtifactType(state.phase);
       const planPhaseFlag = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
 
       // For iteration > 1, generate context file with previous reviews + rebuttals
@@ -443,7 +442,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --protocol ${state.protocol} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult -m ${m} --protocol ${state.protocol} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}"`
       );
 
       tasks.push({
@@ -458,7 +457,6 @@ async function handleBuildVerify(
     // Review files exist — check if all models reviewed
     if (reviews.length < verifyConfig.models.length) {
       // Partial reviews — still waiting. Emit same consultation tasks (idempotent).
-      const consultType = getConsultArtifactType(state.phase);
       const missingModels = verifyConfig.models.filter(
         m => !reviews.find(r => r.model === m)
       );
@@ -478,7 +476,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --protocol ${state.protocol} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult -m ${m} --protocol ${state.protocol} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}"`
       );
 
       return {
@@ -680,19 +678,6 @@ async function handleOncePhase(
       sequential: true,
     }],
   };
-}
-
-/**
- * Get the consult artifact type for a phase.
- */
-function getConsultArtifactType(phaseId: string): string {
-  switch (phaseId) {
-    case 'specify': return 'spec';
-    case 'plan': return 'plan';
-    case 'implement': return 'impl';
-    case 'review': return 'impl';
-    default: return 'spec';
-  }
 }
 
 /**

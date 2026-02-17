@@ -3,6 +3,8 @@
  *
  * Phase 3 (Spec 0099): consult command now spawns the consult CLI
  * directly as a subprocess instead of creating a Tower dashboard tab.
+ *
+ * Updated for Spec 325: flag-based mode routing (no positional args).
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -28,12 +30,10 @@ describe('af consult command', () => {
     vi.clearAllMocks();
   });
 
-  it('should spawn consult process with correct arguments', async () => {
-    // Mock a successful spawn
+  it('should spawn consult process with protocol and type flags', async () => {
     const mockProcess = {
       on: vi.fn((event: string, callback: (...args: unknown[]) => void) => {
         if (event === 'close') {
-          // Simulate successful exit
           setTimeout(() => callback(0), 0);
         }
         return mockProcess;
@@ -43,16 +43,16 @@ describe('af consult command', () => {
 
     const { consult } = await import('../commands/consult.js');
 
-    await consult('spec', '42', { model: 'gemini' });
+    await consult({ model: 'gemini', protocol: 'spir', type: 'spec' });
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'consult',
-      ['--model', 'gemini', 'spec', '42'],
+      ['-m', 'gemini', '--protocol', 'spir', '--type', 'spec'],
       { stdio: 'inherit' }
     );
   });
 
-  it('should include --type when provided', async () => {
+  it('should include --prompt for general mode', async () => {
     const mockProcess = {
       on: vi.fn((event: string, callback: (...args: unknown[]) => void) => {
         if (event === 'close') {
@@ -65,11 +65,11 @@ describe('af consult command', () => {
 
     const { consult } = await import('../commands/consult.js');
 
-    await consult('pr', '87', { model: 'codex', type: 'impl-review' });
+    await consult({ model: 'claude', prompt: 'test query' });
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'consult',
-      ['--model', 'codex', '--type', 'impl-review', 'pr', '87'],
+      ['-m', 'claude', '--prompt', 'test query'],
       { stdio: 'inherit' }
     );
   });
@@ -87,12 +87,11 @@ describe('af consult command', () => {
 
     const { consult } = await import('../commands/consult.js');
 
-    await expect(consult('spec', '42', { model: 'gemini' }))
+    await expect(consult({ model: 'gemini', type: 'spec' }))
       .rejects.toThrow('consult exited with code 1');
   });
 
   it('should not require Tower to be running', async () => {
-    // The key assertion: no TowerClient import, no Tower check
     const mockProcess = {
       on: vi.fn((event: string, callback: (...args: unknown[]) => void) => {
         if (event === 'close') {
@@ -105,12 +104,11 @@ describe('af consult command', () => {
 
     const { consult } = await import('../commands/consult.js');
 
-    // Should succeed without any Tower mocking
-    await consult('general', 'test', { model: 'claude' });
+    await consult({ model: 'claude', prompt: 'test' });
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'consult',
-      ['--model', 'claude', 'general', 'test'],
+      ['-m', 'claude', '--prompt', 'test'],
       { stdio: 'inherit' }
     );
   });
