@@ -128,29 +128,29 @@ codev import github:owner/repo --dry-run
 
 ```bash
 # Spec review (during Stage 1)
-consult --model gemini --type spec-review spec 0044
-consult --model codex --type spec-review spec 0044
+consult -m gemini --protocol spir --type spec
+consult -m codex --protocol spir --type spec
 
 # Plan review (during Stage 2)
-consult --model gemini --type plan-review plan 0044
-consult --model codex --type plan-review plan 0044
+consult -m gemini --protocol spir --type plan
+consult -m codex --protocol spir --type plan
 
 # Implementation review (during Stage 4, after each phase)
-consult --model gemini --type impl-review spec 0044
-consult --model codex --type impl-review spec 0044
+consult -m gemini --protocol spir --type impl
+consult -m codex --protocol spir --type impl
 
-# PR ready review (during Stage 5)
-consult --model gemini --type pr-ready pr 88
-consult --model codex --type pr-ready pr 88
+# PR review (during Stage 5)
+consult -m gemini --protocol spir --type pr
+consult -m codex --protocol spir --type pr
 
 # Integration review (during Stage 6)
-consult --model gemini --type integration-review pr 88
-consult --model codex --type integration-review pr 88
+consult -m gemini --type integration
+consult -m codex --type integration
 
 # Parallel 3-way reviews (run all three concurrently)
-consult --model gemini --type spec-review spec 0044 &
-consult --model codex --type spec-review spec 0044 &
-consult --model claude --type spec-review spec 0044 &
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
 ```
 
@@ -158,11 +158,11 @@ wait
 
 | Type | When Used | Focus |
 |------|-----------|-------|
-| `spec-review` | Stage 1 | Requirements clarity, completeness, feasibility |
-| `plan-review` | Stage 2 | Implementation approach, phase breakdown, risk assessment |
-| `impl-review` | Stage 4 | Code quality, test coverage, spec adherence |
-| `pr-ready` | Stage 5 | Final self-check before PR creation |
-| `integration-review` | Stage 6 | System fit, architectural consistency, side effects |
+| `spec` | Stage 1 | Requirements clarity, completeness, feasibility |
+| `plan` | Stage 2 | Implementation approach, phase breakdown, risk assessment |
+| `impl` | Stage 4 | Code quality, test coverage, spec adherence |
+| `pr` | Stage 5 | Final self-check before PR creation |
+| `integration` | Stage 6 | System fit, architectural consistency, side effects |
 
 ## Builder Lifecycle
 

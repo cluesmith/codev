@@ -76,10 +76,12 @@ A **role** defines who does what work and what tools/permissions they have.
 | **Consultant** | External reviewers providing second opinions on specs, plans, implementations |
 
 **Consultant Flavors** (via `--type`):
-- `spec-review` - Review specification completeness
-- `plan-review` - Review implementation plan feasibility
-- `impl-review` - Review code for spec adherence
-- `integration-review` - Review for architectural fit
+- `spec` - Review specification completeness
+- `plan` - Review implementation plan feasibility
+- `impl` - Review code for spec adherence
+- `pr` - Review pull request before merge
+- `phase` - Phase-scoped review (builder only)
+- `integration` - Review for architectural fit
 
 ### Context Hierarchy
 
@@ -128,20 +130,22 @@ Multi-agent consultation. Used by both humans and agents—**mostly agents** dur
 
 | Command | Description |
 |---------|-------------|
-| `consult --model <model> spec <id>` | Review a specification |
-| `consult --model <model> plan <id>` | Review an implementation plan |
-| `consult --model <model> pr <id>` | Review a pull request |
-| `consult --model <model> general "<query>"` | General consultation |
+| `consult -m <model> --protocol spir --type spec` | Review a specification |
+| `consult -m <model> --protocol spir --type plan` | Review an implementation plan |
+| `consult -m <model> --protocol spir --type pr` | Review a pull request |
+| `consult -m <model> --prompt "query"` | General consultation |
 
 **Models**: `gemini` (alias: `pro`), `codex` (alias: `gpt`), `claude` (alias: `opus`)
 
 **Review Types** (via `--type`):
 | Type | Use Case |
 |------|----------|
-| `spec-review` | Review spec completeness and clarity |
-| `plan-review` | Review plan coverage and feasibility |
-| `impl-review` | Review implementation quality (Builder use) |
-| `integration-review` | Review architectural fit (Architect use) |
+| `spec` | Review spec completeness and clarity |
+| `plan` | Review plan coverage and feasibility |
+| `impl` | Review implementation quality (Builder use) |
+| `pr` | Review pull request before merge |
+| `phase` | Phase-scoped review (Builder only) |
+| `integration` | Review architectural fit (Architect use) |
 
 ---
 
@@ -161,9 +165,9 @@ Multi-agent consultation. Used by both humans and agents—**mostly agents** dur
 
 ```bash
 # Run 3-way review in parallel
-consult --model gemini pr <id> &
-consult --model codex pr <id> &
-consult --model claude pr <id> &
+consult -m gemini --protocol spir --type pr &
+consult -m codex --protocol spir --type pr &
+consult -m claude --protocol spir --type pr &
 wait
 ```
 

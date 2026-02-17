@@ -184,9 +184,9 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 3. Run 3-way CMAP review:
    ```bash
-   consult --model gemini --type pr-ready pr <PR_NUMBER> &
-   consult --model codex --type pr-ready pr <PR_NUMBER> &
-   consult --model claude --type pr-ready pr <PR_NUMBER> &
+   consult -m gemini --protocol bugfix --type pr &
+   consult -m codex --protocol bugfix --type pr &
+   consult -m claude --protocol bugfix --type pr &
    wait
    ```
 
@@ -212,9 +212,9 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 2. Run 3-way CMAP integration review (**NON-NEGOTIABLE**):
    ```bash
-   consult --model gemini --type integration-review pr <M> &
-   consult --model codex --type integration-review pr <M> &
-   consult --model claude --type integration-review pr <M> &
+   consult -m gemini --type integration &
+   consult -m codex --type integration &
+   consult -m claude --type integration &
    wait
    ```
    **DO NOT SKIP THIS STEP.** Manual review is not a substitute for CMAP.
@@ -395,8 +395,8 @@ BUGFIX uses **PR-only CMAP reviews**, which is intentionally lighter than SPIR's
 - All review effort is concentrated where it matters: the final PR
 
 **Review Types**:
-- Builder: `consult --model X --type pr-ready pr N`
-- Architect: `consult --model X --type integration-review pr N`
+- Builder: `consult -m X --protocol bugfix --type pr`
+- Architect: `consult -m X --type integration`
 
 **3-Way Review Pattern**:
 ```bash
@@ -455,9 +455,9 @@ Added encodeURIComponent() call in auth.ts:47.
 - [x] Verified fix locally"
 
 # 6. Builder runs CMAP review
-consult --model gemini --type pr-ready pr 50 &
-consult --model codex --type pr-ready pr 50 &
-consult --model claude --type pr-ready pr 50 &
+consult -m gemini --protocol bugfix --type pr &
+consult -m codex --protocol bugfix --type pr &
+consult -m claude --protocol bugfix --type pr &
 wait
 # → All APPROVE
 
@@ -465,9 +465,9 @@ wait
 af send architect "PR #50 ready (fixes issue #42)"
 
 # 8. Architect reviews + CMAP integration review
-consult --model gemini --type integration-review pr 50 &
-consult --model codex --type integration-review pr 50 &
-consult --model claude --type integration-review pr 50 &
+consult -m gemini --type integration &
+consult -m codex --type integration &
+consult -m claude --type integration &
 wait
 
 # 9. Architect approves

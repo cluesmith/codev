@@ -145,7 +145,7 @@
         "type": {
           "type": "string",
           "description": "Review type (maps to consult --type)",
-          "enum": ["spec-review", "plan-review", "impl-review", "pr-ready", "integration-review"]
+          "enum": ["spec", "plan", "impl", "pr", "phase", "integration"]
         },
         "models": {
           "type": "array",

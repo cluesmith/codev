@@ -139,42 +139,15 @@ describe('MetricsDB summary', () => {
   });
 });
 
-// Test 3: extractUsage() for Gemini JSON
+// Test 3: extractUsage() for Gemini returns null (Spec 325: --output-format json removed)
 describe('extractUsage for Gemini', () => {
-  it('correctly parses sample Gemini JSON output', () => {
-    const output = JSON.stringify({
-      response: 'The review text...',
-      stats: {
-        models: {
-          'gemini-3-pro-preview': {
-            tokens: {
-              prompt: 1200,
-              candidates: 450,
-              total: 1650,
-              cached: 800,
-            },
-          },
-        },
-      },
-    });
-
-    const usage = extractUsage('gemini', output);
-    expect(usage).not.toBeNull();
-    expect(usage!.inputTokens).toBe(1200);
-    expect(usage!.cachedInputTokens).toBe(800);
-    expect(usage!.outputTokens).toBe(450);
-    // Cost: (1200-800)/1M * 1.25 + 800/1M * 0.315 + 450/1M * 10.00
-    expect(usage!.costUsd).not.toBeNull();
-    expect(usage!.costUsd).toBeCloseTo(0.005252);
-  });
-
-  it('returns null for malformed JSON', () => {
-    const usage = extractUsage('gemini', 'not valid json');
+  it('returns null — Gemini outputs plain text, no structured usage available', () => {
+    const usage = extractUsage('gemini', 'any output');
     expect(usage).toBeNull();
   });
 
-  it('returns null when stats block is missing', () => {
-    const usage = extractUsage('gemini', JSON.stringify({ response: 'text' }));
+  it('returns null even with JSON-like input', () => {
+    const usage = extractUsage('gemini', JSON.stringify({ response: 'text', stats: {} }));
     expect(usage).toBeNull();
   });
 });
@@ -406,31 +379,15 @@ describe('SQLite write failure', () => {
   });
 });
 
-// Test 10: Gemini output unwrapping
-describe('Gemini output unwrapping', () => {
-  it('extracts response field as plain text', () => {
-    const rawJson = JSON.stringify({
-      response: 'This is the review text.\n\n---\nVERDICT: APPROVE\nSUMMARY: Looks good\nCONFIDENCE: HIGH\n---\nKEY_ISSUES: None',
-      stats: {
-        models: {
-          'gemini-3-pro-preview': {
-            tokens: { prompt: 1000, candidates: 200, total: 1200, cached: 500 },
-          },
-        },
-      },
-    });
-
-    const text = extractReviewText('gemini', rawJson);
-    expect(text).not.toBeNull();
-    expect(text).toContain('This is the review text.');
-    expect(text).toContain('VERDICT: APPROVE');
-    // Should not contain raw JSON structure
-    expect(text).not.toContain('"stats"');
-    expect(text).not.toContain('"models"');
+// Test 10: Gemini extractReviewText returns null (Spec 325: plain text output)
+describe('Gemini extractReviewText', () => {
+  it('returns null — Gemini outputs plain text directly (Spec 325)', () => {
+    const text = extractReviewText('gemini', 'This is plain text review output');
+    expect(text).toBeNull();
   });
 
-  it('returns null when response field is missing', () => {
-    const rawJson = JSON.stringify({ stats: { models: {} } });
+  it('returns null even with JSON-like input', () => {
+    const rawJson = JSON.stringify({ response: 'text' });
     const text = extractReviewText('gemini', rawJson);
     expect(text).toBeNull();
   });
@@ -502,20 +459,18 @@ describe('Cold start with no database', () => {
   });
 });
 
-// Test 14: JSON parse failure fallback
-describe('JSON parse failure fallback', () => {
-  it('Gemini: extractReviewText returns null for invalid JSON, raw output preserved', () => {
-    const rawOutput = 'This is raw text output, not JSON at all.\n\n---\nVERDICT: APPROVE\n---';
+// Test 14: Gemini always returns null (no structured output — Spec 325)
+describe('Gemini null returns for all input', () => {
+  it('extractReviewText returns null for plain text', () => {
+    const rawOutput = 'This is raw text output.\n\n---\nVERDICT: APPROVE\n---';
     const text = extractReviewText('gemini', rawOutput);
     expect(text).toBeNull();
-    // Caller should fall back to writing rawOutput to outputPath
   });
 
-  it('Gemini: extractUsage returns null for invalid JSON', () => {
+  it('extractUsage returns null for plain text', () => {
     const rawOutput = 'Not valid JSON';
     const usage = extractUsage('gemini', rawOutput);
     expect(usage).toBeNull();
   });
-
 });
 

@@ -32,9 +32,9 @@ This restores the previous conversation context so you don't lose progress.
 When running 3-way reviews, launch all consultations in parallel:
 
 ```bash
-consult --model gemini pr 83 &
-consult --model codex pr 83 &
-consult --model claude pr 83 &
+consult -m gemini --protocol spir --type pr &
+consult -m codex --protocol spir --type pr &
+consult -m claude --protocol spir --type pr &
 wait
 ```
 
@@ -45,12 +45,12 @@ This runs all three in the background simultaneously, saving significant time.
 By default, the `consult` command runs in the background. If you want to watch a consultation happen in the dashboard terminal:
 
 ```
-af consult --model gemini spec 42
+af consult -m gemini --protocol spir --type spec
 ```
 
 Instead of:
 ```
-consult --model gemini spec 42
+consult -m gemini --protocol spir --type spec
 ```
 
 The `af consult` variant runs in a visible dashboard terminal so you can observe the model's analysis.
@@ -70,12 +70,12 @@ The builder gets its own isolated git worktree, automatically receives the spec 
 Use the `--type` flag to get focused review prompts for each stage:
 
 ```bash
-consult --model gemini spec 42 --type spec-review      # Specification review
-consult --model codex plan 42 --type plan-review       # Plan review
-consult --model claude pr 83 --type integration-review # PR integration review
+consult -m gemini --protocol spir --type spec           # Specification review
+consult -m codex --protocol spir --type plan            # Plan review
+consult -m claude --type integration                    # PR integration review
 ```
 
-Available types: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`
+Available types: `spec`, `plan`, `impl`, `pr`, `phase`, `integration`
 
 ## Mediated Reviews (Faster 3-Way)
 
@@ -91,9 +91,9 @@ cat > /tmp/overview.md << 'EOF'
 EOF
 
 # Run parallel mediated reviews (~30-60s vs 2-4min)
-consult --model gemini pr 83 --context /tmp/overview.md &
-consult --model codex pr 83 --context /tmp/overview.md &
-consult --model claude pr 83 --context /tmp/overview.md &
+consult -m gemini --protocol spir --type pr --context /tmp/overview.md &
+consult -m codex --protocol spir --type pr --context /tmp/overview.md &
+consult -m claude --protocol spir --type pr --context /tmp/overview.md &
 wait
 ```
 
