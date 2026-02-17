@@ -82,37 +82,30 @@ describe('consult command (CLI)', () => {
     expect(result.status).not.toBe(0);
   });
 
-  // === Custom Role Support ===
+  // === Protocol Options ===
 
-  it('--help shows --role option', () => {
+  it('--help shows --protocol option', () => {
     const result = runConsult(['--help'], env.dir, env.env);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('--role');
+    expect(result.stdout).toContain('--protocol');
   });
 
-  it('--role blocks directory traversal', () => {
-    const result = runConsult(
-      ['--model', 'gemini', '--role', '../../../etc/passwd', 'general', 'test', '--dry-run'],
-      env.dir, env.env
-    );
-    expect(result.status).not.toBe(0);
-    const output = result.stdout + result.stderr;
-    expect(output).toContain('Invalid role name');
-  });
-
-  it('--role blocks path separators', () => {
-    const result = runConsult(
-      ['--model', 'gemini', '--role', 'foo/bar', 'general', 'test', '--dry-run'],
-      env.dir, env.env
-    );
-    expect(result.status).not.toBe(0);
-    const output = result.stdout + result.stderr;
-    expect(output).toContain('Invalid role name');
-  });
-
-  it('supports --dry-run flag', () => {
+  it('--help shows --type option', () => {
     const result = runConsult(['--help'], env.dir, env.env);
-    expect(result.stdout).toContain('dry');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--type');
+  });
+
+  it('--help shows --prompt option', () => {
+    const result = runConsult(['--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--prompt');
+  });
+
+  it('--help shows stats subcommand', () => {
+    const result = runConsult(['--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('stats');
   });
 
   // === Model Options ===
@@ -132,25 +125,17 @@ describe('consult command (CLI)', () => {
     expect(result.status).toBe(0);
   });
 
-  // === Role Validation ===
+  // === Input Validation ===
 
-  it('--role accepts hyphens and underscores in names', () => {
-    const result = runConsult(
-      ['--model', 'gemini', '--role', 'my-custom_role123', 'general', 'test', '--dry-run'],
-      env.dir, env.env
-    );
-    const output = result.stdout + result.stderr;
-    // Should fail because the role doesn't exist, NOT because the name is invalid
-    expect(output).not.toContain('Invalid role name');
+  it('--type without --model fails', () => {
+    const result = runConsult(['--type', 'spec'], env.dir, env.env);
+    expect(result.status).not.toBe(0);
   });
 
-  it('--role with nonexistent role shows helpful error', () => {
-    const result = runConsult(
-      ['--model', 'gemini', '--role', 'nonexistent-role-xyz', 'general', 'test', '--dry-run'],
-      env.dir, env.env
-    );
+  it('unknown subcommand shows helpful error', () => {
+    const result = runConsult(['nonexistent-cmd'], env.dir, env.env);
     expect(result.status).not.toBe(0);
     const output = result.stdout + result.stderr;
-    expect(output).toMatch(/Available roles|No custom roles found|not found|does not exist/i);
+    expect(output).toContain('Unknown subcommand');
   });
 });

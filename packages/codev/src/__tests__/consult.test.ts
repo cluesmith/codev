@@ -672,9 +672,9 @@ describe('consult command', () => {
       expect(args).not.toContain('--yolo');
     });
 
-    it('protocol mode should pass --yolo to Gemini CLI', async () => {
-      // Protocol mode (--type) uses structured reviews where --yolo is needed
-      // for file access during code review.
+    it('protocol mode should NOT pass --yolo to Gemini CLI', async () => {
+      // After Bugfix #370 fix (commit 2ea868d0), --yolo is never passed to
+      // Gemini in any mode — consultations must be read-only.
       vi.resetModules();
 
       // Clear spawn mock calls from previous tests
@@ -715,12 +715,12 @@ describe('consult command', () => {
       // --issue required from architect context
       await consult({ model: 'gemini', type: 'spec', issue: '1' });
 
-      // Verify spawn was called WITH --yolo
+      // Verify spawn was called WITHOUT --yolo (never used in any mode)
       const spawnCalls = vi.mocked(spawn).mock.calls;
       const geminiCall = spawnCalls.find(call => call[0] === 'gemini');
       expect(geminiCall).toBeDefined();
       const args = geminiCall![1] as string[];
-      expect(args).toContain('--yolo');
+      expect(args).not.toContain('--yolo');
     });
   });
 
