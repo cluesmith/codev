@@ -1,5 +1,7 @@
 # Codev Installation Guide
 
+> **DEPRECATED**: This document is outdated and references v1.x architecture (tmux, state.json, config.json). For current installation instructions, see the [README.md](README.md#quick-start). This file will be removed in a future release.
+
 ## Recommended: Install via npm
 
 The easiest way to install Codev is through npm:

@@ -173,7 +173,7 @@ In much the same way an operating system has a memory hierarchy, Codev repos hav
 
 ![Context Hierarchy](codev/resources/context-hierarchy.png)
 
-**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with an entry in the project list, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews.
+**Key insight**: We build from the top down, and we propagate information from the bottom up. We start with a GitHub issue, then spec and plan out the feature, generate the code, and then propagate what we learned through the reviews.
 
 ## Key Features
 
@@ -323,7 +323,7 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 - **Automatic prompting** - builders start with instructions to implement their assigned spec
 
 **Current limitations:**
-- Currently optimized for **Claude Code** (uses `-p` flag, `--append-system-prompt`, etc.)
+- Currently optimized for **Claude Code** (uses `--append-system-prompt`, `--dangerously-skip-permissions`, etc.)
 - Uses **shellper processes** for persistent terminal sessions (node-pty handles terminal I/O)
 - macOS-focused (should work on Linux but less tested)
 
@@ -341,7 +341,7 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 af dash start
 
 # Spawn a builder for a spec
-af spawn --project 0003
+af spawn 3
 
 # Check status
 af status

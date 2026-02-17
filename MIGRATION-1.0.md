@@ -1,5 +1,7 @@
 # Migration Guide: Upgrading to Codev v1.0.x
 
+> **DEPRECATED**: This migration guide is for upgrading to v1.0.x and references obsolete concepts (state.json, projectlist.md). For current versions, simply run `npm install -g @cluesmith/codev && codev update`. This file will be removed in a future release.
+
 This guide covers migrating an existing codev installation to v1.0.x.
 
 ## Scenario: Existing Codev Project → v1.0.x
