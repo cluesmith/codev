@@ -79,12 +79,15 @@ describe('consult command', () => {
       // Note: Codex now uses experimental_instructions_file config flag (not env var)
       // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
       // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
+      // Bugfix #370: --yolo removed from MODEL_CONFIGS; added conditionally in
+      // runConsultation only for protocol mode (not general mode)
       const configs: Record<string, { cli: string; args: string[] }> = {
-        gemini: { cli: 'gemini', args: ['--yolo'] },
+        gemini: { cli: 'gemini', args: [] },
         codex: { cli: 'codex', args: ['exec', '--full-auto'] },
       };
 
       expect(configs.gemini.cli).toBe('gemini');
+      expect(configs.gemini.args).toEqual([]);
       expect(configs.codex.args).toContain('--full-auto');
     });
 
@@ -632,6 +635,92 @@ describe('consult command', () => {
       // consult is invoked with a real model. The implementation now passes
       // cwd: workspaceRoot to spawn() for CLI-based models.
       expect(vi.mocked(spawn)).toBeDefined();
+    });
+  });
+
+  describe('Gemini --yolo mode restriction (Bugfix #370)', () => {
+    it('general mode should NOT pass --yolo to Gemini CLI', async () => {
+      // Bugfix #370: consult -m gemini general "..." was passing --yolo, allowing
+      // Gemini to auto-approve file writes in the main worktree. General mode
+      // consultations must be read-only.
+      vi.resetModules();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+
+      // Mock execSync so commandExists('gemini') returns true
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        return Buffer.from('');
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { consult } = await import('../commands/consult/index.js');
+
+      await consult({ model: 'gemini', prompt: 'audit all files' });
+
+      // Verify spawn was called without --yolo
+      const spawnCalls = vi.mocked(spawn).mock.calls;
+      const geminiCall = spawnCalls.find(call => call[0] === 'gemini');
+      expect(geminiCall).toBeDefined();
+      const args = geminiCall![1] as string[];
+      expect(args).not.toContain('--yolo');
+    });
+
+    it('protocol mode should pass --yolo to Gemini CLI', async () => {
+      // Protocol mode (--type) uses structured reviews where --yolo is needed
+      // for file access during code review.
+      vi.resetModules();
+
+      // Clear spawn mock calls from previous tests
+      const { spawn: spawnBefore } = await import('node:child_process');
+      vi.mocked(spawnBefore).mockClear();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'specs'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      // resolveProtocolPrompt builds "${type}-review.md", so type 'spec' → 'spec-review.md'
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'consult-types', 'spec-review.md'),
+        '# Review the spec'
+      );
+      // resolveArchitectQuery needs a spec file matching issue number (padded to 4 digits)
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'specs', '0001-test-feature.md'),
+        '# Test Feature Spec'
+      );
+      process.chdir(testBaseDir);
+
+      // Mock execSync to return git info for protocol mode queries
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        if (cmd.includes('git')) return Buffer.from('');
+        return Buffer.from('');
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { consult } = await import('../commands/consult/index.js');
+
+      // type 'spec' resolves to template 'spec-review.md'
+      // --issue required from architect context
+      await consult({ model: 'gemini', type: 'spec', issue: '1' });
+
+      // Verify spawn was called WITH --yolo
+      const spawnCalls = vi.mocked(spawn).mock.calls;
+      const geminiCall = spawnCalls.find(call => call[0] === 'gemini');
+      expect(geminiCall).toBeDefined();
+      const args = geminiCall![1] as string[];
+      expect(args).toContain('--yolo');
     });
   });
 
