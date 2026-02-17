@@ -16,9 +16,7 @@ function stateLabel(builder: OverviewBuilder): string {
   return `${builder.phase} (${idx + 1}/${phases.length})`;
 }
 
-function elapsed(startedAt: string | null): string {
-  if (!startedAt) return '-';
-  const ms = Date.now() - new Date(startedAt).getTime();
+function formatMs(ms: number): string {
   if (ms < 0) return '-';
   const mins = Math.floor(ms / 60_000);
   if (mins < 60) return `${mins}m`;
@@ -27,6 +25,15 @@ function elapsed(startedAt: string | null): string {
   if (hours < 24) return `${hours}h ${rem}m`;
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h`;
+}
+
+function elapsed(startedAt: string | null, idleMs: number): string {
+  if (!startedAt) return '-';
+  const wallMs = Date.now() - new Date(startedAt).getTime();
+  if (wallMs < 0) return '-';
+  const agentMs = Math.max(0, wallMs - idleMs);
+  if (idleMs === 0) return formatMs(wallMs);
+  return `${formatMs(wallMs)} wc / ${formatMs(agentMs)} ag`;
 }
 
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
@@ -53,7 +60,7 @@ export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
         </div>
         <span className="progress-pct">{pct}%</span>
       </td>
-      <td className="builder-col-elapsed">{elapsed(builder.startedAt)}</td>
+      <td className="builder-col-elapsed">{elapsed(builder.startedAt, builder.idleMs ?? 0)}</td>
       <td className="builder-col-actions">
         {onOpen && (
           <button className="builder-row-open" onClick={() => onOpen(builder)}>

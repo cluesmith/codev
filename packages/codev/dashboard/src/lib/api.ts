@@ -89,6 +89,7 @@ export interface OverviewBuilder {
   progress: number;
   blocked: string | null;
   startedAt: string | null;
+  idleMs: number;
 }
 
 export interface OverviewPR {

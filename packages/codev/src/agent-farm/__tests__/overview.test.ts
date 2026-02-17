@@ -19,6 +19,7 @@ import {
   calculateProgress,
   calculateEvenProgress,
   detectBlocked,
+  computeIdleMs,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -263,6 +264,55 @@ describe('overview', () => {
       const result = parseStatusYaml(yaml);
       expect(result.gateRequestedAt).toEqual({});
     });
+
+    it('parses gate approved_at fields (Bugfix #405)', () => {
+      const yaml = [
+        "id: '0124'",
+        'gates:',
+        '  spec-approval:',
+        '    status: approved',
+        "    requested_at: '2026-02-16T03:47:00.754Z'",
+        "    approved_at: '2026-02-16T04:17:44.002Z'",
+        '  plan-approval:',
+        '    status: approved',
+        "    approved_at: '2026-02-16T04:30:17.176Z'",
+        '  pr:',
+        '    status: pending',
+        "    requested_at: '2026-02-16T05:00:00.000Z'",
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateApprovedAt['spec-approval']).toBe('2026-02-16T04:17:44.002Z');
+      expect(result.gateApprovedAt['plan-approval']).toBe('2026-02-16T04:30:17.176Z');
+      expect(result.gateApprovedAt['pr']).toBeUndefined();
+    });
+
+    it('ignores approved_at: null and approved_at: ~', () => {
+      const yaml = [
+        'gates:',
+        '  spec-approval:',
+        '    status: approved',
+        '    approved_at: null',
+        '  plan-approval:',
+        '    status: approved',
+        '    approved_at: ~',
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateApprovedAt).toEqual({});
+    });
+
+    it('returns empty gateApprovedAt when no approved_at present', () => {
+      const yaml = [
+        'gates:',
+        '  spec-approval:',
+        '    status: pending',
+        "    requested_at: '2026-02-16T03:47:00.754Z'",
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateApprovedAt).toEqual({});
+    });
   });
 
   // ==========================================================================
@@ -279,6 +329,7 @@ describe('overview', () => {
         currentPlanPhase: '',
         gates: {},
         gateRequestedAt: {},
+        gateApprovedAt: {},
         planPhases: [],
         ...overrides,
       };
@@ -476,6 +527,7 @@ describe('overview', () => {
         currentPlanPhase: '',
         gates: {},
         gateRequestedAt: {},
+        gateApprovedAt: {},
         planPhases: [],
         ...overrides,
       };
@@ -522,6 +574,85 @@ describe('overview', () => {
           'plan-approval': '2026-01-02T00:00:00Z',
         },
       }))).toBe('spec review');
+    });
+  });
+
+  // ==========================================================================
+  // computeIdleMs (Bugfix #405)
+  // ==========================================================================
+
+  describe('computeIdleMs', () => {
+    function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {
+      return {
+        id: '0100',
+        title: 'test',
+        protocol: 'spir',
+        phase: 'specify',
+        currentPlanPhase: '',
+        gates: {},
+        gateRequestedAt: {},
+        gateApprovedAt: {},
+        planPhases: [],
+        startedAt: '2026-02-17T00:00:00.000Z',
+        ...overrides,
+      };
+    }
+
+    it('returns 0 when no gates have requested_at', () => {
+      expect(computeIdleMs(makeParsed())).toBe(0);
+    });
+
+    it('returns 0 when gates have approved_at but no requested_at (pre-approved)', () => {
+      expect(computeIdleMs(makeParsed({
+        gateApprovedAt: { 'spec-approval': '2026-02-17T01:00:00.000Z' },
+      }))).toBe(0);
+    });
+
+    it('computes idle time from completed gate interval', () => {
+      // 30 minutes of waiting at spec-approval
+      const idle = computeIdleMs(makeParsed({
+        gateRequestedAt: { 'spec-approval': '2026-02-17T01:00:00.000Z' },
+        gateApprovedAt: { 'spec-approval': '2026-02-17T01:30:00.000Z' },
+      }));
+      expect(idle).toBe(30 * 60 * 1000); // 30 minutes in ms
+    });
+
+    it('sums idle time from multiple completed gates', () => {
+      // 30 min at spec-approval + 15 min at plan-approval = 45 min
+      const idle = computeIdleMs(makeParsed({
+        gateRequestedAt: {
+          'spec-approval': '2026-02-17T01:00:00.000Z',
+          'plan-approval': '2026-02-17T02:00:00.000Z',
+        },
+        gateApprovedAt: {
+          'spec-approval': '2026-02-17T01:30:00.000Z',
+          'plan-approval': '2026-02-17T02:15:00.000Z',
+        },
+      }));
+      expect(idle).toBe(45 * 60 * 1000); // 45 minutes in ms
+    });
+
+    it('includes current pending gate in idle time', () => {
+      // spec-approval is completed (30 min), plan-approval is currently pending
+      const now = Date.now();
+      const pendingRequestedAt = new Date(now - 10 * 60 * 1000).toISOString(); // 10 min ago
+
+      const idle = computeIdleMs(makeParsed({
+        gateRequestedAt: {
+          'spec-approval': '2026-02-17T01:00:00.000Z',
+          'plan-approval': pendingRequestedAt,
+        },
+        gateApprovedAt: {
+          'spec-approval': '2026-02-17T01:30:00.000Z',
+          // plan-approval has no approved_at → currently pending
+        },
+      }));
+
+      // Should be ~30 min (completed) + ~10 min (pending)
+      // Allow 2 second tolerance for test execution time
+      const expected = 40 * 60 * 1000;
+      expect(idle).toBeGreaterThanOrEqual(expected - 2000);
+      expect(idle).toBeLessThanOrEqual(expected + 2000);
     });
   });
 
@@ -801,6 +932,38 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('soft');
       expect(builders[0].issueNumber).toBe(300);
       expect(builders[0].id).toBe('bugfix-300-some-fix');
+    });
+
+    it('includes idleMs computed from gate timestamps (Bugfix #405)', () => {
+      createBuilderWorktree(tmpDir, 'spir-60-feature', [
+        "id: '0060'",
+        'title: test-idle',
+        'protocol: spir',
+        'phase: implement',
+        'gates:',
+        '  spec-approval:',
+        '    status: approved',
+        "    requested_at: '2026-02-17T01:00:00.000Z'",
+        "    approved_at: '2026-02-17T01:30:00.000Z'",
+        '  plan-approval:',
+        '    status: approved',
+        "    requested_at: '2026-02-17T02:00:00.000Z'",
+        "    approved_at: '2026-02-17T02:15:00.000Z'",
+        "started_at: '2026-02-17T00:00:00.000Z'",
+      ].join('\n'), '0060-test-idle');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      // 30 min + 15 min = 45 min idle
+      expect(builders[0].idleMs).toBe(45 * 60 * 1000);
+    });
+
+    it('returns idleMs 0 for soft-mode builders (Bugfix #405)', () => {
+      createBuilderWorktree(tmpDir, 'task-XyZw');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].idleMs).toBe(0);
     });
 
     it('includes startedAt from status.yaml (Bugfix #388)', () => {
