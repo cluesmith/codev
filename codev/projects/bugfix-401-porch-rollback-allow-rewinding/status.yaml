@@ -1,0 +1,12 @@
+id: bugfix-401
+title: porch-rollback-allow-rewinding
+protocol: bugfix
+phase: fix
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-17T18:38:49.973Z'
+updated_at: '2026-02-17T18:42:26.594Z'
