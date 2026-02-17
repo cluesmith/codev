@@ -139,16 +139,73 @@ describe('MetricsDB summary', () => {
   });
 });
 
-// Test 3: extractUsage() for Gemini returns null (Spec 325: --output-format json removed)
+// Test 3: extractUsage() for Gemini parses JSON output
 describe('extractUsage for Gemini', () => {
-  it('returns null — Gemini outputs plain text, no structured usage available', () => {
-    const usage = extractUsage('gemini', 'any output');
+  it('extracts token counts and computes cost from single-model JSON output', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review text',
+      stats: {
+        models: {
+          'gemini-3-flash-preview': {
+            tokens: { prompt: 8000, candidates: 500, cached: 2000, thoughts: 100 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    expect(usage!.inputTokens).toBe(8000);
+    expect(usage!.cachedInputTokens).toBe(2000);
+    expect(usage!.outputTokens).toBe(500);
+    expect(usage!.costUsd).toBeGreaterThan(0);
+  });
+
+  it('sums tokens across multiple models', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review text',
+      stats: {
+        models: {
+          'gemini-2.5-flash-lite': {
+            tokens: { prompt: 3000, candidates: 50, cached: 0 },
+          },
+          'gemini-3-flash-preview': {
+            tokens: { prompt: 5000, candidates: 200, cached: 1000 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    expect(usage!.inputTokens).toBe(8000);
+    expect(usage!.cachedInputTokens).toBe(1000);
+    expect(usage!.outputTokens).toBe(250);
+    expect(usage!.costUsd).toBeGreaterThan(0);
+  });
+
+  it('returns null for non-JSON output', () => {
+    const usage = extractUsage('gemini', 'plain text output');
     expect(usage).toBeNull();
   });
 
-  it('returns null even with JSON-like input', () => {
-    const usage = extractUsage('gemini', JSON.stringify({ response: 'text', stats: {} }));
+  it('returns null when stats.models is missing', () => {
+    const usage = extractUsage('gemini', JSON.stringify({ response: 'text' }));
     expect(usage).toBeNull();
+  });
+
+  it('clamps cost to non-negative when cached exceeds input', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review',
+      stats: {
+        models: {
+          'gemini-3-flash-preview': {
+            tokens: { prompt: 1000, candidates: 100, cached: 3000 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    expect(usage!.costUsd).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -379,15 +436,21 @@ describe('SQLite write failure', () => {
   });
 });
 
-// Test 10: Gemini extractReviewText returns null (Spec 325: plain text output)
+// Test 10: Gemini extractReviewText parses JSON response field
 describe('Gemini extractReviewText', () => {
-  it('returns null — Gemini outputs plain text directly (Spec 325)', () => {
-    const text = extractReviewText('gemini', 'This is plain text review output');
+  it('extracts response field from JSON output', () => {
+    const rawJson = JSON.stringify({ response: 'This is the review text', stats: {} });
+    const text = extractReviewText('gemini', rawJson);
+    expect(text).toBe('This is the review text');
+  });
+
+  it('returns null for non-JSON output', () => {
+    const text = extractReviewText('gemini', 'This is plain text');
     expect(text).toBeNull();
   });
 
-  it('returns null even with JSON-like input', () => {
-    const rawJson = JSON.stringify({ response: 'text' });
+  it('returns null when response field is missing', () => {
+    const rawJson = JSON.stringify({ stats: {} });
     const text = extractReviewText('gemini', rawJson);
     expect(text).toBeNull();
   });
@@ -459,18 +522,52 @@ describe('Cold start with no database', () => {
   });
 });
 
-// Test 14: Gemini always returns null (no structured output — Spec 325)
-describe('Gemini null returns for all input', () => {
-  it('extractReviewText returns null for plain text', () => {
+// Test 14: Gemini graceful fallback for malformed output
+describe('Gemini graceful fallback for malformed output', () => {
+  it('extractReviewText returns null for plain text (graceful fallback)', () => {
     const rawOutput = 'This is raw text output.\n\n---\nVERDICT: APPROVE\n---';
     const text = extractReviewText('gemini', rawOutput);
     expect(text).toBeNull();
   });
 
-  it('extractUsage returns null for plain text', () => {
+  it('extractUsage returns null for plain text (graceful fallback)', () => {
     const rawOutput = 'Not valid JSON';
     const usage = extractUsage('gemini', rawOutput);
     expect(usage).toBeNull();
+  });
+
+  it('extractUsage computes per-model cost correctly for Pro pricing', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review',
+      stats: {
+        models: {
+          'gemini-3-pro-preview': {
+            tokens: { prompt: 1_000_000, candidates: 1_000_000, cached: 0 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    // Pro pricing: 1M input * $1.25/1M + 1M output * $5.00/1M = $6.25
+    expect(usage!.costUsd).toBeCloseTo(6.25, 1);
+  });
+
+  it('extractUsage computes per-model cost correctly for Flash pricing', () => {
+    const geminiOutput = JSON.stringify({
+      response: 'Review',
+      stats: {
+        models: {
+          'gemini-3-flash-preview': {
+            tokens: { prompt: 1_000_000, candidates: 1_000_000, cached: 0 },
+          },
+        },
+      },
+    });
+    const usage = extractUsage('gemini', geminiOutput);
+    expect(usage).not.toBeNull();
+    // Flash pricing: 1M input * $0.15/1M + 1M output * $0.60/1M = $0.75
+    expect(usage!.costUsd).toBeCloseTo(0.75, 1);
   });
 });
 

@@ -568,11 +568,11 @@ async function runConsultation(
     fs.writeFileSync(tempFile, role);
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
-    // No --output-format json — let Gemini output text directly
+    // Use --output-format json to capture token usage/cost in structured output.
     // Only use --yolo in protocol mode (structured reviews).
     // General mode must NOT use --yolo to prevent unintended file writes (#370).
     const yoloArgs = generalMode ? [] : ['--yolo'];
-    cmd = [config.cli, ...yoloArgs, ...config.args, query];
+    cmd = [config.cli, ...yoloArgs, '--output-format', 'json', ...config.args, query];
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
