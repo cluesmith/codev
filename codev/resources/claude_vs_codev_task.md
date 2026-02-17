@@ -334,3 +334,28 @@ Key findings:
 - The rebuttal mechanism (PR #246) was critical — without it, SPIR got stuck in a 5-iteration spec review loop
 
 Full results: `codev/resources/vibe-vs-spir-r2-comparison-2026-02.md`
+
+## Feb 2026 Results — Round 3
+
+The third run reinstated Deployment Readiness as a scored dimension (all 7 dimensions scored). Used codev v2.0.8+. Gemini SPIR review failed due to quota exhaustion from SPIR's consultation activity — averages use Codex + Claude only.
+
+| Dimension | Vibe (avg) | SPIR (avg) | Delta |
+|-----------|:----------:|:----------:|:-----:|
+| Bugs | 6.5 | 5.5 | **-1.0** |
+| Code Quality | 6.5 | 7.0 | +0.5 |
+| Maintainability | 6.5 | 7.5 | +1.0 |
+| Tests | 4.5 | 7.0 | **+2.5** |
+| Extensibility | 5.0 | 6.5 | +1.5 |
+| NL Interface | 5.5 | 7.0 | +1.5 |
+| Deployment | 2.5 | 3.5 | +1.0 |
+| **Overall** | **5.3** | **6.3** | **+1.0** |
+
+Key findings:
+- Tests is the largest delta (+2.5) — SPIR has 4.3x more test lines, 8x more test files
+- First round where SPIR has worse Bug score (-1.0) — Critical hook design bug in SPIR's `useTodos`
+- Deployment is low for both (2.5 vs 3.5) — neither produced Dockerfile or Railway config
+- SPIR leads on 6 of 7 dimensions, loses only on Bugs
+- 3-round overall average delta: +1.2 (SPIR consistently better)
+- Gemini quota exhaustion from SPIR consultations prevented one review
+
+Full results: `codev/resources/vibe-vs-spir-r3-comparison-2026-02.md`
