@@ -17,13 +17,15 @@ Terminal windows sometimes get into a state where the PTY dimensions don't match
 ## Design
 
 Two small floating icon buttons arranged **horizontally** in the top-right corner of every terminal window (architect, builder, shell). **Must work on both mobile and desktop.**
-### Button 1: Refresh (top)
+### Button 1: Refresh (left)
 
 On click:
 1. Calls `fitAddon.fit()` to recalculate dimensions from the container
-2. Sends a `resize` control message to the PTY backend with the new cols/rows
+2. Sends a `resize` control message to the PTY backend with the new cols/rows — guarded by `ws.readyState === WebSocket.OPEN`
 
-### Button 2: Scroll to Bottom (below refresh)
+All click handlers must null-check refs (`fitRef`, `wsRef`, `xtermRef`) since they can be null before initialization or after cleanup.
+
+### Button 2: Scroll to Bottom (right)
 
 On click:
 1. Calls `terminal.scrollToBottom()` on the xterm instance to jump to the current input area
@@ -31,13 +33,15 @@ On click:
 ### Placement
 
 - Absolutely positioned inside the terminal container div (the one with `containerRef`)
-- Top-right corner, arranged horizontally with a small gap between them
+- The container div needs `position: relative` added (it doesn't have it today)
+- Top-right corner, arranged horizontally (side-by-side) with a small gap between them
 - Small margin from edges (e.g., 8px from top, 8px from right)
-- Sits above the xterm canvas via z-index
+- Sits above the xterm canvas via z-index (z-index: 10)
 
 ### Appearance
 
-- Small icons (16-20px), semi-transparent (opacity ~0.4), brighten on hover (~0.8)
+- Small icons (16-20px), but button tap targets should be at least 32px for mobile accessibility
+- Semi-transparent (opacity ~0.4), brighten on hover (~0.8)
 - Refresh: simple refresh/reload SVG icon (inline, no external dependency)
 - Scroll to bottom: down-arrow SVG icon (inline)
 - Do not interfere with terminal scrollbar
@@ -48,6 +52,7 @@ On click:
 - Use `onPointerDown` with `preventDefault()` to avoid stealing focus from xterm (same pattern as `VirtualKeyboard.tsx`)
 - Single click triggers each action
 - No tooltips needed — icons are self-explanatory
+- Add `aria-label` attributes to buttons for accessibility (e.g., "Refresh terminal", "Scroll to bottom")
 
 ### Scope
 

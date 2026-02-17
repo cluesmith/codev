@@ -11,6 +11,68 @@ import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage } from '../lib/api.js';
 
+/**
+ * Floating controls overlay for terminal windows — refresh (re-fit + resize)
+ * and scroll-to-bottom buttons. Uses onPointerDown+preventDefault to avoid
+ * stealing focus from xterm (same pattern as VirtualKeyboard).
+ * Spec 0364.
+ */
+function TerminalControls({
+  fitRef,
+  wsRef,
+  xtermRef,
+}: {
+  fitRef: React.RefObject<FitAddon | null>;
+  wsRef: React.RefObject<WebSocket | null>;
+  xtermRef: React.RefObject<XTerm | null>;
+}) {
+  const handleRefresh = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const fit = fitRef.current;
+    if (!fit) return;
+    fit.fit();
+    const ws = wsRef.current;
+    const term = xtermRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+    sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+  };
+
+  const handleScrollToBottom = (e: React.PointerEvent) => {
+    e.preventDefault();
+    xtermRef.current?.scrollToBottom();
+  };
+
+  return (
+    <div className="terminal-controls">
+      <button
+        className="terminal-control-btn"
+        onPointerDown={handleRefresh}
+        tabIndex={-1}
+        aria-label="Refresh terminal"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M13.5 2.5v4h-4" />
+          <path d="M2.5 8a5.5 5.5 0 0 1 9.35-3.5L13.5 6.5" />
+          <path d="M2.5 13.5v-4h4" />
+          <path d="M13.5 8a5.5 5.5 0 0 1-9.35 3.5L2.5 9.5" />
+        </svg>
+      </button>
+      <button
+        className="terminal-control-btn"
+        onPointerDown={handleScrollToBottom}
+        tabIndex={-1}
+        aria-label="Scroll to bottom"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 3v8" />
+          <path d="M4 8l4 4 4-4" />
+          <line x1="4" y1="13" x2="12" y2="13" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
 const FRAME_DATA = 0x01;
@@ -460,7 +522,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
   }, [wsPath]);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       {persistent === false && (
         <div style={{
           backgroundColor: '#3a2a00',
@@ -472,6 +534,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           Session persistence unavailable — this terminal will not survive a restart
         </div>
       )}
+      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} />
       <div
         ref={containerRef}
         className="terminal-container"

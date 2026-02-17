@@ -300,6 +300,42 @@ body {
   background: var(--accent-hover);
 }
 
+/* Floating terminal controls — refresh + scroll-to-bottom (Spec 0364) */
+.terminal-controls {
+  position: absolute;
+  top: 8px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+}
+
+.terminal-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #e0e0e0;
+  opacity: 0.4;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.terminal-control-btn:hover {
+  opacity: 0.8;
+}
+
+.terminal-control-btn:active {
+  opacity: 1.0;
+}
+
 /* Mobile layout */
 .mobile-layout {
   display: flex;
