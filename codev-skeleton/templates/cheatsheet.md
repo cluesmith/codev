@@ -104,7 +104,6 @@ Project management commands. Typically used by **humans** to set up and maintain
 | `codev doctor` | Check dependencies and configuration |
 | `codev update` | Update Codev framework |
 | `codev import` | Import specs from another project |
-| `af tower start` | Cross-project dashboard |
 
 ### agent-farm (af)
 

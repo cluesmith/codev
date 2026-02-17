@@ -57,10 +57,10 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 Enables the Architect-Builder pattern with isolated execution environments:
 
 ```bash
-af start              # Launch the architect dashboard
-af spawn -p 0003      # Create a builder for spec 0003
+af dash start         # Launch the architect dashboard
+af spawn 3            # Create a builder for project 3
 af status             # See what everyone is doing
-af cleanup -p 0003    # Clean up when done
+af cleanup -p 3       # Clean up when done
 ```
 
 #### Consult

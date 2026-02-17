@@ -144,11 +144,13 @@ Does NOT clean up worktrees - use `af cleanup` for that.
 Spawn a new builder.
 
 ```bash
-af spawn [options]
+af spawn [issue-number] [options]
 ```
 
+**Arguments:**
+- `issue-number` - Issue number to build (positional, e.g., `42`)
+
 **Options:**
-- `-p, --project <id>` - Spawn builder for a spec (e.g., `42`)
 - `--task <text>` - Spawn builder with a task description
 - `--protocol <name>` - Spawn builder to run a protocol
 - `--shell` - Spawn a bare Claude session
