@@ -71,10 +71,12 @@ tail -f ~/.agent-farm/tower.log
 | **Architect** | The human + primary AI orchestrating builders and reviewing work |
 | **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
 | **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
-| **Protocol** | Defined workflow for a type of work (SPIR, TICK, MAINTAIN, EXPERIMENT) |
+| **Protocol** | Defined workflow for a type of work (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE) |
 | **SPIR** | Multi-phase protocol: Specify → Plan → Implement → Review |
 | **TICK** | Amendment protocol for extending existing SPIR specs |
+| **BUGFIX** | Lightweight protocol for isolated bug fixes (< 300 LOC) |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
+| **Workspace** | Tower's term for a registered project directory. Used in API paths and code; synonymous with "project" in user-facing contexts |
 | **Worktree** | Git worktree providing isolated environment for a builder |
 | **node-pty** | Native PTY session manager, multiplexed over WebSocket |
 | **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
@@ -111,7 +113,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   Dashboard (React + Vite on :4200)                  │
+│                   Dashboard (React SPA on Tower :4100)               │
 │              HTTP server + WebSocket multiplexer                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
@@ -155,7 +157,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 6. **SQLite Databases**: State persistence (local and global)
 
 **Data Flow**:
-1. User opens dashboard at `http://localhost:4200`
+1. User opens dashboard at `http://localhost:4100`
 2. React dashboard polls `/api/state` for current state (1-second interval). Response includes `persistent` boolean per terminal.
 3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
 4. Terminal creation uses `SessionManager.createSession()` for persistent shellper-backed sessions, or direct node-pty for non-persistent sessions
@@ -276,7 +278,7 @@ DELETE /api/terminals/:id        # Kill session
 POST /api/terminals/:id/resize   # Resize (cols, rows)
 
 # WebSocket connection per terminal
-ws://localhost:4200/ws/terminal/<session-id>
+ws://localhost:4100/ws/terminal/<session-id>
 ```
 
 **Hybrid WebSocket Protocol** (binary frames):
@@ -708,7 +710,7 @@ Agent Farm is designed for local development use only. Understanding the securit
 #### Network Binding
 
 All services bind to `localhost` only:
-- Dashboard server + WebSocket terminals: `127.0.0.1:4200`
+- Tower server + Dashboard + WebSocket terminals: `127.0.0.1:4100`
 - No external network exposure
 
 #### Authentication
@@ -813,7 +815,6 @@ const CONFIG = {
 ### Testing Framework
 - **Vitest**: Unit and integration tests (`packages/codev/src/__tests__/`)
 - **Playwright**: E2E browser tests (`packages/codev/tests/e2e/`)
-- **Vitest**: TypeScript unit testing for packages/codev
 
 ### External Tools (Required)
 - **git**: Version control with worktree support for isolated builder environments
@@ -854,7 +855,7 @@ This is where the Codev project uses Codev to develop itself:
 This is what gets distributed to users when they install Codev:
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
-  - `protocols/` - Protocol definitions (SPIR, TICK, EXPERIMENT, MAINTAIN)
+  - `protocols/` - Protocol definitions (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE)
   - `specs/` - Empty directory (users create their own)
   - `plans/` - Empty directory (users create their own)
   - `reviews/` - Empty directory (users create their own)
@@ -1647,4 +1648,4 @@ See [MAINTAIN protocol](../protocols/maintain/protocol.md) for codebase hygiene 
 
 **Last Updated**: 2026-02-18
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Refinement round 1/4 -- broad prune. See CHANGELOG.md for version history.
+**Changes**: Refinement round 3/4 -- polish pass. See CHANGELOG.md for version history.

@@ -99,7 +99,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0083] Protocol hooks (collision-check, comment-on-issue) should be data-driven via protocol.json rather than hardcoded in spawn functions. This makes adding new protocols possible without modifying spawn.ts.
 - [From 0086] Three distinct layers (Builder/Enforcer/Worker) emerged from specific failures: Builder exists because porch was a terrible conversational interface; Enforcer exists because Claude drifts without deterministic constraints; Worker exists because `claude --print` was crippled (no tools, silent failures). Each layer addresses a concrete failure mode, not theoretical separation of concerns.
 - [From 0090] Single daemon architecture simplifies operations -- no more stale state between dashboard processes. API client pattern (`af dash` calling tower API) is more maintainable than spawning separate processes.
-- [From 0090] Incremental migration with test-first approach (Phase 0 baseline tests) catches regressions early when making architectural changes.
 - [From 0090-TICK-001] You cannot persist a live PTY object or file descriptor to a database. Terminal session persistence means persisting metadata and reconciling against reality on startup. Destructive reconciliation (kill orphans, clear stale rows) is simpler and more reliable than attempting to re-attach to surviving processes.
 - [From 0090-TICK-001] Path normalization is critical when multiple code paths (architect uses `resolvedPath`, shells use raw path) write to the same database table. Always normalize before save/delete/query.
 - [From 0092] Port consolidation simplifies architecture -- moving from per-file ports (4250-4269) to Tower API endpoints eliminates 20 potential port conflicts and removes an entire server process. Single-port architecture is cleaner.
@@ -136,11 +135,13 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0403] Idle detection (timestamp + timer) is simpler and more universal than submit-detection (Enter key parsing) for typing awareness. Enter detection has too many edge cases: Enter in vim/nano means newline, multi-line paste contains `\r`, and you need timeout fallbacks anyway. The simpler approach works with any terminal application.
 - [From 0403] Per-session message buffering with configurable idle threshold (3s) and max buffer age (60s) prevents message injection during typing while ensuring delivery within bounded time. The `interrupt` option provides an escape hatch for urgent messages.
 - [From 0386] Three-tier documentation audit structure (public-facing, developer reference, skeleton templates) with a "historical release notes are read-only" carve-out prevents over-zealous cleanup of historically accurate content.
+- [From 0056] When moving functionality to a new location, always implement a fallback chain that checks the new location first, then falls back to the old location with a deprecation warning. Test both paths explicitly.
+- [From 0064] Hide/show iframes instead of destroy/recreate when preserving state is important. Maintain an invalidation mechanism (e.g., port change detection) to handle stale cached elements.
+- [From 0106] Old migration code (e.g., v6, v7 referencing `shepherd_*`) must remain historically correct even after a rename. Only current schema and new migrations use the new names.
 - [From 0376] Archive `status.yaml` files before `af cleanup` -- most projects' porch state files are deleted after PR merge, losing valuable timing data for future development analyses.
 
 ## Process
 
-- [From 0044] Phased approach makes progress visible and commit messages meaningful
 - [From 0054] Keep specs technology-agnostic when implementation should match existing codebase patterns
 - [From 0059] Verify what data is actually available in state before designing features that depend on it
 - [From 0057] Always handle both new and existing branches when creating worktrees
@@ -167,13 +168,13 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0094] Specs with exact CSS snippets make implementation straightforward -- precise specifications eliminate ambiguity for Builders.
 - [From 0095] Extract shared functions before deleting the file that contains them. Moving `parseVerdict()` to `verdict.ts` in Phase 1 (rather than waiting for Phase 2's deletion of `run.ts`) simplified the refactoring sequence.
 - [From 0096] Monorepo porch compatibility: `porch done` runs `npm run build` and `npm test` from the worktree root, but there may be no root `package.json`. The fix is adding `"cwd": "packages/codev"` to the protocol checks.
-- [From 0097/0113] Set iteration limits for 2/3 approval: when 2 of 3 reviewers consistently approve, the third reviewer's recurring concerns should be evaluated against a threshold to prevent infinite iteration loops. A single reviewer repeating the same concern should not block progress indefinitely. Consider auto-advancing when 2/3 approve for 3+ consecutive iterations with documented dissent.
+- [From 0097/0113] Set iteration limits: when 2/3 approve for 3+ rounds, auto-advance with documented dissent. A single reviewer repeating the same concern should not block progress indefinitely.
 - [From 0098] Combine infrastructure removal and test updates in the same plan phase. Splitting them creates unnecessary overhead -- test fixes are needed to make the removal compile, so they should be together.
 - [From 0098] Include template files (HTML with inline JavaScript) in the plan's file list when planning TypeScript-focused changes. A grep for removed identifiers across all file types (not just `.ts`) during planning catches hidden dependencies.
 - [From 0101] Place test files matching project conventions from the start. Using wrong paths in the plan (e.g., `tests/unit/` when the project uses `src/__tests__/`) causes repeated false negatives from consultation reviewers searching at planned-but-nonexistent paths.
 - [From 0101] Skip screenshot baselines in implementation plans. Playwright `toHaveScreenshot()` generates baselines on first run. Requiring pre-committed baselines causes reviewers to block every iteration looking for PNG files that do not exist pre-first-run.
 - [From 0102] Run `porch done` immediately after implementation, before ending a session. Resumed sessions can have state mismatches if the previous session implemented code but never advanced porch state.
-- [From 0104] Tighter iteration caps per phase: after 3 iterations with the same reviewer pattern (e.g., Codex REQUEST_CHANGES on the same cosmetic issue), a manual architect override saves time. SPIR should recommend a maximum iteration count (e.g., 4) per plan phase.
+- [From 0104] Tighter iteration caps per phase (recommend max 4). After 3 iterations with the same reviewer pattern on cosmetic issues, a manual architect override saves time.
 - [From 0104] Start with comprehensive context files for consultation agents. Sparse initial context files lead to false-positive reviews that require rebuttals and re-consultation cycles.
 - [From 0106] Pre-check for merge artifacts before starting implementation. Run `git diff main -- <files>` to identify unexpected changes from merge resolution that may need to be addressed alongside the feature work.
 - [From 0107] Extracting shared infrastructure first (Phase 1 of a multi-phase plan) makes subsequent phases cleaner and independently testable.
@@ -325,12 +326,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0126] Workspace-scoped routing is a common blind spot in consultation. The Tower server has global and workspace-scoped routing layers; Claude caught that `/api/overview` was only registered globally, which would have broken the dashboard.
 - [From bugfix-274] Codex caught a secondary race path through the Tower API that the initial fix missed -- the direct `/project/.../api/state` endpoint bypasses `getInstances()` entirely, requiring the additional `_reconciling` guard.
 - [From 0104/0106/0109/0117] Reviewer stale branch reads: consultation prompts should include the actual file tree or instruct models to search recursively, since reviewers occasionally read files from `main` instead of the feature branch worktree.
-
-## Backward Compatibility and Migration
-
-- [From 0056] When moving functionality to a new location (e.g., `roles/review-types/` to `consult-types/`), always implement a fallback chain that checks the new location first, then falls back to the old location with a deprecation warning. Test both paths explicitly.
-- [From 0064] Hide/show iframes instead of destroy/recreate when preserving state is important. Maintain an invalidation mechanism (e.g., port change detection) to handle stale cached elements.
-- [From 0106] Old migration code (e.g., v6, v7 referencing `shepherd_*`) must remain historically correct even after a rename. Only current schema and new migrations use the new names.
 
 ## Protocol Orchestration
 
