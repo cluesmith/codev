@@ -55,9 +55,12 @@ Process all document types for each spec number before moving to the next number
 Then move to spec N+1. This ensures full context for each feature before moving on.
 
 **Batching and checkpointing:**
-- Process documents in batches of ~20 spec numbers at a time
+- Divide all spec numbers into groups and process in parallel batches of 5 agents at a time
+- Each agent reads its assigned spec/plan/review documents and writes extraction output to a file (e.g., `codev/projects/422-documentation-sweep/extraction-XXXX-YYYY.md`)
+- After each batch of 5 agents completes, process all 5 extraction files at once — merge their content into arch.md and lessons-learned.md
 - Commit intermediate results after each batch with message format: `[Spec 422] Pass 1: extract batch N (specs XXXX-YYYY)`
-- This prevents context loss and creates recovery points
+- Then launch the next batch of 5 agents
+- This maximizes throughput while keeping context manageable
 
 ### Pass 2: Refinement (Iterative)
 
@@ -81,7 +84,7 @@ Once all documents have been processed, refine both target documents:
 
 **Iteration:**
 - Re-read the refined document end-to-end
-- Maximum 3 refinement passes — stop earlier if a pass produces no changes
+- Maximum 7 refinement passes — stop earlier if a pass produces no changes
 - "Meaningful" = changes that improve clarity, remove redundancy, or fix inconsistency
 
 ### Scope boundaries
@@ -119,7 +122,7 @@ Once all documents have been processed, refine both target documents:
 - [ ] lessons-learned.md captures all generalizable wisdom from reviews
 - [ ] No duplicate entries in either document
 - [ ] Both documents are internally consistent (terminology, formatting)
-- [ ] Refinement passes complete (max 3, or earlier if no changes produced)
+- [ ] Refinement passes complete (max 7, or earlier if no changes produced)
 - [ ] Attribution is preserved for all entries (spec numbers in arch.md, `[From XXXX]` in lessons-learned)
 
 ## Consultation Log
