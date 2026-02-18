@@ -1460,36 +1460,13 @@
       }
     }
 
-    // Restart a workspace
+    // Restart a workspace dashboard (refresh UI state without touching terminals)
     async function restartInstance(workspacePath) {
       try {
-        // First stop
-        await authFetch('./api/stop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workspacePath })
-        });
-
-        // Wait a moment for processes to die
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Then start
-        const response = await authFetch('./api/launch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workspacePath })
-        });
-
-        const result = await response.json();
-
-        if (!result.success) {
-          throw new Error(result.error || 'Restart failed');
-        }
-
-        showToast('Workspace restarting...', 'success');
-        setTimeout(refresh, 2000);
+        showToast('Refreshing dashboard...', 'success');
+        await refresh();
       } catch (err) {
-        showToast('Failed to restart: ' + err.message, 'error');
+        showToast('Failed to refresh: ' + err.message, 'error');
       }
     }
 
