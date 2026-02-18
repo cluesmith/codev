@@ -2252,6 +2252,426 @@ A well-maintained Codev architecture should enable:
 - **Reliable Testing**: Tests pass consistently on all platforms
 - **Safe Updates**: Framework updates never break user work
 
+## Historical Architecture Evolution
+
+This section captures architectural decisions and patterns from the full history of Codev development, organized chronologically by spec range. Content is extracted from review documents with `(Spec XXXX)` attribution.
+
+### Early Foundations (Specs 0001-0012)
+
+#### Test Infrastructure (Spec 0001)
+
+- **bats-core test framework** (Spec 0001): Installation tests use bats-core (vendored under `tests/lib/`) with bats-support, bats-assert, and bats-file helper libraries. Tests run via `scripts/run-tests.sh` (fast, no Claude) and `scripts/run-all-tests.sh` (includes Claude integration tests). Tests create isolated temporary directories via `mktemp` and use XDG sandboxing (`XDG_CONFIG_HOME` set to test directory) to prevent touching real user configuration.
+
+- **Claude isolation flags** (Spec 0001): Claude can be run in a fully isolated test environment using `--strict-mcp-config --mcp-config '[]'` (no MCP servers) and `--settings '{}'` (no user settings). This enables automated integration testing without interference from user configuration.
+
+- **Mock strategy** (Spec 0001): Zen MCP detection is mocked by creating failing shim executables on PATH rather than removing commands from PATH. This is more realistic and avoids PATH reconstruction complexity.
+
+#### Architect-Builder Pattern Origins (Spec 0002)
+
+- **Core architecture** (Spec 0002): The Architect-Builder pattern separates development into two roles: the Architect (human + primary AI) creates specs and plans, while Builders (autonomous AI agents) implement them in isolated git worktrees. Builders execute autonomously following the SPIR protocol's Implement/Defend/Evaluate loop and produce PRs. The architect handles specification, planning, and final review/integration.
+
+- **Git worktrees for builder isolation** (Spec 0002): Each builder operates in its own git worktree (`.builders/<id>/`), providing filesystem isolation while sharing the same .git database for fast rebases and merges. Worktrees are created with `git worktree add -b builder/<id>-<name> .builders/<id> main`.
+
+- **Web terminals via ttyd** (Spec 0002): Initially, ttyd served web-based terminals for each builder on dynamically assigned ports. Each builder terminal was embedded as an iframe in the dashboard. This was later replaced by a tmux-based approach for session persistence.
+
+- **Builder prompt template** (Spec 0002): Standard instructions given to each builder include: follow the SPIR protocol, proceed autonomously without asking permission, stop only for true blockers, self-rebase before creating PR, and create PR when complete.
+
+- **Inline REVIEW comments** (Spec 0002): Code review uses inline comments with a `REVIEW:` prefix in the appropriate comment syntax for each file type (e.g., `// REVIEW: comment` for JS/TS, `# REVIEW: comment` for Python, `<!-- REVIEW: comment -->` for Markdown). Comments are attributed with `@username` and cleaned up before merging.
+
+- **Protocol-agnostic spawn system** (Spec 0002, TICK-002): The `af spawn` command separates three orthogonal concerns: input type (spec, issue, task, protocol), mode (strict/porch vs. soft/AI-follows-protocol.md), and protocol (spir, bugfix, tick, maintain). Each protocol defines its requirements in `protocol.json` with input specifications, pre-spawn hooks (collision checks, issue comments), and mode defaults. Protocol-specific prompt templates live in `protocols/{name}/builder-prompt.md`.
+
+#### Dashboard UI Evolution (Specs 0004, 0007)
+
+- **Split-pane dashboard** (Spec 0007, supersedes Spec 0004): The dashboard uses a fixed 50/50 split layout with the Architect terminal always visible on the left and a tabbed interface on the right. Tab types include File (annotation viewer), Builder (terminal), and Shell (utility). Tabs are created via manual UI buttons or agent-driven CLI commands (`af annotate`, `af spawn`, `af shell`). CLI-spawned tabs open in background without stealing focus from the architect terminal. The dashboard communicates with the CLI via REST API (`/api/state`, `/api/tabs/*`).
+
+- **Dashboard state management** (Spec 0007): Dashboard state tracks architect status, a list of tabs (each with id, type, name, port, and type-specific metadata), and the active tab. Builder tabs include real-time status indicators (green=idle, yellow=working, red=error, blue=spawning).
+
+#### TypeScript CLI Migration (Spec 0005)
+
+- **agent-farm package** (Spec 0005): The CLI was migrated from a 650+ line bash script to TypeScript using Commander.js for CLI parsing. The package structure separates commands (`src/commands/`), server components (`src/servers/`), and utilities (`src/utils/`). State is persisted as JSON at `.agent-farm/state.json`. The package ships HTML templates for the dashboard and annotation viewer.
+
+- **Key TypeScript interfaces** (Spec 0005): Core types include `Builder` (id, name, port, pid, status, phase, worktree, branch), `UtilTerminal`, `Annotation`, `DashboardState`, and `Config`. Builder status values are: spawning, implementing, blocked, pr-ready, complete.
+
+#### Architecture Consolidation (Spec 0008)
+
+- **Elimination of triple implementation** (Spec 0008): The project originally had the same functionality in three places: a 713-line bash script (`codev/bin/architect`), a duplicate in `codev-skeleton/bin/architect`, and the TypeScript `agent-farm/`. The consolidation deleted both bash scripts and duplicate templates, making the TypeScript agent-farm the single canonical implementation. A thin bash wrapper (`codev/bin/agent-farm`) forwards all commands to `node agent-farm/dist/index.js`.
+
+- **config.json for customization** (Spec 0008): Shell commands for architect, builder, and shell sessions are configurable via `config.json` (later renamed to `af-config.json`). Configuration hierarchy: CLI args > config.json > defaults. Commands support both string and array formats (arrays avoid shell-escaping issues). Environment variables are expanded at runtime.
+
+- **Global port registry** (Spec 0008): Multi-instance support uses a global registry at `~/.agent-farm/ports.json` (later migrated to `~/.agent-farm/global.db`) that assigns deterministic 100-port blocks per repository (4200-4299 for first repo, 4300-4399 for second, etc.). File locking with 30-second stale lock timeout prevents concurrent corruption.
+
+- **Port block layout** (Spec 0008): Within each 100-port block: base+0 = dashboard, base+1 = architect, base+10 to base+29 = builders (20 slots), base+30 to base+49 = utilities (20 slots), base+50 to base+69 = annotations (20 slots).
+
+- **Clean slate safety** (Spec 0008): Worktree deletion checks for uncommitted changes and requires `--force` flag to proceed if dirty. On startup, orphaned tmux sessions matching the naming convention are detected and either adopted into state or killed.
+
+- **Template resolution** (Spec 0008): agent-farm resolves templates at runtime from `codev/templates/` (configurable via config.json). The dual-directory structure is preserved: `codev/` for this project's instance, `codev-skeleton/` for the distribution template. agent-farm never bundles its own templates.
+
+#### Terminal File Click (Spec 0009)
+
+- **File path clicking in terminals** (Spec 0009): Initial approach using custom xterm.js with `registerLinkProvider` failed due to xterm.js v5 ES module system incompatibility with script tags. The working solution uses ttyd's built-in HTTP link handling: tools output `http://localhost:<port>/open-file?path=<file>` URLs which ttyd makes clickable natively. The dashboard's `/open-file` route spawns a BroadcastChannel message to open an annotation tab.
+
+- **Annotation server readiness** (Spec 0009): A `waitForPortReady()` function in `dashboard-server.ts` waits up to 5 seconds for the annotation server to be accepting connections before returning from the `/api/tabs/file` endpoint, preventing the "refresh needed" issue where iframes loaded before servers were ready.
+
+#### Annotation Editor (Spec 0010)
+
+- **Edit/Annotate toggle** (Spec 0010): The annotation viewer supports a mode toggle between read-only annotate mode (syntax highlighted with Prism.js) and edit mode (full-file textarea). Switching back to annotate mode auto-saves via the existing `/save` endpoint. Cmd/Ctrl+S saves while in edit mode.
+
+#### Multi-Instance Support (Spec 0011)
+
+- **Project-aware dashboard titles** (Spec 0011): Dashboard titles include the project directory name (`Agent Farm - <projectName>`) in both browser tab and page header, derived from `path.basename(projectRoot)` with HTML escaping.
+
+#### tmux Session Configuration (Spec 0012)
+
+- **tmux status bar hidden** (Spec 0012): All agent-farm tmux sessions have `status off` set immediately after creation via `tmux set-option -t "<sessionName>" status off`. This is per-session (not global), so user's other tmux sessions are unaffected. The dashboard provides equivalent navigation, making the tmux status bar redundant.
+
+### Infrastructure Maturation (Specs 0013-0031)
+
+#### OS Dependencies & Environment Verification (Spec 0013)
+
+The `codev doctor` command (Spec 0013) provides full environment verification as a standalone shell script that works even without Node.js installed. It checks:
+- **Core dependencies**: Node.js (>=18), tmux (>=3.0), git (>=2.5), Python (>=3.10)
+- **AI CLI dependencies** (at least one required): Claude Code, Gemini CLI, Codex CLI
+- Outputs a summary table with status indicators and exit code reflecting overall health
+
+The `af start` command performs a subset of these checks at startup (core deps only), while `codev doctor` covers the full environment including AI CLIs and Python packages. (Spec 0013)
+
+#### Flexible Builder Spawning (Spec 0014)
+
+The `af spawn` command supports four mutually exclusive modes (Spec 0014):
+
+| Mode | Flag | ID Format | Creates Worktree? | Creates Branch? |
+|------|------|-----------|-------------------|-----------------|
+| Spec | `--project XXXX` / `-p XXXX` | Project ID | Yes | Yes (`builder/{id}-{spec-name}`) |
+| Task | `--task "text"` | `task-{rand4}` | Yes | Yes (`builder/task-{rand4}`) |
+| Protocol | `--protocol name` | `{name}-{rand4}` | Yes | Yes (`builder/{name}-{rand4}`) |
+| Shell | `--shell` | `shell-{rand4}` | No | No |
+
+Key design choices:
+- **Explicit flags only** -- no positional arguments for mode selection. `--files` requires `--task`.
+- **4-char alphanumeric IDs** for collision-safe, filesystem-safe builder identification.
+- **Unified `BuilderConfig` internally** -- CLI uses mode-based parsing for clear UX, but normalizes to a single internal model to avoid duplicating git/tmux logic across modes.
+- **Protocol role precedence**: Protocol mode loads `codev/protocols/{name}/role.md` if it exists, falling back to `codev/roles/builder.md`.
+- **Builder state includes `type` field** (`'spec' | 'task' | 'protocol' | 'shell'`) for dashboard grouping and observability. (Spec 0014)
+
+#### CLEANUP Protocol -- Precursor to MAINTAIN (Spec 0015)
+
+The CLEANUP protocol (Spec 0015, later superseded by the MAINTAIN protocol in Spec 0035) introduced a four-phase codebase maintenance workflow:
+
+1. **AUDIT** -- Identify dead code, unused deps, stale docs, orphaned tests
+2. **PRUNE** -- Remove identified cruft using soft-delete (move to `.trash/`) with auto-generated `restore.sh`
+3. **VALIDATE** -- Run full test suite, verify nothing broke
+4. **SYNC** -- Update architecture docs, sync CLAUDE.md/AGENTS.md
+
+Key design patterns that carried forward into MAINTAIN:
+- **Soft-delete with restore scripts**: Files moved to `codev/maintain/.trash/{timestamp}/` with directory structure preserved and `restore.sh` generated for rollback
+- **30-day retention policy** for `.trash/` directories
+- **Dry-run mode** for the prune phase
+- **Entry/exit criteria** per phase with human approval required for all deletions
+- **Cleanup categories**: dead-code, dependencies, docs, tests, temp, metadata (Spec 0015)
+
+#### Platform Portability / Transpilation Vision (Spec 0017)
+
+Spec 0017 envisioned a transpilation approach for multi-platform support where a single `.codev/` source of truth would generate platform-specific instruction files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`). While this spec was low-priority and not implemented, it articulated the architectural direction:
+- One-way transpilation: `.codev/` source -> platform targets
+- Handlebars-style templates with platform conditionals
+- Risk assessment: over-abstraction and "lowest common denominator" limitation
+
+Expert consultation flagged this as potentially premature -- the simpler approach of manually maintaining CLAUDE.md/AGENTS.md in sync was adopted instead (see Invariant #4 in arch.md). (Spec 0017)
+
+#### Architect-to-Builder Communication -- af send (Spec 0020)
+
+The `af send` command (Spec 0020) enables bidirectional communication in the architect-builder workflow using **tmux buffer paste** rather than `send-keys`:
+
+**Message flow**: CLI -> load state -> find builder tmux session -> write to temp file -> `tmux load-buffer` -> `tmux paste-buffer` -> `tmux send-keys Enter` -> cleanup temp file
+
+**Why buffer paste over send-keys**: `send-keys` has severe shell escaping issues with special characters (`$`, backticks, quotes). Buffer paste treats content as a paste operation, preserving formatting and avoiding escaping entirely. Both GPT-5 and Gemini independently recommended this approach.
+
+**Structured message format** (default, disable with `--raw`):
+```
+### [ARCHITECT INSTRUCTION | <timestamp>] ###
+<message content>
+###############################
+```
+
+**Key flags**: `--all` (broadcast), `--file` (attach file content, 48KB limit), `--interrupt` (send Ctrl+C first), `--raw` (skip formatting), `--no-enter` (don't submit). (Spec 0020)
+
+#### Multi-CLI Builder Support -- CLI Adapter Pattern (Spec 0021)
+
+Spec 0021 designed the CLI Adapter pattern for supporting multiple AI CLI tools as builders:
+
+```typescript
+interface CLIAdapter {
+  name: string;
+  command: string;
+  isAvailable(): Promise<boolean>;
+  isAuthenticated(): Promise<boolean>;
+  validateCapabilities(): Promise<{ valid: boolean; missing: string[] }>;
+  buildSpawnCommand(options): { cmd: string; args: string[] };
+  getEnv(options): Record<string, string>;
+  capabilities: { systemPrompt, modelSelection, fileEditing, shellExecution, toolLoop };
+}
+```
+
+**Critical constraint**: Only agentic CLIs (with tool loop, file I/O, and shell execution) can function as builders. Non-agentic CLIs (basic API wrappers) must be rejected with clear error messages. (Spec 0021)
+
+#### Consult Tool Origins (Spec 0022)
+
+The consult tool (Spec 0022) replaced the zen MCP server with a direct CLI wrapper, eliminating ~3.7k tokens of MCP context overhead per conversation. Key architectural decisions:
+
+- **Python with Typer** chosen over TypeScript or Bash -- no build step, proper arg handling, `subprocess.run([...])` bypasses shell for injection safety
+- **Stateless by design** -- each invocation is a fresh process
+- **Consultant role** (`codev/roles/consultant.md`) -- collaborative partner, not adversarial reviewer
+- **Autonomous mode flags**: `--yolo` (gemini), `--full-auto` (codex) to minimize permission prompts
+- **History logging**: `.consult/history.log` for observability
+
+**TICK-001 Amendment (architect-mediated PR reviews)**: Changed PR review workflow from each consultant independently exploring the filesystem (slow: 200-250s with 10-15 shell commands) to architect-prepared overviews passed via `--context` flag or stdin. Consultants analyze provided context without filesystem access. Review time dropped to <60s per consultant.
+
+**Sandbox modes for mediated reviews**:
+| Model | Exploration Mode | Mediated Mode |
+|-------|------------------|---------------|
+| Gemini | `--yolo` | `--sandbox` |
+| Codex | `exec --full-auto` | `exec` (no full-auto) |
+| Claude | `--print --dangerously-skip-permissions` | `--print` |
+
+(Spec 0022)
+
+#### Librarian Role -- Abandoned (Spec 0028)
+
+Spec 0028 proposed a Librarian role for documentation stewardship but was abandoned after consultation. The decision was to absorb documentation maintenance into the MAINTAIN protocol (Spec 0035) rather than adding a fourth role. This preserved the clean three-role model: **Architect, Builder, Consultant**. The insight: documentation maintenance is an episodic protocol activity, not an ongoing role. (Spec 0028)
+
+#### Overview Dashboard -- Meta-Dashboard (Spec 0029)
+
+Spec 0029 designed a standalone overview dashboard on port 4100 showing all running Agent Farm instances across projects:
+- Reads from global port registry (`~/.agent-farm/ports.json`, later `global.db`)
+- Port status detection via TCP socket connect with 1s timeout
+- Launch capability via directory picker + detached `af start`
+- Requires validation that target directory is a valid codev project
+
+Review feedback (from 3-way consultation) flagged: web browsers don't provide native directory pickers that return server-accessible paths -- text input for absolute paths is more reliable. Spawned instances should be detached to survive meta-dashboard restarts. (Spec 0029)
+
+#### Markdown Syntax Highlighting in Annotator (Spec 0030)
+
+Spec 0030 addressed markdown files rendering as plaintext in the annotation viewer. Two approaches failed:
+- Removing the Prism markdown exception caused line breaks around `**` tokens (Prism inserts actual newline characters)
+- CSS override (`display: inline !important`) didn't help because Prism outputs newlines in the string, not block elements
+
+**Working approach (Hybrid "Styled Source")**: Custom regex-based highlighting that keeps syntax characters visible but muted:
+- `#` headers: syntax muted gray, text large/purple
+- `**bold**`: asterisks muted gray, content bold/yellow
+- Backtick code: backticks muted, code red with background
+- Links: brackets muted, text blue underlined
+- Code block state tracked across lines for fenced blocks
+
+This preserves 1:1 line mapping (all characters present, no position drift) and monospace alignment for tables. (Spec 0030)
+
+#### SQLite Runtime State Details (Spec 0031)
+
+Spec 0031 replaced JSON file-based state with SQLite databases. Additional architectural details beyond the main State Management section:
+
+**Migration strategy**: Copy-first, delete-only-after-verification. JSON files backed up as `.bak` permanently for rollback capability. Migration wrapped in transactions for atomicity.
+
+**Schema versioning**: `_migrations` table tracks applied schema versions rather than filesystem sentinels.
+
+**Error handling layers**:
+1. `busy_timeout = 5000` pragma for lock contention
+2. `withRetry()` wrapper for `SQLITE_BUSY` with max 3 retries
+3. WAL mode verification with fallback warning if filesystem doesn't support it (e.g., NFS)
+
+**Debugging CLI**:
+- `af db dump` -- export all tables to JSON
+- `af db query <sql>` -- ad-hoc SELECT queries only (writes rejected for safety)
+- `af db reset` -- destructive reset with confirmation prompt
+
+**Key pragmas**: `journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000`, `foreign_keys = ON` (Spec 0031)
+
+### Package & Protocol Evolution (Specs 0032-0044)
+
+#### Package Architecture (Spec 0039)
+
+- **Single merged npm package** (`@cluesmith/codev`): agent-farm, consult, and codev commands consolidated into one package. Single `npm install -g @cluesmith/codev` replaces separate installs. (Spec 0039)
+  - Entry points: `bin/codev.js` (main CLI), `bin/af.js` (thin shim delegating to `codev agent-farm`), `bin/consult.js` (thin shim delegating to `codev consult`)
+  - `codev` = framework-level operations (init, adopt, doctor, update, tower, consult, import)
+  - `af` = project-level builder operations (start, spawn, status, cleanup)
+  - Consult tool ported from Python to TypeScript, eliminating polyglot dependency (Spec 0039 TICK-001)
+
+#### Template and Skeleton Architecture (Specs 0032, 0039)
+
+- **Template consolidation** (Spec 0032): All HTML templates (tower, dashboard-split, dashboard, annotate) live in `packages/codev/src/agent-farm/templates/`. Server code uses dynamic path resolution (`findTemplatePath()`) checking relative-to-compiled then relative-to-source paths.
+- **Skeleton lifecycle** (Spec 0039 TICK-002 through TICK-004): `codev-skeleton/` is the single source of truth for protocol/role/template files. During `npm run build`, skeleton is copied to `packages/codev/skeleton/`. At init/adopt time, files are copied to the project's `codev/` directory with managed headers (`<!-- MANAGED BY CODEV -->`). Framework version tracked in `codev/.framework-version`. `codev update` uses hash comparison for safe merges (unchanged files overwritten silently, user-modified files get `.codev-new` sibling).
+- **`codev import` command** (Spec 0039 TICK-005): AI-assisted protocol import from other codev projects. Spawns an interactive Claude session with source/target context for intelligent merging. Replaces the deleted `codev-updater` and `spider-protocol-updater` agents.
+
+#### MAINTAIN Protocol (Spec 0035)
+
+- Renamed from CLEANUP to MAINTAIN. Unlike SPIR/TICK (sequential phases), MAINTAIN is a **task list** protocol where tasks can run in parallel. Scope covers both code hygiene (dead code, dependencies, flags, tests) and documentation sync (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md, spec/plan/review consistency). Absorbs the former `architecture-documenter` agent role.
+- Located at `codev/protocols/maintain/protocol.md`.
+- `lessons-learned.md` (at `codev/resources/lessons-learned.md`) is a MAINTAIN-generated artifact: consolidated wisdom from review documents, organized by topic with `[From XXXX]` attribution.
+
+#### TICK Protocol Redesign (Spec 0040)
+
+- TICK redefined as an **amendment mechanism for existing SPIR specs**, not a standalone parallel protocol. Modifies spec and plan in-place with an "Amendments" section at the bottom. Review files use naming convention `reviews/XXXX-name-tick-NNN.md`. Commit format: `[TICK XXXX-NNN] Phase: description`.
+- Decision framework: TICK = refine existing feature (< 300 LOC, amends integrated spec); SPIR = create new feature from scratch.
+
+#### Consult Tool Enhancements (Specs 0038, 0043, 0044)
+
+- **PR review mode** (Spec 0038): `consult pr N` pre-fetches PR data (6 commands: pr info, comments, diff, files, spec, plan) into `.consult/pr-NNNN/` directory. Supports `--all` for parallel 3-way review, `--model` for single model. Verdict extraction parses `VERDICT:` marker from output, falls back to last 50 lines. Auto-cleanup keeps last 10 PR directories.
+- **Codex CLI configuration** (Spec 0043): Uses official `experimental_instructions_file` config flag (writes role to temp file, passes via `-c experimental_instructions_file=<path>`) instead of undocumented `CODEX_SYSTEM_MESSAGE` env var. Uses `-c model_reasoning_effort=low` for faster responses (27% time reduction, 25% token reduction).
+- **Review type prompts** (Spec 0044): `--type` parameter loads stage-specific prompts from `codev/roles/review-types/`. Five types: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`. Type prompt is appended to base consultant role.
+
+#### 7-Stage Architect-Builder Workflow (Spec 0044)
+
+- Documented in `codev/resources/workflow-reference.md`. Stages: conceived -> specified -> planned -> implementing -> implemented -> committed -> integrated.
+- Human approval gates: conceived->specified, specified->planned, planned->implementing, committed->integrated.
+- SPIR-SOLO protocol deleted (redundant; use SPIR with "without consultation" instead).
+- Communication: `af send XXXX "message"` for short notifications, PR comments for detailed feedback.
+
+#### Markdown Annotator Table Alignment (Spec 0034)
+
+- **Table alignment** (Spec 0034): Two-pass rendering in `annotate.html`. First pass identifies code block ranges and tables (using header+separator detection pattern to avoid false positives), computes column widths. Second pass renders with padded cells. Uses `buildTableMap()` for O(1) line-to-table lookup. Preserves alignment markers (`:---:`, `:---`, `---:`).
+
+#### Dashboard Tab Bar UX (Specs 0036, 0037)
+
+- **Tab bar UX** (Spec 0037): Active tab uses bottom border accent (`border-bottom: 2px solid var(--accent)`). Close button always visible at `opacity: 0.4`. Overflow indicator (`... +N`) with dropdown menu listing all tabs when tabs exceed viewport width. Overflow detection via `scrollWidth > clientWidth` comparison.
+- **Tab actions** (Spec 0036): Open-in-new-tab button (arrow symbol) on each tab. Context menu with "Open in New Tab". Tooltips showing tab metadata (port, status, worktree for builders; path for files). Reload button in annotation viewer header (not tab bar).
+
+#### E2E Test Suite (Spec 0041)
+
+- BATS-based E2E tests in `tests/e2e/`. Tests the actual npm tarball after `npm pack`, not source. 70 tests across install, init, adopt, doctor, af, and consult. XDG sandboxing (isolated HOME, XDG dirs, npm prefix/cache) per test. CI workflows: `.github/workflows/e2e.yml` (PR, macOS+Linux matrix) and `.github/workflows/post-release-e2e.yml` (post-release with 120s npm propagation wait).
+
+### Dashboard & Tooling Expansion (Specs 0045-0055)
+
+#### Dashboard UI Components (Specs 0045, 0050, 0055)
+
+- **Projects Tab** (Spec 0045): Uncloseable first tab in the dashboard providing a Kanban-style view of all projects across 7 lifecycle stages (conceived, specified, planned, implementing, implemented, committed, integrated). Data source is `codev/projectlist.md`, parsed client-side with a custom YAML-like line-by-line parser. Includes welcome screen for onboarding, status summary, project detail expansion, real-time polling (5-second interval with hash-based change detection and 500ms debounce), terminal state handling (abandoned/on-hold in collapsible section), and TICK badge indicators. Key file: `packages/codev/src/lib/projectlist-parser.ts` (standalone parser module, 232 lines, 31 unit tests).
+
+- **Files Tab** (Spec 0055): Second permanent/uncloseable tab providing a VSCode-like file browser. Backend `/api/files` endpoint returns directory tree as JSON with recursive traversal. Excludes heavyweight directories (node_modules, .git, dist, .builders, __pycache__) but shows dotfiles like .github and .gitignore. Frontend renders collapsible folder tree with expand/collapse controls. Clicking a file opens it in the annotation viewer via a new tab.
+
+- **Dashboard Polish** (Spec 0050): Three UX refinements: (1) project row click behavior restricted to title-only with underline-on-hover styling, (2) TICK amendment badges (green `TICK-NNN` badges) shown in expanded project view, (3) starter page polling for `projectlist.md` creation every 15 seconds via `/api/projectlist-exists` endpoint with auto-reload on detection.
+
+#### File Viewer Enhancements (Specs 0048, 0053)
+
+- **Markdown Preview** (Spec 0048): Toggle button in `af open` viewer switches between annotated line-number view (`#viewMode`) and rendered markdown preview (`#preview-container`). Uses marked.js (CDN) for parsing, DOMPurify (CDN) for XSS sanitization, and Prism.js (already loaded) for code block syntax highlighting. Three-container architecture: viewMode (annotated), editor (textarea), preview-container (rendered). Libraries loaded conditionally only for `.md` files. Keyboard shortcut: Cmd/Ctrl+Shift+P. Approximate scroll position preserved via percentage-based mapping. GitHub-flavored markdown styling with dark theme colors matching the existing UI. Key files: `open-server.ts` (passes `isMarkdown` flag), `open.html` (main implementation, +202 lines).
+
+- **Image Viewer** (Spec 0053): Extends `af open` to display images (PNG, JPG, GIF, WebP, SVG). Dedicated `/api/image` endpoint serves raw binary with correct MIME types. Image viewer UI includes zoom controls (Fit, 100%, +/-) with CSS class-based zoom modes. Image dimensions and file size displayed in header. Code editor/preview UI hidden for image files. Cache-busting via `?t=<timestamp>` query parameter. Key files: `open-server.ts` (+50 lines), `open.html` (+230 lines).
+
+#### generate-image Command (Spec 0054)
+
+- **AI-powered image generation** (Spec 0054): CLI using Google's Nano Banana Pro model (gemini-3-pro-image-preview) via `@google/genai` SDK. Integrated as both `codev generate-image` subcommand and standalone `generate-image` binary. Options: prompt (text or .txt file), output path, resolution (1K/2K/4K), aspect ratio, reference image for image-to-image generation. GEMINI_API_KEY from environment with GOOGLE_API_KEY fallback. Key file: `packages/codev/src/commands/generate-image.ts` (~180 lines, 12 tests).
+
+#### Documentation Architecture (Specs 0046, 0051, 0052)
+
+- **CLI Command Reference** (Spec 0046): Established standard documentation location at `codev/docs/commands/` (later moved to `codev/resources/commands/`). Four files: `overview.md`, `codev.md`, `agent-farm.md`, `consult.md`. Documented all CLI subcommands with synopsis, description, options, and examples. Integrated into both main repository and `codev-skeleton/` for distribution to all projects. Referenced from CLAUDE.md and AGENTS.md for AI agent discoverability.
+
+- **Codev Cheatsheet** (Spec 0051): Created `codev/resources/cheatsheet.md` as comprehensive onboarding and quick reference document. Covers three core philosophies (Natural Language as Programming Language, Multiple Models Outperform a Single Model, Human-Agent Work Requires Thoughtful Structure), all four protocols (SPIR, TICK, MAINTAIN, EXPERIMENT), three roles (Architect, Builder, Consultant), information hierarchy diagram, and complete tool reference tables for codev, af, and consult commands. Linked from CLAUDE.md, AGENTS.md, and README.md.
+
+- **Agent Farm Internals** (Spec 0052): Added ~640 lines of comprehensive documentation to `codev/resources/arch.md` covering: architecture overview with ASCII component diagram, port system allocation strategy (100 ports per project), tmux integration and session naming, SQLite state management schema, worktree lifecycle, dashboard server API endpoint reference, error handling and recovery procedures (orphan sessions, port races, dead processes), and security model (localhost binding, request validation, path traversal prevention, worktree isolation).
+
+#### Dashboard Server API Endpoints (Specs 0045, 0050, 0053, 0055)
+
+- `/file?path=<relative-path>` (Spec 0045): Serves file content with path traversal protection via `validatePathWithinProject()`. Used by Projects tab to load `projectlist.md`.
+- `/api/projectlist-exists` (Spec 0050): Returns `{ exists: boolean }` for starter page polling.
+- `/api/files` (Spec 0055): Returns project directory tree as JSON with exclusion filtering.
+- `/api/image` (Spec 0053): Serves raw image binary data with correct MIME Content-Type headers.
+
+#### Security Patterns (Specs 0045, 0048, 0055)
+
+- **XSS Prevention** (Spec 0045, 0048): All user-generated content from projectlist.md escaped via `escapeHtml()` (createElement + textContent + innerHTML pattern). Markdown preview uses DOMPurify to sanitize marked.js HTML output. No eval() or Function() in custom parsers.
+- **Path Traversal Protection** (Spec 0045): `/file` endpoint validates paths stay within project directory via `validatePathWithinProject()`.
+- **Link Security** (Spec 0048): All preview links rendered with `target="_blank" rel="noopener noreferrer"` via custom marked.js renderer.
+- **JS Context Escaping** (Spec 0055): `escapeJsString()` function for inline JS handlers, separate from `escapeHtml()` which only handles HTML context.
+
+### Architecture Modernization (Specs 0056-0082)
+
+#### Consult Types System (Spec 0056)
+
+Consultation types moved from `roles/review-types/` to `consult-types/` with a backward-compatibility fallback chain. The `consult` CLI resolves review type prompts by checking `consult-types/<type>.md` first, then falling back to `roles/review-types/<type>.md` with a deprecation warning. The `codev doctor` command validates that `consult-types/` directory exists and is populated. (Spec 0056)
+
+#### Pre-React Dashboard Architecture (Specs 0057, 0058, 0059, 0060, 0064)
+
+The dashboard evolved through multiple specs before the React rewrite:
+
+- **Tab Overhaul (Spec 0057)**: Dashboard uses a two-column layout (tabs list + content area) with builder status indicators (working/idle) derived from builder state proxy data. Quick-action buttons enable spawning new shells and creating worktrees. The "Projects" tab was renamed to "Dashboard". Worktree creation handles both new and existing branches.
+
+- **File Search Autocomplete (Spec 0058)**: Cmd+P file finder with substring matching and relevance scoring. Uses a flat file list cache built from the tree data structure. Search highlighting uses XSS-safe rendering via `escapeHtml()` plus mark tags for matches. Debounced input prevents excessive DOM updates.
+
+- **Daily Activity Summary (Spec 0059)**: Clock button triggers an AI-generated standup summary. Backend collects git log, GitHub PR data, and builder activity. Time tracking uses interval merging with a 2-hour gap detection threshold. The `/api/activity-summary` endpoint aggregates data and passes it to Claude for summarization.
+
+- **Dashboard Modularization (Spec 0060)**: The monolithic 4700-line `dashboard.html` was split into 9 CSS files + 8 JS files served from `dashboard/css/` and `dashboard/js/` directories. Hot reloading via SSE: CSS changes trigger hot-swap (replace link href), JS changes trigger soft-refresh (page reload with `sessionStorage` state preservation). Static file serving includes path traversal protection on the `dashboard/` route. No build step -- plain CSS and JS files served directly.
+
+- **Tab State Preservation (Spec 0064)**: Iframes use hide/show pattern instead of destroy/recreate to preserve terminal state. An iframe cache (`Map<string, HTMLIFrameElement>`) stores active iframes keyed by tab ID. Port change invalidation ensures stale iframes are replaced when the backing port changes.
+
+#### 3D Viewer (Spec 0061)
+
+Three.js loaded via ES Modules using an `importmap` in the HTML template. Supports STL and 3MF file formats. 3MF uses `ThreeMFLoader` which handles multi-color and multi-object models. `TrackballControls` replaces `OrbitControls` for quaternion-based rotation without gimbal lock. Z-up to Y-up coordinate conversion is applied on load. A unified `3d-viewer.html` template handles both formats. File paths are escaped with `escapeHtml()` to prevent XSS from malicious filenames. (Spec 0061)
+
+#### Secure Remote Access and Tower Origins (Specs 0062, 0081)
+
+- **SSH Tunnel Architecture (Spec 0062)**: `af start --remote` enables remote access via SSH tunnel. A reverse proxy using the `http-proxy` npm package handles both HTTP and WebSocket proxying. Dashboard iframe URLs changed from direct port references to `/terminal/:id` proxied paths. The reverse proxy multiplexes WebSocket connections through a single exposed port.
+
+- **Web Tower (Spec 0081)**: Tower server (`tower-server.ts`) provides multi-project web access through a single port (4100). Project paths encoded using Base64URL (RFC 4648) for URL safety. Routes: `/project/<base64url-path>/*` proxies to the project's Agent Farm instance.
+
+  Authentication uses timing-safe comparison (`crypto.timingSafeEqual`) with the `CODEV_WEB_KEY` environment variable. No localhost bypass when key is set -- this is critical because tunnel daemons (cloudflared, ngrok) run locally and proxy remote traffic, so checking `remoteAddress` would be insufficient. WebSocket authentication uses the `Sec-WebSocket-Protocol` subprotocol header (`auth-<key>`), which is stripped before forwarding to the backend to avoid confusing upstream servers.
+
+  Push notifications use ntfy.sh (external service) for mobile alerts. Real-time updates use SSE (Server-Sent Events) via `/api/events` endpoint. The EventSource API lacks custom header support, so authenticated SSE uses `fetch()` with `ReadableStream` instead.
+
+  Mobile responsiveness uses `env(safe-area-inset-*)` CSS for notched devices, 44px minimum touch targets, and a 600px responsive breakpoint.
+
+  TICK-001 amendment simplified proxy routing: all terminal types now route to a single basePort (node-pty WebSocket multiplexing), removing the old per-terminal port routing (`basePort+1`, `basePort+2+n`). The `getInstances()` function no longer probes an architect port, and `stopInstance()` only kills the basePort.
+
+#### BUGFIX Protocol Architecture (Spec 0065)
+
+A lightweight protocol for GitHub Issue-driven bug fixes. Key architectural elements: `af spawn --issue <number>` fetches issue details via GitHub API; collision detection checks for existing worktrees, "On it" issue comments, and open PRs before spawning; 300 LOC net diff threshold with escalation to SPIR if exceeded; PR-only CMAP reviews (no spec/plan consultation). State stored in `codev/executions/bugfix_<issue>/status.yaml`. (Spec 0065)
+
+#### VSCode Companion -- Abandoned (Spec 0066)
+
+Investigated a thin VSCode companion extension using `tmux attach` for terminal persistence. Critical discovery: **VSCode Terminal API cannot capture stdout** -- this fundamental limitation makes a terminal-based companion impractical. The approach was abandoned in favor of CODEV_HQ (Spec 0068). (Spec 0066)
+
+#### Agent Farm Architecture Rewrite Vision (Specs 0067, 0068)
+
+- **Architecture Rewrite (Spec 0067, SUBSUMED into 0068)**: Proposed replacing ttyd + tmux with node-pty + xterm.js. Single-port WebSocket multiplexing replaces port-per-terminal. React + Vite dashboard replaces vanilla JS. This spec was subsumed into Codev 2.0.
+
+- **Codev 2.0 Vision (Spec 0068)**: Three-pillar architecture:
+  1. **Terminal + UI Rewrite**: node-pty, xterm.js, WebSocket mux, React + Vite, single port, stdout capture
+  2. **CODEV_HQ + Mobile**: "Tethered Satellite" hybrid -- cloud control plane (auth, coordination, dashboards) + local runners (execution, code stays on user's machine). Mobile as "Director's Chair" (approve gates, view logs, send commands -- no full terminal).
+  3. **Deterministic Core**: Protocol compliance via state machine, not AI memory. YAML status files tracked in git provide audit trail.
+
+  HQ Network Protocol uses WebSocket (wss://) with JSON message envelope (`type`, `id`, `ts`, `payload`). Key message types: `register`, `status_update`, `builder_update`, `terminal_output`, `gate_completed` (local to HQ); `command`, `approval`, `terminal_input` (HQ to local). State ownership: status files owned by local (git), human approvals owned by HQ, both sync bidirectionally. Reconnection uses exponential backoff with 5-minute message buffering.
+
+  Migration path: v1.6.x-v1.9.x feature flags, v2.0.0-alpha HQ opt-in, v2.0.0 full release. Local-only mode remains viable indefinitely. (Spec 0068)
+
+#### Protocol Enforcement Evolution (Specs 0069, 0071, 0072, 0073, 0075)
+
+- **Checklister Spike (Spec 0069)**: Early exploration of SPIR compliance enforcement via `.spir-state.json` checklist state and Claude Code skills (`/checklister status`, `/checklister complete`, `/checklister gate`). Precursor to porch.
+
+- **Declarative Protocol Checks / pcheck (Spec 0071)**: Proposed declarative YAML check definitions with three check types: `file_exists`, `llm_check` (semantic evaluation via Haiku), and `command` (shell execution). Gates compose multiple checks. LLM checks use content hash caching (`.codev/pcheck-cache.json`) to avoid redundant API calls. `codev pcheck --next` provides actionable guidance.
+
+- **Ralph-SPIR Integration Spike (Spec 0072)**: Validated that builders can own the full SPIR lifecycle (S-P-I-D-E-R) with human approval gates as backpressure points. Key tenets: fresh context per iteration, state in files not AI memory.
+
+- **Porch Protocol Orchestrator (Spec 0073)**: Standalone CLI (`porch` binary, not `codev porch`) orchestrating SPIR, TICK, and BUGFIX protocols. Core architecture:
+  - **State**: Pure YAML files at `codev/projects/<id>-<name>/status.yaml` (SPIR) or `codev/executions/<type>_<id>/status.yaml` (TICK/BUGFIX). Atomic writes via tmp + fsync + rename. Advisory file locking via `flock()`.
+  - **Signals**: LLM output parsed for `<signal>NAME</signal>` tags. Last signal wins when multiple found.
+  - **Protocol definitions**: JSON files alongside human-readable `protocol.md`. Schema at `codev-skeleton/protocols/protocol-schema.json`.
+  - **Phase extraction**: Plan markdown parsed for `### Phase N: <title>` headers.
+  - **IDE loop**: implement -> defend -> evaluate per plan phase.
+  - **Consultation**: 3-way parallel (Gemini, Codex, Claude) with APPROVE/REQUEST_CHANGES/COMMENT verdicts.
+  - **Notifications**: Console and macOS native notifications for pending gates.
+  - **AF integration**: `af kickoff` creates worktree at `worktrees/<protocol>_<id>_<name>/` and starts porch.
+  - **Key modules**: `state.ts`, `signal-parser.ts`, `plan-parser.ts`, `consultation.ts`, `checks.ts`, `notifications.ts`, `protocol-loader.ts`. 72 unit tests across 5 test files.
+  - **YAML key constraint**: Phase and gate IDs must use underscores, not hyphens, for YAML parsing compatibility.
+
+- **Porch Build-Verify Redesign (Spec 0075)**: Build-verify cycles as first-class citizens. Triple-nested architecture: Architect Claude -> Builder Claude (outer, just runs porch) -> Porch -> Inner Claude (does actual work). Consultation verdicts: APPROVE, REQUEST_CHANGES, COMMENT. Safe defaults: empty/short output from consultation defaults to REQUEST_CHANGES. Feedback delivered via file paths in `.porch/` directory -- Claude reads raw files rather than synthesized summaries. `on_complete` config handles automatic git commit + push after successful verification.
+
+#### Terminal Process Lifecycle (Spec 0076)
+
+Three-layer process hierarchy: shell process -> tmux session -> ttyd WebSocket server. When the shell exits, tmux destroys the session immediately (default behavior, `remain-on-exit` not used), but ttyd stays alive to display "Press Enter to Reconnect." The `/api/tabs/:id/running` endpoint checks `tmuxSessionExists()` (synchronous, uses `execSync` with `tmux has-session`) instead of `isProcessRunning(ttyd_pid)`. Fallback to PID check when `tmuxSession` field is missing (backward compatibility). `tmux has-session` completes in ~4ms. Fail-open behavior: `tmuxSessionExists()` returns `false` on error. (Spec 0076)
+
+#### Porch E2E Testing Infrastructure (Spec 0078)
+
+E2E tests use real AI interactions (~40 min runtime, ~$4/run). Vitest config (`vitest.e2e.config.ts`) with 20-minute test timeouts and sequential execution (`maxConcurrency: 1`). `PORCH_AUTO_APPROVE` environment variable enables automated gate approval in tests. Mock consult uses PATH manipulation to inject a mock script that takes precedence over the real `consult` CLI. Interactive stdin handling via `runPorchInteractive()` helper that pipes pre-configured responses. (Spec 0078)
+
+#### Modularization Analysis (Spec 0082)
+
+Evaluation of splitting the codebase into three packages: codev (project management), agentfarm (terminal orchestration), porch (protocol engine). Code dependency flow is unidirectional: Codev -> AgentFarm -> Porch (no circular dependencies). Recommended phased approach: extract porch first as it has the cleanest boundaries. (Spec 0082)
+
 ## Recent Infrastructure Changes
 
 See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
