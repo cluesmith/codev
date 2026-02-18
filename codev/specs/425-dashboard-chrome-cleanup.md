@@ -33,9 +33,10 @@ The dashboard wastes its most prominent screen real estate on redundant and unhe
 
 ## Desired State
 
-- **Header**: Shows `<project-name> dashboard` (e.g., "codev-public dashboard") left-aligned. No badge. Clean and minimal.
-- **Footer**: Removed entirely. The 24px is reclaimed for content.
-- **Tab title**: Shows `<project-name> dashboard` (e.g., "codev-public dashboard"). Falls back to `dashboard` if no workspace name.
+- **Header**: Shows `<project-name> dashboard` (e.g., "codev-public dashboard") left-aligned. No badge, no `.header-meta` wrapper. Clean and minimal. The word "dashboard" is always lowercase. Header height remains 40px.
+- **Footer**: Removed entirely — both HTML elements and associated CSS (`.status-bar`). The 24px is reclaimed for content.
+- **Tab title**: Shows `<project-name> dashboard` (e.g., "codev-public dashboard"). Falls back to just `dashboard` if workspace name is unavailable.
+- **Fallback rule**: Treat falsy `workspaceName` (undefined, null, or empty string `""`) as unavailable. Fall back to just `dashboard`.
 
 ## Stakeholders
 - **Primary Users**: Developers using the Agent Farm dashboard
@@ -54,6 +55,7 @@ The dashboard wastes its most prominent screen real estate on redundant and unhe
 - Must use the existing `state.workspaceName` value (already provided by the backend)
 - Dashboard is a Preact app bundled with esbuild
 - Changes are limited to the dashboard frontend; no backend changes needed
+- **Scope**: Only modify `App.tsx` header/footer/title. Do not change other "Agent Farm" references in other views (e.g., WorkView's `.projects-info h1` at `dashboard-bugs.test.ts:168` is out of scope)
 
 ### Business Constraints
 - None specific beyond keeping the dashboard functional
@@ -125,12 +127,30 @@ The dashboard wastes its most prominent screen real estate on redundant and unhe
 ## Dependencies
 - None - all required data (`workspaceName`) already exists
 
+## Known Test Impacts
+- **`tower-integration.test.ts:49`**: Asserts `toContainText('Agent Farm')` on `.app-title` — **will break**, must be updated to assert `dashboard` or project-name-based text.
+- **`dashboard-bugs.test.ts:92`**: Asserts `.app-title` `toBeVisible()` — will still pass if `.app-title` class is preserved.
+- **`dashboard-bugs.test.ts`**: References `.projects-info`, `.dashboard-header`, `.section-tabs` — these may target legacy layout elements and should be audited during implementation.
+
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
-| Playwright tests reference removed elements | Medium | Low | Update test selectors/assertions |
+| Playwright tests reference removed elements | High | Low | Update test selectors/assertions (known: `tower-integration.test.ts:49`) |
 | Other components depend on footer | Low | Low | Search codebase for references |
+| Long workspace names overflow header | Low | Low | Existing CSS handles text overflow; verify during implementation |
+
+## Expert Consultation
+**Date**: 2026-02-18
+**Models Consulted**: Gemini, Codex (GPT), Claude
+**Sections Updated**:
+- **Desired State**: Added explicit fallback rule for falsy workspaceName (empty string edge case) per Claude/Codex feedback
+- **Desired State**: Specified lowercase "dashboard", header height stays 40px, explicit CSS cleanup per Codex feedback
+- **Constraints**: Added scoping note — only App.tsx, not other "Agent Farm" references per Claude feedback
+- **Known Test Impacts**: New section identifying specific tests that will break per Gemini/Claude feedback
+- **Risks**: Updated Playwright test risk from Medium to High probability, added long workspace name overflow risk per Codex feedback
+
+All three models approved (Gemini: APPROVE, Codex: COMMENT with minor suggestions incorporated, Claude: APPROVE).
 
 ## Approval
 - [ ] Technical Lead Review
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete
