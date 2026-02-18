@@ -73,6 +73,12 @@ body {
   color: var(--text-primary);
 }
 
+.header-version {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
 .app-body {
   flex: 1;
   overflow: hidden;

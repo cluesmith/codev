@@ -169,6 +169,7 @@ export function App() {
         <h1 className="app-title">
           {state?.workspaceName ? `${state.workspaceName} dashboard` : 'dashboard'}
         </h1>
+        {state?.version && <span className="header-version">v{state.version}</span>}
       </header>
       <div className="app-body">
         <SplitPane

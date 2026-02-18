@@ -21,6 +21,7 @@ import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
 import { encodeWorkspacePath, decodeWorkspacePath } from '../lib/tower-client.js';
 import { fileURLToPath } from 'node:url';
+import { version } from '../../version.js';
 
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
@@ -1253,12 +1254,14 @@ async function handleWorkspaceState(
     utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
     annotations: Array<{ id: string; file: string; port: number; pid: number }>;
     workspaceName?: string;
+    version?: string;
   } = {
     architect: null,
     builders: [],
     utils: [],
     annotations: [],
     workspaceName: path.basename(workspacePath),
+    version,
   };
 
   // Add architect if exists

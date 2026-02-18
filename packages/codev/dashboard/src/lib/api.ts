@@ -45,6 +45,7 @@ export interface DashboardState {
   utils: UtilTerminal[];
   annotations: Annotation[];
   workspaceName?: string;
+  version?: string;
 }
 
 export interface FileEntry {
