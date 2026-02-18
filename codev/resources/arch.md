@@ -28,27 +28,27 @@ For debugging common issues, start here:
 | Issue | Entry Point | What to Check |
 |-------|-------------|---------------|
 | **"Tower won't start"** | `packages/codev/src/agent-farm/servers/tower-server.ts` | Port 4100 conflict, node-pty availability |
-| **"Project won't activate"** | `tower-instances.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
+| **"Workspace won't activate"** | `tower-instances.ts` → `launchInstance()` | Workspace state in global.db, architect command parsing |
 | **"Terminal not showing output"** | `tower-websocket.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
 | **"Terminal not persistent"** | `tower-instances.ts` → `launchInstance()` | Check shellper spawn succeeded, dashboard shows `persistent` flag |
-| **"Project shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
-| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shellper session, role injection |
-| **"Gate not notifying architect"** | `tower-terminals.ts` → `startGateWatcher()` | GateWatcher poll interval, `af send` binary resolution |
+| **"Workspace shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `workspaceTerminals` Map has entry |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `upsertBuilder()` | Worktree creation, shellper session, role injection |
+| **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `af send architect` directly at gate transitions (Spec 0108) |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
-| **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
+| **"Port conflicts"** | `packages/codev/src/agent-farm/db/schema.ts` | Global registry at `~/.agent-farm/global.db` |
 | **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
 
 **Common debugging commands:**
 ```bash
-# Check port allocations
-sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM port_allocations"
+# Check terminal sessions and workspaces
+sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM terminal_sessions"
 
 # Check if Tower is running
 curl -s http://localhost:4100/health | jq
 
-# List all projects and their status
-curl -s http://localhost:4100/api/projects | jq
+# List all workspaces and their status
+curl -s http://localhost:4100/api/workspaces | jq
 
 # Check terminal sessions on Tower
 curl -s http://localhost:4100/api/terminals | jq
@@ -70,11 +70,14 @@ tail -f ~/.agent-farm/tower.log
 | **Builder** | An AI agent working in an isolated git worktree on a single spec |
 | **Architect** | The human + primary AI orchestrating builders and reviewing work |
 | **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
+| **CMAP** | "Consult Multiple Agents in Parallel" — shorthand for running 3-way parallel consultation (Gemini + Codex + Claude) |
 | **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
-| **Protocol** | Defined workflow for a type of work (SPIR, TICK, MAINTAIN, EXPERIMENT) |
+| **Protocol** | Defined workflow for a type of work (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE) |
 | **SPIR** | Multi-phase protocol: Specify → Plan → Implement → Review |
 | **TICK** | Amendment protocol for extending existing SPIR specs |
+| **BUGFIX** | Lightweight protocol for isolated bug fixes (< 300 LOC) |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
+| **Workspace** | Tower's term for a registered project directory. Used in API paths and code; synonymous with "project" in user-facing contexts |
 | **Worktree** | Git worktree providing isolated environment for a builder |
 | **node-pty** | Native PTY session manager, multiplexed over WebSocket |
 | **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
@@ -87,7 +90,7 @@ tail -f ~/.agent-farm/tower.log
 
 1. **State Consistency**: `.agent-farm/state.db` is the single source of truth for builder/util state. Never modify it manually.
 
-2. **Port Isolation**: Each project gets a 100-port block (4200-4299, 4300-4399, etc.). Port assignments are tracked in `~/.agent-farm/global.db`.
+2. **Single Tower Port**: All projects are served through Tower on port 4100. Per-project port blocks were removed in Spec 0098. Terminal sessions and workspace metadata are tracked in `~/.agent-farm/global.db`.
 
 3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `af cleanup`).
 
@@ -111,7 +114,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   Dashboard (React + Vite on :4200)                  │
+│                   Dashboard (React SPA on Tower :4100)               │
 │              HTTP server + WebSocket multiplexer                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
@@ -151,11 +154,11 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 2. **Terminal Manager**: node-pty based PTY session manager with WebSocket multiplexing (Spec 0085)
 3. **Shellper Processes**: Detached Node.js processes owning PTYs for session persistence (Spec 0104)
 4. **SessionManager**: Tower-side orchestrator for shellper lifecycle (spawn, reconnect, kill, auto-restart)
-5. **Git Worktrees**: Isolated working directories for each builder
+5. **Git Worktrees**: Isolated working directories for each Builder
 6. **SQLite Databases**: State persistence (local and global)
 
 **Data Flow**:
-1. User opens dashboard at `http://localhost:4200`
+1. User opens dashboard at `http://localhost:4100`
 2. React dashboard polls `/api/state` for current state (1-second interval). Response includes `persistent` boolean per terminal.
 3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
 4. Terminal creation uses `SessionManager.createSession()` for persistent shellper-backed sessions, or direct node-pty for non-persistent sessions
@@ -164,41 +167,13 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 
 ### Port System
 
-The port system ensures multiple projects can run Agent Farm simultaneously without conflicts.
-
-#### Port Block Allocation
-
-Each project receives a dedicated 100-port block:
-- First project: 4200-4299
-- Second project: 4300-4399
-- Third project: 4400-4499
-- Maximum: ~58 projects (ports 4200-9999)
-
-#### Port Layout Within a Block
-
-Given a base port (e.g., 4200), ports are allocated from starting offsets:
-
-| Port Offset | Port (example) | Purpose |
-|-------------|----------------|---------|
-| +0 | 4200 | Dashboard HTTP + WebSocket server (all terminals multiplexed) |
-| +50+ | 4250+ | Annotation viewers (start offset) |
-
-**Note**: All terminal connections are multiplexed over WebSocket at the single dashboard port (4200) using URL path namespaces `/ws/terminal/<id>`. Annotation viewers still use separate ports.
+As of Spec 0098, the per-project port allocation system has been removed. Tower on port 4100 is the single HTTP server for all projects. All terminal connections are multiplexed over WebSocket using URL path namespaces `/workspace/<base64url>/ws/terminal/<id>`.
 
 #### Global Registry (`~/.agent-farm/global.db`)
 
-The global registry is a SQLite database that tracks port allocations across all projects. See `packages/codev/src/agent-farm/db/schema.ts` for the full schema.
+The global registry is a SQLite database that tracks workspace metadata and terminal sessions across all projects. See `packages/codev/src/agent-farm/db/schema.ts` for the full schema.
 
-**Key Operations** (from `utils/port-registry.ts`):
-- `getPortBlock(projectRoot)`: Allocates or retrieves port block for a project
-- `getProjectPorts(projectRoot)`: Returns all port assignments for a project
-- `cleanupStaleEntries()`: Removes allocations for deleted projects
-- `listAllocations()`: Lists all registered projects and ports
-
-**Concurrency Handling**:
-- Uses SQLite's `BEGIN IMMEDIATE` transaction for atomic allocation
-- WAL mode enables concurrent reads
-- 5-second busy timeout prevents deadlocks
+> **Historical note** (Specs 0008, 0098): The global registry originally tracked per-project port block allocations (100 ports per project, starting at 4200). After the Tower Single Daemon architecture (Spec 0090) made per-project ports unnecessary, `port-registry.ts` was deleted and the registry repurposed for terminal session and workspace tracking.
 
 ### Shellper Process Architecture (Spec 0104, renamed from Shepherd in Spec 0106)
 
@@ -262,24 +237,13 @@ All architect sessions (at all 3 creation points) receive a role prompt injected
 **Three architect creation points** where role injection is applied:
 - `tower-instances.ts` → `launchInstance()` (new project activation)
 - `tower-terminals.ts` → `reconcileTerminalSessions()` (startup reconnection with auto-restart options)
-- `tower-terminals.ts` → `getTerminalsForProject()` (on-the-fly shellper reconnection)
+- `tower-terminals.ts` → `getTerminalsForWorkspace()` (on-the-fly shellper reconnection)
 
-#### Builder Gate Notifications (Spec 0100 / Bugfix #261)
+#### Builder Gate Notifications (Spec 0100, replaced by Spec 0108)
 
-The `GateWatcher` class (`packages/codev/src/agent-farm/utils/gate-watcher.ts`) polls for gate transitions and sends `af send architect` messages when builders reach approval gates.
+As of Spec 0108, porch sends direct `af send architect` notifications via `execFile` when gates transition to pending. The `notifyArchitect()` function in `commands/porch/notify.ts` is fire-and-forget: 10s timeout, errors logged to stderr but never thrown. Called at the two gate-transition points in `next.ts`.
 
-**How it works**:
-1. `tower-terminals.ts` → `startGateWatcher()` starts a 10-second polling interval
-2. For each known project, reads porch YAML status files via `getGateStatusForProject()`
-3. On new gate detection, sends a notification to the architect terminal via `af send architect --raw --no-enter`
-4. Uses dedup maps to avoid repeated notifications for the same gate
-5. Clears notifications when gates are resolved
-
-**Key design**:
-- **Dedup**: `Map<key, timestamp>` keyed by `projectPath:builderId:gateName`
-- **Project index**: `Map<projectPath, Set<key>>` for efficient cleanup when gate resolves
-- **Input sanitization**: Strips ANSI escape sequences, rejects control characters
-- **Binary resolution**: Resolves `af` binary path relative to the package directory
+> **Historical note** (Spec 0100): Gate notifications were originally implemented as a polling-based `GateWatcher` class in Tower (`gate-watcher.ts`), which polled porch YAML status files on a 10-second interval. This was replaced by the direct notification approach in Spec 0108. The passive `gate-status.ts` reader is preserved for dashboard API use.
 
 #### Initial Terminal Dimensions
 
@@ -298,8 +262,8 @@ Each session has a unique name based on its purpose:
 
 | Session Type | Name Pattern | Example |
 |--------------|--------------|---------|
-| Architect | `af-architect-{port}` | `af-architect-4201` |
-| Builder | `builder-{project}-{id}` | `builder-codev-0003` |
+| Architect | `architect` | `architect` |
+| Builder | `builder-{protocol}-{id}` | `builder-spir-126` |
 | Shell | `shell-{id}` | `shell-U1A2B3C4` |
 | Utility | `af-shell-{id}` | `af-shell-U5D6E7F8` |
 
@@ -315,7 +279,7 @@ DELETE /api/terminals/:id        # Kill session
 POST /api/terminals/:id/resize   # Resize (cols, rows)
 
 # WebSocket connection per terminal
-ws://localhost:4200/ws/terminal/<session-id>
+ws://localhost:4100/ws/terminal/<session-id>
 ```
 
 **Hybrid WebSocket Protocol** (binary frames):
@@ -465,8 +429,8 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────┐    ┌─────────────────────┐                         │
-│  │   Project A         │    │   Project B         │                         │
-│  │   /project/enc(A)/  │    │   /project/enc(B)/  │                         │
+│  │   Workspace A       │    │   Workspace B       │                         │
+│  │   /workspace/enc(A)/│    │   /workspace/enc(B)/│                         │
 │  │                     │    │                     │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Architect     │  │    │  │ Architect     │  │                         │
@@ -479,8 +443,8 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │  └─────────────────────┘    └─────────────────────┘                         │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    projectTerminals Map (in-memory)                  │    │
-│  │  Key: projectPath → { architect?: terminalId,                        │    │
+│  │                    workspaceTerminals Map (in-memory)                  │    │
+│  │  Key: workspacePath → { architect?: terminalId,                        │    │
 │  │                       builders: Map<builderId, terminalId>,          │    │
 │  │                       shells: Map<shellId, terminalId> }             │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
@@ -504,7 +468,7 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
-                    WebSocket /project/<enc>/ws/terminal/<id>
+                    WebSocket /workspace/<enc>/ws/terminal/<id>
                                     │
               ┌─────────────────────┴─────────────────────┐
               │                                           │
@@ -521,18 +485,18 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 **These MUST remain true - violating them will break the system:**
 
 1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shellper-backed)
-2. **projectTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which project
-3. **SQLite (global.db) tracks port allocations and terminal sessions**: Port assignments and shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`) persist across restarts
-4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/project/<encoded>/` routes
-5. **WebSocket paths include project context**: Format is `/project/<base64url>/ws/terminal/<id>`
+2. **workspaceTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which workspace
+3. **SQLite (global.db) tracks terminal sessions and workspace metadata**: Shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`) and workspace associations persist across restarts
+4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/workspace/<encoded>/` routes
+5. **WebSocket paths include workspace context**: Format is `/workspace/<base64url>/ws/terminal/<id>`
 
 #### State Split Problem & Reconciliation
 
 **WARNING**: The system has a known state split between:
-- **SQLite (global.db)**: Persistent port allocations and terminal session metadata (including `shellper_socket`, `shellper_pid`, `shellper_start_time`)
-- **In-memory (projectTerminals)**: Runtime terminal state
+- **SQLite (global.db)**: Persistent terminal session metadata (including `shellper_socket`, `shellper_pid`, `shellper_start_time`) and workspace associations
+- **In-memory (workspaceTerminals)**: Runtime terminal state
 
-On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy (`reconcileTerminalSessions()` in `tower-terminals.ts`) uses a **dual-source approach**:
+On Tower restart, `workspaceTerminals` is empty but SQLite retains terminal session metadata. The reconciliation strategy (`reconcileTerminalSessions()` in `tower-terminals.ts`) uses a **dual-source approach**:
 
 1. **Phase 1 -- Shellper reconnection**: For SQLite rows with `shellper_socket IS NOT NULL`, attempt `SessionManager.reconnectSession()`. Validates PID is alive and start time matches. On success, creates a PtySession via `TerminalManager.createSessionRaw()` and wires it with `attachShellper()`. Receives REPLAY frame for output continuity.
 2. **Phase 2 -- SQLite sweep**: Stale rows (no matching shellper) are cleaned up. Orphaned non-shellper processes are killed. Shellper processes are preserved (they may be reconnectable later).
@@ -544,7 +508,7 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 - **Framework**: Native Node.js `http` module (no Express)
 - **Port**: 4100 (Tower default)
 - **Security**: Localhost binding only (see Security Model section)
-- **State**: In-memory `projectTerminals` Map + SQLite for port allocations
+- **State**: In-memory `workspaceTerminals` Map + SQLite for terminal sessions and workspace metadata
 
 **Module decomposition** (Spec 0105): The monolithic `tower-server.ts` was decomposed into focused modules with dependency injection. The orchestrator (`tower-server.ts`) creates the HTTP server and initializes all subsystems, delegating work to specialized modules:
 
@@ -556,7 +520,7 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `tower-terminals.ts` | Terminal session CRUD, file tab persistence, shell ID allocation, `reconcileTerminalSessions()`, gate watcher, terminal list assembly |
 | `tower-websocket.ts` | WebSocket upgrade routing and bidirectional WS-to-PTY frame bridging (`handleTerminalWebSocket()`) |
 | `tower-utils.ts` | Shared utilities: rate limiting, path normalization, `isTempDirectory()`, MIME types, static file serving, `buildArchitectArgs()` |
-| `tower-types.ts` | TypeScript interfaces: `TowerContext`, `ProjectTerminals`, `SSEClient`, `RateLimitEntry`, `TerminalEntry`, `InstanceStatus`, `DbTerminalSession` |
+| `tower-types.ts` | TypeScript interfaces: `TowerContext`, `WorkspaceTerminals`, `SSEClient`, `RateLimitEntry`, `TerminalEntry`, `InstanceStatus`, `DbTerminalSession` |
 | `tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh |
 
 **Dependency injection pattern**: Each module exports `init*()` and `shutdown*()` lifecycle functions. The orchestrator calls `initTerminals()`, `initInstances()`, and `initTunnel()` at startup (in dependency order), and the corresponding shutdown functions during graceful shutdown. Modules receive only the dependencies they need via typed interfaces (e.g., `TerminalDeps`, `InstanceDeps`, `RouteContext`).
@@ -569,30 +533,30 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 |--------|------|---------|
 | `GET` | `/` | Serve Tower dashboard HTML |
 | `GET` | `/health` | Health check (uptime, memory, active projects) |
-| `GET` | `/api/projects` | List all projects with status |
-| `GET` | `/api/projects/:enc/status` | Get project status (terminals, gates) |
-| `POST` | `/api/projects/:enc/activate` | Activate project (creates architect terminal) |
-| `POST` | `/api/projects/:enc/deactivate` | Deactivate project (kills all terminals) |
+| `GET` | `/api/workspaces` | List all workspaces with status |
+| `GET` | `/api/workspaces/:enc/status` | Get workspace status (terminals, gates) |
+| `POST` | `/api/workspaces/:enc/activate` | Activate workspace (creates architect terminal) |
+| `POST` | `/api/workspaces/:enc/deactivate` | Deactivate workspace (kills all terminals) |
 | `GET` | `/api/status` | Legacy: Get all instances (backward compat) |
 | `POST` | `/api/launch` | Legacy: Launch instance (backward compat) |
-| `POST` | `/api/stop` | Stop instance by projectPath or basePort |
+| `POST` | `/api/stop` | Stop instance by workspacePath |
 | `GET` | `/api/browse?path=` | Directory autocomplete for project selection |
 | `POST` | `/api/create` | Create new project (codev init + activate) |
 | `GET` | `/api/events` | SSE stream for push notifications |
 | `POST` | `/api/notify` | Broadcast notification to SSE clients |
 
-**Project-scoped APIs (via Tower proxy):**
+**Workspace-scoped APIs (via Tower proxy):**
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/project/:enc/` | Serve React dashboard for project |
-| `GET` | `/project/:enc/api/state` | Get project state (architect, builders, shells) |
-| `POST` | `/project/:enc/api/tabs/shell` | Create shell terminal for project |
-| `DELETE` | `/project/:enc/api/tabs/:id` | Close a tab |
-| `POST` | `/project/:enc/api/stop` | Stop all terminals for project |
-| `WS` | `/project/:enc/ws/terminal/:id` | WebSocket terminal connection |
+| `GET` | `/workspace/:enc/` | Serve React dashboard for workspace |
+| `GET` | `/workspace/:enc/api/state` | Get workspace state (architect, builders, shells) |
+| `POST` | `/workspace/:enc/api/tabs/shell` | Create shell terminal for workspace |
+| `DELETE` | `/workspace/:enc/api/tabs/:id` | Close a tab |
+| `POST` | `/workspace/:enc/api/stop` | Stop all terminals for workspace |
+| `WS` | `/workspace/:enc/ws/terminal/:id` | WebSocket terminal connection |
 
-**Note**: `:enc` is the project path encoded as Base64URL (RFC 4648). Example: `/Users/me/project` → `L1VzZXJzL21lL3Byb2plY3Q`
+**Note**: `:enc` is the workspace path encoded as Base64URL (RFC 4648). Example: `/Users/me/project` → `L1VzZXJzL21lL3Byb2plY3Q`
 
 **Terminal API (global):**
 
@@ -687,27 +651,6 @@ async cleanupStaleSockets(): Promise<number> {
 }
 ```
 
-#### Port Allocation Race Conditions
-
-When multiple builders spawn simultaneously:
-
-```typescript
-// Retry loop in tower-instances.ts / tower-terminals.ts
-const MAX_PORT_RETRIES = 5;
-for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
-  const currentState = loadState();
-  const candidatePort = await findAvailablePort(CONFIG.utilPortStart, currentState);
-
-  // Try to spawn on candidatePort...
-  // If port taken by concurrent request, retry with fresh state
-  if (tryAddUtil(util)) {
-    break; // Success
-  }
-  // Port conflict - kill spawned process and retry
-  await killProcessGracefully(spawnedPid);
-}
-```
-
 #### Dead Process Cleanup
 
 Tower cleans up stale entries on state load:
@@ -761,18 +704,6 @@ git worktree prune
 
 This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups.
 
-#### Port Exhaustion
-
-When maximum allocations are reached (~58 projects):
-
-```typescript
-if (nextPort >= BASE_PORT + (MAX_ALLOCATIONS * PORT_BLOCK_SIZE)) {
-  throw new Error('No available port blocks. Maximum allocations reached.');
-}
-```
-
-**Recovery**: Run `af ports cleanup` to remove stale allocations from deleted projects.
-
 ### Security Model
 
 Agent Farm is designed for local development use only. Understanding the security model is critical for safe operation.
@@ -780,7 +711,7 @@ Agent Farm is designed for local development use only. Understanding the securit
 #### Network Binding
 
 All services bind to `localhost` only:
-- Dashboard server + WebSocket terminals: `127.0.0.1:4200`
+- Tower server + Dashboard + WebSocket terminals: `127.0.0.1:4100`
 - No external network exposure
 
 #### Authentication
@@ -861,121 +792,6 @@ const CONFIG = {
 3. **Review worktree contents**: Check `.builder-*` files before committing
 4. **Use `--force` carefully**: Understand what uncommitted changes will be lost
 
-### Key Files Reference
-
-#### CLI Layer
-
-| File | Purpose |
-|------|---------|
-| `src/agent-farm/cli.ts` | CLI command definitions using commander.js |
-| `src/agent-farm/index.ts` | Re-exports for programmatic use |
-| `src/agent-farm/types.ts` | TypeScript type definitions |
-
-#### Commands
-
-| File | Purpose |
-|------|---------|
-| `commands/start.ts` | Start architect dashboard |
-| `commands/stop.ts` | Stop all processes |
-| `commands/spawn.ts` | Spawn builder (5 modes) |
-| `commands/cleanup.ts` | Clean up builder worktree |
-| `commands/status.ts` | Show agent status |
-| `commands/util.ts` | Spawn utility shell |
-| `commands/open.ts` | Open file annotation viewer |
-| `commands/send.ts` | Send message to builder |
-| `commands/rename.ts` | Rename builder/utility |
-| `commands/tower.ts` | Multi-project overview |
-| `commands/tunnel.ts` | Secure remote access setup (v1.5.2+) |
-| `commands/architect.ts` | Direct CLI access to architect session (v1.5.0+) |
-| `commands/db.ts` | Database inspection/management (dump, query, reset, stats) |
-
-#### Database Layer
-
-| File | Purpose |
-|------|---------|
-| `db/index.ts` | Database initialization and connection management |
-| `db/schema.ts` | SQLite schema definitions (local and global) |
-| `db/migrate.ts` | JSON to SQLite migration |
-| `db/types.ts` | Database row types and converters |
-| `db/errors.ts` | Error handling utilities |
-
-#### State Management
-
-| File | Purpose |
-|------|---------|
-| `state.ts` | High-level state operations |
-
-#### Servers (Spec 0105: Tower Decomposition)
-
-| File | Purpose |
-|------|---------|
-| `servers/tower-server.ts` | **Orchestrator** -- creates HTTP/WS servers, initializes subsystem modules via DI, handles graceful shutdown (Spec 0090 + 0105) |
-| `servers/tower-routes.ts` | All HTTP route handlers (~30 routes), receives `RouteContext` from orchestrator (Spec 0105 Phase 6) |
-| `servers/tower-instances.ts` | Project lifecycle: `launchInstance()`, `getInstances()`, `stopInstance()`, known project registration, directory autocomplete (Spec 0105 Phase 3) |
-| `servers/tower-terminals.ts` | Terminal session CRUD, file tab persistence, `reconcileTerminalSessions()`, gate watcher, terminal list assembly (Spec 0105 Phase 4) |
-| `servers/tower-websocket.ts` | WebSocket upgrade routing and WS-to-PTY frame bridging (Spec 0105 Phase 5) |
-| `servers/tower-utils.ts` | Rate limiting, path normalization, MIME types, static file serving, `buildArchitectArgs()` (Spec 0105 Phase 1) |
-| `servers/tower-types.ts` | Shared TypeScript interfaces: `TowerContext`, `ProjectTerminals`, `SSEClient`, `InstanceStatus`, `DbTerminalSession` (Spec 0105) |
-| `servers/tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh (Spec 0097 / 0105 Phase 2) |
-| `servers/open-server.ts` | File annotation viewer server |
-
-**Note**: As of Spec 0090 Phase 4, `dashboard-server.ts` has been removed. Tower manages everything directly. As of Spec 0105, the monolithic tower-server.ts was decomposed into the focused modules listed above.
-
-#### Utilities
-
-| File | Purpose |
-|------|---------|
-| `utils/config.ts` | Configuration loading and port initialization |
-| `utils/port-registry.ts` | Global port allocation |
-| `utils/shell.ts` | Shell command execution, session management |
-| `utils/logger.ts` | Formatted console output |
-| `utils/deps.ts` | Dependency checking (git, node-pty) |
-| `utils/orphan-handler.ts` | Stale session cleanup |
-| `utils/gate-watcher.ts` | Polls porch YAML for gate transitions, sends `af send architect` notifications (Spec 0100) |
-| `utils/gate-status.ts` | Reads gate status from porch project status YAML files |
-| `utils/file-tabs.ts` | File tab persistence in SQLite (save, delete, load by project) |
-| `utils/roles.ts` | Role prompt loading with local-first, bundled-fallback resolution |
-| `utils/server-utils.ts` | HTTP utilities: JSON body parsing, request validation (Host/Origin checks) |
-
-#### Terminal Management (Spec 0085, extended by Spec 0104)
-
-| File | Purpose |
-|------|---------|
-| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing. `createSessionRaw()` creates PtySession without spawning (for shellper). `shutdown()` skips shellper-backed sessions. |
-| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast. `attachShellper()` wires IShellperClient as I/O backend. `shellperBacked` flag changes write/resize/kill/detach behavior. |
-| `terminal/ring-buffer.ts` | Fixed-size circular buffer (1000 lines) with monotonic sequence numbers |
-| `terminal/ws-protocol.ts` | WebSocket frame encoding/decoding (hybrid binary protocol) |
-| `terminal/session-manager.ts` | Orchestrates shellper lifecycle: spawn, reconnect, kill, auto-restart, stale socket cleanup (Spec 0104) |
-| `terminal/shellper-client.ts` | Tower-side client connecting to a single shellper process via Unix socket (Spec 0104) |
-| `terminal/shellper-protocol.ts` | Binary wire protocol encoder/decoder shared by shellper and Tower (Spec 0104) |
-| `terminal/shellper-process.ts` | Shellper core logic: PTY management, replay buffer, socket handling (Spec 0104) |
-| `terminal/shellper-main.ts` | Standalone shellper entry point spawned by Tower as detached process (Spec 0104) |
-| `terminal/shellper-replay-buffer.ts` | Shellper-side 10,000-line replay buffer (standalone, no ring-buffer.ts dependency) (Spec 0104) |
-
-#### Dashboard (React + Vite, Spec 0085)
-
-| File | Purpose |
-|------|---------|
-| `dashboard/src/components/App.tsx` | Root layout with split pane |
-| `dashboard/src/components/Terminal.tsx` | xterm.js + WebSocket client with DA filtering. Accepts `persistent` prop; shows warning banner when `false` (Spec 0104). |
-| `dashboard/src/components/TabBar.tsx` | Tab bar with close buttons |
-| `dashboard/src/components/WorkView.tsx` | Work view: builders, PRs, backlog (Spec 0126) |
-| `dashboard/src/components/BuilderCard.tsx` | Builder card with phase/gate indicators (Spec 0126) |
-| `dashboard/src/components/PRList.tsx` | Pending PR list with review status (Spec 0126) |
-| `dashboard/src/components/BacklogList.tsx` | Backlog grouped by readiness (Spec 0126) |
-| `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state. Tab interface includes `persistent?: boolean` (Spec 0104). |
-| `dashboard/src/hooks/useOverview.ts` | Overview data polling from /api/overview (Spec 0126) |
-| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath() + overview API (Spec 0126). |
-
-#### Templates
-
-| File | Purpose |
-|------|---------|
-| `templates/annotate.html` | File annotation viewer |
-| `templates/open.html` | File viewer with image support (v1.5.0+) |
-| `templates/3d-viewer.html` | STL/3MF 3D model viewer (v1.5.0+) |
-| `templates/tower.html` | Multi-project overview |
-
 ---
 
 ## Technology Stack
@@ -998,11 +814,8 @@ const CONFIG = {
 - **xterm.js**: Terminal emulator in the browser (with `customGlyphs: true` for Unicode)
 
 ### Testing Framework
-- **bats-core**: Bash Automated Testing System (vendored in `tests/lib/`)
-- **bats-support**: Helper functions for bats tests
-- **bats-assert**: Assertion helpers for test validation
-- **bats-file**: File system assertion helpers
-- **Vitest**: TypeScript unit testing for packages/codev
+- **Vitest**: Unit and integration tests (`packages/codev/src/__tests__/`)
+- **Playwright**: E2E browser tests (`packages/codev/tests/e2e/`)
 
 ### External Tools (Required)
 - **git**: Version control with worktree support for isolated builder environments
@@ -1030,7 +843,7 @@ This is where the Codev project uses Codev to develop itself:
   - `specs/` - Feature specifications for Codev itself
   - `plans/` - Implementation plans for Codev features
   - `reviews/` - Lessons learned from Codev development
-  - `resources/` - Reference materials (this file, llms.txt, etc.)
+  - `resources/` - Reference materials (this file, testing-guide.md, lessons-learned.md, etc.)
   - `protocols/` - Working copies of protocols for development
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
@@ -1043,7 +856,7 @@ This is where the Codev project uses Codev to develop itself:
 This is what gets distributed to users when they install Codev:
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
-  - `protocols/` - Protocol definitions (SPIR, TICK, EXPERIMENT, MAINTAIN)
+  - `protocols/` - Protocol definitions (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE)
   - `specs/` - Empty directory (users create their own)
   - `plans/` - Empty directory (users create their own)
   - `reviews/` - Empty directory (users create their own)
@@ -1110,8 +923,7 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── tower-websocket.ts  # WebSocket upgrade routing, WS↔PTY frame bridging
 │   │   │   │   ├── tower-utils.ts      # Rate limiting, path utils, MIME types, buildArchitectArgs()
 │   │   │   │   ├── tower-types.ts      # Shared TypeScript interfaces
-│   │   │   │   ├── tower-tunnel.ts     # Cloud tunnel client lifecycle
-│   │   │   │   └── open-server.ts      # File annotation viewer
+│   │   │   │   └── tower-tunnel.ts     # Cloud tunnel client lifecycle
 │   │   │   ├── db/                     # SQLite database layer
 │   │   │   │   ├── index.ts            # Database operations
 │   │   │   │   ├── schema.ts           # Table definitions
@@ -1125,8 +937,9 @@ codev/                                  # Project root (git repository)
 │   │   └── consult.js                  # consult command
 │   ├── skeleton/                       # Embedded codev-skeleton (built)
 │   ├── templates/                      # HTML templates
-│   │   ├── dashboard.html              # Split-pane dashboard
-│   │   └── annotate.html               # File annotation viewer
+│   │   ├── tower.html                  # Multi-project overview
+│   │   ├── open.html                   # File viewer with image support
+│   │   └── 3d-viewer.html             # STL/3MF 3D model viewer
 │   ├── dist/                           # Compiled JavaScript
 │   ├── package.json                    # npm package config
 │   └── tsconfig.json                   # TypeScript configuration
@@ -1170,7 +983,7 @@ codev/                                  # Project root (git repository)
 ├── .agent-farm/                        # Project-scoped state (gitignored)
 │   └── state.db                        # SQLite database for architect/builder/util status
 ├── ~/.agent-farm/                      # Global registry (user home)
-│   └── global.db                       # SQLite database for cross-project port allocations
+│   └── global.db                       # SQLite database for terminal sessions and workspace metadata
 ├── .claude/                            # Claude Code-specific directory
 │   └── agents/                         # Agents for Claude Code
 ├── tests/                              # Test infrastructure
@@ -1303,7 +1116,7 @@ codev import https://github.com/owner/repo
 
 ### 3. Agent-Farm CLI (Orchestration Engine)
 
-**Location**: `agent-farm/`
+**Location**: `packages/codev/src/agent-farm/`
 
 **Purpose**: TypeScript-based multi-agent orchestration for the architect-builder pattern
 
@@ -1311,7 +1124,7 @@ codev import https://github.com/owner/repo
 - **Single canonical implementation** - All bash scripts deleted, TypeScript is the source of truth
 - **Thin wrapper invocation** - `af` command from npm package (installed globally)
 - **Project-scoped state** - `.agent-farm/state.db` (SQLite) tracks current session
-- **Global port registry** - `~/.agent-farm/global.db` (SQLite) prevents cross-project port conflicts
+- **Global registry** — `~/.agent-farm/global.db` (SQLite) tracks workspace registrations and session metadata across projects
 
 #### CLI Commands
 
@@ -1354,7 +1167,7 @@ af tunnel                     # Show SSH command for remote access
 af dash start --remote user@host  # Start on remote machine with tunnel
 
 # Port management (multi-project support)
-af ports list                 # List port allocations
+af ports list                 # List workspace registrations (historical; port blocks removed in Spec 0098)
 af ports cleanup              # Remove stale allocations
 
 # Database inspection
@@ -1394,40 +1207,11 @@ af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 - CLI overrides: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`
 - Early validation: on startup, verify commands exist and directories resolve
 
-#### Global Port Registry (`~/.agent-farm/global.db`)
+#### Global Registry (`~/.agent-farm/global.db`)
 
-**Purpose**: Prevent port conflicts when running multiple architects across different repos
+**Purpose**: Cross-workspace coordination -- tracks workspace metadata and terminal sessions for Tower
 
-**Port Block Allocation**:
-- First repo gets port block 4200-4299
-- Second repo gets 4300-4399
-- Each block provides 100 ports per project:
-  - Dashboard: base+0 (e.g., 4200)
-  - Architect: base+1 (e.g., 4201)
-  - Builders: base+10 to base+29 (20 slots)
-  - Utilities: base+30 to base+49 (20 slots)
-  - Annotations: base+50 to base+69 (20 slots)
-
-**Registry Structure**:
-```json
-{
-  "version": 1,
-  "entries": {
-    "/Users/me/project-a": {
-      "basePort": 4200,
-      "registered": "2024-12-02T...",
-      "lastUsed": "2024-12-03T...",
-      "pid": 12345
-    }
-  }
-}
-```
-
-**Safety Features**:
-- File locking with stale lock detection (30-second timeout)
-- Schema versioning for future compatibility
-- PID tracking for process ownership
-- Automatic cleanup of stale entries (deleted projects)
+See the [Port System](#port-system) section above for details on the global registry schema and how it evolved from per-project port blocks to workspace/session tracking.
 
 #### Role Files
 
@@ -1451,119 +1235,158 @@ The `af`, `consult`, and `codev` commands are installed globally via `npm instal
 
 ### 4. Test Infrastructure
 
-**Location**: `tests/`
+**Framework**: Vitest (unit/integration) + Playwright (E2E browser tests)
 
-**Framework**: bats-core (Bash Automated Testing System)
+**Location**:
+- Unit tests: `packages/codev/src/__tests__/`
+- E2E tests: `packages/codev/tests/e2e/`
+- Config: `packages/codev/vitest.config.ts`, `packages/codev/vitest.cli.config.ts`, `packages/codev/vitest.e2e.config.ts`
 
-**Architecture**:
-- **Zero external dependencies** - All frameworks vendored locally
-- **Platform portable** - Works on macOS and Linux without changes
-- **XDG sandboxing** - Tests never touch real user directories
-- **Graceful degradation** - Skips tests when dependencies unavailable
-
-#### Test Organization
-
-**Framework Tests (00-09)**:
-- Core framework validation
-- Runner behavior verification
-- Helper function tests
-
-**Protocol Tests (10-19)**:
-- SPIR protocol installation
-- CLAUDE.md preservation and updates
-- Directory structure validation
-- Protocol content verification
-
-**Integration Tests (20+)**:
-- Claude CLI execution with isolation flags
-- Real agent invocation tests
-- Codev updater validation
-
-**Total Coverage**: 64 tests, ~2000 lines of test code
-
-#### Test Helpers (`tests/helpers/`)
-
-##### common.bash
-**Purpose**: Shared test utilities and assertions
-
-**Key Functions**:
-- `setup_test_project()` - Creates isolated temporary test directory
-- `teardown_test_project()` - Cleans up test artifacts (guaranteed via trap)
-- `install_from_local()` - Installs Codev from local skeleton
-- `create_claude_md()` - Creates CLAUDE.md with specified content
-- `assert_codev_structure()` - Validates directory structure
-- `assert_spir_protocol()` - Validates SPIR protocol files
-- `file_contains()` - Checks file for literal string match
-
-**Agent Installation Logic**:
+**Running Tests**:
 ```bash
-# Mimics INSTALL.md conditional agent installation
-# This test helper replicates production behavior
-if command -v claude &> /dev/null; then
-    # Claude Code present - install agents to .claude/agents/
-    mkdir -p "$target_dir/.claude/agents"
-    cp "$source_dir/agents/"*.md "$target_dir/.claude/agents/" 2>/dev/null || true
-fi
-# Note: For non-Claude Code environments, agents remain in codev/agents/
-# from the skeleton copy (universal location for AGENTS.md-compatible tools)
+cd packages/codev
+npm test                     # All Vitest tests
+npx playwright test          # E2E browser tests
 ```
 
-**Implementation Details**:
-- Detects Claude Code via `command -v claude` check
-- Installs agents conditionally based on detection result
-- Handles both Claude Code and non-Claude Code environments gracefully
-- Never overwrites existing agent files (2>/dev/null || true pattern)
+See `codev/resources/testing-guide.md` for Playwright patterns and Tower regression prevention.
 
-##### mock_mcp.bash
-**Purpose**: Test isolation utilities for PATH manipulation
+### 5. Porch (Protocol Orchestrator)
 
-**Key Functions**:
-- `mock_mcp_present()` - Simulates MCP command availability
-- `mock_mcp_absent()` - Simulates MCP command unavailability
-- `remove_mcp_from_path()` - Removes MCP from PATH
-- `restore_path()` - Restores original PATH
+**Location**: `packages/codev/src/commands/porch/`
 
-**Strategy**: Uses failing shims instead of PATH removal for realistic testing
+**Purpose**: Porch is a stateless planner that drives SPIR, TICK, and BUGFIX protocols via a state machine. It does NOT spawn subprocesses or call LLM APIs — it reads state, decides the next action, and emits JSON task definitions that the Builder executes.
 
-#### Test Execution
+#### The next/done Loop
 
-**Fast Tests** (excludes integration):
-```bash
-./scripts/run-tests.sh
+The canonical builder loop:
+
 ```
-- Runs in <30 seconds
-- No Claude CLI required
-- Core functionality validation
-
-**All Tests** (includes integration):
-```bash
-./scripts/run-all-tests.sh
-```
-- Includes Claude CLI tests
-- Requires `claude` command
-- Full end-to-end validation
-
-#### Test Isolation Strategy
-
-**XDG Sandboxing** (prevents touching real user config):
-```bash
-export XDG_CONFIG_HOME="$TEST_PROJECT/.xdg"
-export XDG_DATA_HOME="$TEST_PROJECT/.local/share"
-export XDG_CACHE_HOME="$TEST_PROJECT/.cache"
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│ porch next   │────→│ Builder runs │────→│ porch done   │
+│ (emit tasks) │     │ tasks        │     │ (validate +  │
+│              │←────│              │←────│  advance)    │
+└─────────────┘     └──────────────┘     └─────────────┘
+       ↕ gate_pending → STOP, wait for human approval
+       ↕ complete → done
 ```
 
-**Claude CLI Isolation**:
-```bash
-claude --strict-mcp-config --mcp-config '[]' --settings '{}'
-```
-- `--strict-mcp-config` - Enforces strict MCP configuration
-- `--mcp-config '[]'` - No MCP servers
-- `--settings '{}'` - No user preferences
+- **`porch next`** — Reads `status.yaml` + filesystem, returns a `PorchNextResponse` with status (`tasks`, `gate_pending`, `complete`, `error`) and an array of `PorchTask` objects (subject, description, sequential flag). No side effects except reading state.
+- **`porch done`** — Signals task completion, runs checks (npm test/build), records reviews, advances state machine.
+- **`porch run`** — Loops `next` → execute → `done` until complete or gate-blocked. Used by strict-mode builders.
+- **`porch status`** — Shows current state and prescriptive next steps.
+- **`porch approve <id> <gate>`** — Human-only gate approval.
 
-**Temporary Directories**:
-- Each test gets isolated `mktemp -d` directory
-- Cleanup guaranteed via `teardown()` trap
-- No persistence between tests
+#### State: `status.yaml`
+
+State lives in `codev/projects/<id>-<name>/status.yaml` (atomic writes via tmp + fsync + rename).
+
+Key fields:
+- `phase` — Current protocol phase (specify, plan, implement, review)
+- `plan_phases` / `current_plan_phase` — For phased protocols, tracks per-plan-phase progress
+- `gates` — `Record<gate_name, {status: pending|approved, requested_at?, approved_at?}>`
+- `iteration` — Current build-verify iteration (1-based)
+- `build_complete` — Has the build finished this iteration?
+- `history` — Audit trail of all iterations with review results
+
+Review artifacts live alongside as `<id>-<phase>-iter<N>-<model>.txt`.
+
+#### Gate Mechanics
+
+Gates are human approval checkpoints between phases:
+
+1. Phase build-verify completes with reviewer approvals
+2. Gate status transitions: `undefined` → `pending` (with `requested_at`)
+3. `porch next` detects pending gate → returns `gate_pending` status → Builder **stops and waits**
+4. Human runs `porch approve <id> <gate-name>` → status becomes `approved` (with `approved_at`)
+5. Next `porch next` call detects approved gate → advances to next phase
+
+**Pre-approved artifacts**: Specs/plans with YAML frontmatter (`approved: <date>`, `validated: [models]`) auto-approve the corresponding gate, skipping build-verify for that phase.
+
+#### Build-Verify Cycle
+
+For most phases, porch runs an iterative build-verify loop:
+
+1. Emit build task (write spec, implement code, etc.)
+2. Run checks (npm test, npm build — defined per-phase in protocol.json)
+3. Run 3-way consultation (parallel `consult` commands with `--output` flags)
+4. Parse verdicts via `verdict.ts` (scans backward for `VERDICT:` line; defaults to `REQUEST_CHANGES` if not found)
+5. If all approve → advance. If not → increment iteration, emit rebuttal/fix task
+
+#### Builder / Enforcer / Worker Layering
+
+Three layers exist because each addresses a concrete failure mode:
+
+| Layer | Component | Why it exists |
+|-------|-----------|---------------|
+| **Builder** | Claude (in worktree) | Porch was a terrible conversational interface — the Builder provides human-visible progress |
+| **Enforcer** | Porch (state machine) | Claude drifts without deterministic constraints — implements everything in one shot, skips reviews |
+| **Worker** | `claude --print` / SDK | `--print` mode was crippled (no tools, silent failures) — needed proper tool execution |
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `porch/next.ts` | Pure planner — reads state, emits JSON tasks |
+| `porch/state.ts` | State management (read/write status.yaml) |
+| `porch/protocol.ts` | Protocol loading and phase navigation |
+| `porch/verdict.ts` | Review verdict parsing |
+| `porch/plan.ts` | Plan phase extraction and advancement |
+| `porch/index.ts` | CLI commands (status, init, approve) |
+| `porch/types.ts` | Type definitions (ProjectState, PorchTask, etc.) |
+
+### 6. Tower Startup Sequence
+
+The startup ordering is critical — race conditions have caused real bugs when subsystems initialize in the wrong order.
+
+**Canonical boot order** (from `tower-server.ts`):
+
+| Step | Operation | Why this order |
+|------|-----------|----------------|
+| 1 | HTTP server binds to `localhost:port` | Must be listening before anything registers routes |
+| 2 | SessionManager init + stale socket cleanup | Prepares shellper infrastructure |
+| 3 | `initTerminals()` | Terminal management module ready |
+| 4 | `startSendBuffer()` | Typing-aware message delivery ready |
+| 5 | **`reconcileTerminalSessions()`** | **MUST run before step 7** — reconnects shellper sessions from previous run |
+| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected |
+| 7 | `initInstances()` | Enables workspace API handlers — triggers dashboard polling |
+| 8 | `initCron()` | Scheduler starts after instances ready |
+| 9 | `initTunnel()` | Cloud tunnel connects last |
+| 10 | WebSocket upgrade handler installed | Terminal connections accepted |
+
+**Known ordering bugs**:
+- **Bugfix #274**: `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation, corrupting shellper sessions
+- **Bugfix #341**: Killing orphaned shellpers before reconciliation killed sessions that were about to be reconnected
+
+**Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
+
+### 7. Message Delivery (`af send`)
+
+**Location**: `servers/send-buffer.ts`, `commands/send.ts`, `terminal/pty-session.ts`
+
+Messages sent via `af send` are not injected immediately — they pass through a **typing-aware send buffer** that prevents message injection while the user is actively typing.
+
+#### How it works
+
+1. **User types** in terminal → WebSocket `data` event → `PtySession.recordUserInput()` updates `lastInputAt` timestamp
+2. **`af send` message arrives** → Tower buffers it via `SendBuffer.enqueue()`
+3. **Every 500ms**, `SendBuffer.flush()` checks each buffered session:
+   - If `session.isUserIdle(3000ms)` → deliver all buffered messages
+   - Else if any message age ≥ 60 seconds → deliver regardless (max buffer age)
+   - Otherwise, keep buffering
+4. **`--interrupt` option** → Sends Ctrl+C first, bypasses buffer entirely
+
+#### Constants
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| Idle threshold | 3,000ms | User must be idle this long before delivery |
+| Max buffer age | 60,000ms | Messages delivered regardless after this time |
+| Flush interval | 500ms | How often the buffer checks for delivery |
+
+#### Address Resolution
+
+`af send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting.
 
 ## Installation Architecture
 
@@ -1592,97 +1415,6 @@ claude --strict-mcp-config --mcp-config '[]' --settings '{}'
 - Uses local skeleton (no network dependency)
 - Preserves existing CLAUDE.md content
 
-## Data Flow
-
-### Specification → Plan → Implementation → Review
-
-**Document Flow**:
-1. **Specification** (`codev/specs/####-feature.md`)
-   - Defines WHAT to build
-   - Created by developer or AI agent
-   - Multi-agent reviewed (SPIR with consultation)
-   - Committed before planning
-
-2. **Plan** (`codev/plans/####-feature.md`)
-   - Defines HOW to build
-   - Breaks specification into phases (SPIR) or single phase (TICK)
-   - Lists files to create/modify
-   - Multi-agent reviewed (SPIR with consultation)
-   - Committed before implementation
-
-3. **Implementation** (actual code in project)
-   - Follows plan phases
-   - Each phase: Implement → Defend (tests) → Evaluate
-   - Committed per phase (SPIR) or single commit (TICK)
-   - Multi-agent consultation at checkpoints (SPIR) or review only (TICK)
-
-4. **Review** (`codev/reviews/####-feature.md`)
-   - Documents lessons learned
-   - Identifies systematic issues
-   - Updates protocol if needed
-   - Multi-agent reviewed (both SPIR and TICK)
-   - Triggers architecture documentation update (TICK)
-   - Final commit in feature workflow
-
-**File Naming Convention**:
-```
-codev/specs/####-descriptive-name.md
-codev/plans/####-descriptive-name.md
-codev/reviews/####-descriptive-name.md
-```
-- Sequential numbering shared across all protocols
-- Same identifier for spec, plan, review
-
-## Git Commit Strategy
-
-See [CLAUDE.md](../../CLAUDE.md#git-workflow) for commit message formats and Git safety rules.
-
-## Development Infrastructure
-
-### Pre-Commit Hooks
-
-**Location**: `hooks/pre-commit`
-
-**Purpose**: Automated quality assurance through test execution before commits
-
-**Installation**:
-```bash
-./scripts/install-hooks.sh
-```
-
-**Behavior**:
-- Runs fast test suite (via `./scripts/run-tests.sh`) before allowing commits
-- Exits with error if any tests fail
-- Provides clear feedback on test status
-- Can be bypassed with `git commit --no-verify` (not recommended)
-
-**Design Rationale**:
-1. **Catch regressions early** - Find issues before they reach the repository
-2. **Maintain quality** - Ensure all commits pass the test suite
-3. **Fast feedback** - Uses fast tests (not integration tests) for quick iteration
-4. **Optional but recommended** - Manual installation respects developer choice
-
-**Installation Script** (`scripts/install-hooks.sh`):
-- Copies `hooks/pre-commit` to `.git/hooks/pre-commit`
-- Makes hook executable
-- Provides clear feedback on installation success
-- Safe to run multiple times (idempotent)
-
-### Test-Driven Development
-
-Codev itself follows test-driven development practices:
-- **64 comprehensive tests** covering all functionality
-- **Fast test suite** (<30 seconds) for rapid iteration
-- **Integration tests** for end-to-end validation
-- **Platform compatibility** testing (macOS and Linux)
-- **Pre-commit hooks** for continuous quality assurance
-
-**Test Organization Philosophy**:
-- Framework tests (00-09) validate core infrastructure
-- Protocol tests (10-19) verify installation and configuration
-- Integration tests (20+) validate real-world usage
-- All tests hermetic and isolated (XDG sandboxing)
-
 ## Key Design Decisions
 
 ### 1. Context-First Philosophy
@@ -1703,43 +1435,7 @@ Codev itself follows test-driven development practices:
 - Continuous improvement from actual use cases
 - Documentation reflects reality, not theory
 
-### 3. Dual Repository Structure
-**Decision**: Separate `codev/` (our work) from `codev-skeleton/` (template)
-
-**Rationale**:
-- Clear separation of concerns
-- Users get clean template without our development artifacts
-- We can evolve protocols while using them
-- No risk of user specs polluting template
-
-### 4. Vendored Test Dependencies
-**Decision**: Include bats-core and helpers directly in repository
-
-**Rationale**:
-- Zero installation dependencies for contributors
-- Consistent test environment across systems
-- No dependency on external package managers
-- Version control ensures stability
-
-### 5. XDG Sandboxing for Tests
-**Decision**: All tests use XDG environment variables to isolate configuration
-
-**Rationale**:
-- Prevents accidental modification of user directories
-- Tests are hermetic and reproducible
-- No side effects on host system
-- Safety-first testing approach
-
-### 6. Shell-Based Testing
-**Decision**: Use bash/bats instead of Python/pytest
-
-**Rationale**:
-- Tests the actual shell commands from INSTALL.md
-- No language dependencies beyond bash
-- Directly validates installation instructions
-- Simple for shell-savvy developers to understand
-
-### 7. Tool-Agnostic Agent Installation
+### 3. Tool-Agnostic Agent Installation
 **Decision**: Conditional installation - `.claude/agents/` (Claude Code) OR `codev/agents/` (other tools)
 
 **Rationale**:
@@ -1756,7 +1452,7 @@ Codev itself follows test-driven development practices:
 - Clear user feedback on installation location
 - Test infrastructure mirrors production behavior
 
-### 8. AGENTS.md Standard + CLAUDE.md Synchronization
+### 4. AGENTS.md Standard + CLAUDE.md Synchronization
 **Decision**: Maintain both AGENTS.md (universal) and CLAUDE.md (Claude Code-specific) with identical content
 
 **Rationale**:
@@ -1765,7 +1461,7 @@ Codev itself follows test-driven development practices:
 - Identical content ensures consistent behavior across tools
 - Users of any AI coding assistant get appropriate file format
 
-### 9. Multi-Agent Consultation by Default
+### 5. Multi-Agent Consultation by Default
 **Decision**: SPIR and TICK default to consulting GPT-5 and Gemini 3 Pro
 
 **Rationale**:
@@ -1776,7 +1472,7 @@ Codev itself follows test-driven development practices:
 
 #### Consult Architecture
 
-The `consult` command (`packages/codev/src/commands/consult/index.ts`, ~750 lines) is a **CLI delegation layer** — it does NOT call LLM APIs directly. Instead, it spawns external CLI tools as subprocesses:
+The `consult` command (`packages/codev/src/commands/consult/index.ts`) is a **CLI delegation layer** — it does NOT call LLM APIs directly. Instead, it spawns external CLI tools as subprocesses:
 
 ```
 consult -m gemini spec 42
@@ -1805,13 +1501,13 @@ consult -m claude spec 42
 
 **Porch integration**: Porch's `next.ts` spawns 3 parallel `consult` commands with `--output` flags, collects results, parses verdicts via `verdict.ts` (scans backward for `VERDICT:` line, defaults to `REQUEST_CHANGES` if not found).
 
-**Consultation feedback flow** (Spec 395): Consultation concerns and builder responses are captured in the **review document** (`codev/reviews/<project>.md`), not in porch project directories. The builder writes a `## Consultation Feedback` section during the review phase, summarizing each reviewer's concerns with one of three responses: **Addressed** (fixed), **Rebutted** (disagreed), or **N/A** (out of scope). This is prompt-driven — the porch review prompt and review templates instruct the builder to read raw consultation output files and summarize them. Raw consultation files remain ephemeral session artifacts; the review file is the durable record. Specs and plans stay clean as forward-looking documents.
+**Consultation feedback flow** (Spec 0395): Consultation concerns and builder responses are captured in the **review document** (`codev/reviews/<project>.md`), not in porch project directories. The builder writes a `## Consultation Feedback` section during the review phase, summarizing each reviewer's concerns with one of three responses: **Addressed** (fixed), **Rebutted** (disagreed), or **N/A** (out of scope). This is prompt-driven — the porch review prompt and review templates instruct the builder to read raw consultation output files and summarize them. Raw consultation files remain ephemeral session artifacts; the review file is the durable record. Specs and plans stay clean as forward-looking documents.
 
 **Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
 1. **Unset `CLAUDECODE`**: Builder's shellper session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
 2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
 
-### 10. TICK Protocol for Fast Iteration
+### 6. TICK Protocol for Fast Iteration
 **Decision**: Create lightweight protocol for simple tasks
 
 **Rationale**:
@@ -1821,25 +1517,7 @@ consult -m claude spec 42
 - Multi-agent review at end maintains quality
 - Fills gap between informal changes and full SPIR
 
-### 11. Pre-Commit Hooks for Quality Assurance
-**Decision**: Provide optional pre-commit hooks that run test suite
-
-**Rationale**:
-- **Early detection** - Catch regressions before they reach repository
-- **Continuous quality** - Ensure all commits pass tests
-- **Fast feedback** - Use fast tests (not integration) for quick iteration
-- **Developer choice** - Manual installation respects autonomy
-- **Escape hatch** - Can bypass with --no-verify when needed
-- **Self-hosting validation** - Codev validates itself before commits
-
-**Implementation**:
-- Hooks stored in `hooks/` directory (not `.git/hooks/` - not tracked)
-- Installation script (`scripts/install-hooks.sh`) copies to `.git/hooks/`
-- Runs `./scripts/run-tests.sh` (fast tests, ~30 seconds)
-- Clear feedback on pass/fail
-- Instructions for bypassing when necessary
-
-### 12. Single Canonical Implementation (TypeScript agent-farm)
+### 7. Single Canonical Implementation (TypeScript agent-farm)
 **Decision**: Delete all bash architect scripts; TypeScript agent-farm is the single source of truth
 
 **Rationale**:
@@ -1849,50 +1527,16 @@ consult -m claude spec 42
 - **Rich features** - Easier to implement complex features (port registry, state locking)
 - **Thin wrapper pattern** - Bash wrappers just call `node agent-farm/dist/index.js`
 
-**What was deleted**:
-- `codev/bin/architect` (713-line bash script)
-- `codev-skeleton/bin/architect` (duplicate)
-- `agent-farm/templates/` (now uses codev/templates/)
-- `codev/builders.md` (legacy state file)
-
-### 13. Global Port Registry for Multi-Architect Support
-**Decision**: Use `~/.agent-farm/global.db` (SQLite) to allocate deterministic port blocks per repository
+### 8. Global Registry for Multi-Workspace Support
+**Decision**: Use `~/.agent-farm/global.db` (SQLite) for cross-workspace coordination
 
 **Rationale**:
-- **Cross-project coordination** - Multiple repos can run architects simultaneously
-- **Deterministic allocation** - Port assignments stable across restarts
-- **100-port blocks** - Ample room for dashboard, architect, 20 builders, utilities, annotations
-- **File locking** - Prevents race conditions during concurrent registration
-- **Stale cleanup** - Automatically removes entries for deleted projects
+- **Cross-workspace coordination** - Multiple repos tracked simultaneously
+- **Terminal session persistence** - Session metadata survives Tower restarts
+- **File locking** - Prevents race conditions during concurrent operations
+- **Stale cleanup** - Automatically removes entries for deleted workspaces
 
-**Port Block Layout**:
-```
-base+0:     Dashboard
-base+1:     Architect terminal
-base+10-29: Builder terminals (20 slots)
-base+30-49: Utility terminals (20 slots)
-base+50-69: Annotation viewers (20 slots)
-base+70-99: Reserved for future use
-```
-
-### 14. af-config.json for Shell Command Customization
-**Decision**: Replace bash wrapper customization with JSON configuration file at project root
-
-**Rationale**:
-- **Declarative configuration** - Easy to understand and modify
-- **Array-form commands** - Avoids shell escaping issues
-- **Environment variable expansion** - `${VAR}` syntax for secrets
-- **Configuration hierarchy** - CLI args > af-config.json > defaults
-- **Early validation** - Fail fast if commands or directories invalid
-
-### 15. Clean Slate with Safety Checks
-**Decision**: When consolidating, nuke old state but protect uncommitted work
-
-**Rationale**:
-- **No migration complexity** - Delete old artifacts rather than migrating
-- **Dirty worktree protection** - Refuse to delete worktrees with uncommitted changes
-- **Force flag requirement** - `--force` required to override safety checks
-- **Orphaned session handling** - Detect and handle stale shellper sockets on startup
+> **Historical note** (Spec 0008, Spec 0098): Originally allocated deterministic 100-port blocks per repository. After the Tower Single Daemon architecture (Spec 0090), per-workspace port blocks became unnecessary and were removed in Spec 0098. The global registry now tracks workspace metadata and terminal sessions instead.
 
 ## Integration Points
 
@@ -1968,7 +1612,7 @@ try {
 **Pattern**: SQLite for all structured state.
 
 - `.agent-farm/state.db` - Builder/util state (local, per-project)
-- `~/.agent-farm/global.db` - Global port registry (cross-project)
+- `~/.agent-farm/global.db` - Global workspace/session registry (cross-project)
 - `codev/projects/<id>/status.yaml` - Active project state (managed by porch)
 - GitHub Issues - Project tracking (source of truth, Spec 0126)
 
@@ -1980,251 +1624,7 @@ try {
 - Simple string replacement, no complex templating engine
 - Applied to CLAUDE.md, AGENTS.md, and similar files
 
-## Development Patterns
 
-### 1. Protocol-Driven Development
-Every feature follows a protocol (SPIR, TICK, EXPERIMENT, or MAINTAIN):
-- Start with specification (WHAT)
-- Create plan (HOW)
-- Implement in phases or single execution
-- Document lessons learned
-
-### 2. Multi-Agent Consultation
-Default consultation pattern:
-```
-1. Agent performs work
-2. STOP - consult GPT-5 and Gemini Pro
-3. Apply feedback
-4. Get FINAL approval from experts
-5. THEN present to user
-```
-
-### 3. Fail-Fast & Git Safety
-See [CLAUDE.md](../../CLAUDE.md) for fail-fast principle and explicit file staging rules.
-
-### 4. Document Naming Convention
-```
-####-descriptive-name.md
-```
-- Four-digit sequential number
-- Kebab-case descriptive name
-- Shared across spec, plan, review
-- Numbers never reused
-
-## File Naming Conventions
-
-See [CLAUDE.md](../../CLAUDE.md#file-naming-convention) for naming patterns. Key paths:
-- Specs: `codev/specs/####-feature-name.md`
-- Plans: `codev/plans/####-feature-name.md`
-- Reviews: `codev/reviews/####-feature-name.md`
-
-## Utility Functions & Helpers
-
-### Test Helpers (`tests/helpers/common.bash`)
-
-#### setup_test_project()
-**Purpose**: Create isolated temporary test directory
-
-**Returns**: Path to test directory
-
-**Usage**:
-```bash
-TEST_PROJECT=$(setup_test_project)
-```
-
-#### teardown_test_project(directory)
-**Purpose**: Clean up test artifacts
-
-**Parameters**:
-- `directory` - Path to test directory
-
-**Usage**:
-```bash
-teardown_test_project "$TEST_PROJECT"
-```
-
-#### install_from_local(target_dir)
-**Purpose**: Install Codev from local skeleton with conditional agent installation
-
-**Parameters**:
-- `target_dir` - Installation target directory
-
-**Returns**: 0 on success, 1 on failure
-
-**Behavior**:
-- Copies `codev-skeleton/` to `target_dir/codev/`
-- Conditionally installs agents based on Claude Code detection
-- Verifies installation success
-
-**Usage**:
-```bash
-install_from_local "$TEST_PROJECT"
-```
-
-#### create_claude_md(directory, content)
-**Purpose**: Create CLAUDE.md with specified content
-
-**Parameters**:
-- `directory` - Target directory
-- `content` - CLAUDE.md content
-
-**Usage**:
-```bash
-create_claude_md "$TEST_PROJECT" "# My Project\n\nInstructions..."
-```
-
-#### assert_codev_structure(directory)
-**Purpose**: Validate Codev directory structure exists
-
-**Parameters**:
-- `directory` - Directory to check
-
-**Usage**:
-```bash
-assert_codev_structure "$TEST_PROJECT"
-```
-
-#### file_contains(file, text)
-**Purpose**: Check if file contains literal string
-
-**Parameters**:
-- `file` - File path
-- `text` - Text to search for (literal match)
-
-**Returns**: 0 if found, 1 if not found
-
-**Usage**:
-```bash
-file_contains "$TEST_PROJECT/CLAUDE.md" "Codev Methodology"
-```
-
-### Test Helpers (`tests/helpers/mock_mcp.bash`)
-
-#### mock_mcp_present()
-**Purpose**: Simulate MCP command availability (for test isolation)
-
-**Usage**:
-```bash
-mock_mcp_present
-```
-
-#### mock_mcp_absent()
-**Purpose**: Simulate MCP command unavailability (for test isolation)
-
-**Usage**:
-```bash
-mock_mcp_absent
-```
-
-## Cross-Tool Compatibility
-
-### AGENTS.md Standard
-Codev supports the [AGENTS.md standard](https://agents.md/) for universal AI coding assistant compatibility:
-
-**Supported Tools**:
-- Claude Code (via CLAUDE.md)
-- Cursor (via AGENTS.md)
-- GitHub Copilot (via AGENTS.md)
-- Continue.dev (via AGENTS.md)
-- Other AGENTS.md-compatible tools
-
-**File Synchronization**:
-- Both `AGENTS.md` and `CLAUDE.md` maintained
-- Identical content in both files
-- AGENTS.md is canonical for non-Claude Code tools
-- CLAUDE.md provides native Claude Code support
-
-### Agent Location Strategy
-**Detection and Installation**:
-```bash
-if command -v claude &> /dev/null; then
-    # Claude Code: Install to .claude/agents/
-    AGENT_DIR=".claude/agents"
-else
-    # Other tools: Use codev/agents/
-    AGENT_DIR="codev/agents"
-fi
-```
-
-**Benefits**:
-- Tool-agnostic architecture
-- Native integration where available
-- Fallback to universal location
-- No tool lock-in
-
-## Platform Compatibility
-
-### macOS Specific
-- Uses BSD `stat` command: `stat -f "%Lp"`
-- gtimeout from coreutils for timeout support
-- Default mktemp behavior compatible
-
-### Linux Specific
-- Uses GNU `stat` command: `stat -c "%a"`
-- Native `timeout` command available
-- Standard mktemp available
-
-### Portable Patterns
-```bash
-# Platform-agnostic permission checking
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  perms=$(stat -f "%Lp" "$file")
-else
-  perms=$(stat -c "%a" "$file")
-fi
-
-# Timeout command detection
-if command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="gtimeout"
-elif command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="timeout"
-fi
-```
-
-## Security Considerations
-
-### Test Isolation
-- XDG sandboxing prevents touching real user directories
-- Temporary directories isolated per test
-- No persistent state between tests
-- Cleanup guaranteed via teardown traps
-
-### Git Commit Safety
-- Explicit file staging required (no `git add -A` or `git add .`)
-- Prevents accidental commit of sensitive files
-- Clear file-by-file staging
-
-### Claude CLI Isolation
-- `--strict-mcp-config` prevents MCP server loading
-- `--mcp-config '[]'` ensures no external servers
-- `--settings '{}'` prevents user settings leakage
-- API keys explicitly unset during testing
-
-### Codev Updater Safety
-- Always creates backups before updating
-- Never modifies user specs, plans, or reviews
-- Provides rollback instructions
-- Verifies successful update before completing
-
-## Performance Characteristics
-
-### Test Suite
-- **Fast Tests**: <30 seconds (no Claude CLI)
-- **All Tests**: ~2-5 minutes (with Claude CLI integration)
-- **Total Tests**: 64 tests, ~2000 lines
-- **Coverage**: Framework validation, protocol installation, agent testing, updater validation
-- **Parallelization**: Tests are independent and can run in parallel
-- **Execution Speed**: Average ~0.5 seconds per test (fast suite)
-
-### Protocol Execution Times
-- **TICK**: ~4 minutes for simple tasks
-- **SPIR** (without consultation): ~15-30 minutes depending on complexity
-- **SPIR** (with consultation): ~30-60 minutes depending on complexity
-
-### Installation
-- **Network**: Not required (uses local skeleton)
-- **Time**: <1 minute for basic installation
-- **Space**: ~500KB for protocols and templates
 
 ## Troubleshooting
 
@@ -2239,108 +1639,8 @@ Additional issues:
 
 See [MAINTAIN protocol](../protocols/maintain/protocol.md) for codebase hygiene and documentation sync procedures.
 
-## Contributing
-
-See [README.md](../../README.md) for contribution guidelines.
-
-## Success Metrics
-
-A well-maintained Codev architecture should enable:
-- **Quick Understanding**: New developers understand structure in <15 minutes
-- **Fast Location**: Find relevant files in <2 minutes
-- **Easy Extension**: Add new protocols or agents in <1 hour
-- **Reliable Testing**: Tests pass consistently on all platforms
-- **Safe Updates**: Framework updates never break user work
-
-## Recent Infrastructure Changes
-
-See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
-
-**v1.6.0 (Gothic)**:
-- BUGFIX protocol for GitHub Issue-based bugfixes (Spec 0065)
-- CLI: `af spawn N --protocol bugfix`, `af cleanup --issue N`
-- Tower subcommands with improved logging
-- Tutorial system scaffolded (Spec 0006 preparation)
-
-**v1.5.x (Florence)**:
-- Dashboard modularization with hot reload (Spec 0060)
-- Daily activity summary (Spec 0059)
-- File search with Cmd+P palette (Spec 0058)
-- Dashboard tab overhaul with two-column layout (Spec 0057)
-- Consult types refactor (Spec 0056)
-- Dashboard file browser (Spec 0055)
-- Generate image tool (Spec 0054)
-- Image support in `af open` (Spec 0053)
-- STL/3MF 3D model viewer (Spec 0061)
-- Secure remote access with SSH tunneling (Spec 0062)
-- Direct CLI access to architect session (Spec 0002-TICK-001)
-
-**v1.4.x (Eichler)**:
-- Agent Farm internals documentation (Spec 0052)
-- Codev cheatsheet (Spec 0051)
-- Dashboard polish (Spec 0050)
-
-**Earlier**:
-- SQLite state management (Spec 0031)
-- Consult tool (Spec 0011-0012)
-- Architecture consolidation (Spec 0008)
-- Tab bar status indicators (Spec 0019)
-- Terminal file click (Spec 0009)
-
-## Integration Testing Requirements
-
-**CRITICAL**: Integration tests MUST pass before any Tower/Agent Farm release.
-
-### Required Test Scenarios
-
-Based on consultation with external models, these scenarios MUST be tested:
-
-1. **Multi-Dashboard Survival Test**
-   - Activate project A
-   - Activate project B
-   - Verify both projects remain active (project A not killed)
-
-2. **Project View Test**
-   - Navigate to Tower UI
-   - Verify project list loads
-   - Verify project status (active/inactive) is correct
-
-3. **Terminal Connectivity Test**
-   - Activate a project
-   - Connect to architect terminal via WebSocket
-   - Verify terminal receives output
-
-4. **State Persistence Test** (Shellper, Spec 0104)
-   - Activate project (creates shellper-backed architect terminal)
-   - Restart Tower
-   - Verify project reconnects to surviving shellper process
-   - Verify architect terminal shows replay data (output continuity)
-   - Verify terminal is interactive (keystrokes reach shell)
-
-### Running Integration Tests
-
-```bash
-# Run Tower E2E tests (Playwright)
-npm run test:e2e -- --grep "tower"
-
-# Run with headed browser for debugging
-npm run test:e2e -- --grep "tower" --headed
-```
-
-### Test Infrastructure Files
-
-| File | Purpose |
-|------|---------|
-| `packages/codev/src/agent-farm/__tests__/tower-api.test.ts` | Tower API unit tests |
-| `packages/codev/src/agent-farm/__tests__/e2e/tower.spec.ts` | Tower E2E tests (Playwright) |
-| `packages/codev/src/terminal/__tests__/shellper-protocol.test.ts` | Shellper wire protocol unit tests (Spec 0104 Phase 1) |
-| `packages/codev/src/terminal/__tests__/shellper-process.test.ts` | Shellper process logic unit tests (Spec 0104 Phase 1) |
-| `packages/codev/src/terminal/__tests__/shellper-client.test.ts` | ShellperClient unit tests (Spec 0104 Phase 2) |
-| `packages/codev/src/terminal/__tests__/session-manager.test.ts` | SessionManager unit/integration tests (Spec 0104 Phase 2) |
-| `packages/codev/src/terminal/__tests__/tower-shellper-integration.test.ts` | PtySession + ShellperClient integration tests (16 tests, Spec 0104 Phase 3) |
-
 ---
 
-**Last Updated**: 2026-02-14
+**Last Updated**: 2026-02-18
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Updated Tower diagram labels from (node-pty) to (shellper), updated State Persistence Test for shellper reconnection, documented known hardcoded dimensions issue (cols:200, rows:50) causing scrollback gap.
+**Changes**: Refinement round 4/4 -- final fresh-eyes pass. See CHANGELOG.md for version history.
