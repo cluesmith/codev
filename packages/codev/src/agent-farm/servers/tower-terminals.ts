@@ -486,6 +486,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
       ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
+      // Architect sessions have auto-restart — keep WebSocket clients connected on exit
+      if (dbSession.type === 'architect') {
+        ptySession.restartOnExit = true;
+      }
     }
 
     // Register in workspaceTerminals Map
@@ -504,7 +508,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
     _deps.registerKnownWorkspace(workspacePath);
 
-    // Clean up on exit
+    // Clean up on exit (only fires for permanent death when restartOnExit is set)
     if (ptySession) {
       ptySession.on('exit', () => {
         const currentEntry = getWorkspaceTerminalsEntry(workspacePath);
@@ -635,8 +639,12 @@ export async function getTerminalsForWorkspace(
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
+            // Architect sessions have auto-restart — keep WebSocket clients connected on exit
+            if (dbSession.type === 'architect') {
+              ptySession.restartOnExit = true;
+            }
 
-            // Clean up on exit (same as startup reconciliation path)
+            // Clean up on exit (only fires for permanent death when restartOnExit is set)
             ptySession.on('exit', () => {
               const currentEntry = getWorkspaceTerminalsEntry(dbSession.workspace_path);
               if (dbSession.type === 'architect' && currentEntry.architect === newSession.id) {

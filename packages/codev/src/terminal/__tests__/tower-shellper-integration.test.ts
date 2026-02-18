@@ -237,6 +237,93 @@ describe('PtySession + ShellperClient integration', () => {
     });
   });
 
+  describe('restartOnExit behavior (Bugfix #418)', () => {
+    it('suppresses exit event and keeps clients when restartOnExit is true', () => {
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const wsClient = { send: vi.fn() };
+      session.attach(wsClient);
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      mockClient.simulateExit(0);
+
+      // Exit event should NOT fire — auto-restart will handle it
+      expect(exitSpy).not.toHaveBeenCalled();
+      // WebSocket client should still be attached (not cleared by cleanupShellper)
+      expect(session.info.status).toBe('exited'); // exitCode is set
+      // A restarting message should have been written to the terminal
+      const ringContent = session.ringBuffer.getAll().join('');
+      expect(ringContent).toContain('restarting');
+    });
+
+    it('cancels cleanup when new data arrives after exit (process restarted)', () => {
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      // Process exits
+      mockClient.simulateExit(0);
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(session.status).toBe('exited'); // exitCode is set initially
+
+      // Process restarts — new data arrives before timeout
+      vi.advanceTimersByTime(2000); // 2s restart delay
+      mockClient.simulateData('new session started\r\n');
+
+      // exitCode should be cleared — session is running again
+      expect(session.status).toBe('running');
+
+      // Write should work after restart
+      session.write('test input');
+      expect(mockClient.writeData).toContain('test input');
+
+      // Advance past the 10s cleanup timeout
+      vi.advanceTimersByTime(10_000);
+
+      // Exit should NOT have fired — restart succeeded
+      expect(exitSpy).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it('falls through to normal exit cleanup when no data arrives (max restarts)', () => {
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      // Process exits
+      mockClient.simulateExit(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      // No restart happens — advance past 10s timeout
+      vi.advanceTimersByTime(10_000);
+
+      // Exit should fire now (permanent death)
+      expect(exitSpy).toHaveBeenCalledWith(1, null);
+      vi.useRealTimers();
+    });
+
+    it('emits exit normally when restartOnExit is false (default)', () => {
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      // restartOnExit defaults to false
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      mockClient.simulateExit(0);
+
+      expect(exitSpy).toHaveBeenCalledWith(0, null);
+    });
+  });
+
   describe('detach behavior for shellper sessions', () => {
     it('does not start disconnect timer for shellper-backed sessions', () => {
       vi.useFakeTimers();

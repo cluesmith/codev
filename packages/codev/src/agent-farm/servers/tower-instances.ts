@@ -393,13 +393,18 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
               ptySession.attachShellper(client, replayData, shellperInfo.pid, sessionId);
+              // Auto-restart is configured at the shellper level — tell PtySession
+              // to keep WebSocket clients connected when the process exits.
+              ptySession.restartOnExit = true;
             }
 
             entry.architect = session.id;
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, shellperInfo.pid,
               shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
 
-            // Clean up cache/SQLite when the shellper session exits
+            // Clean up cache/SQLite when the shellper session permanently exits
+            // (e.g., max restarts exceeded or killed). With restartOnExit, this
+            // only fires for permanent death — normal exits are suppressed by PtySession.
             if (ptySession) {
               ptySession.on('exit', (exitCode?: number, signal?: number | string | null) => {
                 const currentEntry = _deps!.getWorkspaceTerminalsEntry(resolvedPath);
