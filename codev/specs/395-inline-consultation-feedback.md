@@ -72,6 +72,7 @@ KEY_ISSUES:
 <!-- REVIEW(@architect): I don't think that's necessary. The builder can do it. We can just give it instructions to do so. We don't need to hardwire this. Just tell it to include any concerns and rebuttals for each phase at the end. -->
 
 **Porch owns all file appending.** The builder never directly edits the consultation sections.
+<!-- REVIEW(@architect): IS this the right choice? Let's discuss -->
 
 1. **After consultations complete**: Porch's `next.ts` logic (when all review files arrive and any REQUEST_CHANGES exist) programmatically appends the `## Consultation` section to the target file with extracted concerns and empty `**Rebuttal**:` placeholders
 2. **After builder writes rebuttals**: The builder writes rebuttals to the same location as today — a standalone rebuttal file. Porch then reads the rebuttal file, fills in the `**Rebuttal**` placeholders in the consultation section, and deletes the standalone rebuttal file
@@ -98,6 +99,7 @@ Based on the current porch phase:
 - `review` phase → append to `codev/reviews/${PROJECT_TITLE}.md`
 
 For `per_plan_phase` reviews, multiple consultation sections accumulate on the plan file (one per plan phase per iteration). The `[phase-name]` in the header disambiguates them.
+<!-- REVIEW(@architect): What if we put everytihing in the review file? -->
 
 ### Multi-Iteration Behavior
 
@@ -129,6 +131,7 @@ The `buildReviewContext()` function in `next.ts` should be updated to read from 
 ## Scope
 
 - Modify porch's defend phase to inline concerns + rebuttals
+<!-- REVIEW(@architect): What defend phase? I only know about build and verify phases. -->
 - Modify porch's consultation capture to extract and append key concerns
 - Keep raw review files as ephemeral session artifacts (not committed)
 - Existing specs/plans are not retroactively modified
