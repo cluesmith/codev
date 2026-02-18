@@ -69,6 +69,23 @@ Iterations that could have been prevented with better builder behavior:
 
 2. **[Pattern]**: [Another avoidable iteration pattern.]
 
+## Consultation Feedback
+
+[For each phase that had consultation, summarize every reviewer's concerns and how the builder responded. Use **Addressed** (fixed), **Rebutted** (disagreed with reasoning), or **N/A** (out of scope/moot) for each concern. If all reviewers approved with no concerns: "No concerns raised — all consultations approved."]
+
+### [Phase] Phase (Round N)
+
+#### Gemini
+- **Concern**: [Summary of concern]
+  - **Addressed**: [What was changed]
+
+#### Codex
+- **Concern**: [Summary of concern]
+  - **Rebutted**: [Why current approach is correct]
+
+#### Claude
+- No concerns raised (APPROVE)
+
 ## Lessons Learned
 
 ### What Went Well

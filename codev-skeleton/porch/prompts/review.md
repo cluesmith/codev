@@ -85,7 +85,53 @@ One paragraph summarizing what was built and why.
 
 - Recommendation for future work
 - Follow-up items (if any)
+
+## Consultation Feedback
+
+[See instructions below]
 ```
+
+### 1b. Include Consultation Feedback
+
+**IMPORTANT**: The review document MUST include a `## Consultation Feedback` section that summarizes all consultation concerns raised during every phase of the project and how the builder responded.
+
+Read the consultation output files from the project directory (`codev/projects/{project-id}-*/`). For each phase that had consultation, create a subsection organized by phase, round, and model:
+
+```markdown
+## Consultation Feedback
+
+### Specify Phase (Round 1)
+
+#### Gemini
+- **Concern**: [Summary of the concern]
+  - **Addressed**: [What was changed to resolve it]
+- **Concern**: [Another concern]
+  - **Rebutted**: [Why the current approach is correct]
+
+#### Codex
+- **Concern**: [Summary]
+  - **N/A**: [Why it's out of scope or already handled]
+
+#### Claude
+- No concerns raised (APPROVE)
+
+### Plan Phase (Round 1)
+...
+
+### Implement Phase: [phase-name] (Round 1)
+...
+```
+
+**Response types** — each concern gets exactly one:
+- **Addressed**: Builder made a change to resolve the concern
+- **Rebutted**: Builder explains why the concern doesn't apply
+- **N/A**: Concern is out of scope, already handled elsewhere, or moot
+
+**Edge cases**:
+- If all reviewers approved with no concerns across all phases: write "No concerns raised — all consultations approved"
+- For COMMENT verdicts: include their feedback (non-blocking but useful context)
+- For CONSULT_ERROR (model failure): note "Consultation failed for [model]"
+- If a phase had multiple rounds (REQUEST_CHANGES → fix → re-review), give each round its own subsection
 
 ### 2. Create Pull Request
 
