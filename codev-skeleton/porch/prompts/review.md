@@ -85,7 +85,69 @@ One paragraph summarizing what was built and why.
 
 - Recommendation for future work
 - Follow-up items (if any)
+
+## Consultation Feedback
+
+[See instructions below]
 ```
+
+### 1b. Include Consultation Feedback
+
+**IMPORTANT**: The review document MUST include a `## Consultation Feedback` section that summarizes all consultation concerns raised during every phase of the project and how the builder responded.
+
+Read the consultation output files from the project directory (`codev/projects/{project-id}-*/`). For each phase that had consultation, create a subsection organized by phase, round, and model:
+
+```markdown
+## Consultation Feedback
+
+### Specify Phase (Round 1)
+
+#### Gemini
+- **Concern**: [Summary of the concern]
+  - **Addressed**: [What was changed to resolve it]
+- **Concern**: [Another concern]
+  - **Rebutted**: [Why the current approach is correct]
+
+#### Codex
+- **Concern**: [Summary]
+  - **N/A**: [Why it's out of scope or already handled]
+
+#### Claude
+- No concerns raised (APPROVE)
+
+### Plan Phase (Round 1)
+...
+
+### Implement Phase: [phase-name] (Round 1)
+...
+```
+
+**Response types** — each concern gets exactly one:
+- **Addressed**: Builder made a change to resolve the concern
+- **Rebutted**: Builder explains why the concern doesn't apply
+- **N/A**: Concern is out of scope, already handled elsewhere, or moot
+
+**Edge cases**:
+- If all reviewers approved with no concerns across all phases: write "No concerns raised — all consultations approved"
+- For COMMENT verdicts: include their feedback (non-blocking but useful context)
+- For CONSULT_ERROR (model failure): note "Consultation failed for [model]"
+- If a phase had multiple rounds (REQUEST_CHANGES → fix → re-review), give each round its own subsection
+
+### 1c. Update Architecture and Lessons Learned Documentation
+
+**MANDATORY**: The review document MUST include `## Architecture Updates` and `## Lessons Learned Updates` sections. Porch will block advancement if these are missing.
+
+**Architecture Updates** (`codev/resources/arch.md`):
+1. Read the current `codev/resources/arch.md`
+2. Determine if this project introduced architectural changes worth documenting (new subsystems, data flows, design decisions, invariants, file locations)
+3. If yes: make the updates to arch.md and describe what you changed in the `## Architecture Updates` section of the review
+4. If no: write "No architecture updates needed" in the section with a brief explanation (e.g., "This was a template-only change with no new subsystems or data flows")
+
+**Lessons Learned Updates** (`codev/resources/lessons-learned.md`):
+1. Read the current `codev/resources/lessons-learned.md`
+2. Determine if this project produced generalizable lessons (patterns, anti-patterns, debugging insights, process improvements)
+3. If yes: add entries to lessons-learned.md and describe what you added in the `## Lessons Learned Updates` section of the review
+4. If no: write "No lessons learned updates needed" in the section with a brief explanation (e.g., "Straightforward implementation with no novel insights beyond existing entries")
 
 ### 2. Create Pull Request
 

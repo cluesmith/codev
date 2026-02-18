@@ -57,23 +57,22 @@
 - [Improvement area 1]
 - [Improvement area 2]
 
-## Multi-Agent Consultation
+## Consultation Feedback
 
-**Models Consulted**: GPT-5, Gemini Pro
-**Date**: [YYYY-MM-DD]
+[For each phase that had consultation, summarize every reviewer's concerns and how the builder responded. Use **Addressed** (fixed), **Rebutted** (disagreed with reasoning), or **N/A** (out of scope/moot) for each concern. If all reviewers approved with no concerns: "No concerns raised — all consultations approved."]
 
-### Key Feedback
-- [Feedback point 1 from consultation]
-- [Feedback point 2 from consultation]
-- [Feedback point 3 from consultation]
+### [Phase] Phase (Round N)
 
-### Issues Identified
-- [Issue 1 found by agents]
-- [Issue 2 found by agents]
+#### Gemini
+- **Concern**: [Summary of concern]
+  - **Addressed**: [What was changed]
 
-### Recommendations
-- [Recommendation 1]
-- [Recommendation 2]
+#### Codex
+- **Concern**: [Summary of concern]
+  - **Rebutted**: [Why current approach is correct]
+
+#### Claude
+- No concerns raised (APPROVE)
 
 ## TICK Protocol Feedback
 - **Autonomous execution**: [Worked well / Issues encountered]

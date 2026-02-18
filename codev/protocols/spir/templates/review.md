@@ -250,6 +250,37 @@ Issues that the builder should have caught without needing reviewer feedback:
 1. [Pattern the builder missed — describe the anti-pattern and the fix]
 2. [Pattern the builder missed — describe the anti-pattern and the fix]
 
+## Consultation Feedback
+
+[For each phase that had consultation, summarize every reviewer's concerns and how the builder responded. Use **Addressed** (fixed), **Rebutted** (disagreed with reasoning), or **N/A** (out of scope/moot) for each concern. If all reviewers approved with no concerns: "No concerns raised — all consultations approved."]
+
+### [Phase] Phase (Round N)
+
+#### Gemini
+- **Concern**: [Summary of concern]
+  - **Addressed**: [What was changed]
+
+#### Codex
+- **Concern**: [Summary of concern]
+  - **Rebutted**: [Why current approach is correct]
+
+#### Claude
+- No concerns raised (APPROVE)
+
+## Architecture Updates
+
+[What was added/changed in `codev/resources/arch.md`, or why no changes were needed.]
+
+- Updated: [section name] — [what was added/changed]
+- Or: "No architecture updates needed — [brief reason]"
+
+## Lessons Learned Updates
+
+[What was added/changed in `codev/resources/lessons-learned.md`, or why no changes were needed.]
+
+- Added: [category] — [lesson summary]
+- Or: "No lessons learned updates needed — [brief reason]"
+
 ## Sign-off
 - [ ] Technical Lead Review
 - [ ] Team Retrospective Completed

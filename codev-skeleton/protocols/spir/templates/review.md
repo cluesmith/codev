@@ -69,6 +69,23 @@ Iterations that could have been prevented with better builder behavior:
 
 2. **[Pattern]**: [Another avoidable iteration pattern.]
 
+## Consultation Feedback
+
+[For each phase that had consultation, summarize every reviewer's concerns and how the builder responded. Use **Addressed** (fixed), **Rebutted** (disagreed with reasoning), or **N/A** (out of scope/moot) for each concern. If all reviewers approved with no concerns: "No concerns raised — all consultations approved."]
+
+### [Phase] Phase (Round N)
+
+#### Gemini
+- **Concern**: [Summary of concern]
+  - **Addressed**: [What was changed]
+
+#### Codex
+- **Concern**: [Summary of concern]
+  - **Rebutted**: [Why current approach is correct]
+
+#### Claude
+- No concerns raised (APPROVE)
+
 ## Lessons Learned
 
 ### What Went Well
@@ -79,6 +96,20 @@ Iterations that could have been prevented with better builder behavior:
 
 ### What Would Be Done Differently
 - [Actionable improvement for future builders]
+
+## Architecture Updates
+
+[What was added/changed in `codev/resources/arch.md`, or why no changes were needed.]
+
+- Updated: [section name] — [what was added/changed]
+- Or: "No architecture updates needed — [brief reason]"
+
+## Lessons Learned Updates
+
+[What was added/changed in `codev/resources/lessons-learned.md`, or why no changes were needed.]
+
+- Added: [category] — [lesson summary]
+- Or: "No lessons learned updates needed — [brief reason]"
 
 ## Technical Debt
 

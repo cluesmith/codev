@@ -29,6 +29,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Architecture
 
+- [From 395] Prompt-based instructions beat programmatic file manipulation for flexible document generation — the builder already has context and can write natural responses, while code would need fragile parsing and placeholder logic
+- [From 395] Keep specs and plans clean as forward-looking documents — append review history (consultation feedback, lessons learned) to review files, not to the documents being reviewed
 - [From 0031] SQLite with WAL mode handles concurrency better than JSON files for shared state
 - [From 0039-TICK-005] Prefer CLI commands over AI agents for well-defined operations (discoverability, arg parsing, shell completion)
 - [From 0034] Two-pass rendering needed for format-aware processing (e.g., table alignment)
@@ -77,5 +79,5 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ---
 
-*Last updated: 2026-02-13 (CMAP value analysis)*
+*Last updated: 2026-02-18 (Spec 395 — inline consultation feedback)*
 *Source: codev/reviews/*
