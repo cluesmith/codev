@@ -2,29 +2,107 @@
 
 ## Problem
 
-`codev/resources/arch.md` and `codev/resources/lessons-learned.md` are out of date. Many specs, plans, and reviews contain architectural decisions and lessons that were never extracted into these central documents.
+`codev/resources/arch.md` and `codev/resources/lessons-learned.md` are incomplete. While arch.md is substantial (2346 lines), it was largely written from the perspective of a few major features and misses many smaller architectural decisions scattered across 115+ specs, 90+ plans, and 88+ reviews. Meanwhile, lessons-learned.md references only ~25 source documents out of 88+ reviews.
+
+Key gaps:
+- **arch.md**: Missing coverage of many specs (especially 0003-0007, 0010-0014, 0017, 0020-0021, 0024, 0028, 0030, 0035-0038, 0040, 0049, 0063-0064, 0066-0072, 0082, 0089, 0093, 0119, 0123-0124, 0325, 0350, 0364, 0376, 0386, 0395, 0399, 0403). Architectural decisions from these features were never documented centrally.
+- **lessons-learned.md**: Only 25 source references vs 88+ review documents. Most reviews have unextracted lessons.
 
 ## Solution
 
-Sweep through all existing spec, plan, and review documents to bring both files fully up to date using a two-pass approach:
+A two-pass approach to bring both documents fully up to date.
 
 ### Pass 1: Incremental Extraction
-Go through every document in `codev/specs/`, `codev/plans/`, and `codev/reviews/` chronologically. For each:
-- Extract architectural decisions, patterns, and component documentation → update arch.md
-- Extract lessons learned, debugging insights, and process improvements → update lessons-learned.md
-- Append incrementally — don't reorganize yet, just capture everything
+
+Process every document in `codev/specs/`, `codev/plans/`, and `codev/reviews/` in chronological order (by spec number). For each document:
+
+**For arch.md, extract:**
+- New components, modules, or subsystems introduced
+- Architectural patterns adopted (and why)
+- Technology choices and their rationale
+- API designs and interface contracts
+- Data flow changes
+- Configuration or infrastructure changes
+- Security model additions
+- Key file references not already documented
+
+**For lessons-learned.md, extract:**
+- Debugging insights and root cause analyses
+- Process improvements and workflow refinements
+- Testing strategies that worked (or didn't)
+- Patterns that should be repeated or avoided
+- Performance insights
+- Security lessons
+- UI/UX discoveries
+- Multi-agent consultation patterns
+- Common failure modes and their solutions
+
+**Extraction rules:**
+- Read each source document fully — depth matters, don't skim
+- Append new content to the appropriate section in the target doc
+- Use `[From XXXX]` attribution format in lessons-learned.md
+- Use `(Spec XXXX)` attribution format in arch.md section headers/descriptions
+- Skip content already adequately captured in the target documents
+- Don't reorganize or deduplicate during this pass — just capture everything
+- Process specs first, then plans (for additional implementation detail), then reviews (for lessons and retrospective insight)
+
+**Processing order within each document type:**
+1. `codev/specs/` — chronological by number
+2. `codev/plans/` — chronological by number
+3. `codev/reviews/` — chronological by number
 
 ### Pass 2: Refinement (Iterative)
-Once all documents have been processed:
-- Remove duplicate sections across each document
-- Align inconsistencies (terminology, formatting, structure)
-- Consolidate related entries
-- Iterate until no more meaningful edits remain and both documents are as refined as possible
+
+Once all documents have been processed, refine both target documents:
+
+**Deduplication:**
+- Identify and merge duplicate entries that say the same thing in different words
+- Keep the most complete/accurate version of each duplicate
+- Preserve all unique attributions even when merging content
+
+**Consistency alignment:**
+- Standardize terminology (e.g., "Builder" not "builder agent", "Shellper" not "shepherd")
+- Align formatting (heading levels, list styles, code block usage)
+- Ensure section organization follows the existing structure of each document
+- Fix any cross-references broken by merges
+
+**Consolidation:**
+- Group related entries that ended up in different sections during Pass 1
+- Merge entries about the same component/topic into cohesive paragraphs
+- Remove sections that are now empty after dedup
+
+**Iteration:**
+- Re-read the refined document end-to-end
+- Make additional passes until no more meaningful edits remain
+- "Meaningful" = changes that improve clarity, remove redundancy, or fix inconsistency
+
+### Scope boundaries
+
+**In scope:**
+- All files in `codev/specs/`, `codev/plans/`, `codev/reviews/`
+- Updates to `codev/resources/arch.md` and `codev/resources/lessons-learned.md`
+
+**Out of scope:**
+- Protocol documents (`codev/protocols/`)
+- CLAUDE.md / AGENTS.md updates
+- Code changes
+- New documentation files
 
 ## Notes
 
 - This is a one-off catch-up project — going forward, Spec 395 ensures every SPIR review updates these docs
 - Future consideration: build this sweep into the MAINTAIN protocol for periodic reconciliation
+- The builder should read each source document fully, not skim — depth matters here
+- No code is written in this project — the deliverables are purely documentation updates
+
+## Source Document Inventory
+
+| Directory | Count | Description |
+|-----------|-------|-------------|
+| `codev/specs/` | ~115 | Feature specifications |
+| `codev/plans/` | ~90 | Implementation plans |
+| `codev/reviews/` | ~88 | Post-implementation reviews |
+| **Total** | **~293** | Source documents to process |
 
 ## Acceptance Criteria
 
@@ -34,3 +112,4 @@ Once all documents have been processed:
 - [ ] No duplicate entries in either document
 - [ ] Both documents are internally consistent (terminology, formatting)
 - [ ] Iterative refinement complete — no more meaningful edits possible
+- [ ] Attribution is preserved for all entries (spec numbers in arch.md, `[From XXXX]` in lessons-learned)
