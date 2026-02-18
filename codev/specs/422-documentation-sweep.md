@@ -39,17 +39,25 @@ Process every document in `codev/specs/`, `codev/plans/`, and `codev/reviews/` i
 
 **Extraction rules:**
 - Read each source document fully — depth matters, don't skim
-- Append new content to the appropriate section in the target doc
+- Append new content to the appropriate section in the target doc; use existing sections where possible, create new subsections only when no appropriate section exists
 - Use `[From XXXX]` attribution format in lessons-learned.md
 - Use `(Spec XXXX)` attribution format in arch.md section headers/descriptions
-- Skip content already adequately captured in the target documents
+- "Already adequately captured" means the same point with the same attribution is already present — if a different spec adds a nuance or different perspective on the same topic, extract it
+- Not every document will yield extractable content — many specs (especially small bug fixes or minor UI tweaks) may have nothing new for either target doc. That's expected. Don't force additions where none are warranted
 - Don't reorganize or deduplicate during this pass — just capture everything
-- Process specs first, then plans (for additional implementation detail), then reviews (for lessons and retrospective insight)
 
-**Processing order within each document type:**
-1. `codev/specs/` — chronological by number
-2. `codev/plans/` — chronological by number
-3. `codev/reviews/` — chronological by number
+**Processing order:**
+Process all document types for each spec number before moving to the next number. For spec N, read:
+1. `codev/specs/N-*.md`
+2. `codev/plans/N-*.md` (if exists)
+3. `codev/reviews/N-*.md` (if exists)
+
+Then move to spec N+1. This ensures full context for each feature before moving on.
+
+**Batching and checkpointing:**
+- Process documents in batches of ~20 spec numbers at a time
+- Commit intermediate results after each batch with message format: `[Spec 422] Pass 1: extract batch N (specs XXXX-YYYY)`
+- This prevents context loss and creates recovery points
 
 ### Pass 2: Refinement (Iterative)
 
@@ -73,7 +81,7 @@ Once all documents have been processed, refine both target documents:
 
 **Iteration:**
 - Re-read the refined document end-to-end
-- Make additional passes until no more meaningful edits remain
+- Maximum 3 refinement passes — stop earlier if a pass produces no changes
 - "Meaningful" = changes that improve clarity, remove redundancy, or fix inconsistency
 
 ### Scope boundaries
@@ -111,5 +119,22 @@ Once all documents have been processed, refine both target documents:
 - [ ] lessons-learned.md captures all generalizable wisdom from reviews
 - [ ] No duplicate entries in either document
 - [ ] Both documents are internally consistent (terminology, formatting)
-- [ ] Iterative refinement complete — no more meaningful edits possible
+- [ ] Refinement passes complete (max 3, or earlier if no changes produced)
 - [ ] Attribution is preserved for all entries (spec numbers in arch.md, `[From XXXX]` in lessons-learned)
+
+## Consultation Log
+
+### Iteration 1 (3-way: Gemini, Codex, Claude)
+
+**Gemini**: APPROVE. Notes that batching (20-50 docs at a time) will be needed to avoid context window exhaustion. No blocking issues.
+
+**Codex**: REQUEST_CHANGES. Key issues:
+- Ordering conflict between "chronological" and "specs→plans→reviews" — resolved by switching to per-feature ordering (all doc types for spec N before moving to N+1)
+- Open-ended refinement stop condition — resolved by capping at 3 passes
+- Missing verification/processing criteria — addressed with batching commits that serve as audit trail
+
+**Claude**: COMMENT. Key issues:
+- No batching/checkpointing strategy — resolved with batch-of-20 approach and intermediate commits
+- No tracking mechanism for completeness — batch commits with spec ranges serve as audit trail
+- Unbounded refinement — capped at 3 passes
+- Not every doc yields content — added explicit note about zero-yield docs being expected
