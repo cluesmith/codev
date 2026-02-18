@@ -31,7 +31,7 @@ For debugging common issues, start here:
 | **"Workspace won't activate"** | `tower-instances.ts` → `launchInstance()` | Workspace state in global.db, architect command parsing |
 | **"Terminal not showing output"** | `tower-websocket.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
 | **"Terminal not persistent"** | `tower-instances.ts` → `launchInstance()` | Check shellper spawn succeeded, dashboard shows `persistent` flag |
-| **"Project shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `workspaceTerminals` Map has entry |
+| **"Workspace shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `workspaceTerminals` Map has entry |
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shellper session, role injection |
 | **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `af send architect` directly at gate transitions (Spec 0108) |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
@@ -426,8 +426,8 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────┐    ┌─────────────────────┐                         │
-│  │   Project A         │    │   Project B         │                         │
-│  │   /project/enc(A)/  │    │   /project/enc(B)/  │                         │
+│  │   Workspace A       │    │   Workspace B       │                         │
+│  │   /workspace/enc(A)/│    │   /workspace/enc(B)/│                         │
 │  │                     │    │                     │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Architect     │  │    │  │ Architect     │  │                         │
@@ -441,7 +441,7 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    workspaceTerminals Map (in-memory)                  │    │
-│  │  Key: projectPath → { architect?: terminalId,                        │    │
+│  │  Key: workspacePath → { architect?: terminalId,                        │    │
 │  │                       builders: Map<builderId, terminalId>,          │    │
 │  │                       shells: Map<shellId, terminalId> }             │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
@@ -482,7 +482,7 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 **These MUST remain true - violating them will break the system:**
 
 1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shellper-backed)
-2. **workspaceTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which project
+2. **workspaceTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which workspace
 3. **SQLite (global.db) tracks terminal sessions and workspace metadata**: Shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`) and workspace associations persist across restarts
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/workspace/<encoded>/` routes
 5. **WebSocket paths include workspace context**: Format is `/workspace/<base64url>/ws/terminal/<id>`
@@ -536,7 +536,7 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `POST` | `/api/workspaces/:enc/deactivate` | Deactivate workspace (kills all terminals) |
 | `GET` | `/api/status` | Legacy: Get all instances (backward compat) |
 | `POST` | `/api/launch` | Legacy: Launch instance (backward compat) |
-| `POST` | `/api/stop` | Stop instance by projectPath or basePort |
+| `POST` | `/api/stop` | Stop instance by workspacePath |
 | `GET` | `/api/browse?path=` | Directory autocomplete for project selection |
 | `POST` | `/api/create` | Create new project (codev init + activate) |
 | `GET` | `/api/events` | SSE stream for push notifications |
