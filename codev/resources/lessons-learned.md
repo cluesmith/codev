@@ -66,10 +66,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0395] Keep specs and plans clean as forward-looking documents — append review history (consultation feedback, lessons learned) to review files, not to the documents being reviewed
 - [From 0031] SQLite with WAL mode handles concurrency better than JSON files for shared state
 - [From 0039-TICK-005] Prefer CLI commands over AI agents for well-defined operations (discoverability, arg parsing, shell completion)
-- [From 0034] Two-pass rendering needed for format-aware processing (e.g., table alignment)
-- [From 0048] Three-container architecture (viewMode, editor, preview) provides clean separation for multi-mode UIs
 - [From 0039] Embedding templates in npm packages ensures offline capability and version consistency
-- [From 0060] When modularizing large files, group by concern (CSS together, JS together) not by feature
 - [From 0085] PTY sessions need full locale environment (LANG=en_US.UTF-8) — terminal multiplexers use client locale to decide Unicode vs ASCII rendering
 - [From 0008] Configuration hierarchy (CLI args > config file > defaults) provides flexibility without complexity. Array-form commands in config avoid shell-escaping issues that plague string-form commands.
 - [From 0008] Global state (port registry) needs file locking even for "single user" tools. Multiple concurrent CLI invocations can race on the same registry file. Use advisory locks with stale lock detection (30-second timeout).
@@ -93,12 +90,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0045] Modular parser extraction (standalone TypeScript module) enables both proper unit testing and reuse. The projectlist-parser.ts module allowed 31 comprehensive tests covering edge cases.
 - [From 0053] Use dedicated API endpoints for different content types (e.g., `/api/image` vs `/file`) rather than overloading a single endpoint. Keeps MIME type handling and binary serving clean.
 - [From 0059] Timezone bugs are common in time-based features -- the daily summary initially used UTC instead of local time for "today" boundaries.
-- [From 0060] When extracting a monolithic file into modules, maintain function references carefully -- extracted functions must be globally accessible if called from inline event handlers. `sessionStorage` (not `localStorage`) is appropriate for state that should survive a page reload but not persist across sessions (used for hot-reload state preservation).
-- [From 0060] CSS variables should be extracted first when modularizing styles, as they define the cascade that other files depend on.
-- [From 0060] Actual implementation time was ~14 minutes vs. the 7-hour plan estimate (30x faster). Plans routinely overestimate modularization/extraction tasks when the code structure is already well-organized.
 - [From 0062] When adding reverse proxy functionality, file-based features (like file browser tabs) may not work through the proxy without additional routing. Document known limitations explicitly.
 - [From 0062] Derive port numbers from configuration, not hardcoded values. Codex caught a port derivation bug during consultation.
-- [From 0066] The VSCode Terminal API cannot capture stdout -- this is a fundamental platform limitation, not a bug. When a core assumption of an approach turns out to be wrong, abandon it early rather than building workarounds.
 - [From 0068] "Tethered Satellite" hybrid architecture (cloud control plane + local execution) addresses security (code stays local), cost (heavy compute on user hardware), offline capability, and enterprise self-hosting requirements simultaneously.
 - [From 0068] YAML frontmatter + Markdown status files tracked in git provide a simpler, more auditable workflow state mechanism than databases or workflow engines (Temporal, Inngest). Git provides history, blame, and portability with zero infrastructure.
 - [From 0081] The EventSource API does not support custom headers. For authenticated SSE, use `fetch()` with `ReadableStream` instead.
@@ -120,22 +113,14 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0097] TCP proxy test pattern for reconnection testing: creating a transparent TCP proxy between client and server to simulate connection drops is effective without needing to control the remote server process.
 - [From 0098] When removing infrastructure (port registry, dead modules), make database migrations no-ops rather than deleting them. This preserves migration version numbering for existing installations. Hardcoding compatibility values (e.g., `port: 0`) preserves API shape while the field is still in the interface.
 - [From 0098] Project discovery after infrastructure removal: when `loadPortAllocations()` was removed, project discovery needed a new data source. Combining `terminal_sessions` table (persistent) with `projectTerminals` in-memory cache (current session) covers both sources.
-- [From 0100] Dual-map dedup pattern for gate notifications: `Map<key, timestamp>` keyed by `projectPath:builderId:gateName` for dedup, plus `Map<projectPath, Set<key>>` as a project index for efficient cleanup when gates resolve.
-- [From 0101] xterm.js `registerDecoration` with `IMarker` provides persistent overlays that survive scroll and re-render. Unlike `ILinkProvider.decorations` (hover-only), `registerDecoration` creates always-visible visual indicators. The dual approach (ILink.decorations for hover + registerDecoration for persistent underline) works well for file path links.
 - [From 0102] 3-tier resolution chain pattern (explicit arg > CWD detection > filesystem scan > error) provides good UX for CLI tools that operate in context-specific directories. Extract the resolution logic as a separate testable function with parameter injection rather than keeping it in a closure.
 - [From 0103] When integrating an SDK that replaces CLI subprocess delegation, add it as a hard dependency (not optional) if it is essential for functionality. Avoids dynamic import complexity and makes dependency explicit.
 - [From 0103] `CLAUDECODE` env var removal for nesting: when running Claude via SDK inside a Claude Code Builder context, iterate over `process.env` entries and exclude nesting-guard environment variables rather than using spread-and-delete (since env values can be `undefined`).
 - [From 0105] TowerContext pattern for god-object decomposition: passing shared mutable state via a context object eliminates circular dependencies. Every module takes `ctx: TowerContext` as first parameter, creating clean one-way dependency flow.
 - [From 0105] Extraction order matters in decomposition: start with leaf modules (types, utils) and progress to more coupled ones (routes, websocket). This minimizes merge conflicts and keeps each phase independently testable.
 - [From 0105] Module boundaries should follow data flow. Tower modules follow the request lifecycle (routes -> terminals -> instances -> websocket). Spawn modules follow the concern axis (roles/prompts vs git/sessions).
-- [From 0106] Bulk sed replacement with ordered patterns (most specific first) cleanly handles hundreds of individual replacements in mechanical renames. `git mv` preserves file history.
-- [From 0106] SQLite table-rebuild migration pattern (CREATE new, INSERT from old, DROP old, RENAME new) is proven and reliable for column renames. Also update stored values (e.g., socket paths) via `REPLACE()` in the same migration.
 - [From 0108] Fire-and-forget notification via `execFile` (no shell, callback logs errors but never throws) is the right pattern for non-critical side-channel communication from a protocol orchestrator. It is reliable, immune to shell injection, and cannot crash the caller.
-- [From 0110] Tail-match resolution (`0109` -> `builder-spir-109`) preserves backward compatibility for all existing scripts and muscle memory while adopting a new naming convention.
-- [From 0110] Separating sender provenance (`fromWorkspace`) from target resolution context (`workspace`) is necessary for cross-project messaging -- the broadcast's `from.project` must reflect the sender, not the destination.
-- [From 0112] Database migration v9 brings cumulative migration complexity. The CREATE-INSERT-DROP pattern works but future migration consolidation may be warranted.
 - [From 0115] Using `better-sqlite3` (synchronous, already a dependency) for metrics avoids async complexity and delivers sub-millisecond writes. Good fit for best-effort telemetry that must never block the primary operation.
-- [From 0115] Static pricing constants for Gemini/Codex will need manual updates when pricing changes. Future enhancement: auto-fetch from LiteLLM community pricing JSON.
 - [From 0118] Reusing `ShellperClient` for terminal attach (rather than raw `net.createConnection`) eliminates duplicated protocol handling -- the client already handles framing, handshake, and reconnection logic.
 - [From 0118] Pre-HELLO frame gating is a necessary security measure for Unix socket servers accepting multiple clients -- unauthenticated sockets should not be able to send frames to the PTY.
 - [From 0121] Rebuttal-based advancement eliminates wasted API calls from re-consultations that never change the outcome. The rebuttal file is proof the Builder engaged with feedback -- it may contain acknowledgment, changes made, or reasoned disagreement. One consultation round then advance via approval or rebuttal.
@@ -148,12 +133,10 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0127] `execSync` in HTTP request handlers blocks the entire Node.js event loop, freezing terminal WebSocket traffic and dashboard polling. Even "cold path" calls that block for 30-60s (like `codev init`) must be async in a server with concurrent connections. `util.promisify(child_process.exec)` is a mechanical drop-in replacement.
 - [From 0325] Protocol-owned prompt templates (`codev/protocols/<protocol>/consult-types/`) are better than shared templates because different protocols may want different review criteria. The resolution path (`--protocol` narrows lookup to protocol directory) is explicit and predictable.
 - [From 0325] Context auto-detection (Builder vs. architect) based on cwd containing `/.builders/` eliminates a class of errors where users forget to specify which worktree to review. The `--issue` flag overrides auto-detection for architect-initiated reviews.
-- [From 0350] Self-contained components with no props (like TipBanner) that read localStorage directly are trivial to integrate -- a single-line JSX insertion in the parent component.
 - [From 0399] Tower-resident scheduling beats system cron for workspace tasks: system cron lacks the user's environment (no PATH, no tokens), requires explicit sync on every config change, and keeps firing when Tower is down. Tower's scheduler inherits the full environment, auto-detects YAML changes within 60 seconds, and stops naturally when Tower stops.
 - [From 0399] For condition evaluation in workspace-owned config files, `new Function('output', ...)` is acceptable since the trust level is identical to shell commands in the same YAML file. Document the tradeoff rather than over-engineering a sandbox.
 - [From 0403] Idle detection (timestamp + timer) is simpler and more universal than submit-detection (Enter key parsing) for typing awareness. Enter detection has too many edge cases: Enter in vim/nano means newline, multi-line paste contains `\r`, and you need timeout fallbacks anyway. The simpler approach works with any terminal application.
 - [From 0403] Per-session message buffering with configurable idle threshold (3s) and max buffer age (60s) prevents message injection during typing while ensuring delivery within bounded time. The `interrupt` option provides an escape hatch for urgent messages.
-- [From 0364] xterm.js takes ownership of the `containerRef` DOM element -- React cannot render siblings inside it. Floating controls must be placed in a parent wrapper div instead.
 - [From 0386] Three-tier documentation audit structure (public-facing, developer reference, skeleton templates) with a "historical release notes are read-only" carve-out prevents over-zealous cleanup of historically accurate content.
 - [From 0376] Archive `status.yaml` files before `af cleanup` -- most projects' porch state files are deleted after PR merge, losing valuable timing data for future development analyses.
 
@@ -260,11 +243,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0096] Always run the actual coverage tool to get a baseline before setting thresholds. Assumptions about coverage levels are often wrong -- the spec assumed 70% lines would be conservative, but actual baseline was 62.31%.
 - [From 0096] CLI integration tests should run `node dist/codev.js` (built artifact) rather than importing source directly. This tests the real CLI entry point. Tarball packaging integrity is separately verified by `verify-install.mjs`.
 - [From 0097] MockTunnelServer pattern: creating a mock server in early phases proves invaluable for fast, deterministic testing throughout later phases without external dependencies.
-- [From 0100] TypeScript parameter contravariance with literal union types: when defining callback types like `LogFn`, the parameter types must exactly match the caller's literal union (e.g., `'INFO' | 'ERROR' | 'WARN'`), not a broader `string` type.
-- [From 0100] Vitest mock constructors: when the code under test uses `new ClassName()`, the mock must be a real class (not an arrow function returning an object). Use `class MockClassName` in the mock factory.
-- [From 0101] Cross-platform modifier key detection in tests: `navigator.platform` returns `'MacIntel'` in Node.js on macOS. Tests should pass both `metaKey: true, ctrlKey: true` so the activate callback fires regardless of platform.
 - [From 0103] Research SDK APIs before writing specs and plans. The spec assumed several options (`persistSession`, `effort`, `tool_use_summary`) that do not exist in the Claude Agent SDK. Early research during planning prevents implementation rework.
-- [From 0103] Vitest `vi.mock` factories create mock instances that persist across `vi.resetModules()` calls. Use `mockClear()` in `beforeEach` to reset call counts between tests.
 - [From 0105] `return await` is critical in handler wrappers: when a function delegates to another async function inside try/catch, `return await fn()` is required, not `return fn()`. Without `await`, errors bypass the catch block.
 - [From 0105] `fatal()` mock behavior differs from production: in production, `fatal()` calls `process.exit()` (not catchable). The mock throws an Error (catchable by try/catch). Tests for try/catch-wrapped code must assert `fatal` was called rather than using `rejects.toThrow`.
 - [From 0109] Export test-relevant constants (like heartbeat intervals) from the module under test from the start, rather than noting it as a later-phase detail.
@@ -276,12 +255,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0124] Complementary test layers look like overlap from the outside. `tower-instances.test.ts` and `tower-routes.test.ts` seemed duplicative until the audit showed they test different layers (service vs HTTP dispatch). Always audit actual file contents before removing "duplicates."
 - [From 0124] Type-check tests have zero value in TypeScript. Tests that only assign values to typed variables and assert the assignment are testing the compiler, not the code.
 - [From 0124] "When in doubt, keep the test" is the right default for consolidation. It is better to remove fewer tests with confidence than to hit a numeric target by removing borderline tests.
-- [From 0122] `vi.clearAllMocks()` does not reset implementations set via `mockImplementation()` in Vitest. Use explicit `mockReset()` when you need to clear both call history and implementation.
 - [From 0122] Reconciliation logic may skip temp/test paths (like /tmp and /var/folders). E2E tests for reconnection need workspace paths outside excluded directories (e.g., under `~/.agent-farm/test-workspaces/`).
-- [From 0126] Vitest 4 mock patterns: `vi.fn().mockImplementation(...)` does not work as a constructor. Use `class` syntax for mocking classes like OverviewCache.
-- [From 0350] jsdom test environments do not provide a full localStorage implementation. Dashboard tests using localStorage need a manual mock. Document this pattern for future dashboard tests.
 - [From 0324] Node.js async EPIPE is dangerous for daemon processes -- when a writable stream connects to a broken pipe, Node.js delivers EPIPE as an unhandled `'error'` event. Always add `stream.on('error', () => {})` handlers on process stdio streams for long-lived detached processes.
-- [From 0399] esbuild parses `*/N` in JSDoc comments as closing the comment block, causing build failures. Use line comments instead of JSDoc in files containing cron expression patterns.
 
 ## UI/UX
 
@@ -297,7 +272,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0011] HTML-escape all user-derived content injected into templates (project names, file paths) to prevent XSS.
 - [From 0019] Don't rely solely on color for status indicators -- add shape differences (diamond for blocked), pulse animations, and tooltips for accessibility. `prefers-reduced-motion` media query should be included for animation-heavy UIs.
 - [From 0019] `role="status"` on elements that update every polling cycle causes screen reader chatter. Use `role="img"` with descriptive `aria-label` instead for status dots.
-- [From 0030] Prism.js markdown highlighting inserts actual newline characters in output strings (not just block elements), breaking line-number synchronization. A custom regex-based "styled source" approach that keeps syntax visible but muted preserves 1:1 line mapping.
 - [From 0029] Web browsers don't provide native directory pickers that return server-accessible absolute paths. For server-side path input, use a text input field rather than attempting `<input webkitdirectory>`.
 - [From 0037] Tab overflow detection needs both initial check and resize handler -- use `scrollWidth > clientWidth` comparison with debounced resize handler; also update count on tab add/remove
 - [From 0034] Table detection using header+separator pattern (header line with pipes, followed by separator row with dashes) avoids false positives on prose containing pipe characters
@@ -305,14 +279,10 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0050] Click event propagation: when moving click handlers from parent to child elements, use `event.stopPropagation()` to prevent events from bubbling to the parent.
 - [From 0050] UX consistency: if you remove click behavior from an element, also remove visual indicators (cursor, hover effect). Users expect pointer + hover = clickable.
 - [From 0048] Conditional CDN loading (via `document.write` inside `if` blocks) cleanly avoids loading libraries for file types that don't need them. Percentage-based scroll preservation is "good enough" -- perfect scroll mapping is unnecessary.
-- [From 0092] WebLinksAddon requires URL/file disambiguation. The addon's default behavior handles URLs, but file paths need a `looksLikeFilePath()` heuristic to avoid false positives (e.g., `example.com` vs `example.ts`).
-- [From 0094] The `@media (pointer: coarse)` rule for touch targets can conflict with mobile flex overrides. Document the interaction explicitly when both media queries target the same elements.
 - [From 0094] Semantic CSS classes (`.new-shell-row`) are more robust than targeting inline styles via CSS attribute selectors (`[style*="border-top"]`).
 - [From 0099] Differentiate error types in CLI commands. CLI commands that call APIs must distinguish connection-level failures (server not running) from application-level errors (server returned an error) and show different user-facing messages.
 - [From 0126] Building the overview endpoint to work in degraded mode (showing builders but empty PR/backlog sections with error messages when `gh` is unavailable) is a good default pattern for features that depend on external services.
-- [From 0350] Porch project naming (e.g., `350-0350-tip-of-the-day`) conflicts with the existing `codev/specs/` and `codev/plans/` naming convention that uses zero-padded IDs. This inconsistency required symlink workarounds.
-- [From 0364] Use `onPointerDown` with `preventDefault()` and `tabIndex={-1}` to prevent focus stealing from terminal widgets -- this pattern (from VirtualKeyboard.tsx) translates directly to any floating controls rendered alongside xterm.js terminals.
-- [From 0364] When adding floating controls next to xterm terminals, account for the virtual scrollbar width (~14px) to prevent overlap -- use `right: 20px` instead of `right: 8px`.
+- [From 0364] Use `onPointerDown` with `preventDefault()` and `tabIndex={-1}` to prevent focus stealing from terminal widgets -- this pattern translates directly to any floating controls rendered alongside interactive widgets.
 
 ## Documentation
 
@@ -332,10 +302,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From 0054] Each reviewer catches different aspects - Claude: spec compliance, Gemini: API correctness, Codex: practical issues
 - [From 0061-002] Security vulnerabilities (XSS) often identified in 3-way review that weren't in initial implementation
-- [From CMAP analysis] Codex catches security edge cases (SSRF bypass, path traversal, file permissions) that other reviewers miss; blocked in 38 rounds across Jan 30-Feb 13 window
 - [From CMAP analysis] CMAP misses proxy/deployment topology bugs and React lifecycle/WebSocket timing issues — add "works behind reverse proxy?" to review checklist for HTTP specs
-- [From CMAP analysis] When 2/3 approve for 3+ consecutive rounds, auto-advance with documented dissent — prevents 7-10 iteration loops (seen in 0097 Phase 7, 0101 Phase 4)
-- [From CMAP analysis] Full analysis with ROI data: `codev/resources/cmap-value-analysis-2026-02.md`
+- [From CMAP analysis] When 2/3 approve for 3+ consecutive rounds, auto-advance with documented dissent — prevents 7-10 iteration loops
 - [From 0001] Multi-agent consultation must include FINAL approval on the FIXED version, not just the initial review. Presenting fixes directly to the user without re-consulting creates a gap where new issues can be introduced.
 - [From 0005] Different models catch different categories of issues: GPT-5 found shell injection and input validation gaps; Gemini found race conditions and CORS misconfiguration. Using both provides broader coverage than either alone.
 - [From 0012] For small, well-defined changes (like adding a single tmux option at 6 locations), end-only consultation is sufficient. Both reviewers approved without changes, confirming that the task scope matches the consultation effort.
@@ -351,25 +319,16 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0054] When porting between languages/ecosystems, always check the actual package structure. The plan mentioned Python/Typer but the correct approach was TypeScript/Commander since codev is a Node.js package.
 - [From 0053] Spec interpretation diverges across reviewers -- "same annotation system available" was read literally by one reviewer (needing image annotation) but correctly scoped by another (noting line-based annotation is technically infeasible for images without a new coordinate-based system).
 - [From 0089] When a spec is internally inconsistent (Solution section says one thing, Acceptance Criteria says another), reviewers will disagree about which section is authoritative. Acceptance Criteria should always be the definitive source.
-- [From 0094] For straightforward CSS-only changes, all three reviewers may approve with no code changes required. This validates that consultation effort should scale with change complexity.
 - [From 0095] Codex caught state mutation path ambiguity (when does `porch next` modify state vs just emit tasks?) that the other reviewers missed. State mutation rules need explicit documentation for any command that reads and writes state.
-- [From 0097] Codex review loop convergence: Codex blocked 10 iterations in Phase 7 while Gemini and Claude approved. Recurring concerns (auto-start codevos.ai, rate limiting E2E) were either addressed or documented as impractical. Advance with 2/3 approval and document dissent.
-- [From 0099] Codex was the most frequent blocker (13 of 17 rounds), consistently focused on: (a) test quality -- insisting tests exercise actual exported functions, not duplicated logic; (b) edge cases -- ID collisions, path traversal; (c) completeness -- finding missed instances of old patterns.
-- [From 0105] Codex blocked 12 of 14 REQUEST_CHANGES -- primarily test completeness (missing test files, untested edge cases) and startup race conditions. Gemini focused on architectural correctness. Claude never issued REQUEST_CHANGES, using COMMENT for structural observations.
-- [From 0104/0106/0109/0117] Reviewer stale branch reads are a systematic issue: both Claude and Codex occasionally read files from `main` instead of the feature branch worktree, producing false positives claiming code does not exist. Codex consistently only examines `git diff --name-only main` and cannot see uncommitted worktree changes. A porch-level fix (committing before consultation or passing worktree diff context) would eliminate repeated false positives. Consultation prompts should include the actual file tree or instruct models to search recursively.
 - [From 0107] 3-way consultation caught real bugs: stuck button state, nonce placement, body.name truthiness check. The rebuttal mechanism effectively handles false positives.
 - [From 0108] Gemini's plan review caught that `gate-status.ts` is used by the dashboard API, preventing a build-breaking deletion. Codex refined notification semantics (transitions vs re-requests).
 - [From 0113] Multi-agent consultation caught a real bug: `stderrClosed` as a local boolean was copied by value into the session object, so the close callback never updated the session.
 - [From 0118] Codex reviewer consistently found edge cases (pre-HELLO gating, workspace scoping) that improved the design, despite high iteration counts.
-- [From 0120] The rebuttal mechanism works well for disputing false-positive reviewer verdicts. When porch's verdict parser fails on Codex JSONL output and defaults to REQUEST_CHANGES, rebuttals let the Builder demonstrate the review was actually positive.
-- [From 0124] Reviewers hallucinate coverage loss. Gemini claimed disk logging coverage was lost in Phase 2, but the test file had `diskLogEnabled: false`. Always verify reviewer claims against actual code before acting on them.
+- [From 0124] Reviewers hallucinate coverage loss. Always verify reviewer claims against actual code before acting on them.
 - [From 0124] Reviewers may recommend removing tests that serve a different purpose than they appear. Codex said REST API tests "aren't PTY-specific" but they test `TerminalManager.handleRequest`, which is unique to that class.
 - [From 0126] Workspace-scoped routing is a common blind spot in consultation. The Tower server has global and workspace-scoped routing layers; Claude caught that `/api/overview` was only registered globally, which would have broken the dashboard.
-- [From 0127] Codex false positive on import ordering: claimed `const execAsync` between import statements would "fail typecheck/build" -- this was incorrect (TypeScript hoists imports). Fix cosmetic style concerns if reasonable but do not treat false positives as blockers.
 - [From bugfix-274] Codex caught a secondary race path through the Tower API that the initial fix missed -- the direct `/project/.../api/state` endpoint bypasses `getInstances()` entirely, requiring the additional `_reconciling` guard.
-- [From 0399] Consult tooling multi-project detection in Builder worktrees is a recurring issue -- worktrees inherit project directories from main, causing `consult` to fail with "Multiple projects found." The `--prompt-file` workaround bypasses project detection but loses structured context.
-- [From 0101] The `implement` phase in SPIR protocol.json should have a `gate` property. Without one, the `max_iterations` escape hatch in `next.ts` is dead code -- iteration just keeps incrementing with no mechanism for auto-advancement or escalation.
-- [From 0101] Gemini false negatives from wrong paths: Gemini searched for test files at plan-specified paths instead of actual project locations, reporting "no tests found" when they existed. Consultation prompts should include the actual file tree or instruct models to search recursively.
+- [From 0104/0106/0109/0117] Reviewer stale branch reads: consultation prompts should include the actual file tree or instruct models to search recursively, since reviewers occasionally read files from `main` instead of the feature branch worktree.
 
 ## Backward Compatibility and Migration
 
