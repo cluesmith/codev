@@ -1,0 +1,12 @@
+id: bugfix-423
+title: dashboard-builder-terminals-pe
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-18T10:54:24.207Z'
+updated_at: '2026-02-18T11:15:39.352Z'

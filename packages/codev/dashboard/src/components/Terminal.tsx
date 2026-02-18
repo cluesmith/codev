@@ -43,7 +43,18 @@ function TerminalControls({
       containerW: containerStyle?.width, containerH: containerStyle?.height,
     });
 
+    // Preserve scroll position across fit() (Bugfix #423)
+    const baseY = term.buffer?.active?.baseY;
+    const viewportY = term.buffer?.active?.viewportY;
+    const wasAtBottom = !baseY || viewportY == null || viewportY >= baseY;
+
     fit.fit();
+
+    if (wasAtBottom) {
+      term.scrollToBottom();
+    } else {
+      term.scrollToLine(viewportY);
+    }
 
     console.log('[refresh] after fit():', {
       cols: term.cols, rows: term.rows,
@@ -313,6 +324,27 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
     containerRef.current.addEventListener('paste', onNativePaste);
 
+    // Scroll-aware fit: preserves the viewport scroll position across
+    // fit() calls.  Without this, fit() → resize() → buffer reflow can
+    // reset the viewport to the top of the scrollback (Bugfix #423).
+    // Only activates when there IS scrollback (baseY > 0); when the buffer
+    // is empty or all content fits in the viewport, there's nothing to lose.
+    const safeFit = () => {
+      const baseY = term.buffer?.active?.baseY;
+      if (!baseY) {
+        fitAddon.fit();
+        return;
+      }
+      const viewportY = term.buffer.active.viewportY;
+      const wasAtBottom = viewportY == null || viewportY >= baseY;
+      fitAddon.fit();
+      if (wasAtBottom) {
+        term.scrollToBottom();
+      } else {
+        term.scrollToLine(viewportY);
+      }
+    };
+
     // Debounced fit: coalesce multiple fit() triggers into one resize event.
     // This prevents resize storms from multiple sources (initial fit, CSS
     // layout settling, ResizeObserver, visibility change, buffer flush).
@@ -321,11 +353,11 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       if (fitTimer) clearTimeout(fitTimer);
       fitTimer = setTimeout(() => {
         fitTimer = null;
-        fitAddon.fit();
+        safeFit();
       }, 150);
     };
 
-    fitAddon.fit();
+    safeFit();
     // Single delayed re-fit to catch CSS layout settling
     const refitTimer1 = setTimeout(debouncedFit, 300);
 
