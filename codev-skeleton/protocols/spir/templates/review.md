@@ -97,6 +97,20 @@ Iterations that could have been prevented with better builder behavior:
 ### What Would Be Done Differently
 - [Actionable improvement for future builders]
 
+## Architecture Updates
+
+[What was added/changed in `codev/resources/arch.md`, or why no changes were needed.]
+
+- Updated: [section name] — [what was added/changed]
+- Or: "No architecture updates needed — [brief reason]"
+
+## Lessons Learned Updates
+
+[What was added/changed in `codev/resources/lessons-learned.md`, or why no changes were needed.]
+
+- Added: [category] — [lesson summary]
+- Or: "No lessons learned updates needed — [brief reason]"
+
 ## Technical Debt
 
 - [Any shortcuts taken or inconsistencies introduced]

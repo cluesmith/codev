@@ -134,6 +134,14 @@
           "command": "npx vitest run --config vitest.cli.config.ts",
           "cwd": "packages/codev",
           "description": "CLI integration tests"
+        },
+        "review_has_arch_updates": {
+          "command": "grep -q '## Architecture Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Architecture Updates' section (what changed in arch.md, or why no changes needed)"
+        },
+        "review_has_lessons_updates": {
+          "command": "grep -q '## Lessons Learned Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Lessons Learned Updates' section (what changed in lessons-learned.md, or why no changes needed)"
         }
       },
       "gate": "pr",

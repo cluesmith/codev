@@ -27,16 +27,20 @@ Added a `## Consultation Feedback` section to review documents by updating porch
 ## Files Changed
 
 ### Modified
-- `codev-skeleton/porch/prompts/review.md` - Added "1b. Include Consultation Feedback" section with full instructions
-- `codev-skeleton/protocols/spir/prompts/review.md` - Added "3b. Include Consultation Feedback" section with matching instructions
-- `codev-skeleton/protocols/spir/templates/review.md` - Added `## Consultation Feedback` placeholder with example format
+- `codev-skeleton/porch/prompts/review.md` - Added consultation feedback + mandatory arch/lessons-learned update instructions
+- `codev-skeleton/protocols/spir/prompts/review.md` - Added consultation feedback + mandatory arch/lessons-learned update instructions
+- `codev-skeleton/protocols/spir/templates/review.md` - Added `## Consultation Feedback`, `## Architecture Updates`, `## Lessons Learned Updates` sections
+- `codev-skeleton/protocols/spir/protocol.json` - Added `review_has_arch_updates` and `review_has_lessons_updates` porch checks
 - `codev-skeleton/protocols/tick/templates/review.md` - Replaced old `## Multi-Agent Consultation` section with structured `## Consultation Feedback` placeholder
 - `codev/protocols/spir/templates/review.md` - Synced with codev-skeleton
+- `codev/protocols/spir/protocol.json` - Synced review checks
 - `codev/protocols/tick/templates/review.md` - Synced with codev-skeleton
+- `codev/resources/arch.md` - Documented consultation feedback flow
+- `codev/resources/lessons-learned.md` - Added prompt-based vs programmatic lesson
 
 ## Deviations from Plan
 
-**Additional file**: The plan identified 4 codev-skeleton files + 2 codev/ sync files. All 6 were modified as planned. No deviations.
+- **Scope expansion**: Architect requested mandatory arch.md and lessons-learned.md updates as part of every SPIR review phase, with porch enforcement via protocol.json checks. TICK excluded since TICKs are small fixes unlikely to have architectural implications.
 
 ## Testing Results
 
@@ -67,8 +71,18 @@ No consultation was run for this TICK. This is a prompt-and-template-only change
 - **Speed vs quality trade-off**: Balanced
 - **End-only consultation**: N/A (no code to review)
 
+## Architecture Updates
+
+Updated `codev/resources/arch.md` — added "Consultation feedback flow (Spec 395)" paragraph in the Consult Architecture section documenting that builders write consultation feedback in review files via prompt instructions, not porch-managed file manipulation.
+
+## Lessons Learned Updates
+
+Updated `codev/resources/lessons-learned.md` — added two entries under Architecture:
+- Prompt-based instructions beat programmatic file manipulation for flexible document generation
+- Keep specs/plans clean as forward-looking documents — append review history to review files
+
 ## Follow-Up Actions
-- [ ] Verify consultation feedback appears in review documents for the next SPIR/TICK project that runs through porch
+- [ ] Verify consultation feedback and arch/lessons sections appear in review documents for the next SPIR project
 - [ ] Consider reconciling codev/ and codev-skeleton/ review templates during next MAINTAIN cycle
 
 ## Conclusion
