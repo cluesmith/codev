@@ -25,7 +25,7 @@ let cliOverrides: Partial<ResolvedCommands> = {};
 /**
  * Check if we're in a git worktree and return the main repo root if so
  */
-function getMainRepoFromWorktree(dir: string): string | null {
+export function getMainRepoFromWorktree(dir: string): string | null {
   try {
     // Get the common git directory (same for main repo and worktrees)
     const gitCommonDir = execSync('git rev-parse --git-common-dir', {

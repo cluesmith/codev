@@ -1023,8 +1023,14 @@ async function handleWorkspaceRoutes(
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
     const fullPath = path.resolve(workspacePath, relPath);
-    // Security: ensure resolved path stays within workspace directory
-    if (!fullPath.startsWith(workspacePath + path.sep) && fullPath !== workspacePath) {
+    // Security: symlink-aware containment check (consistent with POST /tabs/file)
+    let resolvedFilePath: string;
+    try {
+      resolvedFilePath = fs.realpathSync(fullPath);
+    } catch {
+      resolvedFilePath = path.resolve(fullPath);
+    }
+    if (!resolvedFilePath.startsWith(workspacePath + path.sep) && resolvedFilePath !== workspacePath) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('Forbidden');
       return;
