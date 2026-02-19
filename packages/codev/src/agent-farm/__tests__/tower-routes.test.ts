@@ -777,7 +777,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true }),
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -803,7 +803,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -831,7 +831,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false, composing: true }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -844,6 +844,32 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       // Should have written Ctrl+C and the message
       expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('returns deferred:true when user is idle but composing (Bugfix #450)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      // User paused >3s (idle=true) but hasn't pressed Enter (composing=true)
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: true }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.deferred).toBe(true);
+      // Message should NOT be written — user is composing
+      expect(mockWrite).not.toHaveBeenCalled();
     });
   });
 });

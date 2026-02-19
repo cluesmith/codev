@@ -64,6 +64,7 @@ export class PtySession extends EventEmitter {
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
   private _lastInputAt = 0;
+  private _composing = false;
 
   constructor(private readonly config: PtySessionConfig) {
     super();
@@ -412,6 +413,21 @@ export class PtySession extends EventEmitter {
   /** Timestamp (epoch ms) of the last user input, or 0 if none. */
   get lastInputAt(): number {
     return this._lastInputAt;
+  }
+
+  /** Mark the user as composing input (has typed but not pressed Enter). */
+  startComposing(): void {
+    this._composing = true;
+  }
+
+  /** Mark the user as done composing (pressed Enter to submit). */
+  stopComposing(): void {
+    this._composing = false;
+  }
+
+  /** Whether the user is currently composing input (typed but not yet submitted). */
+  get composing(): boolean {
+    return this._composing;
   }
 
   private cleanup(): void {

@@ -94,8 +94,10 @@ export class SendBuffer {
       const now = Date.now();
       const maxAgeExceeded = messages.some(m => now - m.timestamp >= this.maxBufferAgeMs);
       const isIdle = session.isUserIdle(this.idleThresholdMs);
+      const isComposing = session.composing;
 
-      if (forceAll || isIdle || maxAgeExceeded) {
+      // Deliver when: forced, idle AND not composing, or max age exceeded (Bugfix #450)
+      if (forceAll || (!isComposing && isIdle) || maxAgeExceeded) {
         // Deliver all messages in order
         for (const msg of messages) {
           this.deliver(session, msg);

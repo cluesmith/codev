@@ -160,4 +160,56 @@ describe('PtySession Input Tracking (Spec 403)', () => {
       expect(session.isUserIdle(3000)).toBe(false);
     });
   });
+
+  describe('composing state (Bugfix #450)', () => {
+    it('should not be composing initially', () => {
+      expect(session.composing).toBe(false);
+    });
+
+    it('should be composing after startComposing()', () => {
+      session.startComposing();
+      expect(session.composing).toBe(true);
+    });
+
+    it('should stop composing after stopComposing()', () => {
+      session.startComposing();
+      expect(session.composing).toBe(true);
+      session.stopComposing();
+      expect(session.composing).toBe(false);
+    });
+
+    it('should remain composing across multiple startComposing calls', () => {
+      session.startComposing();
+      session.startComposing();
+      session.startComposing();
+      expect(session.composing).toBe(true);
+    });
+
+    it('should prevent idle detection from allowing delivery while composing', () => {
+      vi.setSystemTime(new Date('2026-02-17T12:00:00Z'));
+      session.recordUserInput();
+      session.startComposing();
+
+      // User pauses for 5 seconds (exceeds idle threshold) but is still composing
+      vi.setSystemTime(new Date('2026-02-17T12:00:05Z'));
+      expect(session.isUserIdle(3000)).toBe(true); // idle by timestamp
+      expect(session.composing).toBe(true); // but still composing
+    });
+
+    it('should allow delivery after Enter (stopComposing) and idle threshold', () => {
+      vi.setSystemTime(new Date('2026-02-17T12:00:00Z'));
+      session.recordUserInput();
+      session.startComposing();
+
+      // User presses Enter at 2 seconds
+      vi.setSystemTime(new Date('2026-02-17T12:00:02Z'));
+      session.recordUserInput();
+      session.stopComposing();
+
+      // 3 seconds after Enter
+      vi.setSystemTime(new Date('2026-02-17T12:00:05Z'));
+      expect(session.composing).toBe(false);
+      expect(session.isUserIdle(3000)).toBe(true);
+    });
+  });
 });

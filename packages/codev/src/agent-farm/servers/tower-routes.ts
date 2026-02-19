@@ -776,8 +776,9 @@ async function handleSend(
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
-  // Check if user is idle — deliver immediately or buffer (Spec 403)
-  const shouldDefer = !interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs);
+  // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
+  // Defer when composing (typed but not submitted) OR recently typed (idle threshold)
+  const shouldDefer = !interrupt && (session.composing || !session.isUserIdle(sendBuffer.idleThresholdMs));
 
   if (shouldDefer) {
     // User is actively typing — buffer for deferred delivery

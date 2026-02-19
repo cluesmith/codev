@@ -50,6 +50,8 @@ function makeSession(seq = 0): any {
     write: vi.fn(),
     resize: vi.fn(),
     recordUserInput: vi.fn(),
+    startComposing: vi.fn(),
+    stopComposing: vi.fn(),
     ringBuffer: { currentSeq: seq },
   };
 }

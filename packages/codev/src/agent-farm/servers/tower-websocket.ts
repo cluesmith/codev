@@ -84,7 +84,14 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
       if (frame.type === 'data') {
         // Record user input for typing awareness (Spec 403)
         session.recordUserInput();
-        session.write(frame.data.toString('utf-8'));
+        const data = frame.data.toString('utf-8');
+        // Track composing state: Enter/Return means submission (Bugfix #450)
+        if (data.includes('\r') || data.includes('\n')) {
+          session.stopComposing();
+        } else {
+          session.startComposing();
+        }
+        session.write(data);
       } else if (frame.type === 'control') {
         // Handle control messages
         const msg = frame.message;
@@ -104,7 +111,13 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
       // If decode fails, try treating as raw UTF-8 input (for simpler clients)
       try {
         session.recordUserInput();
-        session.write(rawData.toString('utf-8'));
+        const rawStr = rawData.toString('utf-8');
+        if (rawStr.includes('\r') || rawStr.includes('\n')) {
+          session.stopComposing();
+        } else {
+          session.startComposing();
+        }
+        session.write(rawStr);
       } catch {
         // Ignore malformed input
       }

@@ -27,9 +27,10 @@ function makeMsg(sessionId: string, overrides?: Partial<BufferedMessage>): Buffe
   };
 }
 
-function makeSession(idle: boolean): PtySession {
+function makeSession(idle: boolean, composing = false): PtySession {
   return {
     isUserIdle: () => idle,
+    composing,
     write: vi.fn(),
   } as unknown as PtySession;
 }
@@ -188,5 +189,54 @@ describe('SendBuffer', () => {
     const defaultBuf = new SendBuffer();
     expect(defaultBuf.idleThresholdMs).toBe(3000);
     expect(defaultBuf.maxBufferAgeMs).toBe(60_000);
+  });
+
+  describe('composing state (Bugfix #450)', () => {
+    it('does NOT deliver when session is idle but composing', () => {
+      // User typed but paused >3s — idle by timestamp but still composing
+      const session = makeSession(true, true); // idle=true, composing=true
+      const deliver = vi.fn();
+      const log = vi.fn();
+
+      buf.start(() => session, deliver, log);
+      buf.enqueue(makeMsg('sess-1'));
+
+      vi.advanceTimersByTime(500);
+
+      expect(deliver).not.toHaveBeenCalled();
+      expect(buf.pendingCount).toBe(1);
+    });
+
+    it('delivers when session is idle and NOT composing', () => {
+      // User pressed Enter and has been idle
+      const session = makeSession(true, false); // idle=true, composing=false
+      const deliver = vi.fn();
+      const log = vi.fn();
+
+      buf.start(() => session, deliver, log);
+      buf.enqueue(makeMsg('sess-1'));
+
+      vi.advanceTimersByTime(500);
+
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(buf.pendingCount).toBe(0);
+    });
+
+    it('delivers when composing but max buffer age exceeded', () => {
+      // Safety valve: deliver after max age even if composing
+      const session = makeSession(false, true); // not idle, composing
+      const deliver = vi.fn();
+      const log = vi.fn();
+
+      buf.start(() => session, deliver, log);
+
+      const oldMsg = makeMsg('sess-1', { timestamp: Date.now() - 15_000 });
+      buf.enqueue(oldMsg);
+
+      vi.advanceTimersByTime(500);
+
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(buf.pendingCount).toBe(0);
+    });
   });
 });
