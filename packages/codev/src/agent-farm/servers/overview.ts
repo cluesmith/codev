@@ -247,7 +247,7 @@ function pushPlanPhase(result: ParsedStatus, partial: Partial<PlanPhase>): void 
 export function calculateProgress(parsed: ParsedStatus, workspaceRoot?: string): number {
   const protocol = parsed.protocol;
 
-  if (protocol === 'spir' || protocol === 'spider') {
+  if (protocol === 'spir' || protocol === 'spider' || protocol === 'aspir') {
     return calculateSpirProgress(parsed);
   }
 

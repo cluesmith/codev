@@ -433,6 +433,37 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'spider', phase: 'implement' }))).toBe(70);
     });
 
+    // ASPIR uses the same phase structure as SPIR (Bugfix #454)
+    it('uses SPIR progress for ASPIR protocol', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'specify' }))).toBe(10);
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'plan' }))).toBe(35);
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'implement' }))).toBe(70);
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'review' }))).toBe(92);
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'complete' }))).toBe(100);
+    });
+
+    it('tracks ASPIR implement plan phases like SPIR (Bugfix #454)', () => {
+      expect(calculateProgress(makeParsed({
+        protocol: 'aspir',
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'complete' },
+          { id: 'p2', title: 'B', status: 'complete' },
+          { id: 'p3', title: 'C', status: 'in_progress' },
+          { id: 'p4', title: 'D', status: 'pending' },
+        ],
+      }))).toBe(70); // 50 + round((2/4) * 40) = 50 + 20 = 70
+    });
+
+    it('shows ASPIR review gate requested progress (Bugfix #454)', () => {
+      expect(calculateProgress(makeParsed({
+        protocol: 'aspir',
+        phase: 'review',
+        gates: { 'pr': 'pending' },
+        gateRequestedAt: { 'pr': '2026-01-01T00:00:00Z' },
+      }))).toBe(95);
+    });
+
     // Dynamic protocol loading (bugfix, tick, etc.)
     it('loads bugfix phases from protocol.json and calculates progress', () => {
       mockLoadProtocol.mockReturnValue({
