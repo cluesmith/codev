@@ -38,25 +38,3 @@ jobs:
       - name: Run CLI integration tests
         working-directory: packages/codev
         run: npx vitest run --config vitest.cli.config.ts
-
-  notify:
-    name: Discord Notification
-    needs: cli
-    if: always() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send Discord notification
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          if [ "${{ needs.cli.result }}" == "success" ]; then
-            COLOR=3066993  # Green
-            STATUS="✅ Passed"
-          else
-            COLOR=15158332  # Red
-            STATUS="❌ Failed"
-          fi
-
-          curl -H "Content-Type: application/json" \
-            -d "{\"embeds\": [{\"title\": \"Codev CLI Tests - ${STATUS}\", \"description\": \"Scheduled daily CLI integration test run completed.\", \"color\": ${COLOR}, \"fields\": [{\"name\": \"Result\", \"value\": \"${{ needs.cli.result }}\", \"inline\": true}, {\"name\": \"Run\", \"value\": \"[View Workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}], \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
-            $DISCORD_WEBHOOK
