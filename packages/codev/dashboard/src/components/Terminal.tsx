@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -202,7 +202,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
   const fitRef = useRef<FitAddon | null>(null);
   const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
-
+  const [connStatus, setConnStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected');
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -375,132 +375,158 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     // Single delayed re-fit to catch CSS layout settling
     const refitTimer1 = setTimeout(debouncedFit, 300);
 
-    // Build WebSocket URL from the relative path
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}${wsPath}`;
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-    wsRef.current = ws;
+    // Build WebSocket URL base
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsBase = `${wsProtocol}//${window.location.host}${wsPath}`;
 
-    // Filter DA (Device Attribute) response sequences that can appear as visible
-    // text when reconnecting to an existing shellper session. Buffer the first
-    // 500ms of data to catch fragmented DA sequences, then flush and switch to
-    // direct writes. Uses a fixed deadline (not reset per frame) so active
-    // terminals don't starve.
-    let initialBuffer = '';
-    let initialPhase = true;
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    // Reconnection state (Bugfix #442)
+    const rc = {
+      lastSeq: 0,
+      attempts: 0,
+      rapidFailures: 0,
+      timer: null as ReturnType<typeof setTimeout> | null,
+      disposed: false,
+      initialPhase: true,
+      initialBuffer: '',
+      flushTimer: null as ReturnType<typeof setTimeout> | null,
+    };
+    const MAX_ATTEMPTS = 15;
+    const MAX_RAPID_FAILURES = 5;
+    const BACKOFF_CAP_MS = 30_000;
 
     const filterDA = (text: string): string => {
-      // DA1: ESC[?...c  DA2: ESC[>...c  (with or without ESC prefix)
       text = text.replace(/\x1b\[[\?>][\d;]*c/g, '');
       text = text.replace(/\[[\?>][\d;]*c/g, '');
       return text;
     };
 
-    const flushInitialBuffer = () => {
-      initialPhase = false;
-      flushTimer = null;
-      if (initialBuffer) {
-        const filtered = filterDA(initialBuffer);
-        if (filtered) {
-          term.write(filtered, () => {
-            // Scroll to bottom after replay buffer is rendered
-            term.scrollToBottom();
-          });
-        }
-        initialBuffer = '';
-      }
-      // Re-fit after buffer flush — CSS layout may have settled since
-      // the initial fit(). Uses debounced fit to avoid resize storms.
-      debouncedFit();
-      // After fit settles, force-send a resize to the PTY even if dimensions
-      // haven't changed. The replay buffer was generated at shellper's default
-      // 80x24 but the browser terminal may differ — the shell needs a SIGWINCH
-      // to redraw at the correct size. Then scroll to the bottom.
-      setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
-        }
-        term.scrollToBottom();
-      }, 350);
-    };
+    /** Create a WebSocket connection, optionally resuming from a sequence number. */
+    const connect = (resumeSeq?: number) => {
+      const wsUrl = resumeSeq !== undefined ? `${wsBase}?resume=${resumeSeq}` : wsBase;
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      wsRef.current = ws;
+      const createdAt = Date.now();
 
-    ws.onopen = () => {
-      // Send initial resize
-      sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
-    };
+      // Reset DA filter state for this connection
+      rc.initialPhase = true;
+      rc.initialBuffer = '';
+      if (rc.flushTimer) { clearTimeout(rc.flushTimer); rc.flushTimer = null; }
 
-    ws.onmessage = (event) => {
-      const data = new Uint8Array(event.data as ArrayBuffer);
-      if (data.length === 0) return;
-
-      const prefix = data[0];
-      const payload = data.subarray(1);
-
-      if (prefix === FRAME_DATA) {
-        const text = new TextDecoder().decode(payload);
-
-        if (initialPhase) {
-          // Buffer initial data to catch fragmented DA responses.
-          // Set flush timer on FIRST message only (fixed 500ms deadline).
-          initialBuffer += text;
-          if (!flushTimer) {
-            flushTimer = setTimeout(flushInitialBuffer, 500);
+      const flushInitialBuffer = () => {
+        rc.initialPhase = false;
+        rc.flushTimer = null;
+        if (rc.initialBuffer) {
+          const filtered = filterDA(rc.initialBuffer);
+          if (filtered) {
+            term.write(filtered, () => { term.scrollToBottom(); });
           }
-        } else {
-          // After initial phase, still filter for safety but write immediately
-          const filtered = filterDA(text);
-          if (filtered) term.write(filtered);
+          rc.initialBuffer = '';
         }
-      } else if (prefix === FRAME_CONTROL) {
-        // Handle control messages (pong, error, etc.) if needed
-      }
+        debouncedFit();
+        setTimeout(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
+          }
+          term.scrollToBottom();
+        }, 350);
+      };
+
+      ws.onopen = () => {
+        // Reset reconnection counters on successful connect
+        rc.attempts = 0;
+        rc.rapidFailures = 0;
+        setConnStatus('connected');
+        sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+      };
+
+      ws.onmessage = (event) => {
+        const data = new Uint8Array(event.data as ArrayBuffer);
+        if (data.length === 0) return;
+
+        const prefix = data[0];
+        const payload = data.subarray(1);
+
+        if (prefix === FRAME_DATA) {
+          const text = new TextDecoder().decode(payload);
+          if (rc.initialPhase) {
+            rc.initialBuffer += text;
+            if (!rc.flushTimer) {
+              rc.flushTimer = setTimeout(flushInitialBuffer, 500);
+            }
+          } else {
+            const filtered = filterDA(text);
+            if (filtered) term.write(filtered);
+          }
+        } else if (prefix === FRAME_CONTROL) {
+          // Parse control frames for seq updates (Bugfix #442)
+          try {
+            const msg = JSON.parse(new TextDecoder().decode(payload));
+            if (msg.type === 'seq' && typeof msg.payload?.seq === 'number') {
+              rc.lastSeq = msg.payload.seq;
+            }
+          } catch { /* ignore malformed control frames */ }
+        }
+      };
+
+      ws.onclose = () => {
+        if (rc.disposed) return;
+
+        // Detect rapid failure (session likely gone): close within 2s of creation
+        const elapsed = Date.now() - createdAt;
+        if (elapsed < 2000) {
+          rc.rapidFailures++;
+        } else {
+          rc.rapidFailures = 0;
+        }
+
+        if (rc.rapidFailures >= MAX_RAPID_FAILURES || rc.attempts >= MAX_ATTEMPTS) {
+          setConnStatus('disconnected');
+          term.write('\r\n\x1b[90m[Session ended — unable to reconnect]\x1b[0m\r\n');
+          return;
+        }
+
+        // Start reconnection
+        setConnStatus('reconnecting');
+        if (rc.attempts === 0) {
+          term.write('\r\n\x1b[33m[Connection lost — reconnecting...]\x1b[0m');
+        }
+
+        const delay = Math.min(1000 * Math.pow(2, rc.attempts), BACKOFF_CAP_MS);
+        rc.attempts++;
+        rc.timer = setTimeout(() => {
+          if (rc.disposed) return;
+          connect(rc.lastSeq || undefined);
+        }, delay);
+      };
+
+      ws.onerror = () => {
+        // onerror is always followed by onclose — reconnect logic is in onclose
+      };
     };
 
-    ws.onclose = () => {
-      term.write('\r\n\x1b[90m[Terminal disconnected]\x1b[0m\r\n');
-    };
-
-    ws.onerror = () => {
-      term.write('\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n');
-    };
-
-    // Mobile input deduplication: On mobile browsers, keyboard input goes
-    // through IME composition. Browsers can fire both compositionend and
-    // input events, causing xterm.js to emit onData twice for the same
-    // keystroke. Near line wraps, duplicates can arrive well after the
-    // composition ends, so we always dedup on mobile (not just during
-    // active composition). The 150ms window is short enough to not
-    // interfere with intentional rapid typing.
+    // Mobile input deduplication
     const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     let lastSentData = '';
     let lastSentTime = 0;
 
-    // Send user input to the PTY
+    // Send user input to the PTY (uses wsRef so it works across reconnections)
     term.onData((data) => {
-      if (ws.readyState !== WebSocket.OPEN) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      // On mobile, skip exact duplicate onData calls within 150ms.
-      // Line wraps can cause delayed duplicates that outlast the old
-      // 100ms IME-only window.
       if (isMobileDevice) {
         const now = Date.now();
-        if (data === lastSentData && now - lastSentTime < 150) {
-          return;
-        }
+        if (data === lastSentData && now - lastSentTime < 150) return;
         lastSentData = data;
         lastSentTime = now;
       }
 
-      // During initial handshake, filter automatic terminal responses
-      // (DA, DSR, mode reports) that xterm.js sends during connection.
-      // These would otherwise be interpreted as keyboard input by the shell.
-      if (initialPhase) {
+      if (rc.initialPhase) {
         const filtered = data
-          .replace(/\x1b\[[\?>][\d;]*c/g, '')    // DA1/DA2 responses
-          .replace(/\x1b\[\d+;\d+R/g, '')          // DSR cursor position
-          .replace(/\x1b\[\?[\d;]*\$y/g, '');      // Mode reports (DECRPM)
+          .replace(/\x1b\[[\?>][\d;]*c/g, '')
+          .replace(/\x1b\[\d+;\d+R/g, '')
+          .replace(/\x1b\[\?[\d;]*\$y/g, '');
         if (!filtered) return;
         data = filtered;
       }
@@ -510,7 +536,6 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       if ((mod.ctrl || mod.cmd) && data.length === 1) {
         const charCode = data.charCodeAt(0);
         if (mod.ctrl) {
-          // Ctrl+letter: convert to control character (a=0x01, z=0x1a)
           if (charCode >= 0x61 && charCode <= 0x7a) {
             data = String.fromCharCode(charCode - 96);
           } else if (charCode >= 0x41 && charCode <= 0x5a) {
@@ -547,17 +572,16 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       sendData(ws, data);
     });
 
-    // Send resize events
+    // Send resize events (uses wsRef so it works across reconnections)
     term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
         sendControl(ws, 'resize', { cols, rows });
       }
     });
 
-    // Scroll: no custom wheel handler. In normal buffer, xterm.js handles
-    // scrollback natively. In alternate buffer, scroll wheel is a known
-    // limitation (#220). Arrow keys and Page Up/Down both cause undesirable
-    // side effects (command history, scrollback navigation).
+    // Initial connection
+    connect();
 
     // Handle window resize (debounced to prevent resize storms)
     const resizeObserver = new ResizeObserver(debouncedFit);
@@ -570,15 +594,17 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      rc.disposed = true;
+      if (rc.timer) clearTimeout(rc.timer);
+      if (rc.flushTimer) clearTimeout(rc.flushTimer);
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
-      if (flushTimer) clearTimeout(flushTimer);
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       containerRef.current?.removeEventListener('paste', onNativePaste);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
-      ws.close();
+      wsRef.current?.close();
       term.dispose();
       xtermRef.current = null;
       wsRef.current = null;
@@ -610,6 +636,12 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           backgroundColor: '#1a1a1a',
         }}
       />
+      {connStatus === 'reconnecting' && (
+        <div className="terminal-reconnecting-overlay">
+          <span className="terminal-reconnecting-spinner" />
+          Reconnecting…
+        </div>
+      )}
       <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} />
       {isMobile && (
         <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />

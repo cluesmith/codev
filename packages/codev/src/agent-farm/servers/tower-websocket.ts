@@ -34,7 +34,9 @@ const WS_HIGH_WATER_MARK = 1 * 1024 * 1024; // 1 MB
  * - 0x01 prefix: Data frame (raw PTY bytes)
  */
 export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
-  const resumeSeq = req.headers['x-session-resume'];
+  // Support resume via header (server-to-server) or query param (browser WebSocket)
+  const reqUrl = new URL(req.url || '/', `http://localhost`);
+  const resumeSeq = req.headers['x-session-resume'] || reqUrl.searchParams.get('resume');
 
   // Create a client adapter for the PTY session.
   // Checks bufferedAmount to prevent unbounded memory growth when
@@ -62,6 +64,17 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
       ws.send(encodeData(replayData));
     }
   }
+
+  // Send current sequence number so client can resume from this point (Bugfix #442)
+  const sendSeq = () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(encodeControl({ type: 'seq', payload: { seq: session.ringBuffer.currentSeq } }));
+    }
+  };
+  sendSeq();
+
+  // Periodic seq heartbeat so client always has a recent sequence number
+  const seqInterval = setInterval(sendSeq, 10_000);
 
   // Handle incoming messages from client (binary protocol)
   ws.on('message', (rawData: Buffer) => {
@@ -99,10 +112,12 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
   });
 
   ws.on('close', () => {
+    clearInterval(seqInterval);
     session.detach(client);
   });
 
   ws.on('error', () => {
+    clearInterval(seqInterval);
     session.detach(client);
   });
 }

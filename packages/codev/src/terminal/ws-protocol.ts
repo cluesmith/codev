@@ -10,7 +10,7 @@ export const FRAME_CONTROL = 0x00;
 export const FRAME_DATA = 0x01;
 
 export interface ControlMessage {
-  type: 'resize' | 'ping' | 'pong' | 'pause' | 'resume' | 'error';
+  type: 'resize' | 'ping' | 'pong' | 'pause' | 'resume' | 'error' | 'seq';
   payload: Record<string, unknown>;
 }
 

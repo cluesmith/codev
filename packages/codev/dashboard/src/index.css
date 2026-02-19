@@ -323,6 +323,36 @@ body {
   opacity: 1.0;
 }
 
+/* Reconnection overlay (Bugfix #442) */
+.terminal-reconnecting-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background-color: #3a2a00;
+  color: #ffcc00;
+  font-size: 12px;
+}
+
+.terminal-reconnecting-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffcc0040;
+  border-top-color: #ffcc00;
+  border-radius: 50%;
+  animation: terminal-spin 0.8s linear infinite;
+}
+
+@keyframes terminal-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Mobile layout */
 .mobile-layout {
   display: flex;
