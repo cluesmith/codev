@@ -147,12 +147,15 @@ codev update [options]
 **Options:**
 - `-n, --dry-run` - Show changes without applying
 - `-f, --force` - Force update, overwrite all files
+- `-a, --agent` - Non-interactive agent mode with JSON output on stdout
 
 **Description:**
 
 Updates framework files (protocols, roles, agents) from the installed `@cluesmith/codev` package. User data (specs, plans, reviews) is never modified.
 
 If you've customized a file locally, the update creates a `.codev-new` file with the new version so you can merge changes manually.
+
+In agent mode (`--agent`), human-readable output goes to stderr and structured JSON is written to stdout. The JSON includes file lists, conflict details, and merge instructions. The interactive Claude merge is skipped.
 
 **Examples:**
 
@@ -165,6 +168,9 @@ codev update
 
 # Force overwrite (discard local changes)
 codev update --force
+
+# Agent mode (JSON output for automation)
+codev update --agent
 ```
 
 ---

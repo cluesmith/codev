@@ -16,6 +16,7 @@ codev adopt -y             # Skip conflict prompts
 codev update               # Update protocols, roles, skills from installed package
 codev update --dry-run     # Preview changes without applying
 codev update --force       # Force overwrite all framework files
+codev update --agent       # Agent mode: JSON output on stdout, no interactive merge
 codev doctor               # Check system dependencies
 ```
 
@@ -28,7 +29,7 @@ Creates a new project directory with codev structure: specs/, plans/, reviews/, 
 Adds codev to the **current directory**. Detects existing CLAUDE.md/AGENTS.md and creates `.codev-new` versions for merge if conflicts exist. Spawns Claude to merge automatically.
 
 ### codev update
-Updates framework files (protocols, roles, skills) from the installed `@cluesmith/codev` package. **Never touches user data** (specs, plans, reviews). If you've customized a framework file, creates a `.codev-new` version for manual merge.
+Updates framework files (protocols, roles, skills) from the installed `@cluesmith/codev` package. **Never touches user data** (specs, plans, reviews). If you've customized a framework file, creates a `.codev-new` version for manual merge. Use `--agent` for structured JSON output on stdout (logs go to stderr, no interactive Claude merge).
 
 ### codev doctor
 Checks that all required dependencies are installed: Node.js (>=18), git (>=2.5), gh (authenticated), and at least one AI CLI (Claude, Gemini, or Codex).
