@@ -777,6 +777,21 @@ describe('Spawn Command', () => {
       });
     });
 
+    describe('failure paths', () => {
+      it('no spec + no GitHub = error (no naming source)', () => {
+        // When input.required: false but GitHub fetch fails and no spec exists,
+        // spawn must fail because there is no naming source
+        expect(() => resolveNamingSource(false, false)).toThrow('No naming source');
+      });
+
+      it('TICK with missing amends spec always fails regardless of input.required', () => {
+        // TICK also has input.required: false, but amends enforces spec existence
+        const tickProtocol: ProtocolDef = { input: { type: 'spec', required: false } };
+        const result = checkSpecRequirement(false, tickProtocol, true);
+        expect(result).toBe('Spec not found');
+      });
+    });
+
     describe('worktree naming with GitHub title', () => {
       it('constructs correct worktree name from GitHub issue title', () => {
         const issueTitle = 'af spawn should not require a pre-existing spec file';
