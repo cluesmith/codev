@@ -72,10 +72,56 @@ program
   .description('Update codev templates and protocols')
   .option('-n, --dry-run', 'Show changes without applying')
   .option('-f, --force', 'Force update, overwrite all files')
+  .option('-a, --agent', 'Non-interactive agent mode with JSON output')
   .action(async (options) => {
     try {
-      await update({ dryRun: options.dryRun, force: options.force });
+      const result = await update({ dryRun: options.dryRun, force: options.force, agent: options.agent });
+      if (options.agent) {
+        const output = {
+          version: '1.0',
+          codevVersion: version,
+          success: !result.error,
+          dryRun: !!options.dryRun,
+          summary: {
+            new: result.newFiles.length,
+            updated: result.updated.length,
+            conflicts: result.conflicts.length + result.rootConflicts.length,
+            skipped: result.skipped.length,
+          },
+          files: {
+            new: result.newFiles,
+            updated: result.updated,
+            skipped: result.skipped,
+            conflicts: [...result.conflicts, ...result.rootConflicts],
+          },
+          instructions: result.error ? null : {
+            conflicts: result.conflicts.length + result.rootConflicts.length > 0
+              ? 'For each conflict, merge the .codev-new file into the original. Preserve user customizations and incorporate new sections from .codev-new. Delete the .codev-new file after merging.'
+              : null,
+            commit: `Stage and commit all changed files with message: '[Maintenance] Update codev to v${version}'`,
+          },
+          ...(result.error ? { error: result.error } : {}),
+        };
+        console.log(JSON.stringify(output));
+        if (result.error) {
+          process.exit(1);
+        }
+      }
     } catch (error) {
+      if (options.agent) {
+        const output = {
+          version: '1.0',
+          codevVersion: version,
+          success: false,
+          dryRun: !!options.dryRun,
+          error: error instanceof Error ? error.message : String(error),
+          summary: { new: 0, updated: 0, conflicts: 0, skipped: 0 },
+          files: { new: [], updated: [], skipped: [], conflicts: [] },
+          instructions: null,
+        };
+        console.log(JSON.stringify(output));
+        process.exit(1);
+      }
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
