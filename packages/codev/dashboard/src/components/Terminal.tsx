@@ -221,6 +221,14 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         cursor: '#ffffff',
       },
       allowProposedApi: true,
+      // Override xterm's default OSC 8 link handler which shows a confirm()
+      // dialog ("This link could potentially be dangerous"). We trust links
+      // from our own terminal sessions.
+      linkHandler: {
+        activate: (_event: MouseEvent, uri: string) => {
+          window.open(uri, '_blank', 'noopener');
+        },
+      },
     });
     xtermRef.current = term;
 
