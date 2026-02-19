@@ -153,6 +153,8 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
       const srcPath = path.join(templatesDir, relativePath);
       const destPath = path.join(codevDir, relativePath);
 
+      const projectRelativePath = `codev/${relativePath}`;
+
       // New file - copy it
       if (!fs.existsSync(destPath)) {
         if (!dryRun) {
@@ -163,8 +165,8 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
           fs.copyFileSync(srcPath, destPath);
           newHashes[relativePath] = hashFile(destPath);
         }
-        result.newFiles.push(relativePath);
-        log(chalk.green('  + (new)'), `codev/${relativePath}`);
+        result.newFiles.push(projectRelativePath);
+        log(chalk.green('  + (new)'), projectRelativePath);
         continue;
       }
 
@@ -175,7 +177,7 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
 
       // If the template hasn't changed, skip
       if (currentHash === newHash) {
-        result.skipped.push(relativePath);
+        result.skipped.push(projectRelativePath);
         continue;
       }
 
@@ -185,8 +187,8 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
           fs.copyFileSync(srcPath, destPath);
           newHashes[relativePath] = hashFile(destPath);
         }
-        result.updated.push(relativePath);
-        log(chalk.blue('  ~ (force)'), `codev/${relativePath}`);
+        result.updated.push(projectRelativePath);
+        log(chalk.blue('  ~ (force)'), projectRelativePath);
         continue;
       }
 
@@ -199,20 +201,20 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
           fs.copyFileSync(srcPath, destPath + '.codev-new');
         }
         result.conflicts.push({
-          file: relativePath,
-          codevNew: `codev/${relativePath}.codev-new`,
+          file: projectRelativePath,
+          codevNew: `${projectRelativePath}.codev-new`,
           reason: 'User modified file; new template version available',
         });
-        log(chalk.yellow('  ! (conflict)'), `codev/${relativePath}`);
-        log(chalk.dim('    New version saved as:'), `codev/${relativePath}.codev-new`);
+        log(chalk.yellow('  ! (conflict)'), projectRelativePath);
+        log(chalk.dim('    New version saved as:'), `${projectRelativePath}.codev-new`);
       } else {
         // File unchanged by user - safe to overwrite
         if (!dryRun) {
           fs.copyFileSync(srcPath, destPath);
           newHashes[relativePath] = hashFile(destPath);
         }
-        result.updated.push(relativePath);
-        log(chalk.blue('  ~'), `codev/${relativePath}`);
+        result.updated.push(projectRelativePath);
+        log(chalk.blue('  ~'), projectRelativePath);
       }
     }
 
@@ -317,9 +319,9 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
       return result;
     }
 
-    // Combine all conflicts for Claude merge
+    // Combine all conflicts for Claude merge (file paths are already project-relative)
     const allConflicts = [
-      ...result.conflicts.map(c => `codev/${c.file}`),
+      ...result.conflicts.map(c => c.file),
       ...result.rootConflicts.map(c => c.file),
     ];
 
