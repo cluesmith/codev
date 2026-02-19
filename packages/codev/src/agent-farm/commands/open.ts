@@ -7,7 +7,7 @@
 
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { getConfig } from '../utils/index.js';
+import { getConfig, getMainRepoFromWorktree } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { TowerClient, encodeWorkspacePath } from '../lib/tower-client.js';
 
@@ -40,7 +40,9 @@ async function tryTowerApi(client: TowerClient, workspacePath: string, filePath:
   }
 
   if (result.error) {
-    logger.error(`Tower API error: ${result.error}`);
+    logger.error(`Tower API error (HTTP ${result.status}): ${result.error}`);
+    logger.kv('Workspace', workspacePath);
+    logger.kv('File', filePath);
   }
 
   return null;
@@ -67,9 +69,17 @@ export async function open(options: OpenOptions): Promise<void> {
     fatal(`File not found: ${filePath}`);
   }
 
+  // When running from a worktree, Tower only knows the main repo workspace.
+  // Fall back to main repo path so the API call targets a registered workspace.
+  let workspacePath = config.workspaceRoot;
+  const mainRepo = getMainRepoFromWorktree(config.workspaceRoot);
+  if (mainRepo) {
+    workspacePath = mainRepo;
+  }
+
   // Try to use Tower API
   const client = new TowerClient();
-  const tabId = await tryTowerApi(client, config.workspaceRoot, filePath);
+  const tabId = await tryTowerApi(client, workspacePath, filePath);
 
   if (tabId) {
     // Tab created server-side — dashboard picks it up via state polling.
