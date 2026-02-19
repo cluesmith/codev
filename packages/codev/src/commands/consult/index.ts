@@ -243,7 +243,7 @@ function isBuilderContext(): boolean {
 /**
  * Get builder project state from status.yaml
  */
-function getBuilderProjectState(workspaceRoot: string): { id: string; title: string; currentPlanPhase: string | null } {
+function getBuilderProjectState(workspaceRoot: string, projectId?: string): { id: string; title: string; currentPlanPhase: string | null } {
   const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
   if (!fs.existsSync(projectsDir)) {
     throw new Error('No project state found. Are you in a builder worktree?');
@@ -258,10 +258,16 @@ function getBuilderProjectState(workspaceRoot: string): { id: string; title: str
     throw new Error('No project found in codev/projects/');
   }
   let dir: string;
-  if (projectDirs.length > 1) {
-    // Multiple project dirs exist (historical records on main).
-    // Disambiguate using the worktree directory name which contains the project ID,
-    // e.g. .builders/spir-438-aspir-protocol → match "438-aspir-protocol"
+  if (projectId) {
+    // Direct lookup by project ID (passed via --project-id from porch)
+    const matched = projectDirs.find(d => d.startsWith(`${projectId}-`) || d.startsWith(`bugfix-${projectId}-`));
+    if (matched) {
+      dir = matched;
+    } else {
+      throw new Error(`Project ${projectId} not found in codev/projects/. Available: ${projectDirs.join(', ')}`);
+    }
+  } else if (projectDirs.length > 1) {
+    // Multiple project dirs — try to disambiguate from worktree directory name
     const cwd = process.cwd();
     const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
     if (builderMatch) {
@@ -1049,7 +1055,7 @@ function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: n
  * Resolve query for builder context (auto-detected from porch state)
  */
 function resolveBuilderQuery(workspaceRoot: string, type: string, options: ConsultOptions): string {
-  const projectState = getBuilderProjectState(workspaceRoot);
+  const projectState = getBuilderProjectState(workspaceRoot, options.projectId);
   const projectNumber = parseInt(projectState.id, 10);
 
   switch (type) {
