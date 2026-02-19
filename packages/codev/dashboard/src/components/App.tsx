@@ -12,6 +12,19 @@ import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 
 
+/** Spec 443: Build the dashboard title string with optional hostname prefix. */
+export function buildDashboardTitle(hostname?: string, workspaceName?: string): string {
+  const h = hostname?.trim();
+  const w = workspaceName?.trim();
+  if (h && w && h.toLowerCase() !== w.toLowerCase()) {
+    return `${h} ${w} dashboard`;
+  }
+  if (w) {
+    return `${w} dashboard`;
+  }
+  return 'dashboard';
+}
+
 export function App() {
   const { state, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
@@ -40,14 +53,13 @@ export function App() {
     }
   }, [refresh]);
 
-  // Set document title with workspace name (no emoji - favicon provides the icon)
+  // Spec 443: Build display title with hostname prefix
+  const dashboardTitle = buildDashboardTitle(state?.hostname, state?.workspaceName);
+
+  // Set document title with hostname + workspace name (no emoji - favicon provides the icon)
   useEffect(() => {
-    if (state?.workspaceName) {
-      document.title = `${state.workspaceName} dashboard`;
-    } else {
-      document.title = 'dashboard';
-    }
-  }, [state?.workspaceName]);
+    document.title = dashboardTitle;
+  }, [dashboardTitle]);
 
   // Check for fullscreen mode from URL — read synchronously to avoid a
   // layout switch (desktop → fullscreen) that unmounts/remounts Terminal
@@ -167,7 +179,7 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1 className="app-title">
-          {state?.workspaceName ? `${state.workspaceName} dashboard` : 'dashboard'}
+          {dashboardTitle}
         </h1>
         {state?.version && <span className="header-version">v{state.version}</span>}
       </header>
