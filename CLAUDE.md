@@ -148,6 +148,14 @@ validated: [gemini, codex, claude]
 - Complex features requiring multiple phases
 - Architecture changes
 
+### Use ASPIR for (autonomous SPIR):
+- Same scope as SPIR but **trusted/low-risk** work
+- Specs pre-written and approved by the architect
+- Internal tooling or protocol additions with low blast radius
+- When the architect wants full SPIR discipline without waiting at gates
+
+ASPIR is identical to SPIR except `spec-approval` and `plan-approval` gates are auto-approved. The PR gate remains. See `codev/protocols/aspir/protocol.md`.
+
 ### Use EXPERIMENT for:
 - Testing new approaches or techniques
 - Evaluating models or libraries
