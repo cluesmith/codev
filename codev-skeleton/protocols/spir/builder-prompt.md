@@ -60,6 +60,15 @@ Always use `af send architect "..."` to notify the architect at key moments:
 - **PR merged**: `af send architect "Project {{project_id}} complete. PR merged. Ready for cleanup."`
 - **Blocked**: `af send architect "Blocked on project {{project_id}}: [reason]"`
 
+## Handling Flaky Tests
+
+If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
+1. **DO NOT** edit `status.yaml` to bypass checks
+2. **DO NOT** skip porch checks or use any workaround to avoid the failure
+3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
+4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section
+5. Commit the skip and continue with your work
+
 ## Getting Started
 1. Read the protocol document thoroughly
 2. Review the spec and plan (if available)

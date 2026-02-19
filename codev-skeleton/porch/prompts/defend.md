@@ -101,3 +101,8 @@ This is non-negotiable. If tests fail:
 3. Fix accordingly
 4. Re-run tests
 5. Only signal completion when ALL tests pass
+
+**Exception: Pre-existing flaky tests** — If a test fails intermittently and is unrelated to your changes:
+1. Mark it as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: intermittent failure, skipped pending investigation`)
+2. Document it in your review under a `## Flaky Tests` section
+3. **DO NOT** edit `status.yaml` or skip porch checks to work around the failure

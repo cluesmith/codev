@@ -98,6 +98,11 @@ Brief description of what was implemented.
 
 [See instructions below]
 
+## Flaky Tests
+- [Any pre-existing tests that were skipped as flaky during this project]
+- [Include test name, file path, and observed failure mode]
+- [If none: "No flaky tests encountered"]
+
 ## Follow-up Items
 - [Any items identified for future work]
 ```

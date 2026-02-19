@@ -206,3 +206,10 @@ Signal `BLOCKED` with details about what's missing.
 
 **If build or tests fail and you can't fix it**:
 Signal `BLOCKED` with the error message.
+
+**If you encounter pre-existing flaky tests** (tests that fail intermittently but are unrelated to your changes):
+1. **DO NOT** edit `status.yaml` to bypass checks
+2. **DO NOT** skip porch checks or use workarounds to avoid the failure
+3. **DO** mark the flaky test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: intermittent timeout, skipped pending investigation`)
+4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section so the team can follow up
+5. Commit the skip and continue with your work
