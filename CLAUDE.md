@@ -148,6 +148,14 @@ validated: [gemini, codex, claude]
 - Complex features requiring multiple phases
 - Architecture changes
 
+### Use ASPIR for (autonomous SPIR):
+- Same as SPIR but **without human approval gates** on spec and plan
+- Trusted, low-risk work where spec/plan review can be deferred to PR
+- Builder runs autonomously through Specify → Plan → Implement → Review
+- Human approval still required at the PR gate before merge
+
+**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. See `codev/protocols/aspir/protocol.md`.
+
 ### Use EXPERIMENT for:
 - Testing new approaches or techniques
 - Evaluating models or libraries

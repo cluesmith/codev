@@ -1,0 +1,161 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "aspir",
+  "version": "1.0.0",
+  "description": "ASPIR: Autonomous SPIR — Specify → Plan → Implement → Review without human approval gates",
+  "input": {
+    "type": "spec",
+    "required": false,
+    "default_for": ["--project", "-p"]
+  },
+  "phases": [
+    {
+      "id": "specify",
+      "name": "Specify",
+      "description": "Write specification with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "specify.md",
+        "artifact": "codev/specs/${PROJECT_TITLE}.md"
+      },
+      "verify": {
+        "type": "spec",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "next": "plan"
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Write implementation plan with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "plan.md",
+        "artifact": "codev/plans/${PROJECT_TITLE}.md"
+      },
+      "verify": {
+        "type": "plan",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "plan_exists": "test -f codev/plans/${PROJECT_TITLE}.md",
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_TITLE}.md",
+        "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_TITLE}.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
+      },
+      "next": "implement"
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "description": "Implement code with 3-way review per plan phase",
+      "type": "per_plan_phase",
+      "build": {
+        "prompt": "implement.md",
+        "artifact": "src/**/*.{ts,tsx,js,jsx}"
+      },
+      "verify": {
+        "type": "impl",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "tests": {
+          "command": "npm test -- --exclude='**/e2e/**'",
+          "description": "Unit tests only - e2e tests run in review phase",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "transition": {
+        "on_complete": "implement",
+        "on_all_phases_complete": "review"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Final review and PR with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "review.md",
+        "artifact": "codev/reviews/${PROJECT_TITLE}.md"
+      },
+      "verify": {
+        "type": "pr",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "pr_exists": {
+          "command": "gh pr list --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
+          "description": "PR must be created before signaling completion"
+        },
+        "review_has_arch_updates": {
+          "command": "grep -q '## Architecture Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Architecture Updates' section (what changed in arch.md, or why no changes needed)"
+        },
+        "review_has_lessons_updates": {
+          "command": "grep -q '## Lessons Learned Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Lessons Learned Updates' section (what changed in lessons-learned.md, or why no changes needed)"
+        },
+        "e2e_tests": {
+          "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+          "description": "Full e2e test suite - only runs in review phase",
+          "optional": true
+        }
+      },
+      "gate": "pr",
+      "next": null
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current build phase is complete",
+      "transitions_to": "verify"
+    },
+    "BLOCKED": {
+      "description": "Signal implementation is blocked",
+      "requires": "reason"
+    }
+  },
+  "phase_completion": {
+    "build_succeeds": "npm run build 2>&1",
+    "tests_pass": "npm test 2>&1",
+    "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
+  },
+  "defaults": {
+    "mode": "strict",
+    "max_iterations": 1,
+    "verify": {
+      "models": ["gemini", "codex", "claude"],
+      "parallel": true
+    }
+  }
+}
