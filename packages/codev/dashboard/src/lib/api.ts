@@ -46,6 +46,7 @@ export interface DashboardState {
   annotations: Annotation[];
   workspaceName?: string;
   version?: string;
+  hostname?: string;
 }
 
 export interface FileEntry {
