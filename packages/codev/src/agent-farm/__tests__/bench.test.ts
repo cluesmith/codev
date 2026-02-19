@@ -2,9 +2,10 @@
  * Tests for af bench command
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter, Readable, PassThrough } from 'node:stream';
 import {
+  bench,
   computeStats,
   formatTime,
   detectCpu,
@@ -30,7 +31,25 @@ vi.mock('node:fs', () => ({
   createWriteStream: vi.fn(() => new PassThrough()),
 }));
 
+// Mock node:os
+vi.mock('node:os', () => ({
+  hostname: vi.fn(() => 'test-host'),
+}));
+
+// Mock logger to suppress output
+vi.mock('../utils/logger.js', () => ({
+  logger: {
+    error: vi.fn(),
+    kv: vi.fn(),
+    row: vi.fn(),
+    blank: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
 import { spawn as spawnMock, execSync as execSyncMock } from 'node:child_process';
+import { writeFileSync as writeFileSyncMock, mkdirSync as mkdirSyncMock } from 'node:fs';
+import { logger as loggerMock } from '../utils/logger.js';
 
 /** Create a mock child process that emits events. */
 function createMockProcess(exitCode: number, delay = 0) {
@@ -167,6 +186,15 @@ describe('af bench', () => {
       expect(detectCpu()).toBe('Apple M2 Max');
     });
 
+    it('should return CPU string on Linux when macOS fails', () => {
+      vi.mocked(execSyncMock)
+        .mockImplementationOnce(() => {
+          throw new Error('not macOS');
+        })
+        .mockReturnValueOnce('Model name:            Intel Xeon Platinum\n');
+      expect(detectCpu()).toBe('Intel Xeon Platinum');
+    });
+
     it('should return "unknown" when both methods fail', () => {
       vi.mocked(execSyncMock).mockImplementation(() => {
         throw new Error('not found');
@@ -179,6 +207,15 @@ describe('af bench', () => {
     it('should return RAM in GB on macOS', () => {
       vi.mocked(execSyncMock).mockReturnValueOnce('34359738368\n'); // 32 GB
       expect(detectRam()).toBe('32 GB');
+    });
+
+    it('should return RAM on Linux when macOS fails', () => {
+      vi.mocked(execSyncMock)
+        .mockImplementationOnce(() => {
+          throw new Error('not macOS');
+        })
+        .mockReturnValueOnce('32G\n');
+      expect(detectRam()).toBe('32G');
     });
 
     it('should return "unknown" when both methods fail', () => {
@@ -296,6 +333,182 @@ describe('af bench', () => {
       expect(result.iteration).toBe(1);
       expect(result.engines).toHaveLength(3);
       expect(result.wallTime).toBeNull();
+    });
+  });
+
+  describe('bench() orchestration', () => {
+    let exitSpy: ReturnType<typeof vi.spyOn>;
+    let consoleSpy: ReturnType<typeof vi.spyOn>;
+    let cwdSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('process.exit');
+      }) as any);
+      consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/test');
+    });
+
+    afterEach(() => {
+      exitSpy.mockRestore();
+      consoleSpy.mockRestore();
+      cwdSpy.mockRestore();
+    });
+
+    it('should exit with error if iterations < 1', async () => {
+      await expect(
+        bench({ iterations: 0, sequential: false, prompt: 'test', timeout: 300 }),
+      ).rejects.toThrow('process.exit');
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(vi.mocked(loggerMock.error)).toHaveBeenCalledWith(
+        '--iterations must be at least 1',
+      );
+    });
+
+    it('should exit with error if consult not on PATH', async () => {
+      // execSync('which consult') throws → consult not found
+      vi.mocked(execSyncMock).mockImplementation(() => {
+        throw new Error('not found');
+      });
+
+      await expect(
+        bench({ iterations: 1, sequential: false, prompt: 'test', timeout: 300 }),
+      ).rejects.toThrow('process.exit');
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(vi.mocked(loggerMock.error)).toHaveBeenCalledWith(
+        "'consult' command not found on PATH",
+      );
+    });
+
+    it('should run single iteration without summary stats', async () => {
+      vi.useRealTimers();
+      // Mock execSync: which consult, detectCpu, detectRam
+      vi.mocked(execSyncMock)
+        .mockReturnValueOnce('') // which consult
+        .mockReturnValueOnce('Apple M2\n') // detectCpu
+        .mockReturnValueOnce('34359738368\n'); // detectRam
+
+      // Mock 3 engine processes (parallel)
+      for (let i = 0; i < 3; i++) {
+        vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
+      }
+
+      exitSpy.mockRestore();
+      exitSpy = vi.spyOn(process, 'exit');
+
+      await bench({ iterations: 1, sequential: false, prompt: 'test', timeout: 300 });
+
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(vi.mocked(writeFileSyncMock)).toHaveBeenCalledTimes(1);
+
+      const content = vi.mocked(writeFileSyncMock).mock.calls[0][1] as string;
+      expect(content).toContain('=== Consultation Benchmark ===');
+      expect(content).toContain('Host: test-host');
+      expect(content).toContain('CPU: Apple M2');
+      expect(content).toContain('RAM: 32 GB');
+      expect(content).toContain('Mode: parallel');
+      expect(content).toContain('Iterations: 1');
+      // Single iteration: no summary section
+      expect(content).not.toContain('=== Summary ===');
+    });
+
+    it('should run multiple iterations with summary stats', async () => {
+      vi.useRealTimers();
+      // Mock execSync: which consult, detectCpu, detectRam
+      vi.mocked(execSyncMock)
+        .mockReturnValueOnce('') // which consult
+        .mockReturnValueOnce('Apple M2\n') // detectCpu
+        .mockReturnValueOnce('34359738368\n'); // detectRam
+
+      // Mock 6 engine processes (2 iterations × 3 engines)
+      for (let i = 0; i < 6; i++) {
+        vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
+      }
+
+      exitSpy.mockRestore();
+      exitSpy = vi.spyOn(process, 'exit');
+
+      await bench({ iterations: 2, sequential: false, prompt: 'test', timeout: 300 });
+
+      const content = vi.mocked(writeFileSyncMock).mock.calls[0][1] as string;
+      expect(content).toContain('=== Summary ===');
+      // Should contain per-engine summary lines
+      expect(content).toMatch(/gemini: avg=.*min=.*max=.*stddev=/);
+      expect(content).toMatch(/codex: avg=.*min=.*max=.*stddev=/);
+      expect(content).toMatch(/claude: avg=.*min=.*max=.*stddev=/);
+    });
+
+    it('should use sequential mode when option set', async () => {
+      vi.useRealTimers();
+      vi.mocked(execSyncMock)
+        .mockReturnValueOnce('') // which consult
+        .mockReturnValueOnce('Apple M2\n') // detectCpu
+        .mockReturnValueOnce('34359738368\n'); // detectRam
+
+      for (let i = 0; i < 3; i++) {
+        vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
+      }
+
+      exitSpy.mockRestore();
+      exitSpy = vi.spyOn(process, 'exit');
+
+      await bench({ iterations: 1, sequential: true, prompt: 'test', timeout: 300 });
+
+      const content = vi.mocked(writeFileSyncMock).mock.calls[0][1] as string;
+      expect(content).toContain('Mode: sequential');
+      // Sequential mode: no wall time in output
+      expect(content).not.toContain('wall:');
+    });
+
+    it('should save results file with correct path format', async () => {
+      vi.useRealTimers();
+      vi.mocked(execSyncMock)
+        .mockReturnValueOnce('') // which consult
+        .mockReturnValueOnce('Apple M2\n') // detectCpu
+        .mockReturnValueOnce('34359738368\n'); // detectRam
+
+      for (let i = 0; i < 3; i++) {
+        vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
+      }
+
+      exitSpy.mockRestore();
+      exitSpy = vi.spyOn(process, 'exit');
+
+      await bench({ iterations: 1, sequential: false, prompt: 'test', timeout: 300 });
+
+      expect(vi.mocked(mkdirSyncMock)).toHaveBeenCalledWith(
+        expect.stringContaining('bench-results'),
+        { recursive: true },
+      );
+
+      const filePath = vi.mocked(writeFileSyncMock).mock.calls[0][0] as string;
+      expect(filePath).toMatch(/bench-test-host-\d{8}-\d{6}\.txt$/);
+    });
+
+    it('should show N/A for engines that fail in all iterations', async () => {
+      vi.useRealTimers();
+      vi.mocked(execSyncMock)
+        .mockReturnValueOnce('') // which consult
+        .mockReturnValueOnce('Apple M2\n') // detectCpu
+        .mockReturnValueOnce('34359738368\n'); // detectRam
+
+      // 2 iterations, all engines fail
+      for (let i = 0; i < 6; i++) {
+        vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(1) as any);
+      }
+
+      exitSpy.mockRestore();
+      exitSpy = vi.spyOn(process, 'exit');
+
+      await bench({ iterations: 2, sequential: false, prompt: 'test', timeout: 300 });
+
+      const content = vi.mocked(writeFileSyncMock).mock.calls[0][1] as string;
+      expect(content).toContain('=== Summary ===');
+      expect(content).toContain('gemini: no successful runs');
+      expect(content).toContain('codex: no successful runs');
+      expect(content).toContain('claude: no successful runs');
     });
   });
 
