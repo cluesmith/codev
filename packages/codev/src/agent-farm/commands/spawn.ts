@@ -297,8 +297,13 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const branchName = `builder/${worktreeName}`;
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
+  // For file references (template context, plan lookup), use the actual spec filename
+  // when it exists. specName drives naming (worktree/branch/porch) but actual files
+  // on disk may have a different name (e.g., "444-spawn-improvements" vs "444-af-spawn-should-not").
+  const actualSpecName = specFile ? basename(specFile, '.md') : specName;
+
   // Check for corresponding plan file
-  const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
+  const planFile = resolve(config.codevDir, 'plans', `${actualSpecName}.md`);
   const hasPlan = existsSync(planFile);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (${protocol})`);
@@ -331,17 +336,17 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
   }
 
-  const specRelPath = `codev/specs/${specName}.md`;
-  const planRelPath = `codev/plans/${specName}.md`;
+  const specRelPath = `codev/specs/${actualSpecName}.md`;
+  const planRelPath = `codev/plans/${actualSpecName}.md`;
   const templateContext: TemplateContext = {
     protocol_name: protocol.toUpperCase(), mode,
     mode_soft: mode === 'soft', mode_strict: mode === 'strict',
     project_id: projectId,
     input_description: `the feature specified in ${specRelPath}`,
-    spec: { path: specRelPath, name: specName },
+    spec: { path: specRelPath, name: actualSpecName },
     spec_missing: !specFile,
   };
-  if (hasPlan) templateContext.plan = { path: planRelPath, name: specName };
+  if (hasPlan) templateContext.plan = { path: planRelPath, name: actualSpecName };
   if (ghIssue) {
     templateContext.issue = {
       number: issueNumber,
