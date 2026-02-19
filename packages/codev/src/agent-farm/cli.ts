@@ -311,7 +311,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--prompt <text>', 'Custom consultation prompt')
     .option('--timeout <seconds>', 'Per-engine timeout in seconds (default: 300)', '300')
     .action(async (options) => {
-      const { bench } = await import('./commands/bench.js');
+      const { bench, DEFAULT_PROMPT, DEFAULT_TIMEOUT } = await import('./commands/bench.js');
       try {
         const iterations = parseInt(options.iterations, 10);
         const timeout = parseInt(options.timeout, 10);
@@ -326,7 +326,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         await bench({
           iterations,
           sequential: !!options.sequential,
-          prompt: options.prompt || 'Please analyze the codev codebase and give me a list of potential impactful improvements.',
+          prompt: options.prompt || DEFAULT_PROMPT,
           timeout,
         });
       } catch (error) {

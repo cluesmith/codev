@@ -15,9 +15,9 @@ import { logger } from '../utils/logger.js';
 const ENGINES = ['gemini', 'codex', 'claude'] as const;
 type Engine = (typeof ENGINES)[number];
 
-const DEFAULT_PROMPT =
+export const DEFAULT_PROMPT =
   'Please analyze the codev codebase and give me a list of potential impactful improvements.';
-const DEFAULT_TIMEOUT = 300;
+export const DEFAULT_TIMEOUT = 300;
 
 export interface BenchOptions {
   iterations: number;
@@ -114,12 +114,8 @@ export function runEngine(
       }
     });
 
-    proc.on('error', (err) => {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        settle({ engine, elapsed: null, status: 'failed' });
-      } else {
-        settle({ engine, elapsed: null, status: 'failed' });
-      }
+    proc.on('error', () => {
+      settle({ engine, elapsed: null, status: 'failed' });
     });
 
     timer = setTimeout(() => {
