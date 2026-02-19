@@ -330,6 +330,12 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     // Only activates when there IS scrollback (baseY > 0); when the buffer
     // is empty or all content fits in the viewport, there's nothing to lose.
     const safeFit = () => {
+      // Skip fit when container is hidden (display: none) or has zero dimensions.
+      // ResizeObserver fires with 0x0 when tabs switch — fitting at that size
+      // causes buffer reflow that resets the viewport to the top.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+
       const baseY = term.buffer?.active?.baseY;
       if (!baseY) {
         fitAddon.fit();
