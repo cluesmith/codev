@@ -257,11 +257,27 @@ function getBuilderProjectState(workspaceRoot: string): { id: string; title: str
   if (projectDirs.length === 0) {
     throw new Error('No project found in codev/projects/');
   }
+  let dir: string;
   if (projectDirs.length > 1) {
-    throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+    // Multiple project dirs exist (historical records on main).
+    // Disambiguate using the worktree directory name which contains the project ID,
+    // e.g. .builders/spir-438-aspir-protocol → match "438-aspir-protocol"
+    const cwd = process.cwd();
+    const builderMatch = cwd.match(/\.builders\/[^/]*?-?(\d+)-([^/]+)/);
+    if (builderMatch) {
+      const worktreeId = builderMatch[1];
+      const matched = projectDirs.find(d => d.startsWith(`${worktreeId}-`) || d.startsWith(`bugfix-${worktreeId}-`));
+      if (matched) {
+        dir = matched;
+      } else {
+        throw new Error(`Multiple projects found and none match worktree ID ${worktreeId}: ${projectDirs.join(', ')}`);
+      }
+    } else {
+      throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+    }
+  } else {
+    dir = projectDirs[0];
   }
-
-  const dir = projectDirs[0];
   const statusPath = path.join(projectsDir, dir, 'status.yaml');
   if (!fs.existsSync(statusPath)) {
     throw new Error(`status.yaml not found in ${dir}`);
