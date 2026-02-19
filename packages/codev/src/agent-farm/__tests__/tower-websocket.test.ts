@@ -7,7 +7,7 @@
  * invalid paths, bad base64, missing sessions).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { handleTerminalWebSocket, setupUpgradeHandler } from '../servers/tower-websocket.js';
@@ -42,7 +42,7 @@ function makeWs(): any {
   return ws;
 }
 
-function makeSession(): any {
+function makeSession(seq = 0): any {
   return {
     attach: vi.fn(() => []),
     attachResume: vi.fn(() => []),
@@ -50,11 +50,12 @@ function makeSession(): any {
     write: vi.fn(),
     resize: vi.fn(),
     recordUserInput: vi.fn(),
+    ringBuffer: { currentSeq: seq },
   };
 }
 
-function makeReq(headers: Record<string, string> = {}): http.IncomingMessage {
-  return { headers } as any;
+function makeReq(headers: Record<string, string> = {}, url = '/'): http.IncomingMessage {
+  return { headers, url } as any;
 }
 
 /**
@@ -87,6 +88,11 @@ function encodeControlFrame(msg: Record<string, unknown>): Buffer {
 describe('tower-websocket', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // =========================================================================
@@ -115,19 +121,19 @@ describe('tower-websocket', () => {
       expect(session.attach).not.toHaveBeenCalled();
     });
 
-    it('sends replay data on connect', () => {
+    it('sends replay data and seq frame on connect', () => {
       const ws = makeWs();
-      const session = makeSession();
+      const session = makeSession(5);
       session.attach.mockReturnValue(['line1', 'line2']);
       const req = makeReq();
 
       handleTerminalWebSocket(ws, session, req);
 
-      // Should send encoded replay data
-      expect(ws.send).toHaveBeenCalledTimes(1);
+      // Should send replay data + seq control frame
+      expect(ws.send).toHaveBeenCalledTimes(2);
     });
 
-    it('skips replay when no lines', () => {
+    it('sends only seq frame when no replay lines', () => {
       const ws = makeWs();
       const session = makeSession();
       session.attach.mockReturnValue([]);
@@ -135,7 +141,8 @@ describe('tower-websocket', () => {
 
       handleTerminalWebSocket(ws, session, req);
 
-      expect(ws.send).not.toHaveBeenCalled();
+      // Seq frame is always sent after attach
+      expect(ws.send).toHaveBeenCalledTimes(1);
     });
 
     it('writes data frames to session', () => {
@@ -188,6 +195,7 @@ describe('tower-websocket', () => {
       const req = makeReq();
 
       handleTerminalWebSocket(ws, session, req);
+      ws.send.mockClear(); // Clear seq frame from attach
 
       ws.emit('message', encodeControlFrame({
         type: 'ping',
@@ -248,6 +256,74 @@ describe('tower-websocket', () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
+    it('uses attachResume when ?resume= query param is set (Bugfix #442)', () => {
+      const ws = makeWs();
+      const session = makeSession();
+      const req = makeReq({}, '/ws/terminal/t1?resume=99');
+
+      handleTerminalWebSocket(ws, session, req);
+
+      expect(session.attachResume).toHaveBeenCalledWith(expect.anything(), 99);
+      expect(session.attach).not.toHaveBeenCalled();
+    });
+
+    it('sends seq control frame with current ring buffer seq (Bugfix #442)', () => {
+      const ws = makeWs();
+      const session = makeSession(42);
+      const req = makeReq();
+
+      handleTerminalWebSocket(ws, session, req);
+
+      // Find the seq control frame
+      const seqFrame = ws.send.mock.calls.find((call: unknown[]) => {
+        const buf = call[0] as Buffer;
+        if (buf[0] !== 0x00) return false;
+        const msg = JSON.parse(buf.subarray(1).toString('utf-8'));
+        return msg.type === 'seq';
+      });
+      expect(seqFrame).toBeDefined();
+      const msg = JSON.parse((seqFrame![0] as Buffer).subarray(1).toString('utf-8'));
+      expect(msg.payload.seq).toBe(42);
+    });
+
+    it('sends periodic seq heartbeat (Bugfix #442)', () => {
+      const ws = makeWs();
+      const session = makeSession(10);
+      const req = makeReq();
+
+      handleTerminalWebSocket(ws, session, req);
+      ws.send.mockClear();
+
+      // Advance by 10s to trigger one heartbeat
+      session.ringBuffer.currentSeq = 20;
+      vi.advanceTimersByTime(10_000);
+
+      const seqFrame = ws.send.mock.calls.find((call: unknown[]) => {
+        const buf = call[0] as Buffer;
+        if (buf[0] !== 0x00) return false;
+        const msg = JSON.parse(buf.subarray(1).toString('utf-8'));
+        return msg.type === 'seq';
+      });
+      expect(seqFrame).toBeDefined();
+      const msg = JSON.parse((seqFrame![0] as Buffer).subarray(1).toString('utf-8'));
+      expect(msg.payload.seq).toBe(20);
+    });
+
+    it('clears heartbeat interval on close (Bugfix #442)', () => {
+      const ws = makeWs();
+      const session = makeSession();
+      const req = makeReq();
+
+      handleTerminalWebSocket(ws, session, req);
+      ws.send.mockClear();
+
+      ws.emit('close');
+
+      // Advancing timers should not trigger more sends
+      vi.advanceTimersByTime(30_000);
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
     it('drops data frames when WebSocket bufferedAmount exceeds high water mark (Bugfix #313)', () => {
       const ws = makeWs();
       const session = makeSession();
@@ -257,6 +333,7 @@ describe('tower-websocket', () => {
 
       // Get the client adapter that was passed to session.attach
       const client = session.attach.mock.calls[0][0];
+      ws.send.mockClear(); // Clear seq frame from attach
 
       // Normal send should work
       ws.bufferedAmount = 0;
