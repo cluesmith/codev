@@ -21,7 +21,8 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockIsSessionPersistent, mockGetNextShellId,
   mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
   mockParseJsonBody,
-  mockOverviewGetOverview, mockOverviewInvalidate } = vi.hoisted(() => ({
+  mockOverviewGetOverview, mockOverviewInvalidate,
+  mockReadCloudConfig } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -36,6 +37,11 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockParseJsonBody: vi.fn(async () => ({})),
   mockOverviewGetOverview: vi.fn(async () => ({ builders: [], pendingPRs: [], backlog: [] })),
   mockOverviewInvalidate: vi.fn(),
+  mockReadCloudConfig: vi.fn(),
+}));
+
+vi.mock('../lib/cloud-config.js', () => ({
+  readCloudConfig: (...args: unknown[]) => mockReadCloudConfig(...args),
 }));
 
 vi.mock('../servers/tower-instances.js', () => ({
@@ -406,6 +412,35 @@ describe('tower-routes', () => {
       expect(parsed).toHaveProperty('architect');
       expect(parsed).toHaveProperty('builders');
       expect(parsed).toHaveProperty('utils');
+    });
+
+    it('returns tower_name as hostname instead of os.hostname() (Bugfix #470)', async () => {
+      mockReadCloudConfig.mockReturnValue({
+        tower_id: 'test-id',
+        tower_name: 'mac',
+        api_key: 'test-key',
+        server_url: 'https://cloud.codevos.ai',
+      });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
+      const { res, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      const parsed = JSON.parse(body());
+      expect(parsed.hostname).toBe('mac');
+    });
+
+    it('returns undefined hostname when no cloud config (Bugfix #470)', async () => {
+      mockReadCloudConfig.mockReturnValue(null);
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
+      const { res, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      const parsed = JSON.parse(body());
+      expect(parsed.hostname).toBeUndefined();
     });
   });
 
