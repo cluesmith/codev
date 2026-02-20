@@ -175,8 +175,8 @@ describe('af bench', () => {
   });
 
   describe('DEFAULT_TIMEOUT', () => {
-    it('should be 300 seconds', () => {
-      expect(DEFAULT_TIMEOUT).toBe(300);
+    it('should be 900 seconds', () => {
+      expect(DEFAULT_TIMEOUT).toBe(900);
     });
   });
 
