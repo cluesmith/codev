@@ -104,6 +104,7 @@ function TerminalControls({
       {connStatus !== 'connected' && (
         <span
           className={`terminal-control-btn terminal-status-icon ${connStatus === 'reconnecting' ? 'terminal-status-reconnecting' : 'terminal-status-disconnected'}`}
+          role="status"
           title={connStatus === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}
           aria-label={connStatus === 'reconnecting' ? 'Reconnecting' : 'Disconnected'}
         >
