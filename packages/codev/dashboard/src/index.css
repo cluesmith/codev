@@ -98,6 +98,7 @@ body {
 .split-left, .split-right {
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .split-handle {
@@ -109,6 +110,66 @@ body {
 
 .split-handle:hover {
   background: var(--accent);
+}
+
+/* Collapse/expand controls for split pane (Issue #495) */
+.split-collapse-btn {
+  position: absolute;
+  top: 8px;
+  z-index: 20;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+}
+
+.split-left:hover .split-collapse-btn,
+.split-right:hover .split-collapse-btn {
+  opacity: 0.6;
+}
+
+.split-collapse-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.split-collapse-btn--left {
+  right: 8px;
+}
+
+.split-collapse-btn--right {
+  left: 8px;
+}
+
+.split-expand-bar {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: none;
+  border-right: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+.split-expand-bar:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .right-panel {
