@@ -17,6 +17,16 @@ import {
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/index.js';
+
+/**
+ * Extract shellper session UUID from socket path (Spec 468).
+ * Socket format: shellper-<UUID>.sock
+ */
+function extractShellperSessionId(socketPath: string | null): string | null {
+  if (!socketPath) return null;
+  const match = path.basename(socketPath).match(/^shellper-(.+)\.sock$/);
+  return match ? match[1] : null;
+}
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
@@ -532,7 +542,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const session = manager.createSessionRaw({ label, cwd: workspacePath });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
-      ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
+      const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+      ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
       // Architect sessions have auto-restart — keep WebSocket clients connected on exit
       if (dbSession.type === 'architect') {
         ptySession.restartOnExit = true;
@@ -685,7 +696,8 @@ export async function getTerminalsForWorkspace(
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.workspace_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
-            ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, dbSession.id);
+            const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
+            ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
             // Architect sessions have auto-restart — keep WebSocket clients connected on exit
             if (dbSession.type === 'architect') {
               ptySession.restartOnExit = true;

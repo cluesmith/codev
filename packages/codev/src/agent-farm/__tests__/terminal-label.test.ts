@@ -494,6 +494,33 @@ describe('Terminal Label Support (Spec 468)', () => {
     });
   });
 
+  describe('shellper session ID extraction from socket path', () => {
+    function extractShellperSessionId(socketPath: string | null): string | null {
+      if (!socketPath) return null;
+      const basename = socketPath.split('/').pop() || '';
+      const match = basename.match(/^shellper-(.+)\.sock$/);
+      return match ? match[1] : null;
+    }
+
+    it('should extract UUID from standard socket path', () => {
+      const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      expect(extractShellperSessionId(`/tmp/shellper-${uuid}.sock`)).toBe(uuid);
+    });
+
+    it('should return null for null socket path', () => {
+      expect(extractShellperSessionId(null)).toBeNull();
+    });
+
+    it('should return null for non-matching path', () => {
+      expect(extractShellperSessionId('/tmp/other-file.sock')).toBeNull();
+    });
+
+    it('should handle socket paths with subdirectories', () => {
+      const uuid = 'abc-123';
+      expect(extractShellperSessionId(`/home/user/.agent-farm/sockets/shellper-${uuid}.sock`)).toBe(uuid);
+    });
+  });
+
   describe('CLI rename command contracts (Phase 3)', () => {
     it('should detect missing SHELLPER_SESSION_ID', () => {
       // The rename command checks env var before calling Tower
