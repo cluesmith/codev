@@ -24,6 +24,7 @@ The data to answer these questions exists across multiple sources (GitHub API, p
 ## Requirements
 
 ### R1: Statistics tab in the right panel
+<!-- REVIEW(@architect): MAybe Analytics rather than statistics? -->
 
 Add a new `statistics` tab type to the dashboard tab system. It should:
 
@@ -39,6 +40,7 @@ Add a new `statistics` tab type to the dashboard tab system. It should:
 Provide a time range selector at the top of the statistics view with three options:
 
 - **7d** (default) — last 7 calendar days (rolling window from current UTC time)
+<!-- REVIEW(@architect): 24h as well -->
 - **30d** — last 30 calendar days (rolling window from current UTC time)
 - **All** — all available data (no time filter)
 
