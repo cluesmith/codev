@@ -142,11 +142,6 @@ export async function fetchOverview(): Promise<OverviewData> {
   return res.json();
 }
 
-/** Get the SSE events URL for push notifications (Bugfix #388). */
-export function getSSEEventsUrl(): string {
-  return apiUrl('api/events');
-}
-
 export async function refreshOverview(): Promise<void> {
   await fetch(apiUrl('api/overview/refresh'), {
     method: 'POST',
