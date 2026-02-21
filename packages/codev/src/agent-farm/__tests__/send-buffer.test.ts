@@ -191,9 +191,10 @@ describe('SendBuffer', () => {
     expect(defaultBuf.maxBufferAgeMs).toBe(60_000);
   });
 
-  describe('composing state (Bugfix #450)', () => {
-    it('does NOT deliver when session is idle but composing', () => {
-      // User typed but paused >3s — idle by timestamp but still composing
+  describe('composing state ignored for idle sessions (Bugfix #492)', () => {
+    it('delivers when session is idle even if composing is true (Bugfix #492)', () => {
+      // Bugfix #492: composing gets stuck true after non-Enter keystrokes (Ctrl+C,
+      // arrows, Tab). Idle threshold alone is sufficient for delivery.
       const session = makeSession(true, true); // idle=true, composing=true
       const deliver = vi.fn();
       const log = vi.fn();
@@ -203,12 +204,11 @@ describe('SendBuffer', () => {
 
       vi.advanceTimersByTime(500);
 
-      expect(deliver).not.toHaveBeenCalled();
-      expect(buf.pendingCount).toBe(1);
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(buf.pendingCount).toBe(0);
     });
 
     it('delivers when session is idle and NOT composing', () => {
-      // User pressed Enter and has been idle
       const session = makeSession(true, false); // idle=true, composing=false
       const deliver = vi.fn();
       const log = vi.fn();
@@ -223,7 +223,6 @@ describe('SendBuffer', () => {
     });
 
     it('delivers when composing but max buffer age exceeded', () => {
-      // Safety valve: deliver after max age even if composing
       const session = makeSession(false, true); // not idle, composing
       const deliver = vi.fn();
       const log = vi.fn();

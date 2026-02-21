@@ -895,8 +895,10 @@ async function handleSend(
   }
 
   // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
-  // Defer when composing (typed but not submitted) OR recently typed (idle threshold)
-  const shouldDefer = !interrupt && (session.composing || !session.isUserIdle(sendBuffer.idleThresholdMs));
+  // Defer only when user has typed recently (within idle threshold).
+  // Bugfix #492: removed session.composing check — composing gets stuck true
+  // after non-Enter keystrokes (Ctrl+C, arrows, Tab), causing 60s delays.
+  const shouldDefer = !interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs);
 
   if (shouldDefer) {
     // User is actively typing — buffer for deferred delivery

@@ -952,7 +952,7 @@ describe('tower-routes', () => {
       expect(writeCalls[0][0]).not.toMatch(/\r$/);
     });
 
-    it('returns deferred:true when user is idle but composing (Bugfix #450)', async () => {
+    it('delivers immediately when user is idle even if composing (Bugfix #492)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -960,7 +960,8 @@ describe('tower-routes', () => {
         agent: 'architect',
       });
       const mockWrite = vi.fn();
-      // User paused >3s (idle=true) but hasn't pressed Enter (composing=true)
+      // Bugfix #492: composing gets stuck true after non-Enter keystrokes.
+      // Idle threshold alone is sufficient — deliver immediately.
       mockGetTerminalManager.mockReturnValue({
         getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: true }),
         listSessions: () => [],
@@ -973,9 +974,9 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.ok).toBe(true);
-      expect(parsed.deferred).toBe(true);
-      // Message should NOT be written — user is composing
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(parsed.deferred).toBe(false);
+      // Message SHOULD be written — user is idle (Bugfix #492)
+      expect(mockWrite).toHaveBeenCalled();
     });
   });
 
