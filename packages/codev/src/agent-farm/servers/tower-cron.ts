@@ -316,8 +316,8 @@ function deliverMessage(task: CronTask, message: string): void {
   }
 
   const formatted = formatBuilderMessage('af-cron', message);
-  session.write(formatted);
-  session.write('\r');
+  // Combine message + Enter into a single write for atomic delivery (Bugfix #481)
+  session.write(formatted + '\r');
 
   broadcastMessage({
     type: 'message',

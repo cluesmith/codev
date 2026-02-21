@@ -894,6 +894,56 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
+    it('delivers message + Enter as a single atomic write (Bugfix #481)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      // Message and Enter must be delivered in a single write() call
+      // to prevent split DATA frames through the shellper protocol.
+      const writeCalls = mockWrite.mock.calls;
+      expect(writeCalls.length).toBe(1);
+      expect(writeCalls[0][0]).toMatch(/\r$/);
+    });
+
+    it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'hello', workspace: '/tmp/ws',
+        options: { noEnter: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res } = makeRes();
+
+      await handleRequest(req, res, ctx);
+      const writeCalls = mockWrite.mock.calls;
+      expect(writeCalls.length).toBe(1);
+      // Should NOT end with \r when noEnter is set
+      expect(writeCalls[0][0]).not.toMatch(/\r$/);
+    });
+
     it('returns deferred:true when user is idle but composing (Bugfix #450)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
