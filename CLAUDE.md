@@ -288,6 +288,17 @@ For detailed commands, configuration, and architecture, see:
 
 **You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
 
+### 🚨 ALWAYS Operate From the Main Workspace Root 🚨
+
+**ALL `af` commands (`af spawn`, `af send`, `af status`, `af dash`, `af cleanup`) MUST be run from the repository root on the `main` branch.**
+
+- **NEVER** run `af spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
+- **NEVER** run `af dash start` from a worktree — there is no separate dashboard per worktree
+- **NEVER** `cd` into a worktree to run af commands
+- The **only exception** is `porch` commands that need worktree context (e.g. `porch approve` from a builder's worktree)
+
+**What happened**: On 2026-02-21, `af spawn` was run from inside a builder's worktree. All new builders were nested inside that worktree, `af send` couldn't find them, and `af status` showed "not active in tower". Multiple builders had to be killed and respawned.
+
 ### Pre-Spawn Rule
 
 **Commit all local changes before `af spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).

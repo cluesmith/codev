@@ -156,12 +156,14 @@ af cleanup -p 0042
 1. **DO NOT merge PRs yourself** - Let builders merge their own PRs
 2. **DO NOT commit directly to main** - All changes go through builder PRs
 3. **DO NOT use `af send` for long messages** - Use GitHub PR comments instead
+4. **DO NOT run `af` commands from inside a builder worktree** - All `af` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
 
 ### ALWAYS Do These:
 1. **Create GitHub Issues first** - Track projects as issues before spawning
 2. **Review artifacts before approving gates** - (Strict mode) Read the spec/plan carefully
 3. **Use PR comments for feedback** - Not terminal send-keys
 4. **Let builders own their work** - Guide, don't take over
+5. **Stay on `main` at the repo root** - All architect operations happen from the main workspace
 
 ## Project Tracking
 
