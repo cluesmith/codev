@@ -365,20 +365,31 @@ af shell -n "test-runner"
 
 ### af rename
 
-Rename a builder or utility terminal.
+Rename the current shell session (Spec 468).
 
 ```bash
-af rename <id> <name>
+af rename <name>
 ```
 
 **Arguments:**
-- `id` - Builder or terminal ID
-- `name` - New name
+- `name` - New display name for the shell tab (1-100 characters)
 
-**Example:**
+**Description:**
+
+Renames the current utility shell session. Must be run from inside a shell created by `af shell`. The new name appears in the dashboard tab and persists across Tower restarts.
+
+- Only utility shell sessions can be renamed (not architect or builder terminals)
+- Duplicate names are auto-deduplicated with a `-N` suffix
+- Control characters are stripped from the name
+
+**Examples:**
 
 ```bash
-af rename 0042 "auth-rework"
+# Rename current shell
+af rename "monitoring"
+
+# Name will be deduped if it conflicts
+af rename "testing"   # → "testing-1" if "testing" already exists
 ```
 
 ---

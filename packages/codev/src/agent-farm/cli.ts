@@ -247,6 +247,20 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Rename command (Spec 468)
+  program
+    .command('rename <name>')
+    .description('Rename the current shell session')
+    .action(async (name) => {
+      const { rename } = await import('./commands/rename.js');
+      try {
+        await rename({ name });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Cleanup command
   program
     .command('cleanup')

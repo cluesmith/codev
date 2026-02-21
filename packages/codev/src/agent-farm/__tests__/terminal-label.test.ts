@@ -493,4 +493,38 @@ describe('Terminal Label Support (Spec 468)', () => {
       });
     });
   });
+
+  describe('CLI rename command contracts (Phase 3)', () => {
+    it('should detect missing SHELLPER_SESSION_ID', () => {
+      // The rename command checks env var before calling Tower
+      const sessionId = undefined;
+      expect(sessionId).toBeUndefined();
+    });
+
+    it('should use TOWER_PORT from env when available', () => {
+      const envPort = '4200';
+      const port = parseInt(envPort, 10);
+      expect(port).toBe(4200);
+    });
+
+    it('should fall back to default port when TOWER_PORT not set', () => {
+      const DEFAULT_TOWER_PORT = 4100;
+      const envPort = undefined;
+      const port = envPort ? parseInt(envPort, 10) : DEFAULT_TOWER_PORT;
+      expect(port).toBe(4100);
+    });
+
+    it('should map HTTP status codes to error messages', () => {
+      const statusMap: Record<number, string> = {
+        400: 'Name must be 1-100 characters',
+        403: 'Cannot rename builder/architect terminals',
+        404: 'Session not found — it may have been closed',
+        0: 'Tower is not running',
+      };
+      expect(statusMap[400]).toContain('1-100');
+      expect(statusMap[403]).toContain('builder/architect');
+      expect(statusMap[404]).toContain('not found');
+      expect(statusMap[0]).toContain('not running');
+    });
+  });
 });

@@ -335,6 +335,19 @@ export class TowerClient {
   }
 
   /**
+   * Rename a terminal session (Spec 468)
+   */
+  async renameTerminal(
+    sessionId: string,
+    name: string,
+  ): Promise<{ ok: boolean; status: number; data?: { id: string; name: string }; error?: string }> {
+    return this.request<{ id: string; name: string }>(`/api/terminals/${sessionId}/rename`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  /**
    * Get the tower dashboard URL for a workspace
    */
   getWorkspaceUrl(workspacePath: string): string {
