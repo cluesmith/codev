@@ -152,6 +152,10 @@ body {
   border-bottom-color: var(--accent);
 }
 
+.tab-icon {
+  flex-shrink: 0;
+}
+
 .tab-label {
   max-width: 120px;
   overflow: hidden;

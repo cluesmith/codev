@@ -1,6 +1,16 @@
 import type { Tab } from '../hooks/useTabs.js';
 import { deleteTab } from '../lib/api.js';
 
+export const TAB_ICONS: Record<Tab['type'], string> = {
+  work: '\u25C8',            // ◈
+  architect: '\u25B6\uFE0E', // ▶︎ (text presentation)
+  builder: '\u2692\uFE0E',   // ⚒︎ (text presentation)
+  shell: '$',                 // $
+  file: '\u2261',             // ≡
+  activity: '\u26A1\uFE0E',  // ⚡︎ (text presentation)
+  files: '\u2630',            // ☰
+};
+
 interface TabBarProps {
   tabs: Tab[];
   activeTabId: string;
@@ -31,6 +41,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onRefresh }: TabBarProp
           onClick={() => onSelectTab(tab.id)}
           title={tab.label}
         >
+          <span className="tab-icon" aria-hidden="true">{TAB_ICONS[tab.type]}</span>
           <span className="tab-label">{tab.label}</span>
           {tab.closable && (
             <span

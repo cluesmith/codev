@@ -17,7 +17,7 @@ import type { Tab } from '../src/hooks/useTabs.js';
 afterEach(cleanup);
 
 const mockTabs: Tab[] = [
-  { id: 'dashboard', type: 'dashboard', label: 'Overview', closable: false },
+  { id: 'dashboard', type: 'work', label: 'Overview', closable: false },
   { id: 'architect', type: 'architect', label: 'Architect', closable: false },
 ];
 
