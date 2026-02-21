@@ -84,23 +84,20 @@ describe('Bugfix #427: getMainRepoFromWorktree export', () => {
 // Test 3: Consistent containment checks in tower-routes.ts
 // ============================================================================
 
-describe('Bugfix #427: Consistent containment checks', () => {
-  it('GET /file route should use symlink-aware containment check', async () => {
+describe('Bugfix #427: GET /file route exists', () => {
+  it('GET /file route handler is present', async () => {
     const { readFileSync } = await import('node:fs');
     const routesSrc = readFileSync(
       resolve(import.meta.dirname, '../servers/tower-routes.ts'),
       'utf-8',
     );
 
-    // Find the GET /file handler section
+    // GET /file handler should still exist
     const getFileIdx = routesSrc.indexOf("subPath === 'file'");
     expect(getFileIdx).toBeGreaterThan(-1);
 
-    // Extract the section around the GET /file handler (next ~30 lines)
+    // Containment check removed in bugfix #502 to allow files outside workspace
     const section = routesSrc.slice(getFileIdx, getFileIdx + 800);
-
-    // Should use fs.realpathSync for symlink-aware containment,
-    // not just path.resolve
-    expect(section).toContain('realpathSync');
+    expect(section).not.toContain('Forbidden');
   });
 });
