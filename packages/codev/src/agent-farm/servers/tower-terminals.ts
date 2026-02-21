@@ -153,6 +153,7 @@ export function saveTerminalSession(
   shellperSocket: string | null = null,
   shellperPid: number | null = null,
   shellperStartTime: number | null = null,
+  label: string | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -166,12 +167,52 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Update the label of a terminal session in SQLite (Spec 468).
+ */
+export function updateTerminalLabel(terminalId: string, label: string): void {
+  try {
+    const db = getGlobalDb();
+    db.prepare('UPDATE terminal_sessions SET label = ? WHERE id = ?').run(label, terminalId);
+  } catch (err) {
+    _deps?.log('WARN', `Failed to update terminal label: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Get a terminal session row by its primary key (Spec 468).
+ */
+export function getTerminalSessionById(terminalId: string): DbTerminalSession | null {
+  try {
+    const db = getGlobalDb();
+    return db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get(terminalId) as DbTerminalSession | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get labels of all active shell sessions in a workspace (Spec 468, for dedup).
+ */
+export function getActiveShellLabels(workspacePath: string): string[] {
+  try {
+    const db = getGlobalDb();
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
+    const rows = db.prepare(
+      "SELECT label FROM terminal_sessions WHERE workspace_path = ? AND type = 'shell' AND label IS NOT NULL"
+    ).all(normalizedPath) as Array<{ label: string }>;
+    return rows.map(r => r.label);
+  } catch {
+    return [];
   }
 }
 
@@ -479,7 +520,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
     const workspacePath = dbSession.workspace_path;
     const replayData = client.getReplayData() ?? Buffer.alloc(0);
-    const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown');
+    const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown'));
 
     // Create a PtySession backed by the reconnected shellper client
     const session = manager.createSessionRaw({ label, cwd: workspacePath });

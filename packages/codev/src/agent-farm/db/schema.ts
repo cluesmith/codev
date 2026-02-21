@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   shellper_socket TEXT,                   -- Unix socket path for shellper process
   shellper_pid INTEGER,                   -- shellper process PID
   shellper_start_time INTEGER,            -- shellper process start time (epoch ms)
+  label TEXT,                             -- custom display label (Spec 468)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

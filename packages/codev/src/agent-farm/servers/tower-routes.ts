@@ -1293,7 +1293,7 @@ async function handleWorkspaceState(
     if (session) {
       state.utils.push({
         id: shellId,
-        name: `Shell ${shellId.replace('shell-', '')}`,
+        name: session.label,
         port: 0,
         pid: session.pid || 0,
         terminalId,
@@ -1357,6 +1357,9 @@ async function handleWorkspaceShellCreate(
         // Strip CLAUDECODE so spawned Claude processes don't detect nesting
         const shellEnv = { ...process.env } as Record<string, string>;
         delete shellEnv['CLAUDECODE'];
+        // Inject session identity for af rename (Spec 468)
+        shellEnv['SHELLPER_SESSION_ID'] = sessionId;
+        shellEnv['TOWER_PORT'] = String(ctx.port);
         const client = await shellperManager.createSession({
           sessionId,
           command: shellCmd,
@@ -1388,7 +1391,7 @@ async function handleWorkspaceShellCreate(
         res.end(JSON.stringify({
           id: shellId,
           port: 0,
-          name: `Shell ${shellId.replace('shell-', '')}`,
+          name: session.label,
           terminalId: session.id,
           persistent: true,
         }));
@@ -1399,6 +1402,8 @@ async function handleWorkspaceShellCreate(
 
     // Fallback: non-persistent session (graceful degradation per plan)
     // Shellper is the only persistence backend for new sessions.
+    // Note: SHELLPER_SESSION_ID is not set for non-persistent sessions since
+    // they don't survive Tower restarts and rename wouldn't persist.
     if (!shellCreated) {
       const session = await manager.createSession({
         command: shellCmd,
@@ -1417,7 +1422,7 @@ async function handleWorkspaceShellCreate(
       res.end(JSON.stringify({
         id: shellId,
         port: 0,
-        name: `Shell ${shellId.replace('shell-', '')}`,
+        name: session.label,
         terminalId: session.id,
         persistent: false,
       }));

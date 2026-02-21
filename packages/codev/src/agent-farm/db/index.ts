@@ -360,7 +360,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 10;
+  const GLOBAL_CURRENT_VERSION = 11;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -631,6 +631,18 @@ function ensureGlobalDatabase(): Database.Database {
     `);
     db.prepare('INSERT INTO _migrations (version) VALUES (10)').run();
     console.log('[info] Created cron_tasks table (Spec 399)');
+  }
+
+  // Migration v11: Add label column to terminal_sessions (Spec 468)
+  const v11 = db.prepare('SELECT version FROM _migrations WHERE version = 11').get();
+  if (!v11) {
+    try {
+      db.exec(`ALTER TABLE terminal_sessions ADD COLUMN label TEXT`);
+    } catch {
+      // Column may already exist from a fresh install
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (11)').run();
+    console.log('[info] Added label column to terminal_sessions (Spec 468)');
   }
 
   return db;
