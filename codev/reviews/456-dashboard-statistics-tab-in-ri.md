@@ -47,3 +47,70 @@ Implemented a Statistics tab in the dashboard right panel that aggregates projec
 2. **Merge overlapping React effects**: Two effects depending on the same state variable both fire on change, causing unintended duplicate side effects. A single merged effect is always cleaner.
 
 3. **Multi-agent review catches different things**: Gemini and Codex consistently flagged the same issues (showing agreement), while Claude provided nuanced architectural notes. The combination is more valuable than any single reviewer.
+
+## Consultation Feedback
+
+### data_layer Phase (Round 1)
+
+#### Gemini (REQUEST_CHANGES)
+- **Concern**: `parseLinkedIssue` only returns single issue from PR body
+  - **Addressed**: Created `parseAllLinkedIssues()` with global regex
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Should use `gh search prs` instead of `gh pr list`
+  - **Rebutted**: `gh pr list --state merged --search` achieves same server-side filtering with automatic repo scoping and `mergedAt` field
+- **Concern**: Partial GitHub failure not surfaced in errors
+  - **Rebutted**: Partial data is still valuable; error only when all three calls fail
+- **Concern**: `activeBuilders` passed as parameter instead of reading from overview cache
+  - **Rebutted**: Keeps `computeStatistics` pure and testable; wired in route handler
+
+#### Claude (APPROVE)
+- No concerns raised
+
+### api_endpoint Phase (Round 1)
+
+#### Gemini (REQUEST_CHANGES)
+- **Concern**: Missing unit tests for route handler
+  - **Addressed**: Added 6 tests to `tower-routes.test.ts`
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Missing endpoint unit tests
+  - **Addressed**: Same as Gemini above
+
+#### Claude (APPROVE)
+- No concerns raised
+
+### dashboard_ui Phase (Round 1)
+
+#### Gemini (APPROVE)
+- No concerns raised
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Duplicate fetch on tab activation due to overlapping effects
+  - **Addressed**: Consolidated two effects into one
+
+#### Claude (APPROVE)
+- Noted double-fetch and CSS variable inconsistency as non-blocking observations
+  - **Addressed**: Both fixed alongside Codex feedback
+
+## Architecture Updates
+
+Updated `codev/resources/arch.md`:
+- Added `StatisticsView.tsx` and `useStatistics.ts` to the dashboard directory tree
+- Added `statistics.ts` to the Tower server module decomposition table
+- Added `GET /workspace/:enc/api/statistics` to the workspace-scoped API routes table
+- Added "Statistics View (Spec 456)" subsection describing the feature's data flow and behavior
+
+## Lessons Learned Updates
+
+No new generalizable lessons beyond what's already documented. The Vitest 4 constructor mocking issue is project-specific rather than a broadly applicable pattern.
+
+## Flaky Tests
+
+No flaky tests encountered.
+
+## Follow-up Items
+
+- Add E2E/Playwright test for the Statistics tab
+- Consider adding a 24h time range option (noted in spec review comments)
+- Consider "Analytics" as an alternative tab name (noted in spec review comments)
