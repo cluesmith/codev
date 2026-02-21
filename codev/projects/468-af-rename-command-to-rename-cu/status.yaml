@@ -1,18 +1,79 @@
 id: '468'
 title: af-rename-command-to-rename-cu
 protocol: spir
-phase: specify
-plan_phases: []
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Database Migration and Environment Variables
+    status: complete
+  - id: phase_2
+    title: Tower API Rename Endpoint and Dashboard State
+    status: complete
+  - id: phase_3
+    title: CLI Command and Integration
+    status: complete
 current_plan_phase: null
 gates:
   spec-approval:
-    status: pending
+    status: approved
+    requested_at: '2026-02-21T11:41:03.492Z'
+    approved_at: '2026-02-21T11:48:56.854Z'
   plan-approval:
-    status: pending
+    status: approved
+    requested_at: '2026-02-21T12:04:36.332Z'
+    approved_at: '2026-02-21T12:32:28.062Z'
   pr:
     status: pending
 iteration: 1
 build_complete: false
-history: []
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-468-af-rename-command-to-rename-cu/codev/projects/468-af-rename-command-to-rename-cu/468-phase_3-iter1-claude.txt
 started_at: '2026-02-21T11:29:52.827Z'
-updated_at: '2026-02-21T11:29:52.827Z'
+updated_at: '2026-02-21T18:04:33.753Z'
