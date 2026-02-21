@@ -8,7 +8,7 @@
 ## Clarifying Questions Asked
 
 1. **Q: Should `af rename` only work for utility shells, or also for builder/architect terminals?**
-   A: The mechanism works for any shellper-managed session since detection is environment-based. All session types (architect, builder, shell) go through shellper and will have `SHELLPER_SESSION_ID` set.
+   A: **Utility shells only.** Builder and architect terminals have consistent naming that other functionality depends on. The API endpoint should reject rename requests for non-shell sessions with a clear error.
 
 2. **Q: Should the rename persist across Tower restarts?**
    A: Yes. The label should be stored in SQLite so it survives restarts. Currently labels are only in memory.
@@ -17,7 +17,7 @@
    A: Non-empty, max 100 characters. Reject (not truncate) names that exceed the limit. Strip control characters (newlines, tabs) to prevent UI rendering issues.
 
 4. **Q: Are duplicate labels allowed?**
-   A: Yes. Labels are for display purposes only and do not serve as identifiers. Multiple sessions may have the same label.
+   A: No. If a name is already in use by another session, auto-deduplicate by appending a suffix (e.g., `monitoring` → `monitoring-1`, `monitoring-2`). The API returns the actual name used so the user knows what was applied.
 
 ## Problem Statement
 
@@ -36,7 +36,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 ## Desired State
 
-- Users can run `af rename "descriptive name"` from inside any shellper-managed shell session
+- Users can run `af rename "descriptive name"` from inside a utility shell session
 - The command detects which session it's running in via `SHELLPER_SESSION_ID` environment variable
 - Tower also injects `TOWER_PORT` so the CLI knows which Tower instance to contact
 - The name updates in Tower's in-memory state and in SQLite (source of truth)
@@ -45,6 +45,8 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 - Running `af rename` outside a shellper session produces a clear error message
 - Labels persist across Tower restarts via SQLite storage
 - Existing sessions created before the migration work correctly (null label treated as current default)
+- Duplicate names are auto-deduplicated (e.g., `monitoring` → `monitoring-1`)
+- Renaming is restricted to utility shell sessions; builder/architect terminals are rejected
 
 ## Stakeholders
 - **Primary Users**: Developers using Agent Farm with multiple shell sessions
@@ -52,7 +54,9 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria
-- [ ] `af rename "name"` updates the current shell's name when run inside a shellper session
+- [ ] `af rename "name"` updates the current shell's name when run inside a utility shell session
+- [ ] `af rename` in a builder/architect terminal produces error: "Cannot rename builder/architect terminals"
+- [ ] Duplicate names are auto-deduplicated with `-N` suffix and CLI shows the actual name applied
 - [ ] Running `af rename` outside a shellper session produces a clear error: "Not running inside a shellper session"
 - [ ] `SHELLPER_SESSION_ID` and `TOWER_PORT` environment variables are set in all new shellper sessions
 - [ ] The dashboard tab title updates to show the new name
@@ -83,7 +87,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 ## Solution Approaches
 
-### Approach 1: Environment Variable + Tower API (Recommended)
+### Approach 1: Environment Variable + Tower API (Approved)
 
 **Description**: Set `SHELLPER_SESSION_ID` and `TOWER_PORT` in the shell environment at session creation. The `af rename` command reads these variables, calls a new Tower API endpoint (`PATCH /api/terminals/:id/rename`), which updates both in-memory state and SQLite.
 
@@ -92,8 +96,9 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
   - Header: `codev-web-key: <local-key>` (existing auth)
   - Body: `{ "name": "new display name" }`
   - `:sessionId` is the `SHELLPER_SESSION_ID` (stable UUID from `terminal_sessions.id`)
-- **Response (success)**: `200 { "id": "session-uuid", "name": "new display name" }`
+- **Response (success)**: `200 { "id": "session-uuid", "name": "new display name" }` — name may differ from request if deduplicated
 - **Response (not found)**: `404 { "error": "Session not found" }` — session ID doesn't exist or was closed
+- **Response (forbidden)**: `403 { "error": "Cannot rename builder/architect terminals" }` — only shell-type sessions can be renamed
 - **Response (validation)**: `400 { "error": "Name must be 1-100 characters" }`
 
 **Source of Truth**: SQLite `terminal_sessions.label` column is the persistent source of truth. On Tower startup, labels are loaded from SQLite. In-memory PtySession labels are synced from SQLite. The rename operation writes to both SQLite and in-memory state atomically.
@@ -168,6 +173,8 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 7. **Control characters**: Run `af rename "test\ninjection"` → control chars stripped, name stored as "testinjection"
 8. **Stale session**: Rename with a `SHELLPER_SESSION_ID` that doesn't exist in Tower → "Session not found" error
 9. **Multiple renames**: Rename same session twice → second name overwrites first
+10. **Builder/architect terminal**: Run `af rename "test"` in builder terminal → error "Cannot rename builder/architect terminals"
+11. **Duplicate name**: Rename to a name already used by another session → auto-dedup to `name-1`, CLI shows "Renamed to: name-1"
 
 ### Non-Functional Tests
 1. **Persistence**: Rename, restart Tower, verify label persists from SQLite
