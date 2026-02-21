@@ -4,6 +4,7 @@
 - **ID**: spec-2026-02-21-spike-protocol
 - **Status**: draft
 - **Created**: 2026-02-21
+- **Updated**: 2026-02-21
 
 ## Clarifying Questions Asked
 
@@ -80,12 +81,12 @@ A lightweight `spike` protocol that:
 - The protocol-schema.json supports a protocol with no gates (confirmed: bugfix and experiment have no gates)
 - `af spawn --protocol spike` will work once the protocol directory exists in codev-skeleton
 - Soft mode builders can follow protocol.md directly without porch orchestration
-- The `input` field can be set to not require a spec (`input.required: false` or input type `none`)
+- The `input` field can use type `task` (per protocol-schema.json enum: `spec`, `github-issue`, `task`, `protocol`, `shell`, `worktree`) with `required: false`
 
 ## Solution Approaches
 
 ### Approach 1: Three-Phase Linear Protocol (Recommended)
-**Description**: Define spike as a 3-phase protocol: research → iterate → findings. Each phase is `once` type. No gates, no consultation. Input type is `none` (task description comes from the spawn command). Output goes to `codev/spikes/` directory.
+**Description**: Define spike as a 3-phase protocol: research → iterate → findings. Each phase is `once` type. No gates, no consultation. Input type is `task` (task description comes from `af spawn --task "..." --protocol spike`). Output goes to `codev/spikes/` directory.
 
 **Pros**:
 - Matches the issue description exactly (Research, Iterate, Findings)
@@ -138,11 +139,11 @@ A lightweight `spike` protocol that:
 - [x] Output directory: `codev/spikes/` vs `codev/reviews/` — Recommending `codev/spikes/`
 
 ### Important (Affects Design)
-- [ ] Should `codev init` / `codev adopt` create the `codev/spikes/` directory? Or create it on first spike?
-- [ ] What input type to use in protocol.json? `none` seems right since spikes don't need a pre-existing spec
+- [x] Should `codev init` / `codev adopt` create the `codev/spikes/` directory? Or create it on first spike? — Create on first spike. Adding a new directory to init/adopt requires changes to the codev CLI, which is out of scope. The builder-prompt can instruct the builder to `mkdir -p codev/spikes/` when writing findings.
+- [x] What input type to use in protocol.json? — Use `task` (not `none`). The `task` type is in the protocol schema enum and matches the spawn pattern `af spawn --task "Can we do X?" --protocol spike`. Unlike experiments, spikes are specifically driven by a task/question.
 
 ### Nice-to-Know (Optimization)
-- [ ] Should the findings template include a "Recommended Next Steps" section linking to SPIR?
+- [x] Should the findings template include a "Recommended Next Steps" section linking to SPIR? — Yes. The primary output of a spike is a feasibility verdict that informs whether to start a SPIR project. A "Next Steps" section explicitly bridges spike → SPIR.
 
 ## Performance Requirements
 - N/A — this is a protocol definition, not runtime code
@@ -198,7 +199,7 @@ A lightweight `spike` protocol that:
 - **Mode**: `soft` (default and only mode — no strict/porch orchestration)
 - **Consultation**: Disabled by default
 - **Gates**: None
-- **Input**: Type `none` — task description provided via spawn command
+- **Input**: Type `task` — task description provided via `af spawn --task "..." --protocol spike`
 - **Signals**: `PHASE_COMPLETE`, `BLOCKED`
 
 ### Findings Template Structure
