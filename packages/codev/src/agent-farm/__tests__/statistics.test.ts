@@ -362,6 +362,19 @@ describe('computeStatistics', () => {
     expect(result.builders.projectsCompleted).toBe(1);
   });
 
+  it('counts all linked issues from a single PR with multiple references', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'Big PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42 and Fixes #73' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
+
+    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    expect(result.builders.projectsCompleted).toBe(2); // Both #42 and #73
+  });
+
   it('counts distinct issues when multiple PRs link to same issue', async () => {
     mockGhOutput({
       mergedPRs: JSON.stringify([
@@ -374,6 +387,19 @@ describe('computeStatistics', () => {
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
     expect(result.builders.projectsCompleted).toBe(1);
+  });
+
+  it('counts multiple issues linked from a single PR', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'Big cleanup', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42, Closes #73, Resolves #99' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
+
+    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    expect(result.builders.projectsCompleted).toBe(3);
   });
 
   // --- Bug-only avg time to close ---

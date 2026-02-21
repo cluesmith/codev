@@ -14,7 +14,7 @@ import {
   fetchMergedPRs,
   fetchClosedIssues,
   fetchIssueList,
-  parseLinkedIssue,
+  parseAllLinkedIssues,
   type MergedPR,
   type ClosedIssue,
 } from '../../lib/github.js';
@@ -180,11 +180,10 @@ async function computeGitHubMetrics(
     closedBugs.map(i => ({ start: i.createdAt, end: i.closedAt })),
   );
 
-  // Projects completed (distinct issue numbers from merged PRs via parseLinkedIssue)
+  // Projects completed (distinct issue numbers from merged PRs via parseAllLinkedIssues)
   const linkedIssues = new Set<number>();
   for (const pr of prs) {
-    const issueNum = parseLinkedIssue(pr.body ?? '', pr.title);
-    if (issueNum !== null) {
+    for (const issueNum of parseAllLinkedIssues(pr.body ?? '', pr.title)) {
       linkedIssues.add(issueNum);
     }
   }
