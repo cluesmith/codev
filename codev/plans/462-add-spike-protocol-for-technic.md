@@ -45,13 +45,15 @@ Implement the spike protocol as the lightest-weight protocol in the codev ecosys
 #### Implementation Details
 
 Create `codev-skeleton/protocols/spike/protocol.json` with:
-- Name: `spike`
-- Version: `1.0.0`
-- Single phase `"spike"` (type: `once`) for schema compliance
-- Input type: `task` with `required: false`
-- Defaults: `mode: "soft"`, `consultation.enabled: false`
+- `$schema`: `../../protocol-schema.json` (consistent with all existing protocols)
+- `name`: `spike`
+- `version`: `1.0.0`
+- `description`: `Time-boxed technical feasibility exploration`
+- Single phase `"spike"` (type: `once`, description: `Execute the spike`) for schema compliance
+- `input`: type `task` with `required: false`
+- `defaults`: `mode: "soft"`, `consultation: { enabled: false, models: [], parallel: false }`
 - No gates, no hooks, no transitions, no checks
-- Signals: `PHASE_COMPLETE`, `BLOCKED` (convention only)
+- `signals`: `PHASE_COMPLETE`, `BLOCKED` (convention, consistent with experiment protocol)
 
 Reference: Follow the same structure as `codev-skeleton/protocols/experiment/protocol.json` but simpler.
 
@@ -142,7 +144,11 @@ Phase 1 (Protocol Config) ──→ Phase 2 (Docs & Templates)
 | protocol.json doesn't validate against schema | Low | Medium | Cross-reference experiment protocol which uses similar patterns |
 | Builder prompt template variables don't render | Low | Low | Use same variables as experiment builder-prompt.md |
 
+## Validation Checkpoints
+1. **After Phase 1**: Manually verify protocol.json includes all required schema fields (`name`, `version`, `description`, `phases`). Cross-check against experiment protocol.json for structural consistency.
+2. **After Phase 2**: Verify all template sections match the spec. Confirm Handlebars variables are consistent with experiment builder-prompt.md.
+
 ## Notes
-- This is a documentation-only change — no TypeScript, no runtime code, no tests to write
+- This is a documentation-only change — no TypeScript, no runtime code, no automated tests to write
 - All files follow existing conventions from the experiment and bugfix protocols
 - The `codev-skeleton/spikes/` directory already exists with `.gitkeep` — no init/adopt changes needed
