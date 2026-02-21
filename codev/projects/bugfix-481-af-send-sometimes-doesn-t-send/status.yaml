@@ -1,0 +1,12 @@
+id: bugfix-481
+title: af-send-sometimes-doesn-t-send
+protocol: bugfix
+phase: complete
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-21T17:42:58.171Z'
+updated_at: '2026-02-21T18:09:14.997Z'
