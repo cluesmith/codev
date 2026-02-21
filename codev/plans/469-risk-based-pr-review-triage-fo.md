@@ -63,13 +63,19 @@ Implement the risk-based PR review triage system in two phases: first the CLI `c
 
 **CLI routing** (`cli.ts`):
 - Add `risk` case to the subcommand switch in the consult action handler
-- Parse the `pr <N>` positional argument after `risk`
+- **Commander argument parsing**: The current `.argument('[subcommand]')` captures only the first positional. To parse `consult risk pr 83`, access remaining positional args via Commander's `Command` object (the last parameter in the action handler) using `command.args` which collects extra positionals when `.allowUnknownOption(true)` is set. Parse `args[0]` as `'pr'` and `args[1]` as the PR number. Error if format doesn't match `pr <N>`.
 - Does not require `-m` flag (risk assessment doesn't invoke models)
+- No `--risk` flag is added to existing `consult` commands — backwards compatibility is preserved by design. The spec's "override" capability is not a CLI flag; the architect simply ignores the recommendation and runs whatever commands they choose.
 
 **Reuse existing helpers**:
-- `fetchPRData(prNumber)` in `index.ts` already calls `gh pr view` and `gh pr diff --name-only`. Export it for reuse. However, risk assessment needs `additions` and `deletions` fields which are already included in the `gh pr view` JSON output.
+- `fetchPRData(prNumber)` in `index.ts` already calls `gh pr view` and `gh pr diff --name-only`. Export it for reuse. The returned `info` field is a raw JSON string — the risk module will `JSON.parse(info)` to extract `additions` and `deletions` numeric values.
+- Also export `logQuery()` from `index.ts` for logging risk assessments.
 
-**Logging**: Append to `.consult/history.log` with `type=risk` (same format as existing consult logs via `logQuery()`)
+**Binary file handling**: `gh pr view --json additions,deletions` reports only text line counts — binary files contribute 0 to additions/deletions. `gh pr diff --name-only` includes binary files in the file list. This is the desired behavior: binary files are excluded from line counts but included in file counts, with no special detection needed.
+
+**Cross-cutting factor**: The spec lists cross-cutting as a 4th risk factor. In practice, cross-cutting changes (shared interfaces, APIs, core modules) are captured by the subsystem path patterns — files in `src/state/`, `src/lib/`, or `protocols/` are inherently cross-cutting and already mapped to medium/high risk. Full import-graph-based cross-cutting detection is deferred as over-engineering for current scale.
+
+**Logging**: Append to `.consult/history.log` with `type=risk` using the existing `logQuery()` function, which accepts arbitrary query text. The log format is a plain text line — no schema constraints.
 
 #### Acceptance Criteria
 - [ ] `consult risk pr 83` outputs correct risk level, breakdown, and recommended commands
@@ -87,11 +93,13 @@ Implement the risk-based PR review triage system in two phases: first the CLI `c
   - Risk level calculation from various line/file counts
   - Subsystem pattern matching for all defined patterns
   - "Highest factor wins" precedence with mixed signals
-  - Edge cases: 0 lines changed, only deletions, single file
-  - Output formatting for each risk level
+  - Edge cases: 0 lines changed, only deletions, single file, binary-only PR
+  - Output formatting for each risk level (low/medium/high recommended commands)
+  - Subsystem detection with mixed-risk file lists
 - **Integration Tests**:
   - CLI invocation with mock `gh` data (mock `execSync`)
   - Error handling: `gh` not found, PR not found, network failure
+  - Verify no `-m` flag required for `consult risk`
 
 #### Rollback Strategy
 - Delete `risk.ts`, revert `cli.ts` and `index.ts` changes. No other code depends on the new subcommand.
@@ -120,6 +128,7 @@ Implement the risk-based PR review triage system in two phases: first the CLI `c
 - [ ] New: `codev/resources/risk-triage.md` — full risk triage reference
 - [ ] New: `codev-skeleton/resources/risk-triage.md` — same for skeleton
 - [ ] Modified: `codev/resources/commands/consult.md` — document `consult risk` subcommand
+- [ ] Modified: `codev-skeleton/resources/commands/consult.md` — same for skeleton (if exists, otherwise create)
 
 #### Implementation Details
 
@@ -196,7 +205,7 @@ Phase 2 depends on Phase 1 because the documentation references the `consult ris
 - [ ] `codev/roles/architect.md` (and skeleton)
 - [ ] `codev/resources/workflow-reference.md` (and skeleton)
 - [ ] `codev/resources/risk-triage.md` (new, and skeleton)
-- [ ] `codev/resources/commands/consult.md`
+- [ ] `codev/resources/commands/consult.md` (and skeleton if exists)
 
 ## Notes
 
