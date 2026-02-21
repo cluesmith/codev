@@ -6,7 +6,7 @@
 **Action: FIXED.** Created `parseAllLinkedIssues(body, title): number[]` in `github.ts` that uses global regex (`matchAll`) to extract all linked issues from closing keywords, `[Spec N]`, and `[Bugfix #N]` patterns. Updated `computeGitHubMetrics` to use it. Added test case for single PR with multiple issue references.
 
 ### 2. Missing test for single PR with multiple issues
-**Action: FIXED.** Added test `counts all linked issues from a single PR with multiple references` that verifies `body: 'Fixes #42 and Fixes #73'` produces `projectsCompleted: 2`.
+**Action: FIXED.** Added test `counts multiple issues linked from a single PR` that verifies `body: 'Fixes #42, Closes #73, Resolves #99'` produces `projectsCompleted: 3`.
 
 ## Codex (REQUEST_CHANGES)
 
