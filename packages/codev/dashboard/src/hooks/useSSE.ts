@@ -11,7 +11,7 @@ function notify(): void {
 }
 
 function connect(): void {
-  if (eventSource) return;
+  if (eventSource || typeof EventSource === 'undefined') return;
   eventSource = new EventSource(getSSEEventsUrl());
   eventSource.onmessage = () => notify();
   eventSource.onerror = () => {
