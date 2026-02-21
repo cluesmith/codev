@@ -1314,6 +1314,11 @@ a.attention-row {
   color: #a855f7;
 }
 
+.type-tag--spike {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
 .backlog-row-title {
   flex: 1;
   font-size: 16px;

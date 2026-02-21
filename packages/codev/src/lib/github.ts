@@ -226,7 +226,7 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
  * - Multiple labels of same kind → first alphabetical
  */
 /** Labels that map directly to a type without the `type:` prefix. */
-const BARE_TYPE_LABELS = new Set(['bug', 'project']);
+const BARE_TYPE_LABELS = new Set(['bug', 'project', 'spike']);
 
 /** Title keywords that suggest a bug report. Trailing \b omitted to match plurals/verb forms. */
 const BUG_TITLE_PATTERNS = /\b(fix|bug|broken|error|crash|fail|wrong|regression|not working)/i;
