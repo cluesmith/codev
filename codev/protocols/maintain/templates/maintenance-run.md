@@ -1,4 +1,4 @@
-# Maintenance Run NNNN
+# Maintenance Run NNN
 
 ## Metadata
 - **Date**: YYYY-MM-DD
@@ -30,7 +30,7 @@ git log --oneline <last-maint-commit>..HEAD
 
 ### Framework
 - [ ] codev update
-- [ ] projectlist.md status updates
+- [ ] GitHub Issue status updates (close completed, update labels)
 
 ## Findings
 

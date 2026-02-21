@@ -50,7 +50,7 @@ TICK is an **amendment workflow** for existing SPIR specifications. Rather than 
 **Example**:
 ```
 User: "Use TICK to add password reset to the auth system"
-Agent finds: specs/0002-user-authentication.md (status: integrated)
+Agent finds: specs/2-user-authentication.md (status: integrated)
 Agent determines: Next TICK is TICK-001 (first amendment)
 ```
 
@@ -58,7 +58,7 @@ Agent determines: Next TICK is TICK-001 (first amendment)
 
 **Agent Actions**:
 1. Analyze what needs to change in the spec
-2. Update relevant sections of `specs/####-name.md`:
+2. Update relevant sections of `specs/NNN-name.md`:
    - Problem Statement (if scope expands)
    - Success Criteria (if new criteria added)
    - Solution Approaches (if design changes)
@@ -78,14 +78,14 @@ Agent determines: Next TICK is TICK-001 (first amendment)
    **Plan Changes**:
    - [Phase/steps]: [What was added/modified]
 
-   **Review**: See `reviews/####-name-tick-001.md`
+   **Review**: See `reviews/NNN-name-tick-001.md`
    ```
-4. **COMMIT**: `[TICK ####-NNN] Spec: [description]`
+4. **COMMIT**: `[TICK NNN-NNN] Spec: [description]`
 
 ### Phase 3: Planning Amendment (Autonomous)
 
 **Agent Actions**:
-1. Update `plans/####-name.md` with new implementation steps
+1. Update `plans/NNN-name.md` with new implementation steps
 2. Add/modify phases as needed
 3. Add entry to "Amendment History" section at bottom:
    ```markdown
@@ -95,9 +95,9 @@ Agent determines: Next TICK is TICK-001 (first amendment)
    - [Phase added]: [Description]
    - [Implementation steps]: [What was updated]
 
-   **Review**: See `reviews/####-name-tick-001.md`
+   **Review**: See `reviews/NNN-name-tick-001.md`
    ```
-4. **COMMIT**: `[TICK ####-NNN] Plan: [description]`
+4. **COMMIT**: `[TICK NNN-NNN] Plan: [description]`
 
 ### Phase 4: Implementation (Autonomous)
 
@@ -105,12 +105,12 @@ Agent determines: Next TICK is TICK-001 (first amendment)
 1. Execute implementation steps from the plan
 2. Write code following fail-fast principles
 3. Test functionality
-4. **COMMIT**: `[TICK ####-NNN] Impl: [description]`
+4. **COMMIT**: `[TICK NNN-NNN] Impl: [description]`
 
 ### Phase 5: Review (User Checkpoint)
 
 **Agent Actions**:
-1. Create review document: `reviews/####-name-tick-NNN.md`
+1. Create review document: `reviews/NNN-name-tick-NNN.md`
    - What was amended and why
    - Changes made to spec and plan
    - Implementation challenges
@@ -120,7 +120,7 @@ Agent determines: Next TICK is TICK-001 (first amendment)
    - Focus: Code quality, missed issues, improvements
    - Update review with consultation feedback
 3. **Update Architecture Documentation** (if applicable)
-4. **COMMIT**: `[TICK ####-NNN] Review: [description]`
+4. **COMMIT**: `[TICK NNN-NNN] Review: [description]`
 5. **PRESENT TO USER**: Show summary with consultation insights
 
 **User Actions**:
@@ -130,7 +130,7 @@ Agent determines: Next TICK is TICK-001 (first amendment)
 
 **If Changes Requested**:
 - Agent makes changes
-- Commits: `[TICK ####-NNN] Fixes: [description]`
+- Commits: `[TICK NNN-NNN] Fixes: [description]`
 - Updates review document
 - Repeats until user approval
 
@@ -140,9 +140,9 @@ TICK amendments modify existing files and create new review files:
 
 | File Type | Pattern | Example |
 |-----------|---------|---------|
-| Spec (modified) | `specs/####-name.md` | `specs/0002-user-authentication.md` |
-| Plan (modified) | `plans/####-name.md` | `plans/0002-user-authentication.md` |
-| Review (new) | `reviews/####-name-tick-NNN.md` | `reviews/0002-user-authentication-tick-001.md` |
+| Spec (modified) | `specs/NNN-name.md` | `specs/2-user-authentication.md` |
+| Plan (modified) | `plans/NNN-name.md` | `plans/2-user-authentication.md` |
+| Review (new) | `reviews/NNN-name-tick-NNN.md` | `reviews/2-user-authentication-tick-001.md` |
 
 **Note**: Spec and plan files are modified in-place. Only the review file is new.
 
@@ -151,16 +151,16 @@ TICK amendments modify existing files and create new review files:
 **TICK commits reference the parent spec and TICK number**:
 
 ```
-[TICK 0002-001] Spec: Add password reset feature
-[TICK 0002-001] Plan: Add password reset implementation
-[TICK 0002-001] Impl: Add password reset feature
-[TICK 0002-001] Review: Password reset implementation
-[TICK 0002-001] Fixes: Address review feedback
+[TICK 2-001] Spec: Add password reset feature
+[TICK 2-001] Plan: Add password reset implementation
+[TICK 2-001] Impl: Add password reset feature
+[TICK 2-001] Review: Password reset implementation
+[TICK 2-001] Fixes: Address review feedback
 ```
 
-The format `[TICK ####-NNN]` identifies:
-- `####`: Parent spec number (e.g., 0002)
-- `NNN`: TICK amendment number (e.g., 001, 002, 003)
+The format `[TICK <parent>-<tick>]` identifies:
+- `<parent>`: Parent spec number (e.g., 2)
+- `<tick>`: TICK amendment number (e.g., 001, 002, 003)
 
 ## Key Differences from SPIR
 
@@ -168,7 +168,7 @@ The format `[TICK ####-NNN]` identifies:
 |--------|--------|------|
 | Purpose | Create new features | Amend existing features |
 | File creation | Creates new spec/plan/review | Modifies spec/plan, creates review |
-| Sequential numbering | Gets new number (0001, 0002) | Uses parent's number (0002-001) |
+| Sequential numbering | Gets new number (1, 2) | Uses parent's number (2-001) |
 | Scope | Any size | < 300 lines typically |
 | Prerequisites | None | Existing integrated spec required |
 | User checkpoints | Multiple (spec, plan, phases) | Two (start, end) |
@@ -195,24 +195,24 @@ Is there an existing spec to amend?
 **User**: "Add password reset to the user authentication system"
 
 **Agent**:
-1. **Identify**: Finds `specs/0002-user-authentication.md` (integrated)
+1. **Identify**: Finds `specs/2-user-authentication.md` (integrated)
 2. **Amend Spec** (30 seconds):
    - Updates Success Criteria with password reset requirements
    - Adds TICK-001 entry to Amendments section
-   - Commit: `[TICK 0002-001] Spec: Add password reset feature`
+   - Commit: `[TICK 2-001] Spec: Add password reset feature`
 3. **Amend Plan** (30 seconds):
    - Adds Phase 4: Password Reset Email Service
    - Adds TICK-001 entry to Amendment History
-   - Commit: `[TICK 0002-001] Plan: Add password reset implementation`
+   - Commit: `[TICK 2-001] Plan: Add password reset implementation`
 4. **Implement** (2 minutes):
    - Creates password reset endpoint
    - Implements email service
    - Tests functionality
-   - Commit: `[TICK 0002-001] Impl: Add password reset feature`
+   - Commit: `[TICK 2-001] Impl: Add password reset feature`
 5. **Review** (1 minute):
-   - Creates `reviews/0002-user-authentication-tick-001.md`
+   - Creates `reviews/2-user-authentication-tick-001.md`
    - Runs 3-way consultation (Gemini, Codex, Claude)
-   - Commit: `[TICK 0002-001] Review: Password reset implementation`
+   - Commit: `[TICK 2-001] Review: Password reset implementation`
    - Shows user the completed work
 
 **Total Time**: ~4 minutes for simple amendment
@@ -243,8 +243,8 @@ Existing standalone TICK projects (created before this protocol change) are gran
 **Optional Migration** (if desired):
 1. Identify the "parent spec" the TICK logically extends
 2. Move TICK content into an amendment entry in the parent spec
-3. Archive the standalone files with a note: "Migrated to spec #### as TICK-NNN"
-4. Update projectlist.md to reflect the change
+3. Archive the standalone files with a note: "Migrated to spec NNN as TICK-NNN"
+4. Update the GitHub Issue to reflect the change
 
 ## Benefits
 

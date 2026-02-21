@@ -56,7 +56,7 @@ grep -E "src/|packages/" codev/resources/arch.md | head -20
 
 ### 5. Create Audit Report
 
-Create a maintenance run file: `codev/maintain/NNNN.md`
+Create a maintenance run file: `codev/maintain/NNN.md`
 
 Document:
 - Dead code identified (with file paths)
@@ -66,7 +66,7 @@ Document:
 
 Use the template structure:
 ```markdown
-# Maintenance Run NNNN
+# Maintenance Run NNN
 
 **Date**: YYYY-MM-DD
 **Base Commit**: <commit-hash>

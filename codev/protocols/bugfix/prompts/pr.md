@@ -54,20 +54,27 @@ consult -m claude --protocol bugfix --type pr &
 
 All three should run in the background (`run_in_background: true`).
 
-### 3. Address Feedback
+### 3. Wait for Results and Address Feedback
 
-Review the consultation results:
+**DO NOT proceed to step 4 until ALL THREE consultations have returned results.**
+
+Wait for each background consultation to complete, then read the results:
+- Use `TaskOutput` (with `block: true`) to retrieve each consultation result
+- Record each model's verdict (APPROVE or REQUEST_CHANGES)
 - Fix any issues identified by reviewers
 - Push updates to the PR branch
 - Re-run CMAP if substantial changes were made
 
+You must have three concrete verdicts (e.g., "gemini: APPROVE, codex: APPROVE, claude: APPROVE") before continuing.
+
 ### 4. Notify Architect
 
-After CMAP review is complete and feedback is addressed, send a **single** notification
-with both the PR link and the review verdict:
+**DO NOT send this notification until you have all three CMAP verdicts from step 3.**
+
+Send a **single** notification that includes the PR link and each model's verdict:
 
 ```bash
-af send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: <verdict summary, e.g. 'all approve' or '2 approve, 1 request changes (addressed)'>"
+af send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"
 ```
 
 **This is the only notification you send.** After this, your work is done — the architect

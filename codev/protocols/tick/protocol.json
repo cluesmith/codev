@@ -1,8 +1,8 @@
 {
-  "$schema": "../../../codev-skeleton/protocol-schema.json",
+  "$schema": "../../protocol-schema.json",
   "name": "tick",
   "version": "1.1.0",
-  "description": "Amendment workflow for existing SPIR specifications (Codev monorepo override)",
+  "description": "Amendment workflow for existing SPIR specifications",
   "input": {
     "type": "spec",
     "required": false
@@ -65,7 +65,6 @@
       "checks": {
         "build": {
           "command": "npm run build",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         }
@@ -87,7 +86,6 @@
       "checks": {
         "tests": {
           "command": "npm test",
-          "cwd": "packages/codev",
           "on_fail": "implement",
           "max_retries": 1
         }
@@ -146,8 +144,8 @@
       "parallel": true
     },
     "checks": {
-      "build": { "command": "npm run build", "cwd": "packages/codev" },
-      "test": { "command": "npm test", "cwd": "packages/codev" }
+      "build": "npm run build",
+      "test": "npm test"
     }
   }
 }

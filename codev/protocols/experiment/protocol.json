@@ -1,0 +1,101 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "experiment",
+  "version": "1.0.0",
+  "description": "Disciplined experimentation with hypothesis testing",
+  "input": {
+    "type": "none",
+    "required": false,
+    "default_for": []
+  },
+  "hooks": {
+    "pre-spawn": {}
+  },
+  "phases": [
+    {
+      "id": "hypothesis",
+      "name": "Hypothesis",
+      "description": "Define the hypothesis and success criteria",
+      "type": "once",
+      "steps": [
+        "define_hypothesis",
+        "define_success_criteria",
+        "define_scope",
+        "create_experiment_doc"
+      ],
+      "transition": {
+        "on_complete": "design"
+      }
+    },
+    {
+      "id": "design",
+      "name": "Design",
+      "description": "Design the experiment approach",
+      "type": "once",
+      "steps": [
+        "choose_approach",
+        "identify_dependencies",
+        "plan_implementation",
+        "define_measurements"
+      ],
+      "transition": {
+        "on_complete": "execute"
+      }
+    },
+    {
+      "id": "execute",
+      "name": "Execute",
+      "description": "Run the experiment",
+      "type": "once",
+      "steps": [
+        "implement_prototype",
+        "gather_data",
+        "document_findings"
+      ],
+      "transition": {
+        "on_complete": "analyze"
+      }
+    },
+    {
+      "id": "analyze",
+      "name": "Analyze",
+      "description": "Analyze results and draw conclusions",
+      "type": "once",
+      "steps": [
+        "analyze_data",
+        "evaluate_hypothesis",
+        "document_conclusions",
+        "recommend_next_steps"
+      ],
+      "gate": {
+        "name": "experiment-complete",
+        "description": "Experiment complete",
+        "requires": ["conclusions_documented"],
+        "next": null
+      }
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "BLOCKED": {
+      "description": "Signal experiment is blocked",
+      "requires": "reason"
+    },
+    "HYPOTHESIS_REJECTED": {
+      "description": "Signal hypothesis was disproven",
+      "transitions_to": "analyze"
+    }
+  },
+  "defaults": {
+    "mode": "soft",
+    "consultation": {
+      "enabled": false,
+      "models": [],
+      "parallel": false
+    },
+    "checks": {}
+  }
+}

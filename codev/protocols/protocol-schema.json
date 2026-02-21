@@ -1,0 +1,290 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://codev.dev/protocol-schema.json",
+  "title": "Protocol Definition",
+  "description": "Schema for porch protocol definitions",
+  "type": "object",
+  "required": ["name", "version", "description", "phases"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Protocol identifier (e.g., 'spir', 'tick', 'bugfix')"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the protocol"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the protocol"
+    },
+    "phases": {
+      "type": "array",
+      "description": "Ordered list of protocol phases",
+      "items": {
+        "$ref": "#/definitions/phase"
+      },
+      "minItems": 1
+    },
+    "input": {
+      "$ref": "#/definitions/protocolInput"
+    },
+    "hooks": {
+      "$ref": "#/definitions/protocolHooks"
+    },
+    "signals": {
+      "type": "object",
+      "description": "Signal definitions for state transitions",
+      "additionalProperties": {
+        "$ref": "#/definitions/signal"
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default configuration for the protocol",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["strict", "soft"],
+          "description": "Default orchestration mode for the protocol"
+        },
+        "consultation": {
+          "$ref": "#/definitions/consultationDefaults"
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "phase": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique phase identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable phase name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Phase description"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["once", "per_plan_phase"],
+          "description": "Whether phase runs once or per plan phase"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered list of steps within the phase"
+        },
+        "checks": {
+          "type": "object",
+          "description": "Build/test checks for this phase",
+          "additionalProperties": {
+            "$ref": "#/definitions/check"
+          }
+        },
+        "consultation": {
+          "$ref": "#/definitions/consultation"
+        },
+        "gate": {
+          "$ref": "#/definitions/gate"
+        },
+        "transition": {
+          "$ref": "#/definitions/transition"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to run"
+        },
+        "on_fail": {
+          "type": "string",
+          "description": "Action on failure: 'retry' or phase name to return to"
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum retry attempts"
+        },
+        "retry_delay": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delay between retries in seconds"
+        }
+      }
+    },
+    "consultation": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "string",
+          "enum": ["review", "complete"],
+          "description": "When to trigger consultation"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "AI models to consult"
+        },
+        "type": {
+          "type": "string",
+          "description": "Review type (spec, plan, impl, pr, phase, integration)"
+        },
+        "parallel": {
+          "type": "boolean",
+          "description": "Run consultations in parallel"
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum revision rounds"
+        },
+        "next": {
+          "type": "string",
+          "description": "Phase to proceed to after consultation"
+        }
+      }
+    },
+    "consultationDefaults": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether consultation is enabled by default"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parallel": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Gate identifier"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this gate checks"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Items that must be complete to pass"
+        },
+        "next": {
+          "type": ["string", "null"],
+          "description": "Next phase after gate (null for terminal)"
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "properties": {
+        "on_complete": {
+          "type": "string",
+          "description": "Phase to transition to on completion"
+        },
+        "on_fail": {
+          "type": "string",
+          "description": "Phase to return to on failure"
+        },
+        "on_too_complex": {
+          "type": "string",
+          "description": "Action when task is too complex"
+        },
+        "on_all_phases_complete": {
+          "type": "string",
+          "description": "Phase to transition to when all plan phases are done"
+        }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "transitions_to": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "string"
+        }
+      }
+    },
+    "protocolInput": {
+      "type": "object",
+      "description": "Protocol input configuration - defines what input types a protocol accepts",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["spec", "github-issue", "task", "protocol", "shell", "worktree"],
+          "description": "Primary input type for this protocol"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether an input of this type is required"
+        },
+        "default_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CLI flags this protocol is the default for (e.g., ['--issue', '-i'])"
+        }
+      }
+    },
+    "protocolHooks": {
+      "type": "object",
+      "description": "Hooks triggered at various points in the spawn lifecycle",
+      "properties": {
+        "pre-spawn": {
+          "type": "object",
+          "description": "Hooks executed before spawning the builder",
+          "properties": {
+            "collision-check": {
+              "type": "boolean",
+              "description": "Check for worktree/PR collisions before spawning"
+            },
+            "comment-on-issue": {
+              "type": "string",
+              "description": "Comment to post on GitHub issue when spawning"
+            }
+          }
+        }
+      }
+    }
+  }
+}

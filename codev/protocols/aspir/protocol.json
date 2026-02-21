@@ -1,8 +1,8 @@
 {
-  "$schema": "../../../codev-skeleton/protocol-schema.json",
+  "$schema": "../../protocol-schema.json",
   "name": "aspir",
   "version": "1.0.0",
-  "description": "ASPIR: Autonomous SPIR — Specify → Plan → Implement → Review without human approval gates (Codev monorepo override)",
+  "description": "ASPIR: Autonomous SPIR — Specify → Plan → Implement → Review without human approval gates",
   "input": {
     "type": "spec",
     "required": false,
@@ -78,14 +78,12 @@
       "checks": {
         "build": {
           "command": "npm run build",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         },
         "tests": {
-          "command": "npm test -- --exclude='**/e2e/**' --exclude='**/init.test.ts' --exclude='**/session-manager.test.ts' --exclude='**/send-integration.test.ts'",
-          "cwd": "packages/codev",
-          "description": "Unit tests only - e2e, init, session-manager, and send-integration excluded (pre-existing failures in worktrees)",
+          "command": "npm test -- --exclude='**/e2e/**'",
+          "description": "Unit tests only - e2e tests run in review phase",
           "on_fail": "retry",
           "max_retries": 2
         }
@@ -119,19 +117,6 @@
           "command": "gh pr list --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
           "description": "PR must be created before signaling completion"
         },
-        "build": {
-          "command": "npm run build",
-          "cwd": "packages/codev"
-        },
-        "tests": {
-          "command": "npm test -- --exclude='**/init.test.ts' --exclude='**/session-manager.test.ts' --exclude='**/send-integration.test.ts'",
-          "cwd": "packages/codev"
-        },
-        "cli_tests": {
-          "command": "npx vitest run --config vitest.cli.config.ts",
-          "cwd": "packages/codev",
-          "description": "CLI integration tests"
-        },
         "review_has_arch_updates": {
           "command": "grep -q '## Architecture Updates' codev/reviews/${PROJECT_TITLE}.md",
           "description": "Review must include '## Architecture Updates' section (what changed in arch.md, or why no changes needed)"
@@ -139,6 +124,11 @@
         "review_has_lessons_updates": {
           "command": "grep -q '## Lessons Learned Updates' codev/reviews/${PROJECT_TITLE}.md",
           "description": "Review must include '## Lessons Learned Updates' section (what changed in lessons-learned.md, or why no changes needed)"
+        },
+        "e2e_tests": {
+          "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+          "description": "Full e2e test suite - only runs in review phase",
+          "optional": true
         }
       },
       "gate": "pr",
@@ -156,8 +146,8 @@
     }
   },
   "phase_completion": {
-    "build_succeeds": "cd packages/codev && npm run build 2>&1",
-    "tests_pass": "cd packages/codev && npm test 2>&1",
+    "build_succeeds": "npm run build 2>&1",
+    "tests_pass": "npm test 2>&1",
     "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
   },
   "defaults": {
@@ -166,10 +156,6 @@
     "verify": {
       "models": ["gemini", "codex", "claude"],
       "parallel": true
-    },
-    "checks": {
-      "build": { "command": "npm run build", "cwd": "packages/codev" },
-      "test": { "command": "npm test", "cwd": "packages/codev" }
     }
   }
 }

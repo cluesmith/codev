@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn XXXX --protocol spir                     │
+│         Architect spawns builder: af spawn XXXX                                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -38,8 +38,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                        HANDOFF / INTEGRATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 6. COMMITTED                                                                     │
-│         Architect assesses PR risk: gh pr diff --stat N                             │
-│         Low: Read + merge | Medium: 1-model review | High: 3-way CMAP              │
+│         Architect does 3-way integration review                                     │
 │         Architect iterates with builder via PR comments                             │
 │         Architect tells builder to merge                                            │
 │         Builder merges PR (NO --delete-branch flag)                                 │
@@ -60,7 +59,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 | 3 | planned | Architect | Commit spec + plan | Committed to main |
 | 4 | implementing | Builder | IDE loop per phase | All phases complete |
 | 5 | implemented | Builder | Write review, create PR | PR created |
-| 6 | committed | Architect + Builder | Risk-based integration review, merge | PR merged |
+| 6 | committed | Architect + Builder | Integration review, merge | PR merged |
 | 7 | integrated | Human | Validate production | Human confirms |
 
 ## Human Gates
@@ -87,13 +86,13 @@ af spawn 44 --protocol spir
 af status
 
 # Send message to builder
-af send 0044 "Check PR comments and address feedback"
+af send 44 "Check PR comments and address feedback"
 
 # Open a file for review
-af open codev/specs/0044-name.md
+af open codev/specs/44-name.md
 
 # Clean up after merge
-af cleanup -p 0044
+af cleanup -p 44
 
 # Stop everything
 af workspace stop
@@ -144,15 +143,9 @@ consult -m codex --protocol spir --type impl
 consult -m gemini --protocol spir --type pr
 consult -m codex --protocol spir --type pr
 
-# Integration review (during Stage 6 — depth depends on risk)
-# Low risk: no consult needed, architect reads and merges
-# Medium risk: single-model review
-consult -m claude --type integration pr N
-# High risk: full 3-way CMAP
-consult -m gemini --type integration pr N &
-consult -m codex --type integration pr N &
-consult -m claude --type integration pr N &
-wait
+# Integration review (during Stage 6)
+consult -m gemini --type integration
+consult -m codex --type integration
 
 # Parallel 3-way reviews (run all three concurrently)
 consult -m gemini --protocol spir --type spec &
@@ -169,7 +162,7 @@ wait
 | `plan` | Stage 2 | Implementation approach, phase breakdown, risk assessment |
 | `impl` | Stage 4 | Code quality, test coverage, spec adherence |
 | `pr` | Stage 5 | Final self-check before PR creation |
-| `integration` | Stage 6 | System fit, architectural consistency, side effects (depth varies by risk — see `codev/resources/risk-triage.md`) |
+| `integration` | Stage 6 | System fit, architectural consistency, side effects |
 
 ## Builder Lifecycle
 
@@ -247,4 +240,3 @@ af cleanup -p XXXX --force
 - Builder role: `codev/roles/builder.md`
 - Architect role: `codev/roles/architect.md`
 - Consultant role: `codev/roles/consultant.md`
-- Risk triage guide: `codev/resources/risk-triage.md`

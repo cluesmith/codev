@@ -1,8 +1,8 @@
 {
-  "$schema": "../../../codev-skeleton/protocol-schema.json",
+  "$schema": "../../protocol-schema.json",
   "name": "bugfix",
   "version": "1.1.0",
-  "description": "Lightweight protocol for minor bugfixes using GitHub Issues (Codev monorepo override)",
+  "description": "Lightweight protocol for minor bugfixes using GitHub Issues",
   "input": {
     "type": "github-issue",
     "required": false,
@@ -50,13 +50,11 @@
         },
         "build": {
           "command": "npm run build",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         },
         "tests": {
           "command": "npm test",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         }
@@ -109,8 +107,8 @@
       "parallel": true
     },
     "checks": {
-      "build": { "command": "npm run build", "cwd": "packages/codev" },
-      "test": { "command": "npm test", "cwd": "packages/codev" }
+      "build": "npm run build",
+      "test": "npm test"
     }
   }
 }

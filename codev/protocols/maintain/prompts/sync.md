@@ -47,7 +47,7 @@ Extract actionable lessons:
 Format:
 ```markdown
 ## [Topic]
-- [From NNNN] Lesson description
+- [From NNN] Lesson description
 ```
 
 ### 3. Sync CLAUDE.md with AGENTS.md

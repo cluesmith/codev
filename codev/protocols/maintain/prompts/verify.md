@@ -63,7 +63,7 @@ Recommended focus areas for next run:
 ```bash
 git push origin HEAD
 
-gh pr create --title "[Maintain] Codebase maintenance run NNNN" --body "$(cat <<'EOF'
+gh pr create --title "[Maintain] Codebase maintenance run NNN" --body "$(cat <<'EOF'
 ## Summary
 
 - Dead code removal

@@ -16,13 +16,13 @@ Disciplined experimentation: Each experiment gets its own directory with `notes.
 
 ```
 experiments/
-├── 0001_descriptive_name/
+├── 1_descriptive_name/
 │   ├── notes.md           # Goal, code, results
 │   ├── experiment.py      # Your experiment code
 │   └── data/
 │       ├── input/         # Input data
 │       └── output/        # Results, plots, etc.
-└── 0002_another_experiment/
+└── 2_another_experiment/
     ├── notes.md
     └── ...
 ```
@@ -33,8 +33,8 @@ experiments/
 
 ```bash
 # Create numbered directory
-mkdir -p experiments/0001_experiment_name
-cd experiments/0001_experiment_name
+mkdir -p experiments/1_experiment_name
+cd experiments/1_experiment_name
 
 # Initialize notes.md from template
 cp codev/protocols/experiment/templates/notes.md notes.md
@@ -81,8 +81,8 @@ Update `notes.md` with:
 ### 6. Commit
 
 ```bash
-git add experiments/0001_experiment_name/
-git commit -m "[Experiment 0001] Brief description of findings"
+git add experiments/1_experiment_name/
+git commit -m "[Experiment 1] Brief description of findings"
 ```
 
 ## notes.md Template
@@ -152,8 +152,8 @@ Example spec reference:
 ```markdown
 ## Background
 
-Experiment 0005 validated that [approach] achieves [results].
-See: experiments/0005_validation_test/notes.md
+Experiment 5 validated that [approach] achieves [results].
+See: experiments/5_validation_test/notes.md
 ```
 
 ### Experiment → TICK
@@ -164,22 +164,22 @@ For small, validated changes discovered during experimentation:
 ## Numbering Convention
 
 Use four-digit sequential numbering (consistent with project list):
-- `0001_`, `0002_`, `0003_`...
+- `1_`, `2_`, `3_`...
 - Shared sequence across all experiments
 - Descriptive name after the number (snake_case)
 
 Examples:
-- `0001_api_response_caching`
-- `0002_model_comparison`
-- `0003_performance_baseline`
+- `1_api_response_caching`
+- `2_model_comparison`
+- `3_performance_baseline`
 
 ## Git Workflow
 
 ### Commits
 ```
-[Experiment 0001] Initial setup and goal
-[Experiment 0001] Add baseline measurements
-[Experiment 0001] Complete - caching improves latency 40%
+[Experiment 1] Initial setup and goal
+[Experiment 1] Add baseline measurements
+[Experiment 1] Complete - caching improves latency 40%
 ```
 
 ### When to Commit
@@ -196,7 +196,7 @@ Examples:
 ## Example Experiment
 
 ```
-experiments/0001_caching_strategy/
+experiments/1_caching_strategy/
 ├── notes.md
 ├── benchmark.py
 ├── cache_test.py
@@ -210,7 +210,7 @@ experiments/0001_caching_strategy/
 
 **notes.md excerpt:**
 ```markdown
-# Experiment 0001: Caching Strategy Evaluation
+# Experiment 1: Caching Strategy Evaluation
 
 **Status**: Complete
 

@@ -1,254 +1,73 @@
 # Review: [Feature/Project Name]
 
-## Metadata
-- **Date**: [YYYY-MM-DD]
-- **Specification**: [Link to codev/specs/spec-file.md]
-- **Plan**: [Link to codev/plans/plan-file.md]
+## Summary
 
-## Executive Summary
-[Brief overview of what was built, how it went, and key outcomes]
+[1-3 sentences: what was built, how many phases, net outcome.]
 
-## Specification Compliance
+## Spec Compliance
 
-### Success Criteria Assessment
-| Criterion | Status | Evidence | Notes |
-|-----------|--------|----------|-------|
-| [Criterion 1] | ✅/❌/⚠️ | [Link/description] | [Any context] |
-| [Criterion 2] | ✅/❌/⚠️ | [Link/description] | [Any context] |
-| [All tests pass >90% coverage] | ✅/❌/⚠️ | [Coverage report] | [Details] |
-| [Performance benchmarks met] | ✅/❌/⚠️ | [Metrics] | [Details] |
+- [x] AC1: [Description] (Phase N)
+- [x] AC2: [Description] (Phase N)
+- [ ] ACn: [Not met — reason]
 
-### Deviations from Specification
-| Original Requirement | What Was Built | Reason for Deviation |
-|---------------------|----------------|---------------------|
-| [If any] | [Actual] | [Justification] |
+## Deviations from Plan
 
-## Plan Execution Review
+- **Phase N**: [What changed and why]
 
-### Phase Completion
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Phase 1 | Complete | [Context] |
-| Phase 2 | Complete | [Context] |
+## Key Metrics
 
-### Deliverables Checklist
-- [x] All planned features implemented
-- [x] Test coverage achieved
-- [x] Documentation updated
-- [x] Performance requirements met
-- [ ] [Any incomplete items]
+- **Commits**: [N] on the branch
+- **Tests**: [N] passing ([N] existing + [N] new)
+- **Files created**: [list]
+- **Files deleted**: [list]
+- **Net LOC impact**: [+/-N lines]
 
-## Code Quality Assessment
+## Timelog
 
-### Architecture Impact
-- **Positive Changes**: [Improvements made to architecture]
-- **Technical Debt Incurred**: [Any shortcuts taken]
-- **Future Considerations**: [What should be refactored later]
-
-### Code Metrics
-- **Lines of Code**: [Added/Modified/Removed]
-- **Test Coverage**: [Percentage and areas covered]
-- **Code Complexity**: [Cyclomatic complexity if measured]
-- **Documentation Coverage**: [Public APIs documented?]
-
-### Security Review
-- **Vulnerabilities Found**: [None/List]
-- **Security Best Practices**: [Followed/Exceptions]
-- **Sensitive Data Handling**: [Properly secured?]
-
-## Performance Analysis
-
-### Benchmarks
-| Metric | Target | Achieved | Status |
-|--------|--------|----------|---------|
-| Response Time (p95) | <200ms | [Actual] | ✅/❌ |
-| Throughput | 1000 rps | [Actual] | ✅/❌ |
-| Memory Usage | <500MB | [Actual] | ✅/❌ |
-
-### Load Testing Results
-[Summary of load testing outcomes, if performed]
-
-## Testing Summary
-
-### Test Execution
-- **Unit Tests**: [X passed, Y failed]
-- **Integration Tests**: [X passed, Y failed]
-- **E2E Tests**: [X passed, Y failed]
-- **Manual Testing**: [Scenarios tested]
-
-### Issues Found During Testing
-| Issue | Severity | Resolution |
-|-------|----------|------------|
-| [Bug 1] | Critical/High/Medium/Low | [Fixed/Deferred] |
-
-## Lessons Learned
-
-### What Went Well
-1. [Success point 1 - be specific]
-2. [Success point 2 - include why it worked]
-3. [Success point 3 - note for future replication]
-
-### What Was Challenging
-1. [Challenge 1 - describe the issue]
-   - **Root Cause**: [Why it happened]
-   - **Resolution**: [How it was addressed]
-   - **Prevention**: [How to avoid in future]
-
-2. [Challenge 2]
-   - **Root Cause**:
-   - **Resolution**:
-   - **Prevention**:
-
-### What Would You Do Differently
-1. [Improvement 1 - be actionable]
-2. [Improvement 2 - be specific]
-3. [Improvement 3 - be realistic]
-
-## Methodology Feedback
-
-### SPIR Protocol Effectiveness
-- **Specification Phase**: [Was it thorough enough? Too detailed?]
-- **Planning Phase**: [Were estimates accurate? Phases well-sized?]
-- **Implementation Loop**: [Did IDE cycle work well?]
-- **Review Process**: [Is this review capturing the right information?]
-
-### Suggested Improvements
-1. **Template Updates**: [Any template improvements needed?]
-2. **Process Changes**: [Any step modifications recommended?]
-3. **Tool Needs**: [Any automation opportunities?]
-
-## Resource Analysis
-
-### Time Investment
-- **Planned**: [X person-days]
-- **Actual**: [Y person-days]
-- **Variance Explanation**: [Why different?]
-
-### Team Feedback
-- [Feedback from team members]
-- [Collaboration insights]
-- [Communication effectiveness]
-
-## Follow-Up Actions
-
-### Immediate (This Week)
-- [ ] [Action 1 - owner]
-- [ ] [Action 2 - owner]
-
-### Short-term (This Month)
-- [ ] [Action 1 - owner]
-- [ ] [Action 2 - owner]
-
-### Long-term (Future Consideration)
-- [ ] [Improvement opportunity 1]
-- [ ] [Technical debt to address]
-
-## Risk Retrospective
-
-### Identified Risks That Materialized
-| Risk | Impact | How Handled | Prevention for Future |
-|------|--------|-------------|----------------------|
-| [Risk] | [What happened] | [Resolution] | [Learning] |
-
-### Unforeseen Issues
-| Issue | Impact | How Handled | How to Predict |
-|-------|--------|-------------|----------------|
-| [Issue] | [Impact] | [Resolution] | [Detection method] |
-
-## Documentation Updates
-
-### Completed
-- [x] API documentation updated
-- [x] README updated
-- [x] Architecture diagrams revised
-- [ ] [Pending items]
-
-### Knowledge Transfer
-- **Wiki/Confluence Updates**: [Links]
-- **Team Presentations**: [Scheduled/Completed]
-- **Runbooks Created**: [Links]
-
-## Stakeholder Feedback
-- **Product Owner**: [Feedback]
-- **End Users**: [Feedback if available]
-- **Support Team**: [Readiness assessment]
-
-## Final Recommendations
-
-### For Future Similar Projects
-1. [Recommendation 1]
-2. [Recommendation 2]
-
-### For Methodology Evolution
-1. [Suggestion 1]
-2. [Suggestion 2]
-
-## Conclusion
-[Summary statement about the project success, key achievements, and main learnings]
-
-## Appendix
-
-### Links
-- **Code**: [Repository links, PRs]
-- **Documentation**: [All related docs]
-- **Metrics Dashboards**: [Monitoring links]
-- **Test Reports**: [CI/CD links]
-
-### Timeline
-
-All times [timezone].
+All times [timezone], [date range].
 
 | Time | Event |
 |------|-------|
-| [HH:MM] | First commit: spec with 3-way consultation feedback |
-| [HH:MM] | Spec revision addressing review comments |
-| — | **GATE: spec-approval** (human approval required) |
-| [HH:MM] | Implementation begins — Phase 1 |
-| [HH:MM] | Phase 1 complete after [N] iterations |
-| [HH:MM] | Phase 2 begins |
-| [HH:MM] | Phase 2 complete after [N] iterations |
-| — | **Context window expired** — session resumed automatically |
-| [HH:MM] | Review document written |
-| [HH:MM] | **GATE: pr** (awaiting human approval) |
+| HH:MM | First commit: [description] |
+| HH:MM | [Phase/milestone] |
+| — | **GATE: [gate-name]** (human approval required) |
+| HH:MM | Implementation begins |
+| HH:MM | Phase N complete after N iterations |
+| HH:MM | **GATE: pr** |
 
 ### Autonomous Operation
 
 | Period | Duration | Activity |
 |--------|----------|----------|
-| Spec + Plan | [Xm] | Created spec, incorporated 3-way feedback, created plan |
-| Human gate wait | [Xh Xm] | Idle — waiting for spec-approval + plan-approval |
-| Implementation → PR | [Xh Xm] | [N] phases, [N] consultation rounds, review document, PR creation |
+| Spec + Plan | ~Nm | [Summary] |
+| Human gate wait | ~Nh Nm | Idle — waiting for approval |
+| Implementation → PR | ~Nh Nm | N phases, N consultation rounds |
 
-**Total wall clock** (first commit to pr): [time]
-**Total autonomous work time** (excluding gate wait): [time]
-**Context windows used**: [N] (expired [N] times, resumed automatically)
+**Total wall clock** (first commit to pr): **Xh Ym**
+**Total autonomous work time** (excluding gate waits): **~Xh Ym**
+**Context window resets**: [N] (resumed automatically / required manual restart)
 
-### CMAP Consultation History
+## Consultation Iteration Summary
 
-[Total consultation rounds] rounds × 3 models = [total files]. [X] APPROVE, [Y] REQUEST_CHANGES, [Z] COMMENT.
+[N] consultation files produced ([N] rounds x [N] models). [N] APPROVE, [N] REQUEST_CHANGES, [N] COMMENT.
 
 | Phase | Iters | Who Blocked | What They Caught |
 |-------|-------|-------------|------------------|
-| Specify | [N] | [Model(s)] | [Key issues raised] |
-| Plan | [N] | [Model(s)] | [Key issues raised] |
-| Phase 1 | [N] | [Model(s)] | [Key issues raised] |
-| Phase 2 | [N] | [Model(s)] | [Key issues raised] |
-| Review | [N] | [Model(s)] | [Key issues raised] |
+| Specify | N | [Model] | [Brief description] |
+| Plan | N | [Model] | [Brief description] |
+| Phase 1 | N | [Model] | [Brief description] |
+| Phase N | N | [Model] | [Brief description] |
+| Review | N | [Model] | [Brief description] |
 
-#### Reviewer Patterns
+**Most frequent blocker**: [Model] — blocked in N of N rounds, focused on: [pattern].
 
-**Codex**: [What Codex consistently focused on — test quality, edge cases, completeness, etc.]
+### Avoidable Iterations
 
-**Gemini**: [What Gemini consistently focused on — architecture, documentation, naming, etc.]
+Iterations that could have been prevented with better builder behavior:
 
-**Claude**: [What Claude consistently focused on — type safety, compilation, security, etc.]
+1. **[Pattern]**: [Specific thing the builder should have done without needing reviewer feedback. E.g., "Run exhaustive grep before claiming all instances fixed."]
 
-#### Prompting Improvements for Future Builders
-
-Issues that the builder should have caught without needing reviewer feedback:
-
-1. [Pattern the builder missed — describe the anti-pattern and the fix]
-2. [Pattern the builder missed — describe the anti-pattern and the fix]
+2. **[Pattern]**: [Another avoidable iteration pattern.]
 
 ## Consultation Feedback
 
@@ -267,6 +86,17 @@ Issues that the builder should have caught without needing reviewer feedback:
 #### Claude
 - No concerns raised (APPROVE)
 
+## Lessons Learned
+
+### What Went Well
+- [Specific positive observation — what worked and why]
+
+### Challenges Encountered
+- **[Challenge]**: [How it was resolved. How many iterations it cost.]
+
+### What Would Be Done Differently
+- [Actionable improvement for future builders]
+
 ## Architecture Updates
 
 [What was added/changed in `codev/resources/arch.md`, or why no changes were needed.]
@@ -281,8 +111,10 @@ Issues that the builder should have caught without needing reviewer feedback:
 - Added: [category] — [lesson summary]
 - Or: "No lessons learned updates needed — [brief reason]"
 
-## Sign-off
-- [ ] Technical Lead Review
-- [ ] Team Retrospective Completed
-- [ ] Lessons Documented
-- [ ] Methodology Updates Proposed
+## Technical Debt
+
+- [Any shortcuts taken or inconsistencies introduced]
+
+## Follow-up Items
+
+- [Items identified for future work, outside this spec's scope]
