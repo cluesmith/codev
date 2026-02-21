@@ -22,7 +22,9 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
   mockParseJsonBody,
   mockOverviewGetOverview, mockOverviewInvalidate,
-  mockReadCloudConfig } = vi.hoisted(() => ({
+  mockReadCloudConfig,
+  mockComputeAnalytics,
+  mockGetKnownWorkspacePaths } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -38,6 +40,8 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockOverviewGetOverview: vi.fn(async () => ({ builders: [], pendingPRs: [], backlog: [] })),
   mockOverviewInvalidate: vi.fn(),
   mockReadCloudConfig: vi.fn(),
+  mockComputeAnalytics: vi.fn(),
+  mockGetKnownWorkspacePaths: vi.fn(() => []),
 }));
 
 vi.mock('../lib/cloud-config.js', () => ({
@@ -46,7 +50,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 
 vi.mock('../servers/tower-instances.js', () => ({
   getInstances: mockGetInstances,
-  getKnownWorkspacePaths: vi.fn(() => []),
+  getKnownWorkspacePaths: (...args: unknown[]) => mockGetKnownWorkspacePaths(...args),
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
@@ -92,6 +96,11 @@ vi.mock('../servers/tower-utils.js', () => ({
 vi.mock('../utils/server-utils.js', () => ({
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
+}));
+
+vi.mock('../servers/analytics.js', () => ({
+  computeAnalytics: (...args: unknown[]) => mockComputeAnalytics(...args),
+  clearAnalyticsCache: vi.fn(),
 }));
 
 vi.mock('../servers/overview.js', () => ({
@@ -680,8 +689,7 @@ describe('tower-routes', () => {
     });
 
     it('falls back to first known workspace when no query param', async () => {
-      const { getKnownWorkspacePaths } = await import('../servers/tower-instances.js');
-      (getKnownWorkspacePaths as any).mockReturnValueOnce(['/my/workspace']);
+      mockGetKnownWorkspacePaths.mockReturnValueOnce(['/my/workspace']);
       mockOverviewGetOverview.mockResolvedValueOnce({
         builders: [],
         pendingPRs: [],
@@ -968,6 +976,92 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(true);
       // Message should NOT be written — user is composing
       expect(mockWrite).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // GET /api/analytics (Spec 456)
+  // =========================================================================
+
+  describe('GET /api/analytics', () => {
+    const fakeStats = {
+      timeRange: '7d',
+      github: { prsMerged: 5, avgTimeToMergeHours: 2.5, bugBacklog: 3, nonBugBacklog: 7, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2 },
+      builders: { projectsCompleted: 3, throughputPerWeek: 3, activeBuilders: 1 },
+      consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] },
+    };
+
+    beforeEach(() => {
+      mockComputeAnalytics.mockResolvedValue(fakeStats);
+      mockGetKnownWorkspacePaths.mockReturnValue(['/tmp/workspace']);
+    });
+
+    it('dispatches GET /api/analytics and returns JSON', async () => {
+      const req = makeReq('GET', '/api/analytics?range=7');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.github.prsMerged).toBe(5);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', 0, false);
+    });
+
+    it('returns 400 for invalid range', async () => {
+      const req = makeReq('GET', '/api/analytics?range=999');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toMatch(/Invalid range/);
+      expect(mockComputeAnalytics).not.toHaveBeenCalled();
+    });
+
+    it('defaults range to 7 when omitted', async () => {
+      const req = makeReq('GET', '/api/analytics');
+      const { res } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', 0, false);
+    });
+
+    it('passes refresh=true when refresh=1 query param is set', async () => {
+      const req = makeReq('GET', '/api/analytics?range=30&refresh=1');
+      const { res } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '30', 0, true);
+    });
+
+    it('returns default empty response when no workspace is available', async () => {
+      mockGetKnownWorkspacePaths.mockReturnValue([]);
+
+      const req = makeReq('GET', '/api/analytics?range=30');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.timeRange).toBe('30d');
+      expect(parsed.github.prsMerged).toBe(0);
+      expect(parsed.builders.activeBuilders).toBe(0);
+      expect(mockComputeAnalytics).not.toHaveBeenCalled();
+    });
+
+    it('accepts range=all', async () => {
+      const req = makeReq('GET', '/api/analytics?range=all');
+      const { res } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', 'all', 0, false);
+    });
+
+    it('accepts range=1 (24h)', async () => {
+      const req = makeReq('GET', '/api/analytics?range=1');
+      const { res } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '1', 0, false);
     });
   });
 });

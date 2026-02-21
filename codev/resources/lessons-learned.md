@@ -222,6 +222,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0053] Query parameter handling matters for endpoint matching -- initial `/api/image` exact-match check failed because the client uses `?t=...` for cache-busting. Use `startsWith()` or proper URL parsing.
 - [From 0053] Clean up stale node processes from previous tests before running new tests. Lingering processes cause confusing failures.
 - [From 0056] Path fallback patterns need explicit testing -- mock both paths (new location exists, old location exists, neither exists) to catch regressions. Always run `copy-skeleton` after modifying `codev-skeleton/` to ensure changes propagate.
+- [From 456] Vitest 4 constructor mocks require class syntax — `vi.fn(() => ({...}))` throws "is not a constructor". Use `vi.mock('module', () => ({ ClassName: class MockClass { ... } }))` with `vi.hoisted()` for shared mock functions.
+- [From 456] Avoid duplicate React effects that fire on the same dependency change. Two `useEffect` hooks both depending on `isActive` will both fire when `isActive` transitions, causing double-fetches. Merge into a single effect.
 - [From 0058] Debouncing is essential for search inputs to prevent excessive DOM updates. A global Escape key handler adds resilience by ensuring modals/overlays can always be dismissed.
 - [From 0076] Test bugfixes with the actual user workflow before marking complete. "It compiled" is not "it works."
 - [From 0076] When bugfixes involve process management, document the full process chain. Incorrect assumptions about which layer owns which process lead to wrong fixes.

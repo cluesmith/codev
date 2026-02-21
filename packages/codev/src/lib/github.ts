@@ -165,6 +165,76 @@ export async function fetchMergedPRs(cwd?: string): Promise<GitHubPR[] | null> {
 }
 
 // =============================================================================
+// Historical data queries (for statistics)
+// =============================================================================
+
+export interface MergedPR {
+  number: number;
+  title: string;
+  createdAt: string;
+  mergedAt: string;
+  body: string;
+}
+
+export interface ClosedIssue {
+  number: number;
+  title: string;
+  createdAt: string;
+  closedAt: string;
+  labels: Array<{ name: string }>;
+}
+
+/**
+ * Fetch merged PRs, optionally filtered to those merged since a given date.
+ * Uses `gh pr list --state merged --search "merged:>=DATE"` which provides `mergedAt`.
+ * Returns null on failure.
+ */
+export async function fetchMergedPRs(since: string | null, cwd?: string): Promise<MergedPR[] | null> {
+  try {
+    const args = [
+      'pr', 'list',
+      '--state', 'merged',
+      '--json', 'number,title,createdAt,mergedAt,body',
+      '--limit', '1000',
+    ];
+    if (since) {
+      args.push('--search', `merged:>=${since}`);
+    }
+    const { stdout } = await execFileAsync('gh', args, { cwd });
+    return JSON.parse(stdout);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchMergedPRs failed (cwd=${cwd ?? 'none'}): ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Fetch closed issues, optionally filtered to those closed since a given date.
+ * Uses `gh issue list --state closed --search "closed:>=DATE"` which provides `closedAt`.
+ * Returns null on failure.
+ */
+export async function fetchClosedIssues(since: string | null, cwd?: string): Promise<ClosedIssue[] | null> {
+  try {
+    const args = [
+      'issue', 'list',
+      '--state', 'closed',
+      '--json', 'number,title,createdAt,closedAt,labels',
+      '--limit', '1000',
+    ];
+    if (since) {
+      args.push('--search', `closed:>=${since}`);
+    }
+    const { stdout } = await execFileAsync('gh', args, { cwd });
+    return JSON.parse(stdout);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchClosedIssues failed (cwd=${cwd ?? 'none'}): ${msg}`);
+    return null;
+  }
+}
+
+// =============================================================================
 // Parsing utilities
 // =============================================================================
 
@@ -211,6 +281,40 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
   }
 
   return null;
+}
+
+/**
+ * Parse ALL linked issue numbers from a PR body and title.
+ *
+ * Unlike `parseLinkedIssue` (which returns the first match), this variant
+ * uses global regex to extract every distinct issue number referenced via:
+ * - GitHub closing keywords: Fixes #N, Closes #N, Resolves #N
+ * - Commit message conventions: [Spec N], [Bugfix #N]
+ *
+ * Returns a deduplicated array of issue numbers (may be empty).
+ */
+export function parseAllLinkedIssues(prBody: string, prTitle: string): number[] {
+  const issues = new Set<number>();
+  const combined = `${prTitle}\n${prBody}`;
+
+  // GitHub closing keywords (global)
+  const closingPattern = /(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#(\d+)/gi;
+  for (const m of combined.matchAll(closingPattern)) {
+    issues.add(parseInt(m[1], 10));
+  }
+
+  // [Spec N] or [Bugfix #N] patterns (global)
+  const specPattern = /\[Spec\s+#?(\d+)\]/gi;
+  for (const m of combined.matchAll(specPattern)) {
+    issues.add(parseInt(m[1], 10));
+  }
+
+  const bugfixPattern = /\[Bugfix\s+#?(\d+)\]/gi;
+  for (const m of combined.matchAll(bugfixPattern)) {
+    issues.add(parseInt(m[1], 10));
+  }
+
+  return [...issues];
 }
 
 /**

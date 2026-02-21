@@ -571,3 +571,71 @@ describe('Gemini graceful fallback for malformed output', () => {
   });
 });
 
+// Test 15: MetricsDB.costByProject
+describe('MetricsDB.costByProject', () => {
+  let tmpDir: string;
+  let db: MetricsDB;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    db = new MetricsDB(join(tmpDir, 'test.db'));
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns top 10 projects by cost descending', () => {
+    db.record(sampleRecord({ projectId: '0042', costUsd: 5.00 }));
+    db.record(sampleRecord({ projectId: '0042', costUsd: 3.00 }));
+    db.record(sampleRecord({ projectId: '0073', costUsd: 10.00 }));
+
+    const result = db.costByProject({});
+    expect(result).toHaveLength(2);
+    expect(result[0].projectId).toBe('0073');
+    expect(result[0].totalCost).toBeCloseTo(10.00);
+    expect(result[1].projectId).toBe('0042');
+    expect(result[1].totalCost).toBeCloseTo(8.00);
+  });
+
+  it('excludes rows with null projectId', () => {
+    db.record(sampleRecord({ projectId: null, costUsd: 5.00 }));
+    db.record(sampleRecord({ projectId: '0042', costUsd: 3.00 }));
+
+    const result = db.costByProject({});
+    expect(result).toHaveLength(1);
+    expect(result[0].projectId).toBe('0042');
+  });
+
+  it('excludes rows with null costUsd', () => {
+    db.record(sampleRecord({ projectId: '0042', costUsd: null }));
+
+    const result = db.costByProject({});
+    expect(result).toHaveLength(0);
+  });
+
+  it('returns empty array when no data', () => {
+    const result = db.costByProject({});
+    expect(result).toEqual([]);
+  });
+
+  it('limits to 10 projects', () => {
+    for (let i = 0; i < 15; i++) {
+      db.record(sampleRecord({ projectId: String(i), costUsd: i + 1 }));
+    }
+
+    const result = db.costByProject({});
+    expect(result).toHaveLength(10);
+  });
+
+  it('respects days filter', () => {
+    db.record(sampleRecord({ projectId: '0042', costUsd: 5.00, timestamp: '2020-01-01T00:00:00Z' }));
+    db.record(sampleRecord({ projectId: '0073', costUsd: 3.00, timestamp: new Date().toISOString() }));
+
+    const result = db.costByProject({ days: 7 });
+    expect(result).toHaveLength(1);
+    expect(result[0].projectId).toBe('0073');
+  });
+});
+

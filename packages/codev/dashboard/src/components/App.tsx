@@ -10,6 +10,7 @@ import { Terminal } from './Terminal.js';
 import { WorkView } from './WorkView.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
+import { AnalyticsView } from './AnalyticsView.js';
 
 
 /** Spec 443: Build the overview title string with optional hostname. */
@@ -131,6 +132,9 @@ export function App() {
         })}
         <div style={{ display: activeTab?.type === 'work' ? undefined : 'none', height: '100%' }}>
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
+        </div>
+        <div style={{ display: activeTab?.type === 'analytics' ? undefined : 'none' }}>
+          <AnalyticsView isActive={activeTab?.type === 'analytics'} />
         </div>
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
       </>

@@ -317,6 +317,25 @@ export class MetricsDB {
     };
   }
 
+  costByProject(filters: StatsFilters): Array<{ projectId: string; totalCost: number }> {
+    const { where, params } = buildWhereClause(filters);
+    const extraCondition = where
+      ? 'AND project_id IS NOT NULL AND cost_usd IS NOT NULL'
+      : 'WHERE project_id IS NOT NULL AND cost_usd IS NOT NULL';
+
+    const rows = this.db.prepare(`
+      SELECT
+        project_id,
+        SUM(cost_usd) as total_cost
+      FROM consultation_metrics ${where} ${extraCondition}
+      GROUP BY project_id
+      ORDER BY total_cost DESC
+      LIMIT 10
+    `).all(params) as Array<{ project_id: string; total_cost: number }>;
+
+    return rows.map(r => ({ projectId: r.project_id, totalCost: r.total_cost }));
+  }
+
   close(): void {
     this.db.close();
   }

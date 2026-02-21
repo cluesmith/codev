@@ -523,6 +523,7 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `tower-utils.ts` | Shared utilities: rate limiting, path normalization, `isTempDirectory()`, MIME types, static file serving, `buildArchitectArgs()` |
 | `tower-types.ts` | TypeScript interfaces: `TowerContext`, `WorkspaceTerminals`, `SSEClient`, `RateLimitEntry`, `TerminalEntry`, `InstanceStatus`, `DbTerminalSession` |
 | `tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh |
+| `statistics.ts` | Statistics aggregation service: GitHub metrics, builder throughput, consultation breakdown. 60s in-memory cache. (Spec 456) |
 
 **Dependency injection pattern**: Each module exports `init*()` and `shutdown*()` lifecycle functions. The orchestrator calls `initTerminals()`, `initInstances()`, and `initTunnel()` at startup (in dependency order), and the corresponding shutdown functions during graceful shutdown. Modules receive only the dependencies they need via typed interfaces (e.g., `TerminalDeps`, `InstanceDeps`, `RouteContext`).
 
@@ -555,6 +556,7 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `POST` | `/workspace/:enc/api/tabs/shell` | Create shell terminal for workspace |
 | `DELETE` | `/workspace/:enc/api/tabs/:id` | Close a tab |
 | `POST` | `/workspace/:enc/api/stop` | Stop all terminals for workspace |
+| `GET` | `/workspace/:enc/api/statistics` | Aggregated statistics (GitHub, builders, consultation) (Spec 456) |
 | `WS` | `/workspace/:enc/ws/terminal/:id` | WebSocket terminal connection |
 
 **Note**: `:enc` is the workspace path encoded as Base64URL (RFC 4648). Example: `/Users/me/project` → `L1VzZXJzL21lL3Byb2plY3Q`
@@ -583,6 +585,7 @@ packages/codev/dashboard/
 │   │   ├── Terminal.tsx         # xterm.js wrapper with WebSocket client
 │   │   ├── TabBar.tsx           # Tab management (builders, shells, annotations)
 │   │   ├── WorkView.tsx         # Work view: builders, PRs, backlog (Spec 0126)
+│   │   ├── StatisticsView.tsx  # Statistics tab: GitHub, Builder, Consultation metrics (Spec 456)
 │   │   ├── BuilderCard.tsx      # Builder card with phase/gate indicators (Spec 0126)
 │   │   ├── PRList.tsx           # Pending PR list with review status (Spec 0126)
 │   │   ├── BacklogList.tsx      # Backlog grouped by readiness (Spec 0126)
@@ -592,6 +595,7 @@ packages/codev/dashboard/
 │   │   ├── useTabs.ts           # Tab state from /api/state polling
 │   │   ├── useBuilderStatus.ts  # Builder status polling
 │   │   ├── useOverview.ts       # Overview data polling (Spec 0126)
+│   │   ├── useStatistics.ts    # Statistics data fetching with tab activation refresh (Spec 456)
 │   │   └── useMediaQuery.ts     # Responsive breakpoints
 │   ├── lib/
 │   │   ├── api.ts               # REST client + getTerminalWsPath() + overview API
@@ -623,6 +627,14 @@ packages/codev/dashboard/
 - Three sections: Active Builders, Pending PRs, Backlog & Open Bugs
 - Data from `/api/overview` endpoint (GitHub + filesystem derived)
 - Collapsible file panel at bottom with search bar
+
+**Statistics View** (Spec 456):
+- Second static tab (`∿ Stats`), non-closable, always-mounted with CSS display toggling
+- Three collapsible sections: GitHub metrics, Builder throughput, Consultation breakdown
+- Data from `/api/statistics?range=<7|30|all>` endpoint with 60s server-side cache
+- Backend aggregates from GitHub CLI (`gh pr list --state merged`, `gh issue list`), MetricsDB (`~/.codev/metrics.db`), and active builder count from Tower workspace terminals
+- No auto-polling; refreshes on tab activation, range change, or manual Refresh button
+- `useStatistics(isActive)` hook manages fetch lifecycle with tab activation detection
 - `+ Shell` button in header for creating shell terminals
 
 **Responsive Design**:
@@ -925,7 +937,9 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── tower-websocket.ts  # WebSocket upgrade routing, WS↔PTY frame bridging
 │   │   │   │   ├── tower-utils.ts      # Rate limiting, path utils, MIME types, buildArchitectArgs()
 │   │   │   │   ├── tower-types.ts      # Shared TypeScript interfaces
-│   │   │   │   └── tower-tunnel.ts     # Cloud tunnel client lifecycle
+│   │   │   │   ├── tower-tunnel.ts     # Cloud tunnel client lifecycle
+│   │   │   │   ├── overview.ts         # Work view data aggregation (Spec 0126)
+│   │   │   │   └── statistics.ts       # Statistics aggregation service (Spec 456)
 │   │   │   ├── db/                     # SQLite database layer
 │   │   │   │   ├── index.ts            # Database operations
 │   │   │   │   ├── schema.ts           # Table definitions

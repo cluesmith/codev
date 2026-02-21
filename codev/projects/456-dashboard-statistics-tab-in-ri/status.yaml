@@ -1,0 +1,79 @@
+id: '456'
+title: dashboard-statistics-tab-in-ri
+protocol: spir
+phase: review
+plan_phases:
+  - id: data_layer
+    title: Backend Data Layer
+    status: complete
+  - id: api_endpoint
+    title: API Endpoint and Caching
+    status: complete
+  - id: dashboard_ui
+    title: Dashboard UI
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-02-21T12:54:41.257Z'
+    approved_at: '2026-02-21T12:58:59.210Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-02-21T13:18:46.359Z'
+    approved_at: '2026-02-21T14:38:49.352Z'
+  pr:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: data_layer
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-data_layer-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-data_layer-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-data_layer-iter1-claude.txt
+  - iteration: 1
+    plan_phase: api_endpoint
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-api_endpoint-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-api_endpoint-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-api_endpoint-iter1-claude.txt
+  - iteration: 1
+    plan_phase: dashboard_ui
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-dashboard_ui-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-dashboard_ui-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-456-dashboard-statistics-tab-in-ri/codev/projects/456-dashboard-statistics-tab-in-ri/456-dashboard_ui-iter1-claude.txt
+started_at: '2026-02-21T12:39:09.052Z'
+updated_at: '2026-02-21T18:19:50.321Z'
