@@ -1,7 +1,18 @@
 # Rebuttals: Review Phase — Iteration 1
 
 ## Claude (APPROVE)
-No changes required. Minor observations (hardcoded empty response, fetchIssueList limit) noted for future maintenance.
+
+### 1. Hardcoded `timeRange: '7d'` in no-workspace fallback
+**Action: FIXED.** Moved range validation before the workspace check in `handleStatistics` so the fallback response uses the requested range instead of hardcoding `'7d'`. Updated test to verify with `range=30` → `timeRange: '30d'`.
+
+### 2. Hardcoded inline empty response object
+**Action: NOTED.** Minor maintainability observation. Consistent with other handler patterns in tower-routes.ts. Not blocking.
+
+### 3. Missing try-catch in `handleStatistics`
+**Action: NOTED.** Consistent with `handleOverview` and other handlers in the codebase. Not a regression.
+
+### 4. `fetchIssueList` limit mismatch, unresolved spec comments
+**Action: NOTED.** Pre-existing limitation and follow-up items documented in review.
 
 ## Gemini (APPROVE)
 No changes required. Minor note about status.yaml phase tracking is cosmetic — porch manages phase state internally.

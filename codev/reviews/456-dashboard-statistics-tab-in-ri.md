@@ -93,6 +93,24 @@ Implemented a Statistics tab in the dashboard right panel that aggregates projec
 - Noted double-fetch and CSS variable inconsistency as non-blocking observations
   - **Addressed**: Both fixed alongside Codex feedback
 
+### PR-Level Review (Round 1)
+
+#### Gemini (APPROVE)
+- No concerns raised
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Spec mismatch on `gh pr list` vs `gh search prs`
+  - **Rebutted**: Already addressed in data_layer phase — intentional deviation
+- **Concern**: Partial GitHub error handling doesn't match R6
+  - **Rebutted**: Already addressed in data_layer phase — partial data is more valuable
+- **Concern**: Missing E2E tests
+  - **Rebutted**: Documented as follow-up; 54 unit/component tests cover v1
+
+#### Claude (APPROVE)
+- **Concern**: Hardcoded `timeRange: '7d'` in no-workspace fallback
+  - **Fixed**: Moved range validation before workspace check so fallback uses requested range
+- Minor observations (inline empty response, missing try-catch) noted as consistent with codebase patterns
+
 ## Architecture Updates
 
 Updated `codev/resources/arch.md`:
