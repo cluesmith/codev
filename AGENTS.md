@@ -86,7 +86,7 @@ Key locations:
 - Issues with the `spec` label have approved specifications
 - Issues with the `plan` label have approved plans
 - Active builders are tracked via `codev/projects/<id>/status.yaml` (managed by porch)
-- The dashboard Work view shows builders, PRs, and backlog derived from GitHub + filesystem state
+- The workspace overview Work view shows builders, PRs, and backlog derived from GitHub + filesystem state
 
 **When to use which:**
 - **Starting work**: Check GitHub Issues for priorities and backlog
@@ -295,7 +295,7 @@ For detailed commands, configuration, and architecture, see:
 ### Key Commands
 
 ```bash
-af dash start                        # Start the architect dashboard
+af workspace start                   # Start the workspace
 af spawn 42 --protocol spir          # Spawn builder for SPIR project
 af spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
 af spawn 42 --protocol bugfix        # Spawn builder for a bugfix

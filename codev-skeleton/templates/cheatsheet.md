@@ -111,14 +111,14 @@ Architect-Builder orchestration. Used by both **humans and agents**—agents use
 
 | Command | Description |
 |---------|-------------|
-| `af dash start` | Start dashboard (port 4200, 4300, etc.) |
-| `af dash stop` | Stop all processes |
+| `af workspace start` | Start workspace (port 4200, 4300, etc.) |
+| `af workspace stop` | Stop all processes |
 | `af spawn <id> --protocol spir` | Spawn a builder for project |
 | `af status` | Check status of all builders |
 | `af send <target> <msg>` | Send message (builder↔architect) |
 | `af cleanup -p <id>` | Clean up a builder worktree |
 | `af shell` | Spawn a utility shell |
-| `af open <file>` | Open file in dashboard viewer |
+| `af open <file>` | Open file in workspace viewer |
 | `af tower start` | Start cross-project tower |
 
 ### consult

@@ -148,7 +148,7 @@ These are the most expensive tests and are NOT run in CI.
 
 **Config**: `packages/codev/playwright.config.ts`
 
-**Prerequisites**: Tower must be running (`af tower start` or `af dash start --no-browser`)
+**Prerequisites**: Tower must be running (`af tower start` or `af workspace start --no-browser`)
 
 ### Test files
 

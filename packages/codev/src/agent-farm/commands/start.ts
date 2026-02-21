@@ -58,7 +58,7 @@ export async function start(options: StartOptions = {}): Promise<void> {
 
   logger.blank();
   logger.success('Agent Farm started!');
-  logger.kv('Dashboard', workspaceUrl);
+  logger.kv('Overview', workspaceUrl);
 
   // Open browser only if Tower wasn't already running (user already has it open)
   if (!options.noBrowser && !towerRunning) {

@@ -18,16 +18,18 @@ af <command> [options]
 
 ## Commands
 
-### af dash
+### af workspace
 
-Project dashboard commands - start/stop the architect dashboard for this project.
+Workspace commands - start/stop the workspace for this project.
 
-#### af dash start
+> **Deprecation note:** `af dash` is a deprecated alias for `af workspace`. It still works but prints a deprecation warning.
 
-Start the architect dashboard.
+#### af workspace start
+
+Start the workspace.
 
 ```bash
-af dash start [options]
+af workspace start [options]
 ```
 
 **Options:**
@@ -40,27 +42,27 @@ af dash start [options]
 
 **Description:**
 
-Starts the agent-farm dashboard with:
+Starts the workspace with:
 - Architect terminal (Claude session with architect role)
 - Web-based UI for monitoring builders
 - Terminal session management (shellper processes)
 
-The dashboard is accessible via browser at `http://localhost:<port>`.
+The workspace overview is accessible via browser at `http://localhost:<port>`.
 
 **Examples:**
 
 ```bash
 # Start with defaults
-af dash start
+af workspace start
 
 # Start with custom port
-af dash start -p 4300
+af workspace start -p 4300
 
 # Start with specific command
-af dash start -c "claude --model opus"
+af workspace start -c "claude --model opus"
 
 # Start on remote machine
-af dash start --remote user@host
+af workspace start --remote user@host
 ```
 
 #### Remote Access
@@ -69,13 +71,13 @@ Start Agent Farm on a remote machine and access it from your local workstation w
 
 ```bash
 # On your local machine - one command does everything:
-af dash start --remote user@remote-host
+af workspace start --remote user@remote-host
 
 # Or with explicit project path:
-af dash start --remote user@remote-host:/path/to/project
+af workspace start --remote user@remote-host:/path/to/project
 
 # With custom port:
-af dash start --remote user@remote-host --port 4300
+af workspace start --remote user@remote-host --port 4300
 ```
 
 This single command:
@@ -84,9 +86,9 @@ This single command:
 3. SSHs into the remote machine
 4. Starts Agent Farm there with matching port
 5. Sets up SSH tunnel back to your local machine
-6. Opens the dashboard in your browser
+6. Opens the workspace overview in your browser
 
-The dashboard and all terminals work identically to local development. Press Ctrl+C to disconnect.
+The workspace and all terminals work identically to local development. Press Ctrl+C to disconnect.
 
 **Port Selection:**
 
@@ -115,25 +117,25 @@ export PATH="$HOME/.local/bin:$PATH"
 **Legacy mode** (deprecated):
 
 ```bash
-# DEPRECATED: Exposes dashboard without authentication
-af dash start --allow-insecure-remote
+# DEPRECATED: Exposes workspace without authentication
+af workspace start --allow-insecure-remote
 ```
 
 The `--allow-insecure-remote` flag binds to `0.0.0.0` with no authentication. Use `--remote` instead for secure access via SSH.
 
-#### af dash stop
+#### af workspace stop
 
 Stop all agent farm processes for this project.
 
 ```bash
-af dash stop
+af workspace stop
 ```
 
 **Description:**
 
 Stops all running agent-farm processes including:
 - Terminal sessions (shellper processes)
-- Dashboard servers
+- Workspace servers
 
 Does NOT clean up worktrees - use `af cleanup` for that.
 
@@ -162,7 +164,7 @@ af spawn [issue-number] [options]
 
 Creates a new builder in an isolated git worktree. The builder gets:
 - Its own branch (`builder/<project>-<name>`)
-- A dedicated terminal in the dashboard
+- A dedicated terminal in the workspace overview
 - The builder role prompt loaded automatically
 
 **Examples:**
@@ -322,7 +324,7 @@ af shell [options]
 
 **Description:**
 
-Opens a general-purpose shell terminal in the dashboard. Useful for:
+Opens a general-purpose shell terminal in the workspace overview. Useful for:
 - Running tests
 - Git operations
 - Manual debugging
@@ -529,7 +531,7 @@ Customize commands via `af-config.json` at the project root:
 Or override via CLI flags:
 
 ```bash
-af dash start --architect-cmd "claude --model opus"
+af workspace start --architect-cmd "claude --model opus"
 af spawn 42 --builder-cmd "claude --model haiku"
 ```
 

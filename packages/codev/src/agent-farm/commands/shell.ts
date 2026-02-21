@@ -33,7 +33,7 @@ async function tryTowerApi(
   );
 
   if (result.ok && result.data) {
-    logger.success('Shell opened in dashboard tab');
+    logger.success('Shell opened in workspace tab');
     logger.kv('Name', result.data.name);
     return { ok: true, connectionRefused: false };
   }

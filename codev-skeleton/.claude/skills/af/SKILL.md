@@ -17,13 +17,15 @@ af tower status            # Check if Tower is running
 
 There is NO `af tower restart` — use `af tower stop && af tower start`.
 
-## Dashboard
+## Workspace
 
 ```bash
-af dash start              # Start architect dashboard for current project
-af dash stop               # Stop dashboard for current project
-af dash open               # Open dashboard in browser
+af workspace start         # Start workspace for current project
+af workspace stop          # Stop workspace for current project
+af workspace open          # Open workspace in browser
 ```
+
+> **Deprecated alias:** `af dash` still works but prints a deprecation warning.
 
 ## Builder Management
 
@@ -47,7 +49,7 @@ af spawn 3 --resume
 ```
 
 This reuses the existing `.builders/3` worktree, creates a fresh terminal
-session registered with the Tower (so it appears in the dashboard), and lets
+session registered with the Tower (so it appears in the workspace overview), and lets
 porch pick up from whatever phase the builder was in. Works with all spawn
 modes: positional issue number, `--task`, `--protocol`, `--worktree`.
 
@@ -112,4 +114,4 @@ with `--force`).
 - **Spawning with uncommitted changes** — builder won't see specs, plans, or codev updates
 - There is NO `codev tower` command — Tower is managed via `af tower`
 - There is NO `restart` subcommand — stop then start
-- There is NO `af start` for Tower — use `af tower start` or `af dash start`
+- There is NO `af start` for Tower — use `af tower start` or `af workspace start`

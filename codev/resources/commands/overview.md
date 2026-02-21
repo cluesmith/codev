@@ -20,8 +20,8 @@ codev adopt
 # Check your environment
 codev doctor
 
-# Start the architect dashboard
-af dash start
+# Start the workspace
+af workspace start
 
 # Consult an AI model about a spec
 consult -m gemini --protocol spir --type spec
@@ -53,8 +53,8 @@ See [codev.md](codev.md) for full documentation.
 
 | Command | Description |
 |---------|-------------|
-| `af dash start` | Start the architect dashboard |
-| `af dash stop` | Stop all agent farm processes |
+| `af workspace start` | Start the workspace |
+| `af workspace stop` | Stop all agent farm processes |
 | `af spawn` | Spawn a new builder |
 | `af status` | Show status of all agents |
 | `af cleanup` | Clean up a builder worktree |

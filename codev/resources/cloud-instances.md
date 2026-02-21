@@ -29,7 +29,7 @@ Example configuration for a GCP dev instance:
 gcloud compute ssh <instance-name> --zone=us-west1-b
 
 # Or use af for Agent Farm
-af dash start --remote <username>@<external-ip>:/home/<username>/dev/your-project
+af workspace start --remote <username>@<external-ip>:/home/<username>/dev/your-project
 
 # Set API keys (first time only)
 gcloud compute ssh <instance-name> --zone=us-west1-b --command='
@@ -74,7 +74,7 @@ gcloud compute disks snapshot <instance-name> --zone=us-west1-b --snapshot-names
 
 - 4+ vCPU, 8GB+ RAM for running multiple builder agents
 - SSD storage for responsive git/sqlite operations
-- SSH access for `af dash start --remote`
+- SSH access for `af workspace start --remote`
 - Ability to snapshot/destroy to minimize costs
 
 ## Recommendations
@@ -188,7 +188,7 @@ echo "Setup complete. Clone your repos and configure API keys."
 
 ```bash
 # Start agent farm on remote instance
-af dash start --remote dev@your-instance-ip:/path/to/project
+af workspace start --remote dev@your-instance-ip:/path/to/project
 
 # This:
 # 1. SSHs into the remote machine

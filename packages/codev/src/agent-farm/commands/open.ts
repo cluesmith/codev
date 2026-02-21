@@ -31,7 +31,7 @@ async function tryTowerApi(client: TowerClient, workspacePath: string, filePath:
   );
 
   if (result.ok && result.data) {
-    logger.success(`Opened in dashboard tab`);
+    logger.success(`Opened in workspace tab`);
     logger.kv('File', filePath);
     if (result.data.existing) {
       logger.info('(File was already open)');

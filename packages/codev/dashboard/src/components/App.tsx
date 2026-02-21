@@ -12,8 +12,8 @@ import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 
 
-/** Spec 443: Build the dashboard title string with optional hostname. */
-export function buildDashboardTitle(hostname?: string, workspaceName?: string): string {
+/** Spec 443: Build the overview title string with optional hostname. */
+export function buildOverviewTitle(hostname?: string, workspaceName?: string): string {
   const h = hostname?.trim();
   const w = workspaceName?.trim();
   if (h && w && h.toLowerCase() !== w.toLowerCase()) {
@@ -54,12 +54,12 @@ export function App() {
   }, [refresh]);
 
   // Spec 443: Build display title with hostname prefix
-  const dashboardTitle = buildDashboardTitle(state?.hostname, state?.workspaceName);
+  const overviewTitle = buildOverviewTitle(state?.hostname, state?.workspaceName);
 
   // Set document title with hostname + workspace name (no emoji - favicon provides the icon)
   useEffect(() => {
-    document.title = dashboardTitle;
-  }, [dashboardTitle]);
+    document.title = overviewTitle;
+  }, [overviewTitle]);
 
   // Check for fullscreen mode from URL — read synchronously to avoid a
   // layout switch (desktop → fullscreen) that unmounts/remounts Terminal
@@ -179,7 +179,7 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1 className="app-title">
-          {dashboardTitle}
+          {overviewTitle}
         </h1>
         {state?.version && <span className="header-version">v{state.version}</span>}
       </header>

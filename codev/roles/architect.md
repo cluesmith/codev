@@ -36,7 +36,7 @@ af spawn --task "fix the bug"             # Ad-hoc task builder (soft mode)
 af spawn --worktree                       # Worktree with no initial prompt
 af status                                 # Check all builders
 af cleanup -p 0001                        # Remove completed builder
-af dash start/stop                        # Dashboard management
+af workspace start/stop                   # Workspace management
 af send 0001 "message"                    # Short message to builder
 ```
 

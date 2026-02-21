@@ -1,12 +1,12 @@
 /**
  * Tests for Spec 443: Show machine hostname in dashboard header and tab title.
  *
- * Tests both the pure helper function (buildDashboardTitle) and the
+ * Tests both the pure helper function (buildOverviewTitle) and the
  * rendered App component to verify hostname appears in header and document.title.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { buildDashboardTitle } from '../src/components/App.js';
+import { buildOverviewTitle } from '../src/components/App.js';
 
 // --- Mocks (hoisted by vitest) ---
 
@@ -78,39 +78,39 @@ import { App } from '../src/components/App.js';
 
 afterEach(cleanup);
 
-// --- Unit tests for buildDashboardTitle helper ---
+// --- Unit tests for buildOverviewTitle helper ---
 
-describe('buildDashboardTitle', () => {
+describe('buildOverviewTitle', () => {
   it('returns "workspace on hostname overview" when both present and different', () => {
-    expect(buildDashboardTitle('Mac-Pro', 'myproject')).toBe('myproject on Mac-Pro overview');
+    expect(buildOverviewTitle('Mac-Pro', 'myproject')).toBe('myproject on Mac-Pro overview');
   });
 
   it('deduplicates when hostname equals workspaceName', () => {
-    expect(buildDashboardTitle('myproject', 'myproject')).toBe('myproject overview');
+    expect(buildOverviewTitle('myproject', 'myproject')).toBe('myproject overview');
   });
 
   it('deduplicates case-insensitively', () => {
-    expect(buildDashboardTitle('MyProject', 'myproject')).toBe('myproject overview');
+    expect(buildOverviewTitle('MyProject', 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is undefined', () => {
-    expect(buildDashboardTitle(undefined, 'myproject')).toBe('myproject overview');
+    expect(buildOverviewTitle(undefined, 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is empty', () => {
-    expect(buildDashboardTitle('', 'myproject')).toBe('myproject overview');
+    expect(buildOverviewTitle('', 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is whitespace', () => {
-    expect(buildDashboardTitle('  ', 'myproject')).toBe('myproject overview');
+    expect(buildOverviewTitle('  ', 'myproject')).toBe('myproject overview');
   });
 
   it('returns "overview" when both are undefined', () => {
-    expect(buildDashboardTitle(undefined, undefined)).toBe('overview');
+    expect(buildOverviewTitle(undefined, undefined)).toBe('overview');
   });
 
   it('trims whitespace from hostname and workspaceName', () => {
-    expect(buildDashboardTitle(' Mac-Pro ', ' myproject ')).toBe('myproject on Mac-Pro overview');
+    expect(buildOverviewTitle(' Mac-Pro ', ' myproject ')).toBe('myproject on Mac-Pro overview');
   });
 });
 

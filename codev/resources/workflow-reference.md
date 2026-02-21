@@ -76,8 +76,8 @@ AI agents must stop and wait for human action at these gates.
 ### Architect Commands
 
 ```bash
-# Start the dashboard
-af dash start
+# Start the workspace
+af workspace start
 
 # Spawn a builder for a project
 af spawn 44 --protocol spir
@@ -95,7 +95,7 @@ af open codev/specs/0044-name.md
 af cleanup -p 0044
 
 # Stop everything
-af dash stop
+af workspace stop
 ```
 
 ### Builder Commands

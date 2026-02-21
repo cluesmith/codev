@@ -45,8 +45,8 @@ test.describe('Tower Desktop', () => {
     const root = page.locator('#root');
     await expect(root).toBeAttached({ timeout: 10_000 });
 
-    // Should see the dashboard header
-    await expect(page.locator('.app-title')).toContainText('dashboard');
+    // Should see the overview header
+    await expect(page.locator('.app-title')).toContainText('overview');
   });
 
   test('tower proxy WebSocket terminal works', async ({ page }) => {

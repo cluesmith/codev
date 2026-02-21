@@ -1133,8 +1133,8 @@ codev import https://github.com/owner/repo
 # af command is installed globally via: npm install -g @cluesmith/codev
 
 # Starting/stopping
-af dash start                 # Start architect dashboard
-af dash stop                  # Stop all agent-farm processes
+af workspace start            # Start workspace
+af workspace stop             # Stop all agent-farm processes
 
 # Managing builders
 af spawn 3 --protocol spir              # Spawn builder (strict mode, default)
@@ -1165,7 +1165,7 @@ af architect "initial prompt" # With initial prompt
 
 # Remote access (v1.5.2+)
 af tunnel                     # Show SSH command for remote access
-af dash start --remote user@host  # Start on remote machine with tunnel
+af workspace start --remote user@host  # Start on remote machine with tunnel
 
 # Port management (multi-project support)
 af ports list                 # List workspace registrations (historical; port blocks removed in Spec 0098)
@@ -1178,7 +1178,7 @@ af db reset                   # Reset state database
 af db stats                   # Show database statistics
 
 # Command overrides
-af dash start --architect-cmd "claude --model opus"
+af workspace start --architect-cmd "claude --model opus"
 af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 

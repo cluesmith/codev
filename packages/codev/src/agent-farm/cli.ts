@@ -71,14 +71,49 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     }
   });
 
-  // Dashboard command group (project-level dashboard)
+  // Workspace command group (per-workspace overview)
+  const workspaceCmd = program
+    .command('workspace')
+    .description('Workspace overview - start/stop the workspace for this project');
+
+  workspaceCmd
+    .command('start')
+    .description('Start the workspace overview')
+    .option('--no-browser', 'Skip opening browser after start')
+    .action(async (options) => {
+      try {
+        await start({
+          noBrowser: !options.browser,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  workspaceCmd
+    .command('stop')
+    .description('Stop all agent farm processes for this project')
+    .action(async () => {
+      try {
+        await stop();
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Deprecated alias: `af dash` → `af workspace`
   const dashCmd = program
     .command('dash')
-    .description('Project dashboard - start/stop the architect dashboard for this project');
+    .description('(deprecated) Use "af workspace" instead')
+    .hook('preAction', () => {
+      logger.warn('`af dash` is deprecated. Use `af workspace` instead.');
+    });
 
   dashCmd
     .command('start')
-    .description('Start the architect dashboard')
+    .description('(deprecated) Use "af workspace start" instead')
     .option('--no-browser', 'Skip opening browser after start')
     .action(async (options) => {
       try {
@@ -93,7 +128,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   dashCmd
     .command('stop')
-    .description('Stop all agent farm processes for this project')
+    .description('(deprecated) Use "af workspace stop" instead')
     .action(async () => {
       try {
         await stop();

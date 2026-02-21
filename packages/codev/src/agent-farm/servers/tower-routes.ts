@@ -1230,7 +1230,7 @@ async function handleWorkspaceRoutes(
   // If we get here for non-API, non-WS paths and React dashboard is not available
   if (!ctx.hasReactDashboard) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Dashboard not available');
+    res.end('Overview not available');
     return;
   }
 
