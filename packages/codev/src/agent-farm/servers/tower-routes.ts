@@ -81,10 +81,10 @@ const sendBuffer = new SendBuffer();
 
 /** Deliver a buffered message to a session (write + broadcast + log). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
-  session.write(msg.formattedMessage);
-  if (!msg.noEnter) {
-    session.write('\r');
-  }
+  // Combine message + Enter into a single write for atomic delivery through
+  // the shellper protocol (Bugfix #481: split writes can arrive as separate
+  // DATA frames, allowing the Enter to be lost between frames).
+  session.write(msg.noEnter ? msg.formattedMessage : msg.formattedMessage + '\r');
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
 }
 
@@ -793,11 +793,11 @@ async function handleSend(
     });
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
   } else {
-    // User is idle (or interrupt) — deliver immediately
-    session.write(formattedMessage);
-    if (!noEnter) {
-      session.write('\r');
-    }
+    // User is idle (or interrupt) — deliver immediately.
+    // Combine message + Enter into a single write for atomic delivery through
+    // the shellper protocol (Bugfix #481: split writes can arrive as separate
+    // DATA frames, allowing the Enter to be lost between frames).
+    session.write(noEnter ? formattedMessage : formattedMessage + '\r');
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }
