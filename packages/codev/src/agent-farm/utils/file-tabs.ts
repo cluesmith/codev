@@ -35,6 +35,23 @@ export function deleteFileTab(db: Database.Database, id: string): void {
 }
 
 /**
+ * Delete all file tabs for a workspace from SQLite.
+ * Used when a workspace is stopped or fully cleaned up.
+ */
+export function deleteFileTabsForWorkspace(db: Database.Database, workspacePath: string): void {
+  db.prepare('DELETE FROM file_tabs WHERE workspace_path = ?').run(workspacePath);
+}
+
+/**
+ * Delete file tabs whose file_path starts with a given prefix.
+ * Used during builder cleanup to remove tabs pointing into a deleted worktree.
+ */
+export function deleteFileTabsByPathPrefix(db: Database.Database, pathPrefix: string): number {
+  const result = db.prepare('DELETE FROM file_tabs WHERE file_path LIKE ? || \'%\'').run(pathPrefix);
+  return result.changes;
+}
+
+/**
  * Load file tabs for a workspace from SQLite.
  */
 export function loadFileTabsForWorkspace(

@@ -49,6 +49,8 @@ export interface InstanceDeps {
   deleteTerminalSession: (id: string) => void;
   /** Delete all terminal session rows for a workspace */
   deleteWorkspaceTerminalSessions: (workspacePath: string) => void;
+  /** Delete all file tabs for a workspace (Bugfix #474) */
+  deleteFileTabsForWorkspace: (workspacePath: string) => void;
   /** Get terminal list for a workspace */
   getTerminalsForWorkspace: (
     workspacePath: string, proxyUrl: string,
@@ -544,6 +546,12 @@ export async function stopInstance(workspacePath: string): Promise<{ success: bo
     _deps.deleteWorkspaceTerminalSessions(resolvedPath);
     if (resolvedPath !== workspacePath) {
       _deps.deleteWorkspaceTerminalSessions(workspacePath);
+    }
+
+    // Bugfix #474: Delete all file tabs for this workspace
+    _deps.deleteFileTabsForWorkspace(resolvedPath);
+    if (resolvedPath !== workspacePath) {
+      _deps.deleteFileTabsForWorkspace(workspacePath);
     }
   }
 

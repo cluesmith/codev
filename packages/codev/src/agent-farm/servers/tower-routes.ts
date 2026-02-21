@@ -65,6 +65,7 @@ import {
   deleteTerminalSession,
   removeTerminalFromRegistry,
   deleteWorkspaceTerminalSessions,
+  deleteFileTabsForWorkspace,
   saveFileTab,
   deleteFileTab,
   getTerminalsForWorkspace,
@@ -1659,16 +1660,12 @@ async function handleWorkspaceTabDelete(
 
   // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
   if (tabId.startsWith('file-')) {
-    if (entry.fileTabs.has(tabId)) {
-      entry.fileTabs.delete(tabId);
-      deleteFileTab(tabId);
-      ctx.log('INFO', `Deleted file tab: ${tabId}`);
-      res.writeHead(204);
-      res.end();
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'File tab not found' }));
-    }
+    // Bugfix #474: Always attempt DB deletion even if not in memory (stale tab recovery)
+    entry.fileTabs.delete(tabId);
+    deleteFileTab(tabId);
+    ctx.log('INFO', `Deleted file tab: ${tabId}`);
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -1730,6 +1727,9 @@ async function handleWorkspaceStopAll(
 
   // TICK-001: Delete all terminal sessions from SQLite
   deleteWorkspaceTerminalSessions(workspacePath);
+
+  // Bugfix #474: Delete all file tabs for this workspace
+  deleteFileTabsForWorkspace(workspacePath);
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true }));

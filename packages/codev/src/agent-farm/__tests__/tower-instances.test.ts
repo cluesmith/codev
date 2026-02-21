@@ -80,6 +80,7 @@ function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
     saveTerminalSession: vi.fn(),
     deleteTerminalSession: vi.fn(),
     deleteWorkspaceTerminalSessions: vi.fn(),
+    deleteFileTabsForWorkspace: vi.fn(),
     getTerminalsForWorkspace: vi.fn().mockResolvedValue({ terminals: [] }),
     ...overrides,
   };

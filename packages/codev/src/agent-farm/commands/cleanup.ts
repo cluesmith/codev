@@ -12,6 +12,8 @@ import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { loadState, removeBuilder } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { getGlobalDb, closeGlobalDb } from '../db/index.js';
+import { deleteFileTabsByPathPrefix } from '../utils/file-tabs.js';
 
 /**
  * Remove porch state for a project from codev/projects/
@@ -264,6 +266,20 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     const shellpersKilled = await killShellperProcesses(builder.worktree);
     if (shellpersKilled > 0) {
       logger.info(`Killed ${shellpersKilled} shellper process(es)`);
+    }
+  }
+
+  // Bugfix #474: Delete file tabs whose file_path points into this worktree
+  if (!isShellMode && builder.worktree) {
+    try {
+      const db = getGlobalDb();
+      const deleted = deleteFileTabsByPathPrefix(db, builder.worktree);
+      if (deleted > 0) {
+        logger.info(`Removed ${deleted} stale file tab(s)`);
+      }
+      closeGlobalDb();
+    } catch {
+      // Non-fatal — Tower may handle cleanup on its own
     }
   }
 

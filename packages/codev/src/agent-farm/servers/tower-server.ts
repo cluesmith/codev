@@ -40,6 +40,7 @@ import {
   saveTerminalSession,
   deleteTerminalSession,
   deleteWorkspaceTerminalSessions,
+  deleteFileTabsForWorkspace,
   getTerminalsForWorkspace,
   reconcileTerminalSessions,
 } from './tower-terminals.js';
@@ -327,6 +328,7 @@ server.listen(port, '127.0.0.1', async () => {
     saveTerminalSession,
     deleteTerminalSession,
     deleteWorkspaceTerminalSessions,
+    deleteFileTabsForWorkspace,
     getTerminalsForWorkspace,
   });
 

@@ -10,6 +10,8 @@ import Database from 'better-sqlite3';
 import {
   saveFileTab,
   deleteFileTab,
+  deleteFileTabsForWorkspace,
+  deleteFileTabsByPathPrefix,
   loadFileTabsForWorkspace,
   ensureFileTabsTable,
 } from '../utils/file-tabs.js';
@@ -104,5 +106,56 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
     expect(tab).toHaveProperty('id', 'file-shape');
     expect(tab).toHaveProperty('path', '/project/src/index.ts');
     expect(tab).toHaveProperty('createdAt', 12345);
+  });
+
+  // Bugfix #474: Stale tabs survive builder cleanup
+  it('should delete all file tabs for a workspace via deleteFileTabsForWorkspace', () => {
+    const workspace = '/home/user/project';
+    const otherWorkspace = '/home/user/other';
+
+    saveFileTab(db, 'file-1', workspace, '/home/user/project/a.ts', 1000);
+    saveFileTab(db, 'file-2', workspace, '/home/user/project/b.ts', 2000);
+    saveFileTab(db, 'file-3', otherWorkspace, '/home/user/other/c.ts', 3000);
+
+    deleteFileTabsForWorkspace(db, workspace);
+
+    // All tabs for the workspace should be gone
+    const tabs = loadFileTabsForWorkspace(db, workspace);
+    expect(tabs.size).toBe(0);
+
+    // Other workspace's tabs should be unaffected
+    const otherTabs = loadFileTabsForWorkspace(db, otherWorkspace);
+    expect(otherTabs.size).toBe(1);
+    expect(otherTabs.get('file-3')?.path).toBe('/home/user/other/c.ts');
+  });
+
+  it('should delete file tabs by path prefix via deleteFileTabsByPathPrefix', () => {
+    const workspace = '/home/user/project';
+    const worktreePath = '/home/user/project/.builders/bugfix-42';
+
+    // Simulate tabs created by a builder via af open (stored under main workspace)
+    saveFileTab(db, 'file-wt1', workspace, `${worktreePath}/src/fix.ts`, 1000);
+    saveFileTab(db, 'file-wt2', workspace, `${worktreePath}/tests/fix.test.ts`, 2000);
+    // A tab from the main workspace (should survive)
+    saveFileTab(db, 'file-main', workspace, '/home/user/project/src/app.ts', 3000);
+
+    const deleted = deleteFileTabsByPathPrefix(db, worktreePath);
+    expect(deleted).toBe(2);
+
+    // Main workspace tab should survive
+    const tabs = loadFileTabsForWorkspace(db, workspace);
+    expect(tabs.size).toBe(1);
+    expect(tabs.get('file-main')?.path).toBe('/home/user/project/src/app.ts');
+  });
+
+  it('should return 0 when no tabs match path prefix', () => {
+    saveFileTab(db, 'file-x', '/project', '/project/src/x.ts', 1000);
+
+    const deleted = deleteFileTabsByPathPrefix(db, '/nonexistent/path');
+    expect(deleted).toBe(0);
+
+    // Original tab should be unaffected
+    const tabs = loadFileTabsForWorkspace(db, '/project');
+    expect(tabs.size).toBe(1);
   });
 });

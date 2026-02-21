@@ -13,6 +13,8 @@ import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
+  deleteFileTabsForWorkspace as deleteFileTabsForWorkspaceFromDb,
+  deleteFileTabsByPathPrefix as deleteFileTabsByPathPrefixFromDb,
   loadFileTabsForWorkspace as loadFileTabsFromDb,
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
@@ -282,6 +284,52 @@ export function deleteFileTab(id: string): void {
     deleteFileTabFromDb(getGlobalDb(), id);
   } catch (err) {
     _deps?.log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete all file tabs for a workspace from SQLite and clear in-memory state.
+ * Called when a workspace is stopped or fully cleaned up (Bugfix #474).
+ */
+export function deleteFileTabsForWorkspace(workspacePath: string): void {
+  try {
+    const normalizedPath = normalizeWorkspacePath(workspacePath);
+    deleteFileTabsForWorkspaceFromDb(getGlobalDb(), normalizedPath);
+    if (normalizedPath !== workspacePath) {
+      deleteFileTabsForWorkspaceFromDb(getGlobalDb(), workspacePath);
+    }
+    // Clear in-memory file tabs
+    const entry = workspaceTerminals.get(normalizedPath) || workspaceTerminals.get(workspacePath);
+    if (entry?.fileTabs) {
+      entry.fileTabs.clear();
+    }
+  } catch (err) {
+    _deps?.log('WARN', `Failed to delete workspace file tabs: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete file tabs whose file_path starts with a given prefix.
+ * Used during builder cleanup to remove tabs pointing into a deleted worktree (Bugfix #474).
+ * Also evicts matching entries from the in-memory registry.
+ */
+export function deleteFileTabsByPathPrefix(pathPrefix: string): number {
+  try {
+    const deleted = deleteFileTabsByPathPrefixFromDb(getGlobalDb(), pathPrefix);
+    // Evict matching entries from in-memory registries
+    for (const [, entry] of workspaceTerminals) {
+      if (entry.fileTabs) {
+        for (const [id, tab] of entry.fileTabs) {
+          if (tab.path.startsWith(pathPrefix)) {
+            entry.fileTabs.delete(id);
+          }
+        }
+      }
+    }
+    return deleted;
+  } catch (err) {
+    _deps?.log('WARN', `Failed to delete file tabs by path prefix: ${(err as Error).message}`);
+    return 0;
   }
 }
 
