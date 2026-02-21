@@ -1,0 +1,109 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "air",
+  "version": "1.0.0",
+  "description": "AIR: Autonomous Implement & Review — lightweight protocol for small features from GitHub Issues",
+  "input": {
+    "type": "github-issue",
+    "required": false,
+    "default_for": ["--issue", "-i"]
+  },
+  "hooks": {
+    "pre-spawn": {
+      "collision-check": true,
+      "comment-on-issue": "On it! Implementing this feature now."
+    }
+  },
+  "phases": [
+    {
+      "id": "implement",
+      "name": "Implement",
+      "description": "Implement the feature and add tests",
+      "type": "once",
+      "steps": [
+        "read_issue",
+        "implement_feature",
+        "add_tests",
+        "verify_build",
+        "commit"
+      ],
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "tests": {
+          "command": "npm test -- --exclude='**/e2e/**'",
+          "description": "Unit tests only - e2e tests run in PR phase",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "transition": {
+        "on_complete": "pr",
+        "on_too_complex": "escalate"
+      }
+    },
+    {
+      "id": "pr",
+      "name": "Create PR",
+      "description": "Create pull request with review in PR body",
+      "type": "once",
+      "steps": [
+        "create_pr",
+        "link_issue",
+        "optional_consultation",
+        "notify_architect"
+      ],
+      "consultation": {
+        "on": "review",
+        "models": ["gemini", "codex"],
+        "type": "impl",
+        "parallel": true,
+        "max_rounds": 1
+      },
+      "checks": {
+        "pr_exists": {
+          "command": "gh pr list --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
+          "description": "PR must be created before signaling completion"
+        },
+        "e2e_tests": {
+          "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+          "description": "Full e2e test suite",
+          "optional": true
+        }
+      },
+      "gate": "pr",
+      "transition": {
+        "on_complete": null
+      }
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "TOO_COMPLEX": {
+      "description": "Feature is too complex for AIR, escalate to ASPIR",
+      "transitions_to": "escalate"
+    },
+    "BLOCKED": {
+      "description": "Signal implementation is blocked",
+      "requires": "reason"
+    }
+  },
+  "defaults": {
+    "mode": "strict",
+    "consultation": {
+      "enabled": true,
+      "models": ["gemini", "codex"],
+      "parallel": true
+    },
+    "checks": {
+      "build": "npm run build",
+      "test": "npm test"
+    }
+  }
+}

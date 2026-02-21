@@ -1,0 +1,14 @@
+id: '494'
+title: new-air-protocol-autonomous-im
+protocol: aspir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-21T20:11:18.309Z'
+updated_at: '2026-02-21T20:11:18.310Z'

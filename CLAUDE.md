@@ -134,6 +134,14 @@ validated: [gemini, codex, claude]
 
 **BUGFIX uses GitHub Issues as source of truth.** See `codev/protocols/bugfix/protocol.md`.
 
+### Use AIR for (small features from GitHub issues):
+- Small features (< 300 LOC) fully described in a **GitHub Issue**
+- No architectural decisions needed
+- No spec/plan artifacts — review goes in the PR body
+- Would be overkill for full SPIR/ASPIR ceremony
+
+**AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
+
 ### Use TICK for (amendments to existing specs):
 - **Amendments** to an existing SPIR spec that is already `integrated`
 - Small scope (< 300 lines of new/changed code)

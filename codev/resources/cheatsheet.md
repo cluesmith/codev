@@ -61,6 +61,7 @@ A **protocol** is a structured workflow that defines how work progresses from id
 | Protocol | Use For | Phases |
 |----------|---------|--------|
 | **SPIR** | New features | Specify → Plan → Implement → Review |
+| **AIR** | Small features (< 300 LOC) | Implement → Review |
 | **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
