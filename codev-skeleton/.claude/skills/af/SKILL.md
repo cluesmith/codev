@@ -22,7 +22,6 @@ There is NO `af tower restart` — use `af tower stop && af tower start`.
 ```bash
 af workspace start         # Start workspace for current project
 af workspace stop          # Stop workspace for current project
-af workspace open          # Open workspace in browser
 ```
 
 > **Deprecated alias:** `af dash` still works but prints a deprecation warning.
