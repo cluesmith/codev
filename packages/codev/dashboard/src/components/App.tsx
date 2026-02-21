@@ -129,7 +129,7 @@ export function App() {
             </div>
           );
         })}
-        <div style={{ display: activeTab?.type === 'work' ? undefined : 'none' }}>
+        <div style={{ display: activeTab?.type === 'work' ? undefined : 'none', height: '100%' }}>
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
         </div>
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
