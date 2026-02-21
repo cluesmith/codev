@@ -331,28 +331,25 @@ body {
   opacity: 1.0;
 }
 
-/* Connection status dot (Bugfix #451 — replaces intrusive overlay from #442) */
-.terminal-status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  align-self: center;
+/* Connection status icon in toolbar (Bugfix #451, #493) */
+.terminal-status-icon {
+  cursor: default;
 }
 
-.terminal-status-reconnecting {
-  background-color: #ffcc00;
+.terminal-status-icon.terminal-status-reconnecting {
+  color: #ffcc00;
+  opacity: 0.8;
   animation: terminal-pulse 1.2s ease-in-out infinite;
 }
 
-.terminal-status-disconnected {
-  background-color: #ff4444;
+.terminal-status-icon.terminal-status-disconnected {
+  color: #ff4444;
+  opacity: 0.8;
 }
 
 @keyframes terminal-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.2; }
 }
 
 /* Mobile layout */

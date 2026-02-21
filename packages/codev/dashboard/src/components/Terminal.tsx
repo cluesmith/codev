@@ -76,12 +76,6 @@ function TerminalControls({
 
   return (
     <div className="terminal-controls">
-      {connStatus !== 'connected' && (
-        <span
-          className={`terminal-status-dot ${connStatus === 'reconnecting' ? 'terminal-status-reconnecting' : 'terminal-status-disconnected'}`}
-          title={connStatus === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}
-        />
-      )}
       <button
         className="terminal-control-btn"
         onPointerDown={handleRefresh}
@@ -107,6 +101,17 @@ function TerminalControls({
           <line x1="4" y1="13" x2="12" y2="13" />
         </svg>
       </button>
+      {connStatus !== 'connected' && (
+        <span
+          className={`terminal-control-btn terminal-status-icon ${connStatus === 'reconnecting' ? 'terminal-status-reconnecting' : 'terminal-status-disconnected'}`}
+          title={connStatus === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}
+          aria-label={connStatus === 'reconnecting' ? 'Reconnecting' : 'Disconnected'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="4" fill="currentColor" />
+          </svg>
+        </span>
+      )}
     </div>
   );
 }

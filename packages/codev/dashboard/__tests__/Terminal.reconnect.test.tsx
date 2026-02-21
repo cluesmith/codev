@@ -176,11 +176,11 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
     act(() => { wsInstances[0].simulateOpen(); });
 
     // No status dot while connected
-    expect(container.querySelector('.terminal-status-dot')).toBeNull();
+    expect(container.querySelector('.terminal-status-icon')).toBeNull();
 
     // Disconnect triggers reconnecting dot
     act(() => { wsInstances[0].simulateClose(); });
-    const dot = container.querySelector('.terminal-status-dot');
+    const dot = container.querySelector('.terminal-status-icon');
     expect(dot).not.toBeNull();
     expect(dot!.classList.contains('terminal-status-reconnecting')).toBe(true);
   });
@@ -191,14 +191,14 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
     act(() => { wsInstances[0].simulateClose(); });
 
     // Dot is shown
-    expect(container.querySelector('.terminal-status-dot')).not.toBeNull();
+    expect(container.querySelector('.terminal-status-icon')).not.toBeNull();
 
     // Reconnect
     act(() => { vi.advanceTimersByTime(1000); });
     act(() => { wsInstances[1].simulateOpen(); });
 
     // Dot is hidden
-    expect(container.querySelector('.terminal-status-dot')).toBeNull();
+    expect(container.querySelector('.terminal-status-icon')).toBeNull();
   });
 
   it('gives up after max attempts and shows session ended', () => {
@@ -261,7 +261,7 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
       }
     }
 
-    const dot = container.querySelector('.terminal-status-dot');
+    const dot = container.querySelector('.terminal-status-icon');
     expect(dot).not.toBeNull();
     expect(dot!.classList.contains('terminal-status-disconnected')).toBe(true);
   });
