@@ -27,10 +27,11 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockLoadProtocol } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
   mockFetchRecentlyClosed: vi.fn(),
+  mockFetchMergedPRs: vi.fn(),
   mockLoadProtocol: vi.fn(),
 }));
 
@@ -41,6 +42,7 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchPRList: mockFetchPRList,
     fetchIssueList: mockFetchIssueList,
     fetchRecentlyClosed: mockFetchRecentlyClosed,
+    fetchMergedPRs: mockFetchMergedPRs,
   };
 });
 
@@ -109,6 +111,7 @@ describe('overview', () => {
     mockFetchPRList.mockResolvedValue([]);
     mockFetchIssueList.mockResolvedValue([]);
     mockFetchRecentlyClosed.mockResolvedValue([]);
+    mockFetchMergedPRs.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -1553,10 +1556,10 @@ describe('overview', () => {
       }
     });
 
-    it('fetches PRs, issues, and recently closed in parallel (Bugfix #400)', async () => {
+    it('fetches PRs, issues, recently closed, and merged PRs in parallel (Bugfix #400)', async () => {
       // Track the order of mock call starts and completions to verify concurrency.
       // If calls are sequential, each starts after the previous completes.
-      // If parallel, all three start before any completes.
+      // If parallel, all start before any completes.
       const callLog: string[] = [];
 
       mockFetchPRList.mockImplementation(() => {
@@ -1577,15 +1580,78 @@ describe('overview', () => {
           setTimeout(() => { callLog.push('closed-end'); resolve([]); }, 50);
         });
       });
+      mockFetchMergedPRs.mockImplementation(() => {
+        callLog.push('merged-start');
+        return new Promise(resolve => {
+          setTimeout(() => { callLog.push('merged-end'); resolve([]); }, 50);
+        });
+      });
 
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
 
-      // All three starts should come before any ends (parallel execution)
+      // All four starts should come before any ends (parallel execution)
       const starts = callLog.filter(e => e.endsWith('-start'));
       const firstEnd = callLog.findIndex(e => e.endsWith('-end'));
-      expect(starts).toHaveLength(3);
-      expect(firstEnd).toBeGreaterThanOrEqual(3); // all 3 starts before first end
+      expect(starts).toHaveLength(4);
+      expect(firstEnd).toBeGreaterThanOrEqual(4); // all 4 starts before first end
+    });
+
+    it('enriches recently closed items with PR URLs from merged PRs (Bugfix #465)', async () => {
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 100, title: 'Bug fix', url: 'https://github.com/org/repo/issues/100', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+        { number: 200, title: 'Feature', url: 'https://github.com/org/repo/issues/200', labels: [], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+      ]);
+      mockFetchMergedPRs.mockResolvedValue([
+        { number: 150, title: '[Bugfix #100] Fix the bug', url: 'https://github.com/org/repo/pull/150', body: 'Fixes #100', createdAt: '2026-01-02T00:00:00Z', mergedAt: new Date().toISOString() },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      // Issue #100 should have a PR link; issue #200 should not
+      const item100 = data.recentlyClosed.find(i => i.number === 100)!;
+      expect(item100.prUrl).toBe('https://github.com/org/repo/pull/150');
+
+      const item200 = data.recentlyClosed.find(i => i.number === 200)!;
+      expect(item200.prUrl).toBeUndefined();
+    });
+
+    it('enriches recently closed items with spec/plan/review paths (Bugfix #465)', async () => {
+      createSpecFile(tmpDir, 42, 'my-feature');
+      createPlanFile(tmpDir, 42, 'my-feature');
+      createReviewFile(tmpDir, 42, 'my-feature');
+
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 42, title: 'My Feature', url: 'https://github.com/org/repo/issues/42', labels: [], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+        { number: 99, title: 'No artifacts', url: 'https://github.com/org/repo/issues/99', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      const item42 = data.recentlyClosed.find(i => i.number === 42)!;
+      expect(item42.specPath).toBe('codev/specs/42-my-feature.md');
+      expect(item42.planPath).toBe('codev/plans/42-my-feature.md');
+      expect(item42.reviewPath).toBe('codev/reviews/42-my-feature.md');
+
+      const item99 = data.recentlyClosed.find(i => i.number === 99)!;
+      expect(item99.specPath).toBeUndefined();
+      expect(item99.planPath).toBeUndefined();
+      expect(item99.reviewPath).toBeUndefined();
+    });
+
+    it('handles null merged PRs gracefully (Bugfix #465)', async () => {
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 50, title: 'Bug', url: 'https://github.com/org/repo/issues/50', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+      ]);
+      mockFetchMergedPRs.mockResolvedValue(null);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.recentlyClosed).toHaveLength(1);
+      expect(data.recentlyClosed[0].prUrl).toBeUndefined();
     });
   });
 });

@@ -126,6 +126,10 @@ export interface OverviewRecentlyClosed {
   url: string;
   type: string;
   closedAt: string;
+  prUrl?: string;
+  specPath?: string;
+  planPath?: string;
+  reviewPath?: string;
 }
 
 export interface OverviewData {

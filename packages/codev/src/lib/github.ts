@@ -33,6 +33,7 @@ export interface GitHubPR {
   reviewDecision: string;
   body: string;
   createdAt: string;
+  mergedAt?: string;
 }
 
 export interface GitHubIssueListItem {
@@ -135,6 +136,30 @@ export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueList
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[github] fetchRecentlyClosed failed (cwd=${cwd ?? 'none'}): ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Fetch recently merged PRs (last 24 hours).
+ * Returns null on failure.
+ * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
+ */
+export async function fetchMergedPRs(cwd?: string): Promise<GitHubPR[] | null> {
+  try {
+    const { stdout } = await execFileAsync('gh', [
+      'pr', 'list',
+      '--state', 'merged',
+      '--json', 'number,title,url,body,createdAt,mergedAt',
+      '--limit', '50',
+    ], { cwd });
+    const prs: GitHubPR[] = JSON.parse(stdout);
+    // Filter to last 24 hours
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return prs.filter(pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchMergedPRs failed (cwd=${cwd ?? 'none'}): ${msg}`);
     return null;
   }
 }

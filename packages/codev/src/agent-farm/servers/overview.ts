@@ -13,6 +13,7 @@ import {
   fetchPRList,
   fetchIssueList,
   fetchRecentlyClosed,
+  fetchMergedPRs,
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../../lib/github.js';
@@ -77,6 +78,10 @@ export interface RecentlyClosedItem {
   url: string;
   type: string;
   closedAt: string;
+  prUrl?: string;
+  specPath?: string;
+  planPath?: string;
+  reviewPath?: string;
 }
 
 export interface OverviewData {
@@ -654,6 +659,7 @@ export class OverviewCache {
   private prCache = new Map<string, { data: GitHubPR[]; fetchedAt: number }>();
   private issueCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
   private closedCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
+  private mergedPRCache = new Map<string, { data: GitHubPR[]; fetchedAt: number }>();
   private readonly TTL = 30_000;
 
   /**
@@ -681,11 +687,12 @@ export class OverviewCache {
         .filter((n): n is number => n !== null),
     );
 
-    // 2. Fetch PRs, issues, and recently closed in parallel (each is independently cached)
-    const [prs, issues, closed] = await Promise.all([
+    // 2. Fetch PRs, issues, recently closed, and merged PRs in parallel (each is independently cached)
+    const [prs, issues, closed, mergedPRs] = await Promise.all([
       this.fetchPRsCached(workspaceRoot),
       this.fetchIssuesCached(workspaceRoot),
       this.fetchRecentlyClosedCached(workspaceRoot),
+      this.fetchMergedPRsCached(workspaceRoot),
     ]);
 
     // 3. Process PRs
@@ -726,18 +733,42 @@ export class OverviewCache {
       }
     }
 
-    // 5. Process recently closed issues
+    // 5. Process recently closed issues — enrich with artifact paths and PR URLs
     let recentlyClosed: RecentlyClosedItem[] = [];
     if (closed !== null) {
+      // Build issue→prUrl map from merged PRs
+      const issueToPrUrl = new Map<number, string>();
+      if (mergedPRs) {
+        for (const pr of mergedPRs) {
+          const linkedIssue = parseLinkedIssue(pr.body || '', pr.title);
+          if (linkedIssue !== null) {
+            issueToPrUrl.set(linkedIssue, pr.url);
+          }
+        }
+      }
+
+      // Scan artifact directories for spec/plan/review files
+      const specFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'specs'));
+      const planFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'plans'));
+      const reviewFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'reviews'));
+
       recentlyClosed = closed.map(issue => {
         const { type } = parseLabelDefaults(issue.labels);
-        return {
+        const specFile = specFiles.get(issue.number);
+        const planFile = planFiles.get(issue.number);
+        const reviewFile = reviewFiles.get(issue.number);
+        const item: RecentlyClosedItem = {
           number: issue.number,
           title: issue.title,
           url: issue.url,
           type,
           closedAt: issue.closedAt!,
         };
+        if (issueToPrUrl.has(issue.number)) item.prUrl = issueToPrUrl.get(issue.number);
+        if (specFile) item.specPath = `codev/specs/${specFile}`;
+        if (planFile) item.planPath = `codev/plans/${planFile}`;
+        if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;
+        return item;
       });
     }
 
@@ -755,6 +786,7 @@ export class OverviewCache {
     this.prCache.clear();
     this.issueCache.clear();
     this.closedCache.clear();
+    this.mergedPRCache.clear();
   }
 
   // ===========================================================================
@@ -799,6 +831,20 @@ export class OverviewCache {
     const data = await fetchRecentlyClosed(cwd);
     if (data !== null) {
       this.closedCache.set(cwd, { data, fetchedAt: now });
+    }
+    return data;
+  }
+
+  private async fetchMergedPRsCached(cwd: string): Promise<GitHubPR[] | null> {
+    const now = Date.now();
+    const cached = this.mergedPRCache.get(cwd);
+    if (cached && (now - cached.fetchedAt) < this.TTL) {
+      return cached.data;
+    }
+
+    const data = await fetchMergedPRs(cwd);
+    if (data !== null) {
+      this.mergedPRCache.set(cwd, { data, fetchedAt: now });
     }
     return data;
   }

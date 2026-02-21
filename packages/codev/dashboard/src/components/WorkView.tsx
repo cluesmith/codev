@@ -124,7 +124,7 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
         {overview?.recentlyClosed && overview.recentlyClosed.length > 0 && (
           <section className="work-section">
             <h3 className="work-section-title">Recently Closed</h3>
-            <RecentlyClosedList items={overview.recentlyClosed} />
+            <RecentlyClosedList items={overview.recentlyClosed} onRefresh={onRefresh} />
           </section>
         )}
       </div>
