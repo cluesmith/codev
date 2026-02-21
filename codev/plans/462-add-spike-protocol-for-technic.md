@@ -8,7 +8,14 @@
 
 ## Executive Summary
 
-Implement the spike protocol as the lightest-weight protocol in the codev ecosystem. The implementation creates 4 files in `codev-skeleton/protocols/spike/`: a minimal protocol.json (single phase, no gates, no consultation), a protocol.md documenting the recommended 3-step workflow, a builder-prompt.md with Handlebars templating, and a findings template. No runtime code changes needed — this is purely configuration and documentation.
+Implement the spike protocol as the lightest-weight protocol in the codev ecosystem. Files are created in BOTH directories following the dual-directory convention:
+
+- **`codev-skeleton/protocols/spike/`** — The template shipped to other projects via `codev init`/`codev adopt`. Contains all files: protocol.json, protocol.md, builder-prompt.md, templates/findings.md.
+- **`codev/protocols/spike/`** — Our own instance of the protocol. Contains the runtime files used by porch/af: protocol.json, protocol.md, templates/findings.md.
+
+This matches the pattern used by existing protocols (e.g., experiment has protocol.md + templates in both directories; SPIR has protocol.json, protocol.md, consult-types, templates in both). builder-prompt.md only lives in codev-skeleton/ (it's a template rendered by af spawn, not used directly at runtime).
+
+No runtime code changes needed — this is purely configuration and documentation.
 
 ## Success Metrics
 - [ ] All specification success criteria met
@@ -40,11 +47,11 @@ Implement the spike protocol as the lightest-weight protocol in the codev ecosys
 
 #### Deliverables
 - [ ] `codev-skeleton/protocols/spike/protocol.json`
-- [ ] `codev-skeleton/protocols/spike/templates/` directory
+- [ ] `codev/protocols/spike/protocol.json` (copy of skeleton version)
 
 #### Implementation Details
 
-Create `codev-skeleton/protocols/spike/protocol.json` with:
+Create `codev-skeleton/protocols/spike/protocol.json` (and copy to `codev/protocols/spike/protocol.json`) with:
 - `$schema`: `../../protocol-schema.json` (consistent with all existing protocols)
 - `name`: `spike`
 - `version`: `1.0.0`
@@ -59,6 +66,7 @@ Reference: Follow the same structure as `codev-skeleton/protocols/experiment/pro
 
 #### Files
 - Create: `codev-skeleton/protocols/spike/protocol.json`
+- Create: `codev/protocols/spike/protocol.json` (identical copy)
 
 #### Acceptance Criteria
 - [ ] protocol.json validates against protocol-schema.json (check with JSON schema validator or manual inspection)
@@ -82,6 +90,8 @@ Reference: Follow the same structure as `codev-skeleton/protocols/experiment/pro
 - [ ] `codev-skeleton/protocols/spike/protocol.md`
 - [ ] `codev-skeleton/protocols/spike/builder-prompt.md`
 - [ ] `codev-skeleton/protocols/spike/templates/findings.md`
+- [ ] `codev/protocols/spike/protocol.md` (copy of skeleton version)
+- [ ] `codev/protocols/spike/templates/findings.md` (copy of skeleton version)
 
 #### Implementation Details
 
@@ -123,6 +133,8 @@ Reference: Follow the style of `codev-skeleton/protocols/experiment/templates/no
 - Create: `codev-skeleton/protocols/spike/protocol.md`
 - Create: `codev-skeleton/protocols/spike/builder-prompt.md`
 - Create: `codev-skeleton/protocols/spike/templates/findings.md`
+- Create: `codev/protocols/spike/protocol.md` (identical copy)
+- Create: `codev/protocols/spike/templates/findings.md` (identical copy)
 
 #### Acceptance Criteria
 - [ ] protocol.md clearly describes the recommended 3-step workflow as guidance
