@@ -136,6 +136,57 @@ export interface OverviewData {
   errors?: { prs?: string; issues?: string };
 }
 
+// Spec 456: Statistics tab types and fetcher
+
+export interface StatisticsResponse {
+  timeRange: '7d' | '30d' | 'all';
+  github: {
+    prsMerged: number;
+    avgTimeToMergeHours: number | null;
+    bugBacklog: number;
+    nonBugBacklog: number;
+    issuesClosed: number;
+    avgTimeToCloseBugsHours: number | null;
+  };
+  builders: {
+    projectsCompleted: number;
+    throughputPerWeek: number;
+    activeBuilders: number;
+  };
+  consultation: {
+    totalCount: number;
+    totalCostUsd: number | null;
+    costByModel: Record<string, number>;
+    avgLatencySeconds: number | null;
+    successRate: number | null;
+    byModel: Array<{
+      model: string;
+      count: number;
+      avgLatency: number;
+      totalCost: number | null;
+      successRate: number;
+    }>;
+    byReviewType: Record<string, number>;
+    byProtocol: Record<string, number>;
+    costByProject: Array<{
+      projectId: string;
+      totalCost: number;
+    }>;
+  };
+  errors?: {
+    github?: string;
+    consultation?: string;
+  };
+}
+
+export async function fetchStatistics(range: string, refresh?: boolean): Promise<StatisticsResponse> {
+  const params = new URLSearchParams({ range });
+  if (refresh) params.set('refresh', '1');
+  const res = await fetch(apiUrl(`api/statistics?${params}`), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch statistics: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchOverview(): Promise<OverviewData> {
   const res = await fetch(apiUrl('api/overview'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch overview: ${res.status}`);

@@ -3,7 +3,7 @@ import type { DashboardState, Builder, UtilTerminal, Annotation } from '../lib/a
 
 export interface Tab {
   id: string;
-  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity';
+  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity' | 'statistics';
   label: string;
   closable: boolean;
   terminalId?: string;
@@ -17,6 +17,7 @@ export interface Tab {
 function buildTabs(state: DashboardState | null): Tab[] {
   const tabs: Tab[] = [
     { id: 'work', type: 'work', label: 'Work', closable: false },
+    { id: 'statistics', type: 'statistics', label: '\u223F Stats', closable: false, persistent: true },
   ];
 
   if (state?.architect) {

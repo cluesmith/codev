@@ -10,6 +10,7 @@ import { Terminal } from './Terminal.js';
 import { WorkView } from './WorkView.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
+import { StatisticsView } from './StatisticsView.js';
 
 
 /** Spec 443: Build the dashboard title string with optional hostname. */
@@ -131,6 +132,9 @@ export function App() {
         })}
         <div style={{ display: activeTab?.type === 'work' ? undefined : 'none' }}>
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
+        </div>
+        <div style={{ display: activeTab?.type === 'statistics' ? undefined : 'none' }}>
+          <StatisticsView isActive={activeTab?.type === 'statistics'} />
         </div>
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
       </>
