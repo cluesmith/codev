@@ -456,6 +456,52 @@ describe('tower-instances', () => {
         fs.rmSync(tmpDir, { recursive: true });
       }
     });
+
+    it('uses TOWER_ARCHITECT_CMD env var when set (Bugfix #473)', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-launch-env-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      // Write an af-config.json with a different architect command
+      fs.writeFileSync(
+        path.join(tmpDir, 'af-config.json'),
+        JSON.stringify({ shell: { architect: 'claude --dangerously-skip-permissions' } }),
+      );
+
+      const originalEnv = process.env.TOWER_ARCHITECT_CMD;
+      process.env.TOWER_ARCHITECT_CMD = 'bash';
+
+      try {
+        const mockCreateSession = vi.fn().mockReturnValue({ id: 'test-session' });
+        const deps = makeDeps({
+          getTerminalManager: vi.fn().mockReturnValue({
+            getSession: vi.fn(),
+            killSession: vi.fn(),
+            createSession: mockCreateSession,
+            createSessionRaw: vi.fn(),
+            listSessions: vi.fn().mockReturnValue([]),
+          }) as any,
+        });
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+        expect(result.success).toBe(true);
+
+        // Verify createSession was called with 'bash' (env var), not 'claude --dangerously-skip-permissions' (config)
+        expect(mockCreateSession).toHaveBeenCalled();
+        const callArgs = mockCreateSession.mock.calls[0];
+        // The command is passed as the first positional arg or within options
+        // Check that the architect command resolved to 'bash' from env var
+        const callStr = JSON.stringify(callArgs);
+        expect(callStr).toContain('bash');
+        expect(callStr).not.toContain('dangerously-skip-permissions');
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.TOWER_ARCHITECT_CMD;
+        } else {
+          process.env.TOWER_ARCHITECT_CMD = originalEnv;
+        }
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
   });
 
   // =========================================================================
