@@ -94,10 +94,11 @@ export class SendBuffer {
       const now = Date.now();
       const maxAgeExceeded = messages.some(m => now - m.timestamp >= this.maxBufferAgeMs);
       const isIdle = session.isUserIdle(this.idleThresholdMs);
-      const isComposing = session.composing;
 
-      // Deliver when: forced, idle AND not composing, or max age exceeded (Bugfix #450)
-      if (forceAll || (!isComposing && isIdle) || maxAgeExceeded) {
+      // Deliver when: forced, user idle, or max age exceeded.
+      // Bugfix #492: removed composing check — it gets stuck true after non-Enter
+      // keystrokes (Ctrl+C, arrows, Tab), causing messages to wait 60s max age.
+      if (forceAll || isIdle || maxAgeExceeded) {
         // Deliver all messages in order
         for (const msg of messages) {
           this.deliver(session, msg);
