@@ -50,13 +50,14 @@ The system should be:
 - **Technical Team**: Codev maintainers (implement and maintain the triage system)
 
 ## Success Criteria
-- [ ] Architect role document includes a risk assessment decision framework
-- [ ] Three triage levels are defined with clear criteria and corresponding actions
-- [ ] Workflow reference documents the triage process at Stage 6
-- [ ] Architect can quickly assess PR risk using diff stats
-- [ ] `consult --type integration --risk auto` flag auto-selects review depth based on diff stats
+- [ ] Architect role document includes a risk assessment decision framework with triage table
+- [ ] Three triage levels (low/medium/high) are defined with clear criteria and corresponding actions
+- [ ] Workflow reference documents the triage process at Stage 6 (replacing fixed 3-way review)
+- [ ] `consult risk pr <N>` command assesses PR risk and recommends the appropriate review commands
+- [ ] Risk triage reference document exists at `codev/resources/risk-triage.md` with subsystem path mappings
 - [ ] Low-risk PRs can be reviewed and merged without invoking any external models
 - [ ] High-risk PRs still receive full 3-way CMAP integration review
+- [ ] `consult risk` fails cleanly when `gh` is unavailable or PR is not found
 - [ ] Documentation is updated and consistent across all affected files
 
 ## Constraints
@@ -65,7 +66,7 @@ The system should be:
 - Must work with existing `consult` CLI infrastructure
 - Must not break existing 3-way review workflows (explicit `--risk high` or no flag = current behavior)
 - The `--risk auto` feature needs access to `gh pr diff --stat` or equivalent to compute diff stats
-- Risk assessment must be deterministic — same PR always gets same risk level
+- Risk assessment must be deterministic given the same diff state — same PR at same commit always gets same risk level (force-pushes that change the diff may change the assessment)
 
 ### Business Constraints
 - Backwards compatible — existing consult commands without `--risk` continue to work identically
@@ -78,9 +79,9 @@ The system should be:
 
 ## Solution Approaches
 
-### Approach 1: Documentation-First with Optional CLI Enhancement
+### Approach 1: Documentation-First with CLI Risk Assessment Command
 
-Update architect documentation and role definition with the triage framework. Add a `--risk` flag to `consult` that enables auto-detection.
+Update architect documentation and role definition with the triage framework. Add a `consult risk` subcommand that assesses PR risk and recommends the appropriate review depth. The architect then runs the recommended commands manually.
 
 **Risk assessment criteria:**
 
@@ -91,25 +92,101 @@ Update architect documentation and role definition with the triage framework. Ad
 | **Subsystem** | UI, docs, cosmetic | Features, commands, tests | Protocol, state mgmt, security, schema |
 | **Cross-cutting** | No shared interfaces | Some shared code | Database, APIs, core interfaces |
 
+**Precedence rule (highest risk wins):** When risk signals conflict (e.g., low lines but high-risk subsystem), the **highest individual factor** determines the overall risk level. This is fail-safe: ambiguous signals escalate rather than downplay.
+
 **Triage levels and actions:**
 
 | Risk | Action | Models Used | Cost |
 |------|--------|-------------|------|
 | **Low** | Architect reads PR, summarizes root cause + fix, merges | None (architect only) | $0 |
-| **Medium** | Architect conducts single-model in-context integration review | 1 model (architect's choice) | ~$1-2 |
-| **High** | Full 3-way CMAP integration review | 3 models (Gemini + Codex + Claude) | ~$4-5 |
+| **Medium** | Architect runs single-model integration review: `consult -m claude --type integration pr N` | 1 model (Claude, recommended for speed and cost) | ~$1-2 |
+| **High** | Full 3-way CMAP integration review (architect runs 3 parallel consult commands) | 3 models (Gemini + Codex + Claude) | ~$4-5 |
+
+**Medium-risk review detail:** The architect picks a single model (Claude is recommended as the fastest at ~60-120s) and runs the standard integration review prompt. The same `integration-review.md` template is used — the review depth comes from having fewer independent perspectives, not a different prompt.
 
 **Typical mappings:**
 - **Low**: Most bugfixes, ASPIR features, documentation changes, UI tweaks, config updates
 - **Medium**: SPIR features, new commands, refactors touching 3+ files, new utility modules
 - **High**: Protocol changes, porch state machine, Tower architecture, security model changes, database schema changes
 
+**Subsystem-to-risk mapping** is stored in `codev/resources/risk-triage.md` as a human-readable reference table. The `consult risk` command hardcodes the same path patterns for auto-detection. When the mapping needs updating, both the doc and the code are updated together.
+
+**Subsystem path patterns (initial set):**
+
+| Path Pattern | Subsystem | Risk |
+|-------------|-----------|------|
+| `packages/codev/src/commands/porch/` | Protocol orchestrator | High |
+| `packages/codev/src/tower/` | Tower architecture | High |
+| `packages/codev/src/state/` | State management | High |
+| `codev/protocols/` | Protocol definitions | High |
+| `codev-skeleton/protocols/` | Protocol templates | High |
+| `packages/codev/src/commands/consult/` | Consultation system | Medium |
+| `packages/codev/src/commands/af/` | Agent Farm commands | Medium |
+| `packages/codev/src/commands/` (other) | CLI commands | Medium |
+| `packages/codev/src/lib/` | Shared libraries | Medium |
+| `codev/roles/` | Role definitions | Medium |
+| `codev/resources/` | Documentation | Low |
+| `codev/specs/`, `codev/plans/`, `codev/reviews/` | Project artifacts | Low |
+| `packages/codev/tests/` | Tests only | Low |
+| `*.md` (not in protocols/) | Documentation | Low |
+
+**CLI interaction model:** The `consult risk` command is a **reporter, not an orchestrator**. It assesses the PR and outputs the recommended risk level and commands. The architect then decides whether to follow the recommendation or override it. This avoids the architectural complexity of making `consult` spawn multiple sub-processes.
+
+Example usage:
+```bash
+# Assess risk for PR #83
+consult risk pr 83
+
+# Output:
+# Risk: MEDIUM (178 lines, 6 files)
+# Subsystems: commands (medium), tests (low)
+# Highest factor: files=6 (medium)
+#
+# Recommended action:
+#   consult -m claude --type integration pr 83
+```
+
+For high-risk:
+```bash
+# Output:
+# Risk: HIGH (620 lines, 14 files)
+# Subsystems: porch (high), state (high), commands (medium)
+# Highest factor: subsystem=porch (high)
+#
+# Recommended action:
+#   consult -m gemini --type integration pr 83 &
+#   consult -m codex --type integration pr 83 &
+#   consult -m claude --type integration pr 83 &
+#   wait
+```
+
+For low-risk:
+```bash
+# Output:
+# Risk: LOW (23 lines, 1 file)
+# Subsystems: docs (low)
+# Highest factor: none above low
+#
+# Recommended action:
+#   No consultation needed. Read PR and merge.
+```
+
+**PR identification:** The `consult risk` command takes a PR number as a positional argument (`consult risk pr 83`), consistent with existing `consult` patterns. It runs `gh pr diff --stat <N>` and `gh pr view <N> --json files` to get the diff stats and file list.
+
+**Error handling:**
+- If `gh` is unavailable or unauthenticated: fail with clear error message (no fallback)
+- If `gh pr diff --stat` fails (network, rate limit, PR not found): fail with error (no silent default)
+- Binary files and renames: excluded from line counts, but file count still reflects them
+- Generated files: no special handling (subsystem path pattern is the primary signal)
+
 **Pros**:
 - Simple to understand and implement
-- Backwards compatible (existing commands unchanged)
+- Backwards compatible — no changes to existing `consult` commands
+- Reporter model avoids orchestration complexity
 - Documentation improvements have immediate value even without CLI changes
 
 **Cons**:
+- Architect must copy/paste recommended commands (minor friction)
 - Auto-detection heuristics may need tuning over time
 
 **Estimated Complexity**: Medium
@@ -130,42 +207,45 @@ Update only the architect role and workflow docs. The architect manually decides
 **Estimated Complexity**: Low
 **Risk Level**: Low
 
-### Approach 3: Full Automation with Risk Engine
+### Approach 3: Full Automation with Orchestrator
 
-Build a dedicated risk analysis engine that parses diffs, detects subsystems, and automatically runs the appropriate review level.
+Build `consult --risk auto` as a full orchestrator that auto-spawns the right number of models, handles parallel execution, and buffers output.
 
 **Pros**:
-- Fully automated, no human judgment needed
+- Fully automated, single command
 - Most consistent
 
 **Cons**:
-- Over-engineered for current scale
-- Hard to get right (edge cases in subsystem detection)
+- Major architectural change to `consult` CLI (currently one-model-per-invocation)
+- Hard to get right (process management, interleaved output, error handling)
 - Removes architect judgment from the process
+- Over-engineered for current scale
 
 **Estimated Complexity**: High
 **Risk Level**: Medium
 
 ### Recommended Approach
 
-**Approach 1** — Documentation-first with the `--risk auto` CLI enhancement. It provides the right balance: clear documentation for the architect to follow, plus a convenience flag that automates the common case.
+**Approach 1** — Documentation-first with the `consult risk` reporter command. It provides the right balance: clear documentation for the architect to follow, plus a CLI tool that computes risk and recommends commands without taking over orchestration.
 
 ## Open Questions
 
 ### Critical (Blocks Progress)
-- [x] Which subsystem paths map to which risk levels? → Defined in the risk criteria table above; can be refined during implementation
+- [x] Which subsystem paths map to which risk levels? → Defined in subsystem path patterns table above
+- [x] How does `consult` interact with `-m` flag for risk? → Resolved: `consult risk` is a separate subcommand (reporter), does not invoke models. Existing `consult -m X --type integration` is unchanged.
+- [x] How does the CLI determine PR context? → Resolved: `consult risk pr <N>` takes PR number as positional arg
+- [x] What is the precedence rule when signals conflict? → Resolved: Highest individual factor wins (fail-safe)
 
 ### Important (Affects Design)
-- [ ] Should `--risk auto` be the default behavior for `consult --type integration`, or must it be explicitly opted into?
-- [ ] Should the risk assessment result be logged/stored for audit purposes?
+- [x] Should the risk assessment result be logged/stored for audit purposes? → Yes, logged to `.consult/history.log` with `type=risk` entries
+- [x] What happens when `gh` fails? → Fail with clear error, no silent fallback
 
 ### Nice-to-Know (Optimization)
 - [ ] Could the builder include risk metadata in its PR description to help the architect?
-- [ ] Should there be a `--risk override` mechanism if the architect disagrees with auto-assessment?
 
 ## Performance Requirements
-- **Risk assessment**: < 5 seconds (gh pr diff --stat is fast)
-- **Low-risk review**: < 30 seconds (architect reads + summarizes)
+- **Risk assessment** (`consult risk`): < 3 seconds (two `gh` API calls)
+- **Low-risk review**: < 30 seconds (architect reads + summarizes, no external models)
 - **Medium-risk review**: ~60-120 seconds (single-model consult)
 - **High-risk review**: ~120-250 seconds (3-way parallel consult)
 
@@ -176,16 +256,21 @@ Build a dedicated risk analysis engine that parses diffs, detects subsystems, an
 ## Test Scenarios
 
 ### Functional Tests
-1. **Low-risk PR**: Bugfix touching 1 file with 15 lines changed → architect reads and merges, no consult invoked
-2. **Medium-risk PR**: New feature touching 5 files with 200 lines → single-model integration review
-3. **High-risk PR**: Protocol change touching 12 files with 600 lines → full 3-way CMAP review
-4. **`--risk auto` flag**: Given a PR number, consult auto-detects risk level and runs appropriate number of models
-5. **`--risk low/medium/high` override**: Architect can force a specific risk level
-6. **Backwards compatibility**: `consult -m gemini --type integration` without `--risk` works exactly as before
+1. **Low-risk assessment**: PR with 1 file, 15 lines, docs subsystem → `consult risk` outputs LOW
+2. **Medium-risk assessment**: PR with 5 files, 200 lines, commands subsystem → outputs MEDIUM
+3. **High-risk assessment**: PR with 12 files, 600 lines, porch subsystem → outputs HIGH
+4. **Precedence rule**: PR with 20 lines (low) but touching `porch/` (high) → outputs HIGH (highest factor wins)
+5. **Recommended commands**: Low outputs "no consultation needed"; Medium outputs single `consult -m claude`; High outputs 3-way parallel commands
+6. **Backwards compatibility**: All existing `consult` commands work exactly as before (no changes to `-m`, `--type`, `--protocol`)
+7. **Error handling — `gh` unavailable**: `consult risk` fails with clear error message, does not default to a risk level
+8. **Error handling — PR not found**: `consult risk pr 99999` fails with "PR not found" error
+9. **Binary/rename files**: Excluded from line counts, included in file counts
+10. **Mixed subsystems**: PR touching both `tests/` (low) and `porch/` (high) → outputs HIGH
 
 ### Non-Functional Tests
-1. Risk assessment adds < 2 seconds to consult startup time
-2. All existing consult commands continue to work without modification
+1. `consult risk` completes in < 3 seconds
+2. All existing `consult` commands continue to work without modification
+3. Risk assessment is logged to `.consult/history.log`
 
 ## Dependencies
 - **External Services**: `gh` CLI for diff stats
@@ -203,11 +288,9 @@ Build a dedicated risk analysis engine that parses diffs, detects subsystems, an
 
 The issue mentions that "typical mappings" include protocol types (ASPIR → low, SPIR → medium). While useful as a heuristic, the primary signal should be the actual diff characteristics, not the protocol used. An ASPIR PR that changes core state management should still be high-risk.
 
-The `--risk auto` feature should output the assessed risk level so the architect can see and override it:
-```
-Risk assessment: MEDIUM (178 lines, 6 files, touches: commands, tests)
-Running single-model integration review...
-```
+The architect always retains final judgment. The `consult risk` command is advisory — the architect can ignore the recommendation and run whatever review depth they choose. This is intentional: the tool assists but does not dictate.
+
+Risk triage applies to all PR types (SPIR, TICK, bugfix, ASPIR). The subsystem-based assessment is agnostic to the protocol that produced the PR.
 
 ---
 
