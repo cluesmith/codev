@@ -12,17 +12,17 @@ import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 
 
-/** Spec 443: Build the dashboard title string with optional hostname prefix. */
+/** Spec 443: Build the dashboard title string with optional hostname. */
 export function buildDashboardTitle(hostname?: string, workspaceName?: string): string {
   const h = hostname?.trim();
   const w = workspaceName?.trim();
   if (h && w && h.toLowerCase() !== w.toLowerCase()) {
-    return `${h} ${w} dashboard`;
+    return `${w} on ${h} overview`;
   }
   if (w) {
-    return `${w} dashboard`;
+    return `${w} overview`;
   }
-  return 'dashboard';
+  return 'overview';
 }
 
 export function App() {

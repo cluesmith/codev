@@ -18,8 +18,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir, hostname, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { encodeWorkspacePath, decodeWorkspacePath } from '../lib/tower-client.js';
+import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
 import { version } from '../../version.js';
 
@@ -1270,7 +1271,7 @@ async function handleWorkspaceState(
     annotations: [],
     workspaceName: path.basename(workspacePath),
     version,
-    hostname: hostname(),
+    hostname: (() => { try { return readCloudConfig()?.tower_name; } catch { return undefined; } })(),
   };
 
   // Add architect if exists

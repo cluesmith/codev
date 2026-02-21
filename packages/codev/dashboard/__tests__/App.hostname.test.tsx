@@ -81,36 +81,36 @@ afterEach(cleanup);
 // --- Unit tests for buildDashboardTitle helper ---
 
 describe('buildDashboardTitle', () => {
-  it('returns hostname + workspaceName when both present and different', () => {
-    expect(buildDashboardTitle('Mac-Pro', 'myproject')).toBe('Mac-Pro myproject dashboard');
+  it('returns "workspace on hostname overview" when both present and different', () => {
+    expect(buildDashboardTitle('Mac-Pro', 'myproject')).toBe('myproject on Mac-Pro overview');
   });
 
   it('deduplicates when hostname equals workspaceName', () => {
-    expect(buildDashboardTitle('myproject', 'myproject')).toBe('myproject dashboard');
+    expect(buildDashboardTitle('myproject', 'myproject')).toBe('myproject overview');
   });
 
   it('deduplicates case-insensitively', () => {
-    expect(buildDashboardTitle('MyProject', 'myproject')).toBe('myproject dashboard');
+    expect(buildDashboardTitle('MyProject', 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is undefined', () => {
-    expect(buildDashboardTitle(undefined, 'myproject')).toBe('myproject dashboard');
+    expect(buildDashboardTitle(undefined, 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is empty', () => {
-    expect(buildDashboardTitle('', 'myproject')).toBe('myproject dashboard');
+    expect(buildDashboardTitle('', 'myproject')).toBe('myproject overview');
   });
 
   it('falls back to workspaceName when hostname is whitespace', () => {
-    expect(buildDashboardTitle('  ', 'myproject')).toBe('myproject dashboard');
+    expect(buildDashboardTitle('  ', 'myproject')).toBe('myproject overview');
   });
 
-  it('returns "dashboard" when both are undefined', () => {
-    expect(buildDashboardTitle(undefined, undefined)).toBe('dashboard');
+  it('returns "overview" when both are undefined', () => {
+    expect(buildDashboardTitle(undefined, undefined)).toBe('overview');
   });
 
   it('trims whitespace from hostname and workspaceName', () => {
-    expect(buildDashboardTitle(' Mac-Pro ', ' myproject ')).toBe('Mac-Pro myproject dashboard');
+    expect(buildDashboardTitle(' Mac-Pro ', ' myproject ')).toBe('myproject on Mac-Pro overview');
   });
 });
 
@@ -121,7 +121,7 @@ describe('App - Hostname Display (Spec 443)', () => {
     document.title = '';
   });
 
-  it('displays hostname in header when hostname differs from workspaceName', () => {
+  it('displays "workspace on hostname overview" when hostname differs from workspaceName', () => {
     mockState = {
       architect: null,
       builders: [],
@@ -131,7 +131,7 @@ describe('App - Hostname Display (Spec 443)', () => {
       hostname: 'Mac-Pro',
     };
     render(<App />);
-    expect(screen.getByText('Mac-Pro myproject dashboard')).toBeTruthy();
+    expect(screen.getByText('myproject on Mac-Pro overview')).toBeTruthy();
   });
 
   it('sets document.title with hostname', () => {
@@ -144,7 +144,7 @@ describe('App - Hostname Display (Spec 443)', () => {
       hostname: 'Mac-Pro',
     };
     render(<App />);
-    expect(document.title).toBe('Mac-Pro myproject dashboard');
+    expect(document.title).toBe('myproject on Mac-Pro overview');
   });
 
   it('deduplicates hostname when it matches workspaceName', () => {
@@ -157,8 +157,8 @@ describe('App - Hostname Display (Spec 443)', () => {
       hostname: 'myproject',
     };
     render(<App />);
-    expect(screen.getByText('myproject dashboard')).toBeTruthy();
-    expect(document.title).toBe('myproject dashboard');
+    expect(screen.getByText('myproject overview')).toBeTruthy();
+    expect(document.title).toBe('myproject overview');
   });
 
   it('falls back gracefully when hostname is absent', () => {
@@ -170,11 +170,11 @@ describe('App - Hostname Display (Spec 443)', () => {
       workspaceName: 'myproject',
     };
     render(<App />);
-    expect(screen.getByText('myproject dashboard')).toBeTruthy();
-    expect(document.title).toBe('myproject dashboard');
+    expect(screen.getByText('myproject overview')).toBeTruthy();
+    expect(document.title).toBe('myproject overview');
   });
 
-  it('shows just "dashboard" when state has no workspaceName or hostname', () => {
+  it('shows just "overview" when state has no workspaceName or hostname', () => {
     mockState = {
       architect: null,
       builders: [],
@@ -182,7 +182,7 @@ describe('App - Hostname Display (Spec 443)', () => {
       annotations: [],
     };
     render(<App />);
-    expect(screen.getByText('dashboard')).toBeTruthy();
-    expect(document.title).toBe('dashboard');
+    expect(screen.getByText('overview')).toBeTruthy();
+    expect(document.title).toBe('overview');
   });
 });
