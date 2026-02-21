@@ -112,7 +112,7 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
 
         {/* Backlog & Bugs */}
         <section className="work-section">
-          <h3 className="work-section-title">Projects and Bugs</h3>
+          <h3 className="work-section-title">Backlog</h3>
           {overview?.errors?.issues ? (
             <p className="work-unavailable">{overview.errors.issues}</p>
           ) : (

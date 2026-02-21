@@ -142,6 +142,13 @@ describe('parseLabelDefaults', () => {
     });
   });
 
+  it('matches bare "spike" label when no type: prefix exists', () => {
+    expect(parseLabelDefaults([{ name: 'spike' }])).toEqual({
+      type: 'spike',
+      priority: 'medium',
+    });
+  });
+
   it('prefers type: prefixed label over bare label', () => {
     expect(parseLabelDefaults([
       { name: 'bug' },

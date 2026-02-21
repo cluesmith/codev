@@ -17,6 +17,7 @@ function timeAgo(dateStr: string): string {
 const TYPE_CLASS: Record<string, string> = {
   bug: 'type-tag--bug',
   project: 'type-tag--project',
+  spike: 'type-tag--spike',
 };
 
 export function RecentlyClosedList({ items }: RecentlyClosedListProps) {
