@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 from spec). The work breaks into three phases: (1) database and environment plumbing, (2) Tower API endpoint, (3) CLI command. Each phase builds on the previous and is independently testable.
+Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 from spec). The work breaks into three phases: (1) database and environment plumbing, (2) Tower API endpoint + dashboard state fix, (3) CLI command. Each phase builds on the previous and is independently testable.
 
 ## Success Metrics
 - [ ] `af rename "name"` works inside utility shell sessions
@@ -24,7 +24,7 @@ Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 
 {
   "phases": [
     {"id": "phase_1", "title": "Database Migration and Environment Variables"},
-    {"id": "phase_2", "title": "Tower API Rename Endpoint"},
+    {"id": "phase_2", "title": "Tower API Rename Endpoint and Dashboard State"},
     {"id": "phase_3", "title": "CLI Command and Integration"}
   ]
 }
@@ -39,15 +39,16 @@ Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 
 - Add `label` column to `terminal_sessions` table via migration v11
 - Inject `SHELLPER_SESSION_ID` and `TOWER_PORT` environment variables into shell sessions at creation time
 - Update `saveTerminalSession` to accept and store labels
-- Update `GLOBAL_SCHEMA` for fresh installs
+- Update label loading on startup (reconciliation path)
 
 #### Deliverables
 - [ ] Migration v11: `ALTER TABLE terminal_sessions ADD COLUMN label TEXT`
-- [ ] `GLOBAL_SCHEMA` updated with `label TEXT` column
+- [ ] `GLOBAL_SCHEMA` updated with `label TEXT` column in `terminal_sessions`
 - [ ] `GLOBAL_CURRENT_VERSION` bumped to 11
-- [ ] `SHELLPER_SESSION_ID` set in shell env during `handleWorkspaceShellCreate`
-- [ ] `TOWER_PORT` set in shell env during `handleWorkspaceShellCreate`
+- [ ] `SHELLPER_SESSION_ID` and `TOWER_PORT` set in shell env during `handleWorkspaceShellCreate`
 - [ ] `saveTerminalSession` accepts optional `label` parameter
+- [ ] `reconcileTerminalSessions` uses `dbSession.label` when reconnecting (instead of hardcoded default)
+- [ ] `handleWorkspaceState` uses `session.label` for shell `name` field (instead of hardcoded `Shell N`)
 - [ ] Unit tests for migration and env var injection
 
 #### Implementation Details
@@ -57,28 +58,32 @@ Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 
 1. **`packages/codev/src/agent-farm/db/schema.ts`** (~line 96-107)
    - Add `label TEXT` column to `terminal_sessions` in `GLOBAL_SCHEMA`
 
-2. **`packages/codev/src/agent-farm/db/index.ts`** (~line 617-636)
+2. **`packages/codev/src/agent-farm/db/index.ts`** (~line 362, 617-636)
    - Bump `GLOBAL_CURRENT_VERSION` from 10 to 11
    - Add migration v11: `ALTER TABLE terminal_sessions ADD COLUMN label TEXT`
 
-3. **`packages/codev/src/agent-farm/servers/tower-terminals.ts`** (~line 147-176)
-   - Add optional `label` parameter to `saveTerminalSession`
-   - Include `label` in the INSERT/REPLACE statement
-   - Add `updateTerminalLabel(terminalId, label)` function for the rename endpoint
+3. **`packages/codev/src/agent-farm/servers/tower-terminals.ts`**
+   - **`saveTerminalSession`** (~line 147): Add optional `label` parameter, include in INSERT/REPLACE
+   - **`reconcileTerminalSessions`** (~line 482): Change `const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown')` to prefer `dbSession.label` when present: `const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown'))`
+   - Add `updateTerminalLabel(terminalId: string, label: string): void` function for Phase 2
 
-4. **`packages/codev/src/agent-farm/servers/tower-routes.ts`** (~lines 1356-1365)
-   - In `handleWorkspaceShellCreate`, add `SHELLPER_SESSION_ID` and `TOWER_PORT` to `shellEnv` before passing to `shellperManager.createSession`
-   - Also add to fallback non-persistent path (~line 1408)
+4. **`packages/codev/src/agent-farm/servers/tower-routes.ts`**
+   - **`handleWorkspaceShellCreate`** (~line 1356-1365): Add `SHELLPER_SESSION_ID` (set to `sessionId` UUID) and `TOWER_PORT` (set to Tower's listen port) to `shellEnv` before passing to `shellperManager.createSession`
+   - **Fallback path** (~line 1402-1408): Add same env vars, using `session.id` (PtySession ID) as `SHELLPER_SESSION_ID` since there's no shellper UUID
+   - **`saveTerminalSession` calls** (~lines 1383, 1413): Pass label parameter
+   - **`handleWorkspaceState`** (~line 1296): Change `name: \`Shell ${shellId.replace('shell-', '')}\`` to `name: session.label` — this is how the dashboard gets the shell name, and it must reflect the current label rather than the hardcoded default
 
 #### Acceptance Criteria
 - [ ] Migration runs without error on existing databases
 - [ ] Fresh installs create `terminal_sessions` with `label` column
 - [ ] New shell sessions have `SHELLPER_SESSION_ID` and `TOWER_PORT` in their environment
 - [ ] `saveTerminalSession` stores label when provided
+- [ ] On Tower restart, reconnected sessions use the label from SQLite (not hardcoded default)
+- [ ] Dashboard state endpoint returns the session's current label for shell names
 
 #### Test Plan
-- **Unit Tests**: Migration v11 adds column correctly; `saveTerminalSession` with label; env vars present in shell creation
-- **Manual Testing**: Start Tower, create shell, verify `echo $SHELLPER_SESSION_ID` and `echo $TOWER_PORT` return values
+- **Unit Tests**: Migration v11 adds column; `saveTerminalSession` with label; label loading from DB in reconciliation
+- **Manual Testing**: Start Tower, create shell, verify `echo $SHELLPER_SESSION_ID` and `echo $TOWER_PORT` return values; verify dashboard shows session label
 
 #### Rollback Strategy
 Migration v11 only adds a nullable column — existing code ignores it. Revert the code changes; column remains harmless.
@@ -89,71 +94,81 @@ Migration v11 only adds a nullable column — existing code ignores it. Revert t
 
 ---
 
-### Phase 2: Tower API Rename Endpoint
+### Phase 2: Tower API Rename Endpoint and Dashboard State
 **Dependencies**: Phase 1
 
 #### Objectives
-- Add `PATCH /api/terminals/:sessionId/rename` endpoint to Tower
-- Implement name validation (1-100 chars, strip control chars)
+- Add rename endpoint inside `handleTerminalRoutes` (global terminal API)
+- Implement name validation (1-100 chars, strip control chars server-side)
 - Implement session type check (only `shell` type allowed)
-- Implement duplicate name deduplication
+- Implement duplicate name deduplication across active sessions
 - Update both SQLite and in-memory PtySession label
+- Make PtySession label mutable
 
 #### Deliverables
-- [ ] New route handler `handleTerminalRename` in tower-routes.ts
-- [ ] Route registration for `PATCH /api/terminals/:id/rename`
-- [ ] Name validation: 1-100 chars, control chars stripped
+- [ ] PtySession `label` made mutable (remove `readonly`)
+- [ ] New handler inside `handleTerminalRoutes` for `PATCH /api/terminals/:id/rename`
+- [ ] Name validation: 1-100 chars, control chars stripped (server-side)
 - [ ] Session type check: reject non-shell sessions with 403
-- [ ] Duplicate name dedup: append `-1`, `-2`, etc.
-- [ ] PtySession label made mutable (remove `readonly`)
+- [ ] Duplicate name dedup across active sessions: append `-1`, `-2`, etc.
+- [ ] Both SQLite and in-memory PtySession label updated
 - [ ] Unit tests for rename handler
 
 #### Implementation Details
+
+**ID Lookup Strategy**: The CLI sends `SHELLPER_SESSION_ID` (a stable UUID set at creation). The existing `handleTerminalRoutes` receives IDs from the URL pattern `/api/terminals/:id/*`. The rename handler must:
+1. First try to find the PtySession directly by ID (handles non-persistent sessions where `SHELLPER_SESSION_ID` = PtySession ID)
+2. If not found, iterate PtySession instances looking for `session.shellperSessionId === id` (handles persistent shellper-backed sessions where the UUID differs from PtySession ID)
+3. If still not found, return 404
+
+This avoids adding a new route namespace while correctly supporting both ID types.
 
 **Files to modify:**
 
 1. **`packages/codev/src/terminal/pty-session.ts`** (~line 42)
    - Remove `readonly` from `label` property to make it mutable
-   - Add `setLabel(label: string)` method (or just make it public writable)
 
-2. **`packages/codev/src/agent-farm/servers/tower-routes.ts`**
-   - Add route: `PATCH /api/terminals/:id/rename` → `handleTerminalRename`
-   - Register near existing terminal routes (~line 1089)
+2. **`packages/codev/src/agent-farm/servers/tower-routes.ts`** (~line 466-530, inside `handleTerminalRoutes`)
+   - Add handler for `req.method === 'PATCH' && subpath === '/rename'`
    - Handler logic:
-     1. Parse body for `name` field
-     2. Validate name (1-100 chars, strip control chars)
-     3. Look up session in `terminal_sessions` by ID
-     4. Check `type === 'shell'`, return 403 if not
-     5. Check for duplicate names across active sessions, dedup with `-N` suffix
-     6. Update SQLite label via `updateTerminalLabel()`
-     7. Update in-memory PtySession label
-     8. Return `200 { id, name }` with actual name applied
+     1. Parse body with `parseJsonBody(req)` for `name` field
+     2. Validate name: strip control chars (`/[\x00-\x1f\x7f]/g`), check 1-100 chars, return 400 if invalid
+     3. Look up PtySession by ID (direct match, then shellperSessionId match)
+     4. Look up `terminal_sessions` row by PtySession's terminal ID to get `type`
+     5. Check `type === 'shell'`, return 403 if not
+     6. Check for duplicate names across active shell sessions (current workspace only), dedup with `-N` suffix
+     7. Update SQLite label via `updateTerminalLabel()`
+     8. Update in-memory `session.label = finalName`
+     9. Return `200 { id, name: finalName }`
 
 3. **`packages/codev/src/agent-farm/servers/tower-terminals.ts`**
-   - Add `getTerminalSession(sessionId)` to query by ID
-   - Add `getActiveSessionLabels()` to check for duplicates
-   - `updateTerminalLabel(terminalId, label)` (if not already added in Phase 1)
+   - Add `getTerminalSessionByTerminalId(terminalId: string): DbTerminalSession | null` — query `terminal_sessions` by primary key
+   - Add `getActiveShellLabels(workspacePath: string): string[]` — query labels of active shell sessions for dedup check
+   - Ensure `updateTerminalLabel(terminalId, label)` is present (may already be from Phase 1)
 
 #### Acceptance Criteria
 - [ ] `PATCH /api/terminals/:id/rename` with valid name returns 200
 - [ ] Non-shell sessions return 403
 - [ ] Unknown session IDs return 404
 - [ ] Names > 100 chars return 400
-- [ ] Duplicate names get `-N` suffix
+- [ ] Empty names return 400
+- [ ] Control characters are stripped before storage
+- [ ] Duplicate names get `-N` suffix (dedup scoped to active sessions in same workspace)
 - [ ] In-memory PtySession label updated
 - [ ] SQLite label updated
+- [ ] Dashboard state endpoint returns the new name (already fixed in Phase 1)
 
 #### Test Plan
-- **Unit Tests**: Validation logic, dedup logic, type checking
-- **Integration Tests**: Full PATCH request → response → DB verification
-- **Manual Testing**: Rename via curl, verify in dashboard
+- **Unit Tests**: Name validation logic, control char stripping, dedup suffix logic, type checking, ID lookup (direct vs shellperSessionId)
+- **Integration Tests**: Full PATCH request → response → DB verification → dashboard state check
+- **Manual Testing**: Rename via curl, verify in dashboard tabs
 
 #### Rollback Strategy
 Remove the route handler. No data changes needed — labels in DB are additive.
 
 #### Risks
-- **Risk**: PtySession label lookup by session ID (stable UUID) vs terminal ID (ephemeral)
-  - **Mitigation**: Look up terminal via `terminal_sessions` table using the stable session ID, then use the mapping to find the PtySession
+- **Risk**: Dedup race condition if two renames happen simultaneously
+  - **Mitigation**: Last write wins; dedup is checked within the handler synchronously (single-threaded Node.js)
 
 ---
 
@@ -179,85 +194,112 @@ Remove the route handler. No data changes needed — labels in DB are additive.
 **Files to create:**
 
 1. **`packages/codev/src/agent-farm/commands/rename.ts`** (NEW)
-   - Read `SHELLPER_SESSION_ID` from env, fail if missing
-   - Read `TOWER_PORT` from env (or default to standard port)
+   - Read `SHELLPER_SESSION_ID` from env, fail with "Not running inside a shellper session" if missing
+   - Read `TOWER_PORT` from env (fall back to default Tower port if missing)
    - Create `TowerClient` with port
    - Call `client.renameTerminal(sessionId, name)`
-   - Print success: `Renamed to: <actual-name>`
-   - Print errors: "Not running inside a shellper session", "Session not found", etc.
+   - Handle responses:
+     - 200: Print `Renamed to: <actual-name>` (shows dedup suffix if applied)
+     - 400: Print validation error
+     - 403: Print "Cannot rename builder/architect terminals"
+     - 404: Print "Session not found — it may have been closed"
+     - Connection error: Print "Tower is not running"
 
 **Files to modify:**
 
-2. **`packages/codev/src/agent-farm/cli.ts`** (~line 248)
+2. **`packages/codev/src/agent-farm/cli.ts`** (~line 248, after `open` command)
    - Register `rename` command:
      ```
      program.command('rename <name>')
        .description('Rename the current shell session')
-       .action(...)
+       .action(async (name) => { ... })
      ```
 
 3. **`packages/codev/src/agent-farm/commands/index.ts`**
    - Add `export { rename } from './rename.js'`
 
-4. **`packages/codev/src/agent-farm/lib/tower-client.ts`** (~line 335)
+4. **`packages/codev/src/agent-farm/lib/tower-client.ts`** (~line 335, after `resizeTerminal`)
    - Add `renameTerminal(sessionId: string, name: string)` method
    - PATCH to `/api/terminals/${sessionId}/rename` with `{ name }` body
-   - Return `{ ok, name, error }` response
+   - Return `{ ok: boolean; status: number; data?: { id: string; name: string }; error?: string }`
 
 #### Acceptance Criteria
 - [ ] `af rename "test"` works inside a shellper session
-- [ ] `af rename "test"` outside shellper prints error and exits 1
+- [ ] `af rename "test"` outside shellper prints "Not running inside a shellper session" and exits 1
 - [ ] `af rename ""` prints usage error
 - [ ] `af rename` with no args prints usage
 - [ ] CLI displays actual name (including dedup suffix if applied)
+- [ ] Error messages match spec phrasing
 
 #### Test Plan
-- **Unit Tests**: Env var detection, TowerClient method, error handling
-- **Integration Tests**: Full CLI → Tower API → DB round-trip (if feasible in test harness)
-- **Manual Testing**: Open shell in dashboard, run `af rename "monitoring"`, verify tab updates
+- **Unit Tests**: Env var detection, TowerClient method, error message formatting
+- **Integration Tests**: Full CLI → Tower API → DB round-trip
+- **Manual Testing**: Open shell in dashboard, run `af rename "monitoring"`, verify tab updates within ~2.5s
 
 #### Rollback Strategy
 Remove command file and registration. No data impact.
 
 #### Risks
-- **Risk**: `TOWER_PORT` not set in legacy sessions
+- **Risk**: `TOWER_PORT` not set in legacy sessions created before this feature
   - **Mitigation**: Fall back to default Tower port if env var is missing
 
 ---
 
 ## Dependency Map
 ```
-Phase 1 (DB + Env Vars) ──→ Phase 2 (API Endpoint) ──→ Phase 3 (CLI Command)
+Phase 1 (DB + Env Vars + State Fix) ──→ Phase 2 (API Endpoint) ──→ Phase 3 (CLI Command)
 ```
 
 ## Integration Points
 ### Internal Systems
-- **Tower API**: New PATCH endpoint for rename
-- **SQLite**: Migration v11, label storage and queries
-- **PtySession**: Label mutation
-- **TowerClient**: New method for CLI → Tower communication
-- **Dashboard**: Existing polling picks up label changes (no frontend changes)
+- **Tower API**: New PATCH endpoint inside `handleTerminalRoutes`
+- **SQLite**: Migration v11, label storage/queries/reconciliation
+- **PtySession**: Label mutation, shellperSessionId lookup
+- **TowerClient**: New `renameTerminal()` method
+- **Dashboard**: Existing polling reads from `handleWorkspaceState` which now returns session labels
 
 ## Risk Analysis
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| PtySession ID mismatch after restart | Low | Medium | Look up via stable session ID in terminal_sessions |
+| PtySession ID mismatch | Low | Medium | Two-step lookup: direct ID then shellperSessionId |
 | Migration failure on existing DB | Low | Low | Simple ADD COLUMN is safe in SQLite |
-| Dashboard not reflecting changes | Low | Medium | Verify polling reads label; add WebSocket broadcast if needed |
+| Dashboard not reflecting changes | Low | Medium | Phase 1 fixes `handleWorkspaceState` to read session.label |
+| Labels lost on restart | Low | Medium | Phase 1 fixes reconciliation to use `dbSession.label` |
 
 ## Validation Checkpoints
-1. **After Phase 1**: Run migration, verify column exists; create shell, verify env vars set
-2. **After Phase 2**: curl PATCH endpoint, verify DB and in-memory update
-3. **After Phase 3**: Full `af rename` flow from inside a shell session
+1. **After Phase 1**: Run migration, verify column; create shell, verify env vars; restart Tower, verify labels persist; verify dashboard state uses session.label
+2. **After Phase 2**: curl PATCH endpoint, verify DB + in-memory update + dashboard tab name
+3. **After Phase 3**: Full `af rename` flow from inside a shell session, end-to-end
 
 ## Documentation Updates Required
-- [ ] CLI command reference (af commands list)
+- [ ] CLI command reference (`codev/resources/commands/agent-farm.md`)
+
+## Expert Consultation
+
+**Date**: 2026-02-21
+**Models Consulted**: Gemini Pro, GPT-5.2 Codex, Claude
+**Key Feedback**:
+- **CRITICAL**: `handleWorkspaceState` hardcodes shell names — must read from `session.label` (Gemini, Claude)
+- **CRITICAL**: Route should be inside `handleTerminalRoutes` (line 466), not workspace-scoped (Claude)
+- **CRITICAL**: `reconcileTerminalSessions` hardcodes label on reconnection — must use `dbSession.label` (Gemini, Codex)
+- **IMPORTANT**: ID lookup needs two-step strategy: PtySession ID direct match, then shellperSessionId match (Gemini, Claude)
+- **IMPORTANT**: Dedup scope: active sessions only (Codex)
+- **IMPORTANT**: Control char stripping: server-side only (Codex)
+- **MINOR**: Fallback path should set `SHELLPER_SESSION_ID` to PtySession ID (Gemini)
+
+**Plan Adjustments**:
+- Phase 1 now includes `handleWorkspaceState` fix and reconciliation label loading
+- Phase 2 route registration corrected to `handleTerminalRoutes`
+- Phase 2 includes two-step ID lookup strategy
+- Dedup scoped to active sessions in same workspace
+- Validation (control chars) explicitly server-side only
+- Non-persistent fallback uses session.id for SHELLPER_SESSION_ID
 
 ## Approval
 - [ ] Technical Lead Review
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete
 
 ## Notes
 
-The `af shell --name` bug (name parameter ignored during creation) is a related issue but out of scope for this plan. It can be fixed as a trivial bonus during Phase 2 since the code is being modified there anyway, but is not a requirement.
+The `af shell --name` bug (name parameter ignored during creation) is a related issue but out of scope for this plan. It can be fixed as a trivial bonus during Phase 1 since `handleWorkspaceShellCreate` is being modified there anyway, but is not a requirement.
