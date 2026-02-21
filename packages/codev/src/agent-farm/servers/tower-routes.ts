@@ -1140,22 +1140,10 @@ async function handleWorkspaceRoutes(
     return;
   }
 
-  // GET /file?path=<relative-path> — Read workspace file by path
+  // GET /file?path=<relative-path> — Read file by path (allows files outside workspace — see issue #502)
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
     const fullPath = path.resolve(workspacePath, relPath);
-    // Security: symlink-aware containment check (consistent with POST /tabs/file)
-    let resolvedFilePath: string;
-    try {
-      resolvedFilePath = fs.realpathSync(fullPath);
-    } catch {
-      resolvedFilePath = path.resolve(fullPath);
-    }
-    if (!resolvedFilePath.startsWith(workspacePath + path.sep) && resolvedFilePath !== workspacePath) {
-      res.writeHead(403, { 'Content-Type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
     try {
       const content = fs.readFileSync(fullPath, 'utf-8');
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1593,34 +1581,15 @@ async function handleWorkspaceFileTabCreate(
       fullPath = path.join(workspacePath, filePath);
     }
 
-    // Security: symlink-aware containment check
-    // For non-existent files, resolve the parent directory to handle
-    // intermediate symlinks (e.g., /tmp -> /private/tmp on macOS).
-    let resolvedPath: string;
+    // Resolve symlinks for canonical path (but allow files outside workspace — see issue #502)
     try {
-      resolvedPath = fs.realpathSync(fullPath);
+      fullPath = fs.realpathSync(fullPath);
     } catch {
       try {
-        resolvedPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
+        fullPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
       } catch {
-        resolvedPath = path.resolve(fullPath);
+        fullPath = path.resolve(fullPath);
       }
-    }
-
-    let normalizedWorkspace: string;
-    try {
-      normalizedWorkspace = fs.realpathSync(workspacePath);
-    } catch {
-      normalizedWorkspace = path.resolve(workspacePath);
-    }
-
-    const isWithinWorkspace = resolvedPath.startsWith(normalizedWorkspace + path.sep)
-      || resolvedPath === normalizedWorkspace;
-
-    if (!isWithinWorkspace) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Path outside workspace' }));
-      return;
     }
 
     // Non-existent files still create a tab (spec 0101: file viewer shows "File not found")
