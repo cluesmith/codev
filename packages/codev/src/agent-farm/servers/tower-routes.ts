@@ -627,17 +627,19 @@ async function handleStatistics(res: http.ServerResponse, url: URL, workspaceOve
     workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
   }
 
-  if (!workspaceRoot) {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ timeRange: '7d', github: { prsMerged: 0, avgTimeToMergeHours: null, bugBacklog: 0, nonBugBacklog: 0, issuesClosed: 0, avgTimeToCloseBugsHours: null }, builders: { projectsCompleted: 0, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] } }));
-    return;
-  }
-
-  // Validate range parameter
+  // Validate range parameter (before workspace check so fallback uses correct range)
   const rangeParam = url.searchParams.get('range') ?? '7';
   if (!['7', '30', 'all'].includes(rangeParam)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Invalid range. Must be 7, 30, or all.' }));
+    return;
+  }
+
+  const rangeLabel = rangeParam === 'all' ? 'all' : `${rangeParam}d`;
+
+  if (!workspaceRoot) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ timeRange: rangeLabel, github: { prsMerged: 0, avgTimeToMergeHours: null, bugBacklog: 0, nonBugBacklog: 0, issuesClosed: 0, avgTimeToCloseBugsHours: null }, builders: { projectsCompleted: 0, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] } }));
     return;
   }
   const range = rangeParam as '7' | '30' | 'all';

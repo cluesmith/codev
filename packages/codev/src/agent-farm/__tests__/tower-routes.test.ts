@@ -986,12 +986,13 @@ describe('tower-routes', () => {
     it('returns default empty response when no workspace is available', async () => {
       mockGetKnownWorkspacePaths.mockReturnValue([]);
 
-      const req = makeReq('GET', '/api/statistics');
+      const req = makeReq('GET', '/api/statistics?range=30');
       const { res, statusCode, body } = makeRes();
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
+      expect(parsed.timeRange).toBe('30d');
       expect(parsed.github.prsMerged).toBe(0);
       expect(parsed.builders.activeBuilders).toBe(0);
       expect(mockComputeStatistics).not.toHaveBeenCalled();
