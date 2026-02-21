@@ -141,7 +141,7 @@ gh pr view <N> --json files | jq '.files[].path'   # See which subsystems
 | **Medium** | 100-500 lines, 4-10 files, touches shared code (features, commands) | Single-model review: `consult -m claude --type integration pr N` |
 | **High** | >500 lines, >10 files, core subsystems (porch, Tower, protocols, security) | Full 3-way CMAP (see below) |
 
-**Precedence: highest factor wins.** If any single factor (lines, files, or subsystem) is high-risk, treat the whole PR as high-risk.
+**Precedence: highest factor wins.** If any single factor (lines, files, subsystem, or cross-cutting scope) is high-risk, treat the whole PR as high-risk.
 
 **Typical mappings:**
 - **Low**: Most bugfixes, ASPIR features, documentation, UI tweaks
