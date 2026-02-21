@@ -53,7 +53,10 @@ porch pending                               # List pending gates
 ### Consult Tool (for integration reviews)
 
 ```bash
-# 3-way parallel integration review of builder's PR
+# Single-model review (medium risk)
+consult -m claude --type integration pr 35
+
+# 3-way parallel review (high risk)
 consult -m gemini --type integration pr 35 &
 consult -m codex --type integration pr 35 &
 consult -m claude --type integration pr 35 &
@@ -117,12 +120,63 @@ af status              # Overview of all builders
 porch status 0042      # Detailed state for one project (strict mode)
 ```
 
-### 4. Integration Review
+### 4. Integration Review (Risk-Based Triage)
 
-When the builder creates a PR:
+When the builder creates a PR, **assess risk first** before deciding review depth.
+
+> **Full reference**: See `codev/resources/risk-triage.md` for subsystem mappings and examples.
+
+#### Step 1: Assess Risk
 
 ```bash
-# Run 3-way integration review
+gh pr diff --stat <N>    # See lines changed and files touched
+gh pr view <N> --json files | jq '.files[].path'   # See which subsystems
+```
+
+#### Step 2: Triage
+
+| Risk | Criteria | Action |
+|------|----------|--------|
+| **Low** | <100 lines, 1-3 files, isolated (docs, tests, cosmetic, bugfixes) | Read PR, summarize root cause + fix, tell builder to merge |
+| **Medium** | 100-500 lines, 4-10 files, touches shared code (features, commands) | Single-model review: `consult -m claude --type integration pr N` |
+| **High** | >500 lines, >10 files, core subsystems (porch, Tower, protocols, security) | Full 3-way CMAP (see below) |
+
+**Precedence: highest factor wins.** If any single factor (lines, files, or subsystem) is high-risk, treat the whole PR as high-risk.
+
+**Typical mappings:**
+- **Low**: Most bugfixes, ASPIR features, documentation, UI tweaks
+- **Medium**: SPIR features, new commands, refactors touching 3+ files
+- **High**: Protocol changes, porch state machine, Tower architecture, security model
+
+#### Step 3: Execute Review
+
+**Low risk** — no external models needed:
+```bash
+# Read the PR yourself, then approve
+gh pr comment 83 --body "## Architect Review
+
+Low-risk change. [Summary of what changed and why.]
+
+---
+Architect review"
+
+af send 0042 "PR approved, please merge"
+```
+
+**Medium risk** — single-model review:
+```bash
+consult -m claude --type integration pr 83
+
+# Post findings as PR comment
+gh pr comment 83 --body "## Architect Integration Review
+...
+Architect integration review"
+
+af send 0042 "PR approved, please merge"
+```
+
+**High risk** — full 3-way CMAP:
+```bash
 consult -m gemini --type integration pr 83 &
 consult -m codex --type integration pr 83 &
 consult -m claude --type integration pr 83 &
@@ -130,15 +184,9 @@ wait
 
 # Post findings as PR comment
 gh pr comment 83 --body "## Architect Integration Review
-
-**Verdict: APPROVE**
-
-Integration looks good. No conflicts with existing modules.
-
----
+...
 Architect integration review"
 
-# Notify builder
 af send 0042 "PR approved, please merge"
 ```
 
@@ -223,6 +271,8 @@ Before approving implementations with UX requirements:
 | Approve spec | `porch approve <id> spec-approval` |
 | Approve plan | `porch approve <id> plan-approval` |
 | See pending gates | `porch pending` |
-| Integration review | `consult -m X --type integration pr N` |
+| Assess PR risk | `gh pr diff --stat N` |
+| Integration review (medium) | `consult -m claude --type integration pr N` |
+| Integration review (high) | 3-way CMAP (see Section 4) |
 | Message builder | `af send <id> "short message"` |
 | Cleanup builder | `af cleanup -p <id>` |
