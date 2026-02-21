@@ -145,7 +145,7 @@ export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueList
  * Returns null on failure.
  * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchMergedPRs(cwd?: string): Promise<GitHubPR[] | null> {
+export async function fetchRecentMergedPRs(cwd?: string): Promise<GitHubPR[] | null> {
   try {
     const { stdout } = await execFileAsync('gh', [
       'pr', 'list',

@@ -42,7 +42,7 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchPRList: mockFetchPRList,
     fetchIssueList: mockFetchIssueList,
     fetchRecentlyClosed: mockFetchRecentlyClosed,
-    fetchMergedPRs: mockFetchMergedPRs,
+    fetchRecentMergedPRs: mockFetchMergedPRs,
   };
 });
 

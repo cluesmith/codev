@@ -9,6 +9,7 @@ export const TAB_ICONS: Record<Tab['type'], string> = {
   file: '\u2261',             // ≡
   activity: '\u26A1\uFE0E',  // ⚡︎ (text presentation)
   files: '\u2630',            // ☰
+  analytics: '\u223F',        // ∿
 };
 
 interface TabBarProps {

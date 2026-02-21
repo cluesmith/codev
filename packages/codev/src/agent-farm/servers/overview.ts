@@ -13,7 +13,7 @@ import {
   fetchPRList,
   fetchIssueList,
   fetchRecentlyClosed,
-  fetchMergedPRs,
+  fetchRecentMergedPRs,
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../../lib/github.js';
@@ -842,7 +842,7 @@ export class OverviewCache {
       return cached.data;
     }
 
-    const data = await fetchMergedPRs(cwd);
+    const data = await fetchRecentMergedPRs(cwd);
     if (data !== null) {
       this.mergedPRCache.set(cwd, { data, fetchedAt: now });
     }
