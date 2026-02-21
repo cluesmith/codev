@@ -197,7 +197,7 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(headers()['Access-Control-Allow-Origin']).toBe('http://localhost:3000');
-      expect(headers()['Access-Control-Allow-Methods']).toBe('GET, POST, DELETE, OPTIONS');
+      expect(headers()['Access-Control-Allow-Methods']).toBe('GET, POST, PATCH, DELETE, OPTIONS');
     });
 
     it('sets CORS headers for https origin', async () => {

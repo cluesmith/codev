@@ -277,6 +277,7 @@ POST /api/terminals              # Create PTY session
 GET  /api/terminals              # List sessions
 DELETE /api/terminals/:id        # Kill session
 POST /api/terminals/:id/resize   # Resize (cols, rows)
+PATCH /api/terminals/:id/rename  # Rename shell session (Spec 468)
 
 # WebSocket connection per terminal
 ws://localhost:4100/ws/terminal/<session-id>
@@ -486,7 +487,7 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 
 1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shellper-backed)
 2. **workspaceTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which workspace
-3. **SQLite (global.db) tracks terminal sessions and workspace metadata**: Shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`) and workspace associations persist across restarts
+3. **SQLite (global.db) tracks terminal sessions and workspace metadata**: Shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`), custom labels (Spec 468), and workspace associations persist across restarts
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/workspace/<encoded>/` routes
 5. **WebSocket paths include workspace context**: Format is `/workspace/<base64url>/ws/terminal/<id>`
 
