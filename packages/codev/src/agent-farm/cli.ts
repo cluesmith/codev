@@ -193,7 +193,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('spawn')
     .description('Spawn a new builder')
     .argument('[number]', 'Issue number (positional)')
-    .option('--protocol <name>', 'Protocol to use (spir, bugfix, tick, maintain, experiment)')
+    .option('--protocol <name>', 'Protocol to use (spir, aspir, air, bugfix, tick, maintain, experiment)')
     .option('--task <text>', 'Spawn builder with a task description')
     .option('--shell', 'Spawn a bare Claude session')
     .option('--worktree', 'Spawn worktree session')

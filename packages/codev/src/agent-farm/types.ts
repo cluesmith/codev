@@ -67,7 +67,7 @@ export interface SpawnOptions {
   issueNumber?: number;   // Positional arg: `af spawn 315`
 
   // Protocol selection (required for issue-based spawns)
-  protocol?: string;      // --protocol spir|bugfix|tick|maintain|experiment
+  protocol?: string;      // --protocol spir|aspir|air|bugfix|tick|maintain|experiment
 
   // Alternative modes (no issue number needed)
   task?: string;          // Task mode: --task
