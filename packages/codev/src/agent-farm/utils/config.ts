@@ -271,5 +271,5 @@ export async function ensureDirectories(config: Config): Promise<void> {
   }
 }
 
-// Exported for testing
-export { findWorkspaceRoot as _findWorkspaceRoot };
+// Exported for testing and for commands that need to resolve workspace from a path
+export { findWorkspaceRoot, findWorkspaceRoot as _findWorkspaceRoot };

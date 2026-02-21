@@ -5,9 +5,9 @@
  * This command creates a file tab via the Tower API.
  */
 
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
-import { getConfig, getMainRepoFromWorktree } from '../utils/index.js';
+import { getMainRepoFromWorktree, findWorkspaceRoot } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { TowerClient, encodeWorkspacePath } from '../lib/tower-client.js';
 
@@ -54,8 +54,6 @@ async function tryTowerApi(client: TowerClient, workspacePath: string, filePath:
  * Spec 0092: All file viewing goes through Tower. No fallback to separate servers.
  */
 export async function open(options: OpenOptions): Promise<void> {
-  const config = getConfig();
-
   // Resolve file path relative to current directory (works correctly in worktrees)
   let filePath: string;
   if (options.file.startsWith('/')) {
@@ -69,10 +67,14 @@ export async function open(options: OpenOptions): Promise<void> {
     fatal(`File not found: ${filePath}`);
   }
 
+  // Find workspace root from the FILE's location, not CWD.
+  // This allows `af open` to work from any directory — the file itself
+  // determines which workspace it belongs to.
+  let workspacePath = findWorkspaceRoot(dirname(filePath));
+
   // When running from a worktree, Tower only knows the main repo workspace.
   // Fall back to main repo path so the API call targets a registered workspace.
-  let workspacePath = config.workspaceRoot;
-  const mainRepo = getMainRepoFromWorktree(config.workspaceRoot);
+  const mainRepo = getMainRepoFromWorktree(workspacePath);
   if (mainRepo) {
     workspacePath = mainRepo;
   }

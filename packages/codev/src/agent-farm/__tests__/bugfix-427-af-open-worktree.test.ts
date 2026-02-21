@@ -39,7 +39,9 @@ describe('Bugfix #427: af open worktree fallback', () => {
       );
 
       // The fix: detect worktree and fall back to main repo
-      expect(openSrc).toContain('getMainRepoFromWorktree(config.workspaceRoot)');
+      // (Bugfix #500 changed from config.workspaceRoot to workspacePath
+      //  derived from file location via findWorkspaceRoot)
+      expect(openSrc).toContain('getMainRepoFromWorktree(workspacePath)');
       // Should use the resolved workspace path (not config.workspaceRoot directly)
       // for the Tower API call
       expect(openSrc).toMatch(/tryTowerApi\(client,\s*workspacePath/);
