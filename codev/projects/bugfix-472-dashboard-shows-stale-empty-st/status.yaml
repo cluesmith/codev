@@ -1,0 +1,12 @@
+id: bugfix-472
+title: dashboard-shows-stale-empty-st
+protocol: bugfix
+phase: fix
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-21T17:45:58.706Z'
+updated_at: '2026-02-21T17:56:53.323Z'

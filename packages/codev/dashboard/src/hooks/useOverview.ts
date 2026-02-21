@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchOverview, refreshOverview } from '../lib/api.js';
 import type { OverviewData } from '../lib/api.js';
+import { useSSE } from './useSSE.js';
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -28,6 +29,9 @@ export function useOverview() {
     const interval = setInterval(poll, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [poll]);
+
+  // Bugfix #472: Trigger immediate poll on SSE events (e.g. after Tower restart)
+  useSSE(poll);
 
   const refresh = useCallback(async () => {
     await refreshOverview();

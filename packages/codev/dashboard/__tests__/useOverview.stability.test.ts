@@ -22,6 +22,7 @@ const makeOverview = (backlogTitle = 'Fix login bug'): OverviewData => ({
       createdAt: '2026-02-10T12:00:00Z',
     },
   ],
+  recentlyClosed: [],
 });
 
 // Mock api module — control what fetchOverview returns per call
@@ -46,9 +47,8 @@ describe('useOverview stability (bugfix #358)', () => {
   });
 
   it('preserves data reference when poll returns identical content', async () => {
-    // Both polls return structurally identical data (different object instances)
-    mockFetchOverview.mockResolvedValueOnce(makeOverview());
-    mockFetchOverview.mockResolvedValueOnce(makeOverview());
+    // All polls return structurally identical data (different object instances)
+    mockFetchOverview.mockImplementation(() => Promise.resolve(makeOverview()));
 
     const { useOverview } = await import('../src/hooks/useOverview.js');
     const { result } = renderHook(() => useOverview());
@@ -61,19 +61,20 @@ describe('useOverview stability (bugfix #358)', () => {
 
     const firstRef = result.current.data;
 
-    // Trigger second poll
+    // Trigger subsequent polls (interval + possible SSE-triggered refresh)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
 
-    expect(mockFetchOverview).toHaveBeenCalledTimes(2);
+    expect(mockFetchOverview.mock.calls.length).toBeGreaterThanOrEqual(2);
     // Data reference should be the SAME object (not a new one)
     expect(result.current.data).toBe(firstRef);
   });
 
   it('updates data reference when content actually changes', async () => {
+    // First call returns 'Fix login bug', all subsequent return 'Fix signup bug'
     mockFetchOverview.mockResolvedValueOnce(makeOverview('Fix login bug'));
-    mockFetchOverview.mockResolvedValueOnce(makeOverview('Fix signup bug'));
+    mockFetchOverview.mockResolvedValue(makeOverview('Fix signup bug'));
 
     const { useOverview } = await import('../src/hooks/useOverview.js');
     const { result } = renderHook(() => useOverview());
@@ -89,7 +90,7 @@ describe('useOverview stability (bugfix #358)', () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
 
-    expect(mockFetchOverview).toHaveBeenCalledTimes(2);
+    expect(mockFetchOverview.mock.calls.length).toBeGreaterThanOrEqual(2);
     // Data should be a NEW reference (content changed)
     expect(result.current.data).not.toBe(firstRef);
     expect(result.current.data!.backlog[0].title).toBe('Fix signup bug');

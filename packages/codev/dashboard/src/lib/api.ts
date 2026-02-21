@@ -255,6 +255,10 @@ export interface GitStatus {
   error?: string;
 }
 
+export function getSSEEventsUrl(): string {
+  return apiUrl('api/events');
+}
+
 export async function fetchGitStatus(): Promise<GitStatus> {
   const res = await fetch(apiUrl('api/git/status'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch git status: ${res.status}`);
