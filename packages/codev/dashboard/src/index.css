@@ -112,64 +112,31 @@ body {
   background: var(--accent);
 }
 
-/* Collapse/expand controls for split pane (Issue #495) */
-.split-collapse-btn {
-  position: absolute;
-  top: 8px;
-  z-index: 20;
-  width: 20px;
-  height: 20px;
+/* Header controls — collapse/expand buttons (Issue #513) */
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
-  padding: 0;
 }
 
-.split-left:hover .split-collapse-btn,
-.split-right:hover .split-collapse-btn {
-  opacity: 0.6;
-}
-
-.split-collapse-btn:hover {
-  opacity: 1;
+.header-btn:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--accent);
-  background: var(--bg-hover);
-}
-
-.split-collapse-btn--left {
-  right: 8px;
-}
-
-.split-collapse-btn--right {
-  left: 8px;
-}
-
-.split-expand-bar {
-  width: 20px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-secondary);
-  border: none;
-  border-right: 1px solid var(--border-color);
-  border-left: 1px solid var(--border-color);
-  cursor: pointer;
-  color: var(--text-muted);
-  padding: 0;
-}
-
-.split-expand-bar:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 .right-panel {
@@ -370,14 +337,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 36px;
+  min-height: 36px;
   padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
+  background: rgba(30, 30, 30, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
   color: #e0e0e0;
-  opacity: 0.4;
+  opacity: 0.7;
   cursor: pointer;
   touch-action: manipulation;
   user-select: none;
@@ -385,7 +352,9 @@ body {
 }
 
 .terminal-control-btn:hover {
-  opacity: 0.8;
+  opacity: 1;
+  background: rgba(50, 50, 50, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .terminal-control-btn:active {

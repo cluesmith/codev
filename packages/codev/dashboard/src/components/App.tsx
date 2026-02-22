@@ -30,6 +30,7 @@ export function App() {
   const { state, refresh } = useBuilderStatus();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+  const [collapsedPane, setCollapsedPane] = useState<'left' | 'right' | null>(null);
 
   // Bugfix #205: Track which terminal tabs have been visited at least once.
   // Terminals are only mounted on first visit, then kept alive (hidden via CSS)
@@ -185,7 +186,59 @@ export function App() {
         <h1 className="app-title">
           {overviewTitle}
         </h1>
-        {state?.version && <span className="header-version">v{state.version}</span>}
+        <div className="header-controls">
+          {!isMobile && (collapsedPane !== 'left' ? (
+            <button
+              className="header-btn"
+              onClick={() => setCollapsedPane('left')}
+              title="Collapse architect panel"
+              aria-label="Collapse architect panel"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="2" x2="3" y2="14" />
+                <path d="M12 5l-4 3 4 3" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="header-btn"
+              onClick={() => setCollapsedPane(null)}
+              title="Expand architect panel"
+              aria-label="Expand architect panel"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="2" x2="3" y2="14" />
+                <path d="M7 5l4 3-4 3" />
+              </svg>
+            </button>
+          ))}
+          {!isMobile && (collapsedPane !== 'right' ? (
+            <button
+              className="header-btn"
+              onClick={() => setCollapsedPane('right')}
+              title="Collapse work panel"
+              aria-label="Collapse work panel"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="13" y1="2" x2="13" y2="14" />
+                <path d="M4 5l4 3-4 3" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="header-btn"
+              onClick={() => setCollapsedPane(null)}
+              title="Expand work panel"
+              aria-label="Expand work panel"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="13" y1="2" x2="13" y2="14" />
+                <path d="M9 5l-4 3 4 3" />
+              </svg>
+            </button>
+          ))}
+          {state?.version && <span className="header-version">v{state.version}</span>}
+        </div>
       </header>
       <div className="app-body">
         <SplitPane
@@ -203,6 +256,7 @@ export function App() {
               </div>
             </div>
           }
+          collapsedPane={collapsedPane}
         />
       </div>
     </div>
