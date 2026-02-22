@@ -503,22 +503,55 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       };
     };
 
-    // Mobile input deduplication
-    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    // Mobile/IME input deduplication (Issue #253, #517)
+    //
+    // On mobile browsers, all keyboard input goes through IME composition.
+    // xterm.js has multiple code paths (keydown, compositionend, input event)
+    // that can each fire onData for the same keystroke, causing duplicates.
+    //
+    // Strategy: Two complementary dedup triggers:
+    // 1. Composition tracking — dedup during/after IME composition on ANY
+    //    device (catches mobile + desktop CJK input)
+    // 2. Touch device detection — always-on dedup for soft keyboard devices
+    //    where delayed duplicates can arrive outside the composition window
+    //    (e.g. near line wraps). Uses pointer:coarse media query instead of
+    //    UA string to correctly detect iPads (iPadOS sends desktop UA).
+    //    Tradeoff: iPad + external keyboard would still get dedup, but
+    //    default keyboard repeat rates (>250ms) are above the 150ms window.
+    const isTouchDevice = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    const textarea = term.textarea;
+    let isComposing = false;
+    let compositionEndTime = 0;
     let lastSentData = '';
     let lastSentTime = 0;
+
+    const onCompositionStart = () => { isComposing = true; };
+    const onCompositionEnd = () => {
+      isComposing = false;
+      compositionEndTime = Date.now();
+    };
+
+    if (textarea) {
+      textarea.addEventListener('compositionstart', onCompositionStart);
+      textarea.addEventListener('compositionend', onCompositionEnd);
+    }
 
     // Send user input to the PTY (uses wsRef so it works across reconnections)
     term.onData((data) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      if (isMobileDevice) {
-        const now = Date.now();
-        if (data === lastSentData && now - lastSentTime < 150) return;
-        lastSentData = data;
-        lastSentTime = now;
+      // Suppress exact duplicate onData calls within 150ms when:
+      // - We're in/near an IME composition (composing or <150ms after), OR
+      // - This is a touch device (soft keyboard can produce late duplicates)
+      const now = Date.now();
+      const inCompositionWindow = isComposing || (now - compositionEndTime < 150);
+      if ((inCompositionWindow || isTouchDevice) &&
+          data === lastSentData && now - lastSentTime < 150) {
+        return;
       }
+      lastSentData = data;
+      lastSentTime = now;
 
       if (rc.initialPhase) {
         const filtered = data
@@ -597,6 +630,10 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       if (rc.flushTimer) clearTimeout(rc.flushTimer);
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
+      if (textarea) {
+        textarea.removeEventListener('compositionstart', onCompositionStart);
+        textarea.removeEventListener('compositionend', onCompositionEnd);
+      }
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       containerRef.current?.removeEventListener('paste', onNativePaste);
