@@ -1,0 +1,58 @@
+id: '467'
+title: add-open-files-shells-section-
+protocol: spir
+phase: review
+plan_phases:
+  - id: backend_last_data_at
+    title: 'Backend: PTY Last-Activity Tracking'
+    status: complete
+  - id: frontend_component
+    title: 'Frontend: Open Files & Shells Component'
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-21T18:54:22.631Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-22T07:51:50.456Z'
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: backend_last_data_at
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-backend_last_data_at-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-backend_last_data_at-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-backend_last_data_at-iter1-claude.txt
+  - iteration: 1
+    plan_phase: frontend_component
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-frontend_component-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-frontend_component-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-frontend_component-iter1-claude.txt
+started_at: '2026-02-21T18:43:02.587Z'
+updated_at: '2026-02-22T08:11:19.878Z'
