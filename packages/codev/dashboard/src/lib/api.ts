@@ -22,6 +22,7 @@ export interface UtilTerminal {
   pid: number;
   terminalId?: string;
   persistent?: boolean;
+  lastDataAt?: number;
 }
 
 export interface Annotation {

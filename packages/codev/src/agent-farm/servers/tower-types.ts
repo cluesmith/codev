@@ -80,5 +80,6 @@ export interface DbTerminalSession {
   shellper_pid: number | null;
   shellper_start_time: number | null;
   label: string | null;
+  cwd: string | null;
   created_at: string;
 }

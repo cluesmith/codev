@@ -2,14 +2,14 @@ import type { Tab } from '../hooks/useTabs.js';
 import { deleteTab } from '../lib/api.js';
 
 export const TAB_ICONS: Record<Tab['type'], string> = {
-  work: '\u25C8',            // ◈
-  architect: '\u25B6\uFE0E', // ▶︎ (text presentation)
-  builder: '\u2692\uFE0E',   // ⚒︎ (text presentation)
-  shell: '$',                 // $
-  file: '\u2261',             // ≡
-  activity: '\u26A1\uFE0E',  // ⚡︎ (text presentation)
-  files: '\u2630',            // ☰
-  analytics: '\u223F',        // ∿
+  work: '📋',
+  architect: '🏛️',
+  builder: '🔨',
+  shell: '💻',
+  file: '📄',
+  activity: '⚡',
+  files: '📁',
+  analytics: '📊',
 };
 
 interface TabBarProps {

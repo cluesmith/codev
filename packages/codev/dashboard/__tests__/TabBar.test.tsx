@@ -61,6 +61,7 @@ describe('TabBar icons', () => {
       { id: 'f', type: 'file', label: 'test.ts', closable: true, annotationId: 'a1' },
       { id: 'act', type: 'activity', label: 'Activity', closable: false },
       { id: 'fs', type: 'files', label: 'Files', closable: false },
+      { id: 'an', type: 'analytics', label: 'Analytics', closable: false },
     ];
 
     const { container } = render(
@@ -68,7 +69,7 @@ describe('TabBar icons', () => {
     );
 
     const iconSpans = container.querySelectorAll('.tab-icon');
-    expect(iconSpans.length).toBe(7);
+    expect(iconSpans.length).toBe(8);
 
     expect(iconSpans[0].textContent).toBe(TAB_ICONS.work);
     expect(iconSpans[1].textContent).toBe(TAB_ICONS.architect);
@@ -77,6 +78,7 @@ describe('TabBar icons', () => {
     expect(iconSpans[4].textContent).toBe(TAB_ICONS.file);
     expect(iconSpans[5].textContent).toBe(TAB_ICONS.activity);
     expect(iconSpans[6].textContent).toBe(TAB_ICONS.files);
+    expect(iconSpans[7].textContent).toBe(TAB_ICONS.analytics);
   });
 
   it('icon spans have aria-hidden="true"', () => {
@@ -102,10 +104,21 @@ describe('TabBar icons', () => {
   });
 
   it('TAB_ICONS covers all tab types', () => {
-    const expectedTypes: Tab['type'][] = ['work', 'files', 'architect', 'builder', 'shell', 'file', 'activity'];
+    const expectedTypes: Tab['type'][] = ['work', 'files', 'architect', 'builder', 'shell', 'file', 'activity', 'analytics'];
     for (const type of expectedTypes) {
       expect(TAB_ICONS[type]).toBeTruthy();
       expect(typeof TAB_ICONS[type]).toBe('string');
+    }
+  });
+
+  it('TAB_ICONS uses emoji instead of static Unicode symbols', () => {
+    // Regression: issue #507 - tab icons should be colorful emoji, not static monochrome symbols
+    const staticSymbols = ['\u25C8', '\u25B6', '\u2692', '\u2261', '\u2630', '\u223F', '$'];
+    for (const type of Object.keys(TAB_ICONS) as Tab['type'][]) {
+      const icon = TAB_ICONS[type];
+      for (const symbol of staticSymbols) {
+        expect(icon).not.toBe(symbol);
+      }
     }
   });
 

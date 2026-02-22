@@ -1,8 +1,11 @@
 /**
- * Unit tests for file path resolution and containment logic (Spec 0101, Phase 2)
+ * Unit tests for file path resolution logic (Spec 0101, Phase 2)
  *
- * Tests the path resolution and security containment patterns used in
- * the POST /api/tabs/file endpoint of tower-server.ts.
+ * Tests the path resolution patterns used in the POST /api/tabs/file endpoint
+ * of tower-routes.ts.
+ *
+ * Note: Workspace containment checks were removed in bugfix #502 to allow
+ * `af open` to work with files outside the workspace directory.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -10,14 +13,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * Replicates the containment check logic from tower-server.ts
+ * Replicates the path resolution logic from tower-routes.ts
  * for testability without starting a full tower server.
  */
-function resolveAndCheckContainment(
+function resolveFilePath(
   filePath: string,
   workspacePath: string,
   sessionCwd?: string,
-): { fullPath: string; contained: boolean } {
+): string {
   // Resolution: use session cwd for relative paths if provided
   let fullPath: string;
   if (path.isAbsolute(filePath)) {
@@ -28,34 +31,21 @@ function resolveAndCheckContainment(
     fullPath = path.join(workspacePath, filePath);
   }
 
-  // Symlink-aware containment check
-  // For non-existent files, resolve the parent directory to handle
-  // intermediate symlinks (e.g., /tmp -> /private/tmp on macOS).
-  let resolvedPath: string;
+  // Resolve symlinks for canonical path
   try {
-    resolvedPath = fs.realpathSync(fullPath);
+    fullPath = fs.realpathSync(fullPath);
   } catch {
     try {
-      resolvedPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
+      fullPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
     } catch {
-      resolvedPath = path.resolve(fullPath);
+      fullPath = path.resolve(fullPath);
     }
   }
 
-  let normalizedWorkspace: string;
-  try {
-    normalizedWorkspace = fs.realpathSync(workspacePath);
-  } catch {
-    normalizedWorkspace = path.resolve(workspacePath);
-  }
-
-  const contained = resolvedPath.startsWith(normalizedWorkspace + path.sep)
-    || resolvedPath === normalizedWorkspace;
-
-  return { fullPath, contained };
+  return fullPath;
 }
 
-describe('File path resolution and containment (Spec 0101)', () => {
+describe('File path resolution (Spec 0101)', () => {
   // Use a temp directory as a stand-in for workspace root
   const tmpBase = os.tmpdir();
   let workspacePath: string;
@@ -74,103 +64,69 @@ describe('File path resolution and containment (Spec 0101)', () => {
 
   describe('relative path resolution', () => {
     it('resolves relative path using workspace root when no session cwd', () => {
-      const result = resolveAndCheckContainment('src/lib/foo.ts', workspacePath);
-      expect(result.fullPath).toBe(path.join(workspacePath, 'src/lib/foo.ts'));
-      expect(result.contained).toBe(true);
+      const result = resolveFilePath('src/lib/foo.ts', workspacePath);
+      // realpathSync resolves the full canonical path
+      expect(result).toBe(fs.realpathSync(path.join(workspacePath, 'src/lib/foo.ts')));
     });
 
     it('resolves relative path using session cwd when provided', () => {
       const sessionCwd = path.join(workspacePath, '.builders', '0099');
-      const result = resolveAndCheckContainment('src/bar.ts', workspacePath, sessionCwd);
-      expect(result.fullPath).toBe(path.join(sessionCwd, 'src/bar.ts'));
-      expect(result.contained).toBe(true);
+      const result = resolveFilePath('src/bar.ts', workspacePath, sessionCwd);
+      expect(result).toBe(fs.realpathSync(path.join(sessionCwd, 'src/bar.ts')));
     });
 
     it('resolves absolute path directly (ignoring session cwd)', () => {
       const absPath = path.join(workspacePath, 'src', 'lib', 'foo.ts');
-      const result = resolveAndCheckContainment(absPath, workspacePath, '/some/other/cwd');
-      expect(result.fullPath).toBe(absPath);
-      expect(result.contained).toBe(true);
+      const result = resolveFilePath(absPath, workspacePath, '/some/other/cwd');
+      expect(result).toBe(fs.realpathSync(absPath));
     });
   });
 
-  describe('containment check', () => {
-    it('allows paths within workspace root', () => {
-      const result = resolveAndCheckContainment('src/lib/foo.ts', workspacePath);
-      expect(result.contained).toBe(true);
+  describe('paths outside workspace (bugfix #502)', () => {
+    it('resolves absolute paths outside workspace without rejection', () => {
+      // /etc/hosts exists on macOS/Linux — resolution should succeed
+      const result = resolveFilePath('/etc/hosts', workspacePath);
+      expect(result).toBe(fs.realpathSync('/etc/hosts'));
     });
 
-    it('allows paths within .builders/ worktrees', () => {
-      const result = resolveAndCheckContainment(
-        '.builders/0099/src/bar.ts',
-        workspacePath,
-      );
-      expect(result.contained).toBe(true);
-    });
-
-    it('allows builder worktree paths resolved via session cwd', () => {
-      const sessionCwd = path.join(workspacePath, '.builders', '0099');
-      const result = resolveAndCheckContainment('src/bar.ts', workspacePath, sessionCwd);
-      expect(result.contained).toBe(true);
-    });
-
-    it('rejects path traversal escaping workspace (../../etc/passwd)', () => {
-      const result = resolveAndCheckContainment('../../etc/passwd', workspacePath);
-      expect(result.contained).toBe(false);
-    });
-
-    it('rejects path traversal from builder worktree', () => {
-      const sessionCwd = path.join(workspacePath, '.builders', '0099');
-      const result = resolveAndCheckContainment('../../../../etc/passwd', workspacePath, sessionCwd);
-      expect(result.contained).toBe(false);
-    });
-
-    it('rejects absolute path outside workspace', () => {
-      const result = resolveAndCheckContainment('/etc/passwd', workspacePath);
-      expect(result.contained).toBe(false);
-    });
-
-    it('rejects path targeting ~/.ssh', () => {
-      const result = resolveAndCheckContainment('../../.ssh/id_rsa', workspacePath);
-      expect(result.contained).toBe(false);
+    it('resolves relative path traversal to canonical path', () => {
+      const result = resolveFilePath('../../etc/hosts', workspacePath);
+      // Should resolve to a canonical path (not reject)
+      expect(path.isAbsolute(result)).toBe(true);
     });
   });
 
   describe('non-existent files', () => {
-    it('handles non-existent files via path.resolve fallback', () => {
-      const result = resolveAndCheckContainment('src/nonexistent.ts', workspacePath);
-      expect(result.fullPath).toBe(path.join(workspacePath, 'src/nonexistent.ts'));
-      expect(result.contained).toBe(true);
-    });
-
-    it('non-existent file with traversal still fails containment', () => {
-      const result = resolveAndCheckContainment('../../nonexistent.ts', workspacePath);
-      expect(result.contained).toBe(false);
+    it('handles non-existent files via parent directory resolution', () => {
+      const result = resolveFilePath('src/nonexistent.ts', workspacePath);
+      // Parent dir (src/) exists, so realpathSync on parent works
+      expect(result).toContain('nonexistent.ts');
     });
   });
 
   describe('symlink handling', () => {
     it('resolves symlinks for existing files', () => {
-      // Create a symlink within the workspace
       const linkPath = path.join(workspacePath, 'src', 'link.ts');
       try {
         fs.symlinkSync(
           path.join(workspacePath, 'src', 'lib', 'foo.ts'),
           linkPath,
         );
-        const result = resolveAndCheckContainment('src/link.ts', workspacePath);
-        expect(result.contained).toBe(true);
+        const result = resolveFilePath('src/link.ts', workspacePath);
+        // Should resolve to the target, not the symlink
+        expect(result).toBe(fs.realpathSync(path.join(workspacePath, 'src', 'lib', 'foo.ts')));
       } finally {
         try { fs.unlinkSync(linkPath); } catch { /* cleanup */ }
       }
     });
 
-    it('rejects symlinks pointing outside workspace', () => {
+    it('resolves symlinks pointing outside workspace (bugfix #502)', () => {
       const linkPath = path.join(workspacePath, 'src', 'escape-link.ts');
       try {
         fs.symlinkSync('/etc/hosts', linkPath);
-        const result = resolveAndCheckContainment('src/escape-link.ts', workspacePath);
-        expect(result.contained).toBe(false);
+        const result = resolveFilePath('src/escape-link.ts', workspacePath);
+        // Should resolve to the target without rejection
+        expect(result).toBe(fs.realpathSync('/etc/hosts'));
       } finally {
         try { fs.unlinkSync(linkPath); } catch { /* cleanup */ }
       }

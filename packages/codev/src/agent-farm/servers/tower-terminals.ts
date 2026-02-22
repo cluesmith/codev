@@ -166,6 +166,7 @@ export function saveTerminalSession(
   shellperPid: number | null = null,
   shellperStartTime: number | null = null,
   label: string | null = null,
+  cwd: string | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -179,9 +180,9 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -585,11 +586,13 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     }
 
     const workspacePath = dbSession.workspace_path;
+    const sessionCwd = dbSession.cwd ?? workspacePath;
     const replayData = client.getReplayData() ?? Buffer.alloc(0);
     const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown'));
 
     // Create a PtySession backed by the reconnected shellper client
-    const session = manager.createSessionRaw({ label, cwd: workspacePath });
+    // Use stored cwd (worktree path for builders) instead of workspace_path (Bugfix #506)
+    const session = manager.createSessionRaw({ label, cwd: sessionCwd });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
       const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
@@ -613,7 +616,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // Update SQLite with new terminal ID
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label);
+      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd);
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -743,7 +746,8 @@ export async function getTerminalsForWorkspace(
         if (client) {
           const replayData = client.getReplayData() ?? Buffer.alloc(0);
           const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id));
-          const newSession = manager.createSessionRaw({ label, cwd: dbSession.workspace_path });
+          // Use stored cwd (worktree path for builders) instead of workspace_path (Bugfix #506)
+          const newSession = manager.createSessionRaw({ label, cwd: dbSession.cwd ?? dbSession.workspace_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
@@ -765,7 +769,7 @@ export async function getTerminalsForWorkspace(
           const originalSessionId = dbSession.id;
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label);
+            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${originalSessionId} → ${newSession.id}`);

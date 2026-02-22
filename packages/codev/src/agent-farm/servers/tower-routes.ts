@@ -426,7 +426,7 @@ async function handleTerminalCreate(
             entry.shells.set(roleId, session.id);
           }
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -447,7 +447,7 @@ async function handleTerminalCreate(
         } else {
           entry.shells.set(roleId, info.id);
         }
-        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid);
+        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null);
         ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
       }
     }
@@ -1140,22 +1140,10 @@ async function handleWorkspaceRoutes(
     return;
   }
 
-  // GET /file?path=<relative-path> — Read workspace file by path
+  // GET /file?path=<relative-path> — Read file by path (allows files outside workspace — see issue #502)
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
     const fullPath = path.resolve(workspacePath, relPath);
-    // Security: symlink-aware containment check (consistent with POST /tabs/file)
-    let resolvedFilePath: string;
-    try {
-      resolvedFilePath = fs.realpathSync(fullPath);
-    } catch {
-      resolvedFilePath = path.resolve(fullPath);
-    }
-    if (!resolvedFilePath.startsWith(workspacePath + path.sep) && resolvedFilePath !== workspacePath) {
-      res.writeHead(403, { 'Content-Type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
     try {
       const content = fs.readFileSync(fullPath, 'utf-8');
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1383,7 +1371,7 @@ async function handleWorkspaceState(
   const state: {
     architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
     builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
-    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
+    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean; lastDataAt?: number }>;
     annotations: Array<{ id: string; file: string; port: number; pid: number }>;
     workspaceName?: string;
     version?: string;
@@ -1422,6 +1410,7 @@ async function handleWorkspaceState(
         pid: session.pid || 0,
         terminalId,
         persistent: isSessionPersistent(terminalId, session),
+        lastDataAt: session.lastDataAt,
       });
     }
   }
@@ -1508,7 +1497,7 @@ async function handleWorkspaceShellCreate(
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1539,7 +1528,7 @@ async function handleWorkspaceShellCreate(
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath);
       ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1593,34 +1582,15 @@ async function handleWorkspaceFileTabCreate(
       fullPath = path.join(workspacePath, filePath);
     }
 
-    // Security: symlink-aware containment check
-    // For non-existent files, resolve the parent directory to handle
-    // intermediate symlinks (e.g., /tmp -> /private/tmp on macOS).
-    let resolvedPath: string;
+    // Resolve symlinks for canonical path (but allow files outside workspace — see issue #502)
     try {
-      resolvedPath = fs.realpathSync(fullPath);
+      fullPath = fs.realpathSync(fullPath);
     } catch {
       try {
-        resolvedPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
+        fullPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
       } catch {
-        resolvedPath = path.resolve(fullPath);
+        fullPath = path.resolve(fullPath);
       }
-    }
-
-    let normalizedWorkspace: string;
-    try {
-      normalizedWorkspace = fs.realpathSync(workspacePath);
-    } catch {
-      normalizedWorkspace = path.resolve(workspacePath);
-    }
-
-    const isWithinWorkspace = resolvedPath.startsWith(normalizedWorkspace + path.sep)
-      || resolvedPath === normalizedWorkspace;
-
-    if (!isWithinWorkspace) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Path outside workspace' }));
-      return;
     }
 
     // Non-existent files still create a tab (spec 0101: file viewer shows "File not found")

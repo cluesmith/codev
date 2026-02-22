@@ -7,6 +7,7 @@ import { NeedsAttentionList } from './NeedsAttentionList.js';
 import { BacklogList } from './BacklogList.js';
 import { RecentlyClosedList } from './RecentlyClosedList.js';
 import { FileTree } from './FileTree.js';
+import { OpenFilesShellsSection } from './OpenFilesShellsSection.js';
 import { TipBanner } from './TipBanner.js';
 
 interface WorkViewProps {
@@ -96,6 +97,13 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
             <p className="work-empty">No active builders</p>
           )}
         </section>
+
+        {/* Open Files & Shells (Spec 467) */}
+        <OpenFilesShellsSection
+          utils={state?.utils ?? []}
+          annotations={state?.annotations ?? []}
+          onSelectTab={id => onSelectTab?.(id)}
+        />
 
         {/* Needs Attention */}
         <section className="work-section">

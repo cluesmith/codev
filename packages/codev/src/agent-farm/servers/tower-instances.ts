@@ -44,6 +44,7 @@ export interface InstanceDeps {
     id: string, workspacePath: string, type: 'architect' | 'builder' | 'shell',
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
+    label?: string | null, cwd?: string | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -405,7 +406,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
             entry.architect = session.id;
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, shellperInfo.pid,
-              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath);
 
             // Clean up cache/SQLite when the shellper session permanently exits
             // (e.g., max restarts exceeded or killed). With restartOnExit, this
@@ -440,7 +441,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
           });
 
           entry.architect = session.id;
-          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid);
+          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, null, null, null, null, workspacePath);
 
           const ptySession = manager.getSession(session.id);
           if (ptySession) {

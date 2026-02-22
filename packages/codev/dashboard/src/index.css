@@ -98,6 +98,7 @@ body {
 .split-left, .split-right {
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .split-handle {
@@ -109,6 +110,66 @@ body {
 
 .split-handle:hover {
   background: var(--accent);
+}
+
+/* Collapse/expand controls for split pane (Issue #495) */
+.split-collapse-btn {
+  position: absolute;
+  top: 8px;
+  z-index: 20;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+}
+
+.split-left:hover .split-collapse-btn,
+.split-right:hover .split-collapse-btn {
+  opacity: 0.6;
+}
+
+.split-collapse-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.split-collapse-btn--left {
+  right: 8px;
+}
+
+.split-collapse-btn--right {
+  left: 8px;
+}
+
+.split-expand-bar {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: none;
+  border-right: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+.split-expand-bar:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .right-panel {
@@ -331,28 +392,25 @@ body {
   opacity: 1.0;
 }
 
-/* Connection status dot (Bugfix #451 — replaces intrusive overlay from #442) */
-.terminal-status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  align-self: center;
+/* Connection status icon in toolbar (Bugfix #451, #493) */
+.terminal-status-icon {
+  cursor: default;
 }
 
-.terminal-status-reconnecting {
-  background-color: #ffcc00;
+.terminal-status-icon.terminal-status-reconnecting {
+  color: #ffcc00;
+  opacity: 0.8;
   animation: terminal-pulse 1.2s ease-in-out infinite;
 }
 
-.terminal-status-disconnected {
-  background-color: #ff4444;
+.terminal-status-icon.terminal-status-disconnected {
+  color: #ff4444;
+  opacity: 0.8;
 }
 
 @keyframes terminal-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.2; }
 }
 
 /* Mobile layout */
@@ -1664,4 +1722,76 @@ a.attention-row {
 .analytics-chart-half {
   flex: 1;
   min-width: 0;
+}
+
+/* Open Files & Shells (Spec 467) */
+.ofs-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ofs-subgroup-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 14px 2px;
+}
+
+.ofs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.ofs-row:hover {
+  background: var(--bg-secondary);
+}
+
+.ofs-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ofs-dot--running {
+  background: var(--status-active);
+}
+
+.ofs-dot--idle {
+  background: var(--text-secondary);
+}
+
+.ofs-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ofs-idle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ofs-file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.ofs-path {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

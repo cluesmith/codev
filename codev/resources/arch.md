@@ -589,6 +589,7 @@ packages/codev/dashboard/
 │   │   ├── BuilderCard.tsx      # Builder card with phase/gate indicators (Spec 0126)
 │   │   ├── PRList.tsx           # Pending PR list with review status (Spec 0126)
 │   │   ├── BacklogList.tsx      # Backlog grouped by readiness (Spec 0126)
+│   │   ├── OpenFilesShellsSection.tsx  # Open shells (running/idle) + files (Spec 467)
 │   │   ├── FileTree.tsx         # File browser
 │   │   └── SplitPane.tsx        # Resizable panes
 │   ├── hooks/
@@ -1385,6 +1386,7 @@ Messages sent via `af send` are not injected immediately — they pass through a
 #### How it works
 
 1. **User types** in terminal → WebSocket `data` event → `PtySession.recordUserInput()` updates `lastInputAt` timestamp
+   - **PTY produces output** → `PtySession.onPtyData()` updates `lastDataAt` timestamp (Spec 467: used by dashboard for shell idle detection)
 2. **`af send` message arrives** → Tower buffers it via `SendBuffer.enqueue()`
 3. **Every 500ms**, `SendBuffer.flush()` checks each buffered session:
    - If `session.isUserIdle(3000ms)` → deliver all buffered messages

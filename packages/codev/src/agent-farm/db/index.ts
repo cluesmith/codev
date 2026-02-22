@@ -645,6 +645,18 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Added label column to terminal_sessions (Spec 468)');
   }
 
+  // Migration v12: Add cwd column to terminal_sessions (Bugfix #506)
+  const v12 = db.prepare('SELECT version FROM _migrations WHERE version = 12').get();
+  if (!v12) {
+    try {
+      db.exec(`ALTER TABLE terminal_sessions ADD COLUMN cwd TEXT`);
+    } catch {
+      // Column may already exist from a fresh install
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (12)').run();
+    console.log('[info] Added cwd column to terminal_sessions (Bugfix #506)');
+  }
+
   return db;
 }
 
