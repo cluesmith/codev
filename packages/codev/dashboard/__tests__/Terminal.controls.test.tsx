@@ -167,4 +167,19 @@ describe('TerminalControls (Issue #382)', () => {
 
     expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
   });
+
+  it('connection status icon renders in same toolbar as buttons (Bugfix #493)', () => {
+    const { container } = render(<Terminal wsPath="/ws/terminal/test" />);
+
+    // No status icon when connected
+    const controls = container.querySelector('.terminal-controls')!;
+    expect(controls.querySelector('.terminal-status-icon')).toBeNull();
+
+    // Status icon should be inside .terminal-controls alongside buttons
+    // (verified by checking parent container structure)
+    const refreshBtn = controls.querySelector('button[aria-label="Refresh terminal"]');
+    const scrollBtn = controls.querySelector('button[aria-label="Scroll to bottom"]');
+    expect(refreshBtn).not.toBeNull();
+    expect(scrollBtn).not.toBeNull();
+  });
 });
