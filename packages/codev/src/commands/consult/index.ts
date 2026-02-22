@@ -240,10 +240,19 @@ function isBuilderContext(): boolean {
   return process.cwd().includes('/.builders/');
 }
 
+interface BuilderProjectState {
+  id: string;
+  title: string;
+  currentPlanPhase: string | null;
+  phase: string;
+  iteration: number;
+  projectDir: string;
+}
+
 /**
  * Get builder project state from status.yaml
  */
-function getBuilderProjectState(workspaceRoot: string, projectId?: string): { id: string; title: string; currentPlanPhase: string | null } {
+function getBuilderProjectState(workspaceRoot: string, projectId?: string): BuilderProjectState {
   const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
   if (!fs.existsSync(projectsDir)) {
     throw new Error('No project state found. Are you in a builder worktree?');
@@ -292,16 +301,39 @@ function getBuilderProjectState(workspaceRoot: string, projectId?: string): { id
   const content = fs.readFileSync(statusPath, 'utf-8');
 
   // Simple YAML parsing for the fields we need
-  const idMatch = content.match(/^id:\s*'?(\d+)'?\s*$/m);
+  // Handles both numeric IDs (e.g., '0042') and prefixed IDs (e.g., 'bugfix-512')
+  const idMatch = content.match(/^id:\s*'?([^\s']+)'?\s*$/m);
   const titleMatch = content.match(/^title:\s*(.+)$/m);
-  const phaseMatch = content.match(/^current_plan_phase:\s*(.+)$/m);
+  const planPhaseMatch = content.match(/^current_plan_phase:\s*(.+)$/m);
+  const phaseMatch = content.match(/^phase:\s*(.+)$/m);
+  const iterationMatch = content.match(/^iteration:\s*(\d+)/m);
 
   const id = idMatch?.[1] ?? '';
   const title = titleMatch?.[1]?.trim() ?? '';
-  const rawPhase = phaseMatch?.[1]?.trim() ?? 'null';
-  const currentPlanPhase = rawPhase === 'null' ? null : rawPhase;
+  const rawPlanPhase = planPhaseMatch?.[1]?.trim() ?? 'null';
+  const currentPlanPhase = rawPlanPhase === 'null' ? null : rawPlanPhase;
+  const phase = phaseMatch?.[1]?.trim() ?? '';
+  const iteration = parseInt(iterationMatch?.[1] ?? '1', 10);
+  const projectDir = path.join(projectsDir, dir);
 
-  return { id, title, currentPlanPhase };
+  return { id, title, currentPlanPhase, phase, iteration, projectDir };
+}
+
+/**
+ * Compute a persistent output path for consultation results.
+ *
+ * When --output is not explicitly provided, this generates a path in the
+ * project directory so results survive Claude Code's temp file cleanup.
+ *
+ * Pattern: codev/projects/<id>-<name>/<id>-<phase>-iter<N>-<model>.txt
+ *
+ * This matches the pattern used by porch's findReviewFiles() and
+ * getReviewFilePath() so porch can find the results.
+ */
+function computePersistentOutputPath(state: BuilderProjectState, model: string): string {
+  const phase = state.currentPlanPhase || state.phase;
+  const fileName = `${state.id}-${phase}-iter${state.iteration}-${model}.txt`;
+  return path.join(state.projectDir, fileName);
 }
 
 /**
@@ -1322,9 +1354,33 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
+  // Auto-generate persistent output path when --output is not provided.
+  // In builder context with protocol mode, write results to the project
+  // directory so they survive Claude Code's temp file cleanup (#512).
+  // Skip when --issue is set (architect-mode query from builder worktree).
+  let outputPath = options.output;
+  const shouldAutoPersist = isBuilderContext() && !options.issue;
+  if (!outputPath && hasType && shouldAutoPersist) {
+    try {
+      const projectState = getBuilderProjectState(workspaceRoot, options.projectId);
+      outputPath = computePersistentOutputPath(projectState, model);
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+      console.error(`Auto-persist: ${outputPath}`);
+    } catch {
+      // If we can't compute a persistent path (e.g., no project state),
+      // continue without — output will still go to stdout.
+    }
+  }
+
   const isGeneralMode = !hasType;
-  await runConsultation(model, query, workspaceRoot, role, options.output, metricsCtx, isGeneralMode);
+  await runConsultation(model, query, workspaceRoot, role, outputPath, metricsCtx, isGeneralMode);
 }
 
 // Exported for testing
-export { getDiffStat as _getDiffStat, buildSpecQuery as _buildSpecQuery, buildPlanQuery as _buildPlanQuery };
+export {
+  getDiffStat as _getDiffStat,
+  buildSpecQuery as _buildSpecQuery,
+  buildPlanQuery as _buildPlanQuery,
+  computePersistentOutputPath as _computePersistentOutputPath,
+};
