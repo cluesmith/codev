@@ -949,11 +949,11 @@ describe('tower-routes', () => {
       const { res } = makeRes();
 
       await handleRequest(req, res, ctx);
-      // Message and Enter must be delivered in a single write() call
-      // to prevent split DATA frames through the shellper protocol.
+      // Message is written first, then \r is sent separately after a 50ms delay
+      // so the PTY processes the multi-line paste before receiving Enter (Bugfix #492).
       const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1);
-      expect(writeCalls[0][0]).toMatch(/\r$/);
+      expect(writeCalls.length).toBe(1); // Initial write (message only)
+      expect(writeCalls[0][0]).not.toMatch(/\r$/); // No \r in initial write
     });
 
     it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {
