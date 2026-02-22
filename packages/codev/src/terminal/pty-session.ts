@@ -64,6 +64,7 @@ export class PtySession extends EventEmitter {
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
   private _lastInputAt = 0;
+  private _lastDataAt = Date.now();
   private _composing = false;
 
   constructor(private readonly config: PtySessionConfig) {
@@ -242,6 +243,9 @@ export class PtySession extends EventEmitter {
   }
 
   private onPtyData(data: string): void {
+    // Track last output activity for idle detection (Spec 467)
+    this._lastDataAt = Date.now();
+
     // Store in ring buffer
     this.ringBuffer.pushData(data);
 
@@ -413,6 +417,11 @@ export class PtySession extends EventEmitter {
   /** Timestamp (epoch ms) of the last user input, or 0 if none. */
   get lastInputAt(): number {
     return this._lastInputAt;
+  }
+
+  /** Timestamp (epoch ms) of the last PTY output data. Initialized to creation time. */
+  get lastDataAt(): number {
+    return this._lastDataAt;
   }
 
   /** Mark the user as composing input (has typed but not pressed Enter). */

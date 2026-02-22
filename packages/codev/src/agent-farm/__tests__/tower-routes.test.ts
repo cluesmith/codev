@@ -423,6 +423,36 @@ describe('tower-routes', () => {
       expect(parsed).toHaveProperty('utils');
     });
 
+    it('includes lastDataAt in shell entries of /api/state response (Spec 467)', async () => {
+      const now = Date.now();
+      mockGetWorkspaceTerminalsEntry.mockReturnValue({
+        architect: undefined,
+        shells: new Map([['shell-1', 'term-abc']]),
+        builders: new Map(),
+        fileTabs: new Map(),
+      });
+      mockGetSession.mockReturnValue({
+        label: 'Shell 1',
+        pid: 1234,
+        lastDataAt: now,
+      });
+      mockIsSessionPersistent.mockReturnValue(false);
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.utils).toHaveLength(1);
+      expect(parsed.utils[0]).toMatchObject({
+        id: 'shell-1',
+        name: 'Shell 1',
+        lastDataAt: now,
+      });
+    });
+
     it('returns tower_name as hostname instead of os.hostname() (Bugfix #470)', async () => {
       mockReadCloudConfig.mockReturnValue({
         tower_id: 'test-id',

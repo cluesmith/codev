@@ -1371,7 +1371,7 @@ async function handleWorkspaceState(
   const state: {
     architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
     builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
-    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
+    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean; lastDataAt?: number }>;
     annotations: Array<{ id: string; file: string; port: number; pid: number }>;
     workspaceName?: string;
     version?: string;
@@ -1410,6 +1410,7 @@ async function handleWorkspaceState(
         pid: session.pid || 0,
         terminalId,
         persistent: isSessionPersistent(terminalId, session),
+        lastDataAt: session.lastDataAt,
       });
     }
   }
