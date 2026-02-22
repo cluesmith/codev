@@ -520,6 +520,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     //    where delayed duplicates can arrive outside the composition window
     //    (e.g. near line wraps). Uses pointer:coarse media query instead of
     //    UA string to correctly detect iPads (iPadOS sends desktop UA).
+    //    Tradeoff: iPad + external keyboard would still get dedup, but
+    //    default keyboard repeat rates (>250ms) are above the 150ms window.
     const isTouchDevice = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
     const textarea = term.textarea;
     let isComposing = false;

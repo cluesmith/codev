@@ -115,6 +115,7 @@ function fireComposition(type: 'compositionstart' | 'compositionend', data?: str
 }
 
 /** Mock matchMedia to simulate touch device (pointer: coarse). */
+const originalMatchMedia = window.matchMedia;
 function mockTouchDevice(isTouch: boolean) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -131,6 +132,13 @@ function mockTouchDevice(isTouch: boolean) {
     })),
   });
 }
+function restoreMatchMedia() {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: originalMatchMedia,
+  });
+}
 
 describe('Terminal IME deduplication (Issue #253, #517)', () => {
   beforeEach(() => {
@@ -143,6 +151,7 @@ describe('Terminal IME deduplication (Issue #253, #517)', () => {
 
   afterEach(() => {
     cleanup();
+    restoreMatchMedia();
     vi.useRealTimers();
   });
 
@@ -243,6 +252,7 @@ describe('Terminal touch device dedup — iPad fix (Issue #517)', () => {
 
   afterEach(() => {
     cleanup();
+    restoreMatchMedia();
     vi.useRealTimers();
   });
 
