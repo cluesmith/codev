@@ -187,7 +187,7 @@ export function App() {
           {overviewTitle}
         </h1>
         <div className="header-controls">
-          {collapsedPane !== 'left' ? (
+          {!isMobile && (collapsedPane !== 'left' ? (
             <button
               className="header-btn"
               onClick={() => setCollapsedPane('left')}
@@ -211,8 +211,8 @@ export function App() {
                 <path d="M7 5l4 3-4 3" />
               </svg>
             </button>
-          )}
-          {collapsedPane !== 'right' ? (
+          ))}
+          {!isMobile && (collapsedPane !== 'right' ? (
             <button
               className="header-btn"
               onClick={() => setCollapsedPane('right')}
@@ -236,7 +236,7 @@ export function App() {
                 <path d="M9 5l-4 3 4 3" />
               </svg>
             </button>
-          )}
+          ))}
           {state?.version && <span className="header-version">v{state.version}</span>}
         </div>
       </header>
