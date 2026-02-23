@@ -3,7 +3,6 @@ import { useAnalytics } from '../hooks/useAnalytics.js';
 import type { AnalyticsResponse } from '../lib/api.js';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  PieChart, Pie,
 } from 'recharts';
 
 interface AnalyticsViewProps {
@@ -99,73 +98,27 @@ function MiniBarChart({ data, dataKey, nameKey, color, formatter }: {
   );
 }
 
-function MiniPieChart({ data, dataKey, nameKey }: {
-  data: Array<Record<string, unknown>>;
-  dataKey: string;
-  nameKey: string;
-}) {
-  if (data.length === 0) return null;
-  return (
-    <ResponsiveContainer width="100%" height={160}>
-      <PieChart>
-        <Pie
-          data={data}
-          dataKey={dataKey}
-          nameKey={nameKey}
-          cx="50%"
-          cy="50%"
-          outerRadius={55}
-          innerRadius={30}
-          label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-          labelLine={false}
-          style={{ fontSize: 10 }}
-        >
-          {data.map((_entry, idx) => (
-            <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-          ))}
-        </Pie>
-        <Tooltip
-          contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', fontSize: 11, borderRadius: 4 }}
-          labelStyle={{ color: 'var(--text-primary)' }}
-          itemStyle={{ color: 'var(--text-secondary)' }}
-        />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-}
-
-function GitHubSection({ github, errors }: { github: AnalyticsResponse['github']; errors?: AnalyticsResponse['errors'] }) {
-  const backlogData = [
-    { name: 'Bug', value: github.bugBacklog },
-    { name: 'Non-Bug', value: github.nonBugBacklog },
-  ].filter(d => d.value > 0);
+function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['activity']; errors?: AnalyticsResponse['errors'] }) {
+  const protocolData = Object.entries(activity.projectsByProtocol).map(([proto, count]) => ({
+    name: proto.toUpperCase(),
+    value: count,
+  }));
 
   return (
-    <Section title="GitHub" error={errors?.github}>
+    <Section title="Activity" error={errors?.activity}>
       <MetricGrid>
-        <Metric label="PRs Merged" value={String(github.prsMerged)} />
-        <Metric label="Avg Time to Merge" value={fmt(github.avgTimeToMergeHours, 1, 'h')} />
-        <Metric label="Issues Closed" value={String(github.issuesClosed)} />
-        <Metric label="Avg Time to Close Bugs" value={fmt(github.avgTimeToCloseBugsHours, 1, 'h')} />
+        <Metric label="Projects Completed" value={String(activity.projectsCompleted)} />
+        <Metric label="Bugs Fixed" value={String(activity.bugsFixed)} />
+        <Metric label="Avg Time to Merge" value={fmt(activity.avgTimeToMergeHours, 1, 'h')} />
+        <Metric label="Throughput / Week" value={fmt(activity.throughputPerWeek)} />
+        <Metric label="Active Builders" value={String(activity.activeBuilders)} />
       </MetricGrid>
-      {backlogData.length > 0 && (
+      {protocolData.length > 0 && (
         <div className="analytics-sub-section">
-          <h4 className="analytics-sub-title">Open Issue Backlog</h4>
-          <MiniBarChart data={backlogData} dataKey="value" nameKey="name" />
+          <h4 className="analytics-sub-title">Projects by Protocol</h4>
+          <MiniBarChart data={protocolData} dataKey="value" nameKey="name" />
         </div>
       )}
-    </Section>
-  );
-}
-
-function BuildersSection({ builders }: { builders: AnalyticsResponse['builders'] }) {
-  return (
-    <Section title="Builders">
-      <MetricGrid>
-        <Metric label="Projects Completed" value={String(builders.projectsCompleted)} />
-        <Metric label="Throughput / Week" value={fmt(builders.throughputPerWeek)} />
-        <Metric label="Active Builders" value={String(builders.activeBuilders)} />
-      </MetricGrid>
     </Section>
   );
 }
@@ -187,11 +140,6 @@ function ConsultationSection({ consultation, errors }: { consultation: Analytics
   const protocolData = Object.entries(consultation.byProtocol).map(([proto, count]) => ({
     name: proto,
     value: count,
-  }));
-
-  const projectData = consultation.costByProject.map(p => ({
-    name: `#${p.projectId}`,
-    cost: p.totalCost,
   }));
 
   return (
@@ -248,27 +196,15 @@ function ConsultationSection({ consultation, errors }: { consultation: Analytics
           {reviewTypeData.length > 0 && (
             <div className="analytics-sub-section analytics-chart-half">
               <h4 className="analytics-sub-title">By Review Type</h4>
-              <MiniPieChart data={reviewTypeData} dataKey="value" nameKey="name" />
+              <MiniBarChart data={reviewTypeData} dataKey="value" nameKey="name" />
             </div>
           )}
           {protocolData.length > 0 && (
             <div className="analytics-sub-section analytics-chart-half">
               <h4 className="analytics-sub-title">By Protocol</h4>
-              <MiniPieChart data={protocolData} dataKey="value" nameKey="name" />
+              <MiniBarChart data={protocolData} dataKey="value" nameKey="name" />
             </div>
           )}
-        </div>
-      )}
-
-      {projectData.length > 0 && (
-        <div className="analytics-sub-section">
-          <h4 className="analytics-sub-title">Cost per Project</h4>
-          <MiniBarChart
-            data={projectData}
-            dataKey="cost"
-            nameKey="name"
-            formatter={(v) => `$${v.toFixed(2)}`}
-          />
         </div>
       )}
     </Section>
@@ -312,8 +248,7 @@ export function AnalyticsView({ isActive }: AnalyticsViewProps) {
 
         {data && (
           <>
-            <GitHubSection github={data.github} errors={data.errors} />
-            <BuildersSection builders={data.builders} />
+            <ActivitySection activity={data.activity} errors={data.errors} />
             <ConsultationSection consultation={data.consultation} errors={data.errors} />
           </>
         )}

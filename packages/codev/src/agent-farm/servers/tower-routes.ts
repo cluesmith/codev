@@ -719,7 +719,7 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ timeRange: rangeLabel, github: { prsMerged: 0, avgTimeToMergeHours: null, bugBacklog: 0, nonBugBacklog: 0, issuesClosed: 0, avgTimeToCloseBugsHours: null }, builders: { projectsCompleted: 0, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] } }));
+    res.end(JSON.stringify({ timeRange: rangeLabel, activity: { projectsCompleted: 0, projectsByProtocol: {}, bugsFixed: 0, avgTimeToMergeHours: null, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {} } }));
     return;
   }
   const range = rangeParam as '1' | '7' | '30' | 'all';
