@@ -176,8 +176,70 @@ export function App() {
 
   // Desktop: architect terminal on left, tabbed content on right
   const architectTab = tabs.find(t => t.type === 'architect');
-  const leftPane = architectTab
-    ? renderTerminal(architectTab)
+
+  // Bugfix #522: Collapse/expand buttons consolidated into architect toolbar
+  const architectToolbarExtra = (
+    <>
+      {collapsedPane !== 'left' ? (
+        <button
+          className="terminal-control-btn"
+          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane('left'); }}
+          tabIndex={-1}
+          title="Collapse architect panel"
+          aria-label="Collapse architect panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="2" x2="3" y2="14" />
+            <path d="M12 5l-4 3 4 3" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          className="terminal-control-btn"
+          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane(null); }}
+          tabIndex={-1}
+          title="Expand architect panel"
+          aria-label="Expand architect panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="2" x2="3" y2="14" />
+            <path d="M7 5l4 3-4 3" />
+          </svg>
+        </button>
+      )}
+      {collapsedPane !== 'right' ? (
+        <button
+          className="terminal-control-btn"
+          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane('right'); }}
+          tabIndex={-1}
+          title="Collapse work panel"
+          aria-label="Collapse work panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="13" y1="2" x2="13" y2="14" />
+            <path d="M4 5l4 3-4 3" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          className="terminal-control-btn"
+          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane(null); }}
+          tabIndex={-1}
+          title="Expand work panel"
+          aria-label="Expand work panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="13" y1="2" x2="13" y2="14" />
+            <path d="M9 5l-4 3 4 3" />
+          </svg>
+        </button>
+      )}
+    </>
+  );
+
+  const architectWsPath = architectTab ? getTerminalWsPath(architectTab) : null;
+  const leftPane = architectWsPath
+    ? <Terminal wsPath={architectWsPath} onFileOpen={handleFileOpen} persistent={architectTab!.persistent} toolbarExtra={architectToolbarExtra} />
     : <div className="no-architect">No architect terminal</div>;
 
   return (
@@ -187,19 +249,8 @@ export function App() {
           {overviewTitle}
         </h1>
         <div className="header-controls">
-          {!isMobile && (collapsedPane !== 'left' ? (
-            <button
-              className="header-btn"
-              onClick={() => setCollapsedPane('left')}
-              title="Collapse architect panel"
-              aria-label="Collapse architect panel"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="2" x2="3" y2="14" />
-                <path d="M12 5l-4 3 4 3" />
-              </svg>
-            </button>
-          ) : (
+          {/* Bugfix #522: Expand button shown in header only when architect panel is collapsed */}
+          {collapsedPane === 'left' && (
             <button
               className="header-btn"
               onClick={() => setCollapsedPane(null)}
@@ -211,32 +262,7 @@ export function App() {
                 <path d="M7 5l4 3-4 3" />
               </svg>
             </button>
-          ))}
-          {!isMobile && (collapsedPane !== 'right' ? (
-            <button
-              className="header-btn"
-              onClick={() => setCollapsedPane('right')}
-              title="Collapse work panel"
-              aria-label="Collapse work panel"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="13" y1="2" x2="13" y2="14" />
-                <path d="M4 5l4 3-4 3" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              className="header-btn"
-              onClick={() => setCollapsedPane(null)}
-              title="Expand work panel"
-              aria-label="Expand work panel"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="13" y1="2" x2="13" y2="14" />
-                <path d="M9 5l-4 3 4 3" />
-              </svg>
-            </button>
-          ))}
+          )}
           {state?.version && <span className="header-version">v{state.version}</span>}
         </div>
       </header>

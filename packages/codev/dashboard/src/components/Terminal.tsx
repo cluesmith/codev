@@ -22,11 +22,13 @@ function TerminalControls({
   wsRef,
   xtermRef,
   connStatus,
+  toolbarExtra,
 }: {
   fitRef: React.RefObject<FitAddon | null>;
   wsRef: React.RefObject<WebSocket | null>;
   xtermRef: React.RefObject<XTerm | null>;
   connStatus: 'connected' | 'reconnecting' | 'disconnected';
+  toolbarExtra?: React.ReactNode;
 }) {
   const handleRefresh = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -113,6 +115,12 @@ function TerminalControls({
           </svg>
         </span>
       )}
+      {toolbarExtra && (
+        <>
+          <span className="toolbar-divider" />
+          {toolbarExtra}
+        </>
+      )}
     </div>
   );
 }
@@ -128,6 +136,8 @@ interface TerminalProps {
   onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
   /** Whether this session is backed by a persistent shellper process (Spec 0104) */
   persistent?: boolean;
+  /** Extra controls to render in the terminal toolbar (Bugfix #522) */
+  toolbarExtra?: React.ReactNode;
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
@@ -209,7 +219,7 @@ function handleNativePaste(event: ClipboardEvent, term: XTerm): void {
  * Terminal component — renders an xterm.js instance connected to the
  * node-pty backend via WebSocket using the hybrid binary protocol.
  */
-export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
+export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -671,7 +681,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           backgroundColor: '#1a1a1a',
         }}
       />
-      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} />
+      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} toolbarExtra={toolbarExtra} />
       {isMobile && (
         <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
       )}
