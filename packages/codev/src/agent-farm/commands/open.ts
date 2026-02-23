@@ -67,10 +67,18 @@ export async function open(options: OpenOptions): Promise<void> {
     fatal(`File not found: ${filePath}`);
   }
 
-  // Find workspace root from the FILE's location, not CWD.
-  // This allows `af open` to work from any directory — the file itself
-  // determines which workspace it belongs to.
-  let workspacePath = findWorkspaceRoot(dirname(filePath));
+  // Determine workspace from CWD first (the user's current workspace context).
+  // This ensures cross-workspace file opens show in the user's active workspace,
+  // not in the workspace where the file physically resides.
+  // Fall back to file-based detection when CWD isn't in a recognizable workspace
+  // (e.g., running from /tmp).
+  const cwdWorkspace = findWorkspaceRoot(process.cwd());
+  const cwdIsWorkspace = existsSync(resolve(cwdWorkspace, 'codev')) ||
+    existsSync(resolve(cwdWorkspace, '.git'));
+
+  let workspacePath = cwdIsWorkspace
+    ? cwdWorkspace
+    : findWorkspaceRoot(dirname(filePath));
 
   // When running from a worktree, Tower only knows the main repo workspace.
   // Fall back to main repo path so the API call targets a registered workspace.

@@ -6,8 +6,9 @@
  * (or in a different subdirectory), the wrong workspace path is sent to
  * the Tower API, causing the open to fail.
  *
- * Fix: Derive workspace root from the FILE's directory (via findWorkspaceRoot)
- * instead of CWD. The file itself determines which workspace it belongs to.
+ * Fix (updated by bugfix #535): Prefer CWD-based workspace detection (for
+ * cross-workspace opens), but fall back to file-based detection when CWD
+ * isn't in a recognizable workspace.
  */
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
@@ -19,10 +20,11 @@ describe('Bugfix #500: af open works from any directory', () => {
     'utf-8',
   );
 
-  it('should use findWorkspaceRoot from file directory, not getConfig', () => {
-    // The fix: workspace root is derived from the file's location
+  it('should fall back to findWorkspaceRoot from file directory when CWD is not in a workspace', () => {
+    // Bugfix #535 changed to CWD-first with file-based fallback.
+    // The file-based fallback must still exist for when CWD is outside any workspace.
     expect(openSrc).toContain('findWorkspaceRoot(dirname(filePath))');
-    // Should NOT use getConfig() — that uses CWD which is the wrong approach
+    // Should NOT use getConfig() — that doesn't support file-based fallback
     expect(openSrc).not.toContain('getConfig()');
   });
 
