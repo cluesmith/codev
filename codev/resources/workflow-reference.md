@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn XXXX                                  │
+│         Architect spawns builder: af spawn XXXX --protocol spir                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -209,6 +209,35 @@ af cleanup -p XXXX          # Clean up builder worktree
 ```
 
 ## Troubleshooting
+
+### Spawn Failures
+
+Common `af spawn` errors and how to recover:
+
+| Error | Cause | Recovery |
+|-------|-------|----------|
+| "Missing required flag: --protocol" | Forgot `--protocol` | Re-run with `--protocol spir` (or bugfix, tick, etc.) |
+| "Dirty worktree" / uncommitted changes | Pending changes in git | `git status` → commit changes → retry spawn |
+| "Builder already exists" | Worktree collision | Use `af spawn N --resume` to resume existing builder |
+
+**Recovery flow:**
+```bash
+# 1. Spawn fails
+af spawn 42 --protocol spir
+# Error: dirty worktree
+
+# 2. Check what's uncommitted
+git status
+
+# 3. Commit pending changes
+git add codev/specs/42-feature.md
+git commit -m "[Spec 42] Initial specification"
+
+# 4. Retry
+af spawn 42 --protocol spir
+```
+
+> **Tip:** Do NOT run `git pull` after a spawn failure unless you specifically need to sync with remote. The most common cause is uncommitted local changes, not a stale branch.
 
 ### Builder Reports Blocked
 

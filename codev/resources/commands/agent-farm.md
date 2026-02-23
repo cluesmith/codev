@@ -146,24 +146,34 @@ Does NOT clean up worktrees - use `af cleanup` for that.
 Spawn a new builder.
 
 ```bash
-af spawn [number] [options]
+af spawn [number] --protocol <name> [options]
 ```
 
 **Arguments:**
 - `[number]` - Issue number (positional)
 
+**Required:**
+- `--protocol <name>` - Protocol to use: spir, bugfix, tick, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
+
 **Options:**
-- `--protocol <name>` - Protocol to use (spir, bugfix, tick, maintain, experiment)
-- `--task <text>` - Spawn builder with a task description
+- `--task <text>` - Spawn builder with a task description (no `--protocol` needed)
 - `--amends <number>` - Original spec number for TICK amendments
-- `--shell` - Spawn a bare Claude session
-- `--worktree` - Spawn worktree session
+- `--shell` - Spawn a bare Claude session (no `--protocol` needed)
+- `--worktree` - Spawn worktree session (no `--protocol` needed)
 - `--files <files>` - Context files (comma-separated)
 - `--soft` - Use soft mode (AI follows protocol, you verify compliance)
 - `--strict` - Use strict mode (porch orchestrates, default)
 - `--resume` - Resume an existing builder worktree
 - `--force` - Skip safety checks (dirty worktree, collision detection)
 - `--no-role` - Skip loading role prompt
+
+**Preconditions:**
+
+The spawn command requires a **clean git worktree**. Before spawning:
+
+1. Run `git status` to check for uncommitted changes
+2. Commit any pending changes — builders branch from HEAD, so uncommitted specs/plans/codev updates are invisible to the builder
+3. The command will refuse to spawn if the worktree is dirty (override with `--force`, but the builder won't see your uncommitted files)
 
 **Description:**
 
@@ -175,7 +185,7 @@ Creates a new builder in an isolated git worktree. The builder gets:
 **Examples:**
 
 ```bash
-# Spawn builder for SPIR project (issue #42)
+# Spawn builder for SPIR project (issue #42) — --protocol is REQUIRED
 af spawn 42 --protocol spir
 
 # Spawn builder for a bugfix
@@ -184,10 +194,10 @@ af spawn 42 --protocol bugfix
 # Spawn TICK amendment to spec 30
 af spawn 42 --protocol tick --amends 30
 
-# Spawn with task description
+# Spawn with task description (no --protocol needed)
 af spawn --task "Fix login bug in auth module"
 
-# Spawn bare Claude session
+# Spawn bare Claude session (no --protocol needed)
 af spawn --shell
 
 # Spawn with context files
@@ -196,6 +206,14 @@ af spawn 42 --protocol spir --files "src/auth.ts,tests/auth.test.ts"
 # Resume an existing builder
 af spawn 42 --resume
 ```
+
+**Common Errors:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, tick, etc.) |
+| "Dirty worktree" | Uncommitted changes | Run `git status`, commit changes, retry |
+| "Builder already exists" | Worktree collision | Use `--resume` to resume, or `af cleanup` first |
 
 ---
 
