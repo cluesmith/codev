@@ -1017,9 +1017,8 @@ describe('tower-routes', () => {
   describe('GET /api/analytics', () => {
     const fakeStats = {
       timeRange: '7d',
-      github: { prsMerged: 5, avgTimeToMergeHours: 2.5, bugBacklog: 3, nonBugBacklog: 7, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2 },
-      builders: { projectsCompleted: 3, throughputPerWeek: 3, activeBuilders: 1 },
-      consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] },
+      activity: { prsMerged: 5, avgTimeToMergeHours: 2.5, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2, projectsCompleted: 3, bugsFixed: 1, throughputPerWeek: 3, activeBuilders: 1, projectsByProtocol: { spir: 2, bugfix: 1 } },
+      consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {} },
     };
 
     beforeEach(() => {
@@ -1034,7 +1033,7 @@ describe('tower-routes', () => {
 
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
-      expect(parsed.github.prsMerged).toBe(5);
+      expect(parsed.activity.prsMerged).toBe(5);
       expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', 0, false);
     });
 
@@ -1074,8 +1073,8 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.timeRange).toBe('30d');
-      expect(parsed.github.prsMerged).toBe(0);
-      expect(parsed.builders.activeBuilders).toBe(0);
+      expect(parsed.activity.prsMerged).toBe(0);
+      expect(parsed.activity.activeBuilders).toBe(0);
       expect(mockComputeAnalytics).not.toHaveBeenCalled();
     });
 

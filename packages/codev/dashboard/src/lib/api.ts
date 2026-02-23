@@ -145,18 +145,16 @@ export interface OverviewData {
 
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
-  github: {
+  activity: {
     prsMerged: number;
     avgTimeToMergeHours: number | null;
-    bugBacklog: number;
-    nonBugBacklog: number;
     issuesClosed: number;
     avgTimeToCloseBugsHours: number | null;
-  };
-  builders: {
     projectsCompleted: number;
+    bugsFixed: number;
     throughputPerWeek: number;
     activeBuilders: number;
+    projectsByProtocol: Record<string, number>;
   };
   consultation: {
     totalCount: number;
@@ -173,10 +171,6 @@ export interface AnalyticsResponse {
     }>;
     byReviewType: Record<string, number>;
     byProtocol: Record<string, number>;
-    costByProject: Array<{
-      projectId: string;
-      totalCost: number;
-    }>;
   };
   errors?: {
     github?: string;

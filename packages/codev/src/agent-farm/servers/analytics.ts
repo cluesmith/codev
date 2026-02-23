@@ -2,21 +2,22 @@
  * Analytics aggregation service for the dashboard Analytics tab.
  *
  * Aggregates data from three sources:
- * - GitHub CLI (merged PRs, closed issues, open issue backlogs)
+ * - GitHub CLI (merged PRs, closed issues)
  * - Consultation metrics DB (~/.codev/metrics.db)
+ * - Local project artifacts (codev/projects/ status.yaml for protocol breakdown)
  * - Active builder count (passed in from tower context)
  *
  * Each data source fails independently — partial results are returned
  * with error messages in the `errors` field.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as yaml from 'js-yaml';
 import {
   fetchMergedPRs,
   fetchClosedIssues,
-  fetchIssueList,
   parseAllLinkedIssues,
-  type MergedPR,
-  type ClosedIssue,
 } from '../../lib/github.js';
 import { MetricsDB } from '../../commands/consult/metrics.js';
 
@@ -26,18 +27,16 @@ import { MetricsDB } from '../../commands/consult/metrics.js';
 
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
-  github: {
+  activity: {
     prsMerged: number;
     avgTimeToMergeHours: number | null;
-    bugBacklog: number;
-    nonBugBacklog: number;
     issuesClosed: number;
     avgTimeToCloseBugsHours: number | null;
-  };
-  builders: {
     projectsCompleted: number;
+    bugsFixed: number;
     throughputPerWeek: number;
     activeBuilders: number;
+    projectsByProtocol: Record<string, number>;
   };
   consultation: {
     totalCount: number;
@@ -54,10 +53,6 @@ export interface AnalyticsResponse {
     }>;
     byReviewType: Record<string, number>;
     byProtocol: Record<string, number>;
-    costByProject: Array<{
-      projectId: string;
-      totalCost: number;
-    }>;
   };
   errors?: {
     github?: string;
@@ -133,11 +128,10 @@ function computeAvgHours(items: Array<{ start: string; end: string }>): number |
 interface GitHubMetrics {
   prsMerged: number;
   avgTimeToMergeHours: number | null;
-  bugBacklog: number;
-  nonBugBacklog: number;
   issuesClosed: number;
   avgTimeToCloseBugsHours: number | null;
   projectsCompleted: number;
+  bugsFixed: number;
 }
 
 async function computeGitHubMetrics(
@@ -145,13 +139,12 @@ async function computeGitHubMetrics(
   cwd: string,
 ): Promise<GitHubMetrics> {
   // Fetch merged PRs and closed issues in parallel
-  const [mergedPRs, closedIssues, openIssues] = await Promise.all([
+  const [mergedPRs, closedIssues] = await Promise.all([
     fetchMergedPRs(since, cwd),
     fetchClosedIssues(since, cwd),
-    fetchIssueList(cwd),
   ]);
 
-  if (mergedPRs === null && closedIssues === null && openIssues === null) {
+  if (mergedPRs === null && closedIssues === null) {
     throw new Error('GitHub CLI unavailable');
   }
 
@@ -163,13 +156,6 @@ async function computeGitHubMetrics(
   const avgTimeToMergeHours = computeAvgHours(
     prs.filter(pr => pr.mergedAt).map(pr => ({ start: pr.createdAt, end: pr.mergedAt })),
   );
-
-  // Backlogs (from open issues)
-  const issues = openIssues ?? [];
-  const bugBacklog = issues.filter(i =>
-    i.labels.some(l => l.name === 'bug'),
-  ).length;
-  const nonBugBacklog = issues.length - bugBacklog;
 
   // Closed issues
   const closed = closedIssues ?? [];
@@ -183,6 +169,9 @@ async function computeGitHubMetrics(
     closedBugs.map(i => ({ start: i.createdAt, end: i.closedAt })),
   );
 
+  // Bugs fixed (closed issues with bug label)
+  const bugsFixed = closedBugs.length;
+
   // Projects completed (distinct issue numbers from merged PRs via parseAllLinkedIssues)
   const linkedIssues = new Set<number>();
   for (const pr of prs) {
@@ -195,11 +184,10 @@ async function computeGitHubMetrics(
   return {
     prsMerged,
     avgTimeToMergeHours,
-    bugBacklog,
-    nonBugBacklog,
     issuesClosed,
     avgTimeToCloseBugsHours,
     projectsCompleted,
+    bugsFixed,
   };
 }
 
@@ -222,10 +210,6 @@ interface ConsultationMetrics {
   }>;
   byReviewType: Record<string, number>;
   byProtocol: Record<string, number>;
-  costByProject: Array<{
-    projectId: string;
-    totalCost: number;
-  }>;
 }
 
 function computeConsultationMetrics(days: number | undefined): ConsultationMetrics {
@@ -233,7 +217,6 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
   try {
     const filters = days ? { days } : {};
     const summary = db.summary(filters);
-    const projectCosts = db.costByProject(filters);
 
     // Derive costByModel from summary.byModel
     const costByModel: Record<string, number> = {};
@@ -274,11 +257,48 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
       })),
       byReviewType,
       byProtocol,
-      costByProject: projectCosts,
     };
   } finally {
     db.close();
   }
+}
+
+// =============================================================================
+// Project protocol breakdown (from status.yaml)
+// =============================================================================
+
+function normalizeProtocol(protocol: string): string {
+  // Legacy "spider" → "spir"
+  if (protocol === 'spider') return 'spir';
+  return protocol;
+}
+
+function computeProjectsByProtocol(workspaceRoot: string): Record<string, number> {
+  const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
+  const result: Record<string, number> = {};
+
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(projectsDir);
+  } catch {
+    return result; // No projects directory — return empty
+  }
+
+  for (const entry of entries) {
+    const statusPath = path.join(projectsDir, entry, 'status.yaml');
+    try {
+      const content = fs.readFileSync(statusPath, 'utf-8');
+      const parsed = yaml.load(content) as Record<string, unknown> | null;
+      if (parsed && typeof parsed.protocol === 'string') {
+        const proto = normalizeProtocol(parsed.protocol);
+        result[proto] = (result[proto] ?? 0) + 1;
+      }
+    } catch {
+      // Skip unreadable entries
+    }
+  }
+
+  return result;
 }
 
 // =============================================================================
@@ -324,11 +344,10 @@ export async function computeAnalytics(
     githubMetrics = {
       prsMerged: 0,
       avgTimeToMergeHours: null,
-      bugBacklog: 0,
-      nonBugBacklog: 0,
       issuesClosed: 0,
       avgTimeToCloseBugsHours: null,
       projectsCompleted: 0,
+      bugsFixed: 0,
     };
   }
 
@@ -348,26 +367,26 @@ export async function computeAnalytics(
       byModel: [],
       byReviewType: {},
       byProtocol: {},
-      costByProject: [],
     };
   }
 
+  // Protocol breakdown from local status.yaml files (supplementary source)
+  const projectsByProtocol = computeProjectsByProtocol(workspaceRoot);
+
   const result: AnalyticsResponse = {
     timeRange: rangeToLabel(range),
-    github: {
+    activity: {
       prsMerged: githubMetrics.prsMerged,
       avgTimeToMergeHours: githubMetrics.avgTimeToMergeHours,
-      bugBacklog: githubMetrics.bugBacklog,
-      nonBugBacklog: githubMetrics.nonBugBacklog,
       issuesClosed: githubMetrics.issuesClosed,
       avgTimeToCloseBugsHours: githubMetrics.avgTimeToCloseBugsHours,
-    },
-    builders: {
       projectsCompleted: githubMetrics.projectsCompleted,
+      bugsFixed: githubMetrics.bugsFixed,
       throughputPerWeek: weeks > 0
         ? Math.round((githubMetrics.projectsCompleted / weeks) * 10) / 10
         : 0,
       activeBuilders,
+      projectsByProtocol,
     },
     consultation: consultMetrics,
   };
