@@ -629,10 +629,7 @@
       renderFile();
       updateAnnotationsList();
       initPreviewToggle();
-      // Auto-show preview for HTML files
-      if (isHtmlFile) {
-        togglePreviewMode();
-      }
+      // HTML files start in annotate mode — user can press Preview to switch
     }
 
     // Initialize preview toggle for markdown files

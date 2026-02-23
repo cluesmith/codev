@@ -43,16 +43,14 @@ describe('HTML preview support (#536)', () => {
       expect(html).toContain('iframe.srcdoc = currentContent');
     });
 
-    it('should auto-show preview for HTML files on init', () => {
+    it('should NOT auto-show preview for HTML files (starts in annotate mode)', () => {
       const html = readFileSync(templatePath, 'utf-8');
-      // After init() sets up the file, it should auto-toggle preview for HTML
-      expect(html).toContain('if (isHtmlFile)');
-      // The togglePreviewMode call must appear inside init()
+      // init() should NOT auto-toggle preview for HTML — user triggers it manually
       const initFn = html.slice(
         html.indexOf('function init(content)'),
         html.indexOf('function initPreviewToggle()'),
       );
-      expect(initFn).toContain('togglePreviewMode()');
+      expect(initFn).not.toContain('togglePreviewMode()');
     });
 
     it('should enable preview toggle for HTML files', () => {
