@@ -103,14 +103,20 @@ Edit `af-config.json` at project root to customize shell commands.
 
 ## Pre-Spawn Checklist
 
-**Before `af spawn`, commit all local changes.** Builders work in git worktrees
-branched from HEAD — uncommitted files (specs, plans, codev updates) are invisible
-to the builder. The spawn command will refuse if the worktree is dirty (override
-with `--force`).
+**Before every `af spawn`:**
+
+1. **`git status`** — Check for uncommitted changes
+2. **Commit if dirty** — Builders branch from HEAD; uncommitted specs/plans are invisible
+3. **Include `--protocol`** — It is **REQUIRED** for all numbered spawns (e.g., `af spawn 42 --protocol spir`)
+
+The spawn command will refuse if the worktree is dirty (override with `--force`,
+but the builder won't see uncommitted files).
 
 ## Common Mistakes
 
+- **Forgetting `--protocol`** — `af spawn 42` fails; use `af spawn 42 --protocol spir` (or bugfix, tick, etc.)
 - **Spawning with uncommitted changes** — builder won't see specs, plans, or codev updates
+- **Running `git pull` after spawn failure** — Usually unnecessary; check `git status` first, commit, then retry
 - There is NO `codev tower` command — Tower is managed via `af tower`
 - There is NO `restart` subcommand — stop then start
 - There is NO `af start` for Tower — use `af tower start` or `af workspace start`

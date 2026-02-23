@@ -16,29 +16,41 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 | Mode | Command | Use When |
 |------|---------|----------|
-| **Strict** (default) | `af spawn XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn XXXX --soft` | AI follows protocol - you verify compliance |
+| **Strict** (default) | `af spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn XXXX --protocol spir --soft` | AI follows protocol - you verify compliance |
 
 **Strict mode** (default): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously without intervention.
 
 **Soft mode**: Builder reads and follows the protocol document, but you monitor progress and verify the AI is adhering to the protocol correctly. Use when you want more hands-on oversight.
+
+### Pre-Spawn Checklist
+
+**Before every `af spawn`, complete these steps:**
+
+1. **`git status`** — Ensure worktree is clean (no uncommitted changes)
+2. **Commit if needed** — Builders branch from HEAD; uncommitted specs/plans are invisible
+3. **`af spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, bugfix, tick, etc.)
+
+The spawn command will refuse if the worktree is dirty (override with `--force`, but your builder won't see uncommitted files).
 
 ## Key Tools
 
 ### Agent Farm CLI (`af`)
 
 ```bash
-af spawn 1                          # Strict mode (default) - porch-driven
-af spawn 1 -t "feature"             # Strict mode with title (no spec yet)
-af spawn 1 --resume                 # Resume existing porch state
-af spawn 1 --soft                   # Soft mode - protocol-guided
-af spawn --task "fix the bug"             # Ad-hoc task builder (soft mode)
-af spawn --worktree                       # Worktree with no initial prompt
-af status                                 # Check all builders
-af cleanup -p 0001                        # Remove completed builder
-af workspace start/stop                   # Workspace management
-af send 0001 "message"                    # Short message to builder
+af spawn 1 --protocol spir               # Strict mode (default) - porch-driven
+af spawn 1 --protocol spir -t "feature"  # Strict mode with title (no spec yet)
+af spawn 1 --resume                      # Resume existing porch state
+af spawn 1 --protocol spir --soft        # Soft mode - protocol-guided
+af spawn --task "fix the bug"            # Ad-hoc task builder (soft mode)
+af spawn --worktree                      # Worktree with no initial prompt
+af status                                # Check all builders
+af cleanup -p 0001                       # Remove completed builder
+af workspace start/stop                  # Workspace management
+af send 0001 "message"                   # Short message to builder
 ```
+
+> **Note:** `--protocol` is REQUIRED for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip it.
 
 **Note:** `af`, `consult`, `porch`, and `codev` are global commands. They work from any directory.
 
@@ -79,16 +91,20 @@ wait
 
 ```bash
 # 1. Create a GitHub Issue for the feature
-# 2. Spawn the builder
+# 2. Ensure worktree is clean: git status → commit if needed
+# 3. Spawn the builder (--protocol is REQUIRED)
 
 # Default: Strict mode (porch-driven with gates)
-af spawn 42
+af spawn 42 --protocol spir
 
 # With project title (if no spec exists yet)
-af spawn 42 -t "user-authentication"
+af spawn 42 --protocol spir -t "user-authentication"
 
 # Or: Soft mode (builder follows protocol independently)
-af spawn 42 --soft
+af spawn 42 --protocol spir --soft
+
+# For bugfixes
+af spawn 42 --protocol bugfix
 ```
 
 ### 2. Approving Gates (Strict Mode Only)
@@ -266,8 +282,9 @@ Before approving implementations with UX requirements:
 
 | Task | Command |
 |------|---------|
-| Start feature (strict, default) | `af spawn <id>` |
-| Start feature (soft) | `af spawn <id> --soft` |
+| Start feature (strict, default) | `af spawn <id> --protocol spir` |
+| Start feature (soft) | `af spawn <id> --protocol spir --soft` |
+| Start bugfix | `af spawn <id> --protocol bugfix` |
 | Check all builders | `af status` |
 | Check one project | `porch status <id>` |
 | Approve spec | `porch approve <id> spec-approval` |
