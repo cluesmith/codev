@@ -177,14 +177,17 @@ export function App() {
   // Desktop: architect terminal on left, tabbed content on right
   const architectTab = tabs.find(t => t.type === 'architect');
 
-  // Bugfix #522: Collapse/expand buttons consolidated into architect toolbar
+  // Bugfix #522: Collapse/expand buttons consolidated into architect toolbar.
+  // Uses onPointerDown+preventDefault to avoid stealing xterm focus on clicks,
+  // with onClick for keyboard activation (Enter/Space). No tabIndex={-1} so
+  // buttons remain keyboard-reachable (CMAP review feedback).
   const architectToolbarExtra = (
     <>
       {collapsedPane !== 'left' ? (
         <button
           className="terminal-control-btn"
-          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane('left'); }}
-          tabIndex={-1}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => setCollapsedPane('left')}
           title="Collapse architect panel"
           aria-label="Collapse architect panel"
         >
@@ -196,8 +199,8 @@ export function App() {
       ) : (
         <button
           className="terminal-control-btn"
-          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane(null); }}
-          tabIndex={-1}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => setCollapsedPane(null)}
           title="Expand architect panel"
           aria-label="Expand architect panel"
         >
@@ -210,8 +213,8 @@ export function App() {
       {collapsedPane !== 'right' ? (
         <button
           className="terminal-control-btn"
-          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane('right'); }}
-          tabIndex={-1}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => setCollapsedPane('right')}
           title="Collapse work panel"
           aria-label="Collapse work panel"
         >
@@ -223,8 +226,8 @@ export function App() {
       ) : (
         <button
           className="terminal-control-btn"
-          onPointerDown={(e) => { e.preventDefault(); setCollapsedPane(null); }}
-          tabIndex={-1}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => setCollapsedPane(null)}
           title="Expand work panel"
           aria-label="Expand work panel"
         >
