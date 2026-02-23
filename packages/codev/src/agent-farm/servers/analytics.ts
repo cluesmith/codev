@@ -2,23 +2,20 @@
  * Analytics aggregation service for the dashboard Analytics tab.
  *
  * Aggregates data from three sources:
- * - GitHub CLI (merged PRs, closed issues)
+ * - GitHub CLI (merged PRs, closed issues, protocol breakdown from branch names)
  * - Consultation metrics DB (~/.codev/metrics.db)
- * - Local project artifacts (codev/projects/ status.yaml for protocol breakdown)
  * - Active builder count (passed in from tower context)
  *
  * Each data source fails independently — partial results are returned
  * with error messages in the `errors` field.
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as yaml from 'js-yaml';
 import {
   fetchMergedPRs,
   fetchClosedIssues,
   parseAllLinkedIssues,
 } from '../../lib/github.js';
+import type { MergedPR } from '../../lib/github.js';
 import { MetricsDB } from '../../commands/consult/metrics.js';
 
 // =============================================================================
@@ -132,6 +129,7 @@ interface GitHubMetrics {
   avgTimeToCloseBugsHours: number | null;
   projectsCompleted: number;
   bugsFixed: number;
+  mergedPRList: MergedPR[];
 }
 
 async function computeGitHubMetrics(
@@ -188,6 +186,7 @@ async function computeGitHubMetrics(
     avgTimeToCloseBugsHours,
     projectsCompleted,
     bugsFixed,
+    mergedPRList: prs,
   };
 }
 
@@ -264,40 +263,37 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
 }
 
 // =============================================================================
-// Project protocol breakdown (from status.yaml)
+// Project protocol breakdown (from PR branch names)
 // =============================================================================
 
-function normalizeProtocol(protocol: string): string {
-  // Legacy "spider" → "spir"
-  if (protocol === 'spider') return 'spir';
-  return protocol;
+/**
+ * Known branch-name prefixes that map to protocols.
+ * Checked in order; first match wins.
+ */
+const BRANCH_PROTOCOL_PATTERNS: Array<{ pattern: RegExp; protocol: string }> = [
+  { pattern: /^builder\/bugfix-/,  protocol: 'bugfix' },
+  { pattern: /^builder\/spir-/,    protocol: 'spir' },
+  { pattern: /^spir\//,            protocol: 'spir' },
+  { pattern: /^builder\/aspir-/,   protocol: 'aspir' },
+  { pattern: /^builder\/air-/,     protocol: 'air' },
+  { pattern: /^builder\/tick-/,    protocol: 'tick' },
+];
+
+export function protocolFromBranch(branch: string): string | null {
+  for (const { pattern, protocol } of BRANCH_PROTOCOL_PATTERNS) {
+    if (pattern.test(branch)) return protocol;
+  }
+  return null;
 }
 
-function computeProjectsByProtocol(workspaceRoot: string): Record<string, number> {
-  const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
+function computeProjectsByProtocol(mergedPRs: MergedPR[]): Record<string, number> {
   const result: Record<string, number> = {};
-
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(projectsDir);
-  } catch {
-    return result; // No projects directory — return empty
-  }
-
-  for (const entry of entries) {
-    const statusPath = path.join(projectsDir, entry, 'status.yaml');
-    try {
-      const content = fs.readFileSync(statusPath, 'utf-8');
-      const parsed = yaml.load(content) as Record<string, unknown> | null;
-      if (parsed && typeof parsed.protocol === 'string') {
-        const proto = normalizeProtocol(parsed.protocol);
-        result[proto] = (result[proto] ?? 0) + 1;
-      }
-    } catch {
-      // Skip unreadable entries
+  for (const pr of mergedPRs) {
+    const protocol = protocolFromBranch(pr.headRefName ?? '');
+    if (protocol) {
+      result[protocol] = (result[protocol] ?? 0) + 1;
     }
   }
-
   return result;
 }
 
@@ -348,6 +344,7 @@ export async function computeAnalytics(
       avgTimeToCloseBugsHours: null,
       projectsCompleted: 0,
       bugsFixed: 0,
+      mergedPRList: [],
     };
   }
 
@@ -370,8 +367,8 @@ export async function computeAnalytics(
     };
   }
 
-  // Protocol breakdown from local status.yaml files (supplementary source)
-  const projectsByProtocol = computeProjectsByProtocol(workspaceRoot);
+  // Protocol breakdown derived from PR branch names (respects time range)
+  const projectsByProtocol = computeProjectsByProtocol(githubMetrics.mergedPRList);
 
   const result: AnalyticsResponse = {
     timeRange: rangeToLabel(range),
