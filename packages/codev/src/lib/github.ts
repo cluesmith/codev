@@ -174,6 +174,7 @@ export interface MergedPR {
   createdAt: string;
   mergedAt: string;
   body: string;
+  headRefName: string;
 }
 
 export interface ClosedIssue {
@@ -194,7 +195,7 @@ export async function fetchMergedPRs(since: string | null, cwd?: string): Promis
     const args = [
       'pr', 'list',
       '--state', 'merged',
-      '--json', 'number,title,createdAt,mergedAt,body',
+      '--json', 'number,title,createdAt,mergedAt,body,headRefName',
       '--limit', '1000',
     ];
     if (since) {

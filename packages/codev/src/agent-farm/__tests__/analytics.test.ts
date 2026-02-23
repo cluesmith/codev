@@ -1,8 +1,9 @@
 /**
- * Unit tests for the analytics service (Bugfix #531).
+ * Unit tests for the analytics service.
  *
- * Tests computeAnalytics() with mocked GitHub CLI, MetricsDB, and filesystem.
+ * Tests computeAnalytics() with mocked GitHub CLI and MetricsDB.
  * Tests fetchMergedPRs/fetchClosedIssues via child_process mock.
+ * Tests protocolFromBranch for branch-name-based protocol derivation.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,8 +15,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const execFileMock = vi.hoisted(() => vi.fn());
 const mockSummary = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn());
-const mockReaddirSync = vi.hoisted(() => vi.fn());
-const mockReadFileSync = vi.hoisted(() => vi.fn());
 
 // Mock child_process + util (for GitHub CLI calls in github.ts)
 vi.mock('node:child_process', () => ({
@@ -33,22 +32,12 @@ vi.mock('../../commands/consult/metrics.js', () => ({
   },
 }));
 
-// Mock fs for status.yaml reading
-vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
-  return {
-    ...actual,
-    readdirSync: mockReaddirSync,
-    readFileSync: mockReadFileSync,
-  };
-});
-
 // ---------------------------------------------------------------------------
 // Static imports (resolved after mocks are hoisted)
 // ---------------------------------------------------------------------------
 
 import { fetchMergedPRs, fetchClosedIssues } from '../../lib/github.js';
-import { computeAnalytics, clearAnalyticsCache } from '../servers/analytics.js';
+import { computeAnalytics, clearAnalyticsCache, protocolFromBranch } from '../servers/analytics.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,17 +81,6 @@ function defaultSummary() {
   };
 }
 
-function mockStatusYaml(entries: Array<{ dir: string; protocol: string; phase: string }>) {
-  mockReaddirSync.mockReturnValue(entries.map(e => e.dir));
-  mockReadFileSync.mockImplementation((filePath: string) => {
-    const entry = entries.find(e => (filePath as string).includes(e.dir));
-    if (entry) {
-      return `id: ${entry.dir}\ntitle: test\nprotocol: ${entry.protocol}\nphase: ${entry.phase}\n`;
-    }
-    throw new Error('ENOENT');
-  });
-}
-
 // ---------------------------------------------------------------------------
 // fetchMergedPRs
 // ---------------------------------------------------------------------------
@@ -132,6 +110,17 @@ describe('fetchMergedPRs', () => {
       expect.arrayContaining(['--search', 'merged:>=2026-02-14']),
       expect.objectContaining({ cwd: '/tmp' }),
     );
+  });
+
+  it('requests headRefName in JSON fields', async () => {
+    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
+
+    await fetchMergedPRs(null, '/tmp');
+
+    const args = execFileMock.mock.calls[0][1] as string[];
+    const jsonIdx = args.indexOf('--json');
+    expect(jsonIdx).toBeGreaterThan(-1);
+    expect(args[jsonIdx + 1]).toContain('headRefName');
   });
 
   it('omits --search when since is null', async () => {
@@ -211,24 +200,19 @@ describe('computeAnalytics', () => {
     clearAnalyticsCache();
     vi.clearAllMocks();
     mockSummary.mockReturnValue(defaultSummary());
-    mockStatusYaml([]);
   });
 
   it('assembles full statistics from all data sources', async () => {
     mockGhOutput({
       mergedPRs: JSON.stringify([
-        { number: 1, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T12:00:00Z', body: 'Closes #42' },
-        { number: 2, title: '[Spec 73] Other', createdAt: '2026-02-12T00:00:00Z', mergedAt: '2026-02-13T00:00:00Z', body: '' },
+        { number: 1, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T12:00:00Z', body: 'Closes #42', headRefName: 'builder/spir-42-feature' },
+        { number: 2, title: '[Spec 73] Other', createdAt: '2026-02-12T00:00:00Z', mergedAt: '2026-02-13T00:00:00Z', body: '', headRefName: 'builder/aspir-73-other' },
       ]),
       closedIssues: JSON.stringify([
         { number: 42, title: 'Bug fix', createdAt: '2026-02-08T00:00:00Z', closedAt: '2026-02-11T12:00:00Z', labels: [{ name: 'bug' }] },
         { number: 50, title: 'Feature', createdAt: '2026-02-09T00:00:00Z', closedAt: '2026-02-12T00:00:00Z', labels: [] },
       ]),
     });
-    mockStatusYaml([
-      { dir: '0042-feature', protocol: 'spir', phase: 'complete' },
-      { dir: '0073-other', protocol: 'aspir', phase: 'complete' },
-    ]);
 
     const result = await computeAnalytics('/tmp/workspace', '7', 3);
 
@@ -456,16 +440,18 @@ describe('computeAnalytics', () => {
     expect(result.consultation.costByModel).toEqual({ codex: 3.50 });
   });
 
-  // --- Protocol breakdown from status.yaml ---
+  // --- Protocol breakdown from PR branch names (#538) ---
 
-  it('counts projects by protocol from status.yaml', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    mockStatusYaml([
-      { dir: '0042-feature', protocol: 'spir', phase: 'complete' },
-      { dir: '0073-other', protocol: 'spir', phase: 'review' },
-      { dir: '0080-air', protocol: 'air', phase: 'implement' },
-      { dir: 'bugfix-100', protocol: 'bugfix', phase: 'complete' },
-    ]);
+  it('derives protocol counts from PR branch names', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/spir-42-feature' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #43', headRefName: 'builder/spir-43-other' },
+        { number: 3, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #80', headRefName: 'builder/air-80-small-feature' },
+        { number: 4, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #100', headRefName: 'builder/bugfix-100-broken-thing' },
+      ]),
+      closedIssues: '[]',
+    });
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.activity.projectsByProtocol).toEqual({
@@ -475,20 +461,34 @@ describe('computeAnalytics', () => {
     });
   });
 
-  it('normalizes spider to spir in protocol breakdown', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    mockStatusYaml([
-      { dir: '0087-old', protocol: 'spider', phase: 'complete' },
-      { dir: '0088-new', protocol: 'spir', phase: 'complete' },
-    ]);
+  it('ignores PRs with unrecognized branch names', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #10', headRefName: 'builder/bugfix-10-fix' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #20', headRefName: 'feature/random-branch' },
+        { number: 3, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #30', headRefName: 'main' },
+      ]),
+      closedIssues: '[]',
+    });
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsByProtocol).toEqual({ spir: 2 });
+    expect(result.activity.projectsByProtocol).toEqual({ bugfix: 1 });
   });
 
-  it('returns empty projectsByProtocol when no projects directory', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    mockReaddirSync.mockImplementation(() => { throw new Error('ENOENT'); });
+  it('returns empty projectsByProtocol when no PRs have protocol branches', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: '', headRefName: 'feature/unrelated' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    expect(result.activity.projectsByProtocol).toEqual({});
+  });
+
+  it('returns empty projectsByProtocol when GitHub fails', async () => {
+    execFileMock.mockRejectedValue(new Error('gh not found'));
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.activity.projectsByProtocol).toEqual({});
@@ -553,5 +553,32 @@ describe('computeAnalytics', () => {
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.activity.throughputPerWeek).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// protocolFromBranch (unit tests for branch → protocol mapping)
+// ---------------------------------------------------------------------------
+
+describe('protocolFromBranch', () => {
+  it.each([
+    ['builder/bugfix-538-analytics-fix', 'bugfix'],
+    ['builder/spir-42-feature-name', 'spir'],
+    ['spir/42-feature-name/phase', 'spir'],
+    ['builder/aspir-73-other', 'aspir'],
+    ['builder/air-80-small-feature', 'air'],
+    ['builder/tick-90-amendment', 'tick'],
+  ])('maps "%s" to "%s"', (branch, expected) => {
+    expect(protocolFromBranch(branch)).toBe(expected);
+  });
+
+  it.each([
+    'feature/random-branch',
+    'main',
+    'develop',
+    'bugfix-without-builder-prefix',
+    '',
+  ])('returns null for unrecognized branch "%s"', (branch) => {
+    expect(protocolFromBranch(branch)).toBeNull();
   });
 });
