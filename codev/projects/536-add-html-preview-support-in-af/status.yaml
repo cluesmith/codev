@@ -1,0 +1,14 @@
+id: '536'
+title: add-html-preview-support-in-af
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-23T19:29:32.300Z'
+updated_at: '2026-02-23T19:38:19.216Z'

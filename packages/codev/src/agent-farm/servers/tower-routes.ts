@@ -1971,6 +1971,7 @@ function handleWorkspaceAnnotate(
   const is3D = ['stl', '3mf'].includes(ext);
   const isPdf = ext === 'pdf';
   const isMarkdown = ext === 'md';
+  const isHtml = ['html', 'htm'].includes(ext);
 
   // Sub-route: GET /file — re-read file content from disk
   if (req.method === 'GET' && subRoute === 'file') {
@@ -2090,6 +2091,7 @@ function handleWorkspaceAnnotate(
         html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
         html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
         html = html.replace(/\{\{IS_PDF\}\}/g, String(isPdf));
+        html = html.replace(/\{\{IS_HTML\}\}/g, String(isHtml));
         html = html.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
 
         // Inject initialization script (template loads content via fetch)
