@@ -115,15 +115,16 @@ For each check the phase requests:
 3. If no override → use protocol default unchanged
 
 **Modified `getPhaseCompletionChecks()` in `protocol.ts`:**
-Same pattern — accept optional overrides, apply command/skip substitution to the `phase_completion` check map.
+Same pattern — accept optional overrides, apply command/skip substitution to the `phase_completion` check map. Note: `phase_completion` checks are currently simple string predicates (e.g., `"build_succeeds": "npm run build 2>&1"`), not `CheckDef` objects. The merging logic must wrap these strings into a compatible shape before applying `command`/`skip` overrides. Skipping a `phase_completion` check removes that condition from the gating — the phase can complete without it passing (it does NOT auto-pass).
 
 #### Acceptance Criteria
 - [ ] Passing no overrides produces identical behavior to current code
 - [ ] Override `command` replaces the protocol command
 - [ ] Override `cwd` replaces the protocol cwd
 - [ ] `skip: true` removes the check from the result
-- [ ] Unknown check names in overrides are silently ignored
-- [ ] `phase_completion` checks are also overridable
+- [ ] Unknown check names in overrides emit a `chalk.yellow` warning (not silently ignored)
+- [ ] `phase_completion` checks are also overridable (string predicates wrapped for override compatibility)
+- [ ] Skipping a `phase_completion` check removes the condition from gating
 
 #### Test Plan
 - **Unit Tests**: getPhaseChecks with mock protocol + various override combinations
@@ -202,8 +203,10 @@ Revert the 4 call sites to not load/pass overrides. The Phase 2 changes remain s
 
 **Test coverage targets:**
 - Config loading: no file, empty, valid, malformed, missing porch key
-- Override merging: command, cwd, skip, no-op, unknown name, phase_completion
+- Override merging: command, cwd, skip, no-op, unknown name, phase_completion string wrapping
+- Mixed scenarios: skip + command override + defaults coexisting in a single phase
 - Integration: end-to-end check execution with overridden commands
+- Multi-protocol: test against both SPIR and TICK protocols (different check structures)
 - Backward compat: all existing tests pass unchanged
 
 **Documentation additions:**
@@ -255,6 +258,7 @@ Linear dependency chain. Each phase produces a working, testable increment.
 | Import cycle porch → agent-farm | Low | High | Self-contained config reader in porch | Builder |
 | Check name instability across versions | Low | Medium | Document stable names, warn on unknown | Builder |
 | Silent skip of critical checks | Low | High | Mandatory yellow log on skip | Builder |
+| phase_completion string predicate mismatch | Medium | Medium | Wrap strings into CheckDef shape before override merge | Builder |
 
 ## Validation Checkpoints
 1. **After Phase 1**: Config loads correctly, types compile, no import cycles
@@ -269,16 +273,23 @@ Linear dependency chain. Each phase produces a working, testable increment.
 
 ## Expert Review
 **Date**: 2026-02-23
-**Model**: Gemini 3 Pro (via Pal MCP planner)
+**Models**: GPT-5.1 Codex (FOR, 8/10), O3 (NEUTRAL, 8/10) via Pal MCP consensus
 **Key Feedback**:
 - Confirmed self-contained config reader approach avoids import cycles
-- Recommended flat override structure (check name keyed) over nested (phase → check)
-- Emphasized logging requirement — silent overrides are dangerous
-- Suggested testing against multiple protocol types (SPIR, TICK) since they have different check structures
+- Confirmed flat override structure (check name keyed) over nested (phase → check)
+- `phase_completion` checks are string predicates, not CheckDef objects — need wrapping logic for override compatibility
+- Unknown check names should emit a yellow warning, not be silently ignored (catches typos)
+- Skipping a `phase_completion` check needs explicit semantics: condition removed from gating, not auto-pass
+- Integration tests must cover mixed scenarios (skip + command + default coexisting)
+- Test against multiple protocol types (SPIR, TICK) since they have different check structures
+- Flat override map assumes global check-name uniqueness — document this constraint
+- Self-contained reader acceptable short-term; shared util can consolidate later
 
 **Plan Adjustments**:
-- Added explicit logging requirements in Phase 3 with chalk.yellow
-- Added TICK protocol to test matrix in Phase 4
+- Phase 2: Changed unknown check names from "silently ignored" to "emit chalk.yellow warning"
+- Phase 2: Added phase_completion string-to-CheckDef wrapping requirement
+- Phase 2: Added skip semantics for phase_completion (condition removed, not auto-pass)
+- Phase 4: Added mixed override test scenarios and multi-protocol test matrix
 - Confirmed linear phase dependency is appropriate for this scope
 
 ## Approval
