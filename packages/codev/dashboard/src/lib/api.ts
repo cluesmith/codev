@@ -152,10 +152,9 @@ export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
   activity: {
     prsMerged: number;
-    avgTimeToMergeHours: number | null;
+    medianTimeToMergeHours: number | null;
     issuesClosed: number;
-    avgTimeToCloseBugsHours: number | null;
-    activeBuilders: number;
+    medianTimeToCloseBugsHours: number | null;
     projectsByProtocol: Record<string, ProtocolStats>;
   };
   consultation: {

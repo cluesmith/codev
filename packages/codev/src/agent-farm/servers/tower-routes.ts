@@ -719,18 +719,13 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ timeRange: rangeLabel, activity: { prsMerged: 0, avgTimeToMergeHours: null, issuesClosed: 0, avgTimeToCloseBugsHours: null, activeBuilders: 0, projectsByProtocol: {} }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {} } }));
+    res.end(JSON.stringify({ timeRange: rangeLabel, activity: { prsMerged: 0, medianTimeToMergeHours: null, issuesClosed: 0, medianTimeToCloseBugsHours: null, projectsByProtocol: {} }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {} } }));
     return;
   }
   const range = rangeParam as '1' | '7' | '30' | 'all';
   const refresh = url.searchParams.get('refresh') === '1';
 
-  // Get active builder count from workspace terminals
-  const wsTerminals = getWorkspaceTerminals();
-  const entry = wsTerminals.get(normalizeWorkspacePath(workspaceRoot));
-  const activeBuilders = entry?.builders.size ?? 0;
-
-  const data = await computeAnalytics(workspaceRoot, range, activeBuilders, refresh);
+  const data = await computeAnalytics(workspaceRoot, range, refresh);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }

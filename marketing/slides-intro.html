@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codev — Demo Intro</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Source Sans 3', sans-serif;
+    background: #1a1a1a;
+    color: #e4e4e7;
+    overflow: hidden;
+  }
+
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 80px 100px;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .slide.active { display: flex; }
+
+  /* ─── Title logo (large, on title slide only) ─── */
+  .logo-title {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 64px;
+  }
+  .logo-title img { width: 88px; height: 88px; }
+  .logo-title span {
+    font-size: 52px;
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    color: #e4e4e7;
+  }
+
+  /* ─── Footer logo (every slide, bottom-right) ─── */
+  .footer-logo {
+    position: fixed;
+    bottom: 32px;
+    right: 40px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .footer-logo img { width: 32px; height: 32px; opacity: 0.5; }
+  .footer-logo span {
+    font-size: 20px;
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    color: #52525b;
+  }
+
+  /* ─── Typography ─── */
+  h1 {
+    font-size: 80px;
+    font-weight: 900;
+    line-height: 1.05;
+    margin-bottom: 40px;
+    color: #fafafa;
+  }
+  h1 .accent { color: #818cf8; }
+
+  h2 {
+    font-size: 64px;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 48px;
+    color: #fafafa;
+  }
+  h2 .accent { color: #818cf8; }
+
+  .subtitle {
+    font-size: 36px;
+    font-weight: 300;
+    color: #a1a1aa;
+    line-height: 1.5;
+    max-width: 960px;
+  }
+
+  .byline {
+    font-size: 28px;
+    font-weight: 400;
+    color: #71717a;
+    margin-top: 64px;
+  }
+  .byline strong { color: #e4e4e7; font-weight: 600; }
+
+  /* ─── Bullet lists ─── */
+  .bullets {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  .bullets li {
+    font-size: 36px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: #d4d4d8;
+    padding-left: 40px;
+    position: relative;
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 16px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #818cf8;
+  }
+  .bullets li strong { color: #fafafa; }
+
+  /* ─── Stat callout ─── */
+  .stat {
+    font-size: 80px;
+    font-weight: 700;
+    color: #818cf8;
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+  .stat-label {
+    font-size: 26px;
+    color: #71717a;
+    font-weight: 400;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 48px;
+    margin-top: 56px;
+  }
+
+  /* ─── Navigation ─── */
+  .slide-counter {
+    position: fixed;
+    bottom: 32px;
+    left: 40px;
+    font-size: 14px;
+    color: #333;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     SLIDE 1: Title
+     ═══════════════════════════════════════════ -->
+<div class="slide active" id="slide-1">
+  <div class="logo-title">
+    <img src="logo-transparent.png" alt="codev">
+    <span>codev</span>
+  </div>
+
+  <h1>Productive Human-AI Co-development<br>on Large Codebases: <span class="accent">Demo</span></h1>
+
+  <p class="byline"><strong>Waleed Kadous</strong></p>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SLIDE 2: The Problem
+     ═══════════════════════════════════════════ -->
+<div class="slide" id="slide-2">
+  <h2>Vibe coding is not <span class="accent">production</span> coding</h2>
+
+  <ul class="bullets">
+    <li>We've all seen the demos — "build me an app" in minutes</li>
+    <li><strong>Production is different</strong> — tests, review, deployment, docs, maintenance</li>
+    <li>Real codebases are 10K-100K+ lines. Context windows run out.</li>
+    <li><strong>Codev</strong> is a Human-AI development OS built for this reality</li>
+  </ul>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SLIDE 3: Results
+     ═══════════════════════════════════════════ -->
+<div class="slide" id="slide-3">
+  <h2>We used Codev to build <span class="accent">Codev</span></h2>
+
+  <p class="subtitle" style="margin-bottom: 40px;">~80K lines of TypeScript. 289 source files. 14 days.</p>
+
+  <ul class="bullets">
+    <li><strong>106 PRs merged in 14 days</strong> — 85% fully autonomous</li>
+    <li><strong>20 bugs caught before merge</strong> — including 1 security-critical</li>
+    <li><strong>26 features shipped</strong> — from session management to workspace orchestration</li>
+    <li>Throughput of <strong>3-4 elite engineers</strong> (vs LinearB 2026 benchmarks, 8.1M PRs)</li>
+    <li>With everything you'd expect: <strong>testing, PRs, architecture overview, design docs</strong></li>
+  </ul>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SLIDE 4: Let me show you
+     ═══════════════════════════════════════════ -->
+<div class="slide" id="slide-4">
+  <div class="logo-title">
+    <img src="logo-transparent.png" alt="codev">
+    <span>codev</span>
+  </div>
+
+  <h1>Let me show you</h1>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<div class="footer-logo">
+  <img src="logo-transparent.png" alt="codev">
+  <span>codev</span>
+</div>
+<div class="slide-counter">1 / 4</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const counter = document.querySelector('.slide-counter');
+  let current = 0;
+
+  function show(i) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(i, slides.length - 1));
+    slides[current].classList.add('active');
+    counter.textContent = `${current + 1} / ${slides.length}`;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') show(current + 1);
+    if (e.key === 'ArrowLeft') show(current - 1);
+  });
+
+  document.addEventListener('click', e => {
+    if (e.clientX > window.innerWidth / 2) show(current + 1);
+    else show(current - 1);
+  });
+</script>
+
+</body>
+</html>

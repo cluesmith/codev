@@ -27,10 +27,9 @@ function makeStats(overrides: Partial<AnalyticsResponse> = {}): AnalyticsRespons
     timeRange: '7d',
     activity: {
       prsMerged: 12,
-      avgTimeToMergeHours: 3.5,
+      medianTimeToMergeHours: 3.5,
       issuesClosed: 6,
-      avgTimeToCloseBugsHours: 1.2,
-      activeBuilders: 2,
+      medianTimeToCloseBugsHours: 1.2,
       projectsByProtocol: {
         spir: { count: 3, avgWallClockHours: 48.2 },
         bugfix: { count: 2, avgWallClockHours: 1.5 },
@@ -240,10 +239,9 @@ describe('AnalyticsView', () => {
     const stats = makeStats({
       activity: {
         prsMerged: 3,
-        avgTimeToMergeHours: null,
+        medianTimeToMergeHours: null,
         issuesClosed: 0,
-        avgTimeToCloseBugsHours: null,
-        activeBuilders: 0,
+        medianTimeToCloseBugsHours: null,
         projectsByProtocol: {},
       },
     });
