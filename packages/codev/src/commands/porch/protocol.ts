@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides } from './types.js';
 
 /** Known protocol locations (relative to project root) */
 const PROTOCOL_PATHS = [
@@ -132,12 +132,24 @@ function normalizeProtocol(json: unknown): Protocol {
     }
   }
 
+  // Extract phase_completion checks (string predicates)
+  let phase_completion: Record<string, string> | undefined;
+  if (obj.phase_completion && typeof obj.phase_completion === 'object') {
+    phase_completion = {};
+    for (const [name, val] of Object.entries(obj.phase_completion as Record<string, unknown>)) {
+      if (typeof val === 'string') {
+        phase_completion[name] = val;
+      }
+    }
+  }
+
   return {
     name: obj.name as string,
     version: obj.version as string | undefined,
     description: obj.description as string | undefined,
     phases,
     checks,
+    phase_completion,
   };
 }
 
@@ -245,18 +257,55 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
 }
 
 /**
- * Get check definitions for a phase
+ * Get check definitions for a phase, optionally merging in af-config.json overrides.
+ *
+ * Override semantics (applied per check name):
+ *   - skip: true   → check is omitted from the result
+ *   - command set  → replaces the protocol's command
+ *   - cwd set      → replaces the protocol's cwd
+ *
+ * Unknown override names (not found in this phase's check list) are warned
+ * via a chalk.yellow log line. All existing call sites that pass no overrides
+ * continue to work unchanged.
  */
-export function getPhaseChecks(protocol: Protocol, phaseId: string): Record<string, CheckDef> {
+export function getPhaseChecks(
+  protocol: Protocol,
+  phaseId: string,
+  overrides?: CheckOverrides
+): Record<string, CheckDef> {
   const phase = getPhaseConfig(protocol, phaseId);
   if (!phase || !phase.checks) {
     return {};
   }
 
+  // Warn about override keys that don't match any check in this phase
+  if (overrides) {
+    const knownNames = new Set(phase.checks);
+    for (const name of Object.keys(overrides)) {
+      if (!knownNames.has(name)) {
+        // Dynamically import chalk to avoid adding a hard dep at module level
+        // We use process.stderr directly to avoid async complications here.
+        process.stderr.write(
+          `\x1b[33m  ⚠ Unknown check override "${name}" (not in phase "${phaseId}" checks)\x1b[0m\n`
+        );
+      }
+    }
+  }
+
   const result: Record<string, CheckDef> = {};
   for (const checkName of phase.checks) {
-    if (protocol.checks?.[checkName]) {
-      result[checkName] = protocol.checks[checkName];
+    const base = protocol.checks?.[checkName];
+    if (!base) continue;
+
+    const override = overrides?.[checkName];
+    if (override) {
+      if (override.skip) continue; // Omit this check
+      result[checkName] = {
+        command: override.command ?? base.command,
+        cwd: override.cwd ?? base.cwd,
+      };
+    } else {
+      result[checkName] = base;
     }
   }
   return result;
@@ -279,10 +328,33 @@ export function isPhased(protocol: Protocol, phaseId: string): boolean {
 }
 
 /**
- * Get checks to run when a plan phase completes (after evaluate stage)
+ * Get checks to run when a plan phase completes (after evaluate stage).
+ *
+ * Accepts optional overrides from af-config.json:
+ *   - skip: true   → condition removed from gating (does NOT auto-pass)
+ *   - command set  → replaces the protocol's command string
+ *
+ * Note: phase_completion checks are simple string predicates, not CheckDef
+ * objects. Skipping one removes that gating condition entirely.
  */
-export function getPhaseCompletionChecks(protocol: Protocol): Record<string, string> {
-  return protocol.phase_completion ?? {};
+export function getPhaseCompletionChecks(
+  protocol: Protocol,
+  overrides?: CheckOverrides
+): Record<string, string> {
+  const base = protocol.phase_completion ?? {};
+  if (!overrides) return base;
+
+  const result: Record<string, string> = {};
+  for (const [name, command] of Object.entries(base)) {
+    const override = overrides[name];
+    if (override?.skip) continue; // Remove this gating condition
+    if (override?.command) {
+      result[name] = override.command;
+    } else {
+      result[name] = command;
+    }
+  }
+  return result;
 }
 
 /**
