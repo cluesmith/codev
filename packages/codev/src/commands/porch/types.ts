@@ -59,6 +59,19 @@ export interface CheckDef {
 }
 
 /**
+ * Per-check override from af-config.json porch.checks section.
+ * Any or all fields may be specified; absent fields use the protocol default.
+ */
+export interface CheckOverride {
+  command?: string;    // Replace the protocol's check command
+  cwd?: string;        // Replace the protocol's working directory
+  skip?: boolean;      // Omit this check entirely when true
+}
+
+/** Map of check name → override, from af-config.json `porch.checks` */
+export type CheckOverrides = Record<string, CheckOverride>;
+
+/**
  * Protocol definition (loaded from protocol.json)
  */
 export interface Protocol {

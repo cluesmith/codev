@@ -606,6 +606,82 @@ Customize commands via `af-config.json` (project root):
 }
 ```
 
+### Language-Agnostic Porch Checks
+
+By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `af-config.json`:
+
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "cargo build" },
+      "tests": { "command": "cargo test" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+**Override fields:**
+- `command` — Replace the protocol's check command with a custom shell command
+- `cwd` — Override the working directory for this check (relative to project root)
+- `skip: true` — Omit this check entirely (for checks that don't apply to your project)
+
+Porch logs a visible warning for each overridden or skipped check so the change is always visible.
+
+**Examples by language stack:**
+
+Python (uv + pytest):
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "uv run pytest --co -q" },
+      "tests": { "command": "uv run pytest" },
+      "build_succeeds": { "command": "uv run pytest --co -q 2>&1" },
+      "tests_pass": { "command": "uv run pytest 2>&1" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+Rust (cargo):
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "cargo build" },
+      "tests": { "command": "cargo test" },
+      "build_succeeds": { "command": "cargo build 2>&1" },
+      "tests_pass": { "command": "cargo test 2>&1" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+Go:
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "go build ./..." },
+      "tests": { "command": "go test ./..." },
+      "build_succeeds": { "command": "go build ./... 2>&1" },
+      "tests_pass": { "command": "go test ./... 2>&1" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+**Notes:**
+- Check names must match exactly the names defined in the protocol's `checks` section (e.g., `build`, `tests`, `e2e_tests`, `build_succeeds`, `tests_pass`)
+- Unknown check names in the override emit a yellow warning (typo detection)
+- Overrides in `af-config.json` survive `codev update` — they are not in `protocol.json`
+- Skipping a `phase_completion` check (e.g., `build_succeeds`, `tests_pass`) removes that gating condition; it does NOT auto-pass
+
 Or override via CLI flags:
 
 ```bash

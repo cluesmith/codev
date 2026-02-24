@@ -45,6 +45,7 @@ import {
   allChecksPassed,
   type CheckEnv,
 } from './checks.js';
+import { loadCheckOverrides } from './config.js';
 
 // ============================================================================
 // Output Helpers
@@ -57,6 +58,35 @@ function header(text: string): string {
 
 function section(title: string, content: string): string {
   return `\n${chalk.bold(title)}:\n${content}`;
+}
+
+/**
+ * Log override/skip notices before running checks.
+ * Only emits output when overrides are actually in use.
+ * @param phaseCheckNames - original check names from the protocol phase
+ * @param resolvedChecks - checks after applying overrides (skipped ones absent)
+ * @param overrides - raw override map from af-config.json (null if not configured)
+ */
+function logCheckOverrides(
+  phaseCheckNames: string[],
+  resolvedChecks: Record<string, import('./types.js').CheckDef>,
+  overrides: import('./types.js').CheckOverrides | null
+): void {
+  if (!overrides) return;
+
+  for (const name of phaseCheckNames) {
+    const override = overrides[name];
+    if (!override) continue;
+
+    if (override.skip) {
+      console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (af-config.json)`));
+    } else if (override.command || override.cwd) {
+      const parts: string[] = [];
+      if (override.command) parts.push(resolvedChecks[name]?.command ?? override.command);
+      if (override.cwd) parts.push(`cwd: ${override.cwd}`);
+      console.log(chalk.yellow(`  ⚠ Check "${name}" overridden: ${parts.join(', ')}`));
+    }
+  }
 }
 
 // ============================================================================
@@ -140,8 +170,9 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
     }
   }
 
-  // Show checks status
-  const checks = getPhaseChecks(protocol, state.phase);
+  // Show checks status (apply overrides so display matches what will actually run)
+  const statusOverrides = loadCheckOverrides(workspaceRoot);
+  const checks = getPhaseChecks(protocol, state.phase, statusOverrides ?? undefined);
   if (Object.keys(checks).length > 0) {
     const checkLines = Object.keys(checks).map(name => `  ○ ${name} (not yet run)`);
     console.log(section('CRITERIA', checkLines.join('\n')));
@@ -174,9 +205,12 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
 
   const state = readState(statusPath);
   const protocol = loadProtocol(workspaceRoot, state.protocol);
-  const checks = getPhaseChecks(protocol, state.phase);
+  const overrides = loadCheckOverrides(workspaceRoot);
+  const phaseConfig = getPhaseConfig(protocol, state.phase);
+  const phaseCheckNames = phaseConfig?.checks ?? [];
+  const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
-  if (Object.keys(checks).length === 0) {
+  if (Object.keys(checks).length === 0 && phaseCheckNames.length === 0) {
     console.log(chalk.dim('No checks defined for this phase.'));
     return;
   }
@@ -185,7 +219,17 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
 
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
+  logCheckOverrides(phaseCheckNames, checks, overrides);
   console.log('');
+
+  if (Object.keys(checks).length === 0) {
+    console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+    console.log('');
+    console.log(chalk.green('RESULT: ALL CHECKS PASSED'));
+    console.log(`\n  Run: porch done ${state.id} (to advance)`);
+    console.log('');
+    return;
+  }
 
   const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
   console.log(formatCheckResults(results));
@@ -213,10 +257,13 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
 
   let state = readState(statusPath);
   const protocol = loadProtocol(workspaceRoot, state.protocol);
-  const checks = getPhaseChecks(protocol, state.phase);
+  const overrides = loadCheckOverrides(workspaceRoot);
+  const phaseConfig = getPhaseConfig(protocol, state.phase);
+  const phaseCheckNames = phaseConfig?.checks ?? [];
+  const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
   // Run checks first — but skip if the gate was just approved (approve already ran them)
-  if (Object.keys(checks).length > 0) {
+  if (phaseCheckNames.length > 0) {
     const gate = getPhaseGate(protocol, state.phase);
     const gateStatus = gate ? state.gates[gate] : undefined;
     const recentlyApproved = gateStatus?.status === 'approved' && gateStatus.approved_at &&
@@ -230,15 +277,20 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
 
       console.log('');
       console.log(chalk.bold('RUNNING CHECKS...'));
+      logCheckOverrides(phaseCheckNames, checks, overrides);
 
-      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
-      console.log(formatCheckResults(results));
+      if (Object.keys(checks).length > 0) {
+        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+        console.log(formatCheckResults(results));
 
-      if (!allChecksPassed(results)) {
-        console.log('');
-        console.log(chalk.red('CHECKS FAILED. Cannot advance.'));
-        console.log(`\n  Fix the failures and try again.`);
-        process.exit(1);
+        if (!allChecksPassed(results)) {
+          console.log('');
+          console.log(chalk.red('CHECKS FAILED. Cannot advance.'));
+          console.log(`\n  Fix the failures and try again.`);
+          process.exit(1);
+        }
+      } else {
+        console.log(chalk.dim('  (all checks skipped via af-config.json)'));
       }
     }
   }
@@ -473,22 +525,30 @@ export async function approve(
 
   // Run phase checks before approving
   const protocol = loadProtocol(workspaceRoot, state.protocol);
-  const checks = getPhaseChecks(protocol, state.phase);
+  const overrides = loadCheckOverrides(workspaceRoot);
+  const phaseConfig = getPhaseConfig(protocol, state.phase);
+  const phaseCheckNames = phaseConfig?.checks ?? [];
+  const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
-  if (Object.keys(checks).length > 0) {
+  if (phaseCheckNames.length > 0) {
     const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
+    logCheckOverrides(phaseCheckNames, checks, overrides);
 
-    const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
-    console.log(formatCheckResults(results));
+    if (Object.keys(checks).length > 0) {
+      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+      console.log(formatCheckResults(results));
 
-    if (!allChecksPassed(results)) {
-      console.log('');
-      console.log(chalk.red('CHECKS FAILED. Cannot approve gate.'));
-      console.log(`\n  Fix the failures and try again.`);
-      process.exit(1);
+      if (!allChecksPassed(results)) {
+        console.log('');
+        console.log(chalk.red('CHECKS FAILED. Cannot approve gate.'));
+        console.log(`\n  Fix the failures and try again.`);
+        process.exit(1);
+      }
+    } else {
+      console.log(chalk.dim('  (all checks skipped via af-config.json)'));
     }
   }
 

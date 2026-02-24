@@ -9,5 +9,13 @@
   },
   "roles": {
     "dir": "codev/roles"
+  },
+  "porch": {
+    "checks": {
+      "build": { "command": "npm run build", "cwd": "packages/codev" },
+      "tests": { "command": "npm test -- --exclude='**/e2e/**' --exclude='**/session-manager.test.ts' --exclude='**/shellper-survive-parent-exit.test.ts' --exclude='**/tower-cloud.test.ts' --exclude='**/tunnel-edge-cases.test.ts'", "cwd": "packages/codev" },
+      "build_succeeds": { "command": "npm run build 2>&1", "cwd": "packages/codev" },
+      "tests_pass": { "command": "npm test 2>&1", "cwd": "packages/codev" }
+    }
   }
 }

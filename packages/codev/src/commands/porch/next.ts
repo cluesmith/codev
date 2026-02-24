@@ -34,6 +34,7 @@ import {
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
+import { loadCheckOverrides } from './config.js';
 
 import type {
   ProjectState,
@@ -376,6 +377,7 @@ async function handleBuildVerify(
   statusPath: string,
 ): Promise<PorchNextResponse> {
   const verifyConfig = getVerifyConfig(protocol, state.phase);
+  const overrides = loadCheckOverrides(workspaceRoot);
 
   // Determine plan phase context for per_plan_phase protocols
   const planPhase = isPhased(protocol, state.phase)
@@ -410,14 +412,29 @@ async function handleBuildVerify(
       });
     }
 
-    // Add check tasks
-    const checks = getPhaseChecks(protocol, state.phase);
-    for (const [name, checkDef] of Object.entries(checks)) {
+    // Add check tasks (with overrides applied)
+    const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
+    // Also show skipped checks as informational tasks
+    const phaseConfig_ = phaseConfig.checks ?? [];
+    for (const name of phaseConfig_) {
+      const override = overrides?.[name];
+      if (override?.skip) {
+        tasks.push({
+          subject: `Check "${name}" skipped`,
+          activeForm: `Skipping ${name} check`,
+          description: `Check "${name}" is skipped via af-config.json porch.checks override.`,
+          sequential: true,
+        });
+        continue;
+      }
+      const checkDef = checks[name];
+      if (!checkDef) continue;
       const cwdNote = checkDef.cwd ? `\n\nIMPORTANT: Run this from the \`${checkDef.cwd}\` subdirectory (relative to project root).` : '';
+      const overrideNote = override?.command ? `\n\n(Command overridden via af-config.json)` : '';
       tasks.push({
         subject: `Run check: ${name}`,
         activeForm: `Running ${name} check`,
-        description: `Run: ${checkDef.command}${cwdNote}\n\nFix any failures before proceeding.`,
+        description: `Run: ${checkDef.command}${cwdNote}${overrideNote}\n\nFix any failures before proceeding.`,
         sequential: true,
       });
     }
