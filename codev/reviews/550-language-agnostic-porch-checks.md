@@ -28,8 +28,8 @@ None. All four phases completed as specified.
 
 **New files:**
 - `packages/codev/src/commands/porch/config.ts` — Self-contained `loadCheckOverrides()` reader
-- `packages/codev/src/commands/porch/__tests__/config.test.ts` — 10 unit tests
-- `packages/codev/src/commands/porch/__tests__/protocol-overrides.test.ts` — 19 unit tests
+- `packages/codev/src/commands/porch/__tests__/config.test.ts` — 11 unit tests
+- `packages/codev/src/commands/porch/__tests__/protocol-overrides.test.ts` — 17 unit tests
 
 **Modified files:**
 - `packages/codev/src/commands/porch/types.ts` — Added `CheckOverride` interface and `CheckOverrides` type alias
@@ -54,10 +54,10 @@ None. All four phases completed as specified.
 |-----------|-----------|
 | `config.test.ts` | no file, no porch key, no checks key, valid overrides, malformed JSON, non-object values, cwd field, extra keys |
 | `protocol-overrides.test.ts` | defaults (no override), command override, cwd override, skip, command+cwd, mixed, empty phase, unknown phase, unknown override name |
-| `protocol-overrides.test.ts` (completion) | defaults, command override, skip (condition removed), all-skipped, mixed |
+| `protocol-overrides.test.ts` (completion) | defaults, command override, skip (condition removed), all-skipped, mixed, unknown-name warning |
 | `protocol-overrides.test.ts` (loading) | phase_completion loaded from JSON, absent phase_completion |
 
-All 203 existing porch tests continue to pass.
+205 porch tests pass (203 pre-existing + 2 new from consultation fixes: Array.isArray guard test + getPhaseCompletionChecks unknown-name warning test).
 
 ## Lessons Learned
 
@@ -66,6 +66,39 @@ All 203 existing porch tests continue to pass.
 2. **Optional parameters are the cleanest backward-compat story:** Adding `overrides?: CheckOverrides` as an optional parameter to `getPhaseChecks()` and `getPhaseCompletionChecks()` required zero changes to existing callers that don't need overrides. TypeScript enforced this.
 
 3. **Self-contained readers prevent dependency hell:** Resisting the temptation to reuse agent-farm's config module was the right call. The two modules have different concerns and different parts of the config file. A shared "parse af-config.json once" optimization can be done later without breaking the override semantics.
+
+## Consultation Feedback
+
+### Phase 1 (config_and_types) — Round 1
+
+#### Gemini, Codex, Claude — APPROVE
+- **Concern (MEDIUM)**: `Array.isArray` guard missing for `porch.checks` — arrays pass the `typeof 'object'` check.
+  - **Addressed**: Added `Array.isArray(porch.checks)` guard in `config.ts:54`; added test case.
+
+### Phase 2 (override_merging) — Round 1
+
+#### Gemini, Codex, Claude — APPROVE
+- **Concern (MEDIUM)**: Warning scope too narrow — `getPhaseChecks()` only warned for names absent from the current phase, creating false positives for cross-phase overrides.
+  - **Addressed**: Warning logic now checks all `protocol.checks` AND `protocol.phase_completion` keys; only truly unknown names trigger the warning.
+
+### Phase 3 (call_sites) — Round 1
+
+#### Gemini, Codex, Claude — APPROVE
+- **Concern (MEDIUM)**: `status()` showed full protocol check list without applying overrides — skipped checks appeared as pending criteria.
+  - **Addressed**: `status()` now calls `loadCheckOverrides()` and passes result to `getPhaseChecks()`.
+- **Concern (MEDIUM)**: `logCheckOverrides()` only logged command overrides; cwd-only overrides were silent, violating spec visibility requirement.
+  - **Addressed**: Condition updated to `override.command || override.cwd`; cwd included in log line.
+
+### Phase 4 (tests_and_docs) — Round 1
+
+#### Gemini — APPROVE
+- **Concern (LOW)**: Raw ANSI escape codes in `protocol.ts` instead of chalk — may not respect `NO_COLOR`.
+  - **Rebutted**: The raw codes were used to avoid importing chalk into `protocol.ts` (keeping the module dependency-light). The warnings are informational and non-critical; NO_COLOR support can be addressed in a follow-up.
+- **Concern (LOW)**: `cwd` silently ignored in phase_completion overrides.
+  - **Rebutted**: By design — `phase_completion` checks are string predicates run by porch's own runner which handles cwd through the override's cwd field (this path is covered by the override runner, not the string value). The return type `Record<string, string>` documents this constraint.
+
+#### Codex, Claude — APPROVE
+- No blocking concerns raised.
 
 ## Architecture Updates
 
