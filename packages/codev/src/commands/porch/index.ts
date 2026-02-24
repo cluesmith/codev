@@ -80,8 +80,11 @@ function logCheckOverrides(
 
     if (override.skip) {
       console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (af-config.json)`));
-    } else if (override.command) {
-      console.log(chalk.yellow(`  ⚠ Check "${name}" overridden: ${resolvedChecks[name]?.command ?? override.command}`));
+    } else if (override.command || override.cwd) {
+      const parts: string[] = [];
+      if (override.command) parts.push(resolvedChecks[name]?.command ?? override.command);
+      if (override.cwd) parts.push(`cwd: ${override.cwd}`);
+      console.log(chalk.yellow(`  ⚠ Check "${name}" overridden: ${parts.join(', ')}`));
     }
   }
 }
@@ -167,8 +170,9 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
     }
   }
 
-  // Show checks status
-  const checks = getPhaseChecks(protocol, state.phase);
+  // Show checks status (apply overrides so display matches what will actually run)
+  const statusOverrides = loadCheckOverrides(workspaceRoot);
+  const checks = getPhaseChecks(protocol, state.phase, statusOverrides ?? undefined);
   if (Object.keys(checks).length > 0) {
     const checkLines = Object.keys(checks).map(name => `  ○ ${name} (not yet run)`);
     console.log(section('CRITERIA', checkLines.join('\n')));

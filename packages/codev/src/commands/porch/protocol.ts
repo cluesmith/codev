@@ -278,17 +278,20 @@ export function getPhaseChecks(
     return {};
   }
 
-  // Warn about override keys that don't match any check in this phase
+  // Warn about override keys that don't exist anywhere in the protocol.
+  // Keys valid in other phases or phase_completion are silently accepted here.
   if (overrides) {
-    const knownNames = new Set(phase.checks);
+    const phaseNames = new Set(phase.checks);
+    const allProtocolChecks = new Set([
+      ...Object.keys(protocol.checks ?? {}),
+      ...Object.keys(protocol.phase_completion ?? {}),
+    ]);
     for (const name of Object.keys(overrides)) {
-      if (!knownNames.has(name)) {
-        // Dynamically import chalk to avoid adding a hard dep at module level
-        // We use process.stderr directly to avoid async complications here.
-        process.stderr.write(
-          `\x1b[33m  ⚠ Unknown check override "${name}" (not in phase "${phaseId}" checks)\x1b[0m\n`
-        );
-      }
+      if (phaseNames.has(name)) continue; // In this phase — normal case
+      if (allProtocolChecks.has(name)) continue; // Valid elsewhere in protocol
+      process.stderr.write(
+        `\x1b[33m  ⚠ Unknown check override "${name}" (not found in protocol)\x1b[0m\n`
+      );
     }
   }
 
@@ -343,6 +346,18 @@ export function getPhaseCompletionChecks(
 ): Record<string, string> {
   const base = protocol.phase_completion ?? {};
   if (!overrides) return base;
+
+  // Warn about override keys that don't exist anywhere in the protocol.
+  const allProtocolChecks = new Set([
+    ...Object.keys(protocol.checks ?? {}),
+    ...Object.keys(protocol.phase_completion ?? {}),
+  ]);
+  for (const name of Object.keys(overrides)) {
+    if (allProtocolChecks.has(name)) continue;
+    process.stderr.write(
+      `\x1b[33m  ⚠ Unknown check override "${name}" (not found in protocol)\x1b[0m\n`
+    );
+  }
 
   const result: Record<string, string> = {};
   for (const [name, command] of Object.entries(base)) {

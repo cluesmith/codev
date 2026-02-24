@@ -51,7 +51,7 @@ export function loadCheckOverrides(workspaceRoot: string): CheckOverrides | null
   }
 
   const porch = obj.porch as Record<string, unknown>;
-  if (typeof porch.checks !== 'object' || porch.checks === null) {
+  if (typeof porch.checks !== 'object' || porch.checks === null || Array.isArray(porch.checks)) {
     return null;
   }
 

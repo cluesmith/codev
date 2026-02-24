@@ -234,6 +234,18 @@ describe('getPhaseCompletionChecks with overrides', () => {
     expect(checks.build_succeeds).toBe('uv run pytest --co -q 2>&1');
     expect(checks.tests_pass).toBeUndefined();
   });
+
+  it('emits warning for unknown override check names (does not throw)', () => {
+    const protocol = loadProtocol(testDir, 'test-protocol');
+    const overrides: CheckOverrides = {
+      nonexistent_check: { command: 'echo nope' },
+    };
+    // Should not throw — just warn to stderr
+    expect(() => getPhaseCompletionChecks(protocol, overrides)).not.toThrow();
+    // Known checks still returned
+    const checks = getPhaseCompletionChecks(protocol, overrides);
+    expect(Object.keys(checks)).toHaveLength(2);
+  });
 });
 
 describe('protocol.json phase_completion loading', () => {

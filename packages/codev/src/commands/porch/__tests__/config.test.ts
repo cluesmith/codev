@@ -98,6 +98,15 @@ describe('loadCheckOverrides', () => {
     expect(result).toBeNull();
   });
 
+  it('returns null when porch.checks is an array (not a map)', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ porch: { checks: [{ command: 'cargo build' }] } })
+    );
+    const result = loadCheckOverrides(testDir);
+    expect(result).toBeNull();
+  });
+
   it('ignores non-porch keys in af-config.json', () => {
     fs.writeFileSync(
       path.join(testDir, 'af-config.json'),
