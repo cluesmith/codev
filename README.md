@@ -11,6 +11,8 @@ Codev is an operating system for structured human-AI collaboration. You write sp
 
 **Quick Links**: [FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md) | [Discord](https://discord.gg/mJ92DhDa6n)
 
+📬 **Stay updated** — [Subscribe to the Codev newsletter](https://marketmaker.cluesmith.com/subscribe/codev) for release notes, tips, and community updates.
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
