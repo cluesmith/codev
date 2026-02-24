@@ -1,5 +1,5 @@
 /**
- * Tests for the Analytics tab (Spec 456, Phase 3).
+ * Tests for the Analytics tab (Bugfix #531).
  *
  * Tests: useAnalytics hook behavior, AnalyticsView rendering,
  * null value formatting, error states, and range switching.
@@ -25,18 +25,16 @@ vi.mock('../src/lib/api.js', () => ({
 function makeStats(overrides: Partial<AnalyticsResponse> = {}): AnalyticsResponse {
   return {
     timeRange: '7d',
-    github: {
+    activity: {
       prsMerged: 12,
-      avgTimeToMergeHours: 3.5,
-      bugBacklog: 4,
-      nonBugBacklog: 8,
+      medianTimeToMergeHours: 3.5,
       issuesClosed: 6,
-      avgTimeToCloseBugsHours: 1.2,
-    },
-    builders: {
-      projectsCompleted: 5,
-      throughputPerWeek: 2.5,
-      activeBuilders: 2,
+      medianTimeToCloseBugsHours: 1.2,
+      projectsByProtocol: {
+        spir: { count: 3, avgWallClockHours: 48.2 },
+        bugfix: { count: 2, avgWallClockHours: 1.5 },
+        aspir: { count: 1, avgWallClockHours: 24.0 },
+      },
     },
     consultation: {
       totalCount: 20,
@@ -50,10 +48,6 @@ function makeStats(overrides: Partial<AnalyticsResponse> = {}): AnalyticsRespons
       ],
       byReviewType: { spec: 5, plan: 5, pr: 10 },
       byProtocol: { spir: 15, tick: 5 },
-      costByProject: [
-        { projectId: '456', totalCost: 0.75 },
-        { projectId: '123', totalCost: 0.48 },
-      ],
     },
     ...overrides,
   };
@@ -84,7 +78,7 @@ describe('useAnalytics', () => {
     });
 
     expect(mockFetchAnalytics).toHaveBeenCalledWith('7', false);
-    expect(result.current.data?.github.prsMerged).toBe(12);
+    expect(result.current.data?.activity.prsMerged).toBe(12);
     expect(result.current.loading).toBe(false);
   });
 
@@ -180,21 +174,22 @@ describe('AnalyticsView', () => {
     expect(screen.getByText('Loading analytics...')).toBeInTheDocument();
   });
 
-  it('renders all three section headers', async () => {
+  it('renders Activity and Consultation section headers (not GitHub/Builders)', async () => {
     mockFetchAnalytics.mockResolvedValue(makeStats());
 
     const { AnalyticsView } = await import('../src/components/AnalyticsView.js');
     render(<AnalyticsView isActive={true} />);
 
     await waitFor(() => {
-      expect(screen.getByText('GitHub')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Builders')).toBeInTheDocument();
     expect(screen.getByText('Consultation')).toBeInTheDocument();
+    expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+    expect(screen.queryByText('Builders')).not.toBeInTheDocument();
   });
 
-  it('renders GitHub metric values', async () => {
+  it('renders Activity metric values', async () => {
     mockFetchAnalytics.mockResolvedValue(makeStats());
 
     const { AnalyticsView } = await import('../src/components/AnalyticsView.js');
@@ -206,6 +201,25 @@ describe('AnalyticsView', () => {
 
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('3.5h')).toBeInTheDocument();
+    // Removed redundant metrics
+    expect(screen.queryByText('Projects Completed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bugs Fixed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Throughput / Week')).not.toBeInTheDocument();
+  });
+
+  it('renders protocol breakdown metrics', async () => {
+    mockFetchAnalytics.mockResolvedValue(makeStats());
+
+    const { AnalyticsView } = await import('../src/components/AnalyticsView.js');
+    render(<AnalyticsView isActive={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Projects by Protocol')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('SPIR')).toBeInTheDocument();
+    expect(screen.getByText('BUGFIX')).toBeInTheDocument();
+    expect(screen.getByText('ASPIR')).toBeInTheDocument();
   });
 
   it('renders consultation total cost', async () => {
@@ -223,13 +237,12 @@ describe('AnalyticsView', () => {
 
   it('displays null values as em-dash', async () => {
     const stats = makeStats({
-      github: {
+      activity: {
         prsMerged: 3,
-        avgTimeToMergeHours: null,
-        bugBacklog: 0,
-        nonBugBacklog: 0,
+        medianTimeToMergeHours: null,
         issuesClosed: 0,
-        avgTimeToCloseBugsHours: null,
+        medianTimeToCloseBugsHours: null,
+        projectsByProtocol: {},
       },
     });
     mockFetchAnalytics.mockResolvedValue(stats);
@@ -238,7 +251,7 @@ describe('AnalyticsView', () => {
     render(<AnalyticsView isActive={true} />);
 
     await waitFor(() => {
-      expect(screen.getByText('GitHub')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
 
     const dashes = screen.getAllByText('\u2014');
@@ -273,19 +286,30 @@ describe('AnalyticsView', () => {
     expect(screen.getByText('gpt-5.2-codex')).toBeInTheDocument();
   });
 
-  it('renders cost per project section', async () => {
+  it('does not render Cost per Project section', async () => {
     mockFetchAnalytics.mockResolvedValue(makeStats());
 
     const { AnalyticsView } = await import('../src/components/AnalyticsView.js');
     render(<AnalyticsView isActive={true} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Cost per Project')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
 
-    // Chart internals (#456, $0.75) render as SVG via Recharts and are
-    // not visible in jsdom's 0-width ResponsiveContainer.  Verifying the
-    // section heading confirms the data path is wired correctly.
+    expect(screen.queryByText('Cost per Project')).not.toBeInTheDocument();
+  });
+
+  it('does not render Open Issue Backlog', async () => {
+    mockFetchAnalytics.mockResolvedValue(makeStats());
+
+    const { AnalyticsView } = await import('../src/components/AnalyticsView.js');
+    render(<AnalyticsView isActive={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Activity')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Open Issue Backlog')).not.toBeInTheDocument();
   });
 
   it('calls fetchAnalytics with new range when range button is clicked', async () => {
@@ -295,7 +319,7 @@ describe('AnalyticsView', () => {
     render(<AnalyticsView isActive={true} />);
 
     await waitFor(() => {
-      expect(screen.getByText('GitHub')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
 
     mockFetchAnalytics.mockResolvedValue(makeStats({ timeRange: '30d' }));
@@ -313,7 +337,7 @@ describe('AnalyticsView', () => {
     render(<AnalyticsView isActive={true} />);
 
     await waitFor(() => {
-      expect(screen.getByText('GitHub')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
 
     const refreshBtn = screen.getByRole('button', { name: /Refresh/ });

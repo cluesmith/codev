@@ -143,20 +143,19 @@ export interface OverviewData {
 
 // Spec 456: Analytics tab types and fetcher
 
+export interface ProtocolStats {
+  count: number;
+  avgWallClockHours: number | null;
+}
+
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
-  github: {
+  activity: {
     prsMerged: number;
-    avgTimeToMergeHours: number | null;
-    bugBacklog: number;
-    nonBugBacklog: number;
+    medianTimeToMergeHours: number | null;
     issuesClosed: number;
-    avgTimeToCloseBugsHours: number | null;
-  };
-  builders: {
-    projectsCompleted: number;
-    throughputPerWeek: number;
-    activeBuilders: number;
+    medianTimeToCloseBugsHours: number | null;
+    projectsByProtocol: Record<string, ProtocolStats>;
   };
   consultation: {
     totalCount: number;
@@ -173,10 +172,6 @@ export interface AnalyticsResponse {
     }>;
     byReviewType: Record<string, number>;
     byProtocol: Record<string, number>;
-    costByProject: Array<{
-      projectId: string;
-      totalCost: number;
-    }>;
   };
   errors?: {
     github?: string;

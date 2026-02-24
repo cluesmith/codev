@@ -174,6 +174,7 @@ export interface MergedPR {
   createdAt: string;
   mergedAt: string;
   body: string;
+  headRefName: string;
 }
 
 export interface ClosedIssue {
@@ -194,7 +195,7 @@ export async function fetchMergedPRs(since: string | null, cwd?: string): Promis
     const args = [
       'pr', 'list',
       '--state', 'merged',
-      '--json', 'number,title,createdAt,mergedAt,body',
+      '--json', 'number,title,createdAt,mergedAt,body,headRefName',
       '--limit', '1000',
     ];
     if (since) {
@@ -232,6 +233,86 @@ export async function fetchClosedIssues(since: string | null, cwd?: string): Pro
     console.warn(`[github] fetchClosedIssues failed (cwd=${cwd ?? 'none'}): ${msg}`);
     return null;
   }
+}
+
+/**
+ * Fetch the "On it!" comment timestamp for multiple issues using GraphQL.
+ *
+ * Uses a batched GraphQL query via `gh api graphql` to fetch comments for
+ * many issues in a single API call. Finds the first comment containing
+ * "On it!" (posted by `af spawn`). Returns a map of issue number → ISO timestamp.
+ * Issues without an "On it!" comment are omitted from the result.
+ *
+ * Batches in groups of 50 to stay within GraphQL complexity limits.
+ * For 100 issues, this makes 2 API calls instead of 100.
+ */
+export async function fetchOnItTimestamps(
+  issueNumbers: number[],
+  cwd?: string,
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (issueNumbers.length === 0) return result;
+
+  const unique = [...new Set(issueNumbers)];
+
+  // Get repo owner/name for GraphQL query
+  let owner: string;
+  let repoName: string;
+  try {
+    const { stdout } = await execFileAsync('gh', [
+      'repo', 'view', '--json', 'owner,name',
+    ], { cwd });
+    const repo = JSON.parse(stdout);
+    owner = repo.owner.login;
+    repoName = repo.name;
+  } catch {
+    return result; // Can't determine repo, skip gracefully
+  }
+
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const batch = unique.slice(i, i + BATCH_SIZE);
+
+    // Build aliased GraphQL query — one field per issue
+    const issueFragments = batch.map((num) =>
+      `issue${num}: issue(number: ${num}) { comments(first: 50) { nodes { body createdAt } } }`,
+    ).join('\n    ');
+
+    const query = `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    ${issueFragments}
+  }
+}`;
+
+    try {
+      const { stdout } = await execFileAsync('gh', [
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-f', `owner=${owner}`,
+        '-f', `name=${repoName}`,
+      ], { cwd });
+
+      const data = JSON.parse(stdout);
+      const repoData = data.data?.repository;
+      if (!repoData) continue;
+
+      for (const num of batch) {
+        const issueData = repoData[`issue${num}`];
+        if (!issueData?.comments?.nodes) continue;
+
+        const onItComment = (issueData.comments.nodes as Array<{ body: string; createdAt: string }>)
+          .find((c) => c.body.includes('On it!'));
+        if (onItComment) {
+          result.set(num, onItComment.createdAt);
+        }
+      }
+    } catch {
+      // Silently skip batch — fallback to PR createdAt will be used
+    }
+  }
+
+  return result;
 }
 
 // =============================================================================

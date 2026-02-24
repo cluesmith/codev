@@ -16,7 +16,8 @@ import { getGlobalDb, closeGlobalDb } from '../db/index.js';
 import { deleteFileTabsByPathPrefix } from '../utils/file-tabs.js';
 
 /**
- * Remove porch state for a project from codev/projects/
+ * Clean porch review artifacts for a project from codev/projects/,
+ * preserving status.yaml for analytics and historical tracking.
  */
 async function cleanupPorchState(projectId: string, config: Config): Promise<void> {
   const projectsDir = join(config.codevDir, 'projects');
@@ -30,9 +31,24 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
 
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name.startsWith(`${projectId}-`)) {
-        const porchStatePath = join(projectsDir, entry.name);
-        logger.info(`Removing porch state: ${entry.name}`);
-        await rm(porchStatePath, { recursive: true, force: true });
+        const projectDir = join(projectsDir, entry.name);
+        const children = readdirSync(projectDir);
+
+        // Delete review artifacts but preserve status.yaml
+        for (const child of children) {
+          if (child === 'status.yaml') continue;
+          await rm(join(projectDir, child), { recursive: true, force: true });
+        }
+
+        // Log what we did
+        const hasStatus = children.includes('status.yaml');
+        if (hasStatus) {
+          logger.info(`Cleaned porch artifacts: ${entry.name} (preserved status.yaml)`);
+        } else {
+          // No status.yaml — remove the empty directory
+          await rm(projectDir, { recursive: true, force: true });
+          logger.info(`Removed porch state: ${entry.name}`);
+        }
       }
     }
   } catch (error) {

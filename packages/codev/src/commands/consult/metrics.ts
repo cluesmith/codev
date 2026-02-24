@@ -67,6 +67,7 @@ export interface StatsFilters {
   type?: string;
   protocol?: string;
   project?: string;
+  workspace?: string;
   last?: number;
 }
 
@@ -147,6 +148,14 @@ function buildWhereClause(filters: StatsFilters): { where: string; params: Recor
   if (filters.project) {
     conditions.push('project_id = @filterProject');
     params.filterProject = filters.project;
+  }
+  if (filters.workspace) {
+    // Prefix match: builder worktree paths like /repo/.builders/bugfix-42
+    // should match when filtering by /repo.
+    const ws = filters.workspace.endsWith('/') ? filters.workspace.slice(0, -1) : filters.workspace;
+    conditions.push("(workspace_path = @filterWorkspace OR workspace_path LIKE @filterWorkspacePrefix)");
+    params.filterWorkspace = ws;
+    params.filterWorkspacePrefix = ws + '/%';
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

@@ -225,6 +225,18 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
 
   // Protocol complete
   if (state.phase === 'complete' || !phaseConfig) {
+    // Build the status.yaml commit task (preserves project history for analytics)
+    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
+    const statusYamlPath = path.join(projectDir, 'status.yaml');
+    const relStatusPath = path.relative(workspaceRoot, statusYamlPath);
+
+    const commitStatusTask: PorchTask = {
+      subject: 'Commit project status for historical record',
+      activeForm: 'Committing project status',
+      description: `Commit status.yaml to your branch so project history survives cleanup:\n\ngit add "${relStatusPath}"\ngit commit -m "chore: Preserve project status for analytics"\ngit push\n\nThis ensures wall clock time, gate timestamps, and protocol data are available for analytics after cleanup.`,
+      sequential: true,
+    };
+
     // Bugfix builders are done after PR + CMAP — architect handles merge/cleanup
     if (state.protocol === 'bugfix') {
       return {
@@ -232,7 +244,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         phase: state.phase,
         iteration: state.iteration,
         summary: `Project ${state.id} has completed the ${state.protocol} protocol. The architect will review, merge, and clean up.`,
-        tasks: [],
+        tasks: [commitStatusTask],
       };
     }
 
@@ -241,12 +253,15 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       phase: state.phase,
       iteration: state.iteration,
       summary: `Project ${state.id} has completed the ${state.protocol} protocol.`,
-      tasks: [{
-        subject: 'Merge the pull request',
-        activeForm: 'Merging pull request',
-        description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`,
-        sequential: true,
-      }],
+      tasks: [
+        commitStatusTask,
+        {
+          subject: 'Merge the pull request',
+          activeForm: 'Merging pull request',
+          description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`,
+          sequential: true,
+        },
+      ],
     };
   }
 

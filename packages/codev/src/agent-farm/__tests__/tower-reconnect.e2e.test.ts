@@ -141,12 +141,17 @@ describe('Tower stop/start reconnection (Spec 0122)', () => {
     const started1 = await waitForPort(TEST_TOWER_PORT, 15000);
     expect(started1).toBe(true);
 
-    // Activate workspace
-    const activateRes = await fetch(
-      `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/activate`,
-      { method: 'POST' },
-    );
-    expect(activateRes.ok).toBe(true);
+    // Activate workspace (retry — server may be listening before initInstances completes)
+    let activateRes: Response | null = null;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      activateRes = await fetch(
+        `http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/activate`,
+        { method: 'POST' },
+      );
+      if (activateRes.ok) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(activateRes!.ok).toBe(true);
 
     // Create a shell terminal (shellper-backed)
     const shellRes = await fetch(

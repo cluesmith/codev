@@ -719,18 +719,13 @@ async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOver
 
   if (!workspaceRoot) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ timeRange: rangeLabel, github: { prsMerged: 0, avgTimeToMergeHours: null, bugBacklog: 0, nonBugBacklog: 0, issuesClosed: 0, avgTimeToCloseBugsHours: null }, builders: { projectsCompleted: 0, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] } }));
+    res.end(JSON.stringify({ timeRange: rangeLabel, activity: { prsMerged: 0, medianTimeToMergeHours: null, issuesClosed: 0, medianTimeToCloseBugsHours: null, projectsByProtocol: {} }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {} } }));
     return;
   }
   const range = rangeParam as '1' | '7' | '30' | 'all';
   const refresh = url.searchParams.get('refresh') === '1';
 
-  // Get active builder count from workspace terminals
-  const wsTerminals = getWorkspaceTerminals();
-  const entry = wsTerminals.get(normalizeWorkspacePath(workspaceRoot));
-  const activeBuilders = entry?.builders.size ?? 0;
-
-  const data = await computeAnalytics(workspaceRoot, range, activeBuilders, refresh);
+  const data = await computeAnalytics(workspaceRoot, range, refresh);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
@@ -1971,6 +1966,7 @@ function handleWorkspaceAnnotate(
   const is3D = ['stl', '3mf'].includes(ext);
   const isPdf = ext === 'pdf';
   const isMarkdown = ext === 'md';
+  const isHtml = ['html', 'htm'].includes(ext);
 
   // Sub-route: GET /file — re-read file content from disk
   if (req.method === 'GET' && subRoute === 'file') {
@@ -2090,6 +2086,7 @@ function handleWorkspaceAnnotate(
         html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
         html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
         html = html.replace(/\{\{IS_PDF\}\}/g, String(isPdf));
+        html = html.replace(/\{\{IS_HTML\}\}/g, String(isHtml));
         html = html.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
 
         // Inject initialization script (template loads content via fetch)

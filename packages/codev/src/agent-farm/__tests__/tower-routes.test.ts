@@ -1017,9 +1017,8 @@ describe('tower-routes', () => {
   describe('GET /api/analytics', () => {
     const fakeStats = {
       timeRange: '7d',
-      github: { prsMerged: 5, avgTimeToMergeHours: 2.5, bugBacklog: 3, nonBugBacklog: 7, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2 },
-      builders: { projectsCompleted: 3, throughputPerWeek: 3, activeBuilders: 1 },
-      consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] },
+      activity: { prsMerged: 5, medianTimeToMergeHours: 2.5, issuesClosed: 4, medianTimeToCloseBugsHours: 1.2, projectsByProtocol: { spir: { count: 2, avgWallClockHours: 36 }, bugfix: { count: 1, avgWallClockHours: 2.5 } } },
+      consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {} },
     };
 
     beforeEach(() => {
@@ -1034,8 +1033,8 @@ describe('tower-routes', () => {
 
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
-      expect(parsed.github.prsMerged).toBe(5);
-      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', 0, false);
+      expect(parsed.activity.prsMerged).toBe(5);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', false);
     });
 
     it('returns 400 for invalid range', async () => {
@@ -1053,7 +1052,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', 0, false);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '7', false);
     });
 
     it('passes refresh=true when refresh=1 query param is set', async () => {
@@ -1061,7 +1060,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '30', 0, true);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '30', true);
     });
 
     it('returns default empty response when no workspace is available', async () => {
@@ -1074,8 +1073,8 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.timeRange).toBe('30d');
-      expect(parsed.github.prsMerged).toBe(0);
-      expect(parsed.builders.activeBuilders).toBe(0);
+      expect(parsed.activity.prsMerged).toBe(0);
+      expect(parsed.activity).not.toHaveProperty('activeBuilders');
       expect(mockComputeAnalytics).not.toHaveBeenCalled();
     });
 
@@ -1084,7 +1083,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', 'all', 0, false);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', 'all', false);
     });
 
     it('accepts range=1 (24h)', async () => {
@@ -1092,7 +1091,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '1', 0, false);
+      expect(mockComputeAnalytics).toHaveBeenCalledWith('/tmp/workspace', '1', false);
     });
   });
 });

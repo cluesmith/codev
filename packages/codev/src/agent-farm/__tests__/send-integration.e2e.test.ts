@@ -115,10 +115,18 @@ function cleanupWorkspace(workspacePath: string): void {
  */
 async function activateAndWait(port: number, workspacePath: string): Promise<void> {
   const encoded = encodeWorkspacePath(workspacePath);
-  const res = await fetch(`http://localhost:${port}/api/workspaces/${encoded}/activate`, {
-    method: 'POST',
-  });
-  expect(res.ok).toBe(true);
+
+  // Retry activation — the server may be listening on the port before
+  // initInstances() completes, returning 400 "Tower is still starting up".
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    res = await fetch(`http://localhost:${port}/api/workspaces/${encoded}/activate`, {
+      method: 'POST',
+    });
+    if (res.ok) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  expect(res!.ok).toBe(true);
 
   // Wait for workspace entry to appear (activation is async)
   for (let i = 0; i < 60; i++) {

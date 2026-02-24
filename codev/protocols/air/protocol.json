@@ -30,11 +30,13 @@
       "checks": {
         "build": {
           "command": "npm run build",
+          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         },
         "tests": {
           "command": "npm test -- --exclude='**/e2e/**'",
+          "cwd": "packages/codev",
           "description": "Unit tests only - e2e tests run in PR phase",
           "on_fail": "retry",
           "max_retries": 2
@@ -70,6 +72,7 @@
         },
         "e2e_tests": {
           "command": "npm run test:e2e 2>&1 || echo 'e2e tests skipped (not configured)'",
+          "cwd": "packages/codev",
           "description": "Full e2e test suite",
           "optional": true
         }

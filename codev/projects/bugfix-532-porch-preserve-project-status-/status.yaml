@@ -1,0 +1,12 @@
+id: bugfix-532
+title: porch-preserve-project-status-
+protocol: bugfix
+phase: complete
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-23T18:27:12.861Z'
+updated_at: '2026-02-23T18:41:53.294Z'
