@@ -129,9 +129,8 @@ function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['ac
       <MetricGrid>
         <Metric label="PRs Merged" value={String(activity.prsMerged)} />
         <Metric label="Issues Closed" value={String(activity.issuesClosed)} />
-        <Metric label="Avg Time to Merge" value={fmt(activity.avgTimeToMergeHours, 1, 'h')} />
-        <Metric label="Avg Time to Close Bugs" value={fmt(activity.avgTimeToCloseBugsHours, 1, 'h')} />
-        <Metric label="Active Builders" value={String(activity.activeBuilders)} />
+        <Metric label="Median Time to Merge" value={fmt(activity.medianTimeToMergeHours, 1, 'h')} />
+        <Metric label="Median Time to Close Bugs" value={fmt(activity.medianTimeToCloseBugsHours, 1, 'h')} />
       </MetricGrid>
     </Section>
   );

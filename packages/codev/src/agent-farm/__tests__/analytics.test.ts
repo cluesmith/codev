@@ -232,14 +232,14 @@ describe('computeAnalytics', () => {
       ]),
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 3);
+    const result = await computeAnalytics('/tmp/workspace', '7');
 
     expect(result.timeRange).toBe('7d');
     expect(result.activity.prsMerged).toBe(2);
-    expect(result.activity.avgTimeToMergeHours).toBeCloseTo(30); // (36+24)/2
+    expect(result.activity.medianTimeToMergeHours).toBeCloseTo(30); // median of [24, 36] = 30
     expect(result.activity.issuesClosed).toBe(2);
-    expect(result.activity.avgTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days for bug only
-    expect(result.activity.activeBuilders).toBe(3);
+    expect(result.activity.medianTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days for bug only (single item)
+    expect(result.activity).not.toHaveProperty('activeBuilders');
     // Protocol breakdown now includes count + avgWallClockHours (no "on it" → falls back to PR times)
     expect(result.activity.projectsByProtocol.spir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(36) });
     expect(result.activity.projectsByProtocol.aspir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(24) });
@@ -262,7 +262,7 @@ describe('computeAnalytics', () => {
 
   it('does not have github or builders top-level keys', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result).not.toHaveProperty('github');
     expect(result).not.toHaveProperty('builders');
     expect(result).toHaveProperty('activity');
@@ -270,31 +270,31 @@ describe('computeAnalytics', () => {
 
   it('does not have costByProject in consultation', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.consultation).not.toHaveProperty('costByProject');
   });
 
   it('returns 24h label for range "1"', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    const result = await computeAnalytics('/tmp/workspace', '1', 0);
+    const result = await computeAnalytics('/tmp/workspace', '1');
     expect(result.timeRange).toBe('24h');
   });
 
   it('returns 30d label for range "30"', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    const result = await computeAnalytics('/tmp/workspace', '30', 0);
+    const result = await computeAnalytics('/tmp/workspace', '30');
     expect(result.timeRange).toBe('30d');
   });
 
   it('returns all label for range "all"', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    const result = await computeAnalytics('/tmp/workspace', 'all', 0);
+    const result = await computeAnalytics('/tmp/workspace', 'all');
     expect(result.timeRange).toBe('all');
   });
 
   it('passes null since date for "all" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    await computeAnalytics('/tmp/workspace', 'all', 0);
+    await computeAnalytics('/tmp/workspace', 'all');
 
     const prCall = execFileMock.mock.calls.find(
       (c: unknown[]) => (c[1] as string[]).includes('merged'),
@@ -305,7 +305,7 @@ describe('computeAnalytics', () => {
 
   it('passes a date string for "7" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
-    await computeAnalytics('/tmp/workspace', '7', 0);
+    await computeAnalytics('/tmp/workspace', '7');
 
     const prCall = execFileMock.mock.calls.find(
       (c: unknown[]) => (c[1] as string[]).includes('merged'),
@@ -322,14 +322,14 @@ describe('computeAnalytics', () => {
   it('returns GitHub defaults and error when all GitHub calls fail', async () => {
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 2);
+    const result = await computeAnalytics('/tmp/workspace', '7');
 
     expect(result.errors?.github).toBeDefined();
     expect(result.activity.prsMerged).toBe(0);
-    expect(result.activity.avgTimeToMergeHours).toBeNull();
+    expect(result.activity.medianTimeToMergeHours).toBeNull();
     expect(result.activity.issuesClosed).toBe(0);
-    expect(result.activity.avgTimeToCloseBugsHours).toBeNull();
-    expect(result.activity.activeBuilders).toBe(2);
+    expect(result.activity.medianTimeToCloseBugsHours).toBeNull();
+    expect(result.activity).not.toHaveProperty('activeBuilders');
     expect(result.activity.projectsByProtocol).toEqual({});
     // Consultation still works
     expect(result.consultation.totalCount).toBe(5);
@@ -342,7 +342,7 @@ describe('computeAnalytics', () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
     mockSummary.mockImplementation(() => { throw new Error('DB file not found'); });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
 
     expect(result.errors?.consultation).toBe('DB file not found');
     expect(result.consultation.totalCount).toBe(0);
@@ -365,10 +365,10 @@ describe('computeAnalytics', () => {
       successCount: 0, byModel: [], byType: [], byProtocol: [],
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
 
-    expect(result.activity.avgTimeToMergeHours).toBeNull();
-    expect(result.activity.avgTimeToCloseBugsHours).toBeNull();
+    expect(result.activity.medianTimeToMergeHours).toBeNull();
+    expect(result.activity.medianTimeToCloseBugsHours).toBeNull();
     expect(result.consultation.avgLatencySeconds).toBeNull();
     expect(result.consultation.successRate).toBeNull();
   });
@@ -384,8 +384,8 @@ describe('computeAnalytics', () => {
       ]),
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.avgTimeToCloseBugsHours).toBeCloseTo(24);
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    expect(result.activity.medianTimeToCloseBugsHours).toBeCloseTo(24);
   });
 
   // --- costByModel derivation ---
@@ -400,7 +400,7 @@ describe('computeAnalytics', () => {
       ],
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.consultation.costByModel).toEqual({ codex: 3.50 });
   });
 
@@ -417,7 +417,7 @@ describe('computeAnalytics', () => {
       closedIssues: '[]',
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.activity.projectsByProtocol.spir?.count).toBe(2);
     expect(result.activity.projectsByProtocol.spir?.avgWallClockHours).toBeCloseTo(24);
     expect(result.activity.projectsByProtocol.air?.count).toBe(1);
@@ -435,7 +435,7 @@ describe('computeAnalytics', () => {
       42: '2026-02-10T06:00:00Z',
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     // Wall clock should be mergedAt - onIt = 30 hours (not 24 from PR createdAt)
     expect(result.activity.projectsByProtocol.bugfix?.avgWallClockHours).toBeCloseTo(30);
   });
@@ -448,7 +448,7 @@ describe('computeAnalytics', () => {
       closedIssues: '[]',
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     // No "on it" → uses PR createdAt → mergedAt = 24 hours
     expect(result.activity.projectsByProtocol.bugfix?.avgWallClockHours).toBeCloseTo(24);
   });
@@ -463,7 +463,7 @@ describe('computeAnalytics', () => {
       closedIssues: '[]',
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(Object.keys(result.activity.projectsByProtocol)).toEqual(['bugfix']);
     expect(result.activity.projectsByProtocol.bugfix?.count).toBe(1);
   });
@@ -476,14 +476,14 @@ describe('computeAnalytics', () => {
       closedIssues: '[]',
     });
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.activity.projectsByProtocol).toEqual({});
   });
 
   it('returns empty projectsByProtocol when GitHub fails', async () => {
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.activity.projectsByProtocol).toEqual({});
   });
 
@@ -492,8 +492,8 @@ describe('computeAnalytics', () => {
   it('returns cached result on second call within TTL', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    const result1 = await computeAnalytics('/tmp/workspace', '7', 3);
-    const result2 = await computeAnalytics('/tmp/workspace', '7', 3);
+    const result1 = await computeAnalytics('/tmp/workspace', '7');
+    const result2 = await computeAnalytics('/tmp/workspace', '7');
 
     expect(result1).toBe(result2);
     expect(mockSummary).toHaveBeenCalledTimes(1);
@@ -502,8 +502,8 @@ describe('computeAnalytics', () => {
   it('bypasses cache when refresh=true', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    await computeAnalytics('/tmp/workspace', '7', 3);
-    await computeAnalytics('/tmp/workspace', '7', 3, true);
+    await computeAnalytics('/tmp/workspace', '7');
+    await computeAnalytics('/tmp/workspace', '7', true);
 
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
@@ -511,8 +511,8 @@ describe('computeAnalytics', () => {
   it('does not share cache between different ranges', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    await computeAnalytics('/tmp/workspace', '7', 3);
-    await computeAnalytics('/tmp/workspace', '30', 3);
+    await computeAnalytics('/tmp/workspace', '7');
+    await computeAnalytics('/tmp/workspace', '30');
 
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
@@ -522,7 +522,7 @@ describe('computeAnalytics', () => {
   it('passes workspace filter to MetricsDB.summary()', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    await computeAnalytics('/tmp/my-workspace', '7', 0);
+    await computeAnalytics('/tmp/my-workspace', '7');
 
     expect(mockSummary).toHaveBeenCalledWith(
       expect.objectContaining({ workspace: '/tmp/my-workspace' }),
@@ -532,7 +532,7 @@ describe('computeAnalytics', () => {
   it('passes workspace filter for all time ranges', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    await computeAnalytics('/tmp/workspace-a', 'all', 0);
+    await computeAnalytics('/tmp/workspace-a', 'all');
 
     expect(mockSummary).toHaveBeenCalledWith(
       expect.objectContaining({ workspace: '/tmp/workspace-a' }),
@@ -542,8 +542,8 @@ describe('computeAnalytics', () => {
   it('different workspaces get different cache entries', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
 
-    await computeAnalytics('/tmp/workspace-a', '7', 0);
-    await computeAnalytics('/tmp/workspace-b', '7', 0);
+    await computeAnalytics('/tmp/workspace-a', '7');
+    await computeAnalytics('/tmp/workspace-b', '7');
 
     expect(mockSummary).toHaveBeenCalledTimes(2);
     expect(mockSummary).toHaveBeenCalledWith(
@@ -552,6 +552,65 @@ describe('computeAnalytics', () => {
     expect(mockSummary).toHaveBeenCalledWith(
       expect.objectContaining({ workspace: '/tmp/workspace-b' }),
     );
+  });
+
+  // --- Regression: median instead of average (#548) ---
+
+  it('uses median (not average) for time-to-merge with outliers', async () => {
+    // 3 PRs: 2h, 3h, 100h — average=35h, median=3h
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T02:00:00Z', body: '', headRefName: 'main' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T03:00:00Z', body: '', headRefName: 'main' },
+        { number: 3, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-14T04:00:00Z', body: '', headRefName: 'main' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    // Median of [2, 3, 100] = 3 (middle value)
+    expect(result.activity.medianTimeToMergeHours).toBeCloseTo(3);
+  });
+
+  it('uses median (not average) for bug close time with outliers', async () => {
+    // 3 bugs: 1h, 2h, 200h — average=67.67h, median=2h
+    mockGhOutput({
+      mergedPRs: '[]',
+      closedIssues: JSON.stringify([
+        { number: 1, title: 'Bug 1', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-10T01:00:00Z', labels: [{ name: 'bug' }] },
+        { number: 2, title: 'Bug 2', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-10T02:00:00Z', labels: [{ name: 'bug' }] },
+        { number: 3, title: 'Bug 3', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-18T08:00:00Z', labels: [{ name: 'bug' }] },
+      ]),
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    // Median of [1, 2, 200] = 2 (middle value)
+    expect(result.activity.medianTimeToCloseBugsHours).toBeCloseTo(2);
+  });
+
+  it('computes median correctly for even number of items', async () => {
+    // 4 PRs: 1h, 2h, 10h, 20h — median = (2+10)/2 = 6
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T01:00:00Z', body: '', headRefName: 'main' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T02:00:00Z', body: '', headRefName: 'main' },
+        { number: 3, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T10:00:00Z', body: '', headRefName: 'main' },
+        { number: 4, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T20:00:00Z', body: '', headRefName: 'main' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    // Median of [1, 2, 10, 20] = (2+10)/2 = 6
+    expect(result.activity.medianTimeToMergeHours).toBeCloseTo(6);
+  });
+
+  // --- Regression: activeBuilders removed (#548) ---
+
+  it('does not include activeBuilders in response', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    expect(result.activity).not.toHaveProperty('activeBuilders');
   });
 
 });

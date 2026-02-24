@@ -390,6 +390,31 @@ describe('Workspace filtering (#545)', () => {
     expect(proj).toBeDefined();
     expect(proj!.totalCost).toBeCloseTo(10.00);
   });
+
+  // --- Regression: prefix match for builder worktree paths (#548) ---
+
+  it('includes builder worktree paths that are children of the workspace', () => {
+    db.record(sampleRecord({ workspacePath: '/projects/codev/.builders/bugfix-535-fix', costUsd: 7.00 }));
+
+    const summary = db.summary({ workspace: '/projects/codev' });
+    // Should include the worktree record via prefix match
+    expect(summary.totalCount).toBe(3); // 2 existing + 1 builder worktree
+  });
+
+  it('does not include unrelated workspace paths via prefix match', () => {
+    db.record(sampleRecord({ workspacePath: '/projects/codev-other', costUsd: 7.00 }));
+
+    const summary = db.summary({ workspace: '/projects/codev' });
+    // Should NOT include /projects/codev-other (different workspace, not a subpath)
+    expect(summary.totalCount).toBe(2); // only the 2 original /projects/codev records
+  });
+
+  it('handles workspace paths with trailing slash', () => {
+    db.record(sampleRecord({ workspacePath: '/projects/codev/.builders/spir-42', costUsd: 4.00 }));
+
+    const summary = db.summary({ workspace: '/projects/codev/' });
+    expect(summary.totalCount).toBe(3); // 2 existing + 1 builder
+  });
 });
 
 // Test 8: CLI flag acceptance (--protocol, --project-id)

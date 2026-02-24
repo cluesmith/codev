@@ -32,10 +32,9 @@ export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
   activity: {
     prsMerged: number;
-    avgTimeToMergeHours: number | null;
+    medianTimeToMergeHours: number | null;
     issuesClosed: number;
-    avgTimeToCloseBugsHours: number | null;
-    activeBuilders: number;
+    medianTimeToCloseBugsHours: number | null;
     projectsByProtocol: Record<string, ProtocolStats>;
   };
   consultation: {
@@ -108,19 +107,22 @@ function rangeToSinceDate(range: RangeParam): string | null {
 // GitHub metrics computation
 // =============================================================================
 
-function computeAvgHours(items: Array<{ start: string; end: string }>): number | null {
+function computeMedianHours(items: Array<{ start: string; end: string }>): number | null {
   if (items.length === 0) return null;
-  const totalMs = items.reduce((sum, item) => {
-    return sum + (new Date(item.end).getTime() - new Date(item.start).getTime());
-  }, 0);
-  return totalMs / items.length / (1000 * 60 * 60);
+  const hours = items
+    .map(item => (new Date(item.end).getTime() - new Date(item.start).getTime()) / (1000 * 60 * 60))
+    .sort((a, b) => a - b);
+  const mid = Math.floor(hours.length / 2);
+  return hours.length % 2 === 0
+    ? (hours[mid - 1] + hours[mid]) / 2
+    : hours[mid];
 }
 
 interface GitHubMetrics {
   prsMerged: number;
-  avgTimeToMergeHours: number | null;
+  medianTimeToMergeHours: number | null;
   issuesClosed: number;
-  avgTimeToCloseBugsHours: number | null;
+  medianTimeToCloseBugsHours: number | null;
   mergedPRList: MergedPR[];
 }
 
@@ -142,8 +144,8 @@ async function computeGitHubMetrics(
   const prs = mergedPRs ?? [];
   const prsMerged = prs.length;
 
-  // Average time to merge
-  const avgTimeToMergeHours = computeAvgHours(
+  // Median time to merge
+  const medianTimeToMergeHours = computeMedianHours(
     prs.filter(pr => pr.mergedAt).map(pr => ({ start: pr.createdAt, end: pr.mergedAt })),
   );
 
@@ -151,19 +153,19 @@ async function computeGitHubMetrics(
   const closed = closedIssues ?? [];
   const issuesClosed = closed.length;
 
-  // Average time to close bugs
+  // Median time to close bugs
   const closedBugs = closed.filter(i =>
     i.labels.some(l => l.name === 'bug') && i.closedAt,
   );
-  const avgTimeToCloseBugsHours = computeAvgHours(
+  const medianTimeToCloseBugsHours = computeMedianHours(
     closedBugs.map(i => ({ start: i.createdAt, end: i.closedAt })),
   );
 
   return {
     prsMerged,
-    avgTimeToMergeHours,
+    medianTimeToMergeHours,
     issuesClosed,
-    avgTimeToCloseBugsHours,
+    medianTimeToCloseBugsHours,
     mergedPRList: prs,
   };
 }
@@ -337,13 +339,11 @@ async function computeProjectsByProtocol(
  *
  * @param workspaceRoot - Path to the workspace root (used as cwd for gh CLI)
  * @param range - Time range: '1', '7', '30', or 'all'
- * @param activeBuilders - Current active builder count (from tower context)
  * @param refresh - If true, bypass the cache
  */
 export async function computeAnalytics(
   workspaceRoot: string,
   range: RangeParam,
-  activeBuilders: number,
   refresh = false,
 ): Promise<AnalyticsResponse> {
   const cacheKey = `${workspaceRoot}:${range}`;
@@ -369,9 +369,9 @@ export async function computeAnalytics(
     errors.github = msg;
     githubMetrics = {
       prsMerged: 0,
-      avgTimeToMergeHours: null,
+      medianTimeToMergeHours: null,
       issuesClosed: 0,
-      avgTimeToCloseBugsHours: null,
+      medianTimeToCloseBugsHours: null,
       mergedPRList: [],
     };
   }
@@ -405,10 +405,9 @@ export async function computeAnalytics(
     timeRange: rangeToLabel(range),
     activity: {
       prsMerged: githubMetrics.prsMerged,
-      avgTimeToMergeHours: githubMetrics.avgTimeToMergeHours,
+      medianTimeToMergeHours: githubMetrics.medianTimeToMergeHours,
       issuesClosed: githubMetrics.issuesClosed,
-      avgTimeToCloseBugsHours: githubMetrics.avgTimeToCloseBugsHours,
-      activeBuilders,
+      medianTimeToCloseBugsHours: githubMetrics.medianTimeToCloseBugsHours,
       projectsByProtocol,
     },
     consultation: consultMetrics,
