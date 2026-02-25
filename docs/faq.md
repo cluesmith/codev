@@ -70,6 +70,44 @@ Codev runs *on top of* Claude Code. The Architect and Builder roles use Claude C
 
 Think of Claude Code as the engine. Codev is the operating system that orchestrates it for larger software projects.
 
+## What protocols are available?
+
+Codev ships with several protocols for different types of work:
+
+| Protocol | Use For | Key Trait |
+|----------|---------|-----------|
+| **SPIR** | New features | Full ceremony: Specify → Plan → Implement → Review with human gates |
+| **ASPIR** | Trusted features | Same as SPIR but without human gates on spec/plan — builder runs autonomously |
+| **AIR** | Small features (< 300 LOC) | Lightweight: Implement → Review, no spec/plan artifacts |
+| **BUGFIX** | Bug fixes from GitHub issues | Minimal: fix, test, PR — no spec needed |
+| **TICK** | Amendments to existing specs | Extends an existing SPIR spec with incremental changes |
+| **MAINTAIN** | Code hygiene | Dead code removal, documentation sync, dependency cleanup |
+| **EXPERIMENT** | Research spikes | Hypothesis → Experiment → Conclude |
+
+**How to choose**: SPIR for anything significant or novel. ASPIR for trusted, well-scoped features. AIR or BUGFIX for small work. TICK to amend an existing spec.
+
+## What is porch?
+
+**Porch** is the protocol orchestrator. It drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine — managing phase transitions, human approval gates, and multi-agent consultations automatically.
+
+When you `af spawn` a builder, porch orchestrates its work:
+- Enforces phase order (can't skip from Specify to Implement)
+- Runs 3-way consultations at checkpoints
+- Blocks at human gates until approved
+- Tracks state in `codev/projects/<id>/status.yaml`
+
+You can also use porch manually: `porch status 42`, `porch run 42`, `porch approve 42 spec-approval`.
+
+## Can I use Codev without Agent Farm?
+
+Yes. All protocols (SPIR, TICK, etc.) work in any AI coding assistant — Claude Code, Cursor, Copilot, or any tool that reads CLAUDE.md/AGENTS.md. Just tell your AI: *"I want to build X using the SPIR protocol"*.
+
+Agent Farm adds parallel builder orchestration, a web dashboard, and automated protocol enforcement. It's optional but powerful for larger projects.
+
+## Can I access Agent Farm remotely?
+
+Yes. Use `af workspace start --remote user@host` to start Agent Farm on a remote machine and access it from your local browser via SSH tunnel. One command handles everything: SSH connection, Agent Farm startup, tunnel setup, and browser launch. Requires passwordless SSH.
+
 ## More questions?
 
-Join the conversation in [GitHub Discussions](https://github.com/cluesmith/codev/discussions).
+Join the conversation in [GitHub Discussions](https://github.com/cluesmith/codev/discussions) or our [Discord community](https://discord.gg/mJ92DhDa6n).

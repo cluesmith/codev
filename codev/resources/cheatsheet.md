@@ -60,8 +60,10 @@ A **protocol** is a structured workflow that defines how work progresses from id
 
 | Protocol | Use For | Phases |
 |----------|---------|--------|
-| **SPIR** | New features | Specify → Plan → Implement → Review |
-| **AIR** | Small features (< 300 LOC) | Implement → Review |
+| **SPIR** | New features | Specify → Plan → Implement → Review (with human gates) |
+| **ASPIR** | Trusted features | Same as SPIR but no human gates on spec/plan |
+| **AIR** | Small features (< 300 LOC) | Implement → Review (no spec/plan artifacts) |
+| **BUGFIX** | Bug fixes from GitHub issues | Fix → Test → PR (minimal ceremony) |
 | **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
@@ -123,6 +125,18 @@ Architect-Builder orchestration. Used by both **humans and agents**—agents use
 | `af shell` | Spawn a utility shell |
 | `af open <file>` | Open file in workspace viewer |
 | `af tower start` | Start cross-project tower |
+| `af tower register` | Register tower with codevos.ai for cloud access |
+
+### porch
+
+Protocol orchestrator. Drives SPIR/ASPIR/TICK/BUGFIX via a state machine. Used by **agents** (and humans for gate approvals).
+
+| Command | Description |
+|---------|-------------|
+| `porch status <id>` | Check project protocol status |
+| `porch run <id>` | Run next protocol phase |
+| `porch approve <id> <gate>` | Approve a human gate (human only) |
+| `porch pending` | List all pending gates |
 
 ### consult
 
