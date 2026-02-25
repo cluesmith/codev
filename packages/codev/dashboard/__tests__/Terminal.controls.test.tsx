@@ -30,6 +30,7 @@ vi.mock('@xterm/xterm', () => {
     dispose = vi.fn();
     onData = vi.fn();
     onResize = vi.fn();
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
     registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }));
     attachCustomKeyEventHandler = vi.fn();
     scrollToBottom = vi.fn();

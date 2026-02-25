@@ -354,11 +354,30 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
     containerRef.current.addEventListener('paste', onNativePaste);
 
+    // Scroll state tracked externally in JS variables (Bugfix #560).
+    // xterm's buffer.active.viewportY (backed by ydisp) can become stale
+    // when the terminal container is hidden via display:none (tab switches,
+    // panel collapse). The browser resets the viewport element's scrollTop
+    // to 0, and xterm may sync ydisp to 0. Reading viewportY after the
+    // container becomes visible again returns 0 instead of the user's
+    // actual position. By tracking scroll state here, we're immune to
+    // DOM state changes from display toggling.
+    const scrollState = { viewportY: 0, baseY: 0, wasAtBottom: true };
+
+    // Update tracked scroll state on every scroll event.
+    const scrollDisposable = term.onScroll(() => {
+      const baseY = term.buffer?.active?.baseY ?? 0;
+      const viewportY = term.buffer?.active?.viewportY ?? 0;
+      scrollState.baseY = baseY;
+      scrollState.viewportY = viewportY;
+      scrollState.wasAtBottom = !baseY || viewportY >= baseY;
+    });
+
     // Scroll-aware fit: preserves the viewport scroll position across
     // fit() calls.  Without this, fit() → resize() → buffer reflow can
     // reset the viewport to the top of the scrollback (Bugfix #423).
-    // Only activates when there IS scrollback (baseY > 0); when the buffer
-    // is empty or all content fits in the viewport, there's nothing to lose.
+    // Uses externally-tracked scroll state instead of reading from xterm's
+    // buffer to avoid stale values after display:none toggling (Bugfix #560).
     const safeFit = () => {
       // Skip fit when container is hidden (display: none) or has zero dimensions.
       // ResizeObserver fires with 0x0 when tabs switch — fitting at that size
@@ -367,17 +386,20 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       if (!rect || rect.width === 0 || rect.height === 0) return;
 
       const baseY = term.buffer?.active?.baseY;
-      if (!baseY) {
+      if (!baseY && !scrollState.baseY) {
         fitAddon.fit();
         return;
       }
-      const viewportY = term.buffer.active.viewportY;
-      const wasAtBottom = viewportY == null || viewportY >= baseY;
+
+      // Use externally-tracked state — immune to display:none scroll reset
+      const wasAtBottom = scrollState.wasAtBottom;
+      const restoreY = scrollState.viewportY;
+
       fitAddon.fit();
       if (wasAtBottom) {
         term.scrollToBottom();
       } else {
-        term.scrollToLine(viewportY);
+        term.scrollToLine(restoreY);
       }
     };
 
@@ -438,7 +460,11 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
         if (rc.initialBuffer) {
           const filtered = filterDA(rc.initialBuffer);
           if (filtered) {
-            term.write(filtered, () => { term.scrollToBottom(); });
+            term.write(filtered, () => {
+              term.scrollToBottom();
+              // Sync tracked scroll state after replay (Bugfix #560)
+              scrollState.wasAtBottom = true;
+            });
           }
           rc.initialBuffer = '';
         }
@@ -448,6 +474,8 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
             sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
           }
           term.scrollToBottom();
+          // Sync tracked scroll state after replay (Bugfix #560)
+          scrollState.wasAtBottom = true;
         }, 350);
       };
 
@@ -642,6 +670,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
         textarea.removeEventListener('compositionstart', onCompositionStart);
         textarea.removeEventListener('compositionend', onCompositionEnd);
       }
+      scrollDisposable.dispose();
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       containerRef.current?.removeEventListener('paste', onNativePaste);
