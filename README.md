@@ -5,6 +5,8 @@
 
 ![Agent Farm Dashboard](docs/assets/agent-farm-hero.png)
 
+> **New: [A Tour of CodevOS](https://waleedk.medium.com/a-tour-of-codevos-1db0fe0e4516)** — A deep dive into how Codev orchestrates human-agent collaboration: the SPIR protocol, Agent Farm, multi-model consultation, and the architecture that ties it all together.
+
 Codev is an operating system for structured human-AI collaboration. You write specs and plans that AI agents execute reliably.
 
 > **Results**: In head-to-head comparison, SPIR scored 92-95 vs VIBE's 12-15 on the same task. [See case study](#-example-implementations)
