@@ -57,10 +57,10 @@ The `af consult` variant runs in a visible dashboard terminal so you can observe
 
 ## Quick Builder Spawning
 
-Spawn a builder directly from a spec number:
+Spawn a builder directly from an issue number:
 
 ```bash
-af spawn 42
+af spawn 42 --protocol spir
 ```
 
 The builder gets its own isolated git worktree, automatically receives the spec and plan context, and starts implementing immediately.
@@ -113,11 +113,11 @@ Builders work in isolated git worktrees. Their changes don't affect your main br
 
 ## Troubleshooting
 
-### Dashboard Won't Start
+### Workspace Won't Start
 
 ```bash
-af dash stop    # Kill any orphaned processes
-af dash start   # Fresh start
+af workspace stop    # Kill any orphaned processes
+af workspace start   # Fresh start
 ```
 
 ### Orphaned Sessions
@@ -125,8 +125,8 @@ af dash start   # Fresh start
 If things are really stuck, restart Tower:
 
 ```bash
-af dash stop    # Stop Tower and all shellper sessions
-af dash start   # Fresh start
+af workspace stop    # Stop Tower and all shellper sessions
+af workspace start   # Fresh start
 ```
 
 ### Port Conflicts

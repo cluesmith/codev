@@ -300,10 +300,10 @@ For detailed commands, configuration, and architecture, see:
 
 ### 🚨 ALWAYS Operate From the Main Workspace Root 🚨
 
-**ALL `af` commands (`af spawn`, `af send`, `af status`, `af dash`, `af cleanup`) MUST be run from the repository root on the `main` branch.**
+**ALL `af` commands (`af spawn`, `af send`, `af status`, `af workspace`, `af cleanup`) MUST be run from the repository root on the `main` branch.**
 
 - **NEVER** run `af spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
-- **NEVER** run `af dash start` from a worktree — there is no separate dashboard per worktree
+- **NEVER** run `af workspace start` from a worktree — there is no separate workspace per worktree
 - **NEVER** `cd` into a worktree to run af commands
 - The **only exception** is `porch` commands that need worktree context (e.g. `porch approve` from a builder's worktree)
 

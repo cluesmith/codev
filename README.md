@@ -39,8 +39,8 @@ codev init
 # 3. Verify setup
 codev doctor
 
-# 4. Start the dashboard (optional)
-af dash start
+# 4. Start the workspace (optional)
+af workspace start
 ```
 
 Then tell your AI agent: *"I want to build X using the SPIR protocol"*
@@ -349,47 +349,34 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 ### Quick Start
 
 ```bash
-# Start the architect dashboard
-af dash start
+# Start the workspace
+af workspace start
 
 # Spawn a builder for a spec
-af spawn 3
+af spawn 3 --protocol spir
 
 # Check status
 af status
 
 # Stop everything
-af dash stop
+af workspace stop
 ```
 
 The `af` command is globally available after installing `@cluesmith/codev`.
 
 ### Remote Access
 
-Access Agent Farm from another device (iPad, laptop, etc.) via SSH tunnel:
+Access Agent Farm from another device (iPad, laptop, etc.) with a single command:
 
 ```bash
-# Step 1: Start Agent Farm
-af dash start
+# Start workspace on remote machine (sets up SSH tunnel automatically)
+af workspace start --remote user@remote-host
 
-# Step 2: Get SSH command (shows your local IPs)
-af tunnel
-
-# Step 3: Run the SSH command on your remote device
-# Example output: ssh -L 4200:localhost:4200 youruser@192.168.1.50
-
-# Step 4: Open http://localhost:4200 in your remote browser
+# Or with explicit project path
+af workspace start --remote user@remote-host:/path/to/project
 ```
 
-The dashboard and all terminals work identically via the tunnel. SSH handles authentication and encryption. (File tabs use separate ports and won't load through the tunnel.)
-
-**Note**: Requires SSH server on the dev machine. On Windows, enable OpenSSH Server or use WSL2.
-
-**Legacy mode** (not recommended):
-```bash
-# DEPRECATED: Exposes dashboard without authentication
-af dash start --allow-insecure-remote
-```
+This command SSHs into the remote machine, starts Agent Farm there, sets up an SSH tunnel back to your local machine, and opens the workspace in your browser. Requires passwordless SSH (`ssh-copy-id user@host`).
 
 See [CLI Reference](codev/resources/commands/agent-farm.md#remote-access) for full details.
 
