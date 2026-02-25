@@ -57,10 +57,10 @@ The `af consult` variant runs in a visible dashboard terminal so you can observe
 
 ## Quick Builder Spawning
 
-Spawn a builder directly from a spec number:
+Spawn a builder directly from an issue number:
 
 ```bash
-af spawn 42
+af spawn 42 --protocol spir
 ```
 
 The builder gets its own isolated git worktree, automatically receives the spec and plan context, and starts implementing immediately.
@@ -107,17 +107,45 @@ For example, to customize the consultant role:
 vim codev/roles/consultant.md
 ```
 
+## Remote Access
+
+Access Agent Farm from any device via cloud connectivity:
+
+```bash
+af tower connect
+```
+
+Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser.
+
+## Non-Node.js Projects
+
+Configure porch checks for your language stack in `af-config.json`:
+
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "cargo build" },
+      "tests": { "command": "cargo test" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+Works with Python (uv/pytest), Rust (cargo), Go, and any language with a build/test command.
+
 ## Safe Branch Management
 
 Builders work in isolated git worktrees. Their changes don't affect your main branch until they create a PR and you merge it.
 
 ## Troubleshooting
 
-### Dashboard Won't Start
+### Workspace Won't Start
 
 ```bash
-af dash stop    # Kill any orphaned processes
-af dash start   # Fresh start
+af workspace stop    # Kill any orphaned processes
+af workspace start   # Fresh start
 ```
 
 ### Orphaned Sessions
@@ -125,8 +153,8 @@ af dash start   # Fresh start
 If things are really stuck, restart Tower:
 
 ```bash
-af dash stop    # Stop Tower and all shellper sessions
-af dash start   # Fresh start
+af workspace stop    # Stop Tower and all shellper sessions
+af workspace start   # Fresh start
 ```
 
 ### Port Conflicts

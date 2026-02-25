@@ -39,8 +39,8 @@ codev init
 # 3. Verify setup
 codev doctor
 
-# 4. Start the dashboard (optional)
-af dash start
+# 4. Start the workspace (optional)
+af workspace start
 ```
 
 Then tell your AI agent: *"I want to build X using the SPIR protocol"*
@@ -349,49 +349,30 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 ### Quick Start
 
 ```bash
-# Start the architect dashboard
-af dash start
+# Start the workspace
+af workspace start
 
 # Spawn a builder for a spec
-af spawn 3
+af spawn 3 --protocol spir
 
 # Check status
 af status
 
 # Stop everything
-af dash stop
+af workspace stop
 ```
 
 The `af` command is globally available after installing `@cluesmith/codev`.
 
 ### Remote Access
 
-Access Agent Farm from another device (iPad, laptop, etc.) via SSH tunnel:
+Access Agent Farm from any device via cloud connectivity:
 
 ```bash
-# Step 1: Start Agent Farm
-af dash start
-
-# Step 2: Get SSH command (shows your local IPs)
-af tunnel
-
-# Step 3: Run the SSH command on your remote device
-# Example output: ssh -L 4200:localhost:4200 youruser@192.168.1.50
-
-# Step 4: Open http://localhost:4200 in your remote browser
+af tower connect
 ```
 
-The dashboard and all terminals work identically via the tunnel. SSH handles authentication and encryption. (File tabs use separate ports and won't load through the tunnel.)
-
-**Note**: Requires SSH server on the dev machine. On Windows, enable OpenSSH Server or use WSL2.
-
-**Legacy mode** (not recommended):
-```bash
-# DEPRECATED: Exposes dashboard without authentication
-af dash start --allow-insecure-remote
-```
-
-See [CLI Reference](codev/resources/commands/agent-farm.md#remote-access) for full details.
+Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser — no SSH tunnels or port forwarding needed.
 
 ### Autonomous Builder Flags
 
@@ -431,7 +412,7 @@ See [CLI Reference](codev/resources/commands/agent-farm.md) for full documentati
 Codev has a **release protocol** (`codev/protocols/release/`) that automates the entire release process. To release a new version:
 
 ```
-Let's release v1.6.0
+Let's release v2.2.0
 ```
 
 The AI guides you through: pre-flight checks, maintenance cycle, E2E tests, version bump, release notes, GitHub release, and npm publish.
@@ -440,11 +421,11 @@ The AI guides you through: pre-flight checks, maintenance cycle, E2E tests, vers
 
 | Version Type | npm Tag | Example | Purpose |
 |--------------|---------|---------|---------|
-| Stable | `latest` | 1.6.0, 1.7.0 | Production-ready releases |
-| Release Candidate | `next` | 1.7.0-rc.1 | Pre-release testing (v1.7.0+) |
-| Patch | `latest` | 1.6.1 | Backported bug fixes |
+| Stable | `latest` | 2.1.1, 2.2.0 | Production-ready releases |
+| Release Candidate | `next` | 2.2.0-rc.1 | Pre-release testing |
+| Patch | `latest` | 2.1.2 | Backported bug fixes |
 
-Starting with v1.7.0, minor releases use release candidates (`npm install @cluesmith/codev@next`) for testing before stable release.
+Minor releases use release candidates (`npm install @cluesmith/codev@next`) for testing before stable release.
 
 Releases are named after great examples of architecture from around the world. See [Release Notes](docs/releases/) for version history.
 

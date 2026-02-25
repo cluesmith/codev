@@ -1,11 +1,12 @@
 # Codev CLI Command Reference
 
-Codev provides three CLI tools for AI-assisted software development:
+Codev provides four CLI tools for AI-assisted software development:
 
 | Tool | Description |
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
 | `af` | Agent Farm - multi-agent orchestration for development |
+| `porch` | Protocol orchestrator - drives SPIR/ASPIR/TICK/BUGFIX state machines |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
 
 ## Quick Start
@@ -33,7 +34,7 @@ consult -m gemini --protocol spir --type spec
 npm install -g @cluesmith/codev
 ```
 
-This installs all three commands globally: `codev`, `af`, and `consult`.
+This installs all four commands globally: `codev`, `af`, `porch`, and `consult`.
 
 ## Command Summaries
 
@@ -64,6 +65,17 @@ See [codev.md](codev.md) for full documentation.
 | `af tower` | Cross-project dashboard |
 
 See [agent-farm.md](agent-farm.md) for full documentation.
+
+### porch - Protocol Orchestrator
+
+| Command | Description |
+|---------|-------------|
+| `porch status <id>` | Show project protocol status |
+| `porch run <id>` | Run the next protocol phase |
+| `porch approve <id> <gate>` | Approve a human gate |
+| `porch pending` | List all pending gates across projects |
+
+Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's used automatically by `af spawn` (strict mode) or manually by builders (soft mode).
 
 ### consult - AI Consultation
 
