@@ -25,6 +25,7 @@ vi.mock('@xterm/xterm', () => {
     dispose = vi.fn();
     onData = vi.fn();
     onResize = vi.fn();
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
     cols = 80;
     rows = 24;
     attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
