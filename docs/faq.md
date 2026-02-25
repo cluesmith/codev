@@ -106,7 +106,7 @@ Agent Farm adds parallel builder orchestration, a web dashboard, and automated p
 
 ## Can I access Agent Farm remotely?
 
-Yes. Use `af workspace start --remote user@host` to start Agent Farm on a remote machine and access it from your local browser via SSH tunnel. One command handles everything: SSH connection, Agent Farm startup, tunnel setup, and browser launch. Requires passwordless SSH.
+Yes. Register your tower with [codevos.ai](https://codevos.ai) using `af tower connect`, then access your workspace from any browser. No SSH tunnels or port forwarding needed.
 
 ## More questions?
 

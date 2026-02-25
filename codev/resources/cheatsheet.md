@@ -125,7 +125,7 @@ Architect-Builder orchestration. Used by both **humans and agents**—agents use
 | `af shell` | Spawn a utility shell |
 | `af open <file>` | Open file in workspace viewer |
 | `af tower start` | Start cross-project tower |
-| `af tower register` | Register tower with codevos.ai for cloud access |
+| `af tower connect` | Connect tower to codevos.ai for cloud access |
 
 ### porch
 

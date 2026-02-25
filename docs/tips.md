@@ -109,25 +109,13 @@ vim codev/roles/consultant.md
 
 ## Remote Access
 
-Access Agent Farm from any device with a single command:
+Access Agent Farm from any device via cloud connectivity:
 
 ```bash
-af workspace start --remote user@remote-host
+af tower connect
 ```
 
-This sets up SSH tunneling automatically. Requires passwordless SSH (`ssh-copy-id user@host` first).
-
-## Cross-Workspace Messaging
-
-Send messages between different project workspaces:
-
-```bash
-# Send to another project's architect
-af send marketmaker:architect "R4 report is ready"
-
-# Send to a builder in another workspace
-af send codev:0042 "Check the shared library changes"
-```
+Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser.
 
 ## Non-Node.js Projects
 

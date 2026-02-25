@@ -366,19 +366,13 @@ The `af` command is globally available after installing `@cluesmith/codev`.
 
 ### Remote Access
 
-Access Agent Farm from another device (iPad, laptop, etc.) with a single command:
+Access Agent Farm from any device via cloud connectivity:
 
 ```bash
-# Start workspace on remote machine (sets up SSH tunnel automatically)
-af workspace start --remote user@remote-host
-
-# Or with explicit project path
-af workspace start --remote user@remote-host:/path/to/project
+af tower connect
 ```
 
-This command SSHs into the remote machine, starts Agent Farm there, sets up an SSH tunnel back to your local machine, and opens the workspace in your browser. Requires passwordless SSH (`ssh-copy-id user@host`).
-
-See [CLI Reference](codev/resources/commands/agent-farm.md#remote-access) for full details.
+Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser — no SSH tunnels or port forwarding needed.
 
 ### Autonomous Builder Flags
 
