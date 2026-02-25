@@ -9,7 +9,7 @@
 
 Codev is an operating system for structured human-AI collaboration. You write specs and plans that AI agents execute reliably.
 
-> **Results**: In head-to-head comparison, SPIR scored 92-95 vs VIBE's 12-15 on the same task. [See case study](#-example-implementations)
+> **Results**: One architect + autonomous AI builders shipped [106 PRs in 14 days](codev/resources/development-analysis-2026-02-17.md), median feature in 57 minutes. In controlled comparison, SPIR consistently outperformed unstructured AI coding across [4 rounds](codev/resources/vibe-vs-spir-r4-comparison-2026-02.md). [Case study](#-example-implementations) | [Production data](#production-metrics-feb-2026)
 
 **Quick Links**: [FAQ](docs/faq.md) | [Tips](docs/tips.md) | [Cheatsheet](codev/resources/cheatsheet.md) | [CLI Reference](codev/resources/commands/overview.md) | [Why Codev?](docs/why.md) | [Discord](https://discord.gg/mJ92DhDa6n)
 
@@ -21,9 +21,9 @@ Codev is an operating system for structured human-AI collaboration. You write sp
 - [Learn About Codev](#learn-about-codev)
 - [What is Codev?](#what-is-codev)
 - [The SPIR Protocol](#the-spir-protocol)
-- [Agent Farm](#agent-farm-optional)
 - [Example Implementations](#-example-implementations)
-- [Quick Start & Prerequisites](#quick-start)
+- [Real-World Performance](#-eating-our-own-dog-food)
+- [Agent Farm](#agent-farm-optional)
 - [Contributing](#contributing)
 
 ## Quick Start
@@ -202,10 +202,9 @@ In much the same way an operating system has a memory hierarchy, Codev repos hav
 Both projects below were given **the exact same prompt** to build a Todo Manager application using **Claude Code with Opus**. The difference? The methodology used:
 
 ### [Todo Manager - VIBE](https://github.com/ansari-project/todo-manager-vibe)
-- Built using a **VIBE-style prompt** approach
-- Shows rapid prototyping with conversational AI interaction
-- Demonstrates how a simple prompt can drive development
-- Results in working code through chat-based iteration
+- Built using a **VIBE-style prompt** approach (same model, same prompt)
+- Produced boilerplate scaffolding but 0% of the specified functionality
+- No tests, no database, no working API — demonstrates how conversational approaches can miss the mark entirely
 
 ### [Todo Manager - SPIR](https://github.com/ansari-project/codev-demo)
 - Built using the **SPIR protocol** with full document-driven development
@@ -215,52 +214,61 @@ Both projects below were given **the exact same prompt** to build a Todo Manager
 - Multi-agent consultation throughout the process
 
 <details>
-<summary><strong>📊 Automated Multi-Agent Analysis</strong> (click to expand)</summary>
+<summary><strong>📊 Multi-Agent Comparison (4 rounds)</strong> (click to expand)</summary>
 
-**Note**: This comparison was generated through automated analysis by 3 independent AI agents (Claude, GPT-5, and Gemini Pro), not human review.
+**Methodology**: Same prompt, same AI model (Claude Opus). Unstructured (conversational) vs SPIR (structured protocol). Scored by 3 independent AI agents (Claude, Codex, Gemini Pro) on a 1-10 scale. Full auto-approved gates — no human review input — to isolate the protocol's effect.
 
-#### Quality Scores (out of 100)
-| Aspect | VIBE | SPIR |
-|--------|------|--------|
-| **Overall Score** | **12-15** | **92-95** |
-| Functionality | 0 | 100 |
-| Test Coverage | 0 | 85 |
-| Documentation | 0 | 95 |
-| Architecture | N/A | 90 |
-| Production Readiness | 0 | 85 |
+#### Latest Results (Round 4, Feb 2026)
 
-#### Key Differences
+| Dimension | Unstructured | SPIR | Delta |
+|-----------|:----------:|:----:|:-----:|
+| **Overall** | **5.8** | **7.0** | **+1.2** |
+| Bugs | 6.7 | 7.3 | +0.7 |
+| Code Quality | 7.0 | 7.7 | +0.7 |
+| Tests | 5.0 | 6.7 | +1.7 |
+| Deployment | 2.7 | 6.7 | +4.0 |
 
-**VIBE**: 3 files (boilerplate only), 0% functionality, 0 tests, no database, no API
+#### Key Findings
 
-**SPIR**: 32 source files, 100% functionality, 5 test suites, SQLite + Drizzle ORM, complete REST API, full component architecture, MCP integration, TypeScript + Zod validation
+- **+1.2 quality advantage consistent across all 4 rounds** (R1: +1.3, R2: +1.2, R4: +1.2)
+- SPIR produced **2.9x more test code** with broader layer coverage
+- SPIR produced **fewer source lines** (1,249 vs 1,294) while being more complete — the first round where structured code was more concise
+- **Deployment readiness** showed the largest delta of any dimension in any round (+4.0): multi-stage Dockerfile, standalone output, deploy instructions
+- Multi-agent consultation caught **5 implementation bugs pre-merge** at a cost of $4.38
 
-#### Why SPIR Won
+**Build time**: SPIR took ~56 min vs ~15 min for unstructured (3.7x). Consultation accounts for 45% of the overhead. Estimated cost: $14-19 vs $4-7 (3-5x). For production code, the deployment readiness and test coverage alone justify the investment.
 
-As GPT-5 noted: *"SPIR's methodology clearly outperformed... Plan-first approach with defined scope, iterative verification, and delivery mindset"*
-
-The verdict: **Context-driven development ensures completeness**, while conversational approaches can miss the mark entirely despite identical prompts and AI models.
+See [full Round 4 analysis](codev/resources/vibe-vs-spir-r4-comparison-2026-02.md) for detailed scoring, bug sweeps, and architecture comparison.
 
 </details>
 
 ## 🐕 Eating Our Own Dog Food
 
-Codev is **self-hosted** - we use Codev methodology to build Codev itself. This means:
+Codev is **self-hosted** — we use Codev to build Codev. Every feature goes through SPIR. Every improvement has a spec, plan, and review.
 
-- **Our test infrastructure** is specified in `codev/specs/0001-test-infrastructure.md`
-- **Our development process** follows the SPIR protocol we advocate
-- **Our improvements** come from lessons learned using our own methodology
+### Production Metrics (Feb 2026)
+
+Over a 14-day sprint building Codev with Codev ([full analysis](codev/resources/development-analysis-2026-02-17.md)):
+
+| Metric | Value |
+|--------|-------|
+| Merged PRs | 106 |
+| Closed issues | 105 |
+| Commits | 801 |
+| Median feature implementation | 57 minutes |
+| Fully autonomous builders | 85% (22 of 26) |
+| Pre-merge bugs caught by consultation | 20 |
+| Consultation cost per PR | $1.59 |
+
+One architect with autonomous builders matched the output of a **3-4 person elite engineering team** (benchmarked against 5 PRs/developer/week from LinearB's 2026 analysis of 8.1M PRs). The bugfix pipeline is genuinely autonomous: 66% of fixes ship in under 30 minutes (median 13 min from PR creation to merge).
+
+Multi-agent consultation catches real bugs that single-model review misses. No single reviewer found all 20 bugs — Codex excels at edge-case exhaustiveness, Claude at runtime semantics, Gemini at architecture.
 
 This self-hosting approach ensures:
 1. The methodology is battle-tested on real development
 2. We experience the same workflow we recommend to users
-3. Any pain points are felt by us first and fixed quickly
+3. Pain points are felt by us first and fixed quickly
 4. The framework evolves based on actual usage, not theory
-
-You can see this in practice:
-- Check `codev/specs/` for our feature specifications
-- Review `codev/plans/` for how we break down work
-- Learn from `codev/reviews/` to see what we've discovered
 
 ### Understanding This Repository's Structure
 
