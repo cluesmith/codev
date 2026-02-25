@@ -107,6 +107,46 @@ For example, to customize the consultant role:
 vim codev/roles/consultant.md
 ```
 
+## Remote Access
+
+Access Agent Farm from any device with a single command:
+
+```bash
+af workspace start --remote user@remote-host
+```
+
+This sets up SSH tunneling automatically. Requires passwordless SSH (`ssh-copy-id user@host` first).
+
+## Cross-Workspace Messaging
+
+Send messages between different project workspaces:
+
+```bash
+# Send to another project's architect
+af send marketmaker:architect "R4 report is ready"
+
+# Send to a builder in another workspace
+af send codev:0042 "Check the shared library changes"
+```
+
+## Non-Node.js Projects
+
+Configure porch checks for your language stack in `af-config.json`:
+
+```json
+{
+  "porch": {
+    "checks": {
+      "build": { "command": "cargo build" },
+      "tests": { "command": "cargo test" },
+      "e2e_tests": { "skip": true }
+    }
+  }
+}
+```
+
+Works with Python (uv/pytest), Rust (cargo), Go, and any language with a build/test command.
+
 ## Safe Branch Management
 
 Builders work in isolated git worktrees. Their changes don't affect your main branch until they create a PR and you merge it.

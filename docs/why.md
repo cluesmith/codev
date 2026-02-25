@@ -97,7 +97,7 @@ SP(IDE)R has real constraints worth acknowledging.
 
 **Scope Considerations**: Quick fixes and small scripts don't need the full protocol. SP(IDE)R shines for features that will need maintenance, documentation, and evolution.
 
-**Tool Dependencies**: Full multi-agent consultation requires Claude Code with MCP support. SP(IDE)R-SOLO works without these but loses the multi-perspective review benefits.
+**Tool Dependencies**: Full multi-agent consultation requires at least two AI CLIs (Claude Code, Gemini CLI, or Codex). SPIR works without consultation but loses the multi-perspective review benefits.
 
 ### Comparisons with Other Specification-Driven Approaches
 
