@@ -67,7 +67,7 @@
       },
       "checks": {
         "pr_exists": {
-          "command": "gh pr list --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
+          "command": "gh pr list --state all --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
           "description": "PR must be created before signaling completion"
         },
         "e2e_tests": {
