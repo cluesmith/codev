@@ -29,7 +29,7 @@ describe('bugfix-566: dashboard-e2e.yml passes GH_TOKEN', () => {
 
     expect(
       stepBlock,
-      'GH_TOKEN must be set in the env block of the Playwright test step',
-    ).toContain('GH_TOKEN');
+      'GH_TOKEN must reference secrets.GITHUB_TOKEN in the env block',
+    ).toMatch(/GH_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}/);
   });
 });
