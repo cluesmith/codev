@@ -490,6 +490,7 @@ export class TunnelClient {
 
     // Check blocklist
     if (path && isBlockedPath(path)) {
+      if (stream.destroyed) return;
       stream.respond({
         ':status': 403,
         'content-type': 'application/json',
@@ -500,6 +501,7 @@ export class TunnelClient {
 
     // Handle metadata requests from the server
     if (method === 'GET' && path === '/__tower/metadata') {
+      if (stream.destroyed) return;
       stream.respond({
         ':status': 200,
         'content-type': 'application/json',
@@ -552,6 +554,7 @@ export class TunnelClient {
 
     wsReq.on('upgrade', (_res, socket, head) => {
       // Respond 200 to the H2 CONNECT
+      if (stream.destroyed) { socket.destroy(); return; }
       stream.respond({ ':status': 200 });
 
       // If there's buffered data from upgrade, push it
@@ -622,6 +625,7 @@ export class TunnelClient {
           }
         }
 
+        if (stream.destroyed) { proxyRes.resume(); return; }
         stream.respond(responseHeaders);
         proxyRes.pipe(stream);
 
