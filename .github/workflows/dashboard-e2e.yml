@@ -34,4 +34,5 @@ jobs:
         working-directory: packages/codev
         env:
           TOWER_ARCHITECT_CMD: bash
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx playwright test --retries 3
