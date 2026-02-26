@@ -58,6 +58,11 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     return '--amends requires --protocol tick';
   }
 
+  // --protocol tick requires --amends
+  if (options.protocol === 'tick' && !options.amends) {
+    return '--protocol tick requires --amends <spec-number> to identify the spec being amended';
+  }
+
   // --strict and --soft are mutually exclusive
   if (options.strict && options.soft) {
     return '--strict and --soft are mutually exclusive';
@@ -267,6 +272,12 @@ describe('Spawn Command', () => {
         expect(error).toContain('--amends requires --protocol tick');
       });
 
+      it('should reject --protocol tick without --amends (issue #562)', () => {
+        const options: SpawnOptions = { issueNumber: 5, protocol: 'tick' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--protocol tick requires --amends');
+      });
+
       it('should reject --strict with --soft', () => {
         const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', strict: true, soft: true };
         const error = validateSpawnOptions(options);
@@ -468,6 +479,12 @@ describe('Spawn Command', () => {
       const options: SpawnOptions = { issueNumber: 320, protocol: 'spir', amends: 315 };
       const error = validateSpawnOptions(options);
       expect(error).toContain('--amends requires --protocol tick');
+    });
+
+    it('rejects --protocol tick without --amends (issue #562)', () => {
+      const options: SpawnOptions = { issueNumber: 5, protocol: 'tick' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--protocol tick requires --amends');
     });
   });
 
