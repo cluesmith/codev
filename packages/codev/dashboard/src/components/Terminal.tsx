@@ -354,18 +354,22 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
     containerRef.current.addEventListener('paste', onNativePaste);
 
-    // Scroll state tracked externally in JS variables (Bugfix #560).
-    // xterm's buffer.active.viewportY (backed by ydisp) can become stale
-    // when the terminal container is hidden via display:none (tab switches,
-    // panel collapse). The browser resets the viewport element's scrollTop
-    // to 0, and xterm may sync ydisp to 0. Reading viewportY after the
-    // container becomes visible again returns 0 instead of the user's
-    // actual position. By tracking scroll state here, we're immune to
-    // DOM state changes from display toggling.
+    // Scroll state tracked externally in JS variables (Bugfix #560, #573).
+    // xterm's buffer.active.viewportY (backed by ydisp) resets to 0 when
+    // the container is hidden via display:none (tab switches, panel collapse).
+    // xterm fires onScroll during this reset, so the handler must ignore
+    // scroll events when the container is hidden — otherwise the tracked
+    // state captures viewportY=0 and safeFit "restores" to the top.
     const scrollState = { viewportY: 0, baseY: 0, wasAtBottom: true };
 
-    // Update tracked scroll state on every scroll event.
+    // Update tracked scroll state on every scroll event — but only when
+    // the container is visible. When hidden (display:none), the browser
+    // resets scrollTop to 0 and xterm syncs viewportY to 0. Accepting
+    // those events would corrupt our tracked position (Bugfix #573).
     const scrollDisposable = term.onScroll(() => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+
       const baseY = term.buffer?.active?.baseY ?? 0;
       const viewportY = term.buffer?.active?.viewportY ?? 0;
       scrollState.baseY = baseY;
@@ -386,8 +390,19 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       if (!rect || rect.width === 0 || rect.height === 0) return;
 
       const baseY = term.buffer?.active?.baseY;
+      const viewportYBefore = term.buffer?.active?.viewportY ?? -1;
+
       if (!baseY) {
+        // DEBUG #573: detect if buffer has scrollback but baseY reads 0
+        if (scrollState.baseY > 0) {
+          console.warn('[safeFit] UNPROTECTED PATH: baseY=0 but scrollState.baseY=', scrollState.baseY,
+            'viewportY=', viewportYBefore, 'scrollState.viewportY=', scrollState.viewportY);
+        }
         fitAddon.fit();
+        const viewportYAfter = term.buffer?.active?.viewportY ?? -1;
+        if (viewportYBefore > 0 && viewportYAfter === 0) {
+          console.warn('[safeFit] FIT CAUSED SCROLL-TO-TOP (unprotected path): before=', viewportYBefore, 'after=', viewportYAfter);
+        }
         return;
       }
 
@@ -396,6 +411,12 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       const restoreY = scrollState.viewportY;
 
       fitAddon.fit();
+      const viewportYAfter = term.buffer?.active?.viewportY ?? -1;
+      if (viewportYBefore > 0 && viewportYAfter === 0 && !wasAtBottom) {
+        console.warn('[safeFit] FIT CAUSED SCROLL-TO-TOP (protected path): before=', viewportYBefore,
+          'after=', viewportYAfter, 'restoring to=', wasAtBottom ? 'bottom' : restoreY);
+      }
+
       if (wasAtBottom) {
         term.scrollToBottom();
       } else {
@@ -407,11 +428,15 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     // This prevents resize storms from multiple sources (initial fit, CSS
     // layout settling, ResizeObserver, visibility change, buffer flush).
     let fitTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedFit = () => {
+    let lastFitTrigger = '';
+    const debouncedFit = (trigger?: string) => {
+      if (trigger) lastFitTrigger = trigger;
       if (fitTimer) clearTimeout(fitTimer);
       fitTimer = setTimeout(() => {
         fitTimer = null;
+        console.debug('[debouncedFit] firing, trigger:', lastFitTrigger, 'scrollState:', { ...scrollState });
         safeFit();
+        lastFitTrigger = '';
       }, 150);
     };
 
@@ -468,7 +493,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
           }
           rc.initialBuffer = '';
         }
-        debouncedFit();
+        debouncedFit('flushInitialBuffer');
         setTimeout(() => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
@@ -651,12 +676,12 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     connect();
 
     // Handle window resize (debounced to prevent resize storms)
-    const resizeObserver = new ResizeObserver(debouncedFit);
+    const resizeObserver = new ResizeObserver(() => debouncedFit('ResizeObserver'));
     resizeObserver.observe(containerRef.current);
 
     // Re-fit when browser tab becomes visible again
     const handleVisibility = () => {
-      if (!document.hidden) debouncedFit();
+      if (!document.hidden) debouncedFit('visibilitychange');
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
