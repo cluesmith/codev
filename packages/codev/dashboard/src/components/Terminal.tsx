@@ -386,7 +386,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       if (!rect || rect.width === 0 || rect.height === 0) return;
 
       const baseY = term.buffer?.active?.baseY;
-      if (!baseY && !scrollState.baseY) {
+      if (!baseY) {
         fitAddon.fit();
         return;
       }

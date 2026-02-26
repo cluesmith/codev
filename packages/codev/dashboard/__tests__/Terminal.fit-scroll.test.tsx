@@ -310,4 +310,36 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     expect(mockTermInstance.scrollToBottom).not.toHaveBeenCalled();
     expect(mockTermInstance.scrollToLine).not.toHaveBeenCalled();
   });
+
+  it('takes simple fit path when buffer is cleared even if scrollState.baseY is stale (Bugfix #563)', () => {
+    // Regression test: when the terminal buffer is cleared (baseY=0) but
+    // scrollState.baseY retains a stale positive value from before the clear,
+    // safeFit() should take the simple path (just fit) — not the scroll-
+    // preserving path with potentially stale position values.
+    render(<Terminal wsPath="/ws/terminal/test" />);
+    mockContainerRect();
+
+    // Step 1: Simulate terminal with scrollback — scrollState gets updated
+    simulateScroll(500, 200);
+
+    // Step 2: Simulate buffer clear — baseY goes to 0, but scrollState
+    // retains old values because onScroll may not fire during clear
+    mockTermInstance.buffer.active.baseY = 0;
+    mockTermInstance.buffer.active.viewportY = 0;
+    // NOTE: we do NOT call simulateScroll here — the clear may not
+    // trigger onScroll, so scrollState.baseY stays at 500 (stale)
+
+    mockFitInstance.fit.mockClear();
+    mockTermInstance.scrollToBottom.mockClear();
+    mockTermInstance.scrollToLine.mockClear();
+
+    // Trigger ResizeObserver → debouncedFit → safeFit
+    mockResizeObserverCallback?.();
+    vi.advanceTimersByTime(150);
+
+    // safeFit should take the simple path: just fit(), no scroll restoration
+    expect(mockFitInstance.fit).toHaveBeenCalled();
+    expect(mockTermInstance.scrollToBottom).not.toHaveBeenCalled();
+    expect(mockTermInstance.scrollToLine).not.toHaveBeenCalled();
+  });
 });
