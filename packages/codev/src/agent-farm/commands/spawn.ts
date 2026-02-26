@@ -89,6 +89,7 @@ function generateShortId(): string {
  * - --protocol is required when issueNumber is present (unless --resume or --soft)
  * - --protocol alone (no issueNumber) is valid as a protocol-only run
  * - --amends requires --protocol tick
+ * - --protocol tick requires --amends
  */
 function validateSpawnOptions(options: SpawnOptions): void {
   // Count primary input modes
@@ -152,6 +153,11 @@ function validateSpawnOptions(options: SpawnOptions): void {
   // --amends requires --protocol tick
   if (options.amends && options.protocol !== 'tick') {
     fatal('--amends requires --protocol tick');
+  }
+
+  // --protocol tick requires --amends
+  if (options.protocol === 'tick' && !options.amends) {
+    fatal('--protocol tick requires --amends <spec-number> to identify the spec being amended');
   }
 
   // --strict and --soft are mutually exclusive
