@@ -362,16 +362,30 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     // state captures viewportY=0 and safeFit "restores" to the top.
     const scrollState = { viewportY: 0, baseY: 0, wasAtBottom: true };
 
-    // Update tracked scroll state on every scroll event — but only when
-    // the container is visible. When hidden (display:none), the browser
-    // resets scrollTop to 0 and xterm syncs viewportY to 0. Accepting
-    // those events would corrupt our tracked position (Bugfix #573).
+    // Update tracked scroll state on every scroll event — but reject
+    // viewport resets caused by display:none or browser tab visibility.
+    // Three checks (Bugfix #573):
+    // 1. Container hidden (display:none) → zero dimensions → reject
+    // 2. Full reset: both baseY and viewportY drop to 0 while we had scrollback
+    // 3. Partial reset: only viewportY drops to 0 while baseY still shows scrollback
     const scrollDisposable = term.onScroll(() => {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0 || rect.height === 0) return;
 
       const baseY = term.buffer?.active?.baseY ?? 0;
       const viewportY = term.buffer?.active?.viewportY ?? 0;
+
+      // Reject full reset: both drop to 0 while we had scrollback
+      if (baseY === 0 && viewportY === 0 && scrollState.baseY > 0) return;
+
+      // Reject partial reset: viewportY drops to 0 while scrollback exists
+      if (viewportY === 0 && baseY > 0 && scrollState.viewportY > 5) return;
+
+      // ALERT: if viewportY=0 slips past our checks with real scrollback
+      if (viewportY === 0 && scrollState.viewportY > 5 && baseY > 5) {
+        console.warn('[onScroll] LEAKED RESET: viewportY=0 accepted! was:', scrollState.viewportY, 'baseY:', baseY);
+      }
+
       scrollState.baseY = baseY;
       scrollState.viewportY = viewportY;
       scrollState.wasAtBottom = !baseY || viewportY >= baseY;
@@ -391,20 +405,16 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
 
       const baseY = term.buffer?.active?.baseY;
       const viewportYBefore = term.buffer?.active?.viewportY ?? -1;
+      // Use tracked baseY as fallback — buffer's baseY can read 0 during
+      // display:none transitions even when scrollback exists (Bugfix #573)
+      const hasScrollback = baseY || scrollState.baseY > 0;
 
-      if (!baseY) {
-        // DEBUG #573: detect if buffer has scrollback but baseY reads 0
-        if (scrollState.baseY > 0) {
-          console.warn('[safeFit] UNPROTECTED PATH: baseY=0 but scrollState.baseY=', scrollState.baseY,
-            'viewportY=', viewportYBefore, 'scrollState.viewportY=', scrollState.viewportY);
-        }
+      if (!hasScrollback) {
         fitAddon.fit();
-        const viewportYAfter = term.buffer?.active?.viewportY ?? -1;
-        if (viewportYBefore > 0 && viewportYAfter === 0) {
-          console.warn('[safeFit] FIT CAUSED SCROLL-TO-TOP (unprotected path): before=', viewportYBefore, 'after=', viewportYAfter);
-        }
         return;
       }
+
+      // (buffer baseY=0 but scrollState has scrollback — using tracked state)
 
       // Use externally-tracked state — immune to display:none scroll reset
       const wasAtBottom = scrollState.wasAtBottom;
@@ -419,8 +429,13 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
 
       if (wasAtBottom) {
         term.scrollToBottom();
-      } else {
+      } else if (restoreY > 0) {
         term.scrollToLine(restoreY);
+      } else {
+        // restoreY=0 with scrollback — likely corrupted, scroll to bottom
+        // as the safest default (most users work at the bottom)
+        console.warn('[safeFit] restoreY=0 with scrollback — defaulting to bottom');
+        term.scrollToBottom();
       }
     };
 
@@ -428,15 +443,11 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     // This prevents resize storms from multiple sources (initial fit, CSS
     // layout settling, ResizeObserver, visibility change, buffer flush).
     let fitTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastFitTrigger = '';
-    const debouncedFit = (trigger?: string) => {
-      if (trigger) lastFitTrigger = trigger;
+    const debouncedFit = () => {
       if (fitTimer) clearTimeout(fitTimer);
       fitTimer = setTimeout(() => {
         fitTimer = null;
-        console.debug('[debouncedFit] firing, trigger:', lastFitTrigger, 'scrollState:', { ...scrollState });
         safeFit();
-        lastFitTrigger = '';
       }, 150);
     };
 
@@ -493,7 +504,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
           }
           rc.initialBuffer = '';
         }
-        debouncedFit('flushInitialBuffer');
+        debouncedFit();
         setTimeout(() => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
@@ -676,20 +687,48 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     connect();
 
     // Handle window resize (debounced to prevent resize storms)
-    const resizeObserver = new ResizeObserver(() => debouncedFit('ResizeObserver'));
+    const resizeObserver = new ResizeObserver(() => debouncedFit());
     resizeObserver.observe(containerRef.current);
 
     // Re-fit when browser tab becomes visible again
     const handleVisibility = () => {
-      if (!document.hidden) debouncedFit('visibilitychange');
+      if (!document.hidden) debouncedFit();
     };
     document.addEventListener('visibilitychange', handleVisibility);
+
+    // Scroll-to-top auto-correction (Bugfix #573).
+    // Despite onScroll rejection guards, the actual viewport can still reset
+    // to 0 (xterm internal reflow, display:none transitions, etc.). Our guards
+    // preserve scrollState but don't fix the actual viewport. This monitor
+    // detects the reset and auto-corrects using the preserved scrollState.
+    let lastMonitorViewportY = -1;
+    const scrollMonitor = setInterval(() => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+
+      const viewportY = term.buffer?.active?.viewportY ?? 0;
+      const baseY = term.buffer?.active?.baseY ?? 0;
+
+      // Detect transition TO 0 with real scrollback — auto-correct
+      if (viewportY === 0 && lastMonitorViewportY > 10 && baseY > 10) {
+        console.warn('[scroll-fix] auto-correcting scroll-to-top (was:', lastMonitorViewportY, 'baseY:', baseY, ')');
+        if (scrollState.wasAtBottom) {
+          term.scrollToBottom();
+        } else if (scrollState.viewportY > 0) {
+          term.scrollToLine(scrollState.viewportY);
+        } else {
+          term.scrollToBottom();
+        }
+      }
+      if (baseY > 0) lastMonitorViewportY = viewportY;
+    }, 200);
 
     return () => {
       rc.disposed = true;
       if (rc.timer) clearTimeout(rc.timer);
       if (rc.flushTimer) clearTimeout(rc.flushTimer);
       clearTimeout(refitTimer1);
+      clearInterval(scrollMonitor);
       if (fitTimer) clearTimeout(fitTimer);
       if (textarea) {
         textarea.removeEventListener('compositionstart', onCompositionStart);
