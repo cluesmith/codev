@@ -14,7 +14,7 @@ function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
 }
 
-const WORKSPACE_PATH = path.resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = path.resolve(import.meta.dirname, '../../../../../../');
 const ENCODED_PATH = toBase64URL(WORKSPACE_PATH);
 
 test.describe('Tower Desktop', () => {
@@ -26,10 +26,11 @@ test.describe('Tower Desktop', () => {
     const header = page.locator('h1');
     await expect(header).toContainText('Control Tower');
 
-    // Should show codev-public as running
+    // Should show the workspace name (derived from directory basename)
     const instance = page.locator('.instance');
     await expect(instance.first()).toBeVisible({ timeout: 10_000 });
-    await expect(instance.first()).toContainText('codev-public');
+    const expectedName = path.basename(WORKSPACE_PATH);
+    await expect(instance.first()).toContainText(expectedName);
 
     // Should show Running badge
     const runningBadge = page.locator('.status-badge.running');
