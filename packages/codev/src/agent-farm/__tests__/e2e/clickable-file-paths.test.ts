@@ -391,7 +391,6 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       // (.builders/XXXX/). In CI scheduled runs, the workspace is the repo root.
       test.skip(!WORKSPACE_PATH.includes('.builders'), 'Only runs in builder worktree context');
 
-
       // Create a shell tab — its cwd is the builder worktree
       const shellResp = await request.post(`${BASE_URL}/api/tabs/shell`, {
         data: { name: 'e2e-worktree-test' },
