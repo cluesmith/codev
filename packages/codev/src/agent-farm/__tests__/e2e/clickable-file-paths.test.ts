@@ -34,7 +34,7 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 const BASE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}`;
 const PAGE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/`;
@@ -387,11 +387,10 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
     });
 
     test('builder worktree resolution via shell tab cwd', async ({ request }) => {
-      // This E2E suite runs against a tower whose workspace root is a builder
-      // worktree (.builders/0101/). The tower assigns this worktree path as the
-      // cwd for all shell tabs. This test verifies that terminalId-based
-      // resolution works correctly in the builder worktree context.
-      expect(WORKSPACE_PATH).toContain('.builders');
+      // This test only applies when running from within a builder worktree
+      // (.builders/XXXX/). In CI scheduled runs, the workspace is the repo root.
+      test.skip(!WORKSPACE_PATH.includes('.builders'), 'Only runs in builder worktree context');
+
 
       // Create a shell tab — its cwd is the builder worktree
       const shellResp = await request.post(`${BASE_URL}/api/tabs/shell`, {

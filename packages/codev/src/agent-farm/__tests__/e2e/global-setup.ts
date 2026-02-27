@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TOWER_PORT = Number(process.env.TOWER_TEST_PORT || '4100');
 const TOWER_URL = `http://localhost:${TOWER_PORT}`;
-const WORKSPACE_PATH = resolve(__dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(__dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 const STATE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`;
 

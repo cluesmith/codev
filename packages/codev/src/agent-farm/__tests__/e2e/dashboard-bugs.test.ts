@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 
 function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
@@ -70,7 +70,7 @@ test.describe('Bug #1: Tower proxy for workspaces', () => {
   });
 
   test('tower proxy serves React dashboard with working CSS/JS', async ({ page }) => {
-    // Test with codev-public workspace through proxy
+    // Test workspace through tower proxy
     const encoded = toBase64URL(WORKSPACE_PATH);
     const proxyUrl = `${TOWER_URL}/workspace/${encoded}/`;
 

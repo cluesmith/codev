@@ -3,7 +3,7 @@
  *
  * Prerequisites:
  *   - Tower running: `af tower start`
- *   - Workspace activated (tests will activate codev-public)
+ *   - Workspace activated (global-setup activates the repo root)
  *   - Playwright browsers installed: `npx playwright install chromium`
  *
  * Run: npx playwright test
@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 // BASE_URL without trailing slash for API calls
 const BASE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}`;

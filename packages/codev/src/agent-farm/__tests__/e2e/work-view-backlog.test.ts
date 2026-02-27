@@ -15,7 +15,7 @@ import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
-const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../');
+const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
 
 function toBase64URL(str: string): string {
   return Buffer.from(str).toString('base64url');
