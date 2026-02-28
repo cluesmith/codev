@@ -156,12 +156,12 @@ Reasons:
 - `'CI: smart-connect feature not implemented in tower.html'`
 - `'CI: #share-btn element does not exist in tower.html DOM'`
 
-**Post-deletion test count**: 88 total − 28 deleted = 60 remaining. Of those, 4 are skipped, leaving 56 active tests (53 previously passing + 3 newly fixed).
+**Post-deletion test count**: 89 total − 38 deleted = 51 remaining. Of those, 4 are skipped, leaving 47 active tests.
 
 **Net result**:
 - 3 tests fixed (work-view-backlog selectors)
 - 4 tests skipped with annotation (2 mobile terminal-controls, 1 smart-connect, 1 share-btn)
-- 28 tests deleted across 5 files (cloud-status, clickable-file-paths, clipboard, autocopy, video)
+- 38 tests deleted across 5 files (cloud-status: 11, clickable-file-paths: 21, clipboard: 3, autocopy: 1, video: 2)
 
 **Pros**:
 - Zero CI failures immediately
@@ -170,7 +170,7 @@ Reasons:
 - Work-view-backlog tests actually get fixed to test real behavior
 
 **Cons**:
-- Reduces active test count from 88 to 56
+- Reduces active test count from 89 to ~47
 - Loses coverage for clipboard, file-path decorations (but these were never passing in CI anyway)
 
 **Security note**: None of the deleted tests cover security-relevant behavior. Path traversal tests (clickable-file-paths API) are already covered by the unit test at `src/agent-farm/__tests__/file-path-resolution.test.ts`.
