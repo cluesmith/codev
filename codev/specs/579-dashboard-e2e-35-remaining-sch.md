@@ -128,31 +128,54 @@ All 88 Dashboard E2E tests either pass in scheduled CI runs or are removed with 
 
 **Actions by category**:
 
-| Category | Count | Action | Detail |
-|----------|-------|--------|--------|
-| cloud-status | 10 | Delete file | Tests for unwired React component |
-| clickable-file-paths | 14 | Delete file | CI-incompatible (needs real files, baselines) |
-| work-view-backlog | 3 | Fix selectors | Change "Projects and Bugs" → "Backlog"; add defensive guards |
-| clipboard/autocopy | 3 | Delete files | Clipboard API unavailable in headless Linux |
-| terminal-controls | 2 | Skip mobile tests | Desktop tests pass; skip mobile with annotation |
-| dashboard-video | 1 | Delete file | Not a regression test |
-| tower-cloud-connect | 1 | Skip test | Feature not implemented |
-| tower-integration | 1 | Skip test | DOM element doesn't exist |
+| Category | Count | Action | File Path | Detail |
+|----------|-------|--------|-----------|--------|
+| cloud-status | 10 | Delete file | `src/agent-farm/__tests__/e2e/cloud-status.test.ts` | Tests for unwired React component |
+| clickable-file-paths | 14 | Delete file | `src/agent-farm/__tests__/e2e/clickable-file-paths.test.ts` | CI-incompatible (needs real files, baselines) |
+| work-view-backlog | 3 | Fix tests | `src/agent-farm/__tests__/e2e/work-view-backlog.test.ts` | See fix details below |
+| clipboard | 2 | Delete file | `src/agent-farm/__tests__/e2e/dashboard-clipboard.test.ts` | Clipboard API unavailable in headless Linux |
+| autocopy | 1 | Delete file | `src/agent-farm/__tests__/e2e/dashboard-autocopy.test.ts` | Same clipboard limitation |
+| terminal-controls | 2 | Skip mobile tests | `src/agent-farm/__tests__/e2e/terminal-controls.test.ts` | Desktop tests pass; skip mobile |
+| dashboard-video | 1 | Delete file | `src/agent-farm/__tests__/e2e/dashboard-video.test.ts` | Not a regression test |
+| tower-cloud-connect | 1 | Skip test | `src/agent-farm/__tests__/e2e/tower-cloud-connect.test.ts` | Feature not implemented |
+| tower-integration | 1 | Skip test | `src/agent-farm/__tests__/e2e/tower-integration.test.ts` | DOM element doesn't exist |
+
+All file paths are relative to `packages/codev/`.
+
+**Work-view-backlog fix details** (3 tests):
+1. **Line 65 "backlog items render as clickable links"**: Change selector from `.work-section:has-text("Projects and Bugs")` to `.work-section:has-text("Backlog")`. The `href` assertion at line 91 should work once the section is found.
+2. **Line 106 "artifact links display for items"**: Same selector fix from `"Projects and Bugs"` to `"Backlog"`.
+3. **Line 133 "recently closed section renders when items exist"**: The test correctly handles both empty and non-empty cases with an `if/else` block. The `href` assertion (line 162) should use `.recently-closed-row-main` (the anchor inside the row div) instead of `.recently-closed-row` (the div wrapper). Add defensive guard: if `closedCount === 0` inside the `recentlyClosed.length > 0` branch, skip the row content assertions.
+
+**Skip annotation convention**: Use `test.skip()` with a reason string:
+```typescript
+test.skip('CI: <reason>', async ({ page }) => { ... });
+```
+Reasons:
+- `'CI: mobile viewport controls not found in headless Chromium'`
+- `'CI: smart-connect feature not implemented in tower.html'`
+- `'CI: #share-btn element does not exist in tower.html DOM'`
+
+**Post-deletion test count**: 88 total − 28 deleted = 60 remaining. Of those, 4 are skipped, leaving 56 active tests (53 previously passing + 3 newly fixed).
 
 **Net result**:
 - 3 tests fixed (work-view-backlog selectors)
 - 4 tests skipped with annotation (2 mobile terminal-controls, 1 smart-connect, 1 share-btn)
-- 28 tests deleted (cloud-status file, clickable-file-paths file, clipboard file, autocopy file, video file)
+- 28 tests deleted across 5 files (cloud-status, clickable-file-paths, clipboard, autocopy, video)
 
 **Pros**:
 - Zero CI failures immediately
 - No complex infrastructure needed
-- Only 3 test files deleted (the rest were testing non-existent or unwired features)
+- Only 5 test files deleted (the rest were testing non-existent or unwired features)
 - Work-view-backlog tests actually get fixed to test real behavior
 
 **Cons**:
-- Reduces total test count from 88 to ~56
+- Reduces active test count from 88 to 56
 - Loses coverage for clipboard, file-path decorations (but these were never passing in CI anyway)
+
+**Security note**: None of the deleted tests cover security-relevant behavior. Path traversal tests (clickable-file-paths API) are already covered by the unit test at `src/agent-farm/__tests__/file-path-resolution.test.ts`.
+
+**CI validation**: Run `npx playwright test` from `packages/codev/` with `TOWER_ARCHITECT_CMD=bash` to approximate CI conditions. The scheduled workflow is `.github/workflows/dashboard-e2e.yml`.
 
 **Estimated Complexity**: Low
 **Risk Level**: Low
@@ -188,8 +211,9 @@ All 88 Dashboard E2E tests either pass in scheduled CI runs or are removed with 
 
 ## Assumptions
 - Tests that have never passed in CI provide zero regression protection
-- The CloudStatus React component will eventually be wired into App.tsx via a separate spec
+- The CloudStatus React component will eventually be wired into App.tsx via a separate spec (no tracking issue yet — one should be created when the feature is prioritized)
 - Clipboard tests can be run manually on macOS when clipboard behavior changes
+- No CI workflow asserts an expected test count threshold
 
 ## Open Questions
 
