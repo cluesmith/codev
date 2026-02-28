@@ -1,0 +1,26 @@
+id: '579'
+title: dashboard-e2e-35-remaining-sch
+protocol: spir
+phase: review
+plan_phases:
+  - id: delete_and_skip
+    title: Delete CI-incompatible test files and skip untestable tests
+    status: complete
+  - id: fix_selectors
+    title: Fix work-view-backlog test selectors
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-02-28T14:44:08.687Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-02-28T14:51:15.770Z'
+  pr:
+    status: pending
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-02-28T12:15:10.628Z'
+updated_at: '2026-02-28T20:12:47.981Z'
