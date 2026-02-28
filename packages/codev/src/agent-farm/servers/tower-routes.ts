@@ -751,11 +751,17 @@ function handleSSEEvents(
 
   ctx.log('INFO', `SSE client connected: ${clientId}`);
 
-  // Clean up on disconnect
-  req.on('close', () => {
+  // Clean up on disconnect — guard against duplicate cleanup (Bugfix #580)
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     ctx.removeSseClient(clientId);
     ctx.log('INFO', `SSE client disconnected: ${clientId}`);
-  });
+  };
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
 }
 
 async function handleNotify(

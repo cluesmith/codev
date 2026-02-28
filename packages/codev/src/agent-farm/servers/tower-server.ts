@@ -135,9 +135,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
     log('INFO', 'Shellper sessions will continue running (sockets close on process exit)');
   }
 
-  // 4. Stop rate limit cleanup and shellper periodic cleanup
+  // 4. Stop rate limit cleanup, shellper periodic cleanup, and SSE heartbeat
   clearInterval(rateLimitCleanupInterval);
   if (shellperCleanupInterval) clearInterval(shellperCleanupInterval);
+  clearInterval(sseHeartbeatInterval);
 
   // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
   stopSendBuffer();
@@ -173,22 +174,63 @@ log('INFO', `Tower server starting on port ${port}`);
 const sseClients: SSEClient[] = [];
 let notificationIdCounter = 0;
 
+/** Remove dead SSE clients from the array (by id list). */
+function removeDeadSseClients(deadIds: string[]): void {
+  for (const id of deadIds) {
+    const index = sseClients.findIndex(c => c.id === id);
+    if (index !== -1) {
+      sseClients.splice(index, 1);
+      log('INFO', `SSE client removed (dead): ${id}`);
+    }
+  }
+}
+
 /**
- * Broadcast a notification to all connected SSE clients
+ * Broadcast a notification to all connected SSE clients.
+ * Detects and removes dead clients during broadcast.
  */
 function broadcastNotification(notification: { type: string; title: string; body: string; workspace?: string }): void {
   const id = ++notificationIdCounter;
   const data = JSON.stringify({ ...notification, id });
   const message = `id: ${id}\ndata: ${data}\n\n`;
 
+  const deadIds: string[] = [];
   for (const client of sseClients) {
+    if (client.res.destroyed || client.res.writableEnded) {
+      deadIds.push(client.id);
+      continue;
+    }
     try {
       client.res.write(message);
     } catch {
-      // Client disconnected, will be cleaned up on next iteration
+      deadIds.push(client.id);
     }
   }
+  if (deadIds.length > 0) removeDeadSseClients(deadIds);
 }
+
+// Heartbeat interval — detects half-open SSE connections (Bugfix #580)
+const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
+const sseHeartbeatInterval = setInterval(() => {
+  if (sseClients.length === 0) return;
+  const deadIds: string[] = [];
+  for (const client of sseClients) {
+    if (client.res.destroyed || client.res.writableEnded) {
+      deadIds.push(client.id);
+      continue;
+    }
+    try {
+      client.res.write(':heartbeat\n\n');
+    } catch {
+      deadIds.push(client.id);
+    }
+  }
+  if (deadIds.length > 0) removeDeadSseClients(deadIds);
+  if (sseClients.length > 0) {
+    log('INFO', `SSE heartbeat: ${sseClients.length} active client(s)`);
+  }
+}, SSE_HEARTBEAT_INTERVAL_MS);
+sseHeartbeatInterval.unref();
 
 /**
  * Find the tower template
