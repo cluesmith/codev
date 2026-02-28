@@ -323,6 +323,55 @@ describe('tower-routes', () => {
 
       expect(ctx.removeSseClient).toHaveBeenCalledTimes(1);
     });
+
+    it('removes SSE client on res close (Bugfix #580)', async () => {
+      const ctx = makeCtx();
+      const req = makeReq('GET', '/api/events');
+      const { res } = makeRes();
+      // Make res an EventEmitter so it can emit 'close'
+      const resEmitter = new EventEmitter();
+      Object.assign(res, { on: resEmitter.on.bind(resEmitter), emit: resEmitter.emit.bind(resEmitter) });
+
+      await handleRequest(req, res, ctx);
+
+      // Simulate response close (without request close)
+      resEmitter.emit('close');
+
+      expect(ctx.removeSseClient).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes SSE client on res error (Bugfix #580)', async () => {
+      const ctx = makeCtx();
+      const req = makeReq('GET', '/api/events');
+      const { res } = makeRes();
+      const resEmitter = new EventEmitter();
+      Object.assign(res, { on: resEmitter.on.bind(resEmitter), emit: resEmitter.emit.bind(resEmitter) });
+
+      await handleRequest(req, res, ctx);
+
+      // Simulate a write error on the response
+      resEmitter.emit('error', new Error('EPIPE'));
+
+      expect(ctx.removeSseClient).toHaveBeenCalledTimes(1);
+    });
+
+    it('only cleans up once even if multiple close events fire (Bugfix #580)', async () => {
+      const ctx = makeCtx();
+      const req = makeReq('GET', '/api/events');
+      const { res } = makeRes();
+      const resEmitter = new EventEmitter();
+      Object.assign(res, { on: resEmitter.on.bind(resEmitter), emit: resEmitter.emit.bind(resEmitter) });
+
+      await handleRequest(req, res, ctx);
+
+      // Fire close on both req and res
+      req.emit('close');
+      resEmitter.emit('close');
+      resEmitter.emit('error', new Error('EPIPE'));
+
+      // Should only clean up once despite three events
+      expect(ctx.removeSseClient).toHaveBeenCalledTimes(1);
+    });
   });
 
   // =========================================================================
