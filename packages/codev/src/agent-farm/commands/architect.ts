@@ -35,6 +35,7 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
     const child = spawn(cmd, args, {
       stdio: 'inherit',
       cwd: config.workspaceRoot,
+      shell: true,
     });
 
     child.on('error', (err) => {

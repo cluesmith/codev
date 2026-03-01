@@ -58,7 +58,7 @@ describe('af architect command', () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       ['--append-system-prompt', '# Architect Role\n\nYou are an architect.'],
-      { stdio: 'inherit', cwd: '/test/workspace' }
+      { stdio: 'inherit', cwd: '/test/workspace', shell: true }
     );
   });
 
@@ -80,7 +80,7 @@ describe('af architect command', () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       ['--resume', '--append-system-prompt', '# Architect Role\n\nYou are an architect.'],
-      { stdio: 'inherit', cwd: '/test/workspace' }
+      { stdio: 'inherit', cwd: '/test/workspace', shell: true }
     );
   });
 
