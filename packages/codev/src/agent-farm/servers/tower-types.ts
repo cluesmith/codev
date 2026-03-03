@@ -41,6 +41,7 @@ export interface WorkspaceTerminals {
 export interface SSEClient {
   res: http.ServerResponse;
   id: string;
+  connectedAt: number;
 }
 
 /** Rate limiting entry for activation requests */

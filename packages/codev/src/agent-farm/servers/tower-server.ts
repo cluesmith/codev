@@ -210,12 +210,23 @@ function broadcastNotification(notification: { type: string; title: string; body
 }
 
 // Heartbeat interval — detects half-open SSE connections (Bugfix #580)
+// Also evicts connections older than max-age to prevent leaks from
+// tunnel-proxied clients that don't properly close (clients auto-reconnect).
 const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
+const SSE_MAX_AGE_MS = 5 * 60_000; // 5 minutes
 const sseHeartbeatInterval = setInterval(() => {
   if (sseClients.length === 0) return;
+  const now = Date.now();
   const deadIds: string[] = [];
   for (const client of sseClients) {
     if (client.res.destroyed || client.res.writableEnded) {
+      deadIds.push(client.id);
+      continue;
+    }
+    // Evict connections older than max-age — tunnel-proxied SSE connections
+    // can leak because both ends are localhost and TCP never detects the close.
+    if (now - client.connectedAt > SSE_MAX_AGE_MS) {
+      try { client.res.end(); } catch { /* already dead */ }
       deadIds.push(client.id);
       continue;
     }

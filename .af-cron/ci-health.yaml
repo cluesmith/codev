@@ -5,8 +5,8 @@
 name: CI Health Check
 schedule: "*/30 * * * *"
 enabled: true
-command: gh run list --branch main --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length'
-condition: "output != '0'"
-message: "CI Alert: ${output} recent failure(s) on main. Run `gh run list --limit 5` to investigate."
+command: gh run list --branch main --limit 10 --json workflowName,conclusion --jq 'group_by(.workflowName) | map(.[0]) | map(select(.conclusion == "failure")) | map(.workflowName) | join(", ")'
+condition: "output != ''"
+message: "CI Alert: currently failing on main: ${output}. Run `gh run list --limit 5` to investigate."
 target: architect
 timeout: 30

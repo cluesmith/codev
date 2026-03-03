@@ -746,7 +746,7 @@ function handleSSEEvents(
   // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected', id: clientId })}\n\n`);
 
-  const client: SSEClient = { res, id: clientId };
+  const client: SSEClient = { res, id: clientId, connectedAt: Date.now() };
   ctx.addSseClient(client);
 
   ctx.log('INFO', `SSE client connected: ${clientId}`);
