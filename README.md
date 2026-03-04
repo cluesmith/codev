@@ -7,7 +7,7 @@
 
 > **New: [A Tour of CodevOS](https://waleedk.medium.com/a-tour-of-codevos-1db0fe0e4516)** — A deep dive into how Codev orchestrates human-agent collaboration: the SPIR protocol, Agent Farm, multi-model consultation, and the architecture that ties it all together.
 
-Codev is an operating system for structured human-AI collaboration. You write specs and plans that AI agents execute reliably.
+Codev turns GitHub Issues into tested, reviewed PRs. You write specs; autonomous AI builders handle the rest.
 
 > **Results**: One architect + autonomous AI builders shipped [106 PRs in 14 days](codev/resources/development-analysis-2026-02-17.md), median feature in 57 minutes. In controlled comparison, SPIR consistently outperformed unstructured AI coding across [4 rounds](codev/resources/vibe-vs-spir-r4-comparison-2026-02.md). [Case study](#-example-implementations) | [Production data](#production-metrics-feb-2026)
 
@@ -18,6 +18,7 @@ Codev is an operating system for structured human-AI collaboration. You write sp
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
 - [Learn About Codev](#learn-about-codev)
 - [What is Codev?](#what-is-codev)
 - [The SPIR Protocol](#the-spir-protocol)
@@ -43,7 +44,13 @@ codev doctor
 af workspace start
 ```
 
-Then tell your AI agent: *"I want to build X using the SPIR protocol"*
+Then open a GitHub Issue describing what you want to build, and run:
+
+```bash
+af spawn <issue-number>
+```
+
+For the full walkthrough, see **[Getting Started](https://codevos.ai/getting-started)**.
 
 **CLI Commands:**
 - `codev` - Main CLI (init, adopt, doctor, update)
@@ -51,6 +58,13 @@ Then tell your AI agent: *"I want to build X using the SPIR protocol"*
 - `consult` - Multi-model consultation
 
 See [CLI Reference](codev/resources/commands/overview.md) for details.
+
+## How It Works
+
+1. **Write a spec** — Describe what you want. The architect helps refine it.
+2. **Spawn a builder** — `af spawn 42` kicks off an autonomous agent in an isolated worktree.
+3. **Review the plan** — The builder writes an implementation plan. You approve or annotate.
+4. **Walk away** — The builder implements, tests, and opens a PR. You review and merge.
 
 ### Prerequisites
 
