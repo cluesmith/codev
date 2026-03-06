@@ -11,7 +11,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { globSync } from 'glob';
 import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import {
   loadProtocol,
@@ -26,12 +25,13 @@ import {
   getPhaseChecks,
 } from './protocol.js';
 import {
-  findPlanFile,
-  extractPhasesFromFile,
+  extractPlanPhasesResolved,
   getCurrentPlanPhase,
   advancePlanPhase,
   allPlanPhasesComplete,
 } from './plan.js';
+import { getResolver } from './artifacts.js';
+import type { ArtifactResolver } from './artifacts.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides } from './config.js';
@@ -48,30 +48,10 @@ import type {
 /**
  * Check if an artifact file has YAML frontmatter indicating it was
  * already approved and validated (3-way review).
- *
- * Frontmatter format:
- * ---
- * approved: 2026-01-29
- * validated: [gemini, codex, claude]
- * ---
+ * Uses the artifact resolver for pluggable backend support.
  */
-function isArtifactPreApproved(workspaceRoot: string, artifactGlob: string): boolean {
-  const matches = globSync(artifactGlob, { cwd: workspaceRoot });
-  if (matches.length === 0) return false;
-
-  const filePath = path.join(workspaceRoot, matches[0]);
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) return false;
-
-    const frontmatter = frontmatterMatch[1];
-    const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
-    const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
-    return hasApproved && hasValidated;
-  } catch {
-    return false;
-  }
+function isArtifactPreApproved(resolver: ArtifactResolver, artifactGlob: string): boolean {
+  return resolver.hasPreApproval(artifactGlob);
 }
 
 /**
@@ -223,6 +203,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   const state = readState(statusPath);
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
+  const resolver = getResolver(workspaceRoot);
 
   // Protocol complete
   if (state.phase === 'complete' || !phaseConfig) {
@@ -270,11 +251,11 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   if (isBuildVerify(protocol, state.phase) && !state.build_complete && state.iteration === 1) {
     const buildConfig = getBuildConfig(protocol, state.phase);
     if (buildConfig?.artifact) {
-      const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+      const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver);
       const artifactGlob = buildConfig.artifact
         .replace('${PROJECT_ID}', state.id)
         .replace('${PROJECT_TITLE}', artifactBaseName);
-      if (isArtifactPreApproved(workspaceRoot, artifactGlob)) {
+      if (isArtifactPreApproved(resolver, artifactGlob)) {
         // Auto-approve gate and advance
         const gateName = getPhaseGate(protocol, state.phase);
         if (gateName) {
@@ -286,12 +267,9 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.phase = nextPhase.id;
           // If entering phased protocol, extract plan phases
           if (isPhased(protocol, nextPhase.id)) {
-            const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-            if (planPath) {
-              state.plan_phases = extractPhasesFromFile(planPath);
-              if (state.plan_phases.length > 0) {
-                state.current_plan_phase = state.plan_phases[0].id;
-              }
+            state.plan_phases = extractPlanPhasesResolved(workspaceRoot, state.id, state.title, resolver);
+            if (state.plan_phases.length > 0) {
+              state.current_plan_phase = state.plan_phases[0].id;
             }
           }
           state.iteration = 1;
@@ -342,12 +320,9 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
 
       // If entering phased protocol, extract plan phases
       if (isPhased(protocol, nextPhase.id)) {
-        const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-        if (planPath) {
-          state.plan_phases = extractPhasesFromFile(planPath);
-          if (state.plan_phases.length > 0) {
-            state.current_plan_phase = state.plan_phases[0].id;
-          }
+        state.plan_phases = extractPlanPhasesResolved(workspaceRoot, state.id, state.title, resolver);
+        if (state.plan_phases.length > 0) {
+          state.current_plan_phase = state.plan_phases[0].id;
         }
       }
 
@@ -358,11 +333,11 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
 
   // Handle build_verify / per_plan_phase phases
   if (isBuildVerify(protocol, state.phase)) {
-    return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath);
+    return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath, resolver);
   }
 
   // Handle 'once' phases (TICK, BUGFIX)
-  return await handleOncePhase(workspaceRoot, state, protocol, phaseConfig);
+  return await handleOncePhase(workspaceRoot, state, protocol, phaseConfig, resolver);
 }
 
 /**
@@ -375,6 +350,7 @@ async function handleBuildVerify(
   protocol: Protocol,
   phaseConfig: ProtocolPhase,
   statusPath: string,
+  resolver?: ArtifactResolver,
 ): Promise<PorchNextResponse> {
   const verifyConfig = getVerifyConfig(protocol, state.phase);
   const overrides = loadCheckOverrides(workspaceRoot);
@@ -392,7 +368,7 @@ async function handleBuildVerify(
 
   // --- NEED BUILD ---
   if (!state.build_complete) {
-    const prompt = await buildPhasePrompt(workspaceRoot, state, protocol);
+    const prompt = await buildPhasePrompt(workspaceRoot, state, protocol, resolver);
     const tasks: PorchTask[] = [];
 
     // Main build task with full phase prompt
@@ -690,6 +666,7 @@ async function handleOncePhase(
   state: ProjectState,
   protocol: Protocol,
   phaseConfig: ProtocolPhase,
+  resolver?: ArtifactResolver,
 ): Promise<PorchNextResponse> {
   // Try to load a prompt file for this phase
   const prompt = await buildPhasePrompt(workspaceRoot, state, protocol);

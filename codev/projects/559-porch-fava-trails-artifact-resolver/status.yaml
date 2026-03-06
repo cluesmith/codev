@@ -1,0 +1,20 @@
+id: '559'
+title: porch-fava-trails-artifact-resolver
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    approved_at: '2026-03-06T17:51:43.343Z'
+  plan-approval:
+    status: approved
+    approved_at: '2026-03-06T17:51:43.568Z'
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-03-06T17:51:43.172Z'
+updated_at: '2026-03-06T17:51:43.569Z'

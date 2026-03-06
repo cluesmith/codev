@@ -12,8 +12,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
-import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
+import { getCurrentPlanPhase, getPhaseContent, getPlanContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
+import { getResolver } from './artifacts.js';
+import type { ArtifactResolver } from './artifacts.js';
 import { fetchGitHubIssue } from '../../lib/github.js';
 
 /** Locations to search for protocol prompts */
@@ -31,7 +33,7 @@ const PROTOCOL_PATHS = [
  * 2. Spec file first heading — fallback for legacy/offline specs
  * 3. Project title from status.yaml — last resort
  */
-export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
+export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string, resolver?: ArtifactResolver): Promise<string | null> {
   // 1. Try GitHub issue
   const issueNumber = parseInt(projectId, 10);
   if (!isNaN(issueNumber)) {
@@ -41,31 +43,13 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
     }
   }
 
-  // 2. Fallback: read first heading from spec file
-  const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  if (fs.existsSync(specsDir)) {
-    try {
-      const files = fs.readdirSync(specsDir);
-      // Match by project ID prefix (handles zero-padded IDs like 0076)
-      const specFile = files.find(f => {
-        if (!f.endsWith('.md')) return false;
-        // Extract leading numeric prefix (handles both 42-name.md and 0042.name.md)
-        const numMatch = f.match(/^(\d+)/);
-        if (!numMatch) return false;
-        const normalizedPrefix = numMatch[1].replace(/^0+/, '') || '0';
-        const normalizedId = projectId.replace(/^0+/, '') || '0';
-        return normalizedPrefix === normalizedId;
-      });
-      if (specFile) {
-        const content = fs.readFileSync(path.join(specsDir, specFile), 'utf-8');
-        // Extract first heading
-        const headingMatch = content.match(/^#\s+(?:Specification:\s*)?(.+)$/m);
-        if (headingMatch) {
-          return headingMatch[1].trim();
-        }
-      }
-    } catch {
-      // Spec file read failed, continue to fallback
+  // 2. Fallback: read first heading from spec via resolver
+  const res = resolver ?? getResolver(workspaceRoot);
+  const specContent = res.getSpecContent(projectId, projectTitle || '');
+  if (specContent) {
+    const headingMatch = specContent.match(/^#\s+(?:Specification:\s*)?(.+)$/m);
+    if (headingMatch) {
+      return headingMatch[1].trim();
     }
   }
 
@@ -215,7 +199,8 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
 export async function buildPhasePrompt(
   workspaceRoot: string,
   state: ProjectState,
-  protocol: Protocol
+  protocol: Protocol,
+  resolver?: ArtifactResolver,
 ): Promise<string> {
   const phaseConfig = getPhaseConfig(protocol, state.phase);
   if (!phaseConfig) {
@@ -223,7 +208,8 @@ export async function buildPhasePrompt(
   }
 
   // Get project summary from GitHub Issues (with spec-file fallback)
-  const summary = await getProjectSummary(workspaceRoot, state.id, state.title);
+  const res = resolver ?? getResolver(workspaceRoot);
+  const summary = await getProjectSummary(workspaceRoot, state.id, state.title, res);
 
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
@@ -252,7 +238,7 @@ export async function buildPhasePrompt(
   }
 
   // Resolve canonical artifact base name (prevents doubled IDs like "364-0364-name")
-  const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+  const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, res);
 
   // Try to load prompt from protocol directory
   const promptsDir = findPromptsDir(workspaceRoot, state.protocol);
@@ -277,7 +263,7 @@ export async function buildPhasePrompt(
 
       // Add plan phase context if applicable
       if (currentPlanPhase) {
-        result = addPlanPhaseContext(workspaceRoot, state, currentPlanPhase, result);
+        result = addPlanPhaseContext(workspaceRoot, state, currentPlanPhase, result, res);
       }
 
       // Prepend history if this is a retry
@@ -307,21 +293,17 @@ function addPlanPhaseContext(
   workspaceRoot: string,
   state: ProjectState,
   planPhase: PlanPhase,
-  prompt: string
+  prompt: string,
+  resolver?: ArtifactResolver,
 ): string {
-  const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-  if (!planPath) {
+  const planContent = getPlanContent(workspaceRoot, state.id, state.title, resolver);
+  if (!planContent) {
     return prompt;
   }
 
-  try {
-    const planContent = fs.readFileSync(planPath, 'utf-8');
-    const phaseContent = getPhaseContent(planContent, planPhase.id);
-    if (phaseContent) {
-      return prompt + `\n\n## Current Plan Phase Details\n\n**${planPhase.id}: ${planPhase.title}**\n\n${phaseContent}\n`;
-    }
-  } catch {
-    // Ignore errors reading plan
+  const phaseContent = getPhaseContent(planContent, planPhase.id);
+  if (phaseContent) {
+    return prompt + `\n\n## Current Plan Phase Details\n\n**${planPhase.id}: ${planPhase.title}**\n\n${phaseContent}\n`;
   }
 
   return prompt;
