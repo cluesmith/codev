@@ -145,6 +145,9 @@ export function extractPhasesFromFile(planFilePath: string): PlanPhase[] {
 /**
  * Get plan content via resolver (preferred) or local file fallback.
  * Returns the raw plan markdown content, or null if not found.
+ *
+ * When a resolver is provided, it handles both backends (local and remote).
+ * Local file fallback only applies when no resolver is given (backward compat).
  */
 export function getPlanContent(
   workspaceRoot: string,
@@ -152,13 +155,12 @@ export function getPlanContent(
   projectTitle: string,
   resolver?: ArtifactResolver,
 ): string | null {
-  // Try resolver first
+  // Resolver handles both LocalResolver and FavaTrailsResolver
   if (resolver) {
-    const content = resolver.getPlanContent(projectId, projectTitle);
-    if (content) return content;
+    return resolver.getPlanContent(projectId, projectTitle);
   }
 
-  // Fallback to local file
+  // No resolver — legacy local file fallback
   const planPath = findPlanFile(workspaceRoot, projectId, projectTitle);
   if (!planPath) return null;
 

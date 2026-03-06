@@ -293,5 +293,12 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
     return new FavaTrailsResolver(config.scope);
   }
 
+  if (config?.backend && config.backend !== 'local') {
+    throw new Error(
+      `af-config.json has unknown artifacts.backend: "${config.backend}".\n` +
+      `Valid values: "local" (default), "fava-trails"`
+    );
+  }
+
   return new LocalResolver(workspaceRoot);
 }
