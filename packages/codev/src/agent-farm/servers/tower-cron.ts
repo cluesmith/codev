@@ -256,7 +256,9 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
     const renderedMessage = task.message.replace(/\$\{output\}/g, output.trim());
     deliverMessage(task, renderedMessage);
   } else if (result === 'failure') {
-    deliverMessage(task, `Cron task '${task.name}' failed: ${output.trim().slice(0, 200)}`);
+    // Command itself errored (non-zero exit, timeout, etc.) — log but don't alert.
+    // Command errors are infrastructure noise, not actionable CI failures.
+    deps.log('WARN', `Cron command failed for '${task.name}': ${output.trim().slice(0, 200)}`);
   }
 
   deps.log('INFO', `Cron task '${task.name}' completed: ${result}`);

@@ -118,7 +118,7 @@ You are implementing ${context.input_description}.
 ${modeInstructions}
 
 ## Protocol
-Follow the ${protocolName.toUpperCase()} protocol: \`codev/protocols/${protocolName}/protocol.md\`
+Follow the ${protocolName.toUpperCase()} protocol in \`codev/protocols/${protocolName}/\`.
 Read and internalize the protocol before starting any work.
 `;
 
@@ -258,8 +258,9 @@ export function validateProtocol(config: Config, protocolName: string): void {
     fatal(`Protocol not found: ${protocolName}${available}`);
   }
 
-  if (!existsSync(protocolFile)) {
-    fatal(`Protocol ${protocolName} exists but has no protocol.md file`);
+  const protocolJson = resolve(protocolDir, 'protocol.json');
+  if (!existsSync(protocolFile) && !existsSync(protocolJson)) {
+    fatal(`Protocol ${protocolName} exists but has no protocol.md or protocol.json file`);
   }
 }
 
