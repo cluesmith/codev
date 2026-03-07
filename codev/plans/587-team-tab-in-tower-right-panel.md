@@ -79,7 +79,7 @@ Functions:
 - `hasTeam(teamDir: string): Promise<boolean>` — returns true if `codev/team/` exists and `people/` has 2+ valid member files
 - `class FileMessageChannel implements MessageChannel` — wraps `loadMessages`
 
-Use `gray-matter` for YAML frontmatter parsing (already a dependency in the project).
+For YAML frontmatter parsing, split file content on `---` delimiters and parse the frontmatter block with `js-yaml` (already a dependency via `yaml` package). Do NOT use `gray-matter` — it is not in the project. Simple approach: split on first two `---` occurrences, parse the middle section with `yaml.parse()`.
 
 #### Acceptance Criteria
 - [ ] `loadTeamMembers()` returns parsed members from `people/*.md` files
@@ -103,9 +103,11 @@ Revert the single commit — no existing code is modified.
 
 #### Objectives
 - Create `/api/team` Tower endpoint that returns team members enriched with GitHub data, plus messages
+- Add `teamEnabled: boolean` field to `DashboardState` (returned by `/api/state`) so the frontend can conditionally show the Team tab without a separate probe
 - Implement batched GraphQL query for GitHub data (assigned issues, open PRs, recent activity)
 
 #### Deliverables
+- [ ] `teamEnabled: boolean` added to `DashboardState` in `/api/state` response (calls `hasTeam()` on each poll)
 - [ ] `/api/team` endpoint in `tower-routes.ts`
 - [ ] GitHub data fetching function using batched GraphQL via `gh api graphql`
 - [ ] Response includes members (with GitHub data) and messages (with channel field)
@@ -141,12 +143,14 @@ Uses a single batched GraphQL query (pattern from `src/lib/github.ts` `fetchOnIt
 
 **Modified file**: `packages/codev/src/agent-farm/servers/tower-routes.ts`
 
-Add route: `'GET /api/team'` → handler that:
-1. Detects workspace root from request context
-2. Calls `hasTeam()` — if false, returns `{ enabled: false }`
-3. Calls `loadTeamMembers()` and `loadMessages()`
-4. Calls `fetchTeamGitHubData()` (with try/catch for graceful degradation)
-5. Returns `{ enabled: true, members: [...], messages: [...], warnings: [...], githubError?: string }`
+1. In the `/api/state` handler, add `teamEnabled: boolean` to the `DashboardState` response by calling `hasTeam(workspacePath + '/codev/team')`. This is a lightweight filesystem check (just counts files in `people/`) and runs on each state poll. This solves the tab visibility chicken-and-egg: `buildTabs()` already receives `DashboardState` and can conditionally include the Team tab based on `state.teamEnabled`.
+
+2. Add route: `'GET /api/team'` → handler that:
+   1. Detects workspace root from request context
+   2. Calls `hasTeam()` — if false, returns `{ enabled: false }`
+   3. Calls `loadTeamMembers()` and `loadMessages()`
+   4. Calls `fetchTeamGitHubData()` (with try/catch for graceful degradation)
+   5. Returns `{ enabled: true, members: [...], messages: [...], warnings: [...], githubError?: string }`
 
 **API response shape**:
 ```typescript
@@ -198,7 +202,7 @@ Remove route from `tower-routes.ts`, revert new files.
 
 **Modified file**: `packages/codev/dashboard/src/hooks/useTabs.ts`
 - Add `'team'` to the type union (line 6)
-- In `buildTabs()`, conditionally add Team tab when team data indicates enabled
+- In `buildTabs()`, conditionally add Team tab when `state.teamEnabled === true`. Unlike Analytics (which is always present), Team is only added when the backend signals that `codev/team/people/` has 2+ members. The `teamEnabled` flag comes from `DashboardState` which `buildTabs()` already receives.
 
 **New file**: `packages/codev/dashboard/src/hooks/useTeam.ts`
 - Fetch-on-activation pattern (like `useAnalytics`):
@@ -219,8 +223,9 @@ Remove route from `tower-routes.ts`, revert new files.
 - Add icon for `'team'` type in `TAB_ICONS`
 
 **Modified file**: `packages/codev/dashboard/src/components/App.tsx`
-- Add Team tab rendering in `renderPersistentContent()` (conditional, like Analytics)
+- Add Team tab rendering alongside the AnalyticsView rendering branch (NOT inside `renderPersistentContent()` — Analytics is rendered separately as a non-terminal tab, and Team follows the same pattern)
 - Pass `isActive` prop to control fetch-on-activation
+- Conditionally render only when `state.teamEnabled === true`
 
 **Modified file**: `packages/codev/dashboard/src/index.css`
 - Add `.team-view`, `.team-member-card`, `.team-messages` styles using existing CSS variables
@@ -240,7 +245,13 @@ Remove route from `tower-routes.ts`, revert new files.
 
 #### Test Plan
 - **Unit Tests**: `useTeam` hook behavior (fetch on activation, refresh, error states), `TeamView` rendering (members, messages, empty states, error states)
-- **Manual Testing**: Verify tab appearance/disappearance, data display, responsive layout
+- **Playwright E2E Tests** (required for UI changes per repo instructions):
+  - Team tab appears only when team has 2+ members
+  - Team tab does NOT appear when team directory is missing
+  - Member cards render with correct data
+  - Messages section shows entries in reverse chronological order
+  - Refresh button triggers re-fetch
+  - GitHub error banner appears when API unavailable
 
 #### Rollback Strategy
 Revert changes to `useTabs.ts`, `TabBar.tsx`, `App.tsx`, remove new files.
@@ -271,9 +282,10 @@ export async function teamList(options: { cwd?: string }): Promise<void>
 // - Prints table: Name | GitHub | Role
 // - Warns if <2 members found
 
-export async function teamMessage(options: { text: string; cwd?: string }): Promise<void>
+export async function teamMessage(options: { text: string; author?: string; cwd?: string }): Promise<void>
 // - Detects workspace root
-// - Gets author GitHub handle via `gh api user --jq .login` or git config user.name
+// - If options.author provided, use it (for cron/auto-updates)
+// - Otherwise, gets author GitHub handle via `gh api user --jq .login` or git config user.name
 // - Formats entry: ---\n**<handle>** | <UTC timestamp>\n<text>\n
 // - Creates messages.md with header if missing
 // - Appends entry to messages.md
@@ -339,10 +351,13 @@ export async function teamUpdate(options: { cwd?: string }): Promise<void>
 // 3. If no notable events, exit silently (no message posted)
 // 4. Format summary message, e.g.:
 //    "Hourly update: Spawned builder for #42. Approved spec for #43. Merged PR #100."
-// 5. Append via teamMessage() function (reuse Phase 4 logic)
+// 5. Append via teamMessage() function with author override (e.g., workspace name or "tower-cron")
 ```
 
-**New file template**: `.af-cron/team-update.yaml` (created by `codev init` or manually)
+**New file template**: `.af-cron/team-update.yaml`
+
+Cron tasks are discovered per-workspace by `tower-cron.ts` via `loadWorkspaceTasks(workspacePath)`, which reads all `.yaml` files from `<workspace>/.af-cron/`. The file is created in the workspace root (not in `codev/`). Tower's 60-second cron tick evaluates all task schedules via `isDue()`.
+
 ```yaml
 name: team-update
 schedule: "0 * * * *"
@@ -405,8 +420,18 @@ Phase 4 can run in parallel with Phases 2-3 since it only depends on Phase 1.
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | GitHub GraphQL rate limiting | Medium | Medium | Single batched query, fetch-on-activation only |
-| `gray-matter` not available | Low | Low | Check dependency; add if missing |
-| Cron task conflicts with manual messages | Low | Low | Append-only format; no locking needed |
+| Concurrent writes to messages.md | Low | Low | Append-only format; atomic write via `fs.appendFile`. Add lockfile if issues arise |
+| Cron task conflicts with manual messages | Low | Low | Append-only format; concurrent appends are safe for this use case |
+
+## Expert Review
+
+**Date**: 2026-03-07
+**Models Consulted**: Gemini, Codex (GPT), Claude
+
+**Key feedback incorporated**:
+- **Gemini** (REQUEST_CHANGES): Fixed circular tab visibility dependency by adding `teamEnabled` to `DashboardState`. Corrected `gray-matter` dependency claim — using `js-yaml` + string split instead.
+- **Codex** (REQUEST_CHANGES): Added Playwright E2E test plan for UI changes. Added author override to `teamMessage()` for cron context. Clarified cron config discovery path (`.af-cron/*.yaml` per workspace).
+- **Claude** (COMMENT): Clarified `buildTabs()` conditional wiring via `state.teamEnabled`. Fixed `renderPersistentContent` guidance — Team renders alongside Analytics, not inside that function. Added concurrent write risk to risk table.
 
 ## Documentation Updates Required
 - [ ] Architecture docs (`codev/resources/arch.md`) — new team module
