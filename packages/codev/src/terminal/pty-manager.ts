@@ -71,6 +71,10 @@ export class TerminalManager {
       // UTF-8 locale for proper Unicode character rendering
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? '',
+      // FAVA Trails data repo — porch FavaTrailsResolver and fava-trails CLI need this
+      ...(process.env.FAVA_TRAILS_DATA_REPO
+        ? { FAVA_TRAILS_DATA_REPO: process.env.FAVA_TRAILS_DATA_REPO }
+        : {}),
     };
 
     const defaults = defaultSessionOptions();

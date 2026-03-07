@@ -12,6 +12,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { PlanPhase } from './types.js';
 import { stripIdPrefix } from './state.js';
+import type { ArtifactResolver } from './artifacts.js';
 
 // ============================================================================
 // Plan File Discovery
@@ -138,6 +139,49 @@ export function extractPhasesFromFile(planFilePath: string): PlanPhase[] {
   }
 
   const content = fs.readFileSync(planFilePath, 'utf-8');
+  return extractPlanPhases(content);
+}
+
+/**
+ * Get plan content via resolver (preferred) or local file fallback.
+ * Returns the raw plan markdown content, or null if not found.
+ *
+ * When a resolver is provided, it handles both backends (local and remote).
+ * Local file fallback only applies when no resolver is given (backward compat).
+ */
+export function getPlanContent(
+  workspaceRoot: string,
+  projectId: string,
+  projectTitle: string,
+  resolver?: ArtifactResolver,
+): string | null {
+  // Resolver handles both LocalResolver and FavaTrailsResolver
+  if (resolver) {
+    return resolver.getPlanContent(projectId, projectTitle);
+  }
+
+  // No resolver — legacy local file fallback
+  const planPath = findPlanFile(workspaceRoot, projectId, projectTitle);
+  if (!planPath) return null;
+
+  try {
+    return fs.readFileSync(planPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract plan phases via resolver (preferred) or local file fallback.
+ */
+export function extractPlanPhasesResolved(
+  workspaceRoot: string,
+  projectId: string,
+  projectTitle: string,
+  resolver?: ArtifactResolver,
+): PlanPhase[] {
+  const content = getPlanContent(workspaceRoot, projectId, projectTitle, resolver);
+  if (!content) return [];
   return extractPlanPhases(content);
 }
 
