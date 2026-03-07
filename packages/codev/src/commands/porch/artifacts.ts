@@ -136,8 +136,23 @@ export class LocalResolver implements ArtifactResolver {
 
 export class FavaTrailsResolver implements ArtifactResolver {
   private cache = new Map<string, string | null>();
+  private extraEnv: Record<string, string>;
 
-  constructor(private scope: string) {}
+  constructor(private scope: string, workspaceRoot?: string) {
+    // Read FAVA_TRAILS_DATA_REPO from .env if not already in process.env.
+    // af_builder.sh injects this into builder worktree .env files.
+    this.extraEnv = {};
+    if (!process.env.FAVA_TRAILS_DATA_REPO && workspaceRoot) {
+      const envPath = path.join(workspaceRoot, '.env');
+      try {
+        const envContent = fs.readFileSync(envPath, 'utf-8');
+        const match = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
+        if (match) {
+          this.extraEnv.FAVA_TRAILS_DATA_REPO = match[1].trim();
+        }
+      } catch { /* .env may not exist */ }
+    }
+  }
 
   findSpecBaseName(projectId: string, _title: string): string | null {
     const children = this.listChildren('specs');
@@ -200,6 +215,7 @@ export class FavaTrailsResolver implements ArtifactResolver {
       const output = execFileSync('fava-trails', ['get', '--list', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
+        env: { ...process.env, ...this.extraEnv },
       }).trim();
       this.cache.set(cacheKey, output || null);
       return output ? output.split('\n').filter(Boolean) : null;
@@ -221,6 +237,7 @@ export class FavaTrailsResolver implements ArtifactResolver {
       const output = execFileSync('fava-trails', ['get', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
+        env: { ...process.env, ...this.extraEnv },
       });
       this.cache.set(cacheKey, output);
       return output;
@@ -290,7 +307,7 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
         `Add: "artifacts": { "backend": "fava-trails", "scope": "mwai/eng/project-name/codev-assets" }`
       );
     }
-    return new FavaTrailsResolver(config.scope);
+    return new FavaTrailsResolver(config.scope, workspaceRoot);
   }
 
   if (config?.backend && config.backend !== 'local') {
