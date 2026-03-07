@@ -36,6 +36,7 @@ The Tower dashboard currently has no visibility into team composition or what ot
 - A `codev/team/messages.md` append-only message log displayed in the Team tab for team communication
 - New `af team` CLI commands for team interactions (message, list)
 - Communication channel abstraction designed for extensibility (messages.md now, Slack/other channels later)
+- Automatic hourly team updates from architect sessions: notable activity (spawned builders, approved gates, merged PRs, completed reviews) summarized and appended to messages.md
 - Foundation for richer inter-architect messaging in the future
 
 ## Stakeholders
@@ -52,6 +53,7 @@ The Tower dashboard currently has no visibility into team composition or what ot
 - [ ] `af team message` CLI command appends a timestamped message to `messages.md`
 - [ ] `af team list` CLI command displays team members from `people/` directory
 - [ ] Communication channel abstraction supports messages.md as first channel, extensible to future channels
+- [ ] Automatic hourly team updates: architect activity (spawned builders, approved gates, merged PRs, completed reviews) summarized and appended to messages.md
 - [ ] Manual refresh button works
 - [ ] Tab follows existing UI patterns (styling, layout, responsive behavior)
 - [ ] All new code has test coverage >90% (server, hooks, CLI, and UI layers)
@@ -153,6 +155,16 @@ interface TeamMessage {
 
 The backend reads from all configured channels and merges messages chronologically. v1 only has the `file` channel. Adding a new channel means implementing a `MessageChannel` interface that returns `TeamMessage[]` — no UI changes needed.
 
+**Automatic team updates**:
+
+Architect sessions automatically post hourly activity summaries to `messages.md`. Notable events tracked:
+- Builder spawned (`af spawn`)
+- Gate approved (`porch approve`)
+- PR merged (`gh pr merge`)
+- Review completed (porch phase transition to `review`)
+
+Implementation: A cron task (via `af cron` or Tower's existing cron infrastructure) runs hourly, collects events from the last hour (from git log, porch status, and `gh` CLI), summarizes them, and appends to `messages.md` via `af team message`. The message author is the workspace name or architect handle. If no notable events occurred in the last hour, no message is appended.
+
 **Pros**:
 - Simple, version-controlled team definition
 - Follows existing codev conventions (YAML frontmatter in markdown)
@@ -239,6 +251,9 @@ The backend reads from all configured channels and merges messages chronological
 16. `af team message "text"` appends a correctly formatted entry to `messages.md`
 17. `af team message` creates `messages.md` with header if file doesn't exist
 18. Messages include `channel: "file"` field in API response
+19. Hourly auto-update appends summary when notable events exist
+20. Hourly auto-update does NOT append when no notable events occurred
+21. Auto-update summary includes correct event types (spawn, gate, merge, review)
 
 ### Non-Functional Tests
 1. Tab renders within 2s for 10 team members (batched GraphQL)
@@ -273,6 +288,7 @@ The backend reads from all configured channels and merges messages chronological
 - Tab only appears with 2+ member files (no empty state)
 - Added `af team` CLI commands (message, list)
 - Added communication channel abstraction for extensibility (messages.md is first channel, Slack etc. as future channels)
+- Added automatic hourly team updates from architect sessions (cron-based activity summaries)
 
 ## Notes
 
