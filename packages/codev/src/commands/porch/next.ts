@@ -363,19 +363,23 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     }
   }
 
-  // Check for pending phase-review gates (parent-delegated consultation)
-  for (const [key, gate] of Object.entries(state.gates)) {
-    if (key.startsWith('phase-review-') && gate?.status === 'pending') {
+  // Check for pending phase-review gate (parent-delegated consultation)
+  // Only check the gate scoped to the current phase/planPhase/iteration —
+  // stale gates from previous phases (e.g. after rollback) must not block.
+  {
+    const expectedGate = `phase-review-${state.phase}-${state.current_plan_phase || 'main'}-iter${state.iteration}`;
+    const gateEntry = state.gates[expectedGate];
+    if (gateEntry?.status === 'pending') {
       return {
         status: 'gate_pending',
         phase: state.phase,
         iteration: state.iteration,
         plan_phase: state.current_plan_phase || undefined,
-        gate: key,
+        gate: expectedGate,
         tasks: [{
           subject: `Waiting for parent session to review`,
           activeForm: `Waiting for parent review`,
-          description: `Parent-delegated consultation is active. STOP and wait.\n\nRun: porch approve ${state.id} ${key} --a-human-explicitly-approved-this`,
+          description: `Parent-delegated consultation is active. STOP and wait.\n\nRun: porch approve ${state.id} ${expectedGate} --a-human-explicitly-approved-this`,
         }],
       };
     }
@@ -715,7 +719,9 @@ async function handleVerifyApproved(
       tasks: [{
         subject: `Request human approval: ${gateName}`,
         activeForm: `Requesting ${gateName} approval`,
-        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`,
+        description: reviews.length > 0
+          ? `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`
+          : `Approved via parent-delegated phase-review gate.\n\nSTOP and wait for human approval.`,
       }],
     };
   }
