@@ -195,20 +195,20 @@ function loadDotenv(workspaceRoot: string): void {
 }
 
 /**
- * Find a spec file by number. Returns null if not found.
+ * Find a spec file by ID. Returns null if not found.
  * Errors if multiple matches found.
  */
-function findSpec(workspaceRoot: string, number: number): string | null {
+function findSpec(workspaceRoot: string, id: string): string | null {
   const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  const unpadded = String(number);
-  const padded = unpadded.padStart(4, '0');
+  const unpadded = id.replace(/^0+/, '') || '0';
+  const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : id;
 
   if (fs.existsSync(specsDir)) {
     const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.md'));
-    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`));
+    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`) || f.startsWith(`${id}-`));
     if (matches.length > 1) {
       const list = matches.map(f => `  - codev/specs/${f}`).join('\n');
-      throw new Error(`Multiple spec files match '${unpadded}' or '${padded}':\n${list}`);
+      throw new Error(`Multiple spec files match '${id}':\n${list}`);
     }
     if (matches.length === 1) {
       return path.join(specsDir, matches[0]);
@@ -218,20 +218,20 @@ function findSpec(workspaceRoot: string, number: number): string | null {
 }
 
 /**
- * Find a plan file by number. Returns null if not found.
+ * Find a plan file by ID. Returns null if not found.
  * Errors if multiple matches found.
  */
-function findPlan(workspaceRoot: string, number: number): string | null {
+function findPlan(workspaceRoot: string, id: string): string | null {
   const plansDir = path.join(workspaceRoot, 'codev', 'plans');
-  const unpadded = String(number);
-  const padded = unpadded.padStart(4, '0');
+  const unpadded = id.replace(/^0+/, '') || '0';
+  const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : id;
 
   if (fs.existsSync(plansDir)) {
     const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.md'));
-    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`));
+    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`) || f.startsWith(`${id}-`));
     if (matches.length > 1) {
       const list = matches.map(f => `  - codev/plans/${f}`).join('\n');
-      throw new Error(`Multiple plan files match '${unpadded}' or '${padded}':\n${list}`);
+      throw new Error(`Multiple plan files match '${id}':\n${list}`);
     }
     if (matches.length === 1) {
       return path.join(plansDir, matches[0]);
@@ -243,13 +243,13 @@ function findPlan(workspaceRoot: string, number: number): string | null {
 /**
  * Find spec content via artifact resolver (FAVA Trails or local fallback).
  */
-function findSpecContent(workspaceRoot: string, number: number): ContentRef | null {
+function findSpecContent(workspaceRoot: string, id: string): ContentRef | null {
   try {
     const resolver = getResolver(workspaceRoot);
-    const content = resolver.getSpecContent(String(number), '');
-    if (content) return { content, label: `spec-${number}` };
+    const content = resolver.getSpecContent(id, '');
+    if (content) return { content, label: `spec-${id}` };
   } catch { /* resolver init may fail; fall through to local */ }
-  const specPath = findSpec(workspaceRoot, number);
+  const specPath = findSpec(workspaceRoot, id);
   if (specPath) return { content: fs.readFileSync(specPath, 'utf-8'), label: specPath };
   return null;
 }
@@ -257,13 +257,13 @@ function findSpecContent(workspaceRoot: string, number: number): ContentRef | nu
 /**
  * Find plan content via artifact resolver (FAVA Trails or local fallback).
  */
-function findPlanContent(workspaceRoot: string, number: number): ContentRef | null {
+function findPlanContent(workspaceRoot: string, id: string): ContentRef | null {
   try {
     const resolver = getResolver(workspaceRoot);
-    const content = resolver.getPlanContent(String(number), '');
-    if (content) return { content, label: `plan-${number}` };
+    const content = resolver.getPlanContent(id, '');
+    if (content) return { content, label: `plan-${id}` };
   } catch { /* resolver init may fail; fall through to local */ }
-  const planPath = findPlan(workspaceRoot, number);
+  const planPath = findPlan(workspaceRoot, id);
   if (planPath) return { content: fs.readFileSync(planPath, 'utf-8'), label: planPath };
   return null;
 }
@@ -1103,31 +1103,31 @@ function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: n
  */
 function resolveBuilderQuery(workspaceRoot: string, type: string, options: ConsultOptions): string {
   const projectState = getBuilderProjectState(workspaceRoot, options.projectId);
-  const projectNumber = parseInt(projectState.id, 10);
+  const projectId = projectState.id;
 
   switch (type) {
     case 'spec': {
-      const spec = findSpecContent(workspaceRoot, projectNumber);
-      if (!spec) throw new Error(`Spec ${projectState.id} not found in codev/specs/ or FAVA Trails`);
-      const plan = findPlanContent(workspaceRoot, projectNumber);
+      const spec = findSpecContent(workspaceRoot, projectId);
+      if (!spec) throw new Error(`Spec ${projectId} not found in codev/specs/ or FAVA Trails`);
+      const plan = findPlanContent(workspaceRoot, projectId);
       console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
       return buildSpecQuery(spec, plan);
     }
 
     case 'plan': {
-      const plan = findPlanContent(workspaceRoot, projectNumber);
-      if (!plan) throw new Error(`Plan ${projectState.id} not found in codev/plans/ or FAVA Trails`);
-      const spec = findSpecContent(workspaceRoot, projectNumber);
+      const plan = findPlanContent(workspaceRoot, projectId);
+      if (!plan) throw new Error(`Plan ${projectId} not found in codev/plans/ or FAVA Trails`);
+      const spec = findSpecContent(workspaceRoot, projectId);
       console.error(`Plan: ${plan.label}`);
       if (spec) console.error(`Spec: ${spec.label}`);
       return buildPlanQuery(plan, spec);
     }
 
     case 'impl': {
-      const spec = findSpecContent(workspaceRoot, projectNumber);
-      const plan = findPlanContent(workspaceRoot, projectNumber);
-      console.error(`Project: ${projectState.id}`);
+      const spec = findSpecContent(workspaceRoot, projectId);
+      const plan = findPlanContent(workspaceRoot, projectId);
+      console.error(`Project: ${projectId}`);
       if (spec) console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
       if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
@@ -1145,8 +1145,8 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
       if (!currentPhase) {
         throw new Error('No current plan phase detected. Use --plan-phase to specify.');
       }
-      const spec = findSpecContent(workspaceRoot, projectNumber);
-      const plan = findPlanContent(workspaceRoot, projectNumber);
+      const spec = findSpecContent(workspaceRoot, projectId);
+      const plan = findPlanContent(workspaceRoot, projectId);
       console.error(`Phase: ${currentPhase}`);
       if (spec) console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
@@ -1179,32 +1179,44 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
     );
   }
 
-  const issueNumber = parseInt(options.issue, 10);
-  if (isNaN(issueNumber)) {
-    throw new Error(`Invalid issue number: ${options.issue}`);
+  const issueId = options.issue;
+
+  // Parse as number only for GitHub API calls (PR lookup).
+  // Spec/plan lookups use the raw string to support non-numeric IDs.
+  //
+  // GitHub issues are numbered but PRs can be found by branch name too —
+  // findPRForCurrentBranch already does that (used in builder context).
+  // The issueAsNumber() path only applies when an architect runs
+  // `consult --type impl --issue N` from outside a worktree, where the
+  // issue number is used to search for the associated PR. From a builder
+  // worktree, the PR is found via the current branch — no issue number needed.
+  function issueAsNumber(): number {
+    const n = parseInt(issueId, 10);
+    if (isNaN(n)) throw new Error(`--issue must be numeric for PR lookup: ${issueId}`);
+    return n;
   }
 
   switch (type) {
     case 'spec': {
-      const spec = findSpecContent(workspaceRoot, issueNumber);
-      if (!spec) throw new Error(`Spec ${issueNumber} not found in codev/specs/ or FAVA Trails`);
-      const plan = findPlanContent(workspaceRoot, issueNumber);
+      const spec = findSpecContent(workspaceRoot, issueId);
+      if (!spec) throw new Error(`Spec ${issueId} not found in codev/specs/ or FAVA Trails`);
+      const plan = findPlanContent(workspaceRoot, issueId);
       console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
       return buildSpecQuery(spec, plan);
     }
 
     case 'plan': {
-      const plan = findPlanContent(workspaceRoot, issueNumber);
-      if (!plan) throw new Error(`Plan ${issueNumber} not found in codev/plans/ or FAVA Trails`);
-      const spec = findSpecContent(workspaceRoot, issueNumber);
+      const plan = findPlanContent(workspaceRoot, issueId);
+      if (!plan) throw new Error(`Plan ${issueId} not found in codev/plans/ or FAVA Trails`);
+      const spec = findSpecContent(workspaceRoot, issueId);
       console.error(`Plan: ${plan.label}`);
       if (spec) console.error(`Spec: ${spec.label}`);
       return buildPlanQuery(plan, spec);
     }
 
     case 'impl': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueAsNumber());
       // Fetch the branch and diff from merge-base
       try {
         execSync(`git fetch origin ${pr.headRefName}`, { cwd: workspaceRoot, stdio: 'pipe' });
@@ -1212,22 +1224,22 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
         // May already be fetched
       }
       const mergeBase = execSync(`git merge-base main origin/${pr.headRefName}`, { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-      const spec = findSpecContent(workspaceRoot, issueNumber);
-      const plan = findPlanContent(workspaceRoot, issueNumber);
-      console.error(`Project: ${issueNumber} (PR #${pr.number}, branch: ${pr.headRefName})`);
+      const spec = findSpecContent(workspaceRoot, issueId);
+      const plan = findPlanContent(workspaceRoot, issueId);
+      console.error(`Project: ${issueId} (PR #${pr.number}, branch: ${pr.headRefName})`);
       if (spec) console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
       return buildImplQuery(workspaceRoot, spec, plan, options.planPhase, `${mergeBase}..origin/${pr.headRefName}`);
     }
 
     case 'pr': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueAsNumber());
       console.error(`PR: #${pr.number}`);
       return buildPRQuery(pr.number);
     }
 
     case 'integration': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueAsNumber());
       console.error(`PR: #${pr.number} (integration review)`);
       return buildPRQuery(pr.number);
     }
