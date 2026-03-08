@@ -543,6 +543,51 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Team commands (Spec 587)
+  const teamCmd = program
+    .command('team')
+    .description('Team interactions and messages');
+
+  teamCmd
+    .command('list')
+    .description('List team members from codev/team/people/')
+    .action(async () => {
+      const { teamList } = await import('./commands/team.js');
+      try {
+        await teamList({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  teamCmd
+    .command('message <text>')
+    .description('Post a message to the team message log')
+    .option('-a, --author <name>', 'Override author (default: auto-detect from gh/git)')
+    .action(async (text, options) => {
+      const { teamMessage } = await import('./commands/team.js');
+      try {
+        await teamMessage({ text, author: options.author, cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  teamCmd
+    .command('update')
+    .description('Post hourly activity summary (used by cron, can run manually)')
+    .action(async () => {
+      const { teamUpdate } = await import('./commands/team-update.js');
+      try {
+        await teamUpdate({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Tower command - cross-project dashboard
   const towerCmd = program
     .command('tower')

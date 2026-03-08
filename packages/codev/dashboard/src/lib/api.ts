@@ -48,6 +48,41 @@ export interface DashboardState {
   workspaceName?: string;
   version?: string;
   hostname?: string;
+  teamEnabled?: boolean;
+}
+
+// Spec 587: Team tab types
+
+export interface TeamMemberGitHubData {
+  assignedIssues: { number: number; title: string; url: string }[];
+  openPRs: { number: number; title: string; url: string }[];
+  recentActivity: {
+    mergedPRs: { number: number; title: string; mergedAt: string }[];
+    closedIssues: { number: number; title: string; closedAt: string }[];
+  };
+}
+
+export interface TeamApiMember {
+  name: string;
+  github: string;
+  role: string;
+  filePath: string;
+  github_data: TeamMemberGitHubData | null;
+}
+
+export interface TeamApiMessage {
+  author: string;
+  timestamp: string;
+  body: string;
+  channel: string;
+}
+
+export interface TeamApiResponse {
+  enabled: boolean;
+  members?: TeamApiMember[];
+  messages?: TeamApiMessage[];
+  warnings?: string[];
+  githubError?: string;
 }
 
 export interface FileEntry {
@@ -185,6 +220,12 @@ export async function fetchAnalytics(range: string, refresh?: boolean): Promise<
   if (refresh) params.set('refresh', '1');
   const res = await fetch(apiUrl(`api/analytics?${params}`), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch analytics: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTeam(): Promise<TeamApiResponse> {
+  const res = await fetch(apiUrl('api/team'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch team: ${res.status}`);
   return res.json();
 }
 

@@ -11,3 +11,4 @@ export { open } from './open.js';
 export { send } from './send.js';
 export { attach } from './attach.js';
 export { rename } from './rename.js';
+export { teamList, teamMessage } from './team.js';

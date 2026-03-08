@@ -586,6 +586,7 @@ packages/codev/dashboard/
 │   │   ├── TabBar.tsx           # Tab management (builders, shells, annotations)
 │   │   ├── WorkView.tsx         # Work view: builders, PRs, backlog (Spec 0126)
 │   │   ├── StatisticsView.tsx  # Statistics tab: GitHub, Builder, Consultation metrics (Spec 456)
+│   │   ├── TeamView.tsx         # Team tab: member cards, messages, GitHub activity (Spec 587)
 │   │   ├── BuilderCard.tsx      # Builder card with phase/gate indicators (Spec 0126)
 │   │   ├── PRList.tsx           # Pending PR list with review status (Spec 0126)
 │   │   ├── BacklogList.tsx      # Backlog grouped by readiness (Spec 0126)
@@ -597,6 +598,7 @@ packages/codev/dashboard/
 │   │   ├── useBuilderStatus.ts  # Builder status polling
 │   │   ├── useOverview.ts       # Overview data polling (Spec 0126)
 │   │   ├── useStatistics.ts    # Statistics data fetching with tab activation refresh (Spec 456)
+│   │   ├── useTeam.ts           # Team data fetching with fetch-on-activation (Spec 587)
 │   │   └── useMediaQuery.ts     # Responsive breakpoints
 │   ├── lib/
 │   │   ├── api.ts               # REST client + getTerminalWsPath() + overview API
@@ -637,6 +639,18 @@ packages/codev/dashboard/
 - No auto-polling; refreshes on tab activation, range change, or manual Refresh button
 - `useStatistics(isActive)` hook manages fetch lifecycle with tab activation detection
 - `+ Shell` button in header for creating shell terminals
+
+**Team View** (Spec 587):
+- Conditional tab — only appears when `codev/team/people/` has 2+ valid member files
+- `teamEnabled` boolean in `DashboardState` controls tab visibility (set by `hasTeam()` in `/api/state`)
+- Member cards: name, role badge, GitHub handle link, assigned issues, open PRs, recent activity (last 7 days)
+- Message log from `codev/team/messages.md` displayed in reverse chronological order
+- Data from `/api/team` endpoint — members enriched with batched GraphQL GitHub data
+- Fetch-on-activation pattern (like Statistics), manual refresh button, no polling
+- `useTeam(isActive)` hook manages fetch lifecycle
+- Graceful degradation: shows member cards without GitHub data when API unavailable
+- Backend: `team.ts` (parsing), `team-github.ts` (GraphQL), `MessageChannel` interface for extensibility
+- CLI: `af team list`, `af team message`, `af team update` (hourly cron via `.af-cron/team-update.yaml`)
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
