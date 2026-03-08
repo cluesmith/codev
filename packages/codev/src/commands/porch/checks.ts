@@ -8,6 +8,7 @@
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { CheckResult, CheckDef } from './types.js';
+import type { ArtifactResolver } from './artifacts.js';
 
 /** Default timeout for checks: 5 minutes */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -120,6 +121,103 @@ export async function runCheck(
 }
 
 /**
+ * Try to run an artifact-dependent check programmatically via the resolver.
+ * Returns a CheckResult if the check name is recognized, null otherwise
+ * (caller should fall back to shell execution).
+ */
+export function runArtifactCheck(
+  name: string,
+  command: string,
+  resolver: ArtifactResolver,
+  env: CheckEnv,
+): CheckResult | null {
+  const startTime = Date.now();
+  const { PROJECT_ID: projectId, PROJECT_TITLE: title } = env;
+
+  switch (name) {
+    case 'plan_exists': {
+      const content = resolver.getPlanContent(projectId, title);
+      return {
+        name,
+        command,
+        passed: content !== null,
+        output: content !== null ? 'Plan found via resolver' : undefined,
+        error: content === null ? 'Plan not found' : undefined,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    case 'has_phases_json': {
+      const content = resolver.getPlanContent(projectId, title);
+      if (content === null) {
+        return { name, command, passed: false, error: 'Plan not found', duration_ms: Date.now() - startTime };
+      }
+      const has = content.includes('"phases":');
+      return {
+        name,
+        command,
+        passed: has,
+        output: has ? 'Found phases JSON block' : undefined,
+        error: has ? undefined : 'No "phases": found in plan',
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    case 'min_two_phases': {
+      const content = resolver.getPlanContent(projectId, title);
+      if (content === null) {
+        return { name, command, passed: false, error: 'Plan not found', duration_ms: Date.now() - startTime };
+      }
+      const matches = content.match(/"id":\s*"[^"]*"/g);
+      const count = matches ? matches.length : 0;
+      return {
+        name,
+        command,
+        passed: count >= 2,
+        output: `Found ${count} phase(s)`,
+        error: count < 2 ? `Only ${count} phase(s) found, need at least 2` : undefined,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    case 'review_has_arch_updates': {
+      const content = resolver.getReviewContent(projectId, title);
+      if (content === null) {
+        return { name, command, passed: false, error: 'Review not found', duration_ms: Date.now() - startTime };
+      }
+      const has = content.includes('## Architecture Updates');
+      return {
+        name,
+        command,
+        passed: has,
+        output: has ? 'Found Architecture Updates section' : undefined,
+        error: has ? undefined : 'Missing "## Architecture Updates" section in review',
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    case 'review_has_lessons_updates': {
+      const content = resolver.getReviewContent(projectId, title);
+      if (content === null) {
+        return { name, command, passed: false, error: 'Review not found', duration_ms: Date.now() - startTime };
+      }
+      const has = content.includes('## Lessons Learned Updates');
+      return {
+        name,
+        command,
+        passed: has,
+        output: has ? 'Found Lessons Learned Updates section' : undefined,
+        error: has ? undefined : 'Missing "## Lessons Learned Updates" section in review',
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    default:
+      return null; // Not an artifact check — fall through to shell execution
+  }
+}
+
+/**
  * Run multiple checks for a phase
  * Accepts either Record<string, string> (legacy) or Record<string, CheckDef>
  */
@@ -127,12 +225,27 @@ export async function runPhaseChecks(
   checks: Record<string, string | CheckDef>,
   cwd: string,
   env: CheckEnv,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  resolver?: ArtifactResolver,
+  overriddenChecks?: Set<string>,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   for (const [name, checkVal] of Object.entries(checks)) {
     const command = typeof checkVal === 'string' ? checkVal : checkVal.command;
+
+    // Try resolver-based check first (handles artifact-dependent checks programmatically).
+    // Skip resolver fast-path if the user overrode this check via af-config.json —
+    // their custom command should run instead.
+    if (resolver && !overriddenChecks?.has(name)) {
+      const artifactResult = runArtifactCheck(name, command, resolver, env);
+      if (artifactResult) {
+        results.push(artifactResult);
+        if (!artifactResult.passed) break;
+        continue;
+      }
+    }
+
     const checkCwd = typeof checkVal === 'object' && checkVal.cwd
       ? path.resolve(cwd, checkVal.cwd)
       : cwd;

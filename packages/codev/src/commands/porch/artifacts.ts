@@ -27,6 +27,9 @@ export interface ArtifactResolver {
   /** Get full content of a plan by project ID */
   getPlanContent(projectId: string, title: string): string | null;
 
+  /** Get full content of a review by project ID */
+  getReviewContent(projectId: string, title: string): string | null;
+
   /** Check if a spec/plan has pre-approval frontmatter */
   hasPreApproval(artifactGlob: string): boolean;
 }
@@ -110,6 +113,27 @@ export class LocalResolver implements ArtifactResolver {
     return null;
   }
 
+  getReviewContent(projectId: string, _title: string): string | null {
+    const reviewsDir = path.join(this.workspaceRoot, 'codev', 'reviews');
+    if (!fs.existsSync(reviewsDir)) return null;
+
+    const normalizedId = projectId.replace(/^0+/, '') || '0';
+    try {
+      const files = fs.readdirSync(reviewsDir);
+      const reviewFile = files.find(f => {
+        if (!f.endsWith('.md')) return false;
+        const numMatch = f.match(/^(\d+)/);
+        if (!numMatch) return false;
+        return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+      });
+      if (reviewFile) {
+        return fs.readFileSync(path.join(reviewsDir, reviewFile), 'utf-8');
+      }
+    } catch { /* ignore */ }
+
+    return null;
+  }
+
   hasPreApproval(artifactGlob: string): boolean {
     const matches = globSync(artifactGlob, { cwd: this.workspaceRoot });
     if (matches.length === 0) return false;
@@ -179,6 +203,12 @@ export class FavaTrailsResolver implements ArtifactResolver {
     return this.getContent(`plans/${baseName}`);
   }
 
+  getReviewContent(projectId: string, _title: string): string | null {
+    const baseName = this.findReviewBaseName(projectId);
+    if (!baseName) return null;
+    return this.getContent(`reviews/${baseName}`);
+  }
+
   hasPreApproval(_artifactGlob: string): boolean {
     // FAVA Trails thoughts use validation_status in frontmatter, not approved/validated fields.
     // For now, check if the thought has validation_status: approved.
@@ -192,6 +222,19 @@ export class FavaTrailsResolver implements ArtifactResolver {
 
   private findPlanBaseName(projectId: string): string | null {
     const children = this.listChildren('plans');
+    if (!children) return null;
+
+    const normalizedId = projectId.replace(/^0+/, '') || '0';
+    const match = children.find(name => {
+      const numMatch = name.match(/^(\d+)/);
+      if (!numMatch) return false;
+      return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+    });
+    return match || null;
+  }
+
+  private findReviewBaseName(projectId: string): string | null {
+    const children = this.listChildren('reviews');
     if (!children) return null;
 
     const normalizedId = projectId.replace(/^0+/, '') || '0';

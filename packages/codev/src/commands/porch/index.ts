@@ -46,6 +46,7 @@ import {
   type CheckEnv,
 } from './checks.js';
 import { loadCheckOverrides, loadConsultationMode } from './config.js';
+import { getResolver } from './artifacts.js';
 
 // ============================================================================
 // Output Helpers
@@ -87,6 +88,21 @@ function logCheckOverrides(
       console.log(chalk.yellow(`  ⚠ Check "${name}" overridden: ${parts.join(', ')}`));
     }
   }
+}
+
+/**
+ * Compute the set of check names that were overridden by af-config.json.
+ * Used to prevent resolver fast-path from bypassing user-customized commands.
+ */
+function getOverriddenCheckNames(overrides: import('./types.js').CheckOverrides | null): Set<string> {
+  if (!overrides) return new Set();
+  const names = new Set<string>();
+  for (const [name, override] of Object.entries(overrides)) {
+    if (override.command || override.cwd) {
+      names.add(name);
+    }
+  }
+  return names;
 }
 
 // ============================================================================
@@ -219,6 +235,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
+  const resolver = getResolver(workspaceRoot);
   const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
   console.log('');
@@ -235,7 +252,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
-  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -277,6 +294,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
       console.log('');
       console.log(chalk.dim('Checks skipped (gate approved <60s ago).'));
     } else {
+      const resolver = getResolver(workspaceRoot);
       const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
       console.log('');
@@ -284,7 +302,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
       logCheckOverrides(phaseCheckNames, checks, overrides);
 
       if (Object.keys(checks).length > 0) {
-        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
         console.log(formatCheckResults(results));
 
         if (!allChecksPassed(results)) {
@@ -475,6 +493,9 @@ export async function gate(workspaceRoot: string, projectId: string): Promise<vo
         stdio: 'inherit',
         detached: true
       }).unref();
+    } else {
+      console.log(`  Artifact: ${artifact}`);
+      console.log(chalk.dim('  (not available locally — may be stored in remote artifact backend)'));
     }
   }
 
@@ -535,6 +556,7 @@ export async function approve(
   const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
   if (phaseCheckNames.length > 0) {
+    const resolver = getResolver(workspaceRoot);
     const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
     console.log('');
@@ -542,7 +564,7 @@ export async function approve(
     logCheckOverrides(phaseCheckNames, checks, overrides);
 
     if (Object.keys(checks).length > 0) {
-      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
       console.log(formatCheckResults(results));
 
       if (!allChecksPassed(results)) {
@@ -750,7 +772,8 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
 }
 
 function getArtifactForPhase(workspaceRoot: string, state: ProjectState): string | null {
-  const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+  const resolver = getResolver(workspaceRoot);
+  const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver);
   switch (state.phase) {
     case 'specify':
       return `codev/specs/${baseName}.md`;
