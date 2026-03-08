@@ -47,6 +47,7 @@ Users who store codev artifacts in FAVA Trails (a versioned agent memory system)
 - [ ] `fava-trails get --exists` returns exit code 0/1 for existence checks
 - [ ] Porch with `artifacts.backend: "local"` (or unset) behaves identically to current behavior
 - [ ] Porch with `artifacts.backend: "fava-trails"` resolves specs, plans, and reviews via `fava-trails get`
+- [ ] Artifact-dependent porch checks (plan_exists, review_has_arch_updates, etc.) use the resolver instead of hardcoded shell commands
 - [ ] `porch status`, `porch next`, and `porch done` all work with the FAVA Trails backend
 - [ ] Existing codev projects with local files continue to work without configuration changes
 - [ ] All existing porch tests continue to pass
@@ -204,3 +205,21 @@ A future fix should make the GitHub fetch in `spawnSpec()` always non-fatal (it 
 7. **Timing instrumentation** (DeepSeek): Add debug-level timing logs to resolver calls during development to validate 200ms assumption.
 
 8. **Future: JSON output mode** (GPT-5.4): `--format json` for fava-trails get to return exists/content/children in single call. Defer to v2.
+
+## Amendments
+
+### TICK-003: Resolver-aware artifact checks (2026-03-08)
+
+**Summary**: Make porch review checks and plan checks use the artifact resolver instead of hardcoded local filesystem paths.
+
+**Problem Addressed**:
+The `review_has_arch_updates`, `review_has_lessons_updates`, `plan_exists`, `has_phases_json`, and `min_two_phases` checks in SPIR/ASPIR `protocol.json` hardcode `codev/reviews/` and `codev/plans/` paths in shell commands. These fail when `artifacts.backend: "fava-trails"` because files don't exist locally.
+
+**Spec Changes**:
+- Success Criteria: Added criterion for resolver-aware checks
+- This Amendments section
+
+**Plan Changes**:
+- Added TICK-003 amendment describing the implementation
+
+**Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-003.md`

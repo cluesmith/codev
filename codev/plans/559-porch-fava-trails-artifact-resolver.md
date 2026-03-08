@@ -285,3 +285,14 @@ Phase 1 (fava-trails CLI) ──→ Phase 2 (artifacts.ts) ──→ Phase 3 (re
 **Date**: 2026-03-06
 **Models**: GPT-5.4, DeepSeek v3.2, Gemini 3.1 Pro (via spec consultation)
 **Key Feedback**: Plan phases align with spec's recommended approach. Implementation details incorporate all consultation findings (caching, stdout hygiene, semantic interface, fail-loudly errors).
+
+## Amendment History
+
+### TICK-003: Resolver-aware artifact checks (2026-03-08)
+
+**Changes**:
+- `artifacts.ts`: Add `getReviewContent()` to `ArtifactResolver` interface + both implementations
+- `checks.ts`: Add `runArtifactCheck()` — programmatic resolver-based checks for `plan_exists`, `has_phases_json`, `min_two_phases`, `review_has_arch_updates`, `review_has_lessons_updates`. Update `runPhaseChecks` to try resolver checks before shell fallback.
+- `index.ts`: Thread resolver through `check()`, `done()`, `approve()`. Fix `getArtifactForPhase()` to be backend-aware.
+
+**Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-003.md`
