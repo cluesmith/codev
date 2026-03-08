@@ -11,6 +11,7 @@ import { WorkView } from './WorkView.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 import { AnalyticsView } from './AnalyticsView.js';
+import { TeamView } from './TeamView.js';
 
 
 /** Spec 443: Build the overview title string with optional hostname. */
@@ -137,6 +138,11 @@ export function App() {
         <div style={{ display: activeTab?.type === 'analytics' ? undefined : 'none', height: '100%' }}>
           <AnalyticsView isActive={activeTab?.type === 'analytics'} />
         </div>
+        {state?.teamEnabled && (
+          <div style={{ display: activeTab?.type === 'team' ? undefined : 'none', height: '100%' }}>
+            <TeamView isActive={activeTab?.type === 'team'} />
+          </div>
+        )}
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
       </>
     );
