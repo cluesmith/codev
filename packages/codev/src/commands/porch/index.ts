@@ -45,7 +45,7 @@ import {
   allChecksPassed,
   type CheckEnv,
 } from './checks.js';
-import { loadCheckOverrides } from './config.js';
+import { loadCheckOverrides, loadConsultationMode } from './config.js';
 import { getResolver } from './artifacts.js';
 
 // ============================================================================
@@ -90,6 +90,21 @@ function logCheckOverrides(
   }
 }
 
+/**
+ * Compute the set of check names that were overridden by af-config.json.
+ * Used to prevent resolver fast-path from bypassing user-customized commands.
+ */
+function getOverriddenCheckNames(overrides: import('./types.js').CheckOverrides | null): Set<string> {
+  if (!overrides) return new Set();
+  const names = new Set<string>();
+  for (const [name, override] of Object.entries(overrides)) {
+    if (override.command || override.cwd) {
+      names.add(name);
+    }
+  }
+  return names;
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -113,6 +128,10 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
   console.log(header(`PROJECT: ${state.id} - ${state.title}`));
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
+  const consultationMode = loadConsultationMode(workspaceRoot);
+  if (consultationMode !== 'default') {
+    console.log(`  CONSULTATION: ${consultationMode}`);
+  }
 
   // For phased protocols, show plan phase status
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
@@ -233,7 +252,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
-  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -283,7 +302,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
       logCheckOverrides(phaseCheckNames, checks, overrides);
 
       if (Object.keys(checks).length > 0) {
-        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
         console.log(formatCheckResults(results));
 
         if (!allChecksPassed(results)) {
@@ -474,6 +493,9 @@ export async function gate(workspaceRoot: string, projectId: string): Promise<vo
         stdio: 'inherit',
         detached: true
       }).unref();
+    } else {
+      console.log(`  Artifact: ${artifact}`);
+      console.log(chalk.dim('  (not available locally — may be stored in remote artifact backend)'));
     }
   }
 
@@ -542,7 +564,7 @@ export async function approve(
     logCheckOverrides(phaseCheckNames, checks, overrides);
 
     if (Object.keys(checks).length > 0) {
-      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver, getOverriddenCheckNames(overrides));
       console.log(formatCheckResults(results));
 
       if (!allChecksPassed(results)) {

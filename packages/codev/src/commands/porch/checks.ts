@@ -149,7 +149,7 @@ export function runArtifactCheck(
 
     case 'has_phases_json': {
       const content = resolver.getPlanContent(projectId, title);
-      if (!content) {
+      if (content === null) {
         return { name, command, passed: false, error: 'Plan not found', duration_ms: Date.now() - startTime };
       }
       const has = content.includes('"phases":');
@@ -165,7 +165,7 @@ export function runArtifactCheck(
 
     case 'min_two_phases': {
       const content = resolver.getPlanContent(projectId, title);
-      if (!content) {
+      if (content === null) {
         return { name, command, passed: false, error: 'Plan not found', duration_ms: Date.now() - startTime };
       }
       const matches = content.match(/"id":\s*"[^"]*"/g);
@@ -182,7 +182,7 @@ export function runArtifactCheck(
 
     case 'review_has_arch_updates': {
       const content = resolver.getReviewContent(projectId, title);
-      if (!content) {
+      if (content === null) {
         return { name, command, passed: false, error: 'Review not found', duration_ms: Date.now() - startTime };
       }
       const has = content.includes('## Architecture Updates');
@@ -198,7 +198,7 @@ export function runArtifactCheck(
 
     case 'review_has_lessons_updates': {
       const content = resolver.getReviewContent(projectId, title);
-      if (!content) {
+      if (content === null) {
         return { name, command, passed: false, error: 'Review not found', duration_ms: Date.now() - startTime };
       }
       const has = content.includes('## Lessons Learned Updates');
@@ -227,14 +227,17 @@ export async function runPhaseChecks(
   env: CheckEnv,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   resolver?: ArtifactResolver,
+  overriddenChecks?: Set<string>,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   for (const [name, checkVal] of Object.entries(checks)) {
     const command = typeof checkVal === 'string' ? checkVal : checkVal.command;
 
-    // Try resolver-based check first (handles artifact-dependent checks programmatically)
-    if (resolver) {
+    // Try resolver-based check first (handles artifact-dependent checks programmatically).
+    // Skip resolver fast-path if the user overrode this check via af-config.json —
+    // their custom command should run instead.
+    if (resolver && !overriddenChecks?.has(name)) {
       const artifactResult = runArtifactCheck(name, command, resolver, env);
       if (artifactResult) {
         results.push(artifactResult);
