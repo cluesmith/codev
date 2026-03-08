@@ -52,15 +52,18 @@ export async function createWorktree(config: Config, branchName: string, worktre
     fatal(`Failed to create worktree: ${error}`);
   }
 
-  // Symlink .env from workspace root into worktree (if it exists)
-  const rootEnvPath = resolve(config.workspaceRoot, '.env');
-  const worktreeEnvPath = resolve(worktreePath, '.env');
-  if (existsSync(rootEnvPath) && !existsSync(worktreeEnvPath)) {
-    try {
-      symlinkSync(rootEnvPath, worktreeEnvPath);
-      logger.info('Linked .env from workspace root');
-    } catch (error) {
-      logger.debug(`Failed to symlink .env: ${error}`);
+  // Symlink config files from workspace root into worktree (if they exist)
+  const symlinks = ['.env', 'af-config.json'];
+  for (const file of symlinks) {
+    const rootPath = resolve(config.workspaceRoot, file);
+    const worktreFilePath = resolve(worktreePath, file);
+    if (existsSync(rootPath) && !existsSync(worktreFilePath)) {
+      try {
+        symlinkSync(rootPath, worktreFilePath);
+        logger.info(`Linked ${file} from workspace root`);
+      } catch (error) {
+        logger.debug(`Failed to symlink ${file}: ${error}`);
+      }
     }
   }
 }
