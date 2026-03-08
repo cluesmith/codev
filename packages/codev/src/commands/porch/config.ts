@@ -1,5 +1,5 @@
 /**
- * Porch config reader — loads porch.checks from af-config.json.
+ * Porch config reader — loads porch.checks and porch.consultation from af-config.json.
  *
  * Intentionally self-contained: does NOT import from agent-farm's config
  * module, keeping porch independent of the af dependency tree.
@@ -57,4 +57,55 @@ export function loadCheckOverrides(workspaceRoot: string): CheckOverrides | null
   }
 
   return porch.checks as CheckOverrides;
+}
+
+// Valid consultation modes. Unknown values fall back to 'default'.
+export type ConsultationMode = 'default' | 'parent';
+
+/**
+ * Load consultation mode from af-config.json in the workspace root.
+ *
+ * Reads the `porch.consultation` value. When set to "parent", porch emits
+ * phase-review gates instead of consult commands, allowing the parent
+ * session to review builder work at each phase boundary.
+ *
+ * Returns 'default' when config is missing, invalid, or has an unknown value.
+ * Uses findConfigRoot() so it works from builder worktrees.
+ */
+export function loadConsultationMode(workspaceRoot: string): ConsultationMode {
+  const configPath = path.join(findConfigRoot(workspaceRoot), 'af-config.json');
+
+  if (!fs.existsSync(configPath)) {
+    return 'default';
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    return 'default';
+  }
+
+  let config: unknown;
+  try {
+    config = JSON.parse(raw);
+  } catch {
+    return 'default';
+  }
+
+  if (typeof config !== 'object' || config === null) {
+    return 'default';
+  }
+
+  const obj = config as Record<string, unknown>;
+  if (typeof obj.porch !== 'object' || obj.porch === null) {
+    return 'default';
+  }
+
+  const porch = obj.porch as Record<string, unknown>;
+  if (porch.consultation === 'parent') {
+    return 'parent';
+  }
+
+  return 'default';
 }

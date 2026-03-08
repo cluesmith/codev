@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadCheckOverrides } from '../config.js';
+import { loadCheckOverrides, loadConsultationMode } from '../config.js';
 
 describe('loadCheckOverrides', () => {
   const testDir = path.join(tmpdir(), `porch-config-test-${Date.now()}`);
@@ -118,5 +118,80 @@ describe('loadCheckOverrides', () => {
     );
     const result = loadCheckOverrides(testDir);
     expect(result).toEqual({ build: { command: 'go build ./...' } });
+  });
+});
+
+describe('loadConsultationMode', () => {
+  const testDir = path.join(tmpdir(), `porch-consultation-test-${Date.now()}`);
+
+  beforeEach(() => {
+    fs.mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('returns "default" when af-config.json does not exist', () => {
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('returns "default" when config has no porch key', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ shell: { builder: 'claude' } })
+    );
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('returns "default" when porch has no consultation key', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ porch: { checks: {} } })
+    );
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('returns "parent" when porch.consultation is "parent"', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ porch: { consultation: 'parent' } })
+    );
+    expect(loadConsultationMode(testDir)).toBe('parent');
+  });
+
+  it('returns "default" for unknown consultation values', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ porch: { consultation: 'skip' } })
+    );
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('returns "default" for non-string consultation values', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ porch: { consultation: true } })
+    );
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('returns "default" on malformed JSON (graceful fallback)', () => {
+    fs.writeFileSync(path.join(testDir, 'af-config.json'), '{ invalid json }');
+    expect(loadConsultationMode(testDir)).toBe('default');
+  });
+
+  it('works alongside checks overrides', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({
+        porch: {
+          consultation: 'parent',
+          checks: { build: { command: 'cargo build' } },
+        },
+      })
+    );
+    expect(loadConsultationMode(testDir)).toBe('parent');
+    expect(loadCheckOverrides(testDir)).toEqual({ build: { command: 'cargo build' } });
   });
 });
