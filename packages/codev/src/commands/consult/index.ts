@@ -15,8 +15,15 @@ import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
 import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
+import { getResolver } from '../porch/artifacts.js';
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
+
+/** Resolved artifact content with a human-readable label */
+interface ContentRef {
+  content: string;
+  label: string;
+}
 
 // Model configuration
 interface ModelConfig {
@@ -230,6 +237,34 @@ function findPlan(workspaceRoot: string, number: number): string | null {
       return path.join(plansDir, matches[0]);
     }
   }
+  return null;
+}
+
+/**
+ * Find spec content via artifact resolver (FAVA Trails or local fallback).
+ */
+function findSpecContent(workspaceRoot: string, number: number): ContentRef | null {
+  try {
+    const resolver = getResolver(workspaceRoot);
+    const content = resolver.getSpecContent(String(number), '');
+    if (content) return { content, label: `spec-${number}` };
+  } catch { /* resolver init may fail; fall through to local */ }
+  const specPath = findSpec(workspaceRoot, number);
+  if (specPath) return { content: fs.readFileSync(specPath, 'utf-8'), label: specPath };
+  return null;
+}
+
+/**
+ * Find plan content via artifact resolver (FAVA Trails or local fallback).
+ */
+function findPlanContent(workspaceRoot: string, number: number): ContentRef | null {
+  try {
+    const resolver = getResolver(workspaceRoot);
+    const content = resolver.getPlanContent(String(number), '');
+    if (content) return { content, label: `plan-${number}` };
+  } catch { /* resolver init may fail; fall through to local */ }
+  const planPath = findPlan(workspaceRoot, number);
+  if (planPath) return { content: fs.readFileSync(planPath, 'utf-8'), label: planPath };
   return null;
 }
 
@@ -827,24 +862,16 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 /**
  * Build query for spec review
  */
-function buildSpecQuery(specPath: string, planPath: string | null): string {
-  let query = `Review Specification: ${path.basename(specPath)}
+function buildSpecQuery(spec: ContentRef, plan: ContentRef | null): string {
+  let query = `Review Specification: ${spec.label}\n\n`;
 
-Please read and review this specification:
-- Spec file: ${specPath}
-`;
+  query += `## Specification\n\n${spec.content}\n\n`;
 
-  if (planPath) {
-    query += `- Plan file: ${planPath}\n`;
+  if (plan) {
+    query += `## Implementation Plan (context)\n\n${plan.content}\n\n`;
   }
 
-  query += `
-## How to Review
-**Read the files listed above directly from disk.** You have full filesystem access.
-Do NOT rely on \`git diff\` or \`git log\` to review content — diffs may be truncated or miss uncommitted work.
-Open the spec file, read it in full, and evaluate it directly.
-
-Please review:
+  query += `Please review:
 1. Clarity and completeness of requirements
 2. Technical feasibility
 3. Edge cases and error scenarios
@@ -871,8 +898,8 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
  */
 function buildImplQuery(
   workspaceRoot: string,
-  specPath: string | null,
-  planPath: string | null,
+  spec: ContentRef | null,
+  plan: ContentRef | null,
   planPhase?: string,
   diffRef?: string,
 ): string {
@@ -893,13 +920,11 @@ function buildImplQuery(
     query += ` — Phase: ${planPhase}`;
   }
 
-  query += `\n\n## Context Files\n`;
-
-  if (specPath) {
-    query += `- Spec: ${specPath}\n`;
+  if (spec) {
+    query += `\n\n## Specification\n\n${spec.content}\n`;
   }
-  if (planPath) {
-    query += `- Plan: ${planPath}\n`;
+  if (plan) {
+    query += `\n## Implementation Plan\n\n${plan.content}\n`;
   }
 
   if (planPhase) {
@@ -919,9 +944,8 @@ function buildImplQuery(
     query += `\n\n## How to Review\n`;
     query += `**Read the changed files from disk** to review their actual content. You have full filesystem access.\n`;
     query += `For each file listed above, read it and evaluate the implementation against the spec/plan.\n`;
-    query += `Do NOT rely on git diffs to determine the current state of code — diffs miss uncommitted changes in worktrees.\n`;
   } else {
-    query += `\n## Instructions\n\nRead the spec and plan files above, then explore the filesystem to find and review the implementation changes.\n`;
+    query += `\n## Instructions\n\nExplore the filesystem to find and review the implementation changes.\n`;
   }
 
   query += `
@@ -948,24 +972,16 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 /**
  * Build query for plan review
  */
-function buildPlanQuery(planPath: string, specPath: string | null): string {
-  let query = `Review Implementation Plan: ${path.basename(planPath)}
+function buildPlanQuery(plan: ContentRef, spec: ContentRef | null): string {
+  let query = `Review Implementation Plan: ${plan.label}\n\n`;
 
-Please read and review this implementation plan:
-- Plan file: ${planPath}
-`;
+  query += `## Implementation Plan\n\n${plan.content}\n\n`;
 
-  if (specPath) {
-    query += `- Spec file: ${specPath} (for context)\n`;
+  if (spec) {
+    query += `## Specification (context)\n\n${spec.content}\n\n`;
   }
 
-  query += `
-## How to Review
-**Read the files listed above directly from disk.** You have full filesystem access.
-Do NOT rely on \`git diff\` or \`git log\` to review content — diffs may be truncated or miss uncommitted work.
-Open the plan file (and spec if provided), read them in full, and evaluate the plan directly.
-
-Please review:
+  query += `Please review:
 1. Alignment with specification requirements
 2. Implementation approach and architecture
 3. Task breakdown and ordering
@@ -993,8 +1009,8 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 function buildPhaseQuery(
   workspaceRoot: string,
   planPhase: string,
-  specPath: string | null,
-  planPath: string | null,
+  spec: ContentRef | null,
+  plan: ContentRef | null,
 ): string {
   let phaseDiff = '';
   try {
@@ -1003,13 +1019,12 @@ function buildPhaseQuery(
     // If git show fails, reviewer explores filesystem
   }
 
-  let query = `Review Phase Implementation: "${planPhase}"\n\n## Context Files\n`;
+  let query = `Review Phase Implementation: "${planPhase}"\n\n`;
 
-  if (specPath) query += `- Spec: ${specPath}\n`;
-  if (planPath) query += `- Plan: ${planPath}\n`;
+  if (spec) query += `## Specification\n\n${spec.content}\n\n`;
+  if (plan) query += `## Implementation Plan\n\n${plan.content}\n\n`;
 
-  query += `
-## REVIEW SCOPE — CURRENT PLAN PHASE ONLY
+  query += `## REVIEW SCOPE — CURRENT PLAN PHASE ONLY
 You are reviewing **plan phase "${planPhase}" ONLY**.
 Read the plan, find the section for "${planPhase}", and scope your review to ONLY the work described in that phase.
 
@@ -1092,31 +1107,31 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
 
   switch (type) {
     case 'spec': {
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      if (!specPath) throw new Error(`Spec ${projectState.id} not found in codev/specs/`);
-      const planPath = findPlan(workspaceRoot, projectNumber);
-      console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      return buildSpecQuery(specPath, planPath);
+      const spec = findSpecContent(workspaceRoot, projectNumber);
+      if (!spec) throw new Error(`Spec ${projectState.id} not found in codev/specs/ or FAVA Trails`);
+      const plan = findPlanContent(workspaceRoot, projectNumber);
+      console.error(`Spec: ${spec.label}`);
+      if (plan) console.error(`Plan: ${plan.label}`);
+      return buildSpecQuery(spec, plan);
     }
 
     case 'plan': {
-      const planPath = findPlan(workspaceRoot, projectNumber);
-      if (!planPath) throw new Error(`Plan ${projectState.id} not found in codev/plans/`);
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      console.error(`Plan: ${planPath}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      return buildPlanQuery(planPath, specPath);
+      const plan = findPlanContent(workspaceRoot, projectNumber);
+      if (!plan) throw new Error(`Plan ${projectState.id} not found in codev/plans/ or FAVA Trails`);
+      const spec = findSpecContent(workspaceRoot, projectNumber);
+      console.error(`Plan: ${plan.label}`);
+      if (spec) console.error(`Spec: ${spec.label}`);
+      return buildPlanQuery(plan, spec);
     }
 
     case 'impl': {
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      const planPath = findPlan(workspaceRoot, projectNumber);
+      const spec = findSpecContent(workspaceRoot, projectNumber);
+      const plan = findPlanContent(workspaceRoot, projectNumber);
       console.error(`Project: ${projectState.id}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
+      if (spec) console.error(`Spec: ${spec.label}`);
+      if (plan) console.error(`Plan: ${plan.label}`);
       if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
-      return buildImplQuery(workspaceRoot, specPath, planPath, options.planPhase);
+      return buildImplQuery(workspaceRoot, spec, plan, options.planPhase);
     }
 
     case 'pr': {
@@ -1130,12 +1145,12 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
       if (!currentPhase) {
         throw new Error('No current plan phase detected. Use --plan-phase to specify.');
       }
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      const planPath = findPlan(workspaceRoot, projectNumber);
+      const spec = findSpecContent(workspaceRoot, projectNumber);
+      const plan = findPlanContent(workspaceRoot, projectNumber);
       console.error(`Phase: ${currentPhase}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      return buildPhaseQuery(workspaceRoot, currentPhase, specPath, planPath);
+      if (spec) console.error(`Spec: ${spec.label}`);
+      if (plan) console.error(`Plan: ${plan.label}`);
+      return buildPhaseQuery(workspaceRoot, currentPhase, spec, plan);
     }
 
     case 'integration': {
@@ -1171,21 +1186,21 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
 
   switch (type) {
     case 'spec': {
-      const specPath = findSpec(workspaceRoot, issueNumber);
-      if (!specPath) throw new Error(`Spec ${issueNumber} not found in codev/specs/`);
-      const planPath = findPlan(workspaceRoot, issueNumber);
-      console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      return buildSpecQuery(specPath, planPath);
+      const spec = findSpecContent(workspaceRoot, issueNumber);
+      if (!spec) throw new Error(`Spec ${issueNumber} not found in codev/specs/ or FAVA Trails`);
+      const plan = findPlanContent(workspaceRoot, issueNumber);
+      console.error(`Spec: ${spec.label}`);
+      if (plan) console.error(`Plan: ${plan.label}`);
+      return buildSpecQuery(spec, plan);
     }
 
     case 'plan': {
-      const planPath = findPlan(workspaceRoot, issueNumber);
-      if (!planPath) throw new Error(`Plan ${issueNumber} not found in codev/plans/`);
-      const specPath = findSpec(workspaceRoot, issueNumber);
-      console.error(`Plan: ${planPath}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      return buildPlanQuery(planPath, specPath);
+      const plan = findPlanContent(workspaceRoot, issueNumber);
+      if (!plan) throw new Error(`Plan ${issueNumber} not found in codev/plans/ or FAVA Trails`);
+      const spec = findSpecContent(workspaceRoot, issueNumber);
+      console.error(`Plan: ${plan.label}`);
+      if (spec) console.error(`Spec: ${spec.label}`);
+      return buildPlanQuery(plan, spec);
     }
 
     case 'impl': {
@@ -1197,12 +1212,12 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
         // May already be fetched
       }
       const mergeBase = execSync(`git merge-base main origin/${pr.headRefName}`, { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-      const specPath = findSpec(workspaceRoot, issueNumber);
-      const planPath = findPlan(workspaceRoot, issueNumber);
+      const spec = findSpecContent(workspaceRoot, issueNumber);
+      const plan = findPlanContent(workspaceRoot, issueNumber);
       console.error(`Project: ${issueNumber} (PR #${pr.number}, branch: ${pr.headRefName})`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      return buildImplQuery(workspaceRoot, specPath, planPath, options.planPhase, `${mergeBase}..origin/${pr.headRefName}`);
+      if (spec) console.error(`Spec: ${spec.label}`);
+      if (plan) console.error(`Plan: ${plan.label}`);
+      return buildImplQuery(workspaceRoot, spec, plan, options.planPhase, `${mergeBase}..origin/${pr.headRefName}`);
     }
 
     case 'pr': {

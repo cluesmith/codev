@@ -313,15 +313,35 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/bugfix-332-fix-login-bug/src/commands/')).toBe('bugfix-332');
     });
 
-    it('should return null for task worktrees', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
+    it('should detect task worktree ID', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBe('task-aB2C');
+    });
+
+    it('should detect task worktree ID from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/task-A_4E/src/commands/')).toBe('task-A_4E');
+    });
+
+    it('should detect ASPIR worktree with spec number', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-17-replace-openai')).toBe('0017');
+    });
+
+    it('should detect SPIR worktree with spec number', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-315-auth-system')).toBe('0315');
+    });
+
+    it('should detect TICK worktree with spec number', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/tick-559-data-repo')).toBe('0559');
+    });
+
+    it('should detect protocol worktree from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-42-feature/src/deep/')).toBe('0042');
     });
 
     it('should return null for maintain worktrees', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
     });
 
-    it('should return null for protocol worktrees', () => {
+    it('should return null for protocol worktrees without numeric ID', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
     });
 
@@ -393,10 +413,15 @@ updated_at: "${state.updated_at}"
         .toThrow('Cannot determine project ID');
     });
 
-    it('step 4: task/protocol worktrees fall through to error when no filesystem match', () => {
-      // Task worktrees return null from CWD detection, and empty root has no projects
-      expect(() => resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot))
-        .toThrow('Cannot determine project ID');
+    it('step 2: task worktrees are detected from CWD', () => {
+      // Task worktrees now return task-{id} from CWD detection
+      const result = resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot);
+      expect(result).toEqual({ id: 'task-aB2C', source: 'cwd' });
+    });
+
+    it('step 2: protocol worktrees with numeric ID are detected from CWD', () => {
+      const result = resolveProjectId(undefined, '/repo/.builders/aspir-17-feature', emptyProjectRoot);
+      expect(result).toEqual({ id: '0017', source: 'cwd' });
     });
   });
 

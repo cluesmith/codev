@@ -268,6 +268,36 @@ export class FavaTrailsResolver implements ArtifactResolver {
 }
 
 // =============================================================================
+// Config Resolution
+// =============================================================================
+
+/**
+ * Find the root directory containing af-config.json.
+ * In builder worktrees, af-config.json only exists in the main repo.
+ * Falls back to the main repo via git worktree resolution.
+ */
+export function findConfigRoot(workspaceRoot: string): string {
+  if (fs.existsSync(path.join(workspaceRoot, 'af-config.json'))) {
+    return workspaceRoot;
+  }
+  try {
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: workspaceRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (gitCommonDir !== '.git') {
+      const mainGitDir = path.resolve(workspaceRoot, gitCommonDir);
+      const mainRepo = path.dirname(mainGitDir.replace(/\/worktrees\/[^/]+$/, ''));
+      if (fs.existsSync(path.join(mainRepo, 'af-config.json'))) {
+        return mainRepo;
+      }
+    }
+  } catch { /* not in git */ }
+  return workspaceRoot;
+}
+
+// =============================================================================
 // Factory
 // =============================================================================
 
@@ -278,9 +308,11 @@ export interface ArtifactConfig {
 
 /**
  * Load artifact resolver config from af-config.json.
+ * Resolves to main repo when running from a builder worktree.
  */
 function loadArtifactConfig(workspaceRoot: string): ArtifactConfig | null {
-  const configPath = path.join(workspaceRoot, 'af-config.json');
+  const configRoot = findConfigRoot(workspaceRoot);
+  const configPath = path.join(configRoot, 'af-config.json');
   if (!fs.existsSync(configPath)) return null;
 
   try {
