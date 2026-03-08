@@ -575,6 +575,19 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  teamCmd
+    .command('update')
+    .description('Post hourly activity summary (used by cron, can run manually)')
+    .action(async () => {
+      const { teamUpdate } = await import('./commands/team-update.js');
+      try {
+        await teamUpdate({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Tower command - cross-project dashboard
   const towerCmd = program
     .command('tower')
