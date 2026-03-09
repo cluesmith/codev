@@ -50,6 +50,7 @@ import {
   buildWorktreeLaunchScript,
 } from './spawn-worktree.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { executeForgeCommand } from '../../lib/forge.js';
 
 // =============================================================================
 // ID and Session Management
@@ -639,7 +640,10 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
       if (!options.noComment) {
         logger.info('Commenting on issue...');
         try {
-          await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
+          await executeForgeCommand('issue-comment', {
+            CODEV_ISSUE_ID: String(issueNumber),
+            CODEV_COMMENT_BODY: 'On it! Working on a fix now.',
+          }, { raw: true });
         } catch {
           logger.warn('Warning: Failed to comment on issue (continuing anyway)');
         }

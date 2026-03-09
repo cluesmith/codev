@@ -14,6 +14,7 @@ import { loadState, removeBuilder } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { getGlobalDb, closeGlobalDb } from '../db/index.js';
 import { deleteFileTabsByPathPrefix } from '../utils/file-tabs.js';
+import { executeForgeCommand } from '../../lib/forge.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,
@@ -330,14 +331,18 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
         // Task builders are ephemeral — always delete remote branch if it exists
         await deleteRemoteBranch(builder.branch, config);
       } else if (!force) {
-        // Bugfix: verify PR is merged first unless --force
+        // Verify PR is merged first unless --force, using pr-search concept
         try {
-          const prStatus = await run(`gh pr list --head "${builder.branch}" --state merged --json number --limit 1`, { cwd: config.workspaceRoot });
-          const mergedPRs = JSON.parse(prStatus.stdout);
+          const mergedResult = await executeForgeCommand('pr-search', {
+            CODEV_SEARCH_QUERY: `head:${builder.branch} is:merged`,
+          }, { cwd: config.workspaceRoot });
+          const mergedPRs = Array.isArray(mergedResult) ? mergedResult : [];
           if (mergedPRs.length === 0) {
             // Check for open PRs
-            const openPRStatus = await run(`gh pr list --head "${builder.branch}" --state open --json number --limit 1`, { cwd: config.workspaceRoot });
-            const openPRs = JSON.parse(openPRStatus.stdout);
+            const openResult = await executeForgeCommand('pr-search', {
+              CODEV_SEARCH_QUERY: `head:${builder.branch} is:open`,
+            }, { cwd: config.workspaceRoot });
+            const openPRs = Array.isArray(openResult) ? openResult : [];
             if (openPRs.length > 0) {
               logger.warn(`Warning: Branch ${builder.branch} has an open PR. Skipping remote deletion.`);
               logger.info('Use --force to delete anyway.');
