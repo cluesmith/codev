@@ -13,16 +13,31 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const execFileMock = vi.hoisted(() => vi.fn());
+const executeForgeCommandMock = vi.hoisted(() => vi.fn());
 const mockSummary = vi.hoisted(() => vi.fn());
 const mockAgentTimeByProtocol = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn());
 
-// Mock child_process + util (for GitHub CLI calls in github.ts)
+// Mock child_process + util (for direct gh calls like fetchOnItTimestamps)
 vi.mock('node:child_process', () => ({
   execFile: execFileMock,
+  exec: vi.fn(),
+  execSync: vi.fn(),
 }));
 vi.mock('node:util', () => ({
   promisify: () => execFileMock,
+}));
+
+// Mock the forge module so functions routed through executeForgeCommand work
+vi.mock('../../lib/forge.js', () => ({
+  executeForgeCommand: executeForgeCommandMock,
+  executeForgeCommandSync: vi.fn(),
+  getForgeCommand: vi.fn(),
+  isConceptDisabled: vi.fn(),
+  loadForgeConfig: vi.fn(),
+  getKnownConcepts: vi.fn(),
+  getDefaultCommand: vi.fn(),
+  validateForgeConfig: vi.fn(),
 }));
 
 // Mock MetricsDB (for consultation metrics in analytics.ts)
@@ -46,15 +61,21 @@ import { computeAnalytics, clearAnalyticsCache, protocolFromBranch } from '../se
 // ---------------------------------------------------------------------------
 
 function mockGhOutput(responses: Record<string, string>, onItTimestamps?: Record<number, string>) {
+  // Mock forge concept commands for fetchMergedPRs and fetchClosedIssues
+  executeForgeCommandMock.mockImplementation((concept: string) => {
+    if (concept === 'recently-merged') {
+      return Promise.resolve(JSON.parse(responses.mergedPRs ?? '[]'));
+    }
+    if (concept === 'recently-closed') {
+      return Promise.resolve(JSON.parse(responses.closedIssues ?? '[]'));
+    }
+    return Promise.resolve(null);
+  });
+
+  // Mock direct execFile for fetchOnItTimestamps (still uses gh directly)
   execFileMock.mockImplementation((_cmd: string, args: string[]) => {
     const argsStr = args.join(' ');
 
-    if (argsStr.includes('pr') && argsStr.includes('list') && argsStr.includes('merged')) {
-      return Promise.resolve({ stdout: responses.mergedPRs ?? '[]' });
-    }
-    if (argsStr.includes('issue') && argsStr.includes('list') && argsStr.includes('closed')) {
-      return Promise.resolve({ stdout: responses.closedIssues ?? '[]' });
-    }
     // gh repo view --json owner,name (for GraphQL repo context)
     if (argsStr.includes('repo') && argsStr.includes('view')) {
       return Promise.resolve({ stdout: JSON.stringify({ owner: { login: 'test' }, name: 'repo' }) });
@@ -110,65 +131,42 @@ describe('fetchMergedPRs', () => {
     vi.clearAllMocks();
   });
 
-  it('returns parsed merged PRs from gh CLI', async () => {
+  it('returns parsed merged PRs via forge concept command', async () => {
     const prs = [
       { number: 1, title: 'PR 1', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42' },
     ];
-    execFileMock.mockResolvedValueOnce({ stdout: JSON.stringify(prs) });
+    executeForgeCommandMock.mockResolvedValueOnce(prs);
 
     const result = await fetchMergedPRs('2026-02-10', '/tmp');
     expect(result).toEqual(prs);
   });
 
-  it('includes --search merged:>=DATE when since is provided', async () => {
-    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
+  it('passes CODEV_SINCE_DATE when since is provided', async () => {
+    executeForgeCommandMock.mockResolvedValueOnce([]);
 
     await fetchMergedPRs('2026-02-14', '/tmp');
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['--search', 'merged:>=2026-02-14']),
+    expect(executeForgeCommandMock).toHaveBeenCalledWith(
+      'recently-merged',
+      expect.objectContaining({ CODEV_SINCE_DATE: '2026-02-14' }),
       expect.objectContaining({ cwd: '/tmp' }),
     );
   });
 
-  it('requests headRefName in JSON fields', async () => {
-    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
+  it('omits CODEV_SINCE_DATE when since is null', async () => {
+    executeForgeCommandMock.mockResolvedValueOnce([]);
 
     await fetchMergedPRs(null, '/tmp');
 
-    const args = execFileMock.mock.calls[0][1] as string[];
-    const jsonIdx = args.indexOf('--json');
-    expect(jsonIdx).toBeGreaterThan(-1);
-    expect(args[jsonIdx + 1]).toContain('headRefName');
-  });
-
-  it('omits --search when since is null', async () => {
-    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
-
-    await fetchMergedPRs(null, '/tmp');
-
-    const args = execFileMock.mock.calls[0][1] as string[];
-    expect(args).not.toContain('--search');
+    const envArg = executeForgeCommandMock.mock.calls[0][1] as Record<string, string>;
+    expect(envArg).not.toHaveProperty('CODEV_SINCE_DATE');
   });
 
   it('returns null on failure', async () => {
-    execFileMock.mockRejectedValueOnce(new Error('gh not found'));
+    executeForgeCommandMock.mockResolvedValueOnce(null);
 
     const result = await fetchMergedPRs('2026-02-14', '/tmp');
     expect(result).toBeNull();
-  });
-
-  it('passes --limit 1000', async () => {
-    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
-
-    await fetchMergedPRs('2026-02-14', '/tmp');
-
-    expect(execFileMock).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['--limit', '1000']),
-      expect.anything(),
-    );
   });
 });
 
@@ -181,30 +179,30 @@ describe('fetchClosedIssues', () => {
     vi.clearAllMocks();
   });
 
-  it('returns parsed closed issues from gh CLI', async () => {
+  it('returns parsed closed issues via forge concept command', async () => {
     const issues = [
       { number: 42, title: 'Bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-11T00:00:00Z', labels: [{ name: 'bug' }] },
     ];
-    execFileMock.mockResolvedValueOnce({ stdout: JSON.stringify(issues) });
+    executeForgeCommandMock.mockResolvedValueOnce(issues);
 
     const result = await fetchClosedIssues('2026-02-10', '/tmp');
     expect(result).toEqual(issues);
   });
 
-  it('includes --search closed:>=DATE when since is provided', async () => {
-    execFileMock.mockResolvedValueOnce({ stdout: '[]' });
+  it('passes CODEV_SINCE_DATE when since is provided', async () => {
+    executeForgeCommandMock.mockResolvedValueOnce([]);
 
     await fetchClosedIssues('2026-02-14', '/tmp');
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['--search', 'closed:>=2026-02-14']),
+    expect(executeForgeCommandMock).toHaveBeenCalledWith(
+      'recently-closed',
+      expect.objectContaining({ CODEV_SINCE_DATE: '2026-02-14' }),
       expect.objectContaining({ cwd: '/tmp' }),
     );
   });
 
   it('returns null on failure', async () => {
-    execFileMock.mockRejectedValueOnce(new Error('gh not found'));
+    executeForgeCommandMock.mockResolvedValueOnce(null);
 
     const result = await fetchClosedIssues('2026-02-14', '/tmp');
     expect(result).toBeNull();
@@ -295,34 +293,35 @@ describe('computeAnalytics', () => {
     expect(result.timeRange).toBe('all');
   });
 
-  it('passes null since date for "all" range', async () => {
+  it('passes no CODEV_SINCE_DATE for "all" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
     await computeAnalytics('/tmp/workspace', 'all');
 
-    const prCall = execFileMock.mock.calls.find(
-      (c: unknown[]) => (c[1] as string[]).includes('merged'),
+    // fetchMergedPRs(null, ...) should pass empty env (no CODEV_SINCE_DATE)
+    const mergedCall = executeForgeCommandMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'recently-merged',
     );
-    expect(prCall).toBeDefined();
-    expect((prCall![1] as string[])).not.toContain('--search');
+    expect(mergedCall).toBeDefined();
+    const env = mergedCall![1] as Record<string, string>;
+    expect(env).not.toHaveProperty('CODEV_SINCE_DATE');
   });
 
-  it('passes a date string for "7" range', async () => {
+  it('passes CODEV_SINCE_DATE for "7" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
     await computeAnalytics('/tmp/workspace', '7');
 
-    const prCall = execFileMock.mock.calls.find(
-      (c: unknown[]) => (c[1] as string[]).includes('merged'),
+    const mergedCall = executeForgeCommandMock.mock.calls.find(
+      (c: unknown[]) => c[0] === 'recently-merged',
     );
-    expect(prCall).toBeDefined();
-    const args = prCall![1] as string[];
-    const searchIdx = args.indexOf('--search');
-    expect(searchIdx).toBeGreaterThan(-1);
-    expect(args[searchIdx + 1]).toMatch(/^merged:>=\d{4}-\d{2}-\d{2}$/);
+    expect(mergedCall).toBeDefined();
+    const env = mergedCall![1] as Record<string, string>;
+    expect(env.CODEV_SINCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   // --- Partial failure: GitHub unavailable ---
 
   it('returns GitHub defaults and error when all GitHub calls fail', async () => {
+    executeForgeCommandMock.mockResolvedValue(null);
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
     const result = await computeAnalytics('/tmp/workspace', '7');
