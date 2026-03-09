@@ -121,16 +121,25 @@ The following concepts capture every forge operation codev currently uses. Each 
 | `pr-list` | `gh pr list --json ...` | Array of open PRs | overview (PR panel) |
 | `issue-list` | `gh issue list --json ...` | Array of open issues | overview (backlog derivation) |
 | `issue-comment` | `gh issue comment N --body ...` | Exit code (0 = success) | spawn ("On it!" posting), protocol hooks |
-| `pr-exists` | `gh pr list --state all --head branch` | Boolean (exit code) | protocol checks (phase completion) |
+| `pr-exists` | `gh pr list --state all --head branch` | JSON boolean on stdout (`true`/`false`) | protocol checks (phase completion) |
 | `recently-closed` | `gh issue list --state closed --search ...` | Array of closed issues | overview (recently closed panel) |
 | `recently-merged` | `gh pr list --state merged --search ...` | Array of merged PRs | overview, analytics |
 | `user-identity` | `gh api user --jq .login` | String (username) | team commands |
 | `team-activity` | `gh api graphql` (batched) | Per-member stats object | team tab, team-update |
 | `on-it-timestamps` | `gh api graphql` (batched) | Map of issue → timestamp | analytics (wall-clock metrics) |
+| `pr-merge` | `gh pr merge N --merge` | Exit code (0 = success) | porch/next.ts merge instructions |
+| `pr-search` | `gh pr list --search "..." --json ...` | Array of PRs matching query | spawn collision detection, cleanup PR status, consult PR lookup |
+| `pr-view` | `gh pr view N --json ...` | Single PR object with metadata | consult PR review data |
+| `pr-diff` | `gh pr diff N` | Diff text (stdout, not JSON) | consult PR review diff |
+| `gh-auth-status` | `gh auth status` | Exit code (0 = authenticated) | doctor health check |
 
-**Input passing**: Concept commands receive their arguments via environment variables (e.g., `CODEV_ISSUE_ID=PROJ-42`, `CODEV_BRANCH_NAME=feature/foo`, `CODEV_SINCE_DATE=2026-03-01`). This avoids shell escaping issues and is language-agnostic. All identifiers (issue IDs, PR IDs, etc.) are treated as **opaque strings** — codev never assumes they are numeric. This ensures compatibility with systems like Jira (`PROJ-123`), GitLab (numeric but different namespace), and any other tracker.
+**Input passing**: Concept commands receive their arguments via environment variables (e.g., `CODEV_ISSUE_ID=PROJ-42`, `CODEV_BRANCH_NAME=feature/foo`, `CODEV_SINCE_DATE=2026-03-01`). All identifiers (issue IDs, PR IDs, etc.) are treated as **opaque strings** — codev never assumes they are numeric. This ensures compatibility with systems like Jira (`PROJ-123`), GitLab (numeric but different namespace), and any other tracker. The current codebase uses `number` for issue IDs internally (`fetchGitHubIssue(issueNumber: number)`); this must be refactored to `string | number` as part of implementation.
+
+**Execution model**: Concept commands are executed via a shell (`sh -c` / `cmd /c`) to allow pipes, redirects, and variable expansion in user-configured commands. Environment variables are set by codev before invocation — they are **not** interpolated into the command string by codev. The user's command string may reference `$CODEV_*` vars directly (shell expands them) or the command can read them from its environment. This is the same trust model as git hooks and `$EDITOR`. The security section addresses the injection surface.
 
 **Error contract**: Exit code 0 = success (parse stdout as JSON). Non-zero = failure (codev treats as unavailable, same as current `null` return pattern). Stderr is passed through for diagnostics.
+
+**Protocol check integration**: Protocol JSON files currently define `pr_exists` as a raw `gh` shell command. Rather than modifying protocol templates, porch will be updated to intercept the `pr_exists` check name and route it through the concept command dispatch. This keeps protocol templates stable across projects while allowing per-project forge configuration.
 
 ## Solution Approaches
 
@@ -235,6 +244,7 @@ Setting a concept to `null` explicitly disables it (codev skips that operation g
 
 - Concept commands execute with the same privileges as the user running codev — no escalation beyond what `gh` already had
 - `af-config.json` forge overrides could point to arbitrary executables — same trust model as porch check overrides (spec 550) and shell command overrides
+- **Shell execution surface**: Concept commands are executed via `sh -c` to support pipes and variable expansion. Environment variables set by codev (e.g., `CODEV_COMMENT_BODY`) could contain shell metacharacters. This is the same trust model as git hooks — the user controls both the config and the environment. Users writing concept commands should follow standard shell safety practices (quoting variables). Codev does not sanitize env var values, as doing so would break legitimate use cases.
 - Disabling concepts (setting to `null`) could bypass review workflows — this is a team policy concern, mitigated by logging when concepts are disabled
 - No credentials are stored or managed by codev — each concept command handles its own authentication (just as `gh` handles GitHub auth today)
 - Concept command stdout is parsed as JSON — malformed output is rejected, not eval'd
@@ -248,7 +258,7 @@ Setting a concept to `null` explicitly disables it (codev skips that operation g
 3. **Non-GitHub repo with forge overrides**: Custom concept commands called, output parsed correctly
 4. **Partial overrides**: Some concepts overridden (e.g., `pr-list`), others left at defaults or disabled
 5. **Concept set to `null`**: Operation skipped entirely, logged, no error
-6. **Builder spawn with `issue-view` unavailable**: Skips issue fetch, collision detection, and "On it!" comment; proceeds normally
+6. **Builder spawn with `issue-view` unavailable**: Fails with a helpful error explaining that the `issue-view` concept command needs to be configured in `af-config.json` (consistent with Q&A decision). Builder spawn requires issue context.
 7. **`porch done` with custom `pr-exists`**: Overridden command determines phase completion
 8. **Work view with partial concepts**: Shows data from available concepts, empty panels for unavailable ones
 9. **Analytics with partial concepts**: Shows git-derived metrics when PR concepts unavailable
