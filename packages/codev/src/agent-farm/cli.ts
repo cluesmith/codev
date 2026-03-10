@@ -543,15 +543,16 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Team commands (Spec 587)
+  // Team commands (Spec 587) — deprecated in favor of standalone `team` CLI (Spec 599)
   const teamCmd = program
     .command('team')
-    .description('Team interactions and messages');
+    .description('Team interactions and messages (deprecated: use `team` CLI instead)');
 
   teamCmd
     .command('list')
     .description('List team members from codev/team/people/')
     .action(async () => {
+      console.warn('⚠ `af team` is deprecated. Use `team list` instead.');
       const { teamList } = await import('./commands/team.js');
       try {
         await teamList({ cwd: process.cwd() });
@@ -566,6 +567,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Post a message to the team message log')
     .option('-a, --author <name>', 'Override author (default: auto-detect from gh/git)')
     .action(async (text, options) => {
+      console.warn('⚠ `af team` is deprecated. Use `team message` instead.');
       const { teamMessage } = await import('./commands/team.js');
       try {
         await teamMessage({ text, author: options.author, cwd: process.cwd() });
@@ -579,6 +581,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('update')
     .description('Post hourly activity summary (used by cron, can run manually)')
     .action(async () => {
+      console.warn('⚠ `af team` is deprecated. Use `team update` instead.');
       const { teamUpdate } = await import('./commands/team-update.js');
       try {
         await teamUpdate({ cwd: process.cwd() });

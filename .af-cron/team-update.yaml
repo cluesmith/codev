@@ -1,5 +1,5 @@
 name: team-update
 schedule: "0 * * * *"
 enabled: true
-command: "af team update"
+command: "team update"
 timeout: 30
