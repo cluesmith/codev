@@ -50,20 +50,23 @@ Extract the `af team` subcommands into a standalone `team` CLI binary, following
 #### Implementation Details
 - `bin/team.js`: `#!/usr/bin/env node` → `import { run } from '../dist/cli.js'; run(['team', ...process.argv.slice(2)]);`
 - In `src/cli.ts`, add a `team` command group using Commander, registering `list`, `message`, `update`, `add` subcommands
-- `teamAdd()` in `src/agent-farm/commands/team.ts`: validates handle with `isValidGitHubHandle()`, normalizes to lowercase, creates `codev/team/people/<handle>.md` with YAML frontmatter, fails if file exists
-- Reuse `findWorkspaceRoot()` for workspace detection
+- **Workspace validation**: Each subcommand action calls `findWorkspaceRoot()` first. If it throws (no `codev/` found), catch and print `Error: Not inside a Codev workspace. Run from a project that has a codev/ directory.` then `process.exit(1)`. This matches the spec's Design Constraint.
+- `teamAdd()` in `src/agent-farm/commands/team.ts`: validates handle with `isValidGitHubHandle()`, normalizes to lowercase, creates `codev/team/people/<handle>.md` with YAML frontmatter, fails if file exists with exact error: `Error: Team member '<handle>' already exists at codev/team/people/<handle>.md`
+- Invalid handle: `Error: Invalid GitHub handle '<handle>'` (exit code 1)
 
 #### Acceptance Criteria
 - [ ] `team list` produces identical output to `af team list`
 - [ ] `team message "test"` posts to messages.md
 - [ ] `team update` runs hourly summary
 - [ ] `team add validhandle` creates member file with correct frontmatter
-- [ ] `team add existing` fails with clear error
-- [ ] `team add "../bad"` fails validation
+- [ ] `team add existing` fails with exact error: `Error: Team member 'existing' already exists at codev/team/people/existing.md`
+- [ ] `team add "../bad"` fails with exact error: `Error: Invalid GitHub handle '../bad'`
+- [ ] `team list` outside a codev workspace fails with: `Error: Not inside a Codev workspace. Run from a project that has a codev/ directory.`
 - [ ] `team --help` shows all 4 subcommands
 
 #### Test Plan
-- **Unit Tests**: `teamAdd()` — valid handle, duplicate, invalid handle, custom `--name`/`--role` flags, directory creation
+- **Unit Tests**: `teamAdd()` — valid handle, duplicate (exact error text), invalid handle (exact error text), custom `--name`/`--role` flags, directory creation
+- **Error Handling Tests**: `team list` outside workspace (exact error text, exit code 1), `team add` with non-writable directory (exit code 1)
 - **Integration Tests**: Full CLI invocation via Commander parse
 
 #### Rollback Strategy
@@ -84,7 +87,10 @@ Remove `team` from `src/cli.ts` command registration and `package.json` bin entr
 - [ ] Tests for deprecation warning output
 
 #### Implementation Details
-- In `src/agent-farm/cli.ts`, wrap each `af team` action to call `console.warn('⚠ \`af team\` is deprecated. Use \`team <subcommand>\` instead.')` before delegating to the existing function
+- In `src/agent-farm/cli.ts`, wrap each `af team` action to print a per-subcommand deprecation warning:
+  - `af team list` → `⚠ \`af team\` is deprecated. Use \`team list\` instead.`
+  - `af team message` → `⚠ \`af team\` is deprecated. Use \`team message\` instead.`
+  - `af team update` → `⚠ \`af team\` is deprecated. Use \`team update\` instead.`
 - The warning goes to stderr so it doesn't interfere with piped output
 - Cron config change is a single-line edit: `command: "team update"`
 
