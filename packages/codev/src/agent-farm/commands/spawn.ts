@@ -50,7 +50,7 @@ import {
   buildWorktreeLaunchScript,
 } from './spawn-worktree.js';
 import { getTowerClient } from '../lib/tower-client.js';
-import { executeForgeCommand } from '../../lib/forge.js';
+import { executeForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 
 // =============================================================================
 // ID and Session Management
@@ -254,6 +254,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const projectId = String(issueNumber);
   const strippedId = stripLeadingZeros(projectId);
   const protocol = await resolveIssueProtocol(options, config);
+  const forgeConfig = loadForgeConfig(config.workspaceRoot);
 
   // Load protocol definition early — needed for input.required check
   const protocolDef = loadProtocol(config, protocol);
@@ -283,9 +284,9 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   let ghIssue: Awaited<ReturnType<typeof fetchGitHubIssueNonFatal>> = null;
   if (!specFile) {
     // Fatal fetch — we need the issue title for naming
-    ghIssue = await fetchGitHubIssue(issueNumber);
+    ghIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
   } else {
-    ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
+    ghIssue = await fetchGitHubIssueNonFatal(issueNumber, { forgeConfig });
   }
 
   // Derive specName for naming.
@@ -589,12 +590,13 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
 async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issueNumber!;
   const protocol = await resolveIssueProtocol(options, config);
+  const forgeConfig = loadForgeConfig(config.workspaceRoot);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Bugfix Builder for Issue #${issueNumber}`);
 
   // Fetch issue from GitHub
   logger.info('Fetching issue from GitHub...');
-  const issue = await fetchGitHubIssue(issueNumber);
+  const issue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
 
   const builderId = buildAgentName('bugfix', String(issueNumber));
 
@@ -633,17 +635,18 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
         worktreePath,
         force: options.force,
         noComment: options.noComment,
+        forgeConfig,
       });
     } else {
       // Fallback: hardcoded behavior for backwards compatibility
-      await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+      await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force, forgeConfig);
       if (!options.noComment) {
         logger.info('Commenting on issue...');
         try {
           await executeForgeCommand('issue-comment', {
             CODEV_ISSUE_ID: String(issueNumber),
             CODEV_COMMENT_BODY: 'On it! Working on a fix now.',
-          }, { raw: true });
+          }, { forgeConfig, raw: true });
         } catch {
           logger.warn('Warning: Failed to comment on issue (continuing anyway)');
         }

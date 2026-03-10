@@ -49,7 +49,7 @@ const DEFAULT_COMMANDS: Record<string, string> = {
   'issue-list': 'gh issue list --limit 200 --json number,title,url,labels,createdAt',
   'issue-comment': 'gh issue comment "$CODEV_ISSUE_ID" --body "$CODEV_COMMENT_BODY"',
   'pr-exists': 'gh pr list --state all --head "$CODEV_BRANCH_NAME" --json number --jq "length > 0"',
-  'recently-closed': 'gh issue list --state closed --search "closed:>$CODEV_SINCE_DATE" --json number,title,url,labels,createdAt,closedAt --limit 50',
+  'recently-closed': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list --state closed --search "closed:>$CODEV_SINCE_DATE" --json number,title,url,labels,createdAt,closedAt --limit 50; else gh issue list --state closed --json number,title,url,labels,createdAt,closedAt --limit 50; fi',
   'recently-merged': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh pr list --state merged --search "merged:>$CODEV_SINCE_DATE" --json number,title,url,body,createdAt,mergedAt,headRefName --limit 50; else gh pr list --state merged --json number,title,url,body,createdAt,mergedAt,headRefName --limit 50; fi',
   'user-identity': 'gh api user --jq .login',
   'team-activity': 'gh api graphql -f query="$CODEV_GRAPHQL_QUERY"',
@@ -58,7 +58,7 @@ const DEFAULT_COMMANDS: Record<string, string> = {
   // Additional concepts (found during plan review)
   'pr-search': 'gh pr list --search "$CODEV_SEARCH_QUERY" --json number,headRefName',
   'pr-view': 'if [ "$CODEV_INCLUDE_COMMENTS" = "1" ]; then gh pr view "$CODEV_PR_NUMBER" --comments; else gh pr view "$CODEV_PR_NUMBER" --json title,body,state,author,baseRefName,headRefName,additions,deletions; fi',
-  'pr-diff': 'gh pr diff "$CODEV_PR_NUMBER"',
+  'pr-diff': 'if [ "$CODEV_DIFF_NAME_ONLY" = "1" ]; then gh pr diff "$CODEV_PR_NUMBER" --name-only; else gh pr diff "$CODEV_PR_NUMBER"; fi',
   'gh-auth-status': 'gh auth status',
 };
 
