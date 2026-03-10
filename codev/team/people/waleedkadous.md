@@ -1,6 +1,6 @@
 ---
 name: M Waleed Kadous
-github: mwk
+github: waleedkadous
 role: Lead Architect
 ---
 
