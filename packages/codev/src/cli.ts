@@ -277,7 +277,7 @@ teamCmd
       const { teamList } = await import('./agent-farm/commands/team.js');
       await teamList({ cwd: process.cwd() });
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });
@@ -292,7 +292,7 @@ teamCmd
       const { teamMessage } = await import('./agent-farm/commands/team.js');
       await teamMessage({ text, author: options.author, cwd: process.cwd() });
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });
@@ -306,7 +306,7 @@ teamCmd
       const { teamUpdate } = await import('./agent-farm/commands/team-update.js');
       await teamUpdate({ cwd: process.cwd() });
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });
@@ -322,7 +322,7 @@ teamCmd
       const { teamAdd } = await import('./agent-farm/commands/team.js');
       await teamAdd({ handle, name: options.name, role: options.role, cwd: process.cwd() });
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });

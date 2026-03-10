@@ -234,3 +234,25 @@ describe('teamAdd', () => {
     expect(logs.some(l => l.includes("Added team member 'jdoe'"))).toBe(true);
   });
 });
+
+// =============================================================================
+// Error handling (Spec 599 — workspace validation)
+// =============================================================================
+
+describe('workspace validation', () => {
+  it('teamList works when codev/ directory exists', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    // tmpDir has codev/ — should not throw
+    await expect(teamList({ cwd: tmpDir })).resolves.not.toThrow();
+  });
+
+  it('teamAdd fails on empty handle', async () => {
+    await expect(teamAdd({ handle: '', cwd: tmpDir }))
+      .rejects.toThrow("Invalid GitHub handle ''");
+  });
+
+  it('teamAdd fails on handle with spaces', async () => {
+    await expect(teamAdd({ handle: 'bad handle', cwd: tmpDir }))
+      .rejects.toThrow("Invalid GitHub handle 'bad handle'");
+  });
+});
