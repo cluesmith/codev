@@ -1,5 +1,5 @@
 ---
-name: Waleed Kadous
+name: M Waleed Kadous
 github: mwk
 role: Lead Architect
 ---
