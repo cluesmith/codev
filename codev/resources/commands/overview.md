@@ -1,6 +1,6 @@
 # Codev CLI Command Reference
 
-Codev provides four CLI tools for AI-assisted software development:
+Codev provides five CLI tools for AI-assisted software development:
 
 | Tool | Description |
 |------|-------------|
@@ -8,6 +8,7 @@ Codev provides four CLI tools for AI-assisted software development:
 | `af` | Agent Farm - multi-agent orchestration for development |
 | `porch` | Protocol orchestrator - drives SPIR/ASPIR/TICK/BUGFIX state machines |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
+| `team` | Team coordination - manage members and messages |
 
 ## Quick Start
 
@@ -34,7 +35,7 @@ consult -m gemini --protocol spir --type spec
 npm install -g @cluesmith/codev
 ```
 
-This installs all four commands globally: `codev`, `af`, `porch`, and `consult`.
+This installs all five commands globally: `codev`, `af`, `porch`, `consult`, and `team`.
 
 ## Command Summaries
 
@@ -86,6 +87,19 @@ Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's u
 | `consult stats` | View consultation statistics |
 
 See [consult.md](consult.md) for full documentation.
+
+### team - Team Coordination
+
+| Command | Description |
+|---------|-------------|
+| `team list` | List team members |
+| `team message <text>` | Post a message to the team log |
+| `team update` | Post hourly activity summary |
+| `team add <handle>` | Scaffold a new team member file |
+
+See [team.md](team.md) for full documentation.
+
+> **Note**: `af team` commands still work but are deprecated. Use `team` directly.
 
 ## Global Options
 

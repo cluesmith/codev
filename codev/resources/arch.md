@@ -650,7 +650,7 @@ packages/codev/dashboard/
 - `useTeam(isActive)` hook manages fetch lifecycle
 - Graceful degradation: shows member cards without GitHub data when API unavailable
 - Backend: `team.ts` (parsing), `team-github.ts` (GraphQL), `MessageChannel` interface for extensibility
-- CLI: `af team list`, `af team message`, `af team update` (hourly cron via `.af-cron/team-update.yaml`)
+- CLI: `team list`, `team message`, `team update`, `team add` (standalone `team` CLI; `af team` is deprecated). Hourly cron via `.af-cron/team-update.yaml`
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
