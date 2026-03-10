@@ -245,14 +245,10 @@ describe('af team deprecation', () => {
     vi.spyOn(console, 'warn').mockImplementation((...args) => warns.push(args.join(' ')));
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    // Import and call runAgentFarm which executes the actual Commander action
-    const { runAgentFarm } = await import('../agent-farm/cli.js');
-    await runAgentFarm(['team', 'list', '--help']).catch(() => {});
-
-    // --help exits without running the action, so we test by verifying the
-    // command is registered. For the actual warning, we invoke the list action:
     // Mock process.cwd to point to our temp dir so teamList finds codev/
     vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+
+    const { runAgentFarm } = await import('../agent-farm/cli.js');
     await runAgentFarm(['team', 'list']);
 
     expect(warns.some(w => w.includes('deprecated'))).toBe(true);

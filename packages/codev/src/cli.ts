@@ -18,12 +18,11 @@ import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
 import { runAgentFarm } from './agent-farm/cli.js';
 import { version } from './version.js';
-import { findWorkspaceRoot } from './lib/skeleton.js';
+import { findWorkspaceRoot } from './agent-farm/utils/index.js';
 
 /**
  * Validate that we're inside a Codev workspace.
- * findWorkspaceRoot() falls back to cwd without throwing,
- * so we check for the codev/ directory explicitly.
+ * Uses the worktree-aware findWorkspaceRoot from agent-farm (issue #407).
  */
 function requireWorkspace(): string {
   const root = findWorkspaceRoot();
