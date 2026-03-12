@@ -26,6 +26,7 @@ export interface TowerStartOptions {
 
 export interface TowerStopOptions {
   port?: number;
+  forceKillAllChildProcesses?: boolean;
 }
 
 /**
@@ -214,13 +215,64 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
  */
 export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   const port = options.port || DEFAULT_TOWER_PORT;
+  const forceKill = options.forceKillAllChildProcesses || false;
 
-  logger.header('Stopping Tower');
+  logger.header(forceKill ? 'Force-Killing Tower and All Child Processes' : 'Stopping Tower');
 
   const pids = getProcessesOnPort(port);
 
   if (pids.length === 0) {
     logger.info('Tower is not running');
+    return;
+  }
+
+  if (forceKill) {
+    // Shellper processes are spawned DETACHED from Tower — they intentionally
+    // survive Tower restarts. So pgrep -P won't find them. We need to:
+    // 1. Find all shellper-main processes via pgrep -f
+    // 2. Find all their children (claude, bash, etc.)
+    // 3. Kill the Tower daemon itself
+    const { execSync } = await import('node:child_process');
+    const allPids = new Set<number>();
+
+    // Recursive function to collect entire subtree via pgrep -P
+    function collectDescendants(pid: number): void {
+      if (allPids.has(pid)) return;
+      allPids.add(pid);
+      try {
+        const output = execSync(`pgrep -P ${pid}`, { encoding: 'utf-8' }).trim();
+        for (const line of output.split('\n')) {
+          const childPid = parseInt(line, 10);
+          if (!isNaN(childPid)) collectDescendants(childPid);
+        }
+      } catch { /* no children */ }
+    }
+
+    // Collect Tower daemon PIDs
+    for (const pid of pids) {
+      collectDescendants(pid);
+    }
+
+    // Collect ALL shellper processes and their descendants (claude, bash, etc.)
+    try {
+      const shellperOutput = execSync('pgrep -f shellper-main', { encoding: 'utf-8' }).trim();
+      for (const line of shellperOutput.split('\n')) {
+        const pid = parseInt(line, 10);
+        if (!isNaN(pid)) collectDescendants(pid);
+      }
+    } catch { /* no shellper processes */ }
+
+    // Kill leaves first (reverse order: deepest descendants → root)
+    const orderedPids = [...allPids].reverse();
+    let killed = 0;
+    for (const pid of orderedPids) {
+      try {
+        process.kill(pid, 'SIGKILL');
+        killed++;
+      } catch { /* already dead */ }
+    }
+
+    logger.success(`Force-killed ${killed} process(es) (tower + ${orderedPids.length - pids.length} shellper/children)`);
     return;
   }
 

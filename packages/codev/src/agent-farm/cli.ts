@@ -617,10 +617,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('stop')
     .description('Stop the tower dashboard')
     .option('-p, --port <port>', 'Port to stop (default: 4100)')
+    .option('--force-kill-all-child-processes', 'SIGKILL tower and every child process (builders, shells, everything)')
     .action(async (options) => {
       try {
         await towerStop({
           port: options.port ? parseInt(options.port, 10) : undefined,
+          forceKillAllChildProcesses: options.forceKillAllChildProcesses,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

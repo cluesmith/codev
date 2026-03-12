@@ -91,12 +91,13 @@ describe('isValidGitHubHandle', () => {
     expect(isValidGitHubHandle('alice-bob')).toBe(true);
     expect(isValidGitHubHandle('Alice123')).toBe(true);
     expect(isValidGitHubHandle('a')).toBe(true);
+    expect(isValidGitHubHandle('alice-')).toBe(true);
+    expect(isValidGitHubHandle('timeleft--')).toBe(true);
   });
 
   it('rejects invalid handles', () => {
     expect(isValidGitHubHandle('')).toBe(false);
     expect(isValidGitHubHandle('-alice')).toBe(false);
-    expect(isValidGitHubHandle('alice-')).toBe(false);
     expect(isValidGitHubHandle('al ice')).toBe(false);
     expect(isValidGitHubHandle('al@ice')).toBe(false);
     expect(isValidGitHubHandle('a'.repeat(40))).toBe(false);

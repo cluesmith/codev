@@ -70,7 +70,10 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
 // Team Members
 // =============================================================================
 
-const GITHUB_HANDLE_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+// GitHub's documented rules say no trailing hyphens or consecutive hyphens,
+// but real accounts like "timeleft--" exist. Match what GitHub actually allows:
+// starts with alphanumeric, then any mix of alphanumeric and hyphens.
+const GITHUB_HANDLE_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 
 export function isValidGitHubHandle(handle: string): boolean {
   return GITHUB_HANDLE_RE.test(handle) && handle.length <= 39;

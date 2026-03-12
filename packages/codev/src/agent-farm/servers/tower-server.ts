@@ -291,7 +291,7 @@ const routeCtx: RouteContext = {
     // Hard cap: evict oldest connections when over limit to prevent
     // unbounded accumulation (tunnel-proxied EventSource reconnects
     // can leak because TCP close doesn't propagate reliably).
-    const SSE_MAX_CLIENTS = 12;
+    const SSE_MAX_CLIENTS = 50;
     while (sseClients.length >= SSE_MAX_CLIENTS) {
       const oldest = sseClients.shift();
       if (oldest) {
