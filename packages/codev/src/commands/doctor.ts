@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
+import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig } from '../lib/forge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -195,13 +196,23 @@ function checkDependency(dep: Dependency): CheckResult {
     };
   }
 
-  // Special case for gh auth status
+  // Special case for gh auth status — only check if using default forge config
+  // (projects with custom forge config don't need gh authentication)
   if (dep.name === 'gh') {
+    const forgeConfig = loadForgeConfig(process.cwd());
+    if (forgeConfig && Object.keys(forgeConfig).length > 0) {
+      // Custom forge config present — gh auth may not be relevant
+      return { status: 'ok', version: 'custom forge config detected', note: 'gh auth check skipped (using custom forge concepts)' };
+    }
     try {
-      const authOutput = execSync('gh auth status', { stdio: 'pipe', encoding: 'utf-8' });
-      const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);
-      const username = accountMatch ? accountMatch[1] : null;
-      return { status: 'ok', version: username ? `authenticated as ${username}` : 'authenticated' };
+      const result = executeForgeCommandSync('gh-auth-status', {}, { raw: true });
+      if (result) {
+        const authOutput = typeof result === 'string' ? result : '';
+        const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);
+        const username = accountMatch ? accountMatch[1] : null;
+        return { status: 'ok', version: username ? `authenticated as ${username}` : 'authenticated' };
+      }
+      return { status: 'warn', version: 'not authenticated', note: 'run: gh auth login' };
     } catch {
       return { status: 'warn', version: 'not authenticated', note: 'run: gh auth login' };
     }
@@ -620,6 +631,31 @@ export async function doctor(): Promise<number> {
       }
     }
     console.log('');
+
+    // Forge concept validation
+    const forgeConfig = loadForgeConfig(workspaceRoot);
+    if (forgeConfig && Object.keys(forgeConfig).length > 0) {
+      console.log(chalk.bold('Forge Concepts') + ' (custom command overrides)');
+      console.log('');
+      const validationResults = validateForgeConfig(forgeConfig);
+      let forgeOk = true;
+      for (const r of validationResults) {
+        if (r.status === 'ok' || r.status === 'provider') {
+          console.log(`  ${chalk.green('✓')} ${r.message}`);
+        } else if (r.status === 'disabled') {
+          console.log(`  ${chalk.dim('○')} ${r.message}`);
+        } else {
+          forgeOk = false;
+          console.log(`  ${chalk.yellow('⚠')} ${r.message}`);
+          warnings++;
+          warningDetails.push({ name: 'Forge concepts', issue: r.message });
+        }
+      }
+      if (forgeOk && validationResults.length > 0) {
+        console.log(`  ${chalk.green('✓')} All forge concepts valid`);
+      }
+      console.log('');
+    }
   }
 
   // Summary

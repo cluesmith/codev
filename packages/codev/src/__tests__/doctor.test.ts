@@ -11,6 +11,17 @@ import { tmpdir } from 'node:os';
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
 
+// Mock forge module (imported by doctor.ts)
+const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => {
+  if (concept === 'gh-auth-status') return 'Logged in';
+  return null;
+}));
+const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
+vi.mock('../lib/forge.js', () => ({
+  executeForgeCommandSync: executeForgeCommandSyncMock,
+  loadForgeConfig: loadForgeConfigMock,
+}));
+
 // Mock child_process
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
@@ -217,12 +228,15 @@ describe('doctor command', () => {
 
   describe('gh auth check (Spec 0126)', () => {
     it('should warn when gh is not authenticated', async () => {
+      // Make forge gh-auth-status concept fail
+      executeForgeCommandSyncMock.mockImplementation((concept: string) => {
+        if (concept === 'gh-auth-status') throw new Error('not authenticated');
+        return null;
+      });
+
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which')) {
           return Buffer.from('/usr/bin/command');
-        }
-        if (cmd.includes('gh auth status')) {
-          throw new Error('not authenticated');
         }
         return Buffer.from('');
       });

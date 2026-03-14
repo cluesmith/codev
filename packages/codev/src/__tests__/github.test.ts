@@ -1,14 +1,20 @@
 /**
  * Unit tests for lib/github.ts — shared GitHub utilities.
  *
- * Tests: parseLinkedIssue, parseLabelDefaults.
+ * Tests: parseLinkedIssue, parseLabelDefaults, forge concept routing.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../lib/github.js';
+
+// Mock forge.js for concept command routing tests
+const executeForgeCommandMock = vi.fn();
+vi.mock('../lib/forge.js', () => ({
+  executeForgeCommand: (...args: unknown[]) => executeForgeCommandMock(...args),
+}));
 
 describe('parseLinkedIssue', () => {
   it('parses "Fixes #N" from PR body', () => {
@@ -251,5 +257,132 @@ describe('parseLabelDefaults', () => {
     expect(parseLabelDefaults([], 'Add issue tracking').type).toBe('project');
     expect(parseLabelDefaults([], 'Create issue template').type).toBe('project');
     expect(parseLabelDefaults([], 'Improve issue search').type).toBe('project');
+  });
+});
+
+// =============================================================================
+// Forge concept command routing tests
+// =============================================================================
+
+describe('forge concept routing', () => {
+  beforeEach(() => {
+    executeForgeCommandMock.mockReset();
+  });
+
+  describe('fetchGitHubIssue', () => {
+    it('routes through issue-view concept with CODEV_ISSUE_ID', async () => {
+      const { fetchGitHubIssue } = await import('../lib/github.js');
+      const mockIssue = { title: 'Test', body: 'Body', state: 'open', comments: [] };
+      executeForgeCommandMock.mockResolvedValue(mockIssue);
+
+      const result = await fetchGitHubIssue(42, { cwd: '/tmp' });
+
+      expect(result).toEqual(mockIssue);
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'issue-view',
+        { CODEV_ISSUE_ID: '42' },
+        expect.objectContaining({ cwd: '/tmp' }),
+      );
+    });
+
+    it('accepts string issue ID for non-GitHub forges', async () => {
+      const { fetchGitHubIssue } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue(null);
+
+      await fetchGitHubIssue('PROJ-123');
+
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'issue-view',
+        { CODEV_ISSUE_ID: 'PROJ-123' },
+        expect.any(Object),
+      );
+    });
+
+    it('returns null when concept command fails', async () => {
+      const { fetchGitHubIssue } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue(null);
+
+      const result = await fetchGitHubIssue(99);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('fetchGitHubIssueOrThrow', () => {
+    it('throws when concept command returns null', async () => {
+      const { fetchGitHubIssueOrThrow } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue(null);
+
+      await expect(fetchGitHubIssueOrThrow(99)).rejects.toThrow(/issue-view/);
+    });
+  });
+
+  describe('fetchPRList', () => {
+    it('routes through pr-list concept', async () => {
+      const { fetchPRList } = await import('../lib/github.js');
+      const mockPRs = [{ number: 1, title: 'PR 1', url: '', reviewDecision: '', body: '', createdAt: '' }];
+      executeForgeCommandMock.mockResolvedValue(mockPRs);
+
+      const result = await fetchPRList('/repo');
+
+      expect(result).toEqual(mockPRs);
+      expect(executeForgeCommandMock).toHaveBeenCalledWith('pr-list', {}, expect.objectContaining({ cwd: '/repo' }));
+    });
+  });
+
+  describe('fetchIssueList', () => {
+    it('routes through issue-list concept', async () => {
+      const { fetchIssueList } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue([]);
+
+      await fetchIssueList('/repo');
+
+      expect(executeForgeCommandMock).toHaveBeenCalledWith('issue-list', {}, expect.objectContaining({ cwd: '/repo' }));
+    });
+  });
+
+  describe('fetchRecentlyClosed', () => {
+    it('routes through recently-closed with CODEV_SINCE_DATE', async () => {
+      const { fetchRecentlyClosed } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue([]);
+
+      await fetchRecentlyClosed('/repo');
+
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'recently-closed',
+        expect.objectContaining({ CODEV_SINCE_DATE: expect.any(String) }),
+        expect.any(Object),
+      );
+    });
+  });
+
+  describe('fetchRecentMergedPRs', () => {
+    it('routes through recently-merged with CODEV_SINCE_DATE', async () => {
+      const { fetchRecentMergedPRs } = await import('../lib/github.js');
+      executeForgeCommandMock.mockResolvedValue([]);
+
+      await fetchRecentMergedPRs('/repo');
+
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'recently-merged',
+        expect.objectContaining({ CODEV_SINCE_DATE: expect.any(String) }),
+        expect.any(Object),
+      );
+    });
+  });
+
+  describe('forgeConfig threading', () => {
+    it('passes forgeConfig to concept commands', async () => {
+      const { fetchPRList } = await import('../lib/github.js');
+      const config = { 'pr-list': 'custom-command' };
+      executeForgeCommandMock.mockResolvedValue([]);
+
+      await fetchPRList('/repo', config);
+
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'pr-list',
+        {},
+        expect.objectContaining({ forgeConfig: config }),
+      );
+    });
   });
 });

@@ -14,6 +14,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
 import { fetchGitHubIssueOrThrow, type GitHubIssue } from '../../lib/github.js';
+import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
 // =============================================================================
@@ -124,14 +125,22 @@ export function findExistingBugfixWorktree(buildersDir: string, issueNumber: num
 }
 
 /**
- * Fetch a GitHub issue via gh CLI (fatal on failure).
+ * Fetch a GitHub issue via the `issue-view` concept command (fatal on failure).
  * Delegates to shared github utility but wraps with fatal() for spawn context.
  */
-export async function fetchGitHubIssue(issueNumber: number): Promise<GitHubIssue> {
+export async function fetchGitHubIssue(
+  issueNumber: number,
+  options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
+): Promise<GitHubIssue> {
   try {
-    return await fetchGitHubIssueOrThrow(issueNumber);
+    return await fetchGitHubIssueOrThrow(issueNumber, options);
   } catch (error) {
-    fatal(`Failed to fetch issue #${issueNumber}. Ensure 'gh' CLI is installed and authenticated.`);
+    fatal(
+      `Failed to fetch issue #${issueNumber}. ` +
+      `Ensure the 'issue-view' forge concept command is configured ` +
+      `(default: 'gh' CLI must be installed and authenticated). ` +
+      `Configure forge commands in af-config.json if using a non-GitHub forge.`,
+    );
     throw error; // TypeScript doesn't know fatal() never returns
   }
 }
@@ -141,13 +150,15 @@ export async function fetchGitHubIssue(issueNumber: number): Promise<GitHubIssue
 // =============================================================================
 
 /**
- * Check for collision conditions before spawning bugfix
+ * Check for collision conditions before spawning bugfix.
+ * Uses forge concept commands for PR search (graceful degradation if unavailable).
  */
 export async function checkBugfixCollisions(
   issueNumber: number,
   worktreePath: string,
   issue: GitHubIssue,
   force: boolean,
+  forgeConfig?: ForgeConfig | null,
 ): Promise<void> {
   // 1. Check if worktree already exists
   if (existsSync(worktreePath)) {
@@ -155,37 +166,44 @@ export async function checkBugfixCollisions(
   }
 
   // 2. Check for recent "On it" comments (< 24h old)
-  const onItComments = issue.comments.filter((c) =>
-    c.body.toLowerCase().includes('on it'),
-  );
-  if (onItComments.length > 0) {
-    const lastComment = onItComments[onItComments.length - 1];
-    const age = Date.now() - new Date(lastComment.createdAt).getTime();
-    const hoursAgo = Math.round(age / (1000 * 60 * 60));
+  // Depends on issue-view returning comments array; if missing, skip gracefully
+  if (issue.comments) {
+    const onItComments = issue.comments.filter((c) =>
+      c.body.toLowerCase().includes('on it'),
+    );
+    if (onItComments.length > 0) {
+      const lastComment = onItComments[onItComments.length - 1];
+      const age = Date.now() - new Date(lastComment.createdAt).getTime();
+      const hoursAgo = Math.round(age / (1000 * 60 * 60));
 
-    if (hoursAgo < 24) {
-      if (!force) {
-        fatal(`Issue #${issueNumber} has "On it" comment from ${hoursAgo}h ago (by @${lastComment.author.login}).\nSomeone may already be working on this. Use --force to override.`);
+      if (hoursAgo < 24) {
+        if (!force) {
+          fatal(`Issue #${issueNumber} has "On it" comment from ${hoursAgo}h ago (by @${lastComment.author.login}).\nSomeone may already be working on this. Use --force to override.`);
+        }
+        logger.warn(`Warning: "On it" comment from ${hoursAgo}h ago - proceeding with --force`);
+      } else {
+        logger.warn(`Warning: Stale "On it" comment (${hoursAgo}h ago). Proceeding.`);
       }
-      logger.warn(`Warning: "On it" comment from ${hoursAgo}h ago - proceeding with --force`);
-    } else {
-      logger.warn(`Warning: Stale "On it" comment (${hoursAgo}h ago). Proceeding.`);
     }
   }
 
-  // 3. Check for open PRs referencing this issue
+  // 3. Check for open PRs referencing this issue via pr-search concept
   try {
-    const prResult = await run(`gh pr list --search "in:body #${issueNumber}" --json number,title --limit 5`);
-    const openPRs = JSON.parse(prResult.stdout);
-    if (openPRs.length > 0) {
+    const result = await executeForgeCommand('pr-search', {
+      CODEV_SEARCH_QUERY: `in:body #${issueNumber}`,
+    }, { forgeConfig });
+    if (result && Array.isArray(result) && result.length > 0) {
+      const openPRs = result as Array<{ number: number; title?: string; headRefName?: string }>;
       if (!force) {
-        const prList = openPRs.map((pr: { number: number; title: string }) => `  - PR #${pr.number}: ${pr.title}`).join('\n');
+        const prList = openPRs.slice(0, 5).map((pr) =>
+          `  - PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
+        ).join('\n');
         fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
       }
       logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
     }
   } catch {
-    // Non-fatal: continue if PR check fails
+    // Non-fatal: continue if PR search concept unavailable
   }
 
   // 4. Warn if issue is already closed
@@ -199,8 +217,9 @@ export async function checkBugfixCollisions(
 // =============================================================================
 
 /**
- * Execute pre-spawn hooks defined in protocol.json
- * Hooks are data-driven but reuse existing implementation logic
+ * Execute pre-spawn hooks defined in protocol.json.
+ * Hooks are data-driven but reuse existing implementation logic.
+ * Uses forge concept commands for collision detection and issue commenting.
  */
 export async function executePreSpawnHooks(
   protocol: ProtocolDefinition | null,
@@ -210,6 +229,7 @@ export async function executePreSpawnHooks(
     worktreePath?: string;
     force?: boolean;
     noComment?: boolean;
+    forgeConfig?: ForgeConfig | null;
   }
 ): Promise<void> {
   if (!protocol?.hooks?.['pre-spawn']) return;
@@ -218,15 +238,21 @@ export async function executePreSpawnHooks(
 
   // collision-check: reuses existing checkBugfixCollisions() logic
   if (hooks['collision-check'] && context.issueNumber && context.issue && context.worktreePath) {
-    await checkBugfixCollisions(context.issueNumber, context.worktreePath, context.issue, !!context.force);
+    await checkBugfixCollisions(
+      context.issueNumber, context.worktreePath, context.issue,
+      !!context.force, context.forgeConfig,
+    );
   }
 
-  // comment-on-issue: posts comment to GitHub issue
+  // comment-on-issue: posts comment via issue-comment concept command
   if (hooks['comment-on-issue'] && context.issueNumber && !context.noComment) {
     const message = hooks['comment-on-issue'];
     logger.info('Commenting on issue...');
     try {
-      await run(`gh issue comment ${context.issueNumber} --body "${message}"`);
+      await executeForgeCommand('issue-comment', {
+        CODEV_ISSUE_ID: String(context.issueNumber),
+        CODEV_COMMENT_BODY: message,
+      }, { forgeConfig: context.forgeConfig, raw: true });
     } catch {
       logger.warn('Warning: Failed to comment on issue (continuing anyway)');
     }

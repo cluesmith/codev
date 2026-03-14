@@ -140,6 +140,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0064] Hide/show iframes instead of destroy/recreate when preserving state is important. Maintain an invalidation mechanism (e.g., port change detection) to handle stale cached elements.
 - [From 0106] Old migration code (e.g., v6, v7 referencing `shepherd_*`) must remain historically correct even after a rename. Only current schema and new migrations use the new names.
 - [From 0376] Archive `status.yaml` files before `af cleanup` -- most projects' porch state files are deleted after PR merge, losing valuable timing data for future development analyses.
+- [From 0589] Concept command abstraction (shell command per operation, env vars for params, JSON on stdout) is an effective pattern for decoupling from a specific CLI tool. Default commands wrap the existing tool, overrides in config enable alternatives. Key: provide both sync and async variants, support `raw` mode for non-JSON output, and always thread the config through all call sites.
+- [From 0589] When migrating multiple call sites to a new abstraction, configuration threading (passing `forgeConfig`/`workspaceRoot` to every call) is easy to miss at non-obvious sites like porch checks and merge instructions. Phase-scoped consultation reviews are effective at catching these gaps.
 
 ## Process
 

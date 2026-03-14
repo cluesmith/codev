@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { findWorkspaceRoot } from '../utils/index.js';
 import { teamMessage } from './team.js';
+import { executeForgeCommandSync } from '../../lib/forge.js';
 
 // =============================================================================
 // Event Collection
@@ -71,16 +72,15 @@ export async function collectEvents(workspacePath: string): Promise<TeamEvent[]>
     // Skip silently
   }
 
-  // 3. PR merges via gh CLI
+  // 3. PR merges via forge concept
   // Note: GitHub search only supports date-level granularity for merged:>=,
   // so we fetch by date and filter by mergedAt timestamp in code.
   try {
     const sinceDate = oneHourAgo.toISOString().split('T')[0];
-    const output = execSync(
-      `gh pr list --search "is:merged merged:>=${sinceDate}" --json number,title,mergedAt --limit 20`,
-      { cwd: workspacePath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-    ).trim();
-    const prs = JSON.parse(output || '[]') as Array<{ number: number; title: string; mergedAt: string }>;
+    const result = executeForgeCommandSync('recently-merged', {
+      CODEV_SINCE_DATE: sinceDate,
+    }, { cwd: workspacePath });
+    const prs = (Array.isArray(result) ? result : []) as Array<{ number: number; title: string; mergedAt: string }>;
     for (const pr of prs) {
       // Filter to actual last-hour window
       if (new Date(pr.mergedAt) >= oneHourAgo) {
@@ -88,7 +88,7 @@ export async function collectEvents(workspacePath: string): Promise<TeamEvent[]>
       }
     }
   } catch {
-    // gh CLI may not be available — skip silently
+    // Forge concept may not be available — skip silently
   }
 
   // 4. Completed reviews: recently modified files in codev/reviews/

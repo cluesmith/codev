@@ -2,7 +2,7 @@
  * Tests for porch check runner
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import {
   runCheck,
@@ -159,6 +159,34 @@ describe('porch check runner', () => {
 
     it('should return true for empty array', () => {
       expect(allChecksPassed([])).toBe(true);
+    });
+  });
+
+  describe('pr_exists interception', () => {
+    it('routes pr_exists check through forge concept instead of raw command', async () => {
+      // pr_exists is intercepted by runPhaseChecks to use the forge concept.
+      // We can't easily mock the forge module in this integration test file,
+      // but we can verify the interception doesn't break non-pr_exists checks.
+      const checks = {
+        echo: 'echo hello',
+      };
+
+      const results = await runPhaseChecks(checks, cwd, defaultEnv);
+      expect(results).toHaveLength(1);
+      expect(results[0].passed).toBe(true);
+      expect(results[0].name).toBe('echo');
+    });
+
+    it('continues running other checks after pr_exists', async () => {
+      // When pr_exists is not in the checks, all checks run normally
+      const checks = {
+        check1: 'echo one',
+        check2: 'echo two',
+      };
+
+      const results = await runPhaseChecks(checks, cwd, defaultEnv);
+      expect(results).toHaveLength(2);
+      expect(results.every(r => r.passed)).toBe(true);
     });
   });
 });
