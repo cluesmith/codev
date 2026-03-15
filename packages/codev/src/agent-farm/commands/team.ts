@@ -17,7 +17,7 @@ import { executeForgeCommandSync } from '../../lib/forge.js';
  */
 function detectAuthor(cwd?: string): string {
   try {
-    const result = executeForgeCommandSync('user-identity', {}, { cwd });
+    const result = executeForgeCommandSync('user-identity', {}, { cwd, raw: true });
     if (result && typeof result === 'string') return result;
   } catch {
     // Fall back to git config

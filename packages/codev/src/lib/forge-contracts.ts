@@ -1,9 +1,13 @@
 /**
  * TypeScript interfaces for forge concept command JSON output contracts.
  *
- * Each concept command must produce JSON on stdout conforming to these
- * interfaces. Default `gh`-based commands produce this output naturally.
- * Custom commands for other forges must match these shapes.
+ * Default `gh`-based commands produce output conforming to these interfaces.
+ * Custom commands for other forges should match these shapes where possible.
+ *
+ * **Provider presets (gitlab, gitea) are best-effort.** Their CLI tools may
+ * output different schemas than GitHub's. Consumers that parse concept output
+ * must handle `null` returns gracefully — a non-conforming response from a
+ * preset command is treated the same as a command failure.
  *
  * @see codev/specs/589-non-github-repository-support.md
  */

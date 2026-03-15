@@ -18,6 +18,8 @@ Add to `af-config.json`:
 
 Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI).
 
+> **Note:** Non-GitHub presets are best-effort. Their CLI tools may produce output schemas that differ from GitHub's JSON contracts. Codev handles this gracefully — concepts that return non-conforming JSON are treated as unavailable (null). If a preset command doesn't work correctly for your setup, override the individual concept with a command that produces the expected output.
+
 ### Overriding Individual Concepts
 
 ```json

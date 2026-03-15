@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
-import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig } from '../lib/forge.js';
+import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -143,17 +143,6 @@ const CORE_DEPENDENCIES: Dependency[] = [
       linux: 'apt install git',
     },
   },
-  {
-    name: 'gh',
-    command: 'gh',
-    versionArg: 'auth status',
-    versionExtract: () => 'authenticated', // Special case - check auth status
-    required: true,
-    installHint: {
-      macos: 'brew install gh',
-      linux: 'apt install gh',
-    },
-  },
 ];
 
 // AI CLI dependencies - at least one required
@@ -194,28 +183,6 @@ function checkDependency(dep: Dependency): CheckResult {
       version: 'not installed',
       note: hint,
     };
-  }
-
-  // Special case for gh auth status — only check if using default forge config
-  // (projects with custom forge config don't need gh authentication)
-  if (dep.name === 'gh') {
-    const forgeConfig = loadForgeConfig(process.cwd());
-    if (forgeConfig && Object.keys(forgeConfig).length > 0) {
-      // Custom forge config present — gh auth may not be relevant
-      return { status: 'ok', version: 'custom forge config detected', note: 'gh auth check skipped (using custom forge concepts)' };
-    }
-    try {
-      const result = executeForgeCommandSync('gh-auth-status', {}, { raw: true });
-      if (result) {
-        const authOutput = typeof result === 'string' ? result : '';
-        const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);
-        const username = accountMatch ? accountMatch[1] : null;
-        return { status: 'ok', version: username ? `authenticated as ${username}` : 'authenticated' };
-      }
-      return { status: 'warn', version: 'not authenticated', note: 'run: gh auth login' };
-    } catch {
-      return { status: 'warn', version: 'not authenticated', note: 'run: gh auth login' };
-    }
   }
 
   // Get version
@@ -632,30 +599,77 @@ export async function doctor(): Promise<number> {
     }
     console.log('');
 
-    // Forge concept validation
+    // Full forge concept reporting: all 15 concepts with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);
+    const provider = forgeConfig?.provider ?? 'github';
+    console.log(chalk.bold('Forge Concepts') + ` (provider: ${provider})`);
+    console.log('');
+
+    // Validate user overrides first
     if (forgeConfig && Object.keys(forgeConfig).length > 0) {
-      console.log(chalk.bold('Forge Concepts') + ' (custom command overrides)');
-      console.log('');
       const validationResults = validateForgeConfig(forgeConfig);
-      let forgeOk = true;
       for (const r of validationResults) {
-        if (r.status === 'ok' || r.status === 'provider') {
-          console.log(`  ${chalk.green('✓')} ${r.message}`);
-        } else if (r.status === 'disabled') {
-          console.log(`  ${chalk.dim('○')} ${r.message}`);
-        } else {
-          forgeOk = false;
+        if (r.status === 'unknown_concept' || r.status === 'empty_command') {
           console.log(`  ${chalk.yellow('⚠')} ${r.message}`);
           warnings++;
           warningDetails.push({ name: 'Forge concepts', issue: r.message });
         }
       }
-      if (forgeOk && validationResults.length > 0) {
-        console.log(`  ${chalk.green('✓')} All forge concepts valid`);
-      }
-      console.log('');
     }
+
+    // Report all 15 concepts with source and executable availability
+    const resolutions = resolveAllConcepts(forgeConfig);
+    const missingExecs = new Set<string>();
+
+    for (const r of resolutions) {
+      if (r.source === 'disabled') {
+        console.log(`  ${chalk.dim('○')} ${r.concept.padEnd(20)} ${chalk.dim('disabled')}`);
+        continue;
+      }
+
+      const sourceLabel = r.source === 'override' ? chalk.cyan('override') : r.source === 'preset' ? chalk.blue('preset') : chalk.dim('default');
+      const execName = r.executable ?? '—';
+      const execInstalled = r.executable ? commandExists(r.executable) : true;
+
+      if (execInstalled) {
+        console.log(`  ${chalk.green('✓')} ${r.concept.padEnd(20)} ${sourceLabel}  ${chalk.dim(execName)}`);
+      } else {
+        console.log(`  ${chalk.yellow('⚠')} ${r.concept.padEnd(20)} ${sourceLabel}  ${chalk.red(execName + ' not found')}`);
+        missingExecs.add(r.executable!);
+      }
+    }
+
+    if (missingExecs.size > 0) {
+      warnings++;
+      warningDetails.push({
+        name: 'Forge executables',
+        issue: `${missingExecs.size} executable(s) not found: ${[...missingExecs].join(', ')}`,
+        recommendation: `Install missing tools or adjust forge config`,
+      });
+    }
+
+    // gh auth check — only for GitHub provider
+    if (provider === 'github' && commandExists('gh')) {
+      try {
+        const result = executeForgeCommandSync('gh-auth-status', {}, { raw: true });
+        if (result) {
+          const authOutput = typeof result === 'string' ? result : '';
+          const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);
+          const username = accountMatch ? accountMatch[1] : null;
+          console.log(`  ${chalk.green('✓')} ${'gh auth'.padEnd(20)} ${username ? `authenticated as ${username}` : 'authenticated'}`);
+        } else {
+          console.log(`  ${chalk.yellow('⚠')} ${'gh auth'.padEnd(20)} not authenticated`);
+          warnings++;
+          warningDetails.push({ name: 'gh auth', issue: 'not authenticated', recommendation: 'run: gh auth login' });
+        }
+      } catch {
+        console.log(`  ${chalk.yellow('⚠')} ${'gh auth'.padEnd(20)} not authenticated`);
+        warnings++;
+        warningDetails.push({ name: 'gh auth', issue: 'not authenticated', recommendation: 'run: gh auth login' });
+      }
+    }
+
+    console.log('');
   }
 
   // Summary

@@ -19,6 +19,7 @@ import {
   getDefaultCommand,
   validateForgeConfig,
   loadForgeConfig,
+  resolveAllConcepts,
 } from '../lib/forge.js';
 
 // =============================================================================
@@ -167,9 +168,17 @@ describe('executeForgeCommand', () => {
     ]);
   });
 
-  it('returns raw string for non-JSON output', async () => {
+  it('returns null for non-JSON output when raw=false', async () => {
     const result = await executeForgeCommand('user-identity', {}, {
       forgeConfig: { 'user-identity': join(MOCK_SCRIPTS_DIR, 'text-output.sh') },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns raw string for non-JSON output when raw=true', async () => {
+    const result = await executeForgeCommand('user-identity', {}, {
+      forgeConfig: { 'user-identity': join(MOCK_SCRIPTS_DIR, 'text-output.sh') },
+      raw: true,
     });
     expect(result).toBe('nharward');
   });
@@ -213,13 +222,12 @@ describe('executeForgeCommand', () => {
     expect(result.branch).toBe('feature/foo');
   });
 
-  it('returns raw string for invalid JSON when not in raw mode', async () => {
+  it('returns null for invalid JSON when not in raw mode', async () => {
     const result = await executeForgeCommand('issue-view', {}, {
       forgeConfig: { 'issue-view': join(MOCK_SCRIPTS_DIR, 'invalid-json.sh') },
     });
-    // Invalid JSON falls back to raw string
-    expect(typeof result).toBe('string');
-    expect(result).toContain('not valid json');
+    // Invalid JSON returns null (not raw string) to prevent downstream cast errors
+    expect(result).toBeNull();
   });
 
   it('returns raw string when raw option is true', async () => {
@@ -493,5 +501,64 @@ describe('graceful degradation when command not found', () => {
       forgeConfig: { 'team-activity': null },
     });
     expect(result).toBeNull();
+  });
+});
+
+// =============================================================================
+// resolveAllConcepts (for codev doctor full reporting)
+// =============================================================================
+
+describe('resolveAllConcepts', () => {
+  it('returns all 15 concepts with default source when no config', () => {
+    const resolutions = resolveAllConcepts();
+    expect(resolutions).toHaveLength(15);
+    expect(resolutions.every(r => r.source === 'default')).toBe(true);
+    expect(resolutions.every(r => r.executable !== null)).toBe(true);
+  });
+
+  it('marks overridden concepts as override source', () => {
+    const config = { 'pr-list': 'my-custom-pr-list' };
+    const resolutions = resolveAllConcepts(config);
+    const prList = resolutions.find(r => r.concept === 'pr-list');
+    expect(prList?.source).toBe('override');
+    expect(prList?.executable).toBe('my-custom-pr-list');
+  });
+
+  it('marks disabled concepts correctly', () => {
+    const config = { 'team-activity': null };
+    const resolutions = resolveAllConcepts(config);
+    const teamActivity = resolutions.find(r => r.concept === 'team-activity');
+    expect(teamActivity?.source).toBe('disabled');
+    expect(teamActivity?.command).toBeNull();
+  });
+
+  it('marks preset concepts when provider is set', () => {
+    const config = { provider: 'gitlab' };
+    const resolutions = resolveAllConcepts(config);
+    const prMerge = resolutions.find(r => r.concept === 'pr-merge');
+    expect(prMerge?.source).toBe('preset');
+    expect(prMerge?.executable).toBe('glab');
+  });
+
+  it('marks preset-disabled concepts as disabled', () => {
+    const config = { provider: 'gitlab' };
+    const resolutions = resolveAllConcepts(config);
+    const teamActivity = resolutions.find(r => r.concept === 'team-activity');
+    expect(teamActivity?.source).toBe('disabled');
+  });
+
+  it('override takes precedence over preset', () => {
+    const config = { provider: 'gitlab', 'pr-merge': 'my-merge-cmd' };
+    const resolutions = resolveAllConcepts(config);
+    const prMerge = resolutions.find(r => r.concept === 'pr-merge');
+    expect(prMerge?.source).toBe('override');
+    expect(prMerge?.command).toBe('my-merge-cmd');
+  });
+
+  it('extracts executable from shell conditionals', () => {
+    const resolutions = resolveAllConcepts();
+    const recentlyClosed = resolutions.find(r => r.concept === 'recently-closed');
+    // Default command is: if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list ...
+    expect(recentlyClosed?.executable).toBe('gh');
   });
 });

@@ -19,6 +19,9 @@ import { resolve } from 'node:path';
 
 const execAsync = promisify(exec);
 
+/** Default maxBuffer for forge commands (10MB). Prevents truncation for large diffs. */
+const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -36,6 +39,8 @@ export interface ForgeCommandOptions {
   forgeConfig?: ForgeConfig | null;
   /** If true, return stdout as raw string instead of parsing as JSON. */
   raw?: boolean;
+  /** Maximum stdout buffer size in bytes. Defaults to 10MB. */
+  maxBuffer?: number;
 }
 
 // =============================================================================
@@ -49,8 +54,8 @@ const DEFAULT_COMMANDS: Record<string, string> = {
   'issue-list': 'gh issue list --limit 200 --json number,title,url,labels,createdAt',
   'issue-comment': 'gh issue comment "$CODEV_ISSUE_ID" --body "$CODEV_COMMENT_BODY"',
   'pr-exists': 'gh pr list --state all --head "$CODEV_BRANCH_NAME" --json number --jq "length > 0"',
-  'recently-closed': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list --state closed --search "closed:>$CODEV_SINCE_DATE" --json number,title,url,labels,createdAt,closedAt --limit 50; else gh issue list --state closed --json number,title,url,labels,createdAt,closedAt --limit 50; fi',
-  'recently-merged': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh pr list --state merged --search "merged:>$CODEV_SINCE_DATE" --json number,title,url,body,createdAt,mergedAt,headRefName --limit 50; else gh pr list --state merged --json number,title,url,body,createdAt,mergedAt,headRefName --limit 50; fi',
+  'recently-closed': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list --state closed --search "closed:>$CODEV_SINCE_DATE" --json number,title,url,labels,createdAt,closedAt --limit 1000; else gh issue list --state closed --json number,title,url,labels,createdAt,closedAt --limit 1000; fi',
+  'recently-merged': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh pr list --state merged --search "merged:>$CODEV_SINCE_DATE" --json number,title,url,body,createdAt,mergedAt,headRefName --limit 1000; else gh pr list --state merged --json number,title,url,body,createdAt,mergedAt,headRefName --limit 1000; fi',
   'user-identity': 'gh api user --jq .login',
   'team-activity': 'gh api graphql -f query="$CODEV_GRAPHQL_QUERY"',
   'on-it-timestamps': 'gh api graphql -f query="$CODEV_GRAPHQL_QUERY" -f owner="$CODEV_REPO_OWNER" -f name="$CODEV_REPO_NAME"',
@@ -66,7 +71,13 @@ const DEFAULT_COMMANDS: Record<string, string> = {
 // Provider presets
 // =============================================================================
 
-/** Built-in presets for common forges. Concepts without an equivalent are null (disabled). */
+/**
+ * Built-in presets for common forges. Concepts without an equivalent are null (disabled).
+ *
+ * NOTE: Non-GitHub presets are best-effort. Their output schemas may not conform
+ * to the contracts in forge-contracts.ts. Consumers must handle null returns
+ * gracefully since JSON parse failures now return null instead of raw strings.
+ */
 const PROVIDER_PRESETS: Record<string, Record<string, string | null>> = {
   github: DEFAULT_COMMANDS,
   gitlab: {
@@ -75,8 +86,8 @@ const PROVIDER_PRESETS: Record<string, Record<string, string | null>> = {
     'issue-list': 'glab issue list --per-page 200 --output json',
     'issue-comment': 'glab issue note "$CODEV_ISSUE_ID" --message "$CODEV_COMMENT_BODY"',
     'pr-exists': 'glab mr list --source-branch "$CODEV_BRANCH_NAME" --output json | jq "length > 0"',
-    'recently-closed': 'glab issue list --state closed --per-page 50 --output json',
-    'recently-merged': 'glab mr list --state merged --per-page 50 --output json',
+    'recently-closed': 'glab issue list --state closed --per-page 1000 --output json',
+    'recently-merged': 'glab mr list --state merged --per-page 1000 --output json',
     'user-identity': 'glab auth status --show-token 2>&1 | grep "Logged in" | sed "s/.*as //" | sed "s/ .*//"',
     'team-activity': null,
     'on-it-timestamps': null,
@@ -92,8 +103,8 @@ const PROVIDER_PRESETS: Record<string, Record<string, string | null>> = {
     'issue-list': 'tea issues list --limit 200 --output json',
     'issue-comment': 'tea issues comment "$CODEV_ISSUE_ID" "$CODEV_COMMENT_BODY"',
     'pr-exists': 'tea pulls list --fields index --output json | jq "[.[] | select(.head.ref == \\"$CODEV_BRANCH_NAME\\")] | length > 0"',
-    'recently-closed': 'tea issues list --state closed --limit 50 --output json',
-    'recently-merged': 'tea pulls list --state closed --limit 50 --output json',
+    'recently-closed': 'tea issues list --state closed --limit 1000 --output json',
+    'recently-merged': 'tea pulls list --state closed --limit 1000 --output json',
     'user-identity': 'tea whoami --output json | jq -r ".login"',
     'team-activity': null,
     'on-it-timestamps': null,
@@ -108,6 +119,67 @@ const PROVIDER_PRESETS: Record<string, Record<string, string | null>> = {
 /** Get known provider names. */
 export function getKnownProviders(): string[] {
   return Object.keys(PROVIDER_PRESETS);
+}
+
+/** Resolution source for a concept command. */
+export type ConceptSource = 'override' | 'preset' | 'default' | 'disabled';
+
+export interface ConceptResolution {
+  concept: string;
+  command: string | null;
+  source: ConceptSource;
+  executable: string | null;
+}
+
+/**
+ * Resolve all 15 concepts with their source and executable.
+ * Used by `codev doctor` for full concept reporting.
+ */
+export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
+  const concepts = Object.keys(DEFAULT_COMMANDS);
+  return concepts.map((concept) => {
+    // Check manual override first
+    if (forgeConfig && concept !== 'provider' && concept in forgeConfig) {
+      const cmd = forgeConfig[concept];
+      if (cmd === null) {
+        return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
+      }
+      return { concept, command: cmd, source: 'override' as ConceptSource, executable: extractExecutable(cmd) };
+    }
+
+    // Check provider preset
+    if (forgeConfig?.provider) {
+      const preset = PROVIDER_PRESETS[forgeConfig.provider];
+      if (preset && concept in preset) {
+        const cmd = preset[concept];
+        if (cmd === null) {
+          return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
+        }
+        return { concept, command: cmd, source: 'preset' as ConceptSource, executable: extractExecutable(cmd) };
+      }
+    }
+
+    // Default
+    const cmd = DEFAULT_COMMANDS[concept] ?? null;
+    return { concept, command: cmd, source: 'default' as ConceptSource, executable: cmd ? extractExecutable(cmd) : null };
+  });
+}
+
+/**
+ * Extract the executable name from a command string.
+ * Handles `if [ ... ]; then cmd ...` patterns by looking for the first real command.
+ */
+function extractExecutable(command: string): string | null {
+  const trimmed = command.trim();
+  // Shell conditional: extract first command after "then"
+  const thenMatch = trimmed.match(/then\s+(\S+)/);
+  if (thenMatch) return thenMatch[1];
+  // Pipe: first command
+  const first = trimmed.split(/[|;]/).map(s => s.trim())[0];
+  // Skip shell builtins
+  const token = first.split(/\s+/)[0];
+  if (['if', 'test', '[', '[['].includes(token)) return null;
+  return token || null;
 }
 
 // =============================================================================
@@ -211,6 +283,7 @@ export async function executeForgeCommand(
       cwd: options?.cwd,
       env: { ...process.env, ...env },
       timeout: 30_000,
+      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
     });
 
     return parseOutput(stdout, options?.raw);
@@ -244,6 +317,7 @@ export function executeForgeCommandSync(
       env: { ...process.env, ...env },
       encoding: 'utf-8',
       timeout: 30_000,
+      maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -258,7 +332,7 @@ export function executeForgeCommandSync(
 // Internal helpers
 // =============================================================================
 
-/** Parse command stdout: try JSON, fall back to raw string, null if empty. */
+/** Parse command stdout: try JSON when raw=false (null on parse failure), raw string otherwise. */
 function parseOutput(stdout: string, raw?: boolean): unknown | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
@@ -268,9 +342,9 @@ function parseOutput(stdout: string, raw?: boolean): unknown | null {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Not valid JSON — return as raw string.
-    // Handles concepts like user-identity that return plain text.
-    return trimmed;
+    // Not valid JSON — return null so downstream code doesn't cast a raw
+    // string to typed objects (e.g. GitHubIssue, GitHubPR[]).
+    return null;
   }
 }
 

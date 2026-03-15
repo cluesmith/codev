@@ -44,6 +44,8 @@ In `af-config.json`:
 
 Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`).
 
+**Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
+
 ### Disabling concepts
 
 Set a concept to `null` to disable it:
