@@ -114,19 +114,25 @@ The builder stops at gates requiring approval:
 **spec-approval** - After builder writes the spec
 ```bash
 # Review the spec in the builder's worktree
-cat worktrees/spir_0042_user-authentication/codev/specs/0042-user-authentication.md
+cat .builders/spir-0042-feature-name/codev/specs/0042-feature-name.md
 
-# Approve if satisfactory
-porch approve 0042 spec-approval
+# Approve if satisfactory (run from builder's worktree context)
+(cd .builders/spir-0042-feature-name && porch approve 0042 spec-approval --a-human-explicitly-approved-this)
+
+# IMPORTANT: Always message the builder after approving a gate
+af send 0042 "Spec approved. Continue to plan phase."
 ```
 
 **plan-approval** - After builder writes the plan
 ```bash
 # Review the plan
-cat worktrees/spir_0042_user-authentication/codev/plans/0042-user-authentication.md
+cat .builders/spir-0042-feature-name/codev/plans/0042-feature-name.md
 
-# Approve if satisfactory
-porch approve 0042 plan-approval
+# Approve if satisfactory (run from builder's worktree context)
+(cd .builders/spir-0042-feature-name && porch approve 0042 plan-approval --a-human-explicitly-approved-this)
+
+# IMPORTANT: Always message the builder after approving a gate
+af send 0042 "Plan approved. Continue to implement phase."
 ```
 
 ### 3. Monitoring Progress
