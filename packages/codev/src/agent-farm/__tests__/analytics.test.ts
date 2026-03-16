@@ -727,10 +727,10 @@ describe('fetchOnItTimestamps', () => {
       return Promise.resolve({ stdout: '[]' });
     });
 
-    const result = await fetchOnItTimestamps([42, 73], '/tmp');
+    const result = await fetchOnItTimestamps(['42', '73'], '/tmp');
 
-    expect(result.get(42)).toBe('2026-02-10T06:00:00Z');
-    expect(result.has(73)).toBe(false); // No "On it!" comment
+    expect(result.get('42')).toBe('2026-02-10T06:00:00Z');
+    expect(result.has('73')).toBe(false); // No "On it!" comment
     // Verify it used GraphQL, not individual gh issue view calls
     const calls = execFileMock.mock.calls.map((c: unknown[]) => (c[1] as string[]).join(' '));
     expect(calls.some((c: string) => c.includes('api') && c.includes('graphql'))).toBe(true);
@@ -761,7 +761,7 @@ describe('fetchOnItTimestamps', () => {
       return Promise.resolve({ stdout: '[]' });
     });
 
-    await fetchOnItTimestamps([42, 42, 42], '/tmp');
+    await fetchOnItTimestamps(['42', '42', '42'], '/tmp');
   });
 
   it('returns empty map when repo lookup fails', async () => {
