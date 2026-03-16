@@ -249,6 +249,28 @@ updated_at: "${state.updated_at}"
       expect(result).toContain('bugfix-237-fix-spawn');
     });
 
+    it('should find project by full directory name (bugfix #606)', () => {
+      const projectDir = path.join(projectsDir, '0221-rename-cli-tools-to-short-shan');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0221"\nprotocol: spir\nphase: specify\n');
+
+      const result = findStatusPath(testDir, '0221-rename-cli-tools-to-short-shan');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('0221-rename-cli-tools-to-short-shan');
+    });
+
+    it('should find bugfix project by full directory name (bugfix #606)', () => {
+      const projectDir = path.join(projectsDir, 'bugfix-606-bug-porch-status-rejects-full-');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "bugfix-606"\nprotocol: bugfix\nphase: investigate\n');
+
+      const result = findStatusPath(testDir, 'bugfix-606-bug-porch-status-rejects-full-');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('bugfix-606-bug-porch-status-rejects-full-');
+    });
+
     it('should return null if projects directory does not exist', () => {
       const emptyDir = path.join(testDir, 'empty');
       fs.mkdirSync(emptyDir);
