@@ -721,10 +721,10 @@ describe('fetchOnItTimestamps', () => {
       },
     });
 
-    const result = await fetchOnItTimestamps([42, 73], '/tmp');
+    const result = await fetchOnItTimestamps(['42', '73'], '/tmp');
 
-    expect(result.get(42)).toBe('2026-02-10T06:00:00Z');
-    expect(result.has(73)).toBe(false); // No "On it!" comment
+    expect(result.get('42')).toBe('2026-02-10T06:00:00Z');
+    expect(result.has('73')).toBe(false); // No "On it!" comment
     // Verify it used the on-it-timestamps concept
     expect(executeForgeCommandMock).toHaveBeenCalledWith(
       'on-it-timestamps',
@@ -754,7 +754,7 @@ describe('fetchOnItTimestamps', () => {
     });
     executeForgeCommandMock.mockResolvedValueOnce({ data: { repository: {} } });
 
-    await fetchOnItTimestamps([42, 42, 42], '/tmp');
+    await fetchOnItTimestamps(['42', '42', '42'], '/tmp');
 
     // Verify CODEV_ISSUE_NUMBERS has only one 42
     expect(executeForgeCommandMock).toHaveBeenCalledWith(
