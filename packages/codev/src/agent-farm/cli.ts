@@ -204,6 +204,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
     .option('--strict', 'Use strict mode (porch orchestrates)')
     .option('--resume', 'Resume builder in existing worktree (skip worktree creation)')
+    .option('--branch <name>', 'Use existing remote branch instead of creating a new one')
     .option('--no-role', 'Skip loading role prompt');
 
   // Catch removed flags with helpful migration messages
@@ -245,6 +246,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           soft: options.soft as boolean | undefined,
           strict: options.strict as boolean | undefined,
           resume: options.resume as boolean | undefined,
+          branch: options.branch as string | undefined,
           noRole: !(options.role as boolean),
         });
       } catch (error) {

@@ -68,6 +68,22 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     return '--strict and --soft are mutually exclusive';
   }
 
+  // --branch mutual exclusions (Spec 609)
+  if (options.branch) {
+    if (options.resume) {
+      return '--branch and --resume are mutually exclusive';
+    }
+    if (options.shell || options.worktree || options.task) {
+      return '--branch requires an issue number and protocol (cannot be used with --shell, --worktree, or --task)';
+    }
+    if (!options.issueNumber) {
+      return '--branch requires an issue number';
+    }
+    if (!options.protocol) {
+      return '--branch requires --protocol (protocol cannot be auto-detected for existing branches)';
+    }
+  }
+
   return null; // Valid
 }
 
@@ -514,6 +530,54 @@ describe('Spawn Command', () => {
     it('allows issue number + --resume + --protocol', () => {
       const options: SpawnOptions = { issueNumber: 315, resume: true, protocol: 'spir' };
       expect(validateSpawnOptions(options)).toBeNull();
+    });
+  });
+
+  describe('--branch mode (Spec 609)', () => {
+    it('accepts --branch with issue number + protocol', () => {
+      const options: SpawnOptions = { issueNumber: 603, protocol: 'bugfix', branch: 'builder/bugfix-603-slug' };
+      expect(validateSpawnOptions(options)).toBeNull();
+    });
+
+    it('accepts --branch with issue number + protocol spir', () => {
+      const options: SpawnOptions = { issueNumber: 315, protocol: 'spir', branch: 'builder/spir-315-feature' };
+      expect(validateSpawnOptions(options)).toBeNull();
+    });
+
+    it('rejects --branch + --resume (mutually exclusive)', () => {
+      const options: SpawnOptions = { issueNumber: 603, protocol: 'bugfix', branch: 'some-branch', resume: true };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch and --resume are mutually exclusive');
+    });
+
+    it('rejects --branch + --shell', () => {
+      const options: SpawnOptions = { shell: true, branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires an issue number and protocol');
+    });
+
+    it('rejects --branch + --worktree', () => {
+      const options: SpawnOptions = { worktree: true, branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires an issue number and protocol');
+    });
+
+    it('rejects --branch + --task', () => {
+      const options: SpawnOptions = { task: 'Fix bug', branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires an issue number and protocol');
+    });
+
+    it('rejects --branch without issue number (protocol-only mode)', () => {
+      const options: SpawnOptions = { protocol: 'maintain', branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires an issue number');
+    });
+
+    it('rejects --branch without --protocol (even with --soft)', () => {
+      const options: SpawnOptions = { issueNumber: 603, soft: true, branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires --protocol');
     });
   });
 

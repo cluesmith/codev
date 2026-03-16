@@ -58,6 +58,12 @@ describe('af command (CLI)', () => {
     expect(result.stdout).toContain('protocol');
   });
 
+  it('spawn --help shows --branch option (Spec 609)', () => {
+    const result = runAf(['spawn', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--branch');
+  });
+
   it('cleanup --help shows options', () => {
     const result = runAf(['cleanup', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
@@ -76,6 +82,26 @@ describe('af command (CLI)', () => {
     const projectDir = join(env.dir, 'test-project');
     const result = runAf(['spawn'], projectDir, env.env);
     expect(result.status).not.toBe(0);
+  });
+
+  // === --branch flag E2E tests (Spec 609) ===
+
+  it('spawn --branch rejects --resume (mutually exclusive)', () => {
+    runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
+    const projectDir = join(env.dir, 'test-project');
+    const result = runAf(['spawn', '603', '--protocol', 'bugfix', '--branch', 'some-branch', '--resume'], projectDir, env.env);
+    expect(result.status).not.toBe(0);
+    const output = result.stdout + result.stderr;
+    expect(output).toContain('mutually exclusive');
+  });
+
+  it('spawn --branch rejects without issue number', () => {
+    runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
+    const projectDir = join(env.dir, 'test-project');
+    const result = runAf(['spawn', '--protocol', 'maintain', '--branch', 'some-branch'], projectDir, env.env);
+    expect(result.status).not.toBe(0);
+    const output = result.stdout + result.stderr;
+    expect(output).toContain('--branch requires an issue number');
   });
 
   // === Status Command ===

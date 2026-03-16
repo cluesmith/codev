@@ -35,6 +35,26 @@ export async function checkDependencies(): Promise<void> {
 // =============================================================================
 
 /**
+ * Symlink config files from workspace root into a worktree (if they exist).
+ * Shared by createWorktree() and createWorktreeFromBranch().
+ */
+export function symlinkConfigFiles(config: Config, worktreePath: string): void {
+  const symlinks = ['.env', 'af-config.json'];
+  for (const file of symlinks) {
+    const rootPath = resolve(config.workspaceRoot, file);
+    const worktreeFilePath = resolve(worktreePath, file);
+    if (existsSync(rootPath) && !existsSync(worktreeFilePath)) {
+      try {
+        symlinkSync(rootPath, worktreeFilePath);
+        logger.info(`Linked ${file} from workspace root`);
+      } catch (error) {
+        logger.debug(`Failed to symlink ${file}: ${error}`);
+      }
+    }
+  }
+}
+
+/**
  * Create git branch and worktree
  */
 export async function createWorktree(config: Config, branchName: string, worktreePath: string): Promise<void> {
@@ -53,20 +73,101 @@ export async function createWorktree(config: Config, branchName: string, worktre
     fatal(`Failed to create worktree: ${error}`);
   }
 
-  // Symlink config files from workspace root into worktree (if they exist)
-  const symlinks = ['.env', 'af-config.json'];
-  for (const file of symlinks) {
-    const rootPath = resolve(config.workspaceRoot, file);
-    const worktreFilePath = resolve(worktreePath, file);
-    if (existsSync(rootPath) && !existsSync(worktreFilePath)) {
-      try {
-        symlinkSync(rootPath, worktreFilePath);
-        logger.info(`Linked ${file} from workspace root`);
-      } catch (error) {
-        logger.debug(`Failed to symlink ${file}: ${error}`);
+  symlinkConfigFiles(config, worktreePath);
+}
+
+/**
+ * Validate a branch name for safe use in shell commands.
+ * Only allows valid git branch name characters: alphanumeric, dots, hyphens, underscores, slashes.
+ * Rejects anything that could be used for shell injection.
+ */
+const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9._\/-]+$/;
+
+export function validateBranchName(name: string): void {
+  if (!name || name.length === 0) {
+    fatal('--branch requires a branch name');
+  }
+  if (!SAFE_BRANCH_REGEX.test(name)) {
+    fatal(`Invalid branch name: "${name}". Branch names may only contain alphanumeric characters, dots, hyphens, underscores, and slashes.`);
+  }
+}
+
+/**
+ * Create a worktree from an existing remote branch (Spec 609).
+ * Fetches the branch from origin, checks it's not already checked out,
+ * and creates a worktree on it.
+ */
+export async function createWorktreeFromBranch(
+  config: Config,
+  branch: string,
+  worktreePath: string,
+): Promise<void> {
+  validateBranchName(branch);
+
+  // Fetch latest from remote
+  logger.info('Fetching from remote...');
+  try {
+    await run('git fetch origin', { cwd: config.workspaceRoot });
+  } catch (error) {
+    fatal(`Failed to fetch from remote: ${error}`);
+  }
+
+  // Verify branch exists on remote
+  try {
+    const { stdout } = await run(`git ls-remote --heads origin "${branch}"`, { cwd: config.workspaceRoot });
+    if (!stdout.trim()) {
+      fatal(`Branch '${branch}' does not exist on the remote. Check the branch name and try again.`);
+    }
+  } catch (error) {
+    fatal(`Failed to check remote branch: ${error}`);
+  }
+
+  // Pre-check: is the branch already checked out in another worktree?
+  let alreadyCheckedOutAt: string | null = null;
+  try {
+    const { stdout } = await run('git worktree list --porcelain', { cwd: config.workspaceRoot });
+    const lines = stdout.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('branch refs/heads/') && line === `branch refs/heads/${branch}`) {
+        // Find the worktree path for this branch (it's the preceding 'worktree' line)
+        const idx = lines.indexOf(line);
+        let wtPath = '(unknown)';
+        for (let i = idx - 1; i >= 0; i--) {
+          if (lines[i].startsWith('worktree ')) {
+            wtPath = lines[i].replace('worktree ', '');
+            break;
+          }
+        }
+        alreadyCheckedOutAt = wtPath;
+        break;
       }
     }
+  } catch (error) {
+    // Non-fatal — git worktree list failing shouldn't block spawn
+    logger.debug(`Worktree list check: ${error}`);
   }
+  if (alreadyCheckedOutAt) {
+    fatal(
+      `Branch '${branch}' is already checked out at '${alreadyCheckedOutAt}'.\n` +
+      `Switch that checkout to a different branch first, or use 'af cleanup' to remove the worktree.`
+    );
+  }
+
+  // Create worktree with the existing branch.
+  // Try creating a local tracking branch first; if it already exists, use it directly.
+  logger.info(`Creating worktree on branch '${branch}'...`);
+  try {
+    await run(`git worktree add "${worktreePath}" -b "${branch}" "origin/${branch}"`, { cwd: config.workspaceRoot });
+  } catch {
+    // Local branch may already exist — try using it directly
+    try {
+      await run(`git worktree add "${worktreePath}" "${branch}"`, { cwd: config.workspaceRoot });
+    } catch (error) {
+      fatal(`Failed to create worktree on branch '${branch}': ${error}`);
+    }
+  }
+
+  symlinkConfigFiles(config, worktreePath);
 }
 
 /**
