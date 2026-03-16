@@ -30,6 +30,13 @@ Key feedback:
 - Suggested shared `isPreApprovedContent()` helper (implemented)
 - Noted upstream should document the CLI protocol (`get` and `get --list` contract)
 
+**3-way consensus review** (2026-03-16):
+**Models**: Gemini 3.1 Pro (for), GPT-5.3 Codex (against), DeepSeek v3.2 (neutral)
+**Verdict**: Unanimous approval with 3 fixes applied:
+1. `hasPreApproval()` now parses artifact type from glob (specs/plans/reviews) and calls the correct getter — previously always checked spec content
+2. Negative cache with sentinel value — CLI failures are now cached to avoid repeated 5s timeouts, using a Symbol sentinel to distinguish from empty string results
+3. Empty listing output is now cached — prevents repeated CLI calls for scopes without children
+
 ## Upstream
 
 Feature request created: https://github.com/cluesmith/codev/issues/612

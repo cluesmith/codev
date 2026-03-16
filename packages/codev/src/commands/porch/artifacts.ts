@@ -171,8 +171,12 @@ export class LocalResolver implements ArtifactResolver {
 // CLI Resolver (shells out to a configurable CLI command)
 // =============================================================================
 
+/** Sentinel value for cached negative results (CLI returned error) */
+const NEGATIVE_CACHE = Symbol('negative');
+type CacheEntry = string | typeof NEGATIVE_CACHE;
+
 export class CliResolver implements ArtifactResolver {
-  private cache = new Map<string, string>();
+  private cache = new Map<string, CacheEntry>();
   private extraEnv: Record<string, string>;
 
   constructor(
@@ -231,14 +235,25 @@ export class CliResolver implements ArtifactResolver {
     return this.getContent(`reviews/${baseName}`);
   }
 
-  hasPreApproval(_artifactGlob: string): boolean {
-    // Extract project ID from the glob pattern (e.g., "codev/specs/0559-*.md" → "559")
-    const idMatch = _artifactGlob.match(/(\d+)/);
+  hasPreApproval(artifactGlob: string): boolean {
+    // Determine artifact type from glob path (e.g., "codev/specs/0559-*.md" or "codev/plans/0559-*.md")
+    const typeMatch = artifactGlob.match(/\b(specs|plans|reviews)\b/);
+    const idMatch = artifactGlob.match(/(?:specs|plans|reviews)\/0*(\d+)/);
     if (!idMatch) return false;
 
-    const content = this.getSpecContent(idMatch[1], '');
-    if (!content) return false;
+    const projectId = idMatch[1];
+    let content: string | null = null;
+    const artifactType = typeMatch?.[1] || 'specs';
 
+    if (artifactType === 'plans') {
+      content = this.getPlanContent(projectId, '');
+    } else if (artifactType === 'reviews') {
+      content = this.getReviewContent(projectId, '');
+    } else {
+      content = this.getSpecContent(projectId, '');
+    }
+
+    if (!content) return false;
     return isPreApprovedContent(content);
   }
 
@@ -275,7 +290,10 @@ export class CliResolver implements ArtifactResolver {
   private listChildren(subPath: string): string[] | null {
     const cacheKey = `list:${subPath}`;
     if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!.split('\n').filter(Boolean);
+      const cached = this.cache.get(cacheKey)!;
+      if (cached === NEGATIVE_CACHE) return null;
+      const items = cached.split('\n').filter(Boolean);
+      return items.length > 0 ? items : null;
     }
 
     const scopePath = `${this.scope}/${subPath}`;
@@ -285,14 +303,14 @@ export class CliResolver implements ArtifactResolver {
         timeout: 5000,
         env: { ...process.env, ...this.extraEnv },
       }).trim();
-      if (output) {
-        this.cache.set(cacheKey, output);
-        return output.split('\n').filter(Boolean);
-      }
-      return null;
+      // Cache both non-empty and empty results (empty = scope exists but has no children)
+      this.cache.set(cacheKey, output);
+      const items = output ? output.split('\n').filter(Boolean) : [];
+      return items.length > 0 ? items : null;
     } catch (err: unknown) {
       this.handleError(err, scopePath);
-      // Do NOT cache errors — only cache successful results
+      // Cache failures as negative to avoid repeated CLI timeouts
+      this.cache.set(cacheKey, NEGATIVE_CACHE);
       return null;
     }
   }
@@ -300,7 +318,8 @@ export class CliResolver implements ArtifactResolver {
   private getContent(subPath: string): string | null {
     const cacheKey = `content:${subPath}`;
     if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!;
+      const cached = this.cache.get(cacheKey)!;
+      return cached === NEGATIVE_CACHE ? null : cached;
     }
 
     const scopePath = `${this.scope}/${subPath}`;
@@ -314,7 +333,8 @@ export class CliResolver implements ArtifactResolver {
       return output;
     } catch (err: unknown) {
       this.handleError(err, scopePath);
-      // Do NOT cache errors — only cache successful results
+      // Cache failures as negative to avoid repeated CLI timeouts
+      this.cache.set(cacheKey, NEGATIVE_CACHE);
       return null;
     }
   }
