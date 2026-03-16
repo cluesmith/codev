@@ -116,7 +116,7 @@ export async function fetchState(): Promise<DashboardState> {
 
 export interface OverviewBuilder {
   id: string;
-  issueNumber: number | null;
+  issueId: string | null;
   issueTitle: string | null;
   phase: string;
   mode: 'strict' | 'soft';
@@ -132,16 +132,16 @@ export interface OverviewBuilder {
 }
 
 export interface OverviewPR {
-  number: number;
+  id: string;
   title: string;
   url: string;
   reviewStatus: string;
-  linkedIssue: number | null;
+  linkedIssue: string | null;
   createdAt: string;
 }
 
 export interface OverviewBacklogItem {
-  number: number;
+  id: string;
   title: string;
   url: string;
   type: string;
@@ -157,7 +157,7 @@ export interface OverviewBacklogItem {
 }
 
 export interface OverviewRecentlyClosed {
-  number: number;
+  id: string;
   title: string;
   url: string;
   type: string;

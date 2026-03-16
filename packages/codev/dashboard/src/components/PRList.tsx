@@ -30,8 +30,8 @@ export function PRList({ prs }: PRListProps) {
       {prs.map(pr => {
         const status = STATUS_MAP[pr.reviewStatus] ?? STATUS_MAP.REVIEW_REQUIRED;
         return (
-          <a key={pr.number} className="pr-row" href={pr.url} target="_blank" rel="noopener noreferrer">
-            <span className="pr-row-number">#{pr.number}</span>
+          <a key={pr.id} className="pr-row" href={pr.url} target="_blank" rel="noopener noreferrer">
+            <span className="pr-row-number">#{pr.id}</span>
             <span className="pr-row-title">{pr.title}</span>
             <span className={`pr-row-status ${status.className}`}>{status.label}</span>
             <span className="pr-row-age">{timeAgo(pr.createdAt)}</span>
