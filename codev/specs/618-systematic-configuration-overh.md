@@ -15,13 +15,19 @@
    A: From issue description — `protocols.source: "github:myorg/my-protocols"`. Exact caching strategy is a design decision (see Approach analysis below).
 
 3. **Q: Does "eliminate codev update" mean removing the command entirely?**
-   A: Yes. Framework files (protocols, templates, roles, skills) should be resolved from the installed npm package at runtime. Users never need to run `codev update` again. The command should warn and become a no-op.
+   A: Yes. Framework files (protocols, templates, roles) should be resolved from the installed npm package at runtime. Users never need to run `codev update` again. The command should warn and become a no-op.
 
 4. **Q: How does this interact with #614 (parent consultation mode)?**
    A: The pluggable consultation config is the foundation that #614 builds on. This spec defines the config shape; #614 implements the `"parent"` mode behavior.
 
 5. **Q: What happens to existing projects with copied skeleton files in `codev/protocols/`?**
    A: Local files take precedence over package defaults. Existing projects continue to work. Over time, users can delete their local copies (since they'll fall back to the package) or keep customized versions.
+
+6. **Q: What about Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`)?**
+   A: These are **out of scope** for runtime resolution. Claude CLI reads `.claude/skills/` and root-level `CLAUDE.md`/`AGENTS.md` directly from the project. Codev cannot intercept this. These files must continue to be copied by `codev init`/`codev adopt` and updated by users. Runtime resolution applies only to files that codev itself reads (protocols, roles, consult-types, templates).
+
+7. **Q: What happens to the `codev-skeleton/` directory in the project root?**
+   A: `codev-skeleton/` is specific to the codev source repository (it's the template that gets embedded into the npm package). End-user projects never have `codev-skeleton/`. The protocol resolver's reference to `codev-skeleton/protocols` is a codev-self-hosting artifact and should be treated as equivalent to the embedded skeleton path.
 
 ## Problem Statement
 
@@ -42,16 +48,21 @@ Codev's configuration system has grown organically, leading to several pain poin
 - Sections: `shell`, `templates`, `roles`, `porch.checks`
 - No global defaults (`~/.codev/` doesn't exist)
 - No consultation model configuration
+- Config loading is scattered across multiple modules:
+  - `packages/codev/src/agent-farm/utils/config.ts` — `loadUserConfig()` for agent farm
+  - `packages/codev/src/commands/porch/config.ts` — porch also loads `af-config.json`
+  - Both read from the same `af-config.json` but have independent loading code
 
-### File Resolution
-- `readCodevFile()` in `skeleton.ts` already has a two-tier fallback: local `codev/<path>` then embedded `skeleton/<path>`
-- Protocol loading (`protocol.ts`) checks `codev/protocols/` then `codev-skeleton/protocols/`
-- Roles resolved via config override, then local, then embedded skeleton
-- This existing fallback chain is the foundation for eliminating `codev update`
+### File Resolution (Two Independent Chains)
+- **Chain 1 — `readCodevFile()` in `skeleton.ts`**: Two-tier fallback: local `codev/<path>` then embedded `skeleton/<path>`. Used by consult types, roles, and general file resolution.
+- **Chain 2 — `PROTOCOL_PATHS` in `protocol.ts`**: Separate array: `['codev/protocols', 'codev-skeleton/protocols']`. Used exclusively for protocol loading. Does NOT go through `readCodevFile()`.
+- Roles resolved via config override → local → embedded skeleton
+
+Both chains need to be updated to support the new resolution order.
 
 ### Consultation Models
-- `MODEL_CONFIGS` hardcoded in `consult/index.ts`: `gemini`, `codex`, `claude`
-- `SDK_MODELS` array: `['claude', 'codex']`
+- `MODEL_CONFIGS` hardcoded in `consult/index.ts`: only `gemini` (CLI-based)
+- `SDK_MODELS` array: `['claude', 'codex']` (SDK-based)
 - `MODEL_ALIASES`: `{ pro: 'gemini', gpt: 'codex', opus: 'claude' }`
 - Protocol `verify` blocks specify models: `"models": ["gemini", "codex", "claude"]`
 - No af-config.json override exists
@@ -61,6 +72,11 @@ Codev's configuration system has grown organically, leading to several pain poin
 - Handles conflicts by creating `.codev-new` files and spawning Claude
 - `codev init` and `codev adopt` both copy full skeleton into project
 
+### Claude-Specific Files (Out of Scope for Runtime Resolution)
+- `.claude/skills/` — Claude CLI reads these directly; codev copies them during init/adopt/update
+- `CLAUDE.md` / `AGENTS.md` — Project-root files read by Claude CLI; must exist as real files
+- These cannot be resolved at runtime because Claude (an external CLI) reads them from the filesystem
+
 ## Desired State
 
 ### 1. Unified `.codev/` Configuration Directory
@@ -69,8 +85,54 @@ A layered configuration system inspired by Claude Code's `.claude/` pattern:
 
 - **Global**: `~/.codev/config.json` — user-wide defaults
 - **Project**: `.codev/config.json` — project-specific overrides
-- Project settings override global settings (deep merge)
+- Project settings override global settings (deep merge — see merge semantics below)
 - `af-config.json` migrated to `.codev/config.json` with backward compatibility
+- Single centralized config loading module replaces the scattered loading in `agent-farm/utils/config.ts` and `porch/config.ts`
+
+#### Deep Merge Semantics
+
+Config merging follows these rules (project overrides global):
+
+- **Objects**: Recursively deep-merged. Project keys override global keys; global-only keys are preserved.
+- **Arrays**: **Replaced**, not concatenated. If project config sets `models: ["claude"]`, it fully replaces the global `models: ["gemini", "codex", "claude"]`. Arrays are treated as atomic values.
+- **Scalars** (strings, numbers, booleans): Project value wins.
+- **`null`**: Explicitly setting a key to `null` in project config removes it (opt-out of a global default).
+- **Unknown keys**: Preserved through merge (extensibility). No validation error for unrecognized top-level sections.
+
+Example:
+```
+Global:  { "porch": { "consultation": { "models": ["gemini", "codex", "claude"] }, "checks": { "build": {...} } } }
+Project: { "porch": { "consultation": { "models": ["claude"] } } }
+Result:  { "porch": { "consultation": { "models": ["claude"] }, "checks": { "build": {...} } } }
+```
+
+#### Error Handling for Config Files
+
+- **Missing config file**: Not an error. Use defaults.
+- **Invalid JSON**: Emit a clear error message with the file path and JSON parse error. Fail hard — do not silently fall back to defaults, as this would mask user mistakes.
+- **File permission errors**: Emit warning, fall back to defaults (the file exists but can't be read).
+- **Both `af-config.json` and `.codev/config.json` exist**: Use `.codev/config.json`, emit info-level message that `af-config.json` is being ignored.
+
+#### Default Config (No Files Exist)
+
+When no config files exist at all, defaults are:
+```json
+{
+  "shell": {
+    "architect": "claude",
+    "builder": "claude",
+    "shell": "bash"
+  },
+  "porch": {
+    "consultation": {
+      "models": ["gemini", "codex", "claude"]
+    }
+  },
+  "protocols": {
+    "source": "local"
+  }
+}
+```
 
 ### 2. Pluggable Consultation Models
 
@@ -86,25 +148,56 @@ Users configure which models porch uses for reviews:
 }
 ```
 
-Special modes:
-- `"models": ["claude"]` — single-model mode (addresses #592)
-- `"models": "parent"` — delegate to architect session (foundation for #614)
-- `"models": ["gemini", "codex", "claude"]` — current default (backward compatible)
+The `models` field accepts either an array of model names or a string for special modes:
+
+- `["claude"]` — single-model mode (addresses #592)
+- `["gemini", "codex", "claude"]` — current default (backward compatible)
+- `"parent"` — delegate to architect session (foundation for #614; recognized but behavior is #614's scope)
+- `"none"` — skip all consultations (equivalent to "without consultation")
+
+**Type**: `string | string[]` — the config loader normalizes to a canonical form for downstream consumers.
+
+When porch encounters a `verify` step in a protocol, it uses the configured models instead of the hardcoded list in `protocol.json`. The protocol's `verify.models` field becomes a fallback default, overridden by user config.
 
 ### 3. Runtime File Resolution (Eliminate `codev update`)
 
-Framework files resolved from the installed npm package at runtime, with local overrides:
+Framework files that codev reads at runtime are resolved from the installed npm package, with local overrides.
+
+**Scope of runtime resolution** — files codev reads itself:
+- Protocols (`protocols/<name>/protocol.json`, `protocol.md`, `consult-types/`, `prompts/`)
+- Roles (`roles/architect.md`, `roles/builder.md`, etc.)
+- Consult types (`consult-types/*.md`)
+- Porch prompts (`porch/prompts/*.md`)
+- Templates for artifact generation (`templates/*.md`)
+
+**NOT in scope** — files external tools read directly from the filesystem:
+- `.claude/skills/` — Claude CLI reads these
+- `CLAUDE.md` / `AGENTS.md` — Claude CLI reads these
+- `.gitignore` — Git reads this
+
+These out-of-scope files continue to be managed by `codev init`/`codev adopt`. Users update them manually or via `codev adopt --update` (which only touches Claude-specific files).
 
 **Resolution order** (first match wins):
-1. `.codev/` directory (user customizations)
-2. `codev/` directory (project-level, existing files)
-3. Installed npm package (embedded skeleton)
+1. `.codev/<path>` — user customization (new)
+2. `codev/<path>` — project-level (existing local copies)
+3. `<package>/skeleton/<path>` — npm package defaults (existing embedded)
 
-This means:
-- Fresh installs don't need to copy skeleton files into the project
-- `codev update` becomes unnecessary — upgrading the npm package is sufficient
-- Users who want to customize a protocol can copy just that file locally
-- Existing projects with full skeleton copies continue to work (local takes precedence)
+**Unifying the two resolution chains**: Both `readCodevFile()` in `skeleton.ts` and `PROTOCOL_PATHS` in `protocol.ts` are updated to use a single `resolveFile(relativePath)` function that implements the three-tier resolution order.
+
+**Changes to `codev init`**:
+- Creates `.codev/config.json` with user-configured settings
+- Creates `codev/specs/`, `codev/plans/`, `codev/reviews/`, `codev/projects/` (user data dirs)
+- Copies Claude-specific files: `.claude/skills/`, `CLAUDE.md`, `AGENTS.md`
+- Does NOT copy protocols, roles, consult-types, templates, or porch prompts (resolved at runtime)
+
+**Changes to `codev adopt`**:
+- Same as init but handles existing files (skip/merge as before)
+- Detects existing `codev/protocols/` etc. — leaves them in place (they take precedence)
+- Creates `.codev/config.json` if not present
+
+**`codev update` deprecation**:
+- Command emits deprecation warning: "codev update is no longer needed. Framework files are resolved from the installed package at runtime. To update Claude-specific files, use `codev adopt --update`."
+- Becomes a no-op (exits after warning)
 
 ### 4. Remote Protocol Sources
 
@@ -113,12 +206,23 @@ Teams can point to a shared protocol repository:
 ```json
 {
   "protocols": {
-    "source": "github:myorg/my-protocols"
+    "source": "github:myorg/my-protocols",
+    "ref": "v1.2.0"
   }
 }
 ```
 
-Remote protocols are fetched and cached locally. They slot into the resolution chain between local overrides and the npm package defaults.
+- `source`: `"local"` (default) | `"github:<owner>/<repo>"` | `"github:<owner>/<repo>/<path>"`
+- `ref`: Optional git ref (tag, branch, commit SHA). If omitted, uses default branch. **Pinning to a ref is strongly recommended** for reproducibility and security.
+
+Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<owner>/<repo>/<ref>/`. They slot into the resolution chain between local overrides and the npm package defaults:
+
+1. `.codev/<path>` — user customization
+2. `codev/<path>` — project-level
+3. Remote protocol cache — fetched from configured source
+4. `<package>/skeleton/<path>` — npm package defaults
+
+**Implementation of remote fetching is deferred to a later phase** (Phase 4). This spec defines the config shape so it can be validated and stored now.
 
 ## Stakeholders
 - **Primary Users**: Codev users configuring their projects
@@ -128,27 +232,34 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 ## Success Criteria
 
 - [ ] `.codev/config.json` works at both global (`~/.codev/`) and project level
-- [ ] Deep merge: project config overrides global config
+- [ ] Deep merge with defined semantics: objects merge, arrays replace, null removes
+- [ ] Invalid JSON in config files produces clear error (not silent fallback)
 - [ ] `af-config.json` migration: auto-detected with deprecation warning, functionality preserved
+- [ ] Centralized config loader replaces scattered loading in agent-farm and porch
 - [ ] Consultation models configurable via `.codev/config.json`
 - [ ] Single-model mode works without errors (`"models": ["claude"]`)
-- [ ] `"parent"` consultation mode recognized (actual behavior is #614's scope)
-- [ ] Framework files resolve from npm package at runtime without local copies
-- [ ] `codev init` creates minimal `.codev/config.json` instead of copying full skeleton
-- [ ] `codev adopt` detects existing skeleton files, works without modification
-- [ ] `codev update` warns that it's deprecated and becomes a no-op
+- [ ] `"parent"` and `"none"` consultation modes recognized (actual behavior deferred)
+- [ ] `models` field accepts both `string` and `string[]`
+- [ ] Framework files (protocols, roles, consult-types, templates) resolve from npm package at runtime
+- [ ] Unified `resolveFile()` replaces both `readCodevFile()` and `PROTOCOL_PATHS`
+- [ ] `codev init` creates minimal project (no skeleton copies for codev-readable files)
+- [ ] `codev adopt` works with existing projects (leaves local files, creates .codev/config.json)
+- [ ] `codev update` emits deprecation warning and becomes a no-op
+- [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
-- [ ] Remote protocol source config is accepted (fetch/cache can be a later phase)
+- [ ] Remote protocol source config shape accepted and validated
 - [ ] All existing tests pass
-- [ ] New tests cover config loading, layering, migration, and resolution
+- [ ] New tests cover config loading, layering, merge semantics, migration, and resolution
 
 ## Constraints
 
 ### Technical Constraints
 - Must be backward compatible with existing `af-config.json` projects
-- `readCodevFile()` fallback chain already exists — extend, don't replace
+- Both resolution chains (`skeleton.ts` and `protocol.ts`) must be unified
 - Embedded skeleton must remain the ultimate fallback (offline support)
 - Config schema must be extensible for future features (#612 artifact resolver, #614 parent mode)
+- Claude-specific files cannot be resolved at runtime (external CLI reads them directly)
+- Platform support: macOS and Linux. Windows is not currently supported.
 
 ### Business Constraints
 - Breaking changes require migration path
@@ -158,8 +269,8 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 
 - Users can edit JSON configuration files
 - The npm package always contains the latest skeleton files (already true)
-- Git worktrees inherit the project-level `.codev/` from the main repo
-- `~/.codev/` is a reasonable global config location on all supported platforms (macOS, Linux)
+- Git worktrees inherit the project-level `.codev/` from the main repo (needs verification in tests)
+- `~/.codev/` is a reasonable global config location on macOS and Linux
 
 ## Solution Approaches
 
@@ -167,11 +278,11 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 
 **Description**: Implement the four concerns in phases, maintaining backward compatibility throughout.
 
-**Phase 1 — Config Foundation**: Create `.codev/config.json` schema, loading, and layering. Migrate `af-config.json` with deprecation. This unblocks everything else.
+**Phase 1 — Config Foundation**: Create `.codev/config.json` schema, loading, and layering. Centralize config loading. Migrate `af-config.json` with deprecation. This unblocks everything else.
 
-**Phase 2 — Pluggable Consultation**: Wire consultation model config into porch's verify step. Addresses #592.
+**Phase 2 — Pluggable Consultation**: Wire consultation model config into porch's verify step and consult command. Addresses #592.
 
-**Phase 3 — Runtime Resolution**: Extend `readCodevFile()` to check `.codev/` first. Minimize what `codev init` copies. Deprecate `codev update`.
+**Phase 3 — Runtime Resolution**: Unify the two resolution chains into a single `resolveFile()`. Add `.codev/` as top-tier. Minimize what `codev init` copies. Deprecate `codev update`.
 
 **Phase 4 — Remote Sources**: Add remote protocol fetching and caching. Lower priority.
 
@@ -225,12 +336,13 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 
 ### Critical (Blocks Progress)
 - [x] Config file format — JSON (consistent with af-config.json, no new parser needed)
+- [x] Deep merge semantics — arrays replace, objects merge, null removes (resolved by consultation feedback)
 
 ### Important (Affects Design)
-- [ ] Should `.codev/` also hold skills and agent definitions, or keep those in `.claude/`?
-  - Recommendation: Keep `.claude/` for Claude-specific items. `.codev/` is for codev configuration only.
+- [x] Should `.codev/` also hold skills and agent definitions, or keep those in `.claude/`?
+  - Answer: Keep `.claude/` for Claude-specific items. `.codev/` is for codev configuration and framework overrides only.
 - [ ] Should the config schema be strictly typed or allow arbitrary extensions?
-  - Recommendation: Typed core sections (`shell`, `porch`, `protocols`) with an `extensions` escape hatch.
+  - Recommendation: Typed core sections (`shell`, `porch`, `protocols`) with unknown keys preserved through merge.
 - [ ] Remote protocol source: git clone vs tarball download vs GitHub API?
   - Recommendation: Defer implementation to Phase 4; define config shape now.
 
@@ -245,25 +357,39 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 
 ## Security Considerations
 - Config files may contain shell commands (`shell.architect`, etc.) — existing concern, no change
-- Remote protocol sources could contain malicious prompts — must validate and/or trust-on-first-use
-- Global config (`~/.codev/config.json`) should have appropriate file permissions
+- Remote protocol sources could contain malicious prompts — must validate and/or trust-on-first-use. Config supports `ref` pinning for reproducibility.
+- Global config (`~/.codev/config.json`): directory should be created with 0700 permissions, config file with 0600
 
 ## Test Scenarios
 
 ### Functional Tests
 1. **Config loading**: Global only, project only, both with merge, neither (defaults)
-2. **Migration**: `af-config.json` detected, loaded, deprecation warning shown
-3. **Consultation models**: Single model, multiple models, "parent" mode, default when unset
-4. **File resolution**: Local `.codev/` override, `codev/` fallback, package fallback
-5. **Init minimal**: `codev init` creates `.codev/config.json` without copying full skeleton
-6. **Existing projects**: Projects with full skeleton copies continue to work
+2. **Merge semantics**: Object deep merge, array replacement, null removal, unknown keys preserved
+3. **Error handling**: Invalid JSON (error), missing file (defaults), permission denied (warning + defaults)
+4. **Migration**: `af-config.json` only (loads with warning), both files (uses .codev, info message), neither (defaults)
+5. **Consultation models**: Single model, multiple models, "parent" mode, "none" mode, default when unset
+6. **Consultation type**: `string` vs `string[]` both accepted and normalized
+7. **File resolution**: `.codev/` override, `codev/` fallback, package fallback, three-tier chain
+8. **Resolution unification**: Both protocol loading and readCodevFile use same resolver
+9. **Init minimal**: `codev init` creates `.codev/config.json`, user dirs, Claude files — but NOT protocols/roles/templates
+10. **Adopt existing**: `codev adopt` leaves existing `codev/protocols/` in place, creates `.codev/config.json`
+11. **Update deprecated**: `codev update` emits warning and exits
+12. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
+13. **Worktree behavior**: `.codev/config.json` accessible from git worktrees
 
 ### Non-Functional Tests
 1. Config load performance under 50ms
 2. No regression in existing test suite
 
 ## Dependencies
-- **Internal**: `readCodevFile()` in `skeleton.ts`, `loadUserConfig()` in `config.ts`, `consult/index.ts`
+- **Internal**:
+  - `readCodevFile()` in `packages/codev/src/lib/skeleton.ts`
+  - `PROTOCOL_PATHS` in `packages/codev/src/commands/porch/protocol.ts`
+  - `loadUserConfig()` in `packages/codev/src/agent-farm/utils/config.ts`
+  - Config loading in `packages/codev/src/commands/porch/config.ts`
+  - `consult/index.ts` model definitions
+  - `scaffold.ts` (init/adopt shared utilities)
+  - `update.ts` (codev update command)
 - **External**: None (remote sources deferred)
 
 ## Risks and Mitigation
@@ -272,8 +398,9 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 |------|------------|--------|-------------------|
 | Breaking existing projects | Low | High | Backward compat: af-config.json still works, local files take precedence |
 | Config merge bugs | Medium | Medium | Comprehensive test suite for layering edge cases |
-| Remote source security | Medium | High | Defer to Phase 4, design trust model carefully |
+| Remote source security | Medium | High | Defer to Phase 4, design trust model carefully, support ref pinning |
 | Migration confusion | Medium | Low | Clear deprecation warnings with actionable messages |
+| Missing a config loading site | Medium | Medium | Enumerate all sites in plan, test each one |
 
 ## Notes
 
@@ -301,7 +428,8 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
     }
   },
   "protocols": {
-    "source": "local"
+    "source": "local",
+    "ref": null
   }
 }
 ```
@@ -315,10 +443,44 @@ Remote protocols are fetched and cached locally. They slot into the resolution c
 
 ### Resolution Chain (Final)
 
+For codev-readable files:
 ```
-.codev/<path>           ← user customization (new)
-codev/<path>            ← project-level (existing)
+.codev/<path>              ← user customization (new)
+codev/<path>               ← project-level (existing)
+<remote-cache>/<path>      ← remote protocol source (Phase 4, cached)
 <package>/skeleton/<path>  ← npm package defaults (existing)
 ```
 
-This extends the existing two-tier chain (`codev/` → skeleton) with a new top tier (`.codev/`).
+For Claude-specific files (NOT runtime resolved):
+```
+.claude/skills/            ← copied by codev init/adopt, maintained by user
+CLAUDE.md / AGENTS.md      ← copied by codev init/adopt, maintained by user
+```
+
+### All Config Loading Sites (Must Be Migrated)
+
+These are the known locations where `af-config.json` is currently loaded:
+1. `packages/codev/src/agent-farm/utils/config.ts` — `loadUserConfig()`
+2. `packages/codev/src/commands/porch/config.ts` — porch config loading
+3. `packages/codev/src/commands/update.ts` — reads check overrides
+
+All three must be migrated to use the new centralized config loader.
+
+## Expert Consultation
+
+**Date**: 2026-03-16
+**Models Consulted**: Gemini, Codex, Claude
+**Key Feedback Addressed**:
+
+1. **Claude-specific file feasibility** (Gemini): Added explicit scope boundary — `.claude/skills/`, `CLAUDE.md`, `AGENTS.md` are out of scope for runtime resolution since Claude CLI reads them directly. Added Q6 and dedicated section.
+2. **Deep merge semantics** (all three): Added dedicated "Deep Merge Semantics" section with rules for objects, arrays, scalars, null, and unknown keys. Arrays replace, objects merge, null removes.
+3. **Two independent resolution chains** (Claude): Added explicit documentation of both chains in Current State. Added success criterion for unified `resolveFile()`. Added `PROTOCOL_PATHS` to dependencies.
+4. **Error handling** (Codex, Claude): Added "Error Handling for Config Files" section covering invalid JSON, missing files, permission errors, and dual-file scenarios.
+5. **Schema typing for models** (Gemini): Specified `models` as `string | string[]` with normalization.
+6. **Default config** (Codex): Added explicit "Default Config" section showing what's used when no files exist.
+7. **Multiple config loading sites** (Claude): Added "All Config Loading Sites" section enumerating the three known locations.
+8. **`codev adopt` behavior** (Claude): Clarified in Desired State — leaves existing files, creates `.codev/config.json`.
+9. **`codev-skeleton/` fate** (Claude): Added Q7 explaining this is a self-hosting artifact.
+10. **Remote source pinning** (Codex): Added `ref` field to protocol source config for pinning to tag/branch/commit.
+11. **Platform support** (Codex, Claude): Added explicit constraint — macOS and Linux only.
+12. **Security permissions** (Claude): Added specific permissions (0700 dir, 0600 file) for global config.
