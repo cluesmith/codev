@@ -543,6 +543,54 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Team commands (Spec 587) — deprecated in favor of standalone `team` CLI (Spec 599)
+  const teamCmd = program
+    .command('team')
+    .description('Team interactions and messages (deprecated: use `team` CLI instead)');
+
+  teamCmd
+    .command('list')
+    .description('List team members from codev/team/people/')
+    .action(async () => {
+      console.warn('⚠ `af team` is deprecated. Use `team list` instead.');
+      const { teamList } = await import('./commands/team.js');
+      try {
+        await teamList({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  teamCmd
+    .command('message <text>')
+    .description('Post a message to the team message log')
+    .option('-a, --author <name>', 'Override author (default: auto-detect from gh/git)')
+    .action(async (text, options) => {
+      console.warn('⚠ `af team` is deprecated. Use `team message` instead.');
+      const { teamMessage } = await import('./commands/team.js');
+      try {
+        await teamMessage({ text, author: options.author, cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  teamCmd
+    .command('update')
+    .description('Post hourly activity summary (used by cron, can run manually)')
+    .action(async () => {
+      console.warn('⚠ `af team` is deprecated. Use `team update` instead.');
+      const { teamUpdate } = await import('./commands/team-update.js');
+      try {
+        await teamUpdate({ cwd: process.cwd() });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Tower command - cross-project dashboard
   const towerCmd = program
     .command('tower')
@@ -569,10 +617,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('stop')
     .description('Stop the tower dashboard')
     .option('-p, --port <port>', 'Port to stop (default: 4100)')
+    .option('--force-kill-all-child-processes', 'SIGKILL tower and every child process (builders, shells, everything)')
     .action(async (options) => {
       try {
         await towerStop({
           port: options.port ? parseInt(options.port, 10) : undefined,
+          forceKillAllChildProcesses: options.forceKillAllChildProcesses,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

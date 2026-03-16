@@ -38,6 +38,8 @@ import {
   serveStaticFile,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
+import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import { SendBuffer } from './send-buffer.js';
@@ -1251,6 +1253,11 @@ async function handleWorkspaceRoutes(
       return handleWorkspaceRecentFiles(res, workspacePath);
     }
 
+    // GET /api/team - Return team members with GitHub data + messages (Spec 587)
+    if (req.method === 'GET' && apiPath === 'team') {
+      return handleWorkspaceTeam(res, workspacePath);
+    }
+
     // GET /api/annotate/:tabId/* — Serve rich annotator template and sub-APIs
     const annotateMatch = apiPath.match(/^annotate\/([^/]+)(\/(.*))?$/);
     if (annotateMatch) {
@@ -1382,6 +1389,7 @@ async function handleWorkspaceState(
     workspaceName?: string;
     version?: string;
     hostname?: string;
+    teamEnabled?: boolean;
   } = {
     architect: null,
     builders: [],
@@ -1390,6 +1398,7 @@ async function handleWorkspaceState(
     workspaceName: path.basename(workspacePath),
     version,
     hostname: (() => { try { return readCloudConfig()?.tower_name; } catch { return undefined; } })(),
+    teamEnabled: await hasTeam(path.join(workspacePath, 'codev', 'team')),
   };
 
   // Add architect if exists
@@ -1453,6 +1462,54 @@ async function handleWorkspaceState(
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(state));
+}
+
+async function handleWorkspaceTeam(
+  res: http.ServerResponse,
+  workspacePath: string,
+): Promise<void> {
+  const teamDir = path.join(workspacePath, 'codev', 'team');
+
+  // Single read — avoids double filesystem traversal from hasTeam() + loadTeamMembers()
+  const membersResult = await loadTeamMembers(teamDir);
+  if (membersResult.items.length < 2) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ enabled: false }));
+    return;
+  }
+
+  const messagesResult = await loadMessages(path.join(teamDir, 'messages.md'));
+
+  const { data: githubData, error: githubError } = await fetchTeamGitHubData(
+    membersResult.items,
+    workspacePath,
+  );
+
+  const members = membersResult.items.map((m: TeamMember) => ({
+    name: m.name,
+    github: m.github,
+    role: m.role,
+    filePath: m.filePath,
+    github_data: githubData.get(m.github) ?? null,
+  }));
+
+  const messages = messagesResult.items.map((msg: TeamMessage) => ({
+    author: msg.author,
+    timestamp: msg.timestamp,
+    body: msg.body,
+    channel: msg.channel,
+  }));
+
+  const warnings = [...membersResult.warnings, ...messagesResult.warnings];
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    enabled: true,
+    members,
+    messages,
+    warnings,
+    ...(githubError ? { githubError } : {}),
+  }));
 }
 
 async function handleWorkspaceShellCreate(

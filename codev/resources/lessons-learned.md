@@ -79,6 +79,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0021] Not all AI CLIs are agentic enough to serve as Builders. Validate capabilities (tool loop, file editing, shell execution) before spawning -- non-agentic CLIs silently fail at implementation tasks rather than erroring cleanly.
 - [From 0017] Multi-platform transpilation (single source of truth generating per-platform instruction files) was identified as potentially premature. Manual sync of CLAUDE.md/AGENTS.md is simpler and avoids the "lowest common denominator" problem where abstraction limits platform-specific features.
 - [From 0032] Template resolution should use dynamic path finding (check compiled output path, then source path) rather than hardcoded project-relative paths -- makes code independent of directory structure
+- [From 587] GraphQL variables don't substitute inside string literal arguments. When building GitHub `search()` queries dynamically, pass values as JS/TS function parameters and interpolate at the string level, not as GraphQL `$variables`.
+- [From 587] GraphQL aliases follow identifier rules — they cannot start with a digit. When using external data (like GitHub handles) as alias names, always add a safe prefix (e.g., `u_`) to avoid silent query failures.
 - [From 0039-TICK-002] Embedded skeleton with local overrides pattern: framework files embedded in npm package, resolved at runtime with local-first precedence. Clean for users but creates AI accessibility problems -- AI tools ignore `node_modules/`
 - [From 0039-TICK-003] Copy-on-init with managed headers is better than embedded skeleton for AI-assisted development -- AI consultants need to find and read protocol files at expected local paths, not buried in node_modules
 - [From 0035] MAINTAIN as a task-list protocol (vs sequential phases) works well for cross-cutting concerns that span code and documentation -- allows parallelizable independent tasks with targeted human review gates
@@ -138,6 +140,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0064] Hide/show iframes instead of destroy/recreate when preserving state is important. Maintain an invalidation mechanism (e.g., port change detection) to handle stale cached elements.
 - [From 0106] Old migration code (e.g., v6, v7 referencing `shepherd_*`) must remain historically correct even after a rename. Only current schema and new migrations use the new names.
 - [From 0376] Archive `status.yaml` files before `af cleanup` -- most projects' porch state files are deleted after PR merge, losing valuable timing data for future development analyses.
+- [From 0589] Concept command abstraction (shell command per operation, env vars for params, JSON on stdout) is an effective pattern for decoupling from a specific CLI tool. Default commands wrap the existing tool, overrides in config enable alternatives. Key: provide both sync and async variants, support `raw` mode for non-JSON output, and always thread the config through all call sites.
+- [From 0589] When migrating multiple call sites to a new abstraction, configuration threading (passing `forgeConfig`/`workspaceRoot` to every call) is easy to miss at non-obvious sites like porch checks and merge instructions. Phase-scoped consultation reviews are effective at catching these gaps.
 
 ## Process
 
@@ -319,6 +323,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0118] Codex reviewer consistently found edge cases (pre-HELLO gating, workspace scoping) that improved the design, despite high iteration counts.
 - [From 0124] Reviewers hallucinate coverage loss. Always verify reviewer claims against actual code before acting on them.
 - [From 0124] Reviewers may recommend removing tests that serve a different purpose than they appear. Codex said REST API tests "aren't PTY-specific" but they test `TerminalManager.handleRequest`, which is unique to that class.
+- [From 587] `gh pr list --state` and `--search` are mutually exclusive — combining them fails silently. Use `is:merged` (or `is:open`) within the `--search` string instead. Also, GitHub's `merged:>=YYYY-MM-DD` only has day-level precision; for hour-level windows, fetch `mergedAt` via `--json` and filter in code.
 - [From 0126] Workspace-scoped routing is a common blind spot in consultation. The Tower server has global and workspace-scoped routing layers; Claude caught that `/api/overview` was only registered globally, which would have broken the dashboard.
 - [From bugfix-274] Codex caught a secondary race path through the Tower API that the initial fix missed -- the direct `/project/.../api/state` endpoint bypasses `getInstances()` entirely, requiring the additional `_reconciling` guard.
 - [From 0104/0106/0109/0117] Reviewer stale branch reads: consultation prompts should include the actual file tree or instruct models to search recursively, since reviewers occasionally read files from `main` instead of the feature branch worktree.

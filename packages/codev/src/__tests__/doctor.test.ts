@@ -11,6 +11,29 @@ import { tmpdir } from 'node:os';
 // We need to test the internal functions, so we'll import the module
 // and test the exported function behavior
 
+// Mock forge module (imported by doctor.ts)
+const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => {
+  if (concept === 'auth-status') return 'Logged in';
+  return null;
+}));
+const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
+const validateForgeConfigMock = vi.hoisted(() => vi.fn(() => []));
+const resolveAllConceptsMock = vi.hoisted(() => vi.fn(() => {
+  // Return all 15 concepts as default/gh-based
+  const concepts = [
+    'issue-view', 'pr-list', 'issue-list', 'issue-comment', 'pr-exists',
+    'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
+    'on-it-timestamps', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff', 'auth-status',
+  ];
+  return concepts.map(c => ({ concept: c, command: `gh ${c}`, source: 'default', executable: 'gh' }));
+}));
+vi.mock('../lib/forge.js', () => ({
+  executeForgeCommandSync: executeForgeCommandSyncMock,
+  loadForgeConfig: loadForgeConfigMock,
+  validateForgeConfig: validateForgeConfigMock,
+  resolveAllConcepts: resolveAllConceptsMock,
+}));
+
 // Mock child_process
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
@@ -217,12 +240,15 @@ describe('doctor command', () => {
 
   describe('gh auth check (Spec 0126)', () => {
     it('should warn when gh is not authenticated', async () => {
+      // Make forge auth-status concept fail
+      executeForgeCommandSyncMock.mockImplementation((concept: string) => {
+        if (concept === 'auth-status') throw new Error('not authenticated');
+        return null;
+      });
+
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which')) {
           return Buffer.from('/usr/bin/command');
-        }
-        if (cmd.includes('gh auth status')) {
-          throw new Error('not authenticated');
         }
         return Buffer.from('');
       });

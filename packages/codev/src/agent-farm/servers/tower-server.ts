@@ -288,6 +288,17 @@ const routeCtx: RouteContext = {
   getShellperManager: () => shellperManager,
   broadcastNotification,
   addSseClient: (client: SSEClient) => {
+    // Hard cap: evict oldest connections when over limit to prevent
+    // unbounded accumulation (tunnel-proxied EventSource reconnects
+    // can leak because TCP close doesn't propagate reliably).
+    const SSE_MAX_CLIENTS = 50;
+    while (sseClients.length >= SSE_MAX_CLIENTS) {
+      const oldest = sseClients.shift();
+      if (oldest) {
+        try { oldest.res.end(); } catch { /* already dead */ }
+        log('WARN', `SSE cap reached (${SSE_MAX_CLIENTS}), evicted oldest client: ${oldest.id}`);
+      }
+    }
     sseClients.push(client);
   },
   removeSseClient: (id: string) => {

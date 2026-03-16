@@ -23,52 +23,21 @@ function TerminalControls({
   xtermRef,
   connStatus,
   toolbarExtra,
+  onReconnect,
 }: {
   fitRef: React.RefObject<FitAddon | null>;
   wsRef: React.RefObject<WebSocket | null>;
   xtermRef: React.RefObject<XTerm | null>;
   connStatus: 'connected' | 'reconnecting' | 'disconnected';
   toolbarExtra?: React.ReactNode;
+  onReconnect: () => void;
 }) {
   const handleRefresh = (e: React.PointerEvent) => {
     e.preventDefault();
-    const fit = fitRef.current;
-    const ws = wsRef.current;
-    const term = xtermRef.current;
-    if (!fit || !ws || ws.readyState !== WebSocket.OPEN || !term) return;
-
-    // Debug: trace the full resize path (Issue #382)
-    const beforeCols = term.cols;
-    const beforeRows = term.rows;
-    const container = term.element?.parentElement;
-    const containerStyle = container ? window.getComputedStyle(container) : null;
-    console.log('[refresh] before:', {
-      cols: beforeCols, rows: beforeRows,
-      containerW: containerStyle?.width, containerH: containerStyle?.height,
-    });
-
-    // Preserve scroll position across fit() (Bugfix #423)
-    const baseY = term.buffer?.active?.baseY;
-    const viewportY = term.buffer?.active?.viewportY;
-    const wasAtBottom = !baseY || viewportY == null || viewportY >= baseY;
-
-    fit.fit();
-
-    if (wasAtBottom) {
-      term.scrollToBottom();
-    } else {
-      term.scrollToLine(viewportY);
-    }
-
-    console.log('[refresh] after fit():', {
-      cols: term.cols, rows: term.rows,
-      changed: term.cols !== beforeCols || term.rows !== beforeRows,
-    });
-
-    // Always send resize to PTY — even if fit() didn't change dimensions,
-    // force SIGWINCH so the shell redraws.
-    sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
-    console.log('[refresh] sent resize control frame:', { cols: term.cols, rows: term.rows });
+    // Full terminal refresh: clear xterm buffer and reconnect with full
+    // replay from shellper's ring buffer. This fixes corrupted display
+    // that SIGWINCH alone can't recover from.
+    onReconnect();
   };
 
   const handleScrollToBottom = (e: React.PointerEvent) => {
@@ -225,6 +194,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
   const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
   const [connStatus, setConnStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected');
+  const reconnectRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -468,6 +438,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       initialPhase: true,
       initialBuffer: '',
       flushTimer: null as ReturnType<typeof setTimeout> | null,
+      skipReplay: false,  // When true, discard replay data and just send SIGWINCH
     };
     const MAX_ATTEMPTS = 50;
     const BACKOFF_CAP_MS = 30_000;
@@ -493,6 +464,19 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       const flushInitialBuffer = () => {
         rc.initialPhase = false;
         rc.flushTimer = null;
+        if (rc.skipReplay) {
+          // Discard replay data — ring buffer may contain corrupted escape sequences.
+          // Just send SIGWINCH to make the running program redraw from scratch.
+          rc.initialBuffer = '';
+          rc.skipReplay = false;
+          debouncedFit();
+          setTimeout(() => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
+            }
+          }, 100);
+          return;
+        }
         if (rc.initialBuffer) {
           const filtered = filterDA(rc.initialBuffer);
           if (filtered) {
@@ -683,6 +667,24 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       }
     });
 
+    // Full reconnect: reset terminal and reconnect. Discards the replay buffer
+    // (which may contain corrupted escape sequences) and sends SIGWINCH to make
+    // the running program redraw from scratch.
+    reconnectRef.current = () => {
+      term.reset();
+      rc.lastSeq = 0;
+      rc.attempts = 0;
+      rc.skipReplay = true;
+      // Close existing connection and immediately reconnect (bypass backoff)
+      const oldWs = wsRef.current;
+      if (oldWs) {
+        rc.disposed = true;  // Prevent onclose from triggering its own reconnect
+        oldWs.close();
+        rc.disposed = false;
+      }
+      connect();  // Fresh connect — replay discarded, SIGWINCH sent instead
+    };
+
     // Initial connection
     connect();
 
@@ -772,7 +774,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
           backgroundColor: '#1a1a1a',
         }}
       />
-      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} toolbarExtra={toolbarExtra} />
+      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} toolbarExtra={toolbarExtra} onReconnect={() => reconnectRef.current?.()} />
       {isMobile && (
         <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
       )}

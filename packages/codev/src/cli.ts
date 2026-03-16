@@ -4,6 +4,8 @@
  * Codev CLI - Unified entry point for codev framework
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { Command } from 'commander';
 import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
@@ -16,6 +18,20 @@ import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
 import { runAgentFarm } from './agent-farm/cli.js';
 import { version } from './version.js';
+import { findWorkspaceRoot } from './agent-farm/utils/index.js';
+
+/**
+ * Validate that we're inside a Codev workspace.
+ * Uses the worktree-aware findWorkspaceRoot from agent-farm (issue #407).
+ */
+function requireWorkspace(): string {
+  const root = findWorkspaceRoot();
+  if (!existsSync(join(root, 'codev'))) {
+    console.error('Error: Not inside a Codev workspace. Run from a project that has a codev/ directory.');
+    process.exit(1);
+  }
+  return root;
+}
 
 const program = new Command();
 
@@ -242,6 +258,70 @@ program
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Team command group (standalone CLI, Spec 599)
+const teamCmd = program
+  .command('team')
+  .description('Team coordination — manage members and messages');
+
+teamCmd
+  .command('list')
+  .description('List team members from codev/team/people/')
+  .action(async () => {
+    try {
+      requireWorkspace();
+      const { teamList } = await import('./agent-farm/commands/team.js');
+      await teamList({ cwd: process.cwd() });
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  });
+
+teamCmd
+  .command('message <text>')
+  .description('Post a message to the team message log')
+  .option('-a, --author <name>', 'Override author (default: auto-detect from gh/git)')
+  .action(async (text: string, options: { author?: string }) => {
+    try {
+      requireWorkspace();
+      const { teamMessage } = await import('./agent-farm/commands/team.js');
+      await teamMessage({ text, author: options.author, cwd: process.cwd() });
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  });
+
+teamCmd
+  .command('update')
+  .description('Post hourly activity summary (used by cron, can run manually)')
+  .action(async () => {
+    try {
+      requireWorkspace();
+      const { teamUpdate } = await import('./agent-farm/commands/team-update.js');
+      await teamUpdate({ cwd: process.cwd() });
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  });
+
+teamCmd
+  .command('add <github-handle>')
+  .description('Scaffold a new team member file')
+  .option('-n, --name <name>', 'Full name (default: github handle)')
+  .option('-r, --role <role>', 'Role (default: Team Member)')
+  .action(async (handle: string, options: { name?: string; role?: string }) => {
+    try {
+      requireWorkspace();
+      const { teamAdd } = await import('./agent-farm/commands/team.js');
+      await teamAdd({ handle, name: options.name, role: options.role, cwd: process.cwd() });
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });

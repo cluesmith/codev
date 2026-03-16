@@ -200,7 +200,7 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
   const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith(`${projectId}-`)) {
+    if (entry.isDirectory() && (entry.name === projectId || entry.name.startsWith(`${projectId}-`))) {
       const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
       if (fs.existsSync(statusPath)) {
         return statusPath;
@@ -218,19 +218,19 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
  */
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
-  // Bugfix worktrees: .builders/bugfix-{N}[-slug]
-  const bugfix = normalized.match(/\/\.builders\/bugfix-(\d+)(?:-[^/]*)?(\/|$)/);
-  if (bugfix) return `bugfix-${bugfix[1]}`;
-  // Protocol worktrees: .builders/{aspir|spir|tick}-{N}[-slug]
-  const proto = normalized.match(/\/\.builders\/(?:aspir|spir|tick)-(\d+)(?:-[^/]*)?(\/|$)/);
-  if (proto) return proto[1].padStart(4, '0');
-  // Legacy spec worktrees: .builders/{NNNN} (bare 4-digit ID)
-  const legacy = normalized.match(/\/\.builders\/(\d{4})(\/|$)/);
-  if (legacy) return legacy[1];
-  // Task worktrees: .builders/task-{shortId}
-  const task = normalized.match(/\/\.builders\/(task-[^/]+)(\/|$)/);
-  if (task) return task[1];
-  return null;
+  // Bugfix worktrees: .builders/bugfix-{N}-{slug} (slug is optional for legacy paths)
+  // Protocol worktrees: .builders/{protocol}-{N}-{slug} (aspir, spir, air, tick)
+  // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
+  const match = normalized.match(
+    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|tick)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
+  );
+  if (!match) return null;
+  // Bugfix worktrees use "bugfix-N" as the porch project ID
+  if (match[2]) return `bugfix-${match[2]}`;
+  // Protocol worktrees (aspir, spir, air, tick) use the bare numeric ID
+  if (match[3]) return match[3];
+  // Spec worktrees use zero-padded numeric IDs
+  return match[4];
 }
 
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };

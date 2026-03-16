@@ -200,12 +200,19 @@ export async function getInstances(): Promise<InstanceStatus[]> {
     });
   }
 
-  // Sort: running first, then by workspace name
+  // Sort: running first (alphabetical), then non-running by most recently used
   instances.sort((a, b) => {
     if (a.running !== b.running) {
       return a.running ? -1 : 1;
     }
-    return a.workspaceName.localeCompare(b.workspaceName);
+    if (a.running) {
+      // Running: alphabetical
+      return a.workspaceName.localeCompare(b.workspaceName);
+    }
+    // Non-running (recent): reverse chronological (most recently used first)
+    const aTime = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
+    const bTime = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
+    return bTime - aTime;
   });
 
   return instances;

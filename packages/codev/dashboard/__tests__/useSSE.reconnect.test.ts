@@ -67,6 +67,8 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
     mockFetchState.mockReset().mockResolvedValue(MOCK_STATE);
     mockFetchOverview.mockReset().mockResolvedValue(MOCK_OVERVIEW);
     mockRefreshOverview.mockReset().mockResolvedValue(undefined);
+    // Ensure tab is "visible" by default
+    Object.defineProperty(document, 'hidden', { value: false, writable: true, configurable: true });
   });
 
   afterEach(() => {
@@ -118,6 +120,60 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
     });
 
     expect(mockFetchOverview.mock.calls.length).toBeGreaterThan(callsAfterInit);
+  });
+
+  it('disconnects SSE when tab is hidden and reconnects on visible', async () => {
+    const { useSSE } = await import('../src/hooks/useSSE.js');
+    const listener = vi.fn();
+    const { unmount } = renderHook(() => useSSE(listener));
+
+    // Record baseline — prior tests may have leaked instances via module resets
+    const baseCount = eventSourceInstances.length;
+    expect(baseCount).toBeGreaterThanOrEqual(1);
+    const currentES = eventSourceInstances[baseCount - 1];
+
+    // Hide the tab
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // SSE should be closed
+    expect(currentES.close).toHaveBeenCalled();
+
+    // Show the tab again
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // Should have reconnected (at least one new EventSource instance)
+    expect(eventSourceInstances.length).toBeGreaterThan(baseCount);
+
+    // Listener should have been notified on re-visible (to refresh stale data)
+    expect(listener).toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it('does not connect SSE if tab starts hidden', async () => {
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    const { useSSE } = await import('../src/hooks/useSSE.js');
+    const listener = vi.fn();
+    const baseCount = eventSourceInstances.length;
+    const { unmount } = renderHook(() => useSSE(listener));
+
+    // Should NOT have connected (no new instances beyond baseline)
+    expect(eventSourceInstances.length).toBe(baseCount);
+
+    // Make visible — should connect now
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(eventSourceInstances.length).toBeGreaterThan(baseCount);
+    unmount();
   });
 
   it('useOverview responds to overview-changed SSE event', async () => {

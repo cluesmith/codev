@@ -83,7 +83,7 @@ function MiniBarChart({ data, dataKey, nameKey, color, formatter }: {
         <XAxis type="number" hide />
         <YAxis type="category" dataKey={nameKey} width={80} tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} />
         <Tooltip
-          formatter={formatter ? (v: number | undefined) => v != null ? formatter(v) : '' : undefined}
+          formatter={formatter ? ((v: unknown) => typeof v === 'number' ? formatter(v) : '') as never : undefined}
           contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', fontSize: 11, borderRadius: 4 }}
           labelStyle={{ color: 'var(--text-primary)' }}
           itemStyle={{ color: 'var(--text-secondary)' }}

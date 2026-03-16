@@ -18,6 +18,7 @@ import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
 import { getResolver } from '../porch/artifacts.js';
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
+import { executeForgeCommandSync } from '../../lib/forge.js';
 
 /** Resolved artifact content with a human-readable label */
 interface ContentRef {
@@ -773,19 +774,34 @@ function getDiffStat(workspaceRoot: string, ref: string): { stat: string; files:
 }
 
 /**
- * Fetch PR metadata (no diff — that's fetched separately)
+ * Fetch PR metadata via forge concept commands (no diff — that's fetched separately).
  */
 function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; comments: string } {
   console.error(`Fetching PR #${prNumber} data...`);
 
   try {
-    const info = execSync(`gh pr view ${prNumber} --json title,body,state,author,baseRefName,headRefName,additions,deletions`, { encoding: 'utf-8' });
-    const nameOnly = execSync(`gh pr diff ${prNumber} --name-only`, { encoding: 'utf-8' });
+    const prView = executeForgeCommandSync('pr-view', {
+      CODEV_PR_NUMBER: String(prNumber),
+    });
+    const info = typeof prView === 'string' ? prView : JSON.stringify(prView);
+
+    const diffResult = executeForgeCommandSync('pr-diff', {
+      CODEV_PR_NUMBER: String(prNumber),
+      CODEV_DIFF_NAME_ONLY: '1',
+    }, { raw: true });
+    const nameOnly = typeof diffResult === 'string' ? diffResult : '';
     const changedFiles = nameOnly.trim().split('\n').filter(Boolean);
 
     let comments = '(No comments)';
     try {
-      comments = execSync(`gh pr view ${prNumber} --comments`, { encoding: 'utf-8' });
+      // Fetch PR comments via pr-view concept with CODEV_INCLUDE_COMMENTS flag
+      const commentsResult = executeForgeCommandSync('pr-view', {
+        CODEV_PR_NUMBER: String(prNumber),
+        CODEV_INCLUDE_COMMENTS: '1',
+      }, { raw: true });
+      if (commentsResult && typeof commentsResult === 'string' && commentsResult.trim()) {
+        comments = commentsResult;
+      }
     } catch {
       // No comments or error fetching
     }
@@ -797,11 +813,14 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
 }
 
 /**
- * Fetch the full PR diff via gh pr diff
+ * Fetch the full PR diff via the pr-diff forge concept command.
  */
 function fetchPRDiff(prNumber: number): string {
   try {
-    return execSync(`gh pr diff ${prNumber}`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    const result = executeForgeCommandSync('pr-diff', {
+      CODEV_PR_NUMBER: String(prNumber),
+    }, { raw: true });
+    return typeof result === 'string' ? result : '';
   } catch (err) {
     throw new Error(`Failed to fetch PR diff for #${prNumber}: ${err}`);
   }
@@ -1061,41 +1080,36 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 }
 
 /**
- * Find PR number for the current branch
+ * Find PR number for the current branch via pr-search forge concept.
  */
 function findPRForCurrentBranch(workspaceRoot: string): number {
   const branchName = execSync('git branch --show-current', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-  const prJson = execSync(
-    `gh pr list --head "${branchName}" --json number --jq '.[0].number'`,
-    { cwd: workspaceRoot, encoding: 'utf-8' }
-  ).trim();
+  const result = executeForgeCommandSync('pr-search', {
+    CODEV_SEARCH_QUERY: `head:${branchName}`,
+  }, { cwd: workspaceRoot });
 
-  if (!prJson) {
+  const prs = Array.isArray(result) ? result as Array<{ number: number }> : [];
+  if (prs.length === 0 || !prs[0]?.number) {
     throw new Error(`No PR found for branch: ${branchName}`);
   }
 
-  const prNumber = parseInt(prJson, 10);
-  if (isNaN(prNumber)) {
-    throw new Error(`No PR found for branch: ${branchName}`);
-  }
-
-  return prNumber;
+  return prs[0].number;
 }
 
 /**
- * Find PR number for a given issue number (architect mode)
+ * Find PR number for a given issue number (architect mode) via pr-search forge concept.
  */
 function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: number; headRefName: string } {
-  const prJson = execSync(
-    `gh pr list --search "${issueNumber}" --json number,headRefName --jq '.[0]'`,
-    { cwd: workspaceRoot, encoding: 'utf-8' }
-  ).trim();
+  const result = executeForgeCommandSync('pr-search', {
+    CODEV_SEARCH_QUERY: String(issueNumber),
+  }, { cwd: workspaceRoot });
 
-  if (!prJson || prJson === 'null') {
+  const prs = Array.isArray(result) ? result as Array<{ number: number; headRefName: string }> : [];
+  if (prs.length === 0 || !prs[0]?.number) {
     throw new Error(`No PR found for issue #${issueNumber}`);
   }
 
-  return JSON.parse(prJson);
+  return prs[0];
 }
 
 /**

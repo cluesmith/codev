@@ -43,9 +43,10 @@ describe('codev doctor (CLI)', () => {
     expect(hasIndicators).toBe(true);
   });
 
-  it('checks for gh (GitHub CLI)', () => {
+  it('checks AI CLI dependencies', () => {
     const result = runCodev(['doctor'], env.dir, env.env);
-    expect(result.stdout).toContain('gh');
+    // Doctor should show AI CLI dependency section (Claude, Gemini, Codex)
+    expect(result.stdout).toContain('Claude');
   });
 
   it('output is readable (multiple lines)', () => {

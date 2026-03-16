@@ -12,6 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
+import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import {
   loadProtocol,
   getPhaseConfig,
@@ -240,7 +241,13 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         {
           subject: 'Merge the pull request',
           activeForm: 'Merging pull request',
-          description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`,
+          description: (() => {
+            const mergeCmd = getForgeCommand('pr-merge', loadForgeConfig(workspaceRoot));
+            const mergeInstructions = mergeCmd
+              ? `Merge the PR using:\n\n${mergeCmd}`
+              : `The pr-merge concept is disabled for this forge. Merge the PR manually using your forge's merge mechanism.`;
+            return `The protocol is complete. ${mergeInstructions}\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`;
+          })(),
           sequential: true,
         },
       ],

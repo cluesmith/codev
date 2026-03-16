@@ -794,6 +794,6 @@ describe('porch next', () => {
     expect(result.tasks![0].description).toContain('status.yaml');
     // Second task: merge PR
     expect(result.tasks![1].subject).toContain('Merge');
-    expect(result.tasks![1].description).toContain('gh pr merge');
+    expect(result.tasks![1].description).toContain('pr-merge');
   });
 });

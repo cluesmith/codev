@@ -1,0 +1,137 @@
+id: '589'
+title: support-non-github-repositorie
+protocol: spir
+phase: complete
+plan_phases:
+  - id: concept-infrastructure
+    title: Concept Command Infrastructure
+    status: complete
+  - id: core-github-refactor
+    title: Core GitHub Function Migration
+    status: complete
+  - id: spawn-migration
+    title: Spawn Worktree Migration
+    status: complete
+  - id: overview-analytics-migration
+    title: Overview & Analytics Migration
+    status: complete
+  - id: porch-protocol-migration
+    title: Porch & Protocol Migration
+    status: complete
+  - id: team-doctor-docs
+    title: Team, Doctor, and Documentation
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-03-09T04:39:38.253Z'
+    approved_at: '2026-03-09T04:40:22.927Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-03-09T05:00:39.654Z'
+    approved_at: '2026-03-09T05:01:06.555Z'
+  pr:
+    status: approved
+    approved_at: '2026-03-10T18:03:17.584Z'
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: concept-infrastructure
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-concept-infrastructure-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-concept-infrastructure-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-concept-infrastructure-iter1-claude.txt
+  - iteration: 1
+    plan_phase: core-github-refactor
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-core-github-refactor-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-core-github-refactor-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-core-github-refactor-iter1-claude.txt
+  - iteration: 1
+    plan_phase: spawn-migration
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-spawn-migration-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-spawn-migration-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-spawn-migration-iter1-claude.txt
+  - iteration: 1
+    plan_phase: overview-analytics-migration
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-overview-analytics-migration-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-overview-analytics-migration-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-overview-analytics-migration-iter1-claude.txt
+  - iteration: 1
+    plan_phase: porch-protocol-migration
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-porch-protocol-migration-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-porch-protocol-migration-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-porch-protocol-migration-iter1-claude.txt
+  - iteration: 1
+    plan_phase: team-doctor-docs
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-team-doctor-docs-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-team-doctor-docs-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/nharward/src/github/codev/.builders/spir-589-support-non-github-repositorie/codev/projects/589-support-non-github-repositorie/589-team-doctor-docs-iter1-claude.txt
+started_at: '2026-03-09T04:16:16.086Z'
+updated_at: '2026-03-10T23:13:23.134Z'

@@ -3,7 +3,7 @@ import type { DashboardState, Builder, UtilTerminal, Annotation } from '../lib/a
 
 export interface Tab {
   id: string;
-  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity' | 'analytics';
+  type: 'work' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity' | 'analytics' | 'team';
   label: string;
   closable: boolean;
   terminalId?: string;
@@ -19,6 +19,10 @@ function buildTabs(state: DashboardState | null): Tab[] {
     { id: 'work', type: 'work', label: 'Work', closable: false },
     { id: 'analytics', type: 'analytics', label: 'Analytics', closable: false, persistent: true },
   ];
+
+  if (state?.teamEnabled) {
+    tabs.push({ id: 'team', type: 'team', label: 'Team', closable: false });
+  }
 
   if (state?.architect) {
     tabs.push({ id: 'architect', type: 'architect', label: 'Architect', closable: false, terminalId: state.architect.terminalId, persistent: state.architect.persistent });

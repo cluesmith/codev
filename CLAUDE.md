@@ -266,12 +266,14 @@ When the user says **"cmap the PR"** or **"cmap spec 42"**, this means:
 - There is NO `restart` subcommand — stop then start
 - When unsure about syntax, check the docs below first
 
-Codev provides three CLI tools. For complete reference documentation, see:
+Codev provides five CLI tools. For complete reference documentation, see:
 
 - **[Overview](codev/resources/commands/overview.md)** - Quick start and summary of all tools
 - **[codev](codev/resources/commands/codev.md)** - Project management (init, adopt, doctor, update, tower)
 - **[af](codev/resources/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
+- **[porch](codev/resources/commands/overview.md#porch---protocol-orchestrator)** - Protocol orchestrator (status, run, approve, pending)
 - **[consult](codev/resources/commands/consult.md)** - AI consultation (general, protocol, stats)
+- **[team](codev/resources/commands/team.md)** - Team coordination (list, message, update, add)
 
 ## Architect-Builder Pattern
 

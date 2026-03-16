@@ -249,6 +249,28 @@ updated_at: "${state.updated_at}"
       expect(result).toContain('bugfix-237-fix-spawn');
     });
 
+    it('should find project by full directory name (bugfix #606)', () => {
+      const projectDir = path.join(projectsDir, '0221-rename-cli-tools-to-short-shan');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0221"\nprotocol: spir\nphase: specify\n');
+
+      const result = findStatusPath(testDir, '0221-rename-cli-tools-to-short-shan');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('0221-rename-cli-tools-to-short-shan');
+    });
+
+    it('should find bugfix project by full directory name (bugfix #606)', () => {
+      const projectDir = path.join(projectsDir, 'bugfix-606-bug-porch-status-rejects-full-');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "bugfix-606"\nprotocol: bugfix\nphase: investigate\n');
+
+      const result = findStatusPath(testDir, 'bugfix-606-bug-porch-status-rejects-full-');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('bugfix-606-bug-porch-status-rejects-full-');
+    });
+
     it('should return null if projects directory does not exist', () => {
       const emptyDir = path.join(testDir, 'empty');
       fs.mkdirSync(emptyDir);
@@ -313,35 +335,39 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/bugfix-332-fix-login-bug/src/commands/')).toBe('bugfix-332');
     });
 
-    it('should detect task worktree ID', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBe('task-aB2C');
+    it('should detect numeric ID from aspir worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-221-rename-cli-tools')).toBe('221');
     });
 
-    it('should detect task worktree ID from subdirectory', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/task-A_4E/src/commands/')).toBe('task-A_4E');
+    it('should detect numeric ID from spir worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-042-feature-name')).toBe('042');
     });
 
-    it('should detect ASPIR worktree with spec number', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/aspir-17-replace-openai')).toBe('0017');
+    it('should detect numeric ID from air worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/air-100-small-feature')).toBe('100');
     });
 
-    it('should detect SPIR worktree with spec number', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/spir-315-auth-system')).toBe('0315');
+    it('should detect numeric ID from tick worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/tick-050-amendment')).toBe('050');
     });
 
-    it('should detect TICK worktree with spec number', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/tick-559-data-repo')).toBe('0559');
+    it('should detect protocol worktree ID from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-221-rename-cli-tools/src/commands/')).toBe('221');
     });
 
-    it('should detect protocol worktree from subdirectory', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/aspir-42-feature/src/deep/')).toBe('0042');
+    it('should detect protocol worktree without slug', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-042')).toBe('042');
+    });
+
+    it('should return null for task worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
     });
 
     it('should return null for maintain worktrees', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
     });
 
-    it('should return null for protocol worktrees without numeric ID', () => {
+    it('should return null for protocol worktrees with non-numeric IDs', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
     });
 
@@ -413,15 +439,9 @@ updated_at: "${state.updated_at}"
         .toThrow('Cannot determine project ID');
     });
 
-    it('step 2: task worktrees are detected from CWD', () => {
-      // Task worktrees now return task-{id} from CWD detection
-      const result = resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot);
-      expect(result).toEqual({ id: 'task-aB2C', source: 'cwd' });
-    });
-
     it('step 2: protocol worktrees with numeric ID are detected from CWD', () => {
       const result = resolveProjectId(undefined, '/repo/.builders/aspir-17-feature', emptyProjectRoot);
-      expect(result).toEqual({ id: '0017', source: 'cwd' });
+      expect(result).toEqual({ id: '17', source: 'cwd' });
     });
   });
 

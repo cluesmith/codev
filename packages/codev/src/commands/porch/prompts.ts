@@ -16,7 +16,7 @@ import { getCurrentPlanPhase, getPhaseContent, getPlanContent } from './plan.js'
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import { getResolver } from './artifacts.js';
 import type { ArtifactResolver } from './artifacts.js';
-import { fetchGitHubIssue } from '../../lib/github.js';
+import { fetchIssue } from '../../lib/github.js';
 
 /** Locations to search for protocol prompts */
 const PROTOCOL_PATHS = [
@@ -37,7 +37,7 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
   // 1. Try GitHub issue
   const issueNumber = parseInt(projectId, 10);
   if (!isNaN(issueNumber)) {
-    const issue = await fetchGitHubIssue(issueNumber);
+    const issue = await fetchIssue(issueNumber);
     if (issue?.title) {
       return issue.title;
     }
