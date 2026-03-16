@@ -9,7 +9,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   slugify, buildWorktreeLaunchScript,
   checkDependencies, createWorktree, createWorktreeFromBranch,
-  validateBranchName, symlinkConfigFiles,
+  validateBranchName, validateRemoteName, detectForkRemote,
+  symlinkConfigFiles,
   checkBugfixCollisions,
   findExistingBugfixWorktree,
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
@@ -442,8 +443,8 @@ describe('spawn-worktree', () => {
         .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any) // git worktree list
         .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);        // git worktree add
       await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt')).resolves.toBeUndefined();
-      expect(run).toHaveBeenCalledWith('git fetch origin', { cwd: '/projects/test' });
-      expect(run).toHaveBeenCalledWith('git ls-remote --heads origin "my-branch"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git fetch "origin"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git ls-remote --heads "origin" "my-branch"', { cwd: '/projects/test' });
       expect(run).toHaveBeenCalledWith(
         'git worktree add "/tmp/wt" -b "my-branch" "origin/my-branch"',
         { cwd: '/projects/test' },
@@ -492,6 +493,225 @@ describe('spawn-worktree', () => {
       await expect(createWorktreeFromBranch(config, 'foo;rm -rf /', '/tmp/wt'))
         .rejects.toThrow('Invalid branch name');
       expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // validateRemoteName (Bugfix #615)
+  // =========================================================================
+
+  describe('validateRemoteName', () => {
+    it('accepts valid remote names', () => {
+      expect(() => validateRemoteName('origin')).not.toThrow();
+      expect(() => validateRemoteName('upstream')).not.toThrow();
+      expect(() => validateRemoteName('nharward')).not.toThrow();
+      expect(() => validateRemoteName('my-fork')).not.toThrow();
+    });
+
+    it('rejects empty remote name', () => {
+      expect(() => validateRemoteName('')).toThrow('--remote requires a remote name');
+    });
+
+    it('rejects remote names with shell metacharacters', () => {
+      expect(() => validateRemoteName('foo;rm -rf /')).toThrow('Invalid remote name');
+      expect(() => validateRemoteName('foo$(whoami)')).toThrow('Invalid remote name');
+    });
+  });
+
+  // =========================================================================
+  // detectForkRemote (Bugfix #615)
+  // =========================================================================
+
+  describe('detectForkRemote', () => {
+    const config = { workspaceRoot: '/projects/test' } as any;
+
+    it('returns fork owner and URL when a fork PR is found', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({
+        stdout: JSON.stringify([{
+          number: 604,
+          headRepositoryOwner: { login: 'nharward' },
+          headRepository: { name: 'codev' },
+          isCrossRepository: true,
+        }]),
+        stderr: '',
+      } as any);
+
+      const result = await detectForkRemote(config, 'feature-branch');
+      expect(result).toEqual({
+        owner: 'nharward',
+        url: 'https://github.com/nharward/codev.git',
+      });
+    });
+
+    it('returns null when no PRs are found', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any);
+
+      const result = await detectForkRemote(config, 'feature-branch');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when PRs exist but none are cross-repository', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({
+        stdout: JSON.stringify([{
+          number: 604,
+          headRepositoryOwner: { login: 'owner' },
+          headRepository: { name: 'codev' },
+          isCrossRepository: false,
+        }]),
+        stderr: '',
+      } as any);
+
+      const result = await detectForkRemote(config, 'feature-branch');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when gh command fails', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockRejectedValueOnce(new Error('gh not found'));
+
+      const result = await detectForkRemote(config, 'feature-branch');
+      expect(result).toBeNull();
+    });
+
+    it('fatals when multiple fork PRs share the same branch name', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 604,
+            headRepositoryOwner: { login: 'nharward' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          },
+          {
+            number: 610,
+            headRepositoryOwner: { login: 'otherfork' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          },
+        ]),
+        stderr: '',
+      } as any);
+
+      await expect(detectForkRemote(config, 'feature-branch'))
+        .rejects.toThrow('Multiple fork PRs found');
+    });
+  });
+
+  // =========================================================================
+  // createWorktreeFromBranch with --remote and fork detection (Bugfix #615)
+  // =========================================================================
+
+  describe('createWorktreeFromBranch (fork support)', () => {
+    const config = { workspaceRoot: '/projects/test' } as any;
+
+    it('uses explicit --remote instead of origin', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch "nharward"
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any) // git ls-remote nharward
+        .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any) // git worktree list
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);        // git worktree add
+
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt', { remote: 'nharward' }))
+        .resolves.toBeUndefined();
+
+      expect(run).toHaveBeenCalledWith('git fetch "nharward"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git ls-remote --heads "nharward" "my-branch"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith(
+        'git worktree add "/tmp/wt" -b "my-branch" "nharward/my-branch"',
+        { cwd: '/projects/test' },
+      );
+    });
+
+    it('auto-detects fork when branch not found on origin', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch "origin"
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git ls-remote origin (not found)
+        // Fork detection: gh pr list
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([{
+            number: 604,
+            headRepositoryOwner: { login: 'nharward' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          }]),
+          stderr: '',
+        } as any)
+        // ensureRemote: git remote get-url fails (remote doesn't exist)
+        .mockRejectedValueOnce(new Error('No such remote'))
+        // ensureRemote: git remote add
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)
+        // git fetch fork
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)
+        // git ls-remote fork (found)
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any)
+        // git worktree list
+        .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any)
+        // git worktree add
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);
+
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt'))
+        .resolves.toBeUndefined();
+
+      // Verify fork remote was added and used
+      expect(run).toHaveBeenCalledWith('git remote add "nharward" "https://github.com/nharward/codev.git"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git fetch "nharward" "my-branch"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith(
+        'git worktree add "/tmp/wt" -b "my-branch" "nharward/my-branch"',
+        { cwd: '/projects/test' },
+      );
+    });
+
+    it('fatals with helpful message when branch not found anywhere', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)  // git fetch origin
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)  // git ls-remote (not found)
+        .mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any); // gh pr list (no fork PRs)
+
+      await expect(createWorktreeFromBranch(config, 'nonexistent', '/tmp/wt'))
+        .rejects.toThrow('does not exist on the remote');
+    });
+
+    it('fatals with remote name in message when explicit --remote fails', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)  // git fetch nharward
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any); // git ls-remote (not found)
+
+      await expect(createWorktreeFromBranch(config, 'nonexistent', '/tmp/wt', { remote: 'nharward' }))
+        .rejects.toThrow("does not exist on remote 'nharward'");
+    });
+
+    it('fatals when existing remote has mismatched URL during fork detection', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch "origin"
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git ls-remote origin (not found)
+        // Fork detection: gh pr list
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([{
+            number: 604,
+            headRepositoryOwner: { login: 'nharward' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          }]),
+          stderr: '',
+        } as any)
+        // ensureRemote: git remote get-url succeeds with WRONG URL
+        .mockResolvedValueOnce({ stdout: 'https://github.com/other/repo.git', stderr: '' } as any);
+
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt'))
+        .rejects.toThrow("Remote 'nharward' already exists but points to");
+    });
+
+    it('rejects invalid remote names', () => {
+      expect(() => validateRemoteName('foo;rm -rf /')).toThrow('Invalid remote name');
     });
   });
 

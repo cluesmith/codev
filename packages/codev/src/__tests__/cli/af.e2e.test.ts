@@ -104,6 +104,23 @@ describe('af command (CLI)', () => {
     expect(output).toContain('--branch requires an issue number');
   });
 
+  // === --remote flag E2E tests (Bugfix #615) ===
+
+  it('spawn --help shows --remote option (Bugfix #615)', () => {
+    const result = runAf(['spawn', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--remote');
+  });
+
+  it('spawn --remote rejects without --branch', () => {
+    runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
+    const projectDir = join(env.dir, 'test-project');
+    const result = runAf(['spawn', '615', '--protocol', 'bugfix', '--remote', 'nharward'], projectDir, env.env);
+    expect(result.status).not.toBe(0);
+    const output = result.stdout + result.stderr;
+    expect(output).toContain('--remote requires --branch');
+  });
+
   // === Status Command ===
 
   it('status works in a codev project', () => {

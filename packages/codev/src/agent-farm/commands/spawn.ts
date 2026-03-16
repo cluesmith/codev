@@ -182,6 +182,11 @@ function validateSpawnOptions(options: SpawnOptions): void {
       fatal('--branch requires --protocol (protocol cannot be auto-detected for existing branches)');
     }
   }
+
+  // --remote requires --branch
+  if (options.remote && !options.branch) {
+    fatal('--remote requires --branch (specifies which remote to fetch the branch from)');
+  }
 }
 
 /**
@@ -354,7 +359,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   if (options.resume) {
     validateResumeWorktree(worktreePath);
   } else if (options.branch) {
-    await createWorktreeFromBranch(config, branchName, worktreePath);
+    await createWorktreeFromBranch(config, branchName, worktreePath, { remote: options.remote });
   } else {
     await createWorktree(config, branchName, worktreePath);
   }
@@ -703,7 +708,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   if (options.resume) {
     validateResumeWorktree(worktreePath);
   } else if (options.branch) {
-    await createWorktreeFromBranch(config, branchName, worktreePath);
+    await createWorktreeFromBranch(config, branchName, worktreePath, { remote: options.remote });
     // Pre-initialize porch for --branch mode too
     const porchProjectId = `bugfix-${issueNumber}`;
     const slug = slugify(issue.title);
