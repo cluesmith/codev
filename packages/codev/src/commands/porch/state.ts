@@ -192,7 +192,7 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
   const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith(`${projectId}-`)) {
+    if (entry.isDirectory() && (entry.name === projectId || entry.name.startsWith(`${projectId}-`))) {
       const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
       if (fs.existsSync(statusPath)) {
         return statusPath;
