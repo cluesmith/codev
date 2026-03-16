@@ -53,12 +53,13 @@ Codev's configuration system has grown organically, leading to several pain poin
   - `packages/codev/src/commands/porch/config.ts` — porch also loads `af-config.json`
   - Both read from the same `af-config.json` but have independent loading code
 
-### File Resolution (Two Independent Chains)
+### File Resolution (Three Independent Chains)
 - **Chain 1 — `readCodevFile()` in `skeleton.ts`**: Two-tier fallback: local `codev/<path>` then embedded `skeleton/<path>`. Used by consult types, roles, and general file resolution.
-- **Chain 2 — `PROTOCOL_PATHS` in `protocol.ts`**: Separate array: `['codev/protocols', 'codev-skeleton/protocols']`. Used exclusively for protocol loading. Does NOT go through `readCodevFile()`.
+- **Chain 2 — `PROTOCOL_PATHS` in `protocol.ts`**: Separate array: `['codev/protocols', 'codev-skeleton/protocols']`. Used for protocol JSON loading. Does NOT go through `readCodevFile()`.
+- **Chain 3 — `PROTOCOL_PATHS` in `prompts.ts`**: Independent copy of the same array. Used for loading protocol prompt files. Also does NOT go through `readCodevFile()`.
 - Roles resolved via config override → local → embedded skeleton
 
-Both chains need to be updated to support the new resolution order.
+All three chains need to be unified into a single resolver.
 
 ### Consultation Models
 - `MODEL_CONFIGS` hardcoded in `consult/index.ts`: only `gemini` (CLI-based)
@@ -96,7 +97,7 @@ Config merging follows these rules (project overrides global):
 - **Objects**: Recursively deep-merged. Project keys override global keys; global-only keys are preserved.
 - **Arrays**: **Replaced**, not concatenated. If project config sets `models: ["claude"]`, it fully replaces the global `models: ["gemini", "codex", "claude"]`. Arrays are treated as atomic values.
 - **Scalars** (strings, numbers, booleans): Project value wins.
-- **`null`**: Explicitly setting a key to `null` in project config removes it (opt-out of a global default).
+- **`null`**: Explicitly setting a key to `null` in project config **deletes the key** from the merged result (the key is omitted entirely, not kept as `null`). This allows opting out of a global default.
 - **Unknown keys**: Preserved through merge (extensibility). No validation error for unrecognized top-level sections.
 
 Example:
@@ -109,13 +110,13 @@ Result:  { "porch": { "consultation": { "models": ["claude"] }, "checks": { "bui
 #### Error Handling for Config Files
 
 - **Missing config file**: Not an error. Use defaults.
-- **Invalid JSON**: Emit a clear error message with the file path and JSON parse error. Fail hard — do not silently fall back to defaults, as this would mask user mistakes.
+- **Invalid JSON**: Emit a clear error message with the file path and JSON parse error. **Fail hard** regardless of which file is invalid — even if global config is invalid but project config is valid, fail. Users must fix their config files. Do not silently fall back to defaults.
 - **File permission errors**: Emit warning, fall back to defaults (the file exists but can't be read).
 - **Both `af-config.json` and `.codev/config.json` exist**: Use `.codev/config.json`, emit info-level message that `af-config.json` is being ignored.
 
 #### Default Config (No Files Exist)
 
-When no config files exist at all, defaults are:
+When no config files exist at all, hardcoded defaults are used. Note: shell defaults are bare `claude` — the `--dangerously-skip-permissions` flag is a project-level choice that users opt into, not a default:
 ```json
 {
   "shell": {
@@ -152,12 +153,21 @@ The `models` field accepts either an array of model names or a string for specia
 
 - `["claude"]` — single-model mode (addresses #592)
 - `["gemini", "codex", "claude"]` — current default (backward compatible)
-- `"parent"` — delegate to architect session (foundation for #614; recognized but behavior is #614's scope)
+- `"parent"` — delegate to architect session (foundation for #614)
 - `"none"` — skip all consultations (equivalent to "without consultation")
 
 **Type**: `string | string[]` — the config loader normalizes to a canonical form for downstream consumers.
 
+**Behavior in porch verify steps**:
+
 When porch encounters a `verify` step in a protocol, it uses the configured models instead of the hardcoded list in `protocol.json`. The protocol's `verify.models` field becomes a fallback default, overridden by user config.
+
+| Mode | Verify step behavior |
+|------|---------------------|
+| `["claude"]` | Run consult with only claude. Verify passes if claude approves. |
+| `["gemini", "codex", "claude"]` | Current behavior — 3-way parallel consultation. |
+| `"none"` | Skip the verify step entirely. Mark it as passed with a note: "consultation skipped (configured: none)". |
+| `"parent"` | Emit a `phase-review-{phase}` gate instead of running consult. Builder blocks at the gate. Architect reviews and approves. (Full behavior defined in #614; this spec just ensures the gate is emitted instead of consult commands.) |
 
 ### 3. Runtime File Resolution (Eliminate `codev update`)
 
@@ -195,9 +205,17 @@ These out-of-scope files continue to be managed by `codev init`/`codev adopt`. U
 - Detects existing `codev/protocols/` etc. — leaves them in place (they take precedence)
 - Creates `.codev/config.json` if not present
 
-**`codev update` deprecation**:
-- Command emits deprecation warning: "codev update is no longer needed. Framework files are resolved from the installed package at runtime. To update Claude-specific files, use `codev adopt --update`."
-- Becomes a no-op (exits after warning)
+**Stale skeleton file cleanup** (update shadowing prevention):
+Existing projects may have unmodified skeleton files in `codev/protocols/`, `codev/roles/`, etc. that were copied by `codev init` or `codev update`. These files will shadow newer versions from the npm package, preventing updates. To address this:
+- `codev update` performs a **one-time migration**: reads `codev/.update-hashes.json`, identifies files whose hash still matches the original skeleton hash (i.e., user never modified them), and deletes those files. This allows them to fall back to the package defaults.
+- Files whose hash differs from the original (user-modified) are left in place.
+- After cleanup, `codev update` emits: "Cleaned up N unmodified skeleton files. Framework files now resolve from the installed package. Future `codev update` calls are no longer needed."
+- Subsequent calls to `codev update` emit a deprecation warning and become a no-op.
+
+**New `codev adopt --update` flag**:
+- Updates Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) from the latest package without touching other files
+- This is the recommended way to get updated skills/agent instructions after a codev upgrade
+- Handles conflicts the same way `codev adopt` does (skip existing, merge, or `.codev-new`)
 
 ### 4. Remote Protocol Sources
 
@@ -224,6 +242,8 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 
 **Implementation of remote fetching is deferred to a later phase** (Phase 4). This spec defines the config shape so it can be validated and stored now.
 
+**Pre-Phase 4 behavior**: If `protocols.source` is set to anything other than `"local"`, emit a clear error: "Remote protocol sources are not yet supported. Set protocols.source to 'local' or remove it." This prevents silent misconfiguration where users think they're using remote protocols but are actually falling back to local/package.
+
 ## Stakeholders
 - **Primary Users**: Codev users configuring their projects
 - **Secondary Users**: Teams sharing custom protocols across projects
@@ -241,13 +261,17 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 - [ ] `"parent"` and `"none"` consultation modes recognized (actual behavior deferred)
 - [ ] `models` field accepts both `string` and `string[]`
 - [ ] Framework files (protocols, roles, consult-types, templates) resolve from npm package at runtime
-- [ ] Unified `resolveFile()` replaces both `readCodevFile()` and `PROTOCOL_PATHS`
+- [ ] Unified `resolveFile()` replaces `readCodevFile()`, `PROTOCOL_PATHS` in protocol.ts, and `PROTOCOL_PATHS` in prompts.ts
 - [ ] `codev init` creates minimal project (no skeleton copies for codev-readable files)
 - [ ] `codev adopt` works with existing projects (leaves local files, creates .codev/config.json)
-- [ ] `codev update` emits deprecation warning and becomes a no-op
+- [ ] `codev update` performs one-time skeleton cleanup (unmodified files), then becomes a no-op on subsequent calls
+- [ ] `codev adopt --update` flag updates Claude-specific files only
 - [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
 - [ ] Remote protocol source config shape accepted and validated
+- [ ] Non-local `protocols.source` emits clear "not yet supported" error
+- [ ] Worktree symlink pattern updated from `af-config.json` to `.codev/config.json`
+- [ ] All 10 `af-config.json` usage sites migrated to centralized loader
 - [ ] All existing tests pass
 - [ ] New tests cover config loading, layering, merge semantics, migration, and resolution
 
@@ -255,7 +279,7 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 
 ### Technical Constraints
 - Must be backward compatible with existing `af-config.json` projects
-- Both resolution chains (`skeleton.ts` and `protocol.ts`) must be unified
+- All three resolution chains (`skeleton.ts`, `protocol.ts`, and `prompts.ts`) must be unified
 - Embedded skeleton must remain the ultimate fallback (offline support)
 - Config schema must be extensible for future features (#612 artifact resolver, #614 parent mode)
 - Claude-specific files cannot be resolved at runtime (external CLI reads them directly)
@@ -373,22 +397,33 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 8. **Resolution unification**: Both protocol loading and readCodevFile use same resolver
 9. **Init minimal**: `codev init` creates `.codev/config.json`, user dirs, Claude files — but NOT protocols/roles/templates
 10. **Adopt existing**: `codev adopt` leaves existing `codev/protocols/` in place, creates `.codev/config.json`
-11. **Update deprecated**: `codev update` emits warning and exits
-12. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
-13. **Worktree behavior**: `.codev/config.json` accessible from git worktrees
+11. **Update migration**: `codev update` cleans up unmodified skeleton files on first run, then becomes no-op
+12. **Adopt --update**: `codev adopt --update` refreshes Claude-specific files only
+13. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
+14. **Worktree behavior**: `.codev/config.json` accessible from git worktrees (symlink from spawn-worktree)
+15. **Remote source pre-Phase 4**: Setting `protocols.source` to non-local value emits error
+16. **Null removal**: Setting a key to `null` in project config deletes it from merged result
+17. **Consultation modes in verify**: "none" skips verify, "parent" emits gate, array runs specified models
+18. **Skeleton cleanup**: Unmodified files are removed, user-modified files are preserved
 
 ### Non-Functional Tests
 1. Config load performance under 50ms
 2. No regression in existing test suite
 
 ## Dependencies
-- **Internal**:
+- **Internal** (see "All `af-config.json` Usage Sites" for complete inventory):
   - `readCodevFile()` in `packages/codev/src/lib/skeleton.ts`
   - `PROTOCOL_PATHS` in `packages/codev/src/commands/porch/protocol.ts`
+  - `PROTOCOL_PATHS` in `packages/codev/src/commands/porch/prompts.ts`
   - `loadUserConfig()` in `packages/codev/src/agent-farm/utils/config.ts`
   - Config loading in `packages/codev/src/commands/porch/config.ts`
+  - `loadForgeConfig()` in `packages/codev/src/lib/forge.ts`
+  - `tower-terminals.ts` and `tower-instances.ts` (direct config reads)
+  - `spawn-worktree.ts` (af-config.json symlink into worktrees)
+  - `send.ts` (workspace root detection via af-config.json)
   - `consult/index.ts` model definitions
   - `scaffold.ts` (init/adopt shared utilities)
+  - `init.ts` and `adopt.ts` (config file creation)
   - `update.ts` (codev update command)
 - **External**: None (remote sources deferred)
 
@@ -427,6 +462,9 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
       "models": ["gemini", "codex", "claude"]
     }
   },
+  "forge": {
+    "concepts": {}
+  },
   "protocols": {
     "source": "local",
     "ref": null
@@ -434,12 +472,15 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 }
 ```
 
+Note: The `forge` section (used by `lib/forge.ts` for GitHub/GitLab integration) is included. Unknown keys (like future `artifacts` from #612) are preserved through merge.
+```
+
 ### Migration Path
 
 1. On first config load, check for `af-config.json`
-2. If found and `.codev/config.json` doesn't exist: load from `af-config.json`, emit deprecation warning
+2. If found and `.codev/config.json` doesn't exist: load from `af-config.json`, emit deprecation warning suggesting the user move it
 3. If both exist: use `.codev/config.json`, ignore `af-config.json`, emit info message
-4. Provide `codev migrate-config` command to auto-move the file
+4. A `codev migrate-config` helper command is **out of scope** for this spec — users can simply `mkdir -p .codev && mv af-config.json .codev/config.json`
 
 ### Resolution Chain (Final)
 
@@ -457,18 +498,33 @@ For Claude-specific files (NOT runtime resolved):
 CLAUDE.md / AGENTS.md      ← copied by codev init/adopt, maintained by user
 ```
 
-### All Config Loading Sites (Must Be Migrated)
+### All `af-config.json` Usage Sites (Must Be Migrated)
 
-These are the known locations where `af-config.json` is currently loaded:
-1. `packages/codev/src/agent-farm/utils/config.ts` — `loadUserConfig()`
-2. `packages/codev/src/commands/porch/config.ts` — porch config loading
-3. `packages/codev/src/commands/update.ts` — reads check overrides
+Comprehensive inventory of all source files that read, parse, create, or reference `af-config.json`:
 
-All three must be migrated to use the new centralized config loader.
+**Config parsers** (must use new centralized loader):
+1. `packages/codev/src/agent-farm/utils/config.ts` — `loadUserConfig()`, primary config for agent farm
+2. `packages/codev/src/commands/porch/config.ts` — porch check overrides
+3. `packages/codev/src/lib/forge.ts` — `loadForgeConfig()`, reads forge section
+4. `packages/codev/src/agent-farm/servers/tower-terminals.ts` — reads config directly for shell commands
+5. `packages/codev/src/agent-farm/servers/tower-instances.ts` — reads config for architect command
+
+**File creators** (must create `.codev/config.json` instead):
+6. `packages/codev/src/commands/init.ts` — creates af-config.json during init
+7. `packages/codev/src/commands/adopt.ts` — creates af-config.json during adopt
+
+**Path references** (must update file path):
+8. `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — symlinks af-config.json into worktrees (must symlink `.codev/config.json` or `.codev/` directory instead)
+9. `packages/codev/src/agent-farm/commands/send.ts` — uses af-config.json existence for workspace root detection
+
+**Read-only / update** (must update path or use centralized loader):
+10. `packages/codev/src/commands/update.ts` — reads check overrides
+
+All sites must be migrated. The worktree symlink (item 8) is particularly important — the current pattern of symlinking `af-config.json` must carry over to `.codev/config.json`.
 
 ## Expert Consultation
 
-**Date**: 2026-03-16
+### Round 1 (2026-03-16)
 **Models Consulted**: Gemini, Codex, Claude
 **Key Feedback Addressed**:
 
@@ -484,3 +540,20 @@ All three must be migrated to use the new centralized config loader.
 10. **Remote source pinning** (Codex): Added `ref` field to protocol source config for pinning to tag/branch/commit.
 11. **Platform support** (Codex, Claude): Added explicit constraint — macOS and Linux only.
 12. **Security permissions** (Claude): Added specific permissions (0700 dir, 0600 file) for global config.
+
+### Round 2 (2026-03-16)
+**Models Consulted**: Gemini, Codex, Claude
+**Key Feedback Addressed**:
+
+13. **Incomplete config loading sites** (all three): Expanded from 3 to 10 sites. Added forge.ts, tower-terminals.ts, tower-instances.ts, spawn-worktree.ts, send.ts, init.ts, adopt.ts. Categorized by type (parsers, creators, path references).
+14. **Three resolution chains, not two** (Claude): Added `prompts.ts` as a third independent chain with its own `PROTOCOL_PATHS` array.
+15. **Missing forge config** (Gemini, Claude): Added `forge` section to config schema draft.
+16. **Update shadowing** (Gemini): Changed `codev update` from a pure no-op to a one-time migration that removes unmodified skeleton files using `.update-hashes.json`, preventing stale local files from shadowing package updates.
+17. **Consultation mode behavior in verify** (Codex): Added table defining exactly what happens for each mode ("none" skips, "parent" emits gate, array runs specified models).
+18. **Remote source before Phase 4** (Codex): Specified behavior — emit error if `protocols.source` is not `"local"`.
+19. **Default config inconsistency** (Codex): Clarified that defaults use bare `claude` (not `--dangerously-skip-permissions`), added explanatory note.
+20. **`codev migrate-config` scope** (Codex, Claude): Explicitly marked as out of scope; users can move the file manually.
+21. **`codev adopt --update` flag** (Gemini, Claude): Defined as new flag for updating Claude-specific files after upgrades.
+22. **Null removal semantics** (Codex): Clarified that null **deletes the key** from merged result (key is omitted, not kept as null).
+23. **Invalid JSON precedence** (Codex): Clarified that any invalid JSON file fails hard, regardless of which file (global or project).
+24. **Worktree symlink pattern** (Claude): Added success criterion for updating spawn-worktree.ts symlink.
