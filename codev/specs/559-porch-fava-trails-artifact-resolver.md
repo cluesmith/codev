@@ -47,6 +47,12 @@ Users who store codev artifacts in FAVA Trails (a versioned agent memory system)
 - [ ] `fava-trails get --exists` returns exit code 0/1 for existence checks
 - [ ] Porch with `artifacts.backend: "local"` (or unset) behaves identically to current behavior
 - [ ] Porch with `artifacts.backend: "fava-trails"` resolves specs, plans, and reviews via `fava-trails get`
+- [ ] Porch with `artifacts.backend: "cli"` resolves artifacts via any CLI supporting `<cmd> get <scope>` and `<cmd> get --list <scope>`
+- [ ] CLI command is configurable via `artifacts.command` in af-config.json (defaults to `fava-trails`)
+- [ ] `backend: "fava-trails"` is accepted as an alias for `backend: "cli"` for backward compatibility
+- [ ] Resolver is passed through all code paths including `handleOncePhase` (TICK/BUGFIX protocols)
+- [ ] CLI errors are not cached — only successful results are cached
+- [ ] `hasPreApproval()` works for CLI resolver using shared frontmatter parsing
 - [ ] Artifact-dependent porch checks (plan_exists, review_has_arch_updates, etc.) use the resolver instead of hardcoded shell commands
 - [ ] `porch status`, `porch next`, and `porch done` all work with the FAVA Trails backend
 - [ ] Existing codev projects with local files continue to work without configuration changes
@@ -223,3 +229,24 @@ The `review_has_arch_updates`, `review_has_lessons_updates`, `plan_exists`, `has
 - Added TICK-003 amendment describing the implementation
 
 **Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-003.md`
+
+### TICK-004: Genericize artifact resolver + fix bugs (2026-03-16)
+
+**Summary**: Rename `FavaTrailsResolver` → `CliResolver` to make the resolver CLI-tool-agnostic, fix critical bug where resolver wasn't passed through TICK/BUGFIX protocols, and fix error caching + `hasPreApproval()` bugs.
+
+**Problem Addressed**:
+1. `handleOncePhase()` in `next.ts` receives `resolver` parameter but doesn't pass it to `buildPhasePrompt()`, breaking all TICK/BUGFIX protocols when using external artifact backend
+2. `hasPreApproval()` always returns `false` for CLI resolver, preventing auto-skip of approved gates
+3. CLI failures are cached as `null`, indistinguishable from "artifact not found" — transient failures poison the cache
+4. All naming is FAVA Trails-specific (`FavaTrailsResolver`, `backend: 'fava-trails'`, `FAVA_TRAILS_DATA_REPO`), making it unsuitable for upstream acceptance
+
+**Spec Changes**:
+- Success Criteria: Added criteria for generic CLI backend, configurable command, error caching fix
+- This Amendments section
+
+**Plan Changes**:
+- Added TICK-004 amendment describing implementation steps
+
+**Upstream**: https://github.com/cluesmith/codev/issues/612
+
+**Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-004.md`

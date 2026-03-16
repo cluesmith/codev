@@ -296,3 +296,18 @@ Phase 1 (fava-trails CLI) ──→ Phase 2 (artifacts.ts) ──→ Phase 3 (re
 - `index.ts`: Thread resolver through `check()`, `done()`, `approve()`. Fix `getArtifactForPhase()` to be backend-aware.
 
 **Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-003.md`
+
+### TICK-004: Genericize artifact resolver + fix bugs (2026-03-16)
+
+**Changes**:
+- `next.ts:733`: Pass `resolver` to `buildPhasePrompt()` in `handleOncePhase()`
+- `artifacts.ts`: Rename `FavaTrailsResolver` → `CliResolver`, make CLI command configurable via constructor `command` param, add `command` field to `ArtifactConfig`, accept `'cli'` as canonical backend with `'fava-trails'` as alias
+- `artifacts.ts`: Fix error caching — don't cache CLI failures as null, only cache successful results
+- `artifacts.ts`: Implement `hasPreApproval()` using shared `isPreApprovedContent()` helper for both resolvers
+- `artifacts.ts`: Read `CODEV_ARTIFACTS_DATA_REPO` env var (fallback to `FAVA_TRAILS_DATA_REPO` for backward compat)
+- `plan.ts:158`: Update comment from FavaTrailsResolver to CliResolver
+- `status.ts:172-187`: Display generic backend name, show configured command
+- `pty-manager.ts:74-77`: Propagate `CODEV_ARTIFACTS_DATA_REPO` alongside `FAVA_TRAILS_DATA_REPO`
+- `prompts.ts:40-66`: Add diagnostic logging in `getProjectSummary()` when falling back
+
+**Review**: See `reviews/559-porch-fava-trails-artifact-resolver-tick-004.md`
