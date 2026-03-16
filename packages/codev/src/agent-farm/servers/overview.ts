@@ -603,7 +603,7 @@ function scanArtifactDir(dirPath: string): Map<string, string> {
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
       const idStr = file.split('-')[0];
-      if (/^\d+$/.test(idStr)) result.set(idStr, file);
+      if (/^\d+$/.test(idStr)) result.set(String(Number(idStr)), file);
     }
   } catch {
     // Silently continue

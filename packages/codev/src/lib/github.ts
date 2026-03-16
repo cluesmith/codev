@@ -351,7 +351,7 @@ export function parseLinkedIssue(prBody: string, prTitle: string): string | null
   const closingKeywordPattern = /(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#(\d+)/i;
   const bodyMatch = prBody.match(closingKeywordPattern);
   if (bodyMatch) {
-    return bodyMatch[1];
+    return String(Number(bodyMatch[1]));
   }
 
   // Check PR title for [Spec N] or [Bugfix #N] patterns
@@ -360,23 +360,23 @@ export function parseLinkedIssue(prBody: string, prTitle: string): string | null
 
   const titleSpecMatch = prTitle.match(specPattern);
   if (titleSpecMatch) {
-    return titleSpecMatch[1];
+    return String(Number(titleSpecMatch[1]));
   }
 
   const titleBugfixMatch = prTitle.match(bugfixPattern);
   if (titleBugfixMatch) {
-    return titleBugfixMatch[1];
+    return String(Number(titleBugfixMatch[1]));
   }
 
   // Also check body for same patterns
   const bodySpecMatch = prBody.match(specPattern);
   if (bodySpecMatch) {
-    return bodySpecMatch[1];
+    return String(Number(bodySpecMatch[1]));
   }
 
   const bodyBugfixMatch = prBody.match(bugfixPattern);
   if (bodyBugfixMatch) {
-    return bodyBugfixMatch[1];
+    return String(Number(bodyBugfixMatch[1]));
   }
 
   return null;
@@ -399,18 +399,18 @@ export function parseAllLinkedIssues(prBody: string, prTitle: string): string[] 
   // GitHub closing keywords (global)
   const closingPattern = /(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#(\d+)/gi;
   for (const m of combined.matchAll(closingPattern)) {
-    issues.add(m[1]);
+    issues.add(String(Number(m[1])));
   }
 
   // [Spec N] or [Bugfix #N] patterns (global)
   const specPattern = /\[Spec\s+#?(\d+)\]/gi;
   for (const m of combined.matchAll(specPattern)) {
-    issues.add(m[1]);
+    issues.add(String(Number(m[1])));
   }
 
   const bugfixPattern = /\[Bugfix\s+#?(\d+)\]/gi;
   for (const m of combined.matchAll(bugfixPattern)) {
-    issues.add(m[1]);
+    issues.add(String(Number(m[1])));
   }
 
   return [...issues];

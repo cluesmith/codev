@@ -1166,6 +1166,20 @@ describe('overview', () => {
       expect(issue43.specPath).toBeUndefined();
     });
 
+    it('matches zero-padded spec filenames to unpadded issue IDs', () => {
+      // Real spec files use zero-padded names like 0042-my-feature.md
+      const specsDir = path.join(tmpDir, 'codev', 'specs');
+      fs.mkdirSync(specsDir, { recursive: true });
+      fs.writeFileSync(path.join(specsDir, '0042-my-feature.md'), '# my-feature');
+
+      const issues = [issueItem(42, 'My Feature')];
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+
+      const issue42 = backlog.find(b => b.id === '42')!;
+      expect(issue42.hasSpec).toBe(true);
+      expect(issue42.specPath).toBe('codev/specs/0042-my-feature.md');
+    });
+
     it('includes url from issue', () => {
       const issues = [issueItem(42, 'Test')];
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());

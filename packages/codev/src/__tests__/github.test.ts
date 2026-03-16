@@ -42,7 +42,7 @@ describe('parseLinkedIssue', () => {
   });
 
   it('parses [Spec N] from PR title', () => {
-    expect(parseLinkedIssue('', '[Spec 0126] Initial plan')).toBe('0126');
+    expect(parseLinkedIssue('', '[Spec 0126] Initial plan')).toBe('126');
   });
 
   it('parses [Spec #N] from PR title', () => {
