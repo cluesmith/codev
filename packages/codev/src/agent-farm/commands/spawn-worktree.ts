@@ -115,6 +115,8 @@ export async function detectForkRemote(
   config: Config,
   branch: string,
 ): Promise<{ owner: string; url: string } | null> {
+  // Fetch PR data — network/parse errors return null (graceful degradation)
+  let prs: Array<Record<string, unknown>>;
   try {
     const { stdout } = await run(
       `gh pr list --head "${branch}" --json number,headRepositoryOwner,headRepository,isCrossRepository --state open`,
@@ -122,41 +124,67 @@ export async function detectForkRemote(
     );
     const trimmed = stdout.trim();
     if (!trimmed) return null;
-    const prs = JSON.parse(trimmed);
+    prs = JSON.parse(trimmed);
     if (!Array.isArray(prs) || prs.length === 0) return null;
-
-    const forkPr = prs.find((pr: Record<string, unknown>) => pr.isCrossRepository);
-    if (!forkPr) return null;
-
-    const owner = (forkPr.headRepositoryOwner as Record<string, string>)?.login;
-    const repo = (forkPr.headRepository as Record<string, string>)?.name;
-    if (!owner || !repo) return null;
-
-    return {
-      owner,
-      url: `https://github.com/${owner}/${repo}.git`,
-    };
   } catch {
     return null;
   }
+
+  // Validation is outside try/catch so fatal() propagates
+  const forkPrs = prs.filter((pr) => pr.isCrossRepository);
+  if (forkPrs.length === 0) return null;
+
+  // Ambiguity check: if multiple forks have the same branch name, require --remote
+  if (forkPrs.length > 1) {
+    const owners = forkPrs.map((pr) =>
+      (pr.headRepositoryOwner as Record<string, string>)?.login,
+    ).filter(Boolean);
+    fatal(
+      `Multiple fork PRs found for branch '${branch}' from: ${owners.join(', ')}.\n` +
+      `Use --remote <name> to specify which fork to use.`
+    );
+  }
+
+  const forkPr = forkPrs[0];
+  const owner = (forkPr.headRepositoryOwner as Record<string, string>)?.login;
+  const repo = (forkPr.headRepository as Record<string, string>)?.name;
+  if (!owner || !repo) return null;
+
+  return {
+    owner,
+    url: `https://github.com/${owner}/${repo}.git`,
+  };
 }
 
 /**
  * Ensure a git remote exists with the given name and URL.
- * Adds the remote if it doesn't already exist.
+ * Adds the remote if it doesn't exist. If it exists but points to a
+ * different URL, fatals with a clear message to avoid silent misrouting.
  */
 async function ensureRemote(
   config: Config,
   name: string,
   url: string,
 ): Promise<void> {
+  let existingUrl: string | null = null;
   try {
-    await run(`git remote get-url "${name}"`, { cwd: config.workspaceRoot });
-    logger.debug(`Remote '${name}' already configured`);
+    const { stdout } = await run(`git remote get-url "${name}"`, { cwd: config.workspaceRoot });
+    existingUrl = stdout.trim();
   } catch {
+    // Remote doesn't exist — add it
     logger.info(`Adding remote '${name}' → ${url}`);
     await run(`git remote add "${name}" "${url}"`, { cwd: config.workspaceRoot });
+    return;
   }
+
+  // Remote exists — verify URL matches (outside try/catch so fatal propagates)
+  if (existingUrl !== url) {
+    fatal(
+      `Remote '${name}' already exists but points to '${existingUrl}' (expected '${url}').\n` +
+      `Remove or update the remote, or use --remote with the correct remote name.`
+    );
+  }
+  logger.debug(`Remote '${name}' already configured`);
 }
 
 /**

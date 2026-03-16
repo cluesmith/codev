@@ -575,6 +575,30 @@ describe('spawn-worktree', () => {
       const result = await detectForkRemote(config, 'feature-branch');
       expect(result).toBeNull();
     });
+
+    it('fatals when multiple fork PRs share the same branch name', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 604,
+            headRepositoryOwner: { login: 'nharward' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          },
+          {
+            number: 610,
+            headRepositoryOwner: { login: 'otherfork' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          },
+        ]),
+        stderr: '',
+      } as any);
+
+      await expect(detectForkRemote(config, 'feature-branch'))
+        .rejects.toThrow('Multiple fork PRs found');
+    });
   });
 
   // =========================================================================
@@ -662,6 +686,28 @@ describe('spawn-worktree', () => {
 
       await expect(createWorktreeFromBranch(config, 'nonexistent', '/tmp/wt', { remote: 'nharward' }))
         .rejects.toThrow("does not exist on remote 'nharward'");
+    });
+
+    it('fatals when existing remote has mismatched URL during fork detection', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch "origin"
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git ls-remote origin (not found)
+        // Fork detection: gh pr list
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([{
+            number: 604,
+            headRepositoryOwner: { login: 'nharward' },
+            headRepository: { name: 'codev' },
+            isCrossRepository: true,
+          }]),
+          stderr: '',
+        } as any)
+        // ensureRemote: git remote get-url succeeds with WRONG URL
+        .mockResolvedValueOnce({ stdout: 'https://github.com/other/repo.git', stderr: '' } as any);
+
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt'))
+        .rejects.toThrow("Remote 'nharward' already exists but points to");
     });
 
     it('rejects invalid remote names', () => {
