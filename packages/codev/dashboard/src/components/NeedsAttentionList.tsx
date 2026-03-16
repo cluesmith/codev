@@ -31,8 +31,8 @@ function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionIt
   // PRs needing review
   for (const pr of prs) {
     items.push({
-      key: `pr-${pr.number}`,
-      issueOrPR: `#${pr.number}`,
+      key: `pr-${pr.id}`,
+      issueOrPR: `#${pr.id}`,
       title: pr.title,
       kind: 'PR review',
       kindClass: 'attention-kind--pr',
@@ -46,7 +46,7 @@ function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionIt
     if (!b.blocked || !b.blockedSince) continue;
     // Skip "PR review" — those are already covered by the PRs list
     if (b.blocked === 'PR review') continue;
-    const label = b.issueNumber ? `#${b.issueNumber}` : b.id;
+    const label = b.issueId ? `#${b.issueId}` : b.id;
     items.push({
       key: `gate-${b.id}`,
       issueOrPR: label,

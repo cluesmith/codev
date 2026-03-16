@@ -32,7 +32,7 @@ export interface PlanPhase {
 
 export interface BuilderOverview {
   id: string;
-  issueNumber: number | null;
+  issueId: string | null;
   issueTitle: string | null;
   phase: string;
   mode: 'strict' | 'soft';
@@ -48,16 +48,16 @@ export interface BuilderOverview {
 }
 
 export interface PROverview {
-  number: number;
+  id: string;
   title: string;
   url: string;
   reviewStatus: string;
-  linkedIssue: number | null;
+  linkedIssue: string | null;
   createdAt: string;
 }
 
 export interface BacklogItem {
-  number: number;
+  id: string;
   title: string;
   url: string;
   type: string;
@@ -73,7 +73,7 @@ export interface BacklogItem {
 }
 
 export interface RecentlyClosedItem {
-  number: number;
+  id: string;
   title: string;
   url: string;
   type: string;
@@ -489,7 +489,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
       // No ID extracted (task-*, worktree-*) → soft mode
       builders.push({
         id: entry.name,
-        issueNumber: null,
+        issueId: null,
         issueTitle: null,
         phase: '',
         mode: 'soft',
@@ -529,16 +529,16 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
           const content = fs.readFileSync(statusFile, 'utf-8');
           const parsed = parseStatusYaml(content);
 
-          let issueNumber: number | null = parsed.id ? parseInt(parsed.id, 10) : null;
-          if (issueNumber !== null && Number.isNaN(issueNumber)) {
-            // Bugfix-style IDs like "builder-bugfix-315" — extract trailing number
-            const trailingNum = parsed.id!.match(/(\d+)$/);
-            issueNumber = trailingNum ? parseInt(trailingNum[1], 10) : null;
+          let issueId: string | null = parsed.id || null;
+          if (issueId) {
+            // Extract trailing number as the issue ID (e.g. "bugfix-315" → "315", "0042" → "42")
+            const trailingNum = issueId.match(/(\d+)$/);
+            if (trailingNum) issueId = String(Number(trailingNum[1]));
           }
 
           builders.push({
             id: parsed.id || entry.name,
-            issueNumber: Number.isNaN(issueNumber) ? null : issueNumber,
+            issueId,
             issueTitle: parsed.title || null,
             phase: (parsed.currentPlanPhase && parsed.currentPlanPhase !== 'null')
               ? parsed.currentPlanPhase
@@ -563,12 +563,12 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
     }
 
     if (!found) {
-      // No matching project dir → soft mode, but extract issue number from dir name
+      // No matching project dir → soft mode, but extract issue ID from dir name
       const numMatch = projectId.match(/(\d+)$/);
-      const issueNumber = numMatch ? parseInt(numMatch[1], 10) : null;
+      const issueId = numMatch ? numMatch[1] : null;
       builders.push({
         id: entry.name,
-        issueNumber: Number.isNaN(issueNumber) ? null : issueNumber,
+        issueId,
         issueTitle: null,
         phase: '',
         mode: 'soft',
@@ -595,16 +595,15 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
 /**
  * Scan a codev artifact directory and return a map of issue number → filename.
  */
-function scanArtifactDir(dirPath: string): Map<number, string> {
-  const result = new Map<number, string>();
+function scanArtifactDir(dirPath: string): Map<string, string> {
+  const result = new Map<string, string>();
   if (!fs.existsSync(dirPath)) return result;
   try {
     const files = fs.readdirSync(dirPath);
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
-      const numStr = file.split('-')[0];
-      const num = parseInt(numStr, 10);
-      if (!Number.isNaN(num)) result.set(num, file);
+      const idStr = file.split('-')[0];
+      if (/^\d+$/.test(idStr)) result.set(idStr, file);
     }
   } catch {
     // Silently continue
@@ -618,22 +617,23 @@ function scanArtifactDir(dirPath: string): Map<number, string> {
 export function deriveBacklog(
   issues: GitHubIssueListItem[],
   workspaceRoot: string,
-  activeBuilderIssues: Set<number>,
-  prLinkedIssues: Set<number>,
+  activeBuilderIssues: Set<string>,
+  prLinkedIssues: Set<string>,
 ): BacklogItem[] {
   const specFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'specs'));
   const planFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'plans'));
   const reviewFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'reviews'));
 
   return issues
-    .filter(issue => !prLinkedIssues.has(issue.number))
+    .filter(issue => !prLinkedIssues.has(String(issue.number)))
     .map(issue => {
+      const id = String(issue.number);
       const { type, priority } = parseLabelDefaults(issue.labels, issue.title);
-      const specFile = specFiles.get(issue.number);
-      const planFile = planFiles.get(issue.number);
-      const reviewFile = reviewFiles.get(issue.number);
+      const specFile = specFiles.get(id);
+      const planFile = planFiles.get(id);
+      const reviewFile = reviewFiles.get(id);
       const item: BacklogItem = {
-        number: issue.number,
+        id,
         title: issue.title,
         url: issue.url,
         type,
@@ -641,7 +641,7 @@ export function deriveBacklog(
         hasSpec: !!specFile,
         hasPlan: !!planFile,
         hasReview: !!reviewFile,
-        hasBuilder: activeBuilderIssues.has(issue.number),
+        hasBuilder: activeBuilderIssues.has(id),
         createdAt: issue.createdAt,
       };
       if (specFile) item.specPath = `codev/specs/${specFile}`;
@@ -683,8 +683,8 @@ export class OverviewCache {
     }
     const activeBuilderIssues = new Set(
       builders
-        .map(b => b.issueNumber)
-        .filter((n): n is number => n !== null),
+        .map(b => b.issueId)
+        .filter((id): id is string => id !== null),
     );
 
     // 2. Fetch PRs, issues, recently closed, and merged PRs in parallel (each is independently cached)
@@ -701,7 +701,7 @@ export class OverviewCache {
       errors.prs = 'GitHub CLI unavailable — could not fetch PRs';
     } else {
       pendingPRs = prs.map(pr => ({
-        number: pr.number,
+        id: String(pr.number),
         title: pr.title,
         url: pr.url,
         reviewStatus: pr.reviewDecision || 'REVIEW_REQUIRED',
@@ -713,7 +713,7 @@ export class OverviewCache {
     const prLinkedIssues = new Set(
       pendingPRs
         .map(pr => pr.linkedIssue)
-        .filter((n): n is number => n !== null),
+        .filter((id): id is string => id !== null),
     );
 
     // 4. Process issues and derive backlog
@@ -725,10 +725,10 @@ export class OverviewCache {
 
       // Enrich builder titles from GitHub issue titles
       // (status.yaml stores a slug, not the human-readable title)
-      const issueTitleMap = new Map(issues.map(i => [i.number, i.title]));
+      const issueTitleMap = new Map(issues.map(i => [String(i.number), i.title]));
       for (const b of builders) {
-        if (b.issueNumber !== null && issueTitleMap.has(b.issueNumber)) {
-          b.issueTitle = issueTitleMap.get(b.issueNumber)!;
+        if (b.issueId !== null && issueTitleMap.has(b.issueId)) {
+          b.issueTitle = issueTitleMap.get(b.issueId)!;
         }
       }
     }
@@ -737,7 +737,7 @@ export class OverviewCache {
     let recentlyClosed: RecentlyClosedItem[] = [];
     if (closed !== null) {
       // Build issue→prUrl map from merged PRs
-      const issueToPrUrl = new Map<number, string>();
+      const issueToPrUrl = new Map<string, string>();
       if (mergedPRs) {
         for (const pr of mergedPRs) {
           const linkedIssue = parseLinkedIssue(pr.body || '', pr.title);
@@ -753,18 +753,19 @@ export class OverviewCache {
       const reviewFiles = scanArtifactDir(path.join(workspaceRoot, 'codev', 'reviews'));
 
       recentlyClosed = closed.map(issue => {
+        const id = String(issue.number);
         const { type } = parseLabelDefaults(issue.labels);
-        const specFile = specFiles.get(issue.number);
-        const planFile = planFiles.get(issue.number);
-        const reviewFile = reviewFiles.get(issue.number);
+        const specFile = specFiles.get(id);
+        const planFile = planFiles.get(id);
+        const reviewFile = reviewFiles.get(id);
         const item: RecentlyClosedItem = {
-          number: issue.number,
+          id,
           title: issue.title,
           url: issue.url,
           type,
           closedAt: issue.closedAt!,
         };
-        if (issueToPrUrl.has(issue.number)) item.prUrl = issueToPrUrl.get(issue.number);
+        if (issueToPrUrl.has(id)) item.prUrl = issueToPrUrl.get(id);
         if (specFile) item.specPath = `codev/specs/${specFile}`;
         if (planFile) item.planPath = `codev/plans/${planFile}`;
         if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;
