@@ -12,6 +12,8 @@ Add a `--branch <name>` flag to `af spawn` that creates a worktree on an existin
 
 The implementation is straightforward: add the CLI flag, add a new worktree creation function that fetches an existing branch, wire it into the spawn paths (`spawnSpec` and `spawnBugfix`), and add tests.
 
+**Routing note**: `getSpawnMode()` routes all issue-based non-bugfix spawns (spir, aspir, air, tick) through `spawnSpec()`, while bugfix goes through `spawnBugfix()`. So wiring `--branch` into these two functions covers all five protocol types.
+
 ## Success Metrics
 - [ ] All specification criteria met
 - [ ] `--branch` works with spir, aspir, air, bugfix, tick protocols
@@ -25,116 +27,127 @@ The implementation is straightforward: add the CLI flag, add a new worktree crea
 ```json
 {
   "phases": [
-    {"id": "cli_and_validation", "title": "Phase 1: CLI Flag, Validation, and Worktree Creation"},
-    {"id": "spawn_integration", "title": "Phase 2: Spawn Path Integration and Prompt Context"},
-    {"id": "tests", "title": "Phase 3: Tests"}
+    {"id": "cli_and_worktree", "title": "Phase 1: CLI Flag, Validation, Worktree Creation, and Unit Tests"},
+    {"id": "spawn_integration_and_tests", "title": "Phase 2: Spawn Path Integration, Prompt Context, and E2E Tests"}
   ]
 }
 ```
 
 ## Phase Breakdown
 
-### Phase 1: CLI Flag, Validation, and Worktree Creation
+### Phase 1: CLI Flag, Validation, Worktree Creation, and Unit Tests
 **Dependencies**: None
 
 #### Objectives
 - Add `--branch <name>` flag to the CLI
 - Add branch name validation
 - Create `createWorktreeFromBranch()` function that fetches and checks out an existing remote branch
+- Extract shared symlink setup from `createWorktree()`
+- Write unit tests for all new functions
 
 #### Deliverables
 - [ ] `--branch` option added to CLI in `cli.ts`
 - [ ] `branch` field added to `SpawnOptions` in `types.ts`
-- [ ] Branch name validation function (safe regex: `/^[a-zA-Z0-9._\/-]+$/`)
+- [ ] `validateBranchName()` function (safe regex: `/^[a-zA-Z0-9._\/-]+$/`)
 - [ ] `createWorktreeFromBranch()` in `spawn-worktree.ts` that:
   1. Validates branch name against safe regex
-  2. Runs `git fetch origin <branch>:<branch>` to create local tracking branch
-  3. Runs `git worktree add <path> <branch>` with existing branch
-  4. Detects "already checked out" errors and surfaces actionable message
-  5. Symlinks `.env` and `af-config.json` (same as `createWorktree`)
-- [ ] Mutual exclusion check: `--branch` + `--resume` → error
+  2. Runs `git fetch origin` to update remote refs
+  3. Checks `git worktree list` for "already checked out" before attempting `git worktree add`
+  4. Runs `git worktree add <path> -b <branch> origin/<branch>` (creates local tracking branch from remote; if local branch already exists, falls back to `git worktree add <path> <branch>`)
+  5. Calls shared symlink setup helper
+- [ ] Extract symlink setup from `createWorktree()` into a shared `symlinkConfigFiles()` helper (used by both `createWorktree` and `createWorktreeFromBranch`)
+- [ ] Mutual exclusion checks in `validateSpawnOptions()`:
+  - `--branch` + `--resume` → error
+  - `--branch` + `--shell`/`--worktree`/`--task` → error
+  - `--branch` without issue number → error (protocol-only mode rejected)
+- [ ] Skip uncommitted changes check when `--branch` is set (line ~720 of spawn.ts) — `--branch` fetches from remote, not HEAD, so dirty worktree is irrelevant
+- [ ] Unit tests for `validateBranchName()` — valid names, invalid names with metacharacters
+- [ ] Unit tests for `createWorktreeFromBranch()` — happy path, branch not found, already checked out
+- [ ] Unit tests for `validateSpawnOptions()` — `--branch` mutual exclusion cases
 
 #### Implementation Details
 - **`packages/codev/src/agent-farm/cli.ts`**: Add `.option('--branch <name>', 'Use existing remote branch instead of creating a new one')` to the spawn command. Pass `options.branch` through to `spawn()`.
 - **`packages/codev/src/agent-farm/types.ts`**: Add `branch?: string` to `SpawnOptions`.
-- **`packages/codev/src/agent-farm/commands/spawn-worktree.ts`**: Add `validateBranchName()` and `createWorktreeFromBranch()` functions.
-- **`packages/codev/src/agent-farm/commands/spawn.ts`**: Add `--branch` + `--resume` mutual exclusion check in `validateSpawnOptions()`. Add `--branch` + `--shell`/`--worktree`/`--task` mutual exclusion check.
+- **`packages/codev/src/agent-farm/commands/spawn-worktree.ts`**:
+  - Add `validateBranchName(name: string): void` — throws on invalid names.
+  - Add `symlinkConfigFiles(config: Config, worktreePath: string): void` — extracted from `createWorktree()`.
+  - Refactor `createWorktree()` to call `symlinkConfigFiles()`.
+  - Add `createWorktreeFromBranch(config: Config, branch: string, worktreePath: string): Promise<void>`.
+- **`packages/codev/src/agent-farm/commands/spawn.ts`**: Update `validateSpawnOptions()` with mutual exclusion checks. Add `options.branch` to the uncommitted changes skip condition.
+
+#### Git strategy for `createWorktreeFromBranch()`:
+```
+git fetch origin                          # update all remote refs
+git worktree list                         # check if branch is already checked out
+git worktree add <path> -b <local> origin/<branch>   # create worktree with new local tracking branch
+# If local branch already exists:
+git worktree add <path> <branch>          # use existing local branch
+```
+
+This avoids the `git fetch origin <branch>:<branch>` pitfall (fails on non-fast-forward if local branch exists and has diverged).
 
 #### Acceptance Criteria
 - [ ] `af spawn --help` shows `--branch` option
 - [ ] `af spawn 603 --protocol bugfix --branch "foo;rm -rf /"` rejects with validation error
 - [ ] `af spawn 603 --protocol bugfix --branch nonexistent-branch` fails with "not found on remote" error
-- [ ] `af spawn 603 --protocol bugfix --branch --resume` fails with mutual exclusion error
+- [ ] `af spawn 603 --protocol bugfix --branch some-branch --resume` fails with mutual exclusion error
+- [ ] `af spawn --protocol maintain --branch some-branch` fails (no issue number)
 - [ ] `createWorktreeFromBranch()` fetches remote branch and creates worktree correctly
-
-#### Test Plan
-- **Unit Tests**: Branch name validation (valid names, invalid names with metacharacters)
-- **Unit Tests**: `createWorktreeFromBranch()` with mocked git commands
+- [ ] All unit tests pass
 
 ---
 
-### Phase 2: Spawn Path Integration and Prompt Context
+### Phase 2: Spawn Path Integration, Prompt Context, and E2E Tests
 **Dependencies**: Phase 1
 
 #### Objectives
 - Wire `--branch` into `spawnSpec()` and `spawnBugfix()` so they use `createWorktreeFromBranch()` when `--branch` is provided
 - Inject branch context into the builder prompt
-- Handle worktree directory naming (slugify the branch name)
+- Handle worktree directory naming (must be compatible with existing detection patterns)
+- Write E2E tests
 
 #### Deliverables
 - [ ] `spawnSpec()` uses `createWorktreeFromBranch()` when `options.branch` is set
 - [ ] `spawnBugfix()` uses `createWorktreeFromBranch()` when `options.branch` is set
-- [ ] Worktree directory name derived from slugified branch name (e.g., `builder/bugfix-603-slug` → `builder-bugfix-603-slug`)
+- [ ] Worktree directory uses `<protocol>-<issueNumber>-branch-<slug>` pattern to maintain compatibility with `inferProtocolFromWorktree()`, `findExistingBugfixWorktree()`, and porch's `detectProjectIdFromCwd()`
 - [ ] Builder prompt includes: "You are continuing work on existing branch `<branch>`. This branch may have commits from another contributor."
-- [ ] The branch name (not the auto-generated one) is used for git operations and stored in builder state
-
-#### Implementation Details
-- **`packages/codev/src/agent-farm/commands/spawn.ts`**:
-  - In `spawnSpec()`: When `options.branch` is set, derive `worktreeName` by slugifying the branch name. Use `createWorktreeFromBranch()` instead of `createWorktree()`. Set `branchName = options.branch` (the actual branch, not auto-generated).
-  - In `spawnBugfix()`: Same pattern as `spawnSpec()`.
-  - Add a helper `slugifyBranchName()` that converts branch names with slashes to directory-safe names (replace `/` with `-`, then apply existing `slugify` logic).
-- **`packages/codev/src/agent-farm/commands/spawn-roles.ts`**: Add `existingBranch` to `TemplateContext` so the prompt template can include branch continuation context.
-
-#### Acceptance Criteria
-- [ ] `af spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree at `.builders/builder-bugfix-603-slug`
-- [ ] The builder's prompt mentions continuing work on the branch
-- [ ] The builder state records the correct (user-specified) branch name
-- [ ] Pushing from the worktree goes to the correct remote branch
-
-#### Test Plan
-- **Unit Tests**: Worktree naming from branch name slugification
-- **Integration Tests**: End-to-end spawn with `--branch` flag (mocked git/tower)
-
----
-
-### Phase 3: Tests
-**Dependencies**: Phase 2
-
-#### Objectives
-- Comprehensive unit tests for all new functions
-- E2E test for the full `--branch` spawn flow
-
-#### Deliverables
-- [ ] Unit tests for `validateBranchName()` — valid names, invalid names, edge cases
-- [ ] Unit tests for `createWorktreeFromBranch()` — happy path, branch not found, already checked out
-- [ ] Unit tests for `validateSpawnOptions()` — `--branch` mutual exclusion with `--resume`, `--shell`, `--task`, `--worktree`
-- [ ] Unit tests for worktree directory naming from branch names
+- [ ] The user-specified branch name (not the auto-generated one) is used for git operations and stored in builder state
 - [ ] E2E test: spawn with `--branch` flag end-to-end
 
 #### Implementation Details
-- **`packages/codev/tests/unit/spawn-worktree.test.ts`**: Add tests for `validateBranchName()` and `createWorktreeFromBranch()`
-- **`packages/codev/tests/unit/spawn.test.ts`**: Add tests for `--branch` validation in `validateSpawnOptions()`
+- **`packages/codev/src/agent-farm/commands/spawn.ts`**:
+  - In `spawnSpec()`: When `options.branch` is set:
+    - Set `branchName = options.branch` (the actual branch, not auto-generated)
+    - Derive `worktreeName = `${protocol}-${strippedId}-branch-${slugify(options.branch)}`` — the `branch-` infix distinguishes from auto-generated names while preserving the `<protocol>-<id>-` prefix that detection utilities scan for
+    - Use `createWorktreeFromBranch()` instead of `createWorktree()`
+    - Add `existingBranch: options.branch` to template context
+  - In `spawnBugfix()`: Same pattern as `spawnSpec()`
+- **`packages/codev/src/agent-farm/commands/spawn-roles.ts`**: Add `existingBranch?: string` to `TemplateContext`. When present, inject continuation context into the builder prompt (inline in `buildPromptFromTemplate` or as part of the template data).
 - **`packages/codev/tests/e2e/`**: Add E2E test for branch spawn flow
 
-#### Acceptance Criteria
-- [ ] All new unit tests pass
-- [ ] All existing tests still pass
-- [ ] E2E test validates the complete flow
-- [ ] No reduction in test coverage
+#### Worktree naming examples:
+```
+af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-string-
+→ worktree: .builders/bugfix-603-branch-builder-bugfix-603-propagate
+→ branch: builder/bugfix-603-propagate-opaque-string- (the actual remote branch)
 
-#### Test Plan
-- Run full test suite: `npm test` from `packages/codev/`
-- Run E2E tests: `npx playwright test` from `packages/codev/`
+af spawn 315 --protocol spir --branch builder/spir-315-some-feature
+→ worktree: .builders/spir-315-branch-builder-spir-315-some-featur
+→ branch: builder/spir-315-some-feature (the actual remote branch)
+```
+
+This pattern ensures:
+- `inferProtocolFromWorktree()` matches on `parts[1]` (the issue number)
+- `findExistingBugfixWorktree()` matches on `bugfix-{N}-` prefix
+- Porch detects project ID from the `<id>-` segment in the path
+
+#### Acceptance Criteria
+- [ ] `af spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree at `.builders/bugfix-603-branch-builder-bugfix-603-slug`
+- [ ] The builder's prompt mentions continuing work on the branch
+- [ ] The builder state records the correct (user-specified) branch name
+- [ ] `inferProtocolFromWorktree()` still works for `--branch`-created worktrees
+- [ ] All unit tests pass, all existing tests pass
+- [ ] E2E test validates the complete flow
 
 ## Risk Analysis
 
@@ -142,10 +155,11 @@ The implementation is straightforward: add the CLI flag, add a new worktree crea
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | Shell injection via branch name | Low | High | Validate against safe regex before any shell command |
-| Branch already checked out | Medium | Low | Detect git error and surface actionable message |
+| Branch already checked out | Medium | Low | Pre-check via `git worktree list` before attempting add |
 | Git fetch fails (network/auth) | Low | Medium | Let git's error propagate — it's already clear |
+| Local branch exists and diverged | Low | Medium | Try `-b` first, fall back to using existing local branch |
+| Fetched branch is stale (behind main) | Medium | Low | Architect's judgment call — not our problem to solve |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `createWorktreeFromBranch()` works standalone with a real git repo
-2. **After Phase 2**: Full `af spawn --branch` flow works end-to-end manually
-3. **After Phase 3**: All tests pass, no regressions
+1. **After Phase 1**: `createWorktreeFromBranch()` works standalone with a real git repo; unit tests pass
+2. **After Phase 2**: Full `af spawn --branch` flow works end-to-end; E2E test passes; no regressions
