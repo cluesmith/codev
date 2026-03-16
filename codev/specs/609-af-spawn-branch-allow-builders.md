@@ -64,9 +64,11 @@ af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-stri
 ## Success Criteria
 - [ ] `af spawn <id> --protocol <proto> --branch <name>` creates a worktree on the specified existing remote branch
 - [ ] The branch must exist on the remote; if not, the command fails with a clear error
+- [ ] If the branch is already checked out in another worktree, the command fails with a clear, actionable error
 - [ ] `--branch` is mutually exclusive with `--resume` (error if both provided)
-- [ ] `--branch` works with all protocol types: spir, aspir, air, bugfix, tick
-- [ ] The builder prompt includes context that it's continuing work on an existing branch/PR
+- [ ] `--branch` works with all protocol types: spir, aspir, air, bugfix, tick (not with `--task` or `--shell` which have no issue context)
+- [ ] The builder prompt includes the branch name and a note that the builder is continuing existing work on that branch
+- [ ] Branch names are validated against a safe regex before any shell commands run
 - [ ] Pushing from the builder updates the existing PR (no new PR created)
 - [ ] Unit tests cover the new flag parsing, validation, and worktree creation path
 - [ ] E2E test validates the end-to-end spawn-with-branch flow
@@ -75,9 +77,11 @@ af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-stri
 
 ### Technical Constraints
 - Must use `git worktree add` with an existing branch (not create a new one)
-- The branch must be fetched from remote before worktree creation
-- Worktree directory naming should remain predictable (based on protocol + issue number, not the branch name)
+- The branch must be fetched from remote and a local tracking branch created before worktree creation (e.g., `git fetch origin <branch>:<branch>` to create the local branch from the remote)
+- Worktree directory naming: use the branch name, slugified, as the directory name under `.builders/` (e.g., branch `builder/bugfix-603-slug` → worktree dir `builder-bugfix-603-slug`)
 - Must not break existing spawn flows — all current tests must continue to pass
+- If the branch is already checked out in another worktree or the main working directory, fail with a clear, actionable error (e.g., "Branch 'X' is already checked out at '/path'. Switch that checkout to a different branch first.")
+- Branch names from user input must be validated against a safe regex (e.g., matching valid git branch name characters only) before being passed to shell commands — do not rely on existing auto-generated-only patterns
 
 ### Business Constraints
 - None — this is an internal tooling improvement
@@ -92,12 +96,14 @@ af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-stri
 ### Approach 1: Flag-based branch override in createWorktree
 
 Add a `--branch` CLI flag that passes through to `createWorktree()`. When provided:
-1. `git fetch origin <branch>` to ensure we have the latest
-2. Skip `git branch <branchName>` (branch already exists)
-3. Use `git worktree add <path> <branch>` with the existing branch
-4. Proceed with normal porch initialization and prompt generation
+1. Validate the branch name against a safe regex (alphanumeric, hyphens, underscores, slashes, dots)
+2. `git fetch origin <branch>:<branch>` to fetch and create the local tracking branch
+3. Skip `git branch <branchName>` (branch already exists)
+4. Use `git worktree add <path> <branch>` with the existing local branch
+5. If `git worktree add` fails because the branch is already checked out, surface a clear error
+6. Proceed with normal porch initialization and prompt generation
 
-The worktree directory name is derived from the branch name (slugified) to keep it predictable.
+The worktree directory name is derived from the branch name (slugified) — e.g., `builder/bugfix-603-slug` becomes directory `builder-bugfix-603-slug` under `.builders/`.
 
 **Pros**:
 - Minimal change — modifies only the worktree creation path
@@ -137,6 +143,8 @@ Instead of specifying the branch name, accept a `--pr <number>` flag and use `gh
 
 ### Important (Affects Design)
 - [x] Should we add PR context (review comments, etc.) to the builder prompt? → Out of scope for this spec. The builder prompt should note it's continuing work on an existing branch, but pulling full PR context is a future enhancement.
+- [x] Should `--branch` work with `--task` and `--shell` modes? → No. These modes have no issue context. `--branch` requires an issue number and protocol.
+- [x] Which remote is used? → Always `origin`. No `--remote` flag for now; can be added later if needed.
 
 ### Nice-to-Know (Optimization)
 - [ ] Should we support `--pr <number>` as a convenience alias? → Deferred to a future spec.
@@ -146,21 +154,23 @@ Instead of specifying the branch name, accept a `--pr <number>` flag and use `gh
 - `git fetch` may take a few seconds depending on the remote
 
 ## Security Considerations
-- Branch name must be sanitized before use in shell commands (already handled by existing patterns in spawn-worktree.ts)
+- Branch names from `--branch` are user-supplied input and must be validated before use in shell commands. Validate against a regex like `/^[a-zA-Z0-9._\/-]+$/` — reject anything else with a clear error. This is a new requirement since existing branch names are auto-generated and never contain arbitrary user input.
 - No new authentication or authorization concerns — uses existing git credentials
 
 ## Test Scenarios
 
 ### Functional Tests
 1. **Happy path**: `af spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree on the specified branch
-2. **Branch doesn't exist**: Command fails with error "Branch 'foo' does not exist on the remote"
-3. **Mutual exclusion**: `--branch` + `--resume` produces an error
-4. **All protocols**: `--branch` works with spir, aspir, air, bugfix, tick
-5. **Builder prompt**: The generated prompt includes context about continuing existing work
+2. **Branch doesn't exist on remote**: Command fails with error "Branch 'foo' does not exist on the remote"
+3. **Branch already checked out**: Command fails with a clear, actionable error when the branch is already checked out in another worktree or the main directory
+4. **Mutual exclusion**: `--branch` + `--resume` produces an error
+5. **All protocols**: `--branch` works with spir, aspir, air, bugfix, tick
+6. **Builder prompt**: The generated prompt includes the branch name and a note that this is continuing existing work on that branch
+7. **Invalid branch name**: Branch names with shell metacharacters (`;`, `$`, backticks, etc.) are rejected before any git command runs
 
 ### Non-Functional Tests
 1. **Existing tests pass**: No regression in current spawn tests
-2. **Branch name sanitization**: Special characters in branch names are handled safely
+2. **Branch name validation**: Only valid git branch name characters are accepted
 
 ## Dependencies
 - **External Services**: None new (git remote already required)
@@ -173,6 +183,8 @@ Instead of specifying the branch name, accept a `--pr <number>` flag and use `gh
 | Branch has diverged significantly from main | Medium | Low | Builder works on the branch as-is; divergence is the architect's judgment call |
 | Existing PR has merge conflicts | Low | Low | Not our problem — standard git workflow handles this |
 | Branch name collision with auto-generated names | Low | Low | Worktree naming uses the actual branch name, avoiding collision with auto-generated patterns |
+| Branch already checked out elsewhere | Medium | Low | Detect and surface a clear error telling the user to switch the other checkout to a different branch |
+| Shell injection via malicious branch name | Low | High | Validate branch names against a safe regex before any shell command |
 
 ## Notes
 - This feature enables the "hand-off" workflow where one person starts a PR and another finishes it
