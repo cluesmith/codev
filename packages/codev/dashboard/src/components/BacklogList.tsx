@@ -54,10 +54,10 @@ export function BacklogList({ items, onRefresh }: BacklogListProps) {
   return (
     <div className="backlog-rows">
       {visible.map(item => (
-        <div key={item.number} className="backlog-row">
+        <div key={item.id} className="backlog-row">
           <a className="backlog-row-main" href={item.url} target="_blank" rel="noopener noreferrer">
             <span className={`backlog-priority-dot ${PRIORITY_CLASS[item.priority] ?? 'priority-dot--low'}`} />
-            <span className="backlog-row-number">#{item.number}</span>
+            <span className="backlog-row-number">#{item.id}</span>
             <span className={`backlog-type-tag ${TYPE_CLASS[item.type] ?? ''}`}>{item.type}</span>
             <span className="backlog-row-title">{item.title}</span>
             <span className="backlog-row-age">{timeAgo(item.createdAt)}</span>

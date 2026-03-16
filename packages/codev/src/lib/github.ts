@@ -245,14 +245,14 @@ export async function fetchClosedIssues(
  * back to PR createdAt for wall-clock time).
  */
 export async function fetchOnItTimestamps(
-  issueNumbers: number[],
+  issueIds: string[],
   cwd?: string,
   forgeConfig?: ForgeConfig | null,
-): Promise<Map<number, string>> {
-  const result = new Map<number, string>();
-  if (issueNumbers.length === 0) return result;
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (issueIds.length === 0) return result;
 
-  const unique = [...new Set(issueNumbers)];
+  const unique = [...new Set(issueIds)];
 
   // Check if a custom (non-default) on-it-timestamps command is configured.
   // Custom commands receive CODEV_ISSUE_NUMBERS and return a simple JSON map.
@@ -267,9 +267,8 @@ export async function fetchOnItTimestamps(
 
     if (cmdResult && typeof cmdResult === 'object' && !Array.isArray(cmdResult)) {
       for (const [key, value] of Object.entries(cmdResult as Record<string, string>)) {
-        const num = parseInt(key, 10);
-        if (!isNaN(num) && typeof value === 'string') {
-          result.set(num, value);
+        if (typeof value === 'string') {
+          result.set(key, value);
         }
       }
     }
@@ -290,8 +289,11 @@ export async function fetchOnItTimestamps(
     const batch = unique.slice(i, i + BATCH_SIZE);
 
     // Build aliased GraphQL query — one field per issue
-    const issueFragments = batch.map((num) =>
-      `issue${num}: issue(number: ${num}) { comments(first: 50) { nodes { body createdAt } } }`,
+    // GraphQL requires numeric issue numbers; skip non-numeric IDs (non-GitHub forges)
+    const numericBatch = batch.filter(id => /^\d+$/.test(id));
+    if (numericBatch.length === 0) continue;
+    const issueFragments = numericBatch.map((id) =>
+      `issue${id}: issue(number: ${id}) { comments(first: 50) { nodes { body createdAt } } }`,
     ).join('\n    ');
 
     const query = `query($owner: String!, $name: String!) {
@@ -313,14 +315,14 @@ export async function fetchOnItTimestamps(
       const repoData = data?.data?.repository;
       if (!repoData) continue;
 
-      for (const num of batch) {
-        const issueData = repoData[`issue${num}`];
+      for (const id of numericBatch) {
+        const issueData = repoData[`issue${id}`];
         if (!issueData?.comments?.nodes) continue;
 
         const onItComment = issueData.comments.nodes
           .find((c) => c.body.includes('On it!'));
         if (onItComment) {
-          result.set(num, onItComment.createdAt);
+          result.set(id, onItComment.createdAt);
         }
       }
     } catch {
@@ -344,12 +346,12 @@ export async function fetchOnItTimestamps(
  *
  * Returns the first matched issue number, or null if none found.
  */
-export function parseLinkedIssue(prBody: string, prTitle: string): number | null {
+export function parseLinkedIssue(prBody: string, prTitle: string): string | null {
   // Check PR body for GitHub closing keywords
   const closingKeywordPattern = /(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#(\d+)/i;
   const bodyMatch = prBody.match(closingKeywordPattern);
   if (bodyMatch) {
-    return parseInt(bodyMatch[1], 10);
+    return String(Number(bodyMatch[1]));
   }
 
   // Check PR title for [Spec N] or [Bugfix #N] patterns
@@ -358,23 +360,23 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
 
   const titleSpecMatch = prTitle.match(specPattern);
   if (titleSpecMatch) {
-    return parseInt(titleSpecMatch[1], 10);
+    return String(Number(titleSpecMatch[1]));
   }
 
   const titleBugfixMatch = prTitle.match(bugfixPattern);
   if (titleBugfixMatch) {
-    return parseInt(titleBugfixMatch[1], 10);
+    return String(Number(titleBugfixMatch[1]));
   }
 
   // Also check body for same patterns
   const bodySpecMatch = prBody.match(specPattern);
   if (bodySpecMatch) {
-    return parseInt(bodySpecMatch[1], 10);
+    return String(Number(bodySpecMatch[1]));
   }
 
   const bodyBugfixMatch = prBody.match(bugfixPattern);
   if (bodyBugfixMatch) {
-    return parseInt(bodyBugfixMatch[1], 10);
+    return String(Number(bodyBugfixMatch[1]));
   }
 
   return null;
@@ -390,25 +392,25 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
  *
  * Returns a deduplicated array of issue numbers (may be empty).
  */
-export function parseAllLinkedIssues(prBody: string, prTitle: string): number[] {
-  const issues = new Set<number>();
+export function parseAllLinkedIssues(prBody: string, prTitle: string): string[] {
+  const issues = new Set<string>();
   const combined = `${prTitle}\n${prBody}`;
 
   // GitHub closing keywords (global)
   const closingPattern = /(?:fix(?:es)?|close[sd]?|resolve[sd]?)\s+#(\d+)/gi;
   for (const m of combined.matchAll(closingPattern)) {
-    issues.add(parseInt(m[1], 10));
+    issues.add(String(Number(m[1])));
   }
 
   // [Spec N] or [Bugfix #N] patterns (global)
   const specPattern = /\[Spec\s+#?(\d+)\]/gi;
   for (const m of combined.matchAll(specPattern)) {
-    issues.add(parseInt(m[1], 10));
+    issues.add(String(Number(m[1])));
   }
 
   const bugfixPattern = /\[Bugfix\s+#?(\d+)\]/gi;
   for (const m of combined.matchAll(bugfixPattern)) {
-    issues.add(parseInt(m[1], 10));
+    issues.add(String(Number(m[1])));
   }
 
   return [...issues];

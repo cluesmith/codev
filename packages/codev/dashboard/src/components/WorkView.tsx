@@ -33,8 +33,8 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
     // Find matching builder terminal tab by issue number or ID
     const builderTab = state?.builders?.find(b => {
       // Match by project ID in the terminal state
-      if (builder.issueNumber) {
-        return b.name?.includes(String(builder.issueNumber)) || b.id?.includes(String(builder.issueNumber));
+      if (builder.issueId) {
+        return b.name?.includes(builder.issueId) || b.id?.includes(builder.issueId);
       }
       return b.id?.includes(builder.id) || b.name?.includes(builder.id);
     });

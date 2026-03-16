@@ -874,7 +874,7 @@ describe('overview', () => {
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
       expect(builders[0].id).toBe('0126');
-      expect(builders[0].issueNumber).toBe(126);
+      expect(builders[0].issueId).toBe('126');
       expect(builders[0].phase).toBe('tower_endpoint');
       expect(builders[0].mode).toBe('strict');
       expect(builders[0].gates['pr']).toBe('pending');
@@ -890,7 +890,7 @@ describe('overview', () => {
       expect(builders).toHaveLength(1);
       expect(builders[0].id).toBe('task-AbCd');
       expect(builders[0].mode).toBe('soft');
-      expect(builders[0].issueNumber).toBeNull();
+      expect(builders[0].issueId).toBeNull();
       expect(builders[0].phase).toBe('');
       expect(builders[0].protocol).toBe('');
       expect(builders[0].planPhases).toEqual([]);
@@ -942,9 +942,9 @@ describe('overview', () => {
 
       const strict = builders.find(b => b.mode === 'strict');
       const soft = builders.find(b => b.mode === 'soft');
-      expect(strict?.issueNumber).toBe(100);
+      expect(strict?.issueId).toBe('100');
       expect(soft?.id).toBe('bugfix-200-fix');
-      expect(soft?.issueNumber).toBe(200);
+      expect(soft?.issueId).toBe('200');
     });
 
     it('does not pick up wrong project dir (regression: #326)', () => {
@@ -978,7 +978,7 @@ describe('overview', () => {
       expect(builders).toHaveLength(1);
       // Must match 0126, NOT 0087
       expect(builders[0].id).toBe('0126');
-      expect(builders[0].issueNumber).toBe(126);
+      expect(builders[0].issueId).toBe('126');
       expect(builders[0].mode).toBe('strict');
     });
 
@@ -1009,7 +1009,7 @@ describe('overview', () => {
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
       expect(builders[0].id).toBe('bugfix-326');
-      expect(builders[0].issueNumber).toBe(326);
+      expect(builders[0].issueId).toBe('326');
       expect(builders[0].mode).toBe('strict');
     });
 
@@ -1030,7 +1030,7 @@ describe('overview', () => {
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
       expect(builders[0].mode).toBe('soft');
-      expect(builders[0].issueNumber).toBe(300);
+      expect(builders[0].issueId).toBe('300');
       expect(builders[0].id).toBe('bugfix-300-some-fix');
     });
 
@@ -1103,15 +1103,15 @@ describe('overview', () => {
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
       expect(builders[0].mode).toBe('soft');
-      expect(builders[0].issueNumber).toBe(999);
+      expect(builders[0].issueId).toBe('999');
     });
 
     it('handles multiple worktrees each matching their own project (not all #87)', () => {
       // This is the core regression test for issue #326
       const worktrees = [
-        { name: 'spir-87-timeout', projDir: '0087-porch-timeout', id: '0087', issue: 87 },
-        { name: 'spir-126-rework', projDir: '0126-project-rework', id: '0126', issue: 126 },
-        { name: 'tick-130-amend', projDir: '0130-codex-integration', id: '0130', issue: 130 },
+        { name: 'spir-87-timeout', projDir: '0087-porch-timeout', id: '0087', issue: '87' },
+        { name: 'spir-126-rework', projDir: '0126-project-rework', id: '0126', issue: '126' },
+        { name: 'tick-130-amend', projDir: '0130-codex-integration', id: '0130', issue: '130' },
       ];
 
       for (const wt of worktrees) {
@@ -1136,7 +1136,7 @@ describe('overview', () => {
 
       // Each builder should match its OWN project, not all showing #87
       for (const wt of worktrees) {
-        const builder = builders.find(b => b.issueNumber === wt.issue);
+        const builder = builders.find(b => b.issueId === wt.issue);
         expect(builder).toBeDefined();
         expect(builder!.id).toBe(wt.id);
         expect(builder!.mode).toBe('strict');
@@ -1157,13 +1157,27 @@ describe('overview', () => {
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog).toHaveLength(2);
 
-      const issue42 = backlog.find(b => b.number === 42)!;
+      const issue42 = backlog.find(b => b.id === '42')!;
       expect(issue42.hasSpec).toBe(true);
       expect(issue42.specPath).toBe('codev/specs/42-my-feature.md');
 
-      const issue43 = backlog.find(b => b.number === 43)!;
+      const issue43 = backlog.find(b => b.id === '43')!;
       expect(issue43.hasSpec).toBe(false);
       expect(issue43.specPath).toBeUndefined();
+    });
+
+    it('matches zero-padded spec filenames to unpadded issue IDs', () => {
+      // Real spec files use zero-padded names like 0042-my-feature.md
+      const specsDir = path.join(tmpDir, 'codev', 'specs');
+      fs.mkdirSync(specsDir, { recursive: true });
+      fs.writeFileSync(path.join(specsDir, '0042-my-feature.md'), '# my-feature');
+
+      const issues = [issueItem(42, 'My Feature')];
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+
+      const issue42 = backlog.find(b => b.id === '42')!;
+      expect(issue42.hasSpec).toBe(true);
+      expect(issue42.specPath).toBe('codev/specs/0042-my-feature.md');
     });
 
     it('includes url from issue', () => {
@@ -1190,9 +1204,9 @@ describe('overview', () => {
     it('marks issues with active builders', () => {
       const issues = [issueItem(100, 'Active'), issueItem(200, 'Idle')];
 
-      const backlog = deriveBacklog(issues, tmpDir, new Set([100]), new Set());
-      const active = backlog.find(b => b.number === 100)!;
-      const idle = backlog.find(b => b.number === 200)!;
+      const backlog = deriveBacklog(issues, tmpDir, new Set(['100']), new Set());
+      const active = backlog.find(b => b.id === '100')!;
+      const idle = backlog.find(b => b.id === '200')!;
 
       expect(active.hasBuilder).toBe(true);
       expect(idle.hasBuilder).toBe(false);
@@ -1201,9 +1215,9 @@ describe('overview', () => {
     it('filters out issues that have linked PRs', () => {
       const issues = [issueItem(50, 'Has PR'), issueItem(60, 'No PR')];
 
-      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set([50]));
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set(['50']));
       expect(backlog).toHaveLength(1);
-      expect(backlog[0].number).toBe(60);
+      expect(backlog[0].id).toBe('60');
     });
 
     it('parses type and priority from labels', () => {
@@ -1259,17 +1273,17 @@ describe('overview', () => {
       const data = await cache.getOverview(tmpDir);
 
       expect(data.builders).toHaveLength(1);
-      expect(data.builders[0].issueNumber).toBe(42);
+      expect(data.builders[0].issueId).toBe('42');
 
       expect(data.pendingPRs).toHaveLength(1);
-      expect(data.pendingPRs[0].linkedIssue).toBe(42);
+      expect(data.pendingPRs[0].linkedIssue).toBe('42');
 
       expect(data.backlog).toHaveLength(1);
-      expect(data.backlog[0].number).toBe(99);
+      expect(data.backlog[0].id).toBe('99');
       expect(data.backlog[0].url).toContain('/issues/99');
 
       expect(data.recentlyClosed).toHaveLength(1);
-      expect(data.recentlyClosed[0].number).toBe(88);
+      expect(data.recentlyClosed[0].id).toBe('88');
       expect(data.recentlyClosed[0].type).toBe('bug');
 
       expect(data.errors).toBeUndefined();
@@ -1397,10 +1411,10 @@ describe('overview', () => {
 
       // Issue 42 is linked to a PR, so it should not appear in backlog
       expect(data.backlog).toHaveLength(1);
-      expect(data.backlog[0].number).toBe(43);
+      expect(data.backlog[0].id).toBe('43');
 
       // PR linkage should be parsed
-      expect(data.pendingPRs[0].linkedIssue).toBe(42);
+      expect(data.pendingPRs[0].linkedIssue).toBe('42');
     });
 
     it('passes through PR url field', async () => {
@@ -1471,7 +1485,7 @@ describe('overview', () => {
       const activeSet = new Set(['builder-spir-42']);
       const filtered = await cache.getOverview(tmpDir, activeSet);
       expect(filtered.builders).toHaveLength(1);
-      expect(filtered.builders[0].issueNumber).toBe(42);
+      expect(filtered.builders[0].issueId).toBe('42');
     });
 
     it('returns no builders when activeBuilderRoleIds is empty', async () => {
@@ -1610,10 +1624,10 @@ describe('overview', () => {
       const data = await cache.getOverview(tmpDir);
 
       // Issue #100 should have a PR link; issue #200 should not
-      const item100 = data.recentlyClosed.find(i => i.number === 100)!;
+      const item100 = data.recentlyClosed.find(i => i.id === '100')!;
       expect(item100.prUrl).toBe('https://github.com/org/repo/pull/150');
 
-      const item200 = data.recentlyClosed.find(i => i.number === 200)!;
+      const item200 = data.recentlyClosed.find(i => i.id === '200')!;
       expect(item200.prUrl).toBeUndefined();
     });
 
@@ -1630,12 +1644,12 @@ describe('overview', () => {
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
 
-      const item42 = data.recentlyClosed.find(i => i.number === 42)!;
+      const item42 = data.recentlyClosed.find(i => i.id === '42')!;
       expect(item42.specPath).toBe('codev/specs/42-my-feature.md');
       expect(item42.planPath).toBe('codev/plans/42-my-feature.md');
       expect(item42.reviewPath).toBe('codev/reviews/42-my-feature.md');
 
-      const item99 = data.recentlyClosed.find(i => i.number === 99)!;
+      const item99 = data.recentlyClosed.find(i => i.id === '99')!;
       expect(item99.specPath).toBeUndefined();
       expect(item99.planPath).toBeUndefined();
       expect(item99.reviewPath).toBeUndefined();

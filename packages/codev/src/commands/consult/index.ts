@@ -192,9 +192,9 @@ function loadDotenv(workspaceRoot: string): void {
  * Find a spec file by number. Returns null if not found.
  * Errors if multiple matches found.
  */
-function findSpec(workspaceRoot: string, number: number): string | null {
+function findSpec(workspaceRoot: string, id: string): string | null {
   const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  const unpadded = String(number);
+  const unpadded = id.replace(/^0+/, '') || '0';
   const padded = unpadded.padStart(4, '0');
 
   if (fs.existsSync(specsDir)) {
@@ -215,9 +215,9 @@ function findSpec(workspaceRoot: string, number: number): string | null {
  * Find a plan file by number. Returns null if not found.
  * Errors if multiple matches found.
  */
-function findPlan(workspaceRoot: string, number: number): string | null {
+function findPlan(workspaceRoot: string, id: string): string | null {
   const plansDir = path.join(workspaceRoot, 'codev', 'plans');
-  const unpadded = String(number);
+  const unpadded = id.replace(/^0+/, '') || '0';
   const padded = unpadded.padStart(4, '0');
 
   if (fs.existsSync(plansDir)) {
@@ -741,17 +741,17 @@ function getDiffStat(workspaceRoot: string, ref: string): { stat: string; files:
 /**
  * Fetch PR metadata via forge concept commands (no diff — that's fetched separately).
  */
-function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; comments: string } {
-  console.error(`Fetching PR #${prNumber} data...`);
+function fetchPRData(prId: string): { info: string; changedFiles: string[]; comments: string } {
+  console.error(`Fetching PR #${prId} data...`);
 
   try {
     const prView = executeForgeCommandSync('pr-view', {
-      CODEV_PR_NUMBER: String(prNumber),
+      CODEV_PR_NUMBER: prId,
     });
     const info = typeof prView === 'string' ? prView : JSON.stringify(prView);
 
     const diffResult = executeForgeCommandSync('pr-diff', {
-      CODEV_PR_NUMBER: String(prNumber),
+      CODEV_PR_NUMBER: prId,
       CODEV_DIFF_NAME_ONLY: '1',
     }, { raw: true });
     const nameOnly = typeof diffResult === 'string' ? diffResult : '';
@@ -761,7 +761,7 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
     try {
       // Fetch PR comments via pr-view concept with CODEV_INCLUDE_COMMENTS flag
       const commentsResult = executeForgeCommandSync('pr-view', {
-        CODEV_PR_NUMBER: String(prNumber),
+        CODEV_PR_NUMBER: prId,
         CODEV_INCLUDE_COMMENTS: '1',
       }, { raw: true });
       if (commentsResult && typeof commentsResult === 'string' && commentsResult.trim()) {
@@ -780,14 +780,14 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
 /**
  * Fetch the full PR diff via the pr-diff forge concept command.
  */
-function fetchPRDiff(prNumber: number): string {
+function fetchPRDiff(prId: string): string {
   try {
     const result = executeForgeCommandSync('pr-diff', {
-      CODEV_PR_NUMBER: String(prNumber),
+      CODEV_PR_NUMBER: prId,
     }, { raw: true });
     return typeof result === 'string' ? result : '';
   } catch (err) {
-    throw new Error(`Failed to fetch PR diff for #${prNumber}: ${err}`);
+    throw new Error(`Failed to fetch PR diff for #${prId}: ${err}`);
   }
 }
 
@@ -795,13 +795,13 @@ function fetchPRDiff(prNumber: number): string {
  * Build query for PR review.
  * Includes full PR diff + file list; model reads surrounding context from disk.
  */
-function buildPRQuery(prNumber: number): string {
-  const prData = fetchPRData(prNumber);
-  const diff = fetchPRDiff(prNumber);
+function buildPRQuery(prId: string): string {
+  const prData = fetchPRData(prId);
+  const diff = fetchPRDiff(prId);
 
   const fileList = prData.changedFiles.map(f => `- ${f}`).join('\n');
 
-  return `Review Pull Request #${prNumber}
+  return `Review Pull Request #${prId}
 
 ## PR Info
 \`\`\`json
@@ -1067,7 +1067,7 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 /**
  * Find PR number for the current branch via pr-search forge concept.
  */
-function findPRForCurrentBranch(workspaceRoot: string): number {
+function findPRForCurrentBranch(workspaceRoot: string): string {
   const branchName = execSync('git branch --show-current', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
   const result = executeForgeCommandSync('pr-search', {
     CODEV_SEARCH_QUERY: `head:${branchName}`,
@@ -1078,20 +1078,20 @@ function findPRForCurrentBranch(workspaceRoot: string): number {
     throw new Error(`No PR found for branch: ${branchName}`);
   }
 
-  return prs[0].number;
+  return String(prs[0].number);
 }
 
 /**
  * Find PR number for a given issue number (architect mode) via pr-search forge concept.
  */
-function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: number; headRefName: string } {
+function findPRForIssue(workspaceRoot: string, issueId: string): { number: number; headRefName: string } {
   const result = executeForgeCommandSync('pr-search', {
-    CODEV_SEARCH_QUERY: String(issueNumber),
+    CODEV_SEARCH_QUERY: issueId,
   }, { cwd: workspaceRoot });
 
   const prs = Array.isArray(result) ? result as Array<{ number: number; headRefName: string }> : [];
   if (prs.length === 0 || !prs[0]?.number) {
-    throw new Error(`No PR found for issue #${issueNumber}`);
+    throw new Error(`No PR found for issue #${issueId}`);
   }
 
   return prs[0];
@@ -1102,31 +1102,31 @@ function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: n
  */
 function resolveBuilderQuery(workspaceRoot: string, type: string, options: ConsultOptions): string {
   const projectState = getBuilderProjectState(workspaceRoot, options.projectId);
-  const projectNumber = parseInt(projectState.id, 10);
+  const projectId = projectState.id;
 
   switch (type) {
     case 'spec': {
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      if (!specPath) throw new Error(`Spec ${projectState.id} not found in codev/specs/`);
-      const planPath = findPlan(workspaceRoot, projectNumber);
+      const specPath = findSpec(workspaceRoot, projectId);
+      if (!specPath) throw new Error(`Spec ${projectId} not found in codev/specs/`);
+      const planPath = findPlan(workspaceRoot, projectId);
       console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
       return buildSpecQuery(specPath, planPath);
     }
 
     case 'plan': {
-      const planPath = findPlan(workspaceRoot, projectNumber);
-      if (!planPath) throw new Error(`Plan ${projectState.id} not found in codev/plans/`);
-      const specPath = findSpec(workspaceRoot, projectNumber);
+      const planPath = findPlan(workspaceRoot, projectId);
+      if (!planPath) throw new Error(`Plan ${projectId} not found in codev/plans/`);
+      const specPath = findSpec(workspaceRoot, projectId);
       console.error(`Plan: ${planPath}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       return buildPlanQuery(planPath, specPath);
     }
 
     case 'impl': {
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      const planPath = findPlan(workspaceRoot, projectNumber);
-      console.error(`Project: ${projectState.id}`);
+      const specPath = findSpec(workspaceRoot, projectId);
+      const planPath = findPlan(workspaceRoot, projectId);
+      console.error(`Project: ${projectId}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
       if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
@@ -1134,9 +1134,9 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
     }
 
     case 'pr': {
-      const prNumber = findPRForCurrentBranch(workspaceRoot);
-      console.error(`PR: #${prNumber}`);
-      return buildPRQuery(prNumber);
+      const prId = findPRForCurrentBranch(workspaceRoot);
+      console.error(`PR: #${prId}`);
+      return buildPRQuery(prId);
     }
 
     case 'phase': {
@@ -1144,8 +1144,8 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
       if (!currentPhase) {
         throw new Error('No current plan phase detected. Use --plan-phase to specify.');
       }
-      const specPath = findSpec(workspaceRoot, projectNumber);
-      const planPath = findPlan(workspaceRoot, projectNumber);
+      const specPath = findSpec(workspaceRoot, projectId);
+      const planPath = findPlan(workspaceRoot, projectId);
       console.error(`Phase: ${currentPhase}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
@@ -1153,9 +1153,9 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
     }
 
     case 'integration': {
-      const prNumber = findPRForCurrentBranch(workspaceRoot);
-      console.error(`PR: #${prNumber} (integration review)`);
-      return buildPRQuery(prNumber);
+      const prId = findPRForCurrentBranch(workspaceRoot);
+      console.error(`PR: #${prId} (integration review)`);
+      return buildPRQuery(prId);
     }
 
     default:
@@ -1178,32 +1178,29 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
     );
   }
 
-  const issueNumber = parseInt(options.issue, 10);
-  if (isNaN(issueNumber)) {
-    throw new Error(`Invalid issue number: ${options.issue}`);
-  }
+  const issueId = options.issue;
 
   switch (type) {
     case 'spec': {
-      const specPath = findSpec(workspaceRoot, issueNumber);
-      if (!specPath) throw new Error(`Spec ${issueNumber} not found in codev/specs/`);
-      const planPath = findPlan(workspaceRoot, issueNumber);
+      const specPath = findSpec(workspaceRoot, issueId);
+      if (!specPath) throw new Error(`Spec ${issueId} not found in codev/specs/`);
+      const planPath = findPlan(workspaceRoot, issueId);
       console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
       return buildSpecQuery(specPath, planPath);
     }
 
     case 'plan': {
-      const planPath = findPlan(workspaceRoot, issueNumber);
-      if (!planPath) throw new Error(`Plan ${issueNumber} not found in codev/plans/`);
-      const specPath = findSpec(workspaceRoot, issueNumber);
+      const planPath = findPlan(workspaceRoot, issueId);
+      if (!planPath) throw new Error(`Plan ${issueId} not found in codev/plans/`);
+      const specPath = findSpec(workspaceRoot, issueId);
       console.error(`Plan: ${planPath}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       return buildPlanQuery(planPath, specPath);
     }
 
     case 'impl': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueId);
       // Fetch the branch and diff from merge-base
       try {
         execSync(`git fetch origin ${pr.headRefName}`, { cwd: workspaceRoot, stdio: 'pipe' });
@@ -1211,24 +1208,24 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
         // May already be fetched
       }
       const mergeBase = execSync(`git merge-base main origin/${pr.headRefName}`, { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-      const specPath = findSpec(workspaceRoot, issueNumber);
-      const planPath = findPlan(workspaceRoot, issueNumber);
-      console.error(`Project: ${issueNumber} (PR #${pr.number}, branch: ${pr.headRefName})`);
+      const specPath = findSpec(workspaceRoot, issueId);
+      const planPath = findPlan(workspaceRoot, issueId);
+      console.error(`Project: ${issueId} (PR #${pr.number}, branch: ${pr.headRefName})`);
       if (specPath) console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
       return buildImplQuery(workspaceRoot, specPath, planPath, options.planPhase, `${mergeBase}..origin/${pr.headRefName}`);
     }
 
     case 'pr': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueId);
       console.error(`PR: #${pr.number}`);
-      return buildPRQuery(pr.number);
+      return buildPRQuery(String(pr.number));
     }
 
     case 'integration': {
-      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      const pr = findPRForIssue(workspaceRoot, issueId);
       console.error(`PR: #${pr.number} (integration review)`);
-      return buildPRQuery(pr.number);
+      return buildPRQuery(String(pr.number));
     }
 
     default:
