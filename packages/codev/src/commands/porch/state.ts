@@ -211,13 +211,18 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
   // Bugfix worktrees: .builders/bugfix-{N}-{slug} (slug is optional for legacy paths)
+  // Protocol worktrees: .builders/{protocol}-{N}-{slug} (aspir, spir, air, tick)
   // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
-  const match = normalized.match(/\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/);
+  const match = normalized.match(
+    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|tick)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
+  );
   if (!match) return null;
   // Bugfix worktrees use "bugfix-N" as the porch project ID
   if (match[2]) return `bugfix-${match[2]}`;
+  // Protocol worktrees (aspir, spir, air, tick) use the bare numeric ID
+  if (match[3]) return match[3];
   // Spec worktrees use zero-padded numeric IDs
-  return match[3];
+  return match[4];
 }
 
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
