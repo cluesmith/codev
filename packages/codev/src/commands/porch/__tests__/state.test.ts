@@ -313,6 +313,30 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/bugfix-332-fix-login-bug/src/commands/')).toBe('bugfix-332');
     });
 
+    it('should detect numeric ID from aspir worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-221-rename-cli-tools')).toBe('221');
+    });
+
+    it('should detect numeric ID from spir worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-042-feature-name')).toBe('042');
+    });
+
+    it('should detect numeric ID from air worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/air-100-small-feature')).toBe('100');
+    });
+
+    it('should detect numeric ID from tick worktree', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/tick-050-amendment')).toBe('050');
+    });
+
+    it('should detect protocol worktree ID from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/aspir-221-rename-cli-tools/src/commands/')).toBe('221');
+    });
+
+    it('should detect protocol worktree without slug', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-042')).toBe('042');
+    });
+
     it('should return null for task worktrees', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
     });
@@ -321,7 +345,7 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
     });
 
-    it('should return null for protocol worktrees', () => {
+    it('should return null for protocol worktrees with non-numeric IDs', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
     });
 
