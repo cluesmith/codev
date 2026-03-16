@@ -23,7 +23,7 @@ import { run } from '../utils/shell.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
-import { fetchGitHubIssue as fetchGitHubIssueNonFatal } from '../../lib/github.js';
+import { fetchIssue as fetchIssueNonFatal } from '../../lib/github.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -278,22 +278,22 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     }
   }
 
-  // Fetch GitHub issue context.
+  // Fetch forge issue context.
   // When no spec file exists, this is fatal (we need a project name).
   // When spec file exists, this is non-fatal (spec filename is the fallback).
-  let ghIssue: Awaited<ReturnType<typeof fetchGitHubIssueNonFatal>> = null;
+  let forgeIssue: Awaited<ReturnType<typeof fetchIssueNonFatal>> = null;
   if (!specFile) {
     // Fatal fetch — we need the issue title for naming
-    ghIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
+    forgeIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
   } else {
-    ghIssue = await fetchGitHubIssueNonFatal(issueNumber, { forgeConfig });
+    forgeIssue = await fetchIssueNonFatal(issueNumber, { forgeConfig });
   }
 
   // Derive specName for naming.
   // Priority: GitHub issue title > spec filename
   let specName: string;
-  if (ghIssue) {
-    specName = `${strippedId}-${slugify(ghIssue.title)}`;
+  if (forgeIssue) {
+    specName = `${strippedId}-${slugify(forgeIssue.title)}`;
   } else {
     // No GitHub issue — fall back to spec filename (specFile must exist here)
     specName = basename(specFile!, '.md');
@@ -340,8 +340,8 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
-  if (ghIssue) {
-    logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
+  if (forgeIssue) {
+    logger.kv('Issue', `#${issueNumber}: ${forgeIssue.title}`);
   }
 
   const specRelPath = `codev/specs/${actualSpecName}.md`;
@@ -355,11 +355,11 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     spec_missing: !specFile,
   };
   if (hasPlan) templateContext.plan = { path: planRelPath, name: actualSpecName };
-  if (ghIssue) {
+  if (forgeIssue) {
     templateContext.issue = {
       number: issueNumber,
-      title: ghIssue.title,
-      body: ghIssue.body || '(No description provided)',
+      title: forgeIssue.title,
+      body: forgeIssue.body || '(No description provided)',
     };
   }
 

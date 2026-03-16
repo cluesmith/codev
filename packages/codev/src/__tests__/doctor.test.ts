@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 
 // Mock forge module (imported by doctor.ts)
 const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => {
-  if (concept === 'gh-auth-status') return 'Logged in';
+  if (concept === 'auth-status') return 'Logged in';
   return null;
 }));
 const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
@@ -23,7 +23,7 @@ const resolveAllConceptsMock = vi.hoisted(() => vi.fn(() => {
   const concepts = [
     'issue-view', 'pr-list', 'issue-list', 'issue-comment', 'pr-exists',
     'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
-    'on-it-timestamps', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff', 'gh-auth-status',
+    'on-it-timestamps', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff', 'auth-status',
   ];
   return concepts.map(c => ({ concept: c, command: `gh ${c}`, source: 'default', executable: 'gh' }));
 }));
@@ -240,9 +240,9 @@ describe('doctor command', () => {
 
   describe('gh auth check (Spec 0126)', () => {
     it('should warn when gh is not authenticated', async () => {
-      // Make forge gh-auth-status concept fail
+      // Make forge auth-status concept fail
       executeForgeCommandSyncMock.mockImplementation((concept: string) => {
-        if (concept === 'gh-auth-status') throw new Error('not authenticated');
+        if (concept === 'auth-status') throw new Error('not authenticated');
         return null;
       });
 

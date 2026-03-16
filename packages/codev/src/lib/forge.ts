@@ -15,9 +15,22 @@
 import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const execAsync = promisify(exec);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/**
+ * Resolve the path to a provider's on-disk concept script.
+ * Scripts live at `scripts/forge/<provider>/<concept>.sh` relative to the package root.
+ * At runtime, __dirname is `dist/lib/` — the package root is two levels up.
+ */
+function resolveScriptPath(provider: string, concept: string): string {
+  return resolve(__dirname, '..', '..', 'scripts', 'forge', provider, `${concept}.sh`);
+}
 
 /** Default maxBuffer for forge commands (10MB). Prevents truncation for large diffs. */
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
@@ -44,81 +57,83 @@ export interface ForgeCommandOptions {
 }
 
 // =============================================================================
-// Default concept commands (gh-based)
+// Known concept names
 // =============================================================================
 
-const DEFAULT_COMMANDS: Record<string, string> = {
-  // Core issue/PR concepts
-  'issue-view': 'gh issue view "$CODEV_ISSUE_ID" --json title,body,state,comments',
-  'pr-list': 'gh pr list --json number,title,url,reviewDecision,body,createdAt',
-  'issue-list': 'gh issue list --limit 200 --json number,title,url,labels,createdAt',
-  'issue-comment': 'gh issue comment "$CODEV_ISSUE_ID" --body "$CODEV_COMMENT_BODY"',
-  'pr-exists': 'gh pr list --state all --head "$CODEV_BRANCH_NAME" --json number --jq "length > 0"',
-  'recently-closed': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list --state closed --search "closed:>$CODEV_SINCE_DATE" --json number,title,url,labels,createdAt,closedAt --limit 1000; else gh issue list --state closed --json number,title,url,labels,createdAt,closedAt --limit 1000; fi',
-  'recently-merged': 'if [ -n "$CODEV_SINCE_DATE" ]; then gh pr list --state merged --search "merged:>$CODEV_SINCE_DATE" --json number,title,url,body,createdAt,mergedAt,headRefName --limit 1000; else gh pr list --state merged --json number,title,url,body,createdAt,mergedAt,headRefName --limit 1000; fi',
-  'user-identity': 'gh api user --jq .login',
-  'team-activity': 'gh api graphql -f query="$CODEV_GRAPHQL_QUERY"',
-  'on-it-timestamps': 'gh api graphql -f query="$CODEV_GRAPHQL_QUERY" -f owner="$CODEV_REPO_OWNER" -f name="$CODEV_REPO_NAME"',
-  'pr-merge': 'gh pr merge "$CODEV_PR_NUMBER" --merge',
-  // Additional concepts (found during plan review)
-  'pr-search': 'gh pr list --search "$CODEV_SEARCH_QUERY" --json number,headRefName',
-  'pr-view': 'if [ "$CODEV_INCLUDE_COMMENTS" = "1" ]; then gh pr view "$CODEV_PR_NUMBER" --comments; else gh pr view "$CODEV_PR_NUMBER" --json title,body,state,author,baseRefName,headRefName,additions,deletions; fi',
-  'pr-diff': 'if [ "$CODEV_DIFF_NAME_ONLY" = "1" ]; then gh pr diff "$CODEV_PR_NUMBER" --name-only; else gh pr diff "$CODEV_PR_NUMBER"; fi',
-  'gh-auth-status': 'gh auth status',
-};
+const KNOWN_CONCEPTS = [
+  'issue-view', 'pr-list', 'issue-list', 'issue-comment', 'pr-exists',
+  'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
+  'on-it-timestamps', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
+  'auth-status',
+] as const;
+
+// =============================================================================
+// Default concept commands — resolved lazily from on-disk scripts
+// =============================================================================
+
+let _defaultCommands: Record<string, string> | null = null;
+
+/**
+ * Build default commands from on-disk scripts (github provider).
+ * Each concept maps to `scripts/forge/github/<concept>.sh`.
+ * Lazily computed and cached.
+ */
+function getDefaultCommands(): Record<string, string> {
+  if (_defaultCommands) return _defaultCommands;
+  _defaultCommands = {};
+  for (const concept of KNOWN_CONCEPTS) {
+    _defaultCommands[concept] = resolveScriptPath('github', concept);
+  }
+  return _defaultCommands;
+}
 
 // =============================================================================
 // Provider presets
 // =============================================================================
 
 /**
- * Built-in presets for common forges. Concepts without an equivalent are null (disabled).
+ * Build a provider preset from on-disk scripts.
+ * Concepts without a script file are null (disabled).
+ */
+function buildPresetFromScripts(provider: string, disabledConcepts: string[] = []): Record<string, string | null> {
+  const preset: Record<string, string | null> = {};
+  for (const concept of KNOWN_CONCEPTS) {
+    if (disabledConcepts.includes(concept)) {
+      preset[concept] = null;
+      continue;
+    }
+    const scriptPath = resolveScriptPath(provider, concept);
+    if (existsSync(scriptPath)) {
+      preset[concept] = scriptPath;
+    } else {
+      preset[concept] = null;
+    }
+  }
+  return preset;
+}
+
+let _providerPresets: Record<string, Record<string, string | null>> | null = null;
+
+/**
+ * Built-in presets for common forges. Resolved lazily from on-disk scripts.
  *
  * NOTE: Non-GitHub presets are best-effort. Their output schemas may not conform
  * to the contracts in forge-contracts.ts. Consumers must handle null returns
  * gracefully since JSON parse failures now return null instead of raw strings.
  */
-const PROVIDER_PRESETS: Record<string, Record<string, string | null>> = {
-  github: DEFAULT_COMMANDS,
-  gitlab: {
-    'issue-view': 'glab issue view "$CODEV_ISSUE_ID" --output json',
-    'pr-list': 'glab mr list --output json',
-    'issue-list': 'glab issue list --per-page 200 --output json',
-    'issue-comment': 'glab issue note "$CODEV_ISSUE_ID" --message "$CODEV_COMMENT_BODY"',
-    'pr-exists': 'glab mr list --source-branch "$CODEV_BRANCH_NAME" --output json | jq "length > 0"',
-    'recently-closed': 'glab issue list --state closed --per-page 1000 --output json',
-    'recently-merged': 'glab mr list --state merged --per-page 1000 --output json',
-    'user-identity': 'glab auth status --show-token 2>&1 | grep "Logged in" | sed "s/.*as //" | sed "s/ .*//"',
-    'team-activity': null,
-    'on-it-timestamps': null,
-    'pr-merge': 'glab mr merge "$CODEV_PR_NUMBER" --yes',
-    'pr-search': 'glab mr list --search "$CODEV_SEARCH_QUERY" --output json',
-    'pr-view': 'glab mr view "$CODEV_PR_NUMBER" --output json',
-    'pr-diff': 'glab mr diff "$CODEV_PR_NUMBER"',
-    'gh-auth-status': 'glab auth status',
-  },
-  gitea: {
-    'issue-view': 'tea issues view "$CODEV_ISSUE_ID" --output json',
-    'pr-list': 'tea pulls list --output json',
-    'issue-list': 'tea issues list --limit 200 --output json',
-    'issue-comment': 'tea issues comment "$CODEV_ISSUE_ID" "$CODEV_COMMENT_BODY"',
-    'pr-exists': 'tea pulls list --fields index --output json | jq "[.[] | select(.head.ref == \\"$CODEV_BRANCH_NAME\\")] | length > 0"',
-    'recently-closed': 'tea issues list --state closed --limit 1000 --output json',
-    'recently-merged': 'tea pulls list --state closed --limit 1000 --output json',
-    'user-identity': 'tea whoami --output json | jq -r ".login"',
-    'team-activity': null,
-    'on-it-timestamps': null,
-    'pr-merge': 'tea pulls merge "$CODEV_PR_NUMBER"',
-    'pr-search': null,
-    'pr-view': 'tea pulls view "$CODEV_PR_NUMBER" --output json',
-    'pr-diff': null,
-    'gh-auth-status': 'tea whoami',
-  },
-};
+function getProviderPresets(): Record<string, Record<string, string | null>> {
+  if (_providerPresets) return _providerPresets;
+  _providerPresets = {
+    github: getDefaultCommands(),
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
+  };
+  return _providerPresets;
+}
 
 /** Get known provider names. */
 export function getKnownProviders(): string[] {
-  return Object.keys(PROVIDER_PRESETS);
+  return Object.keys(getProviderPresets());
 }
 
 /** Resolution source for a concept command. */
@@ -136,7 +151,7 @@ export interface ConceptResolution {
  * Used by `codev doctor` for full concept reporting.
  */
 export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
-  const concepts = Object.keys(DEFAULT_COMMANDS);
+  const concepts = Object.keys(getDefaultCommands());
   return concepts.map((concept) => {
     // Check manual override first
     if (forgeConfig && concept !== 'provider' && concept in forgeConfig) {
@@ -149,7 +164,7 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
 
     // Check provider preset
     if (forgeConfig?.provider) {
-      const preset = PROVIDER_PRESETS[forgeConfig.provider];
+      const preset = getProviderPresets()[forgeConfig.provider];
       if (preset && concept in preset) {
         const cmd = preset[concept];
         if (cmd === null) {
@@ -160,17 +175,45 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
     }
 
     // Default
-    const cmd = DEFAULT_COMMANDS[concept] ?? null;
+    const cmd = getDefaultCommands()[concept] ?? null;
     return { concept, command: cmd, source: 'default' as ConceptSource, executable: cmd ? extractExecutable(cmd) : null };
   });
 }
 
 /**
- * Extract the executable name from a command string.
- * Handles `if [ ... ]; then cmd ...` patterns by looking for the first real command.
+ * Extract the executable name from a command string or script path.
+ *
+ * For script paths (ending in .sh): reads the script and finds the first
+ * substantive command (after `exec`, or in `if/then` blocks).
+ *
+ * For inline commands: handles `if [ ... ]; then cmd ...` patterns and pipes.
  */
 function extractExecutable(command: string): string | null {
   const trimmed = command.trim();
+
+  // Script path: read and extract the underlying tool
+  if (trimmed.endsWith('.sh') && existsSync(trimmed)) {
+    try {
+      const content = readFileSync(trimmed, 'utf-8');
+      // Look for `exec <tool>` or first non-comment, non-shebang, non-blank line
+      for (const line of content.split('\n')) {
+        const l = line.trim();
+        if (!l || l.startsWith('#') || l.startsWith('if') || l.startsWith('else') || l.startsWith('fi')) continue;
+        const execMatch = l.match(/^exec\s+(\S+)/);
+        if (execMatch) return execMatch[1];
+        // First substantive command
+        const token = l.split(/\s+/)[0];
+        if (token && !['if', 'then', 'else', 'fi', 'test', '[', '[['].includes(token)) {
+          return token;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Inline command: extract first real executable
   // Shell conditional: extract first command after "then"
   const thenMatch = trimmed.match(/then\s+(\S+)/);
   if (thenMatch) return thenMatch[1];
@@ -230,14 +273,14 @@ export function getForgeCommand(
 
   // Check provider preset
   if (forgeConfig?.provider) {
-    const preset = PROVIDER_PRESETS[forgeConfig.provider];
+    const preset = getProviderPresets()[forgeConfig.provider];
     if (preset && concept in preset) {
       return preset[concept]; // null means not supported by this provider
     }
   }
 
   // Fall back to default (github)
-  return DEFAULT_COMMANDS[concept] ?? null;
+  return getDefaultCommands()[concept] ?? null;
 }
 
 /**
@@ -343,7 +386,7 @@ function parseOutput(stdout: string, raw?: boolean): unknown | null {
     return JSON.parse(trimmed);
   } catch {
     // Not valid JSON — return null so downstream code doesn't cast a raw
-    // string to typed objects (e.g. GitHubIssue, GitHubPR[]).
+    // string to typed objects (e.g. IssueViewResult, PrListItem[]).
     return null;
   }
 }
@@ -365,7 +408,7 @@ function logDebug(concept: string, err: unknown, sync = false): void {
  * Get the list of all known concept names.
  */
 export function getKnownConcepts(): string[] {
-  return Object.keys(DEFAULT_COMMANDS);
+  return Object.keys(getDefaultCommands());
 }
 
 /**
@@ -373,7 +416,7 @@ export function getKnownConcepts(): string[] {
  * Useful for documentation and doctor checks.
  */
 export function getDefaultCommand(concept: string): string | null {
-  return DEFAULT_COMMANDS[concept] ?? null;
+  return getDefaultCommands()[concept] ?? null;
 }
 
 /**
@@ -389,10 +432,10 @@ export function validateForgeConfig(
   // Report provider if set
   if (forgeConfig.provider) {
     const providerName = forgeConfig.provider;
-    if (PROVIDER_PRESETS[providerName]) {
+    if (getProviderPresets()[providerName]) {
       results.push({ concept: 'provider', status: 'provider', message: `Provider: ${providerName}` });
     } else {
-      results.push({ concept: 'provider', status: 'unknown_concept', message: `Unknown provider '${providerName}' (known: ${Object.keys(PROVIDER_PRESETS).join(', ')})` });
+      results.push({ concept: 'provider', status: 'unknown_concept', message: `Unknown provider '${providerName}' (known: ${Object.keys(getProviderPresets()).join(', ')})` });
     }
   }
 
@@ -402,7 +445,7 @@ export function validateForgeConfig(
       results.push({ concept, status: 'disabled', message: `Concept '${concept}' is explicitly disabled` });
     } else if (command === '') {
       results.push({ concept, status: 'empty_command', message: `Concept '${concept}' has an empty command string` });
-    } else if (!(concept in DEFAULT_COMMANDS)) {
+    } else if (!(concept in getDefaultCommands())) {
       results.push({ concept, status: 'unknown_concept', message: `Concept '${concept}' is not a known forge concept` });
     } else {
       results.push({ concept, status: 'ok', message: `Concept '${concept}' overridden: ${command}` });

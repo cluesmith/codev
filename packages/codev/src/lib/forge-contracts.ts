@@ -128,5 +128,5 @@ export interface PrViewResult {
 // Auth concepts
 // =============================================================================
 
-/** Output of the `gh-auth-status` concept command: exit code only. */
+/** Output of the `auth-status` concept command: exit code only. */
 // Exit code 0 = authenticated, non-zero = not authenticated.

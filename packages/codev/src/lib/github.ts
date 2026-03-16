@@ -1,5 +1,5 @@
 /**
- * Shared GitHub utilities for Codev.
+ * Shared forge utilities for Codev.
  *
  * Provides non-fatal forge API access via configurable concept commands.
  * Default commands wrap the `gh` CLI. Projects can override via af-config.json.
@@ -9,46 +9,27 @@
  * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
 import { getRepoInfo } from './team-github.js';
-
-const execFileAsync = promisify(execFile);
+import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contracts.js';
 
 // =============================================================================
-// Types
+// Types — re-export forge-contracts types under generic names
 // =============================================================================
 
-export interface GitHubIssue {
-  title: string;
-  body: string;
-  state: string;
-  comments: Array<{
-    body: string;
-    createdAt: string;
-    author: { login: string };
-  }>;
-}
+/** A single issue as returned by the `issue-view` concept command. */
+export type ForgeIssue = IssueViewResult;
+/** A single PR/MR item as returned by the `pr-list` concept command. */
+export type ForgePR = PrListItem;
+/** A single issue item as returned by the `issue-list` concept command. */
+export type ForgeIssueListItem = IssueListItem;
 
-export interface GitHubPR {
-  number: number;
-  title: string;
-  url: string;
-  reviewDecision: string;
-  body: string;
-  createdAt: string;
-  mergedAt?: string;
-}
-
-export interface GitHubIssueListItem {
-  number: number;
-  title: string;
-  url: string;
-  labels: Array<{ name: string }>;
-  createdAt: string;
-  closedAt?: string;
-}
+/** @deprecated Use ForgeIssue instead. */
+export type GitHubIssue = ForgeIssue;
+/** @deprecated Use ForgePR instead. */
+export type GitHubPR = ForgePR;
+/** @deprecated Use ForgeIssueListItem instead. */
+export type GitHubIssueListItem = ForgeIssueListItem;
 
 // =============================================================================
 // Core forge API functions (non-fatal, via concept commands)
@@ -59,34 +40,34 @@ export interface GitHubIssueListItem {
  * Routes through the `issue-view` concept command.
  * Returns null if the concept command fails.
  *
- * @param issueId - Issue identifier (number or string for non-GitHub forges)
+ * @param issueId - Issue identifier (number or string)
  * @param options - Optional forge config and cwd
  */
-export async function fetchGitHubIssue(
+export async function fetchIssue(
   issueId: string | number,
   options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
-): Promise<GitHubIssue | null> {
+): Promise<ForgeIssue | null> {
   const result = await executeForgeCommand('issue-view', {
     CODEV_ISSUE_ID: String(issueId),
   }, {
     cwd: options?.cwd,
     forgeConfig: options?.forgeConfig,
   });
-  return result as GitHubIssue | null;
+  return result as ForgeIssue | null;
 }
 
 /**
  * Fetch a single issue by ID.
  * Throws on failure (for use in spawn where failure is fatal).
  *
- * @param issueId - Issue identifier (number or string for non-GitHub forges)
+ * @param issueId - Issue identifier (number or string)
  * @param options - Optional forge config and cwd
  */
-export async function fetchGitHubIssueOrThrow(
+export async function fetchIssueOrThrow(
   issueId: string | number,
   options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
-): Promise<GitHubIssue> {
-  const issue = await fetchGitHubIssue(issueId, options);
+): Promise<ForgeIssue> {
+  const issue = await fetchIssue(issueId, options);
   if (!issue) {
     throw new Error(
       `Failed to fetch issue #${issueId}. Ensure the 'issue-view' forge concept command is configured ` +
@@ -97,6 +78,11 @@ export async function fetchGitHubIssueOrThrow(
   return issue;
 }
 
+/** @deprecated Use fetchIssue instead. */
+export const fetchGitHubIssue = fetchIssue;
+/** @deprecated Use fetchIssueOrThrow instead. */
+export const fetchGitHubIssueOrThrow = fetchIssueOrThrow;
+
 /**
  * Fetch open PRs for the current repo.
  * Routes through the `pr-list` concept command.
@@ -105,12 +91,12 @@ export async function fetchGitHubIssueOrThrow(
 export async function fetchPRList(
   cwd?: string,
   forgeConfig?: ForgeConfig | null,
-): Promise<GitHubPR[] | null> {
+): Promise<ForgePR[] | null> {
   const result = await executeForgeCommand('pr-list', {}, {
     cwd,
     forgeConfig,
   });
-  return result as GitHubPR[] | null;
+  return result as ForgePR[] | null;
 }
 
 /**
@@ -121,12 +107,12 @@ export async function fetchPRList(
 export async function fetchIssueList(
   cwd?: string,
   forgeConfig?: ForgeConfig | null,
-): Promise<GitHubIssueListItem[] | null> {
+): Promise<ForgeIssueListItem[] | null> {
   const result = await executeForgeCommand('issue-list', {}, {
     cwd,
     forgeConfig,
   });
-  return result as GitHubIssueListItem[] | null;
+  return result as ForgeIssueListItem[] | null;
 }
 
 /**
@@ -137,7 +123,7 @@ export async function fetchIssueList(
 export async function fetchRecentlyClosed(
   cwd?: string,
   forgeConfig?: ForgeConfig | null,
-): Promise<GitHubIssueListItem[] | null> {
+): Promise<ForgeIssueListItem[] | null> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const result = await executeForgeCommand('recently-closed', {
     CODEV_SINCE_DATE: since,
@@ -145,11 +131,11 @@ export async function fetchRecentlyClosed(
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as GitHubIssueListItem[] | null;
+  if (!result || !Array.isArray(result)) return result as ForgeIssueListItem[] | null;
 
   // Filter to last 24 hours (concept command may return more)
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as GitHubIssueListItem[]).filter(
+  return (result as ForgeIssueListItem[]).filter(
     i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff,
   );
 }
@@ -162,7 +148,7 @@ export async function fetchRecentlyClosed(
 export async function fetchRecentMergedPRs(
   cwd?: string,
   forgeConfig?: ForgeConfig | null,
-): Promise<GitHubPR[] | null> {
+): Promise<ForgePR[] | null> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const result = await executeForgeCommand('recently-merged', {
     CODEV_SINCE_DATE: since,
@@ -170,11 +156,11 @@ export async function fetchRecentMergedPRs(
     cwd,
     forgeConfig,
   });
-  if (!result || !Array.isArray(result)) return result as GitHubPR[] | null;
+  if (!result || !Array.isArray(result)) return result as ForgePR[] | null;
 
   // Filter to last 24 hours (concept command may return more)
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (result as GitHubPR[]).filter(
+  return (result as ForgePR[]).filter(
     pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff,
   );
 }

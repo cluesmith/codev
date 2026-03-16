@@ -651,7 +651,7 @@ export async function doctor(): Promise<number> {
     // gh auth check — only for GitHub provider
     if (provider === 'github' && commandExists('gh')) {
       try {
-        const result = executeForgeCommandSync('gh-auth-status', {}, { raw: true });
+        const result = executeForgeCommandSync('auth-status', {}, { raw: true });
         if (result) {
           const authOutput = typeof result === 'string' ? result : '';
           const accountMatch = authOutput.match(/Logged in to .+ account (\S+)/);

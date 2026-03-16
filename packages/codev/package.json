@@ -16,7 +16,8 @@
     "bin",
     "skeleton",
     "templates",
-    "dashboard/dist"
+    "dashboard/dist",
+    "scripts/forge"
   ],
   "scripts": {
     "clean": "rm -rf dist",

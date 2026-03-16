@@ -89,7 +89,7 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 
 | Concept | Env Vars | Output | Description |
 |---------|----------|--------|-------------|
-| `gh-auth-status` | — | text | Check forge authentication |
+| `auth-status` | — | text | Check forge authentication |
 
 ## Worked Examples
 

@@ -13,7 +13,7 @@ import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
-import { fetchGitHubIssueOrThrow, type GitHubIssue } from '../../lib/github.js';
+import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
@@ -93,8 +93,8 @@ export async function initPorchInWorktree(
   }
 }
 
-// Re-export GitHubIssue type for backward compatibility with tests
-export type { GitHubIssue } from '../../lib/github.js';
+// Re-export ForgeIssue (and deprecated alias) for backward compatibility with tests
+export type { ForgeIssue, GitHubIssue } from '../../lib/github.js';
 
 /**
  * Generate a slug from an issue title (max 30 chars, lowercase, alphanumeric + hyphens)
@@ -131,9 +131,9 @@ export function findExistingBugfixWorktree(buildersDir: string, issueNumber: num
 export async function fetchGitHubIssue(
   issueNumber: number,
   options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
-): Promise<GitHubIssue> {
+): Promise<ForgeIssue> {
   try {
-    return await fetchGitHubIssueOrThrow(issueNumber, options);
+    return await fetchIssueOrThrow(issueNumber, options);
   } catch (error) {
     fatal(
       `Failed to fetch issue #${issueNumber}. ` +
@@ -156,7 +156,7 @@ export async function fetchGitHubIssue(
 export async function checkBugfixCollisions(
   issueNumber: number,
   worktreePath: string,
-  issue: GitHubIssue,
+  issue: ForgeIssue,
   force: boolean,
   forgeConfig?: ForgeConfig | null,
 ): Promise<void> {
@@ -225,7 +225,7 @@ export async function executePreSpawnHooks(
   protocol: ProtocolDefinition | null,
   context: {
     issueNumber?: number;
-    issue?: GitHubIssue;
+    issue?: ForgeIssue;
     worktreePath?: string;
     force?: boolean;
     noComment?: boolean;

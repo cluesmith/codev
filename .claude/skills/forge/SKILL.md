@@ -20,7 +20,7 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 | `pr-search` | `CODEV_SEARCH_QUERY` | Search PRs (JSON array) |
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` (optional) | View PR details (JSON or text) |
 | `pr-diff` | `CODEV_PR_NUMBER`, `CODEV_DIFF_NAME_ONLY` (optional) | Get PR diff |
-| `gh-auth-status` | — | Check forge authentication status |
+| `auth-status` | — | Check forge authentication status |
 
 ## Configuration
 

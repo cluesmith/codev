@@ -93,15 +93,15 @@ afterAll(() => {
 // =============================================================================
 
 describe('getForgeCommand', () => {
-  it('returns default gh command when no config provided', () => {
+  it('returns default script path when no config provided', () => {
     const cmd = getForgeCommand('issue-view');
-    expect(cmd).toContain('gh issue view');
+    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
   });
 
-  it('returns default gh command when config has no override for concept', () => {
+  it('returns default script path when config has no override for concept', () => {
     const config = { 'pr-list': 'custom-pr-list' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('gh issue view');
+    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
   });
 
   it('returns user override when configured', () => {
@@ -322,26 +322,25 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('pr-search');
     expect(concepts).toContain('pr-view');
     expect(concepts).toContain('pr-diff');
-    expect(concepts).toContain('gh-auth-status');
+    expect(concepts).toContain('auth-status');
     expect(concepts.length).toBe(15);
   });
 });
 
 describe('getDefaultCommand', () => {
-  it('returns the default command for a known concept', () => {
+  it('returns the on-disk script path for a known concept', () => {
     const cmd = getDefaultCommand('issue-view');
-    expect(cmd).toContain('gh issue view');
-    expect(cmd).toContain('$CODEV_ISSUE_ID');
+    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
   });
 
-  it('includes CODEV_SINCE_DATE in recently-closed default', () => {
+  it('returns the on-disk script path for recently-closed', () => {
     const cmd = getDefaultCommand('recently-closed');
-    expect(cmd).toContain('$CODEV_SINCE_DATE');
+    expect(cmd).toContain('scripts/forge/github/recently-closed.sh');
   });
 
-  it('includes CODEV_SINCE_DATE in recently-merged default', () => {
+  it('returns the on-disk script path for recently-merged', () => {
     const cmd = getDefaultCommand('recently-merged');
-    expect(cmd).toContain('$CODEV_SINCE_DATE');
+    expect(cmd).toContain('scripts/forge/github/recently-merged.sh');
   });
 
   it('returns null for unknown concepts', () => {
@@ -436,7 +435,7 @@ describe('provider presets', () => {
   it('uses provider preset when no manual override', () => {
     const config = { provider: 'gitlab' };
     const cmd = getForgeCommand('pr-merge', config);
-    expect(cmd).toContain('glab');
+    expect(cmd).toContain('scripts/forge/gitlab/pr-merge.sh');
   });
 
   it('manual override takes precedence over provider preset', () => {
@@ -446,10 +445,10 @@ describe('provider presets', () => {
   });
 
   it('falls back to default when provider does not define concept', () => {
-    // github preset is DEFAULT_COMMANDS, so any concept returns the default
+    // github preset uses on-disk scripts, same as defaults
     const config = { provider: 'github' };
     const cmd = getForgeCommand('issue-view', config);
-    expect(cmd).toContain('gh issue view');
+    expect(cmd).toContain('scripts/forge/github/issue-view.sh');
   });
 
   it('returns null for concepts disabled in provider preset', () => {
