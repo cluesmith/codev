@@ -767,7 +767,7 @@ describe('fetchOnItTimestamps', () => {
   it('returns empty map when repo lookup fails', async () => {
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
-    const result = await fetchOnItTimestamps([42], '/tmp');
+    const result = await fetchOnItTimestamps(['42'], '/tmp');
     expect(result.size).toBe(0);
   });
 
@@ -781,7 +781,7 @@ describe('fetchOnItTimestamps', () => {
     });
     executeForgeCommandMock.mockRejectedValueOnce(new Error('concept failed'));
 
-    const result = await fetchOnItTimestamps([42, 73], '/tmp');
+    const result = await fetchOnItTimestamps(['42', '73'], '/tmp');
     expect(result.size).toBe(0);
   });
 
@@ -792,10 +792,10 @@ describe('fetchOnItTimestamps', () => {
       '73': '2026-02-10T07:00:00Z',
     });
 
-    const result = await fetchOnItTimestamps([42, 73], '/tmp', forgeConfig);
+    const result = await fetchOnItTimestamps(['42', '73'], '/tmp', forgeConfig);
 
-    expect(result.get(42)).toBe('2026-02-10T06:00:00Z');
-    expect(result.get(73)).toBe('2026-02-10T07:00:00Z');
+    expect(result.get('42')).toBe('2026-02-10T06:00:00Z');
+    expect(result.get('73')).toBe('2026-02-10T07:00:00Z');
     // Should not call execFile for repo view (custom path)
     expect(execFileMock).not.toHaveBeenCalled();
   });
@@ -803,7 +803,7 @@ describe('fetchOnItTimestamps', () => {
   it('returns empty map when custom concept is disabled (null)', async () => {
     const forgeConfig = { 'on-it-timestamps': null };
 
-    const result = await fetchOnItTimestamps([42], '/tmp', forgeConfig as any);
+    const result = await fetchOnItTimestamps(['42'], '/tmp', forgeConfig as any);
 
     expect(result.size).toBe(0);
     expect(executeForgeCommandMock).not.toHaveBeenCalled();

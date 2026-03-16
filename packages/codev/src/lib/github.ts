@@ -267,9 +267,8 @@ export async function fetchOnItTimestamps(
 
     if (cmdResult && typeof cmdResult === 'object' && !Array.isArray(cmdResult)) {
       for (const [key, value] of Object.entries(cmdResult as Record<string, string>)) {
-        const num = parseInt(key, 10);
-        if (!isNaN(num) && typeof value === 'string') {
-          result.set(num, value);
+        if (typeof value === 'string') {
+          result.set(key, value);
         }
       }
     }
