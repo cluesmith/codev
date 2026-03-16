@@ -79,6 +79,9 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     if (!options.issueNumber) {
       return '--branch requires an issue number';
     }
+    if (!options.protocol) {
+      return '--branch requires --protocol (protocol cannot be auto-detected for existing branches)';
+    }
   }
 
   return null; // Valid
@@ -569,6 +572,12 @@ describe('Spawn Command', () => {
       const options: SpawnOptions = { protocol: 'maintain', branch: 'some-branch' };
       const error = validateSpawnOptions(options);
       expect(error).toContain('--branch requires an issue number');
+    });
+
+    it('rejects --branch without --protocol (even with --soft)', () => {
+      const options: SpawnOptions = { issueNumber: 603, soft: true, branch: 'some-branch' };
+      const error = validateSpawnOptions(options);
+      expect(error).toContain('--branch requires --protocol');
     });
   });
 

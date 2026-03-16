@@ -78,7 +78,7 @@ af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-stri
 ### Technical Constraints
 - Must use `git worktree add` with an existing branch (not create a new one)
 - The branch must be fetched from remote and a local tracking branch created before worktree creation (e.g., `git fetch origin <branch>:<branch>` to create the local branch from the remote)
-- Worktree directory naming: use the branch name, slugified, as the directory name under `.builders/` (e.g., branch `builder/bugfix-603-slug` → worktree dir `builder-bugfix-603-slug`)
+- Worktree directory naming: use `<protocol>-<issueNumber>-branch-<slugified-branch>` pattern to preserve compatibility with existing detection utilities (e.g., `bugfix-603-branch-builder-bugfix-603-slug`)
 - Must not break existing spawn flows — all current tests must continue to pass
 - If the branch is already checked out in another worktree or the main working directory, fail with a clear, actionable error (e.g., "Branch 'X' is already checked out at '/path'. Switch that checkout to a different branch first.")
 - Branch names from user input must be validated against a safe regex (e.g., matching valid git branch name characters only) before being passed to shell commands — do not rely on existing auto-generated-only patterns
@@ -139,7 +139,7 @@ Instead of specifying the branch name, accept a `--pr <number>` flag and use `gh
 ## Open Questions
 
 ### Critical (Blocks Progress)
-- [x] How should the worktree directory be named when using `--branch`? → Use the branch name, slugified, as the worktree directory name under `.builders/`
+- [x] How should the worktree directory be named when using `--branch`? → Use `<protocol>-<id>-branch-<slug>` pattern to maintain compatibility with detection utilities
 
 ### Important (Affects Design)
 - [x] Should we add PR context (review comments, etc.) to the builder prompt? → Out of scope for this spec. The builder prompt should note it's continuing work on an existing branch, but pulling full PR context is a future enhancement.

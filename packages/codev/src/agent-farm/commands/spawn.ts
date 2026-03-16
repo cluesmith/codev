@@ -38,7 +38,6 @@ import {
   checkDependencies,
   createWorktree,
   createWorktreeFromBranch,
-  validateBranchName,
   initPorchInWorktree,
   checkBugfixCollisions,
   fetchGitHubIssue,
@@ -178,6 +177,9 @@ function validateSpawnOptions(options: SpawnOptions): void {
     }
     if (!options.issueNumber) {
       fatal('--branch requires an issue number');
+    }
+    if (!options.protocol) {
+      fatal('--branch requires --protocol (protocol cannot be auto-detected for existing branches)');
     }
   }
 }
