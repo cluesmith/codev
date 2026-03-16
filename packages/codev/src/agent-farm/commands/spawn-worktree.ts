@@ -201,6 +201,7 @@ export async function createWorktreeFromBranch(
     logger.info(`Branch '${branch}' not found on origin. Checking for fork PRs...`);
     const fork = await detectForkRemote(config, branch);
     if (fork) {
+      validateRemoteName(fork.owner);
       logger.info(`Found fork PR from '${fork.owner}'. Fetching from fork...`);
       await ensureRemote(config, fork.owner, fork.url);
       remote = fork.owner;
