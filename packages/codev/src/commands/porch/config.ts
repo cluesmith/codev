@@ -1,5 +1,5 @@
 /**
- * Porch config reader — loads porch.checks from af-config.json.
+ * Porch config reader — loads porch.checks and porch.consultation from af-config.json.
  *
  * Intentionally self-contained: does NOT import from agent-farm's config
  * module, keeping porch independent of the af dependency tree.
@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CheckOverrides } from './types.js';
+import { findConfigRoot } from './artifacts.js';
 
 /**
  * Load check overrides from af-config.json in the workspace root.
@@ -21,7 +22,7 @@ import type { CheckOverrides } from './types.js';
  * Throws when af-config.json exists but cannot be parsed as JSON.
  */
 export function loadCheckOverrides(workspaceRoot: string): CheckOverrides | null {
-  const configPath = path.join(workspaceRoot, 'af-config.json');
+  const configPath = path.join(findConfigRoot(workspaceRoot), 'af-config.json');
 
   if (!fs.existsSync(configPath)) {
     return null;

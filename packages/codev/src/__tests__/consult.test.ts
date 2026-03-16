@@ -590,41 +590,40 @@ describe('consult command', () => {
     });
   });
 
-  describe('file-based review instructions (Bugfix #280)', () => {
-    it('buildSpecQuery should instruct models to read files from disk', async () => {
+  describe('content-inlined review queries (Bugfix #280 + TICK-002)', () => {
+    it('buildSpecQuery should inline spec content', async () => {
       vi.resetModules();
       const { _buildSpecQuery } = await import('../commands/consult/index.js');
-      const query = _buildSpecQuery('/path/to/spec.md', null);
+      const query = _buildSpecQuery({ content: '# My Spec\nDetails here', label: 'spec-42' }, null);
 
-      expect(query).toContain('Read the files listed above directly from disk');
-      expect(query).toContain('Do NOT rely on `git diff`');
+      expect(query).toContain('# My Spec');
+      expect(query).toContain('Details here');
+      expect(query).toContain('spec-42');
     });
 
-    it('buildPlanQuery should instruct models to read files from disk', async () => {
-      vi.resetModules();
-      const { _buildPlanQuery } = await import('../commands/consult/index.js');
-      const query = _buildPlanQuery('/path/to/plan.md', '/path/to/spec.md');
-
-      expect(query).toContain('Read the files listed above directly from disk');
-      expect(query).toContain('Do NOT rely on `git diff`');
-    });
-
-    it('buildSpecQuery should include file paths', async () => {
+    it('buildSpecQuery should inline plan content when provided', async () => {
       vi.resetModules();
       const { _buildSpecQuery } = await import('../commands/consult/index.js');
-      const query = _buildSpecQuery('/path/to/spec.md', '/path/to/plan.md');
+      const query = _buildSpecQuery(
+        { content: '# Spec content', label: 'spec-42' },
+        { content: '# Plan content', label: 'plan-42' },
+      );
 
-      expect(query).toContain('/path/to/spec.md');
-      expect(query).toContain('/path/to/plan.md');
+      expect(query).toContain('# Spec content');
+      expect(query).toContain('# Plan content');
     });
 
-    it('buildPlanQuery should include file paths', async () => {
+    it('buildPlanQuery should inline plan and spec content', async () => {
       vi.resetModules();
       const { _buildPlanQuery } = await import('../commands/consult/index.js');
-      const query = _buildPlanQuery('/path/to/plan.md', '/path/to/spec.md');
+      const query = _buildPlanQuery(
+        { content: '# Plan content', label: 'plan-42' },
+        { content: '# Spec content', label: 'spec-42' },
+      );
 
-      expect(query).toContain('/path/to/plan.md');
-      expect(query).toContain('/path/to/spec.md');
+      expect(query).toContain('# Plan content');
+      expect(query).toContain('# Spec content');
+      expect(query).toContain('plan-42');
     });
 
     it('CLI model spawn should use cwd from workspaceRoot', async () => {

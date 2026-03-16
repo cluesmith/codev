@@ -71,6 +71,13 @@ export class TerminalManager {
       // UTF-8 locale for proper Unicode character rendering
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? '',
+      // Artifact data repo — porch CliResolver and artifact CLI tools need this
+      ...(process.env.CODEV_ARTIFACTS_DATA_REPO
+        ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO }
+        : {}),
+      ...(process.env.FAVA_TRAILS_DATA_REPO
+        ? { FAVA_TRAILS_DATA_REPO: process.env.FAVA_TRAILS_DATA_REPO }
+        : {}),
     };
 
     const defaults = defaultSessionOptions();

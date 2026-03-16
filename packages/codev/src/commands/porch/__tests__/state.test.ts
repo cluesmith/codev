@@ -439,10 +439,9 @@ updated_at: "${state.updated_at}"
         .toThrow('Cannot determine project ID');
     });
 
-    it('step 4: task/protocol worktrees fall through to error when no filesystem match', () => {
-      // Task worktrees return null from CWD detection, and empty root has no projects
-      expect(() => resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot))
-        .toThrow('Cannot determine project ID');
+    it('step 2: protocol worktrees with numeric ID are detected from CWD', () => {
+      const result = resolveProjectId(undefined, '/repo/.builders/aspir-17-feature', emptyProjectRoot);
+      expect(result).toEqual({ id: '17', source: 'cwd' });
     });
   });
 
