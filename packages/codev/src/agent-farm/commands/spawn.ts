@@ -316,8 +316,18 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   const builderId = buildAgentName('spec', projectId, protocol);
   const specSlug = specName.replace(/^[0-9]+-/, '');
-  const worktreeName = `${protocol}-${strippedId}-${specSlug}`;
-  const branchName = `builder/${worktreeName}`;
+
+  // Spec 609: when --branch is provided, use the existing branch name and
+  // derive worktree name with a compatible pattern for detection utilities.
+  let worktreeName: string;
+  let branchName: string;
+  if (options.branch) {
+    branchName = options.branch;
+    worktreeName = `${protocol}-${strippedId}-branch-${slugify(options.branch)}`;
+  } else {
+    worktreeName = `${protocol}-${strippedId}-${specSlug}`;
+    branchName = `builder/${worktreeName}`;
+  }
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
   // For file references (template context, plan lookup), use the actual spec filename
@@ -332,7 +342,8 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (${protocol})`);
   logger.kv('Issue', `#${issueNumber}`);
   logger.kv('Spec', specFile ?? '(will be created by Specify phase)');
-  logger.kv('Branch', branchName);
+  if (options.branch) logger.kv('Existing Branch', branchName);
+  else logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
 
   await ensureDirectories(config);
@@ -340,6 +351,8 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   if (options.resume) {
     validateResumeWorktree(worktreePath);
+  } else if (options.branch) {
+    await createWorktreeFromBranch(config, branchName, worktreePath);
   } else {
     await createWorktree(config, branchName, worktreePath);
   }
@@ -377,10 +390,16 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
       body: forgeIssue.body || '(No description provided)',
     };
   }
+  if (options.branch) {
+    templateContext.existing_branch = options.branch;
+  }
 
   const initialPrompt = buildPromptFromTemplate(config, protocol, templateContext);
   const resumeNotice = options.resume ? `\n${buildResumeNotice(projectId)}\n` : '';
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${initialPrompt}`;
+  const branchNotice = options.branch
+    ? `\n## Existing Branch\nYou are continuing work on existing branch \`${options.branch}\`. This branch may have commits from another contributor. Review the existing commits before making changes.\n`
+    : '';
+  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}${branchNotice}\n${initialPrompt}`;
 
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
@@ -618,31 +637,38 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   // When resuming, find the existing worktree by issue number pattern
   // instead of recomputing from the current title (which may have changed).
   let worktreeName: string;
-  if (options.resume) {
+  let branchName: string;
+  if (options.branch) {
+    // Spec 609: use existing remote branch
+    branchName = options.branch;
+    worktreeName = `bugfix-${issueNumber}-branch-${slugify(options.branch)}`;
+  } else if (options.resume) {
     const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
     if (existing) {
       worktreeName = existing;
     } else {
       worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
     }
+    branchName = `builder/${worktreeName}`;
   } else {
     worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+    branchName = `builder/${worktreeName}`;
   }
 
-  const branchName = `builder/${worktreeName}`;
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
   const protocolDef = loadProtocol(config, protocol);
   const mode = resolveMode(options, protocolDef);
 
   logger.kv('Title', issue.title);
-  logger.kv('Branch', branchName);
+  if (options.branch) logger.kv('Existing Branch', branchName);
+  else logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
   logger.kv('Protocol', protocol.toUpperCase());
   logger.kv('Mode', mode.toUpperCase());
 
-  // Execute pre-spawn hooks (skip in resume mode)
-  if (!options.resume) {
+  // Execute pre-spawn hooks (skip in resume and branch modes)
+  if (!options.resume && !options.branch) {
     if (protocolDef?.hooks?.['pre-spawn']) {
       await executePreSpawnHooks(protocolDef, {
         issueNumber,
@@ -674,6 +700,12 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
 
   if (options.resume) {
     validateResumeWorktree(worktreePath);
+  } else if (options.branch) {
+    await createWorktreeFromBranch(config, branchName, worktreePath);
+    // Pre-initialize porch for --branch mode too
+    const porchProjectId = `bugfix-${issueNumber}`;
+    const slug = slugify(issue.title);
+    await initPorchInWorktree(worktreePath, protocol, porchProjectId, slug);
   } else {
     await createWorktree(config, branchName, worktreePath);
 
@@ -692,9 +724,15 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     input_description: `a fix for GitHub Issue #${issueNumber}`,
     issue: { number: issueNumber, title: issue.title, body: issue.body || '(No description provided)' },
   };
+  if (options.branch) {
+    templateContext.existing_branch = options.branch;
+  }
   const prompt = buildPromptFromTemplate(config, protocol, templateContext);
   const resumeNotice = options.resume ? `\n${buildResumeNotice(builderId)}\n` : '';
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${prompt}`;
+  const branchNotice = options.branch
+    ? `\n## Existing Branch\nYou are continuing work on existing branch \`${options.branch}\`. This branch may have commits from another contributor. Review the existing commits before making changes.\n`
+    : '';
+  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}${branchNotice}\n${prompt}`;
 
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
