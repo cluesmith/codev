@@ -211,8 +211,14 @@ af send 0042 "PR approved, please merge"
 After builder merges and work is integrated:
 
 ```bash
+# 1. Close the GitHub Issue
+gh issue close 42
+
+# 2. Clean up the builder worktree
 af cleanup -p 0042
 ```
+
+**Always close the GitHub Issue when the PR merges.** This is the architect's responsibility — builders don't close issues.
 
 ## Critical Rules
 
