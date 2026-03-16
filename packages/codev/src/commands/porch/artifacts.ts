@@ -3,9 +3,9 @@
  *
  * Decouples porch from filesystem assumptions. Two backends:
  * - LocalResolver: reads from codev/specs/, codev/plans/ (default, backward compatible)
- * - FavaTrailsResolver: shells out to `fava-trails get` CLI
+ * - CliResolver: shells out to a configurable CLI command (e.g. `fava-trails get`)
  *
- * Spec 559: Porch FAVA Trails Artifact Resolver
+ * Spec 559: Porch Artifact Resolver
  */
 
 import { execFileSync } from 'node:child_process';
@@ -18,7 +18,7 @@ import { globSync } from 'glob';
 // =============================================================================
 
 export interface ArtifactResolver {
-  /** Find spec basename by numeric ID (e.g., "0559-porch-fava-trails-artifact-resolver") */
+  /** Find spec basename by numeric ID (e.g., "0559-porch-artifact-resolver") */
   findSpecBaseName(projectId: string, title: string): string | null;
 
   /** Get full content of a spec by project ID */
@@ -32,6 +32,25 @@ export interface ArtifactResolver {
 
   /** Check if a spec/plan has pre-approval frontmatter */
   hasPreApproval(artifactGlob: string): boolean;
+}
+
+// =============================================================================
+// Shared Helpers
+// =============================================================================
+
+/**
+ * Check if artifact content has pre-approval frontmatter.
+ * Looks for YAML frontmatter with `approved:` and `validated:` fields.
+ * Used by both LocalResolver and CliResolver for consistency.
+ */
+export function isPreApprovedContent(content: string): boolean {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch) return false;
+
+  const frontmatter = frontmatterMatch[1];
+  const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
+  const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
+  return hasApproved && hasValidated;
 }
 
 // =============================================================================
@@ -141,13 +160,7 @@ export class LocalResolver implements ArtifactResolver {
     const filePath = path.join(this.workspaceRoot, matches[0]);
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-      if (!frontmatterMatch) return false;
-
-      const frontmatter = frontmatterMatch[1];
-      const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
-      const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
-      return hasApproved && hasValidated;
+      return isPreApprovedContent(content);
     } catch {
       return false;
     }
@@ -155,24 +168,33 @@ export class LocalResolver implements ArtifactResolver {
 }
 
 // =============================================================================
-// FAVA Trails Resolver (shells out to fava-trails CLI)
+// CLI Resolver (shells out to a configurable CLI command)
 // =============================================================================
 
-export class FavaTrailsResolver implements ArtifactResolver {
-  private cache = new Map<string, string | null>();
+export class CliResolver implements ArtifactResolver {
+  private cache = new Map<string, string>();
   private extraEnv: Record<string, string>;
 
-  constructor(private scope: string, workspaceRoot?: string) {
-    // Read FAVA_TRAILS_DATA_REPO from .env if not already in process.env.
-    // af_builder.sh injects this into builder worktree .env files.
+  constructor(
+    private scope: string,
+    private command: string = 'fava-trails',
+    workspaceRoot?: string,
+  ) {
+    // Read data repo env vars from .env if not already in process.env.
+    // af_builder.sh injects these into builder worktree .env files.
     this.extraEnv = {};
-    if (!process.env.FAVA_TRAILS_DATA_REPO && workspaceRoot) {
+    const dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO || process.env.FAVA_TRAILS_DATA_REPO;
+    if (!dataRepo && workspaceRoot) {
       const envPath = path.join(workspaceRoot, '.env');
       try {
         const envContent = fs.readFileSync(envPath, 'utf-8');
-        const match = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
-        if (match) {
-          this.extraEnv.FAVA_TRAILS_DATA_REPO = match[1].trim();
+        // Try new env var first, fall back to legacy
+        const newMatch = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
+        const legacyMatch = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
+        const repo = newMatch?.[1]?.trim() || legacyMatch?.[1]?.trim();
+        if (repo) {
+          this.extraEnv.CODEV_ARTIFACTS_DATA_REPO = repo;
+          this.extraEnv.FAVA_TRAILS_DATA_REPO = repo; // backward compat
         }
       } catch { /* .env may not exist */ }
     }
@@ -210,10 +232,14 @@ export class FavaTrailsResolver implements ArtifactResolver {
   }
 
   hasPreApproval(_artifactGlob: string): boolean {
-    // FAVA Trails thoughts use validation_status in frontmatter, not approved/validated fields.
-    // For now, check if the thought has validation_status: approved.
-    // This requires --with-frontmatter. For v1, return false (no pre-approval in FAVA Trails).
-    return false;
+    // Extract project ID from the glob pattern (e.g., "codev/specs/0559-*.md" → "559")
+    const idMatch = _artifactGlob.match(/(\d+)/);
+    if (!idMatch) return false;
+
+    const content = this.getSpecContent(idMatch[1], '');
+    if (!content) return false;
+
+    return isPreApprovedContent(content);
   }
 
   // ---------------------------------------------------------------------------
@@ -249,22 +275,24 @@ export class FavaTrailsResolver implements ArtifactResolver {
   private listChildren(subPath: string): string[] | null {
     const cacheKey = `list:${subPath}`;
     if (this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      return cached ? cached.split('\n').filter(Boolean) : null;
+      return this.cache.get(cacheKey)!.split('\n').filter(Boolean);
     }
 
     const scopePath = `${this.scope}/${subPath}`;
     try {
-      const output = execFileSync('fava-trails', ['get', '--list', scopePath], {
+      const output = execFileSync(this.command, ['get', '--list', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
         env: { ...process.env, ...this.extraEnv },
       }).trim();
-      this.cache.set(cacheKey, output || null);
-      return output ? output.split('\n').filter(Boolean) : null;
+      if (output) {
+        this.cache.set(cacheKey, output);
+        return output.split('\n').filter(Boolean);
+      }
+      return null;
     } catch (err: unknown) {
       this.handleError(err, scopePath);
-      this.cache.set(cacheKey, null);
+      // Do NOT cache errors — only cache successful results
       return null;
     }
   }
@@ -272,12 +300,12 @@ export class FavaTrailsResolver implements ArtifactResolver {
   private getContent(subPath: string): string | null {
     const cacheKey = `content:${subPath}`;
     if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey) ?? null;
+      return this.cache.get(cacheKey)!;
     }
 
     const scopePath = `${this.scope}/${subPath}`;
     try {
-      const output = execFileSync('fava-trails', ['get', scopePath], {
+      const output = execFileSync(this.command, ['get', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
         env: { ...process.env, ...this.extraEnv },
@@ -286,7 +314,7 @@ export class FavaTrailsResolver implements ArtifactResolver {
       return output;
     } catch (err: unknown) {
       this.handleError(err, scopePath);
-      this.cache.set(cacheKey, null);
+      // Do NOT cache errors — only cache successful results
       return null;
     }
   }
@@ -295,16 +323,15 @@ export class FavaTrailsResolver implements ArtifactResolver {
     if (err && typeof err === 'object' && 'code' in err) {
       if ((err as { code: string }).code === 'ENOENT') {
         throw new Error(
-          `fava-trails CLI not found. Install with: pip install fava-trails\n` +
-          `Or: uv tool install fava-trails`
+          `CLI command '${this.command}' not found. Ensure it is installed and on PATH.`
         );
       }
     }
-    // Non-zero exit — log stderr for debugging, then return null (caller handles missing artifacts)
+    // Non-zero exit — log warning for debugging
     if (err && typeof err === 'object' && 'stderr' in err) {
       const stderr = (err as { stderr: string }).stderr;
       if (stderr) {
-        console.error(`[porch] fava-trails get ${scopePath}: ${stderr.trim()}`);
+        console.error(`[porch] ${this.command} get ${scopePath}: ${stderr.trim()}`);
       }
     }
   }
@@ -345,8 +372,9 @@ export function findConfigRoot(workspaceRoot: string): string {
 // =============================================================================
 
 export interface ArtifactConfig {
-  backend?: 'local' | 'fava-trails';
+  backend?: 'local' | 'cli' | 'fava-trails';
   scope?: string;
+  command?: string;
 }
 
 /**
@@ -375,20 +403,22 @@ function loadArtifactConfig(workspaceRoot: string): ArtifactConfig | null {
 export function getResolver(workspaceRoot: string): ArtifactResolver {
   const config = loadArtifactConfig(workspaceRoot);
 
-  if (config?.backend === 'fava-trails') {
+  // 'cli' is the canonical backend; 'fava-trails' is accepted as an alias
+  if (config?.backend === 'cli' || config?.backend === 'fava-trails') {
     if (!config.scope) {
       throw new Error(
-        `af-config.json has artifacts.backend: "fava-trails" but no artifacts.scope.\n` +
-        `Add: "artifacts": { "backend": "fava-trails", "scope": "mwai/eng/project-name/codev-assets" }`
+        `af-config.json has artifacts.backend: "${config.backend}" but no artifacts.scope.\n` +
+        `Add: "artifacts": { "backend": "cli", "scope": "org/project/codev-assets" }`
       );
     }
-    return new FavaTrailsResolver(config.scope, workspaceRoot);
+    const command = config.command || 'fava-trails';
+    return new CliResolver(config.scope, command, workspaceRoot);
   }
 
   if (config?.backend && config.backend !== 'local') {
     throw new Error(
       `af-config.json has unknown artifacts.backend: "${config.backend}".\n` +
-      `Valid values: "local" (default), "fava-trails"`
+      `Valid values: "local" (default), "cli"`
     );
   }
 

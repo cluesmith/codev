@@ -155,7 +155,7 @@ export function getPlanContent(
   projectTitle: string,
   resolver?: ArtifactResolver,
 ): string | null {
-  // Resolver handles both LocalResolver and FavaTrailsResolver
+  // Resolver handles both LocalResolver and CliResolver
   if (resolver) {
     return resolver.getPlanContent(projectId, projectTitle);
   }

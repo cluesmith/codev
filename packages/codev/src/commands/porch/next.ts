@@ -730,7 +730,7 @@ async function handleOncePhase(
   resolver?: ArtifactResolver,
 ): Promise<PorchNextResponse> {
   // Try to load a prompt file for this phase
-  const prompt = await buildPhasePrompt(workspaceRoot, state, protocol);
+  const prompt = await buildPhasePrompt(workspaceRoot, state, protocol, resolver);
 
   // If prompt is just a generic fallback, try to use phase steps from protocol
   let description = prompt;
