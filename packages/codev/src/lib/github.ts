@@ -1,167 +1,168 @@
 /**
- * Shared GitHub utilities for Codev.
+ * Shared forge utilities for Codev.
  *
- * Provides non-fatal GitHub API access via the `gh` CLI.
+ * Provides non-fatal forge API access via configurable concept commands.
+ * Default commands wrap the `gh` CLI. Projects can override via af-config.json.
  * All functions return `null` on failure instead of throwing,
- * enabling graceful degradation when GitHub is unavailable.
+ * enabling graceful degradation when forge is unavailable.
+ *
+ * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-
-// =============================================================================
-// Types
-// =============================================================================
-
-export interface GitHubIssue {
-  title: string;
-  body: string;
-  state: string;
-  comments: Array<{
-    body: string;
-    createdAt: string;
-    author: { login: string };
-  }>;
-}
-
-export interface GitHubPR {
-  number: number;
-  title: string;
-  url: string;
-  reviewDecision: string;
-  body: string;
-  createdAt: string;
-  mergedAt?: string;
-}
-
-export interface GitHubIssueListItem {
-  number: number;
-  title: string;
-  url: string;
-  labels: Array<{ name: string }>;
-  createdAt: string;
-  closedAt?: string;
-}
+import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import { getRepoInfo } from './team-github.js';
+import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contracts.js';
 
 // =============================================================================
-// Core GitHub API functions (non-fatal)
+// Types — re-export forge-contracts types under generic names
+// =============================================================================
+
+/** A single issue as returned by the `issue-view` concept command. */
+export type ForgeIssue = IssueViewResult;
+/** A single PR/MR item as returned by the `pr-list` concept command. */
+export type ForgePR = PrListItem;
+/** A single issue item as returned by the `issue-list` concept command. */
+export type ForgeIssueListItem = IssueListItem;
+
+/** @deprecated Use ForgeIssue instead. */
+export type GitHubIssue = ForgeIssue;
+/** @deprecated Use ForgePR instead. */
+export type GitHubPR = ForgePR;
+/** @deprecated Use ForgeIssueListItem instead. */
+export type GitHubIssueListItem = ForgeIssueListItem;
+
+// =============================================================================
+// Core forge API functions (non-fatal, via concept commands)
 // =============================================================================
 
 /**
- * Fetch a single GitHub issue by number.
- * Returns null if gh CLI fails (not authenticated, network down, etc.).
+ * Fetch a single issue by ID.
+ * Routes through the `issue-view` concept command.
+ * Returns null if the concept command fails.
+ *
+ * @param issueId - Issue identifier (number or string)
+ * @param options - Optional forge config and cwd
  */
-export async function fetchGitHubIssue(issueNumber: number): Promise<GitHubIssue | null> {
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'issue', 'view', String(issueNumber),
-      '--json', 'title,body,state,comments',
-    ]);
-    return JSON.parse(stdout);
-  } catch {
-    return null;
-  }
+export async function fetchIssue(
+  issueId: string | number,
+  options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
+): Promise<ForgeIssue | null> {
+  const result = await executeForgeCommand('issue-view', {
+    CODEV_ISSUE_ID: String(issueId),
+  }, {
+    cwd: options?.cwd,
+    forgeConfig: options?.forgeConfig,
+  });
+  return result as ForgeIssue | null;
 }
 
 /**
- * Fetch a single GitHub issue by number.
+ * Fetch a single issue by ID.
  * Throws on failure (for use in spawn where failure is fatal).
+ *
+ * @param issueId - Issue identifier (number or string)
+ * @param options - Optional forge config and cwd
  */
-export async function fetchGitHubIssueOrThrow(issueNumber: number): Promise<GitHubIssue> {
-  const issue = await fetchGitHubIssue(issueNumber);
+export async function fetchIssueOrThrow(
+  issueId: string | number,
+  options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
+): Promise<ForgeIssue> {
+  const issue = await fetchIssue(issueId, options);
   if (!issue) {
-    throw new Error(`Failed to fetch issue #${issueNumber}. Ensure 'gh' CLI is installed and authenticated.`);
+    throw new Error(
+      `Failed to fetch issue #${issueId}. Ensure the 'issue-view' forge concept command is configured ` +
+      `(default: 'gh' CLI must be installed and authenticated). ` +
+      `Configure forge commands in af-config.json if using a non-GitHub forge.`,
+    );
   }
   return issue;
 }
 
+/** @deprecated Use fetchIssue instead. */
+export const fetchGitHubIssue = fetchIssue;
+/** @deprecated Use fetchIssueOrThrow instead. */
+export const fetchGitHubIssueOrThrow = fetchIssueOrThrow;
+
 /**
  * Fetch open PRs for the current repo.
+ * Routes through the `pr-list` concept command.
  * Returns null on failure.
- * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchPRList(cwd?: string): Promise<GitHubPR[] | null> {
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'pr', 'list',
-      '--json', 'number,title,url,reviewDecision,body,createdAt',
-    ], { cwd });
-    return JSON.parse(stdout);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchPRList failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
-  }
+export async function fetchPRList(
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<ForgePR[] | null> {
+  const result = await executeForgeCommand('pr-list', {}, {
+    cwd,
+    forgeConfig,
+  });
+  return result as ForgePR[] | null;
 }
 
 /**
  * Fetch open issues for the current repo.
+ * Routes through the `issue-list` concept command.
  * Returns null on failure.
- * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchIssueList(cwd?: string): Promise<GitHubIssueListItem[] | null> {
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'issue', 'list',
-      '--json', 'number,title,url,labels,createdAt',
-      '--limit', '200',
-    ], { cwd });
-    return JSON.parse(stdout);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchIssueList failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
-  }
+export async function fetchIssueList(
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<ForgeIssueListItem[] | null> {
+  const result = await executeForgeCommand('issue-list', {}, {
+    cwd,
+    forgeConfig,
+  });
+  return result as ForgeIssueListItem[] | null;
 }
 
 /**
  * Fetch recently closed issues (last 24 hours).
+ * Routes through the `recently-closed` concept command.
  * Returns null on failure.
- * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueListItem[] | null> {
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'issue', 'list',
-      '--state', 'closed',
-      '--json', 'number,title,url,labels,createdAt,closedAt',
-      '--limit', '50',
-    ], { cwd });
-    const issues: GitHubIssueListItem[] = JSON.parse(stdout);
-    // Filter to last 24 hours
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    return issues.filter(i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchRecentlyClosed failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
-  }
+export async function fetchRecentlyClosed(
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<ForgeIssueListItem[] | null> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const result = await executeForgeCommand('recently-closed', {
+    CODEV_SINCE_DATE: since,
+  }, {
+    cwd,
+    forgeConfig,
+  });
+  if (!result || !Array.isArray(result)) return result as ForgeIssueListItem[] | null;
+
+  // Filter to last 24 hours (concept command may return more)
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return (result as ForgeIssueListItem[]).filter(
+    i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff,
+  );
 }
 
 /**
  * Fetch recently merged PRs (last 24 hours).
+ * Routes through the `recently-merged` concept command.
  * Returns null on failure.
- * @param cwd - Working directory for `gh` CLI (determines which repo is queried).
  */
-export async function fetchRecentMergedPRs(cwd?: string): Promise<GitHubPR[] | null> {
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'pr', 'list',
-      '--state', 'merged',
-      '--json', 'number,title,url,body,createdAt,mergedAt',
-      '--limit', '50',
-    ], { cwd });
-    const prs: GitHubPR[] = JSON.parse(stdout);
-    // Filter to last 24 hours
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    return prs.filter(pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchMergedPRs failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
-  }
+export async function fetchRecentMergedPRs(
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<ForgePR[] | null> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const result = await executeForgeCommand('recently-merged', {
+    CODEV_SINCE_DATE: since,
+  }, {
+    cwd,
+    forgeConfig,
+  });
+  if (!result || !Array.isArray(result)) return result as ForgePR[] | null;
+
+  // Filter to last 24 hours (concept command may return more)
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return (result as ForgePR[]).filter(
+    pr => pr.mergedAt && new Date(pr.mergedAt).getTime() >= cutoff,
+  );
 }
 
 // =============================================================================
@@ -187,87 +188,101 @@ export interface ClosedIssue {
 
 /**
  * Fetch merged PRs, optionally filtered to those merged since a given date.
- * Uses `gh pr list --state merged --search "merged:>=DATE"` which provides `mergedAt`.
+ * Routes through the `recently-merged` concept command.
  * Returns null on failure.
  */
-export async function fetchMergedPRs(since: string | null, cwd?: string): Promise<MergedPR[] | null> {
-  try {
-    const args = [
-      'pr', 'list',
-      '--state', 'merged',
-      '--json', 'number,title,createdAt,mergedAt,body,headRefName',
-      '--limit', '1000',
-    ];
-    if (since) {
-      args.push('--search', `merged:>=${since}`);
-    }
-    const { stdout } = await execFileAsync('gh', args, { cwd });
-    return JSON.parse(stdout);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchMergedPRs failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
+export async function fetchMergedPRs(
+  since: string | null,
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<MergedPR[] | null> {
+  const env: Record<string, string> = {};
+  if (since) {
+    env.CODEV_SINCE_DATE = since;
   }
+  const result = await executeForgeCommand('recently-merged', env, {
+    cwd,
+    forgeConfig,
+  });
+  return result as MergedPR[] | null;
 }
 
 /**
  * Fetch closed issues, optionally filtered to those closed since a given date.
- * Uses `gh issue list --state closed --search "closed:>=DATE"` which provides `closedAt`.
+ * Routes through the `recently-closed` concept command.
  * Returns null on failure.
  */
-export async function fetchClosedIssues(since: string | null, cwd?: string): Promise<ClosedIssue[] | null> {
-  try {
-    const args = [
-      'issue', 'list',
-      '--state', 'closed',
-      '--json', 'number,title,createdAt,closedAt,labels',
-      '--limit', '1000',
-    ];
-    if (since) {
-      args.push('--search', `closed:>=${since}`);
-    }
-    const { stdout } = await execFileAsync('gh', args, { cwd });
-    return JSON.parse(stdout);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[github] fetchClosedIssues failed (cwd=${cwd ?? 'none'}): ${msg}`);
-    return null;
+export async function fetchClosedIssues(
+  since: string | null,
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<ClosedIssue[] | null> {
+  const env: Record<string, string> = {};
+  if (since) {
+    env.CODEV_SINCE_DATE = since;
   }
+  const result = await executeForgeCommand('recently-closed', env, {
+    cwd,
+    forgeConfig,
+  });
+  return result as ClosedIssue[] | null;
 }
 
 /**
- * Fetch the "On it!" comment timestamp for multiple issues using GraphQL.
+ * Fetch the "On it!" comment timestamp for multiple issues.
  *
- * Uses a batched GraphQL query via `gh api graphql` to fetch comments for
- * many issues in a single API call. Finds the first comment containing
- * "On it!" (posted by `af spawn`). Returns a map of issue number → ISO timestamp.
- * Issues without an "On it!" comment are omitted from the result.
+ * Routes through the `on-it-timestamps` concept command. The default command
+ * uses `gh api graphql` with a batched query. Non-GitHub forges can provide
+ * a simpler command that accepts CODEV_ISSUE_NUMBERS (comma-separated) and
+ * returns a JSON map of issue number → ISO timestamp.
+ *
+ * For the default GitHub implementation, this function builds the GraphQL
+ * query internally and passes it via CODEV_GRAPHQL_QUERY. It also needs
+ * repo owner/name which it fetches via a separate gh call.
  *
  * Batches in groups of 50 to stay within GraphQL complexity limits.
- * For 100 issues, this makes 2 API calls instead of 100.
+ * Returns empty map on failure (graceful degradation — analytics falls
+ * back to PR createdAt for wall-clock time).
  */
 export async function fetchOnItTimestamps(
   issueNumbers: number[],
   cwd?: string,
+  forgeConfig?: ForgeConfig | null,
 ): Promise<Map<number, string>> {
   const result = new Map<number, string>();
   if (issueNumbers.length === 0) return result;
 
   const unique = [...new Set(issueNumbers)];
 
-  // Get repo owner/name for GraphQL query
-  let owner: string;
-  let repoName: string;
-  try {
-    const { stdout } = await execFileAsync('gh', [
-      'repo', 'view', '--json', 'owner,name',
-    ], { cwd });
-    const repo = JSON.parse(stdout);
-    owner = repo.owner.login;
-    repoName = repo.name;
-  } catch {
+  // Check if a custom (non-default) on-it-timestamps command is configured.
+  // Custom commands receive CODEV_ISSUE_NUMBERS and return a simple JSON map.
+  const customCmd = forgeConfig?.['on-it-timestamps'];
+  if (customCmd !== undefined) {
+    // Custom command or explicitly disabled (null)
+    if (customCmd === null) return result;
+
+    const cmdResult = await executeForgeCommand('on-it-timestamps', {
+      CODEV_ISSUE_NUMBERS: unique.join(','),
+    }, { cwd, forgeConfig });
+
+    if (cmdResult && typeof cmdResult === 'object' && !Array.isArray(cmdResult)) {
+      for (const [key, value] of Object.entries(cmdResult as Record<string, string>)) {
+        const num = parseInt(key, 10);
+        if (!isNaN(num) && typeof value === 'string') {
+          result.set(num, value);
+        }
+      }
+    }
+    return result;
+  }
+
+  // Default path: build GraphQL query for gh api graphql
+  // Get repo owner/name from git remote
+  const repo = await getRepoInfo(cwd);
+  if (!repo) {
     return result; // Can't determine repo, skip gracefully
   }
+  const { owner, name: repoName } = repo;
 
   const BATCH_SIZE = 50;
 
@@ -286,22 +301,23 @@ export async function fetchOnItTimestamps(
 }`;
 
     try {
-      const { stdout } = await execFileAsync('gh', [
-        'api', 'graphql',
-        '-f', `query=${query}`,
-        '-f', `owner=${owner}`,
-        '-f', `name=${repoName}`,
-      ], { cwd });
+      const cmdResult = await executeForgeCommand('on-it-timestamps', {
+        CODEV_ISSUE_NUMBERS: batch.join(','),
+        CODEV_GRAPHQL_QUERY: query,
+        CODEV_REPO_OWNER: owner,
+        CODEV_REPO_NAME: repoName,
+      }, { cwd, forgeConfig });
 
-      const data = JSON.parse(stdout);
-      const repoData = data.data?.repository;
+      // Default gh command returns GraphQL response structure
+      const data = cmdResult as { data?: { repository?: Record<string, { comments?: { nodes?: Array<{ body: string; createdAt: string }> } }> } } | null;
+      const repoData = data?.data?.repository;
       if (!repoData) continue;
 
       for (const num of batch) {
         const issueData = repoData[`issue${num}`];
         if (!issueData?.comments?.nodes) continue;
 
-        const onItComment = (issueData.comments.nodes as Array<{ body: string; createdAt: string }>)
+        const onItComment = issueData.comments.nodes
           .find((c) => c.body.includes('On it!'));
         if (onItComment) {
           result.set(num, onItComment.createdAt);

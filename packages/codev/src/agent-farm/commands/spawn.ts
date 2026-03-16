@@ -23,7 +23,7 @@ import { run } from '../utils/shell.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
-import { fetchGitHubIssue as fetchGitHubIssueNonFatal } from '../../lib/github.js';
+import { fetchIssue as fetchIssueNonFatal } from '../../lib/github.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -50,6 +50,7 @@ import {
   buildWorktreeLaunchScript,
 } from './spawn-worktree.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { executeForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 
 // =============================================================================
 // ID and Session Management
@@ -253,6 +254,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const projectId = String(issueNumber);
   const strippedId = stripLeadingZeros(projectId);
   const protocol = await resolveIssueProtocol(options, config);
+  const forgeConfig = loadForgeConfig(config.workspaceRoot);
 
   // Load protocol definition early — needed for input.required check
   const protocolDef = loadProtocol(config, protocol);
@@ -276,22 +278,22 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     }
   }
 
-  // Fetch GitHub issue context.
+  // Fetch forge issue context.
   // When no spec file exists, this is fatal (we need a project name).
   // When spec file exists, this is non-fatal (spec filename is the fallback).
-  let ghIssue: Awaited<ReturnType<typeof fetchGitHubIssueNonFatal>> = null;
+  let forgeIssue: Awaited<ReturnType<typeof fetchIssueNonFatal>> = null;
   if (!specFile) {
     // Fatal fetch — we need the issue title for naming
-    ghIssue = await fetchGitHubIssue(issueNumber);
+    forgeIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
   } else {
-    ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
+    forgeIssue = await fetchIssueNonFatal(issueNumber, { forgeConfig });
   }
 
   // Derive specName for naming.
   // Priority: GitHub issue title > spec filename
   let specName: string;
-  if (ghIssue) {
-    specName = `${strippedId}-${slugify(ghIssue.title)}`;
+  if (forgeIssue) {
+    specName = `${strippedId}-${slugify(forgeIssue.title)}`;
   } else {
     // No GitHub issue — fall back to spec filename (specFile must exist here)
     specName = basename(specFile!, '.md');
@@ -338,8 +340,8 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
-  if (ghIssue) {
-    logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
+  if (forgeIssue) {
+    logger.kv('Issue', `#${issueNumber}: ${forgeIssue.title}`);
   }
 
   const specRelPath = `codev/specs/${actualSpecName}.md`;
@@ -353,11 +355,11 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     spec_missing: !specFile,
   };
   if (hasPlan) templateContext.plan = { path: planRelPath, name: actualSpecName };
-  if (ghIssue) {
+  if (forgeIssue) {
     templateContext.issue = {
       number: issueNumber,
-      title: ghIssue.title,
-      body: ghIssue.body || '(No description provided)',
+      title: forgeIssue.title,
+      body: forgeIssue.body || '(No description provided)',
     };
   }
 
@@ -588,12 +590,13 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
 async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issueNumber!;
   const protocol = await resolveIssueProtocol(options, config);
+  const forgeConfig = loadForgeConfig(config.workspaceRoot);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Bugfix Builder for Issue #${issueNumber}`);
 
   // Fetch issue from GitHub
   logger.info('Fetching issue from GitHub...');
-  const issue = await fetchGitHubIssue(issueNumber);
+  const issue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
 
   const builderId = buildAgentName('bugfix', String(issueNumber));
 
@@ -632,14 +635,18 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
         worktreePath,
         force: options.force,
         noComment: options.noComment,
+        forgeConfig,
       });
     } else {
       // Fallback: hardcoded behavior for backwards compatibility
-      await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+      await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force, forgeConfig);
       if (!options.noComment) {
         logger.info('Commenting on issue...');
         try {
-          await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
+          await executeForgeCommand('issue-comment', {
+            CODEV_ISSUE_ID: String(issueNumber),
+            CODEV_COMMENT_BODY: 'On it! Working on a fix now.',
+          }, { forgeConfig, raw: true });
         } catch {
           logger.warn('Warning: Failed to comment on issue (continuing anyway)');
         }

@@ -17,7 +17,7 @@ import {
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../../lib/github.js';
-import type { GitHubPR, GitHubIssueListItem } from '../../lib/github.js';
+import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 
 // =============================================================================
@@ -616,7 +616,7 @@ function scanArtifactDir(dirPath: string): Map<number, string> {
  * Derive backlog from open GitHub issues cross-referenced with specs and builders.
  */
 export function deriveBacklog(
-  issues: GitHubIssueListItem[],
+  issues: ForgeIssueListItem[],
   workspaceRoot: string,
   activeBuilderIssues: Set<number>,
   prLinkedIssues: Set<number>,
@@ -656,10 +656,10 @@ export function deriveBacklog(
 // =============================================================================
 
 export class OverviewCache {
-  private prCache = new Map<string, { data: GitHubPR[]; fetchedAt: number }>();
-  private issueCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
-  private closedCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
-  private mergedPRCache = new Map<string, { data: GitHubPR[]; fetchedAt: number }>();
+  private prCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
+  private issueCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
+  private closedCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
+  private mergedPRCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
   private readonly TTL = 30_000;
 
   /**
@@ -793,7 +793,7 @@ export class OverviewCache {
   // Private cache helpers
   // ===========================================================================
 
-  private async fetchPRsCached(cwd: string): Promise<GitHubPR[] | null> {
+  private async fetchPRsCached(cwd: string): Promise<ForgePR[] | null> {
     const now = Date.now();
     const cached = this.prCache.get(cwd);
     if (cached && (now - cached.fetchedAt) < this.TTL) {
@@ -807,7 +807,7 @@ export class OverviewCache {
     return data;
   }
 
-  private async fetchIssuesCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
+  private async fetchIssuesCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
     const now = Date.now();
     const cached = this.issueCache.get(cwd);
     if (cached && (now - cached.fetchedAt) < this.TTL) {
@@ -821,7 +821,7 @@ export class OverviewCache {
     return data;
   }
 
-  private async fetchRecentlyClosedCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
+  private async fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
     const now = Date.now();
     const cached = this.closedCache.get(cwd);
     if (cached && (now - cached.fetchedAt) < this.TTL) {
@@ -835,7 +835,7 @@ export class OverviewCache {
     return data;
   }
 
-  private async fetchMergedPRsCached(cwd: string): Promise<GitHubPR[] | null> {
+  private async fetchMergedPRsCached(cwd: string): Promise<ForgePR[] | null> {
     const now = Date.now();
     const cached = this.mergedPRCache.get(cwd);
     if (cached && (now - cached.fetchedAt) < this.TTL) {

@@ -1575,7 +1575,7 @@ consult -m claude spec 42
 ## Integration Points
 
 ### External Services
-- **GitHub**: Repository hosting, version control
+- **GitHub**: Repository hosting, version control (default forge)
 - **AI Model Providers**:
   - Anthropic Claude (Sonnet, Opus)
   - OpenAI GPT-5
@@ -1587,6 +1587,22 @@ consult -m claude spec 42
 - **GitHub Copilot**: Via AGENTS.md standard
 - **Other AI coding assistants**: Via AGENTS.md standard
 - **Consult CLI**: For multi-agent consultation (installed with @cluesmith/codev)
+
+### Forge Concept Commands (Spec 589)
+
+All interactions with the repository hosting platform (GitHub by default) are routed through **forge concept commands** — configurable external processes that produce JSON on stdout. This abstraction enables non-GitHub repository support.
+
+**Core module**: `src/lib/forge.ts`
+- `executeForgeCommand(concept, envVars, options)` — async dispatcher
+- `executeForgeCommandSync(concept, envVars, options)` — sync variant
+- `loadForgeConfig(workspaceRoot)` — loads `af-config.json` forge section
+- `validateForgeConfig(config)` — validates concept overrides
+
+**Configuration**: `af-config.json` `forge` section maps concept names to shell commands. Set to `null` to disable a concept. Omit to use the default (`gh`-based) command.
+
+**15 concepts**: `issue-view`, `pr-list`, `issue-list`, `issue-comment`, `pr-exists`, `recently-closed`, `recently-merged`, `user-identity`, `team-activity`, `on-it-timestamps`, `pr-merge`, `pr-search`, `pr-view`, `pr-diff`, `auth-status`.
+
+**Environment variables**: Each concept receives `CODEV_*` env vars (e.g., `CODEV_ISSUE_NUMBER`, `CODEV_PR_NUMBER`) that the command uses to parameterize its output.
 
 ### Internal Dependencies
 - **Git**: Version control, worktrees for builder isolation

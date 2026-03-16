@@ -41,6 +41,11 @@ vi.mock('../utils/shell.js', () => ({
   commandExists: vi.fn(async () => true),
 }));
 
+const executeForgeCommandMock = vi.fn().mockResolvedValue(null);
+vi.mock('../../lib/forge.js', () => ({
+  executeForgeCommand: (...args: unknown[]) => executeForgeCommandMock(...args),
+}));
+
 describe('spawn-worktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -272,8 +277,7 @@ describe('spawn-worktree', () => {
     it('warns but continues when "On it" comment exists with --force', async () => {
       const { existsSync } = await import('node:fs');
       vi.mocked(existsSync).mockReturnValueOnce(false);
-      const { run } = await import('../utils/shell.js');
-      vi.mocked(run).mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any);
+      executeForgeCommandMock.mockResolvedValueOnce([]); // pr-search returns empty
       const issue: GitHubIssue = {
         ...baseIssue,
         comments: [{
@@ -290,28 +294,45 @@ describe('spawn-worktree', () => {
     it('fatals when open PRs reference the issue and no --force', async () => {
       const { existsSync } = await import('node:fs');
       vi.mocked(existsSync).mockReturnValueOnce(false);
-      const { run } = await import('../utils/shell.js');
-      vi.mocked(run).mockResolvedValueOnce({
-        stdout: JSON.stringify([{ number: 99, title: 'Fix #42' }]),
-        stderr: '',
-      } as any);
-      // fatal() in production calls process.exit(), which isn't catchable.
-      // Our mock throws, but the PR-check try/catch swallows it.
-      // Verify fatal was called with the right message instead.
+      executeForgeCommandMock.mockResolvedValueOnce([{ number: 99, headRefName: 'fix-42' }]);
       const { fatal } = await import('../utils/logger.js');
       await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+      expect(executeForgeCommandMock).toHaveBeenCalledWith(
+        'pr-search',
+        expect.objectContaining({ CODEV_SEARCH_QUERY: expect.stringContaining('#42') }),
+        expect.any(Object),
+      );
     });
 
     it('warns when issue is already closed', async () => {
       const { existsSync } = await import('node:fs');
       vi.mocked(existsSync).mockReturnValueOnce(false);
-      const { run } = await import('../utils/shell.js');
-      vi.mocked(run).mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any);
+      executeForgeCommandMock.mockResolvedValueOnce([]); // pr-search returns empty
       const { logger } = await import('../utils/logger.js');
       const closedIssue: GitHubIssue = { ...baseIssue, state: 'CLOSED' };
       await checkBugfixCollisions(42, '/tmp/wt', closedIssue, false);
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('already closed'));
+    });
+
+    it('skips PR collision check when pr-search concept returns null', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce(null); // concept unavailable
+      // Should not fatal — just skips the PR check
+      await expect(
+        checkBugfixCollisions(42, '/tmp/wt', baseIssue, false),
+      ).resolves.toBeUndefined();
+    });
+
+    it('skips collision check gracefully when issue has no comments array', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      executeForgeCommandMock.mockResolvedValueOnce([]); // pr-search returns empty
+      const noCommentsIssue = { title: 'Test', body: 'body', state: 'OPEN' } as GitHubIssue;
+      await expect(
+        checkBugfixCollisions(42, '/tmp/wt', noCommentsIssue, false),
+      ).resolves.toBeUndefined();
     });
   });
 

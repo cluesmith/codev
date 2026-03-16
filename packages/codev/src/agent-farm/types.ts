@@ -170,6 +170,8 @@ export interface UserConfig {
   dashboard?: {
     frontend?: 'react' | 'legacy';
   };
+  /** Forge concept command overrides. Keys are concept names, values are command strings or null (disabled). */
+  forge?: Record<string, string | null>;
 }
 
 /**

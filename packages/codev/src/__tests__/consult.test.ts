@@ -7,6 +7,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 
+// Mock forge module (imported by consult/index.ts)
+vi.mock('../lib/forge.js', () => ({
+  executeForgeCommandSync: vi.fn(() => null),
+}));
+
 // Mock child_process
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(() => ({
