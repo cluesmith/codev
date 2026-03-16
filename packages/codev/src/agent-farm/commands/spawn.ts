@@ -37,6 +37,8 @@ import {
 import {
   checkDependencies,
   createWorktree,
+  createWorktreeFromBranch,
+  validateBranchName,
   initPorchInWorktree,
   checkBugfixCollisions,
   fetchGitHubIssue,
@@ -164,6 +166,19 @@ function validateSpawnOptions(options: SpawnOptions): void {
   // --strict and --soft are mutually exclusive
   if (options.strict && options.soft) {
     fatal('--strict and --soft are mutually exclusive');
+  }
+
+  // --branch mutual exclusions (Spec 609)
+  if (options.branch) {
+    if (options.resume) {
+      fatal('--branch and --resume are mutually exclusive');
+    }
+    if (options.shell || options.worktree || options.task) {
+      fatal('--branch requires an issue number and protocol (cannot be used with --shell, --worktree, or --task)');
+    }
+    if (!options.issueNumber) {
+      fatal('--branch requires an issue number');
+    }
   }
 }
 
@@ -717,7 +732,7 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   //   - --force: explicit override
   //   - --resume: worktree already exists with its own branch
   //   - --task: ephemeral tasks don't depend on committed specs/plans
-  if (!options.force && !options.resume && !options.task) {
+  if (!options.force && !options.resume && !options.task && !options.branch) {
     try {
       const { stdout } = await run('git status --porcelain', { cwd: config.workspaceRoot });
       if (stdout.trim().length > 0) {

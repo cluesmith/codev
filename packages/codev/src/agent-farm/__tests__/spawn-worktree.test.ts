@@ -8,7 +8,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   slugify, buildWorktreeLaunchScript,
-  checkDependencies, createWorktree, checkBugfixCollisions,
+  checkDependencies, createWorktree, createWorktreeFromBranch,
+  validateBranchName, symlinkConfigFiles,
+  checkBugfixCollisions,
   findExistingBugfixWorktree,
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
@@ -392,6 +394,134 @@ describe('spawn-worktree', () => {
       const { logger } = await import('../utils/logger.js');
       await expect(initPorchInWorktree('/tmp/wt', 'spir', '0105', 'feat')).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to initialize porch'));
+    });
+  });
+
+  // =========================================================================
+  // validateBranchName (Spec 609)
+  // =========================================================================
+
+  describe('validateBranchName', () => {
+    it('accepts valid branch names', () => {
+      expect(() => validateBranchName('main')).not.toThrow();
+      expect(() => validateBranchName('builder/bugfix-603-slug')).not.toThrow();
+      expect(() => validateBranchName('feature/my-feature')).not.toThrow();
+      expect(() => validateBranchName('release/v1.2.3')).not.toThrow();
+      expect(() => validateBranchName('my_branch.name')).not.toThrow();
+    });
+
+    it('rejects empty branch name', () => {
+      expect(() => validateBranchName('')).toThrow('--branch requires a branch name');
+    });
+
+    it('rejects branch names with shell metacharacters', () => {
+      expect(() => validateBranchName('foo;rm -rf /')).toThrow('Invalid branch name');
+      expect(() => validateBranchName('foo$(whoami)')).toThrow('Invalid branch name');
+      expect(() => validateBranchName('foo`whoami`')).toThrow('Invalid branch name');
+      expect(() => validateBranchName('foo & bar')).toThrow('Invalid branch name');
+      expect(() => validateBranchName('foo | bar')).toThrow('Invalid branch name');
+    });
+
+    it('rejects branch names with spaces', () => {
+      expect(() => validateBranchName('my branch')).toThrow('Invalid branch name');
+    });
+  });
+
+  // =========================================================================
+  // createWorktreeFromBranch (Spec 609)
+  // =========================================================================
+
+  describe('createWorktreeFromBranch', () => {
+    const config = { workspaceRoot: '/projects/test' } as any;
+
+    it('fetches, verifies remote branch, and creates worktree', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch origin
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any) // git ls-remote
+        .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any) // git worktree list
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);        // git worktree add
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt')).resolves.toBeUndefined();
+      expect(run).toHaveBeenCalledWith('git fetch origin', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git ls-remote --heads origin "my-branch"', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith(
+        'git worktree add "/tmp/wt" -b "my-branch" "origin/my-branch"',
+        { cwd: '/projects/test' },
+      );
+    });
+
+    it('fatals when branch does not exist on remote', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)  // git fetch origin
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any); // git ls-remote (empty = not found)
+      await expect(createWorktreeFromBranch(config, 'nonexistent', '/tmp/wt'))
+        .rejects.toThrow("Branch 'nonexistent' does not exist on the remote");
+    });
+
+    it('fatals when branch is already checked out in another worktree', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)  // git fetch origin
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any) // git ls-remote
+        .mockResolvedValueOnce({
+          stdout: 'worktree /projects/test\nbranch refs/heads/main\n\nworktree /other/wt\nbranch refs/heads/my-branch\n',
+          stderr: '',
+        } as any); // git worktree list
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt'))
+        .rejects.toThrow("Branch 'my-branch' is already checked out at '/other/wt'");
+    });
+
+    it('falls back to using existing local branch when -b fails', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)         // git fetch origin
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any) // git ls-remote
+        .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any) // git worktree list
+        .mockRejectedValueOnce(new Error('branch already exists'))         // git worktree add -b (fails)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);        // git worktree add (fallback)
+      await expect(createWorktreeFromBranch(config, 'my-branch', '/tmp/wt')).resolves.toBeUndefined();
+      expect(run).toHaveBeenCalledWith(
+        'git worktree add "/tmp/wt" "my-branch"',
+        { cwd: '/projects/test' },
+      );
+    });
+
+    it('rejects invalid branch names before any git operations', async () => {
+      const { run } = await import('../utils/shell.js');
+      await expect(createWorktreeFromBranch(config, 'foo;rm -rf /', '/tmp/wt'))
+        .rejects.toThrow('Invalid branch name');
+      expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // symlinkConfigFiles (Spec 609 — extracted helper)
+  // =========================================================================
+
+  describe('symlinkConfigFiles', () => {
+    const config = { workspaceRoot: '/projects/test' } as any;
+
+    it('symlinks .env and af-config.json when they exist at root', async () => {
+      const { existsSync, symlinkSync } = await import('node:fs');
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)   // .env exists at root
+        .mockReturnValueOnce(false)  // .env not in worktree
+        .mockReturnValueOnce(true)   // af-config.json exists at root
+        .mockReturnValueOnce(false); // af-config.json not in worktree
+      symlinkConfigFiles(config, '/tmp/wt');
+      expect(symlinkSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips symlink when file already exists in worktree', async () => {
+      const { existsSync, symlinkSync } = await import('node:fs');
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)  // .env exists at root
+        .mockReturnValueOnce(true)  // .env already in worktree
+        .mockReturnValueOnce(true)  // af-config.json exists at root
+        .mockReturnValueOnce(true); // af-config.json already in worktree
+      symlinkConfigFiles(config, '/tmp/wt');
+      expect(symlinkSync).not.toHaveBeenCalled();
     });
   });
 });
