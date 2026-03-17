@@ -3,7 +3,7 @@
  *
  * Decouples porch from filesystem assumptions. Two backends:
  * - LocalResolver: reads from codev/specs/, codev/plans/ (default, backward compatible)
- * - CliResolver: shells out to a configurable CLI command (e.g. `fava-trails get`)
+ * - CliResolver: shells out to a configurable CLI command
  *
  * Spec 559: Porch Artifact Resolver
  */
@@ -181,24 +181,19 @@ export class CliResolver implements ArtifactResolver {
 
   constructor(
     private scope: string,
-    private command: string = 'fava-trails',
+    private command: string,
     workspaceRoot?: string,
   ) {
-    // Read data repo env vars from .env if not already in process.env.
-    // af_builder.sh injects these into builder worktree .env files.
+    // Read CODEV_ARTIFACTS_DATA_REPO from .env if not already in process.env.
+    // af_builder.sh injects this into builder worktree .env files.
     this.extraEnv = {};
-    const dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO || process.env.FAVA_TRAILS_DATA_REPO;
-    if (!dataRepo && workspaceRoot) {
+    if (!process.env.CODEV_ARTIFACTS_DATA_REPO && workspaceRoot) {
       const envPath = path.join(workspaceRoot, '.env');
       try {
         const envContent = fs.readFileSync(envPath, 'utf-8');
-        // Try new env var first, fall back to legacy
-        const newMatch = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
-        const legacyMatch = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
-        const repo = newMatch?.[1]?.trim() || legacyMatch?.[1]?.trim();
-        if (repo) {
-          this.extraEnv.CODEV_ARTIFACTS_DATA_REPO = repo;
-          this.extraEnv.FAVA_TRAILS_DATA_REPO = repo; // backward compat
+        const match = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
+        if (match) {
+          this.extraEnv.CODEV_ARTIFACTS_DATA_REPO = match[1].trim();
         }
       } catch { /* .env may not exist */ }
     }
@@ -392,7 +387,7 @@ export function findConfigRoot(workspaceRoot: string): string {
 // =============================================================================
 
 export interface ArtifactConfig {
-  backend?: 'local' | 'cli' | 'fava-trails';
+  backend?: 'local' | 'cli';
   scope?: string;
   command?: string;
 }
@@ -423,16 +418,20 @@ function loadArtifactConfig(workspaceRoot: string): ArtifactConfig | null {
 export function getResolver(workspaceRoot: string): ArtifactResolver {
   const config = loadArtifactConfig(workspaceRoot);
 
-  // 'cli' is the canonical backend; 'fava-trails' is accepted as an alias
-  if (config?.backend === 'cli' || config?.backend === 'fava-trails') {
+  if (config?.backend === 'cli') {
     if (!config.scope) {
       throw new Error(
-        `af-config.json has artifacts.backend: "${config.backend}" but no artifacts.scope.\n` +
-        `Add: "artifacts": { "backend": "cli", "scope": "org/project/codev-assets" }`
+        `af-config.json has artifacts.backend: "cli" but no artifacts.scope.\n` +
+        `Add: "artifacts": { "backend": "cli", "command": "my-tool", "scope": "org/project/codev-assets" }`
       );
     }
-    const command = config.command || 'fava-trails';
-    return new CliResolver(config.scope, command, workspaceRoot);
+    if (!config.command) {
+      throw new Error(
+        `af-config.json has artifacts.backend: "cli" but no artifacts.command.\n` +
+        `Add: "artifacts": { "backend": "cli", "command": "my-tool", "scope": "org/project/codev-assets" }`
+      );
+    }
+    return new CliResolver(config.scope, config.command, workspaceRoot);
   }
 
   if (config?.backend && config.backend !== 'local') {
