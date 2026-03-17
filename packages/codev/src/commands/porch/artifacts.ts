@@ -5,7 +5,7 @@
  * - LocalResolver: reads from codev/specs/, codev/plans/ (default, backward compatible)
  * - CliResolver: shells out to a configurable CLI command
  *
- * Spec 559: Porch Artifact Resolver
+ * GitHub Issue: https://github.com/cluesmith/codev/issues/612
  */
 
 import { execFileSync } from 'node:child_process';

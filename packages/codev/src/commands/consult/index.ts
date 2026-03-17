@@ -242,30 +242,26 @@ function findPlan(workspaceRoot: string, id: string): string | null {
 }
 
 /**
- * Find spec content via artifact resolver (FAVA Trails or local fallback).
+ * Find spec content via artifact resolver.
+ * Uses the configured resolver (cli or local). Config errors propagate
+ * so misconfiguration is visible rather than silently falling back.
  */
 function findSpecContent(workspaceRoot: string, id: string): ContentRef | null {
-  try {
-    const resolver = getResolver(workspaceRoot);
-    const content = resolver.getSpecContent(id, '');
-    if (content) return { content, label: `spec-${id}` };
-  } catch { /* resolver init may fail; fall through to local */ }
-  const specPath = findSpec(workspaceRoot, id);
-  if (specPath) return { content: fs.readFileSync(specPath, 'utf-8'), label: specPath };
+  const resolver = getResolver(workspaceRoot);
+  const content = resolver.getSpecContent(id, '');
+  if (content) return { content, label: `spec-${id}` };
   return null;
 }
 
 /**
- * Find plan content via artifact resolver (FAVA Trails or local fallback).
+ * Find plan content via artifact resolver.
+ * Uses the configured resolver (cli or local). Config errors propagate
+ * so misconfiguration is visible rather than silently falling back.
  */
 function findPlanContent(workspaceRoot: string, id: string): ContentRef | null {
-  try {
-    const resolver = getResolver(workspaceRoot);
-    const content = resolver.getPlanContent(id, '');
-    if (content) return { content, label: `plan-${id}` };
-  } catch { /* resolver init may fail; fall through to local */ }
-  const planPath = findPlan(workspaceRoot, id);
-  if (planPath) return { content: fs.readFileSync(planPath, 'utf-8'), label: planPath };
+  const resolver = getResolver(workspaceRoot);
+  const content = resolver.getPlanContent(id, '');
+  if (content) return { content, label: `plan-${id}` };
   return null;
 }
 
