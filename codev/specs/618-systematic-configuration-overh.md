@@ -171,38 +171,70 @@ When porch encounters a `verify` step in a protocol, it uses the configured mode
 
 ### 3. Runtime File Resolution (Eliminate `codev update`)
 
-Framework files that codev reads at runtime are resolved from the installed npm package, with local overrides.
+#### Core Concept: Framework Files Live in the npm Package
 
-**Scope of runtime resolution** — files codev reads itself:
+Version-dependent framework files — protocols, roles, consult-types, porch prompts, and templates — are **no longer copied into user projects**. Instead, they remain inside the installed `@cluesmith/codev` npm package and are read at runtime.
+
+The npm package already embeds all skeleton files (in `codev-skeleton/`), and `readCodevFile()` already falls back to them. This spec makes the package the **primary source** rather than a fallback. Upgrading the npm package (`npm install -g @cluesmith/codev`) automatically gives users the latest protocols and roles — no `codev update` step needed.
+
+#### What Lives Where
+
+| Location | Contents | Who manages it |
+|----------|----------|---------------|
+| `<package>/skeleton/` | Protocols, roles, consult-types, porch prompts, templates | npm package (version-dependent, updated on install) |
+| `.codev/` | User overrides of any framework file | User (optional, for customization) |
+| `codev/` | Legacy local copies from older init/update | Left in place for backward compat; cleaned up over time |
+| `.claude/skills/`, `CLAUDE.md`, `AGENTS.md` | Claude-specific files | Copied by `codev init`/`adopt`; Claude CLI reads directly |
+| `codev/specs/`, `codev/plans/`, `codev/reviews/` | User data | User-created, never in the package |
+
+#### Resolution Order (First Match Wins)
+
+```
+.codev/<path>              ← user customization (optional overrides)
+codev/<path>               ← project-level (legacy local copies, if any)
+<package>/skeleton/<path>  ← npm package (primary source for framework files)
+```
+
+Example: When porch needs `protocols/spir/protocol.json`, it checks `.codev/protocols/spir/protocol.json`, then `codev/protocols/spir/protocol.json`, then the copy embedded in the installed npm package. For a fresh project with no local overrides, it reads directly from the package.
+
+#### What This Means for Users
+
+- **Fresh projects**: `codev init` no longer copies protocols/roles/templates. They resolve from the package.
+- **Existing projects**: Local copies in `codev/protocols/` etc. continue to work (they take precedence). Over time, unmodified copies are cleaned up (see "Stale skeleton file cleanup" below).
+- **Customization**: To customize a protocol, copy just that file into `.codev/protocols/<name>/protocol.json`. Your override takes precedence over the package version.
+- **Upgrades**: `npm install -g @cluesmith/codev` is all that's needed. No `codev update` step.
+
+#### Scope of Runtime Resolution
+
+Files codev reads itself (resolved at runtime from package):
 - Protocols (`protocols/<name>/protocol.json`, `protocol.md`, `consult-types/`, `prompts/`)
 - Roles (`roles/architect.md`, `roles/builder.md`, etc.)
 - Consult types (`consult-types/*.md`)
 - Porch prompts (`porch/prompts/*.md`)
 - Templates for artifact generation (`templates/*.md`)
 
-**NOT in scope** — files external tools read directly from the filesystem:
+Files external tools read directly (NOT runtime-resolved — must exist on disk):
 - `.claude/skills/` — Claude CLI reads these
 - `CLAUDE.md` / `AGENTS.md` — Claude CLI reads these
 - `.gitignore` — Git reads this
 
-These out-of-scope files continue to be managed by `codev init`/`codev adopt`. Users update them manually or via `codev adopt --update` (which only touches Claude-specific files).
+These out-of-scope files continue to be copied by `codev init`/`codev adopt`. Users update them manually or via `codev adopt --update` (which only touches Claude-specific files).
 
-**Resolution order** (first match wins):
-1. `.codev/<path>` — user customization (new)
-2. `codev/<path>` — project-level (existing local copies)
-3. `<package>/skeleton/<path>` — npm package defaults (existing embedded)
+#### Unifying the Resolution Chains
 
-**Unifying the two resolution chains**: Both `readCodevFile()` in `skeleton.ts` and `PROTOCOL_PATHS` in `protocol.ts` are updated to use a single `resolveFile(relativePath)` function that implements the three-tier resolution order.
+All three existing resolution chains (`readCodevFile()` in `skeleton.ts`, `PROTOCOL_PATHS` in `protocol.ts`, and `PROTOCOL_PATHS` in `prompts.ts`) are updated to use a single `resolveFile(relativePath)` function that implements the three-tier resolution order above.
 
-**Changes to `codev init`**:
+#### Changes to `codev init`
+
 - Creates `.codev/config.json` with user-configured settings
 - Creates `codev/specs/`, `codev/plans/`, `codev/reviews/`, `codev/projects/` (user data dirs)
 - Copies Claude-specific files: `.claude/skills/`, `CLAUDE.md`, `AGENTS.md`
-- Does NOT copy protocols, roles, consult-types, templates, or porch prompts (resolved at runtime)
+- Does NOT copy protocols, roles, consult-types, templates, or porch prompts (resolved at runtime from the package)
 
-**Changes to `codev adopt`**:
+#### Changes to `codev adopt`
+
 - Same as init but handles existing files (skip/merge as before)
-- Detects existing `codev/protocols/` etc. — leaves them in place (they take precedence)
+- Detects existing `codev/protocols/` etc. — leaves them in place (they take precedence via resolution order)
 - Creates `.codev/config.json` if not present
 
 **Stale skeleton file cleanup** (update shadowing prevention):
