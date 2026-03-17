@@ -12,7 +12,7 @@
    A: Replace. `af-config.json` moves into `.codev/config.json`. The old location is supported during a migration period with a deprecation warning.
 
 2. **Q: For remote protocol sources, what's the fetch/cache strategy?**
-   A: From issue description — `protocols.source: "github:myorg/my-protocols"`. Exact caching strategy is a design decision (see Approach analysis below).
+   A: From issue description — `framework.source: "myorg/my-protocols"`. Fetched via forge `repo-archive` concept, cached locally. See section 4 for full design.
 
 3. **Q: Does "eliminate codev update" mean removing the command entirely?**
    A: Yes. Framework files (protocols, templates, roles) should be resolved from the installed npm package at runtime. Users never need to run `codev update` again. The command should warn and become a no-op.
@@ -129,7 +129,7 @@ When no config files exist at all, hardcoded defaults are used. Note: shell defa
       "models": ["gemini", "codex", "claude"]
     }
   },
-  "protocols": {
+  "framework": {
     "source": "local"
   }
 }
@@ -249,18 +249,20 @@ Existing projects may have unmodified skeleton files in `codev/protocols/`, `cod
 - This is the recommended way to get updated skills/agent instructions after a codev upgrade
 - Handles conflicts the same way `codev adopt` does (skip existing, merge, or `.codev-new`)
 
-### 4. Remote Protocol Sources
+### 4. Remote Framework Sources
 
-Teams can point to a shared repository containing custom protocols, roles, consult-types, and templates:
+Teams can point to a shared repository containing their development framework — protocols, roles, consult-types, and templates:
 
 ```json
 {
-  "protocols": {
-    "source": "myorg/my-protocols",
+  "framework": {
+    "source": "myorg/our-codev-framework",
     "ref": "v1.2.0"
   }
 }
 ```
+
+The config key is `framework`, not `protocols`, because a team's shared methodology includes more than just protocols — it includes roles, consult-types, templates, and porch prompts. The entire framework bundle is fetched and cached as a unit.
 
 #### Configuration
 
@@ -270,11 +272,28 @@ Teams can point to a shared repository containing custom protocols, roles, consu
   - `"<owner>/<repo>/<path>"` — use a subdirectory within the repo as the root
 - `ref`: A tag, branch, or commit SHA identifying the version to fetch.
   - **Required when `source` is not `"local"`**. Omitting `ref` is an error — this prevents silent drift.
-  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev protocols fetch` to update.
+  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev sync` to update.
 
-The `source` is a **forge-relative** identifier, not a raw git URL. The forge determines how to fetch it based on the project's configured provider (GitHub by default, but could be GitLab, Bitbucket, etc.). This keeps remote protocol sources decoupled from any specific VCS or hosting platform.
+The `source` is a **forge-relative** identifier, not a raw git URL. The forge determines how to fetch it based on the project's configured provider (GitHub by default, but could be GitLab, Bitbucket, etc.). This keeps remote sources decoupled from any specific VCS or hosting platform.
 
-#### Fetch Mechanism: New Forge Concept `repo-archive`
+#### `codev sync`
+
+```bash
+codev sync          # Fetch framework from configured source, update cache
+codev sync --force  # Delete cache and re-fetch from scratch
+codev sync --status # Show current cache state (source, ref, last fetched)
+```
+
+`codev sync` pulls the entire framework bundle from the configured remote source:
+- Fetches the repo archive at the configured `ref`
+- Extracts to the local cache
+- All framework file types are included: protocols, roles, consult-types, templates, porch prompts
+- For immutable refs (tags, SHAs): no-op if cache exists (unless `--force`)
+- For branch refs: always re-fetches to get latest
+
+When no `framework.source` is configured (or set to `"local"`), `codev sync` emits: "No remote framework source configured. Nothing to sync."
+
+#### Fetch Mechanism: Forge Concept `repo-archive`
 
 Fetching goes through the forge's concept-command system (see `lib/forge.ts` and `scripts/forge/<provider>/`). A new `repo-archive` concept is added:
 
@@ -301,42 +320,33 @@ Other forge providers (GitLab, Bitbucket) implement the same concept using their
 - No dependency on `git` CLI being installed
 - Platform-agnostic — works with any forge provider
 - Consistent with how codev already interacts with external platforms
-- Teams using custom forge providers (spec #589) get remote protocols for free
+- Teams using custom forge providers (spec #589) get remote framework sources for free
 
 #### Cache Behavior
 
-Downloaded archives are extracted to `~/.codev/cache/protocols/<source-hash>/<ref>/`:
+Downloaded archives are extracted to `~/.codev/cache/framework/<source-hash>/<ref>/`:
 - `<source-hash>` is a short hash of the normalized source identifier
 
 | Scenario | Behavior |
 |----------|----------|
-| Cache exists and ref is a tag or SHA | Use cache. Immutable refs never re-fetch. |
-| Cache exists and ref is a branch | Use cache. User must run `codev protocols fetch` to update. |
-| Cache missing | Fetch on first use. Emit: "Fetching protocols from <source>@<ref>..." |
+| Cache exists and ref is a tag or SHA | Use cache. Immutable refs never re-fetch (unless `--force`). |
+| Cache exists and ref is a branch | `codev sync` re-fetches. Direct resolution uses cache as-is. |
+| Cache missing | Fetch on first use. Emit: "Fetching framework from <source>@<ref>..." |
 | Fetch fails (network, auth, bad ref) | **Fail hard** with clear error. Do NOT fall back to package defaults silently — the user explicitly configured a remote source and should know it's not working. |
 | `source` is `"local"` | Skip remote entirely. No fetch, no cache check. |
 
-#### Manual Refresh
-
-```bash
-codev protocols fetch          # Re-fetch from configured source
-codev protocols fetch --force  # Delete cache and re-fetch
-```
-
-This is the only way to update a branch-based ref. Tag/SHA refs are immutable and `fetch` is a no-op for them (unless `--force`).
-
 #### Resolution Chain with Remote Sources
 
-When a remote source is configured, it slots between local overrides and package defaults:
+When a remote framework source is configured, it slots between local overrides and package defaults:
 
 ```
 .codev/<path>              ← user customization (highest priority)
 codev/<path>               ← project-level (legacy local copies)
-<cache>/<path>             ← remote protocol source (fetched via forge)
+<cache>/<path>             ← remote framework (fetched via forge)
 <package>/skeleton/<path>  ← npm package defaults (lowest priority)
 ```
 
-A team's shared protocols override the package defaults, but project-level or user-level customizations still take precedence.
+A team's shared framework overrides the package defaults, but project-level or user-level customizations still take precedence. This applies uniformly to all framework file types — protocols, roles, consult-types, templates, and porch prompts.
 
 #### Remote Repo Layout
 
@@ -350,12 +360,17 @@ protocols/
     consult-types/
     prompts/
 roles/
+  architect.md
   builder.md
+  consultant.md
 consult-types/
   custom-review.md
+templates/
+  spec.md
+  plan.md
 ```
 
-Only the directories/files that exist in the remote are used. Missing directories fall through to the package defaults. Teams can override just protocols without needing to provide roles, templates, etc.
+Only the directories/files that exist in the remote are used. Missing directories fall through to the package defaults. Teams can share just protocols, just roles, or any combination — they don't need to provide the full skeleton.
 
 #### Security Considerations
 
@@ -363,8 +378,8 @@ Only the directories/files that exist in the remote are used. Missing directorie
 - `ref` is required (not optional) to prevent silent drift from upstream changes.
 - Immutable refs (tags, SHAs) are strongly recommended for production use.
 - Auth is handled by the forge provider (e.g., `gh auth` for GitHub) — no credentials stored in codev config.
-- The `codev protocols fetch` command shows what's being fetched and from where, so users can audit.
-- Future enhancement: a `codev protocols verify` command could check content against a lockfile (out of scope for this spec).
+- `codev sync --status` shows what's cached and from where, so users can audit.
+- Future enhancement: a `codev sync --verify` flag could check content against a lockfile (out of scope for this spec).
 
 ## Stakeholders
 - **Primary Users**: Codev users configuring their projects
@@ -390,13 +405,14 @@ Only the directories/files that exist in the remote are used. Missing directorie
 - [ ] `codev adopt --update` flag updates Claude-specific files only
 - [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
-- [ ] Remote protocol source fetched via forge `repo-archive` concept, cached at `~/.codev/cache/`
+- [ ] Remote framework source fetched via forge `repo-archive` concept, cached at `~/.codev/cache/framework/`
 - [ ] New `repo-archive` forge concept implemented for GitHub provider
-- [ ] `ref` is required when `source` is not `"local"` (error if missing)
-- [ ] Immutable refs (tags, SHAs) use cache without re-fetch; branches require explicit `codev protocols fetch`
+- [ ] `ref` is required when `framework.source` is not `"local"` (error if missing)
+- [ ] Immutable refs (tags, SHAs) use cache without re-fetch; branches re-fetch on `codev sync`
 - [ ] Fetch failure produces clear error (no silent fallback to package)
-- [ ] `codev protocols fetch` and `codev protocols fetch --force` work correctly
-- [ ] Remote protocols slot into resolution chain between local and package
+- [ ] `codev sync`, `codev sync --force`, and `codev sync --status` work correctly
+- [ ] Remote framework slots into resolution chain between local and package
+- [ ] All framework file types supported: protocols, roles, consult-types, templates, porch prompts
 - [ ] Worktree symlink pattern updated from `af-config.json` to `.codev/config.json`
 - [ ] All 10 `af-config.json` usage sites migrated to centralized loader
 - [ ] All existing tests pass
@@ -435,7 +451,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
 
 **Phase 3 — Runtime Resolution**: Unify the two resolution chains into a single `resolveFile()`. Add `.codev/` as top-tier. Minimize what `codev init` copies. Deprecate `codev update`.
 
-**Phase 4 — Remote Sources**: New `repo-archive` forge concept, cache management, `codev protocols fetch` command, resolution chain integration.
+**Phase 4 — Remote Sources**: New `repo-archive` forge concept, cache management, `codev sync` command, resolution chain integration.
 
 **Pros**:
 - Each phase delivers value independently
@@ -493,7 +509,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
 - [x] Should `.codev/` also hold skills and agent definitions, or keep those in `.claude/`?
   - Answer: Keep `.claude/` for Claude-specific items. `.codev/` is for codev configuration and framework overrides only.
 - [ ] Should the config schema be strictly typed or allow arbitrary extensions?
-  - Recommendation: Typed core sections (`shell`, `porch`, `protocols`) with unknown keys preserved through merge.
+  - Recommendation: Typed core sections (`shell`, `porch`, `framework`) with unknown keys preserved through merge.
 - [ ] Remote protocol source: git clone vs tarball download vs GitHub API?
   - Recommendation: Defer implementation to Phase 4; define config shape now.
 
@@ -528,19 +544,22 @@ Only the directories/files that exist in the remote are used. Missing directorie
 12. **Adopt --update**: `codev adopt --update` refreshes Claude-specific files only
 13. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
 14. **Worktree behavior**: `.codev/config.json` accessible from git worktrees (symlink from spawn-worktree)
-15. **Remote source fetch**: `owner/repo` fetched via forge `repo-archive` concept, extracted to cache
-16. **Remote source ref required**: Missing `ref` with non-local source emits error
-17. **Remote source cache hit**: Immutable ref (tag/SHA) serves from cache without network
-18. **Remote source cache miss**: First use triggers fetch with progress message
-19. **Remote source fetch failure**: Network error, bad ref, or auth failure produces clear error (no fallback)
-20. **Remote source resolution order**: Remote overrides package but not local overrides
-21. **Remote source subdirectory**: `owner/repo/path` uses subdirectory as root
-24. **Forge concept**: `repo-archive` script invoked with correct env vars (CODEV_REPO, CODEV_REF, CODEV_OUTPUT_DIR)
-22. **`codev protocols fetch`**: Re-fetches branch refs, no-ops for immutable refs
-23. **`codev protocols fetch --force`**: Deletes cache and re-fetches regardless of ref type
-16. **Null removal**: Setting a key to `null` in project config deletes it from merged result
-17. **Consultation modes in verify**: "none" skips verify, "parent" emits gate, array runs specified models
-18. **Skeleton cleanup**: Unmodified files are removed, user-modified files are preserved
+15. **Null removal**: Setting a key to `null` in project config deletes it from merged result
+16. **Consultation modes in verify**: "none" skips verify, "parent" emits gate, array runs specified models
+17. **Skeleton cleanup**: Unmodified files are removed, user-modified files are preserved
+18. **Remote framework fetch**: `owner/repo` fetched via forge `repo-archive` concept, extracted to cache
+19. **Remote framework ref required**: Missing `ref` with non-local source emits error
+20. **Remote framework cache hit**: Immutable ref (tag/SHA) serves from cache without re-fetch
+21. **Remote framework cache miss**: First use triggers fetch with progress message
+22. **Remote framework fetch failure**: Network error, bad ref, or auth failure produces clear error (no fallback)
+23. **Remote framework resolution**: Remote overrides package defaults but not local overrides
+24. **Remote framework file types**: All types resolved — protocols, roles, consult-types, templates, porch prompts
+25. **Remote framework subdirectory**: `owner/repo/path` uses subdirectory as root
+26. **`codev sync`**: Re-fetches branch refs, no-ops for immutable refs
+27. **`codev sync --force`**: Deletes cache and re-fetches regardless of ref type
+28. **`codev sync --status`**: Shows source, ref, last fetched time, cache path
+29. **`codev sync` with no source**: Emits "no remote framework source configured"
+30. **Forge `repo-archive` concept**: Script invoked with correct env vars (CODEV_REPO, CODEV_REF, CODEV_OUTPUT_DIR)
 
 ### Non-Functional Tests
 1. Config load performance under 50ms
@@ -601,7 +620,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
   "forge": {
     "concepts": {}
   },
-  "protocols": {
+  "framework": {
     "source": "local",
     "ref": null
   }
@@ -686,7 +705,7 @@ All sites must be migrated. The worktree symlink (item 8) is particularly import
 15. **Missing forge config** (Gemini, Claude): Added `forge` section to config schema draft.
 16. **Update shadowing** (Gemini): Changed `codev update` from a pure no-op to a one-time migration that removes unmodified skeleton files using `.update-hashes.json`, preventing stale local files from shadowing package updates.
 17. **Consultation mode behavior in verify** (Codex): Added table defining exactly what happens for each mode ("none" skips, "parent" emits gate, array runs specified models).
-18. **Remote source before Phase 4** (Codex): Specified behavior — emit error if `protocols.source` is not `"local"`.
+18. **Remote source** (Codex): Fully specified — `framework.source` with forge-based fetching via `repo-archive` concept and `codev sync` command.
 19. **Default config inconsistency** (Codex): Clarified that defaults use bare `claude` (not `--dangerously-skip-permissions`), added explanatory note.
 20. **`codev migrate-config` scope** (Codex, Claude): Explicitly marked as out of scope; users can move the file manually.
 21. **`codev adopt --update` flag** (Gemini, Claude): Defined as new flag for updating Claude-specific files after upgrades.
