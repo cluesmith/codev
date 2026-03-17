@@ -251,7 +251,7 @@ Existing projects may have unmodified skeleton files in `codev/protocols/`, `cod
 
 ### 4. Remote Protocol Sources
 
-Teams can point to a shared protocol repository:
+Teams can point to a shared git repository containing custom protocols, roles, consult-types, and templates:
 
 ```json
 {
@@ -262,19 +262,84 @@ Teams can point to a shared protocol repository:
 }
 ```
 
-- `source`: `"local"` (default) | `"github:<owner>/<repo>"` | `"github:<owner>/<repo>/<path>"`
-- `ref`: Optional git ref (tag, branch, commit SHA). If omitted, uses default branch. **Pinning to a ref is strongly recommended** for reproducibility and security.
+#### Configuration
 
-Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<owner>/<repo>/<ref>/`. They slot into the resolution chain between local overrides and the npm package defaults:
+- `source`: `"local"` (default) | a git-cloneable URL
+  - `"local"` — use only local overrides + package defaults (current behavior)
+  - `"github:<owner>/<repo>"` — shorthand, expanded to `https://github.com/<owner>/<repo>.git`
+  - `"github:<owner>/<repo>/<path>"` — use a subdirectory within the repo as the root
+  - Any valid git URL (`https://...`, `git@...`) — for non-GitHub hosts (GitLab, Bitbucket, self-hosted)
+- `ref`: Git ref to check out (tag, branch, or commit SHA).
+  - **Required when `source` is not `"local"`**. Omitting `ref` is an error — this prevents silent drift when a branch's HEAD moves.
+  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev protocols fetch` to update (see below).
 
-1. `.codev/<path>` — user customization
-2. `codev/<path>` — project-level
-3. Remote protocol cache — fetched from configured source
-4. `<package>/skeleton/<path>` — npm package defaults
+#### Fetch Mechanism
 
-**Implementation of remote fetching is deferred to a later phase** (Phase 4). This spec defines the config shape so it can be validated and stored now.
+Remote sources are fetched via `git clone --depth 1 --branch <ref>`:
 
-**Pre-Phase 4 behavior**: If `protocols.source` is set to anything other than `"local"`, emit a clear error: "Remote protocol sources are not yet supported. Set protocols.source to 'local' or remove it." This prevents silent misconfiguration where users think they're using remote protocols but are actually falling back to local/package.
+- Uses the user's existing git credentials (SSH keys, credential helpers) — no additional auth config needed
+- Shallow clone keeps it fast and small
+- Cached at `~/.codev/cache/protocols/<source-hash>/<ref>/`
+  - `<source-hash>` is a short hash of the normalized source URL (avoids path issues with special characters)
+
+#### Cache Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Cache exists and ref is a tag or SHA | Use cache. Immutable refs never re-fetch. |
+| Cache exists and ref is a branch | Use cache. User must run `codev protocols fetch` to update. |
+| Cache missing | Fetch on first use. Emit: "Fetching protocols from <source>@<ref>..." |
+| Fetch fails (network, auth, bad ref) | **Fail hard** with clear error. Do NOT fall back to package defaults silently — the user explicitly configured a remote source and should know it's not working. |
+| `source` is `"local"` | Skip remote entirely. No fetch, no cache check. |
+
+#### Manual Refresh
+
+```bash
+codev protocols fetch          # Re-fetch from configured source
+codev protocols fetch --force  # Delete cache and re-fetch
+```
+
+This is the only way to update a branch-based ref. Tag/SHA refs are immutable and `fetch` is a no-op for them (unless `--force`).
+
+#### Resolution Chain with Remote Sources
+
+When a remote source is configured, it slots between local overrides and package defaults:
+
+```
+.codev/<path>              ← user customization (highest priority)
+codev/<path>               ← project-level (legacy local copies)
+<cache>/<path>             ← remote protocol source (fetched from git)
+<package>/skeleton/<path>  ← npm package defaults (lowest priority)
+```
+
+This means a team's shared protocols override the package defaults, but any project-level or user-level customizations still take precedence.
+
+#### Remote Repo Layout
+
+The remote repo (or subdirectory, if `<path>` is specified) should mirror the `codev-skeleton/` structure:
+
+```
+protocols/
+  my-custom-protocol/
+    protocol.json
+    protocol.md
+    consult-types/
+    prompts/
+roles/
+  builder.md
+consult-types/
+  custom-review.md
+```
+
+Only the directories/files that exist in the remote are used. Missing directories fall through to the package defaults. This allows teams to override just protocols without needing to provide roles, templates, etc.
+
+#### Security Considerations
+
+- Remote repos can contain arbitrary prompt text (protocol instructions, review prompts, role definitions). This is inherently a trust decision — similar to adding a dependency.
+- `ref` is required (not optional) to prevent silent drift from upstream changes.
+- Immutable refs (tags, SHAs) are strongly recommended for production use.
+- The `codev protocols fetch` command shows what's being fetched and from where, so users can audit.
+- Future enhancement: a `codev protocols verify` command could check content against a lockfile (out of scope for this spec).
 
 ## Stakeholders
 - **Primary Users**: Codev users configuring their projects
@@ -300,8 +365,12 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 - [ ] `codev adopt --update` flag updates Claude-specific files only
 - [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
-- [ ] Remote protocol source config shape accepted and validated
-- [ ] Non-local `protocols.source` emits clear "not yet supported" error
+- [ ] Remote protocol source fetched via shallow git clone, cached at `~/.codev/cache/`
+- [ ] `ref` is required when `source` is not `"local"` (error if missing)
+- [ ] Immutable refs (tags, SHAs) use cache without re-fetch; branches require explicit `codev protocols fetch`
+- [ ] Fetch failure produces clear error (no silent fallback to package)
+- [ ] `codev protocols fetch` and `codev protocols fetch --force` work correctly
+- [ ] Remote protocols slot into resolution chain between local and package
 - [ ] Worktree symlink pattern updated from `af-config.json` to `.codev/config.json`
 - [ ] All 10 `af-config.json` usage sites migrated to centralized loader
 - [ ] All existing tests pass
@@ -340,7 +409,7 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 
 **Phase 3 — Runtime Resolution**: Unify the two resolution chains into a single `resolveFile()`. Add `.codev/` as top-tier. Minimize what `codev init` copies. Deprecate `codev update`.
 
-**Phase 4 — Remote Sources**: Add remote protocol fetching and caching. Lower priority.
+**Phase 4 — Remote Sources**: Add remote protocol fetching via shallow git clone, caching, and `codev protocols fetch` command.
 
 **Pros**:
 - Each phase delivers value independently
@@ -433,7 +502,15 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
 12. **Adopt --update**: `codev adopt --update` refreshes Claude-specific files only
 13. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
 14. **Worktree behavior**: `.codev/config.json` accessible from git worktrees (symlink from spawn-worktree)
-15. **Remote source pre-Phase 4**: Setting `protocols.source` to non-local value emits error
+15. **Remote source fetch**: `github:owner/repo` expanded to HTTPS URL, shallow cloned, cached
+16. **Remote source ref required**: Missing `ref` with non-local source emits error
+17. **Remote source cache hit**: Immutable ref (tag/SHA) serves from cache without network
+18. **Remote source cache miss**: First use triggers fetch with progress message
+19. **Remote source fetch failure**: Network error, bad ref, or auth failure produces clear error (no fallback)
+20. **Remote source resolution order**: Remote overrides package but not local overrides
+21. **Remote source subdirectory**: `github:owner/repo/path` uses subdirectory as root
+22. **`codev protocols fetch`**: Re-fetches branch refs, no-ops for immutable refs
+23. **`codev protocols fetch --force`**: Deletes cache and re-fetches regardless of ref type
 16. **Null removal**: Setting a key to `null` in project config deletes it from merged result
 17. **Consultation modes in verify**: "none" skips verify, "parent" emits gate, array runs specified models
 18. **Skeleton cleanup**: Unmodified files are removed, user-modified files are preserved
@@ -457,7 +534,7 @@ Remote protocols are fetched and cached locally in `~/.codev/cache/protocols/<ow
   - `scaffold.ts` (init/adopt shared utilities)
   - `init.ts` and `adopt.ts` (config file creation)
   - `update.ts` (codev update command)
-- **External**: None (remote sources deferred)
+- **External**: `git` CLI (required for remote protocol fetching)
 
 ## Risks and Mitigation
 
