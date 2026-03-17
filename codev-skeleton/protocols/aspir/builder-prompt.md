@@ -27,7 +27,7 @@ You are running in STRICT mode. This means:
 {{/if}}
 
 ## Protocol
-Follow the SPIR protocol: `codev/protocols/spir/protocol.md`
+Follow the ASPIR protocol: `codev/protocols/aspir/protocol.md`
 Read and internalize the protocol before starting any work.
 
 {{#if spec}}
