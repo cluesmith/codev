@@ -251,12 +251,12 @@ Existing projects may have unmodified skeleton files in `codev/protocols/`, `cod
 
 ### 4. Remote Protocol Sources
 
-Teams can point to a shared git repository containing custom protocols, roles, consult-types, and templates:
+Teams can point to a shared repository containing custom protocols, roles, consult-types, and templates:
 
 ```json
 {
   "protocols": {
-    "source": "github:myorg/my-protocols",
+    "source": "myorg/my-protocols",
     "ref": "v1.2.0"
   }
 }
@@ -264,25 +264,49 @@ Teams can point to a shared git repository containing custom protocols, roles, c
 
 #### Configuration
 
-- `source`: `"local"` (default) | a git-cloneable URL
+- `source`: `"local"` (default) | `"<owner>/<repo>"` | `"<owner>/<repo>/<path>"`
   - `"local"` — use only local overrides + package defaults (current behavior)
-  - `"github:<owner>/<repo>"` — shorthand, expanded to `https://github.com/<owner>/<repo>.git`
-  - `"github:<owner>/<repo>/<path>"` — use a subdirectory within the repo as the root
-  - Any valid git URL (`https://...`, `git@...`) — for non-GitHub hosts (GitLab, Bitbucket, self-hosted)
-- `ref`: Git ref to check out (tag, branch, or commit SHA).
-  - **Required when `source` is not `"local"`**. Omitting `ref` is an error — this prevents silent drift when a branch's HEAD moves.
-  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev protocols fetch` to update (see below).
+  - `"<owner>/<repo>"` — fetch from a repository via the forge (platform-agnostic)
+  - `"<owner>/<repo>/<path>"` — use a subdirectory within the repo as the root
+- `ref`: A tag, branch, or commit SHA identifying the version to fetch.
+  - **Required when `source` is not `"local"`**. Omitting `ref` is an error — this prevents silent drift.
+  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev protocols fetch` to update.
 
-#### Fetch Mechanism
+The `source` is a **forge-relative** identifier, not a raw git URL. The forge determines how to fetch it based on the project's configured provider (GitHub by default, but could be GitLab, Bitbucket, etc.). This keeps remote protocol sources decoupled from any specific VCS or hosting platform.
 
-Remote sources are fetched via `git clone --depth 1 --branch <ref>`:
+#### Fetch Mechanism: New Forge Concept `repo-archive`
 
-- Uses the user's existing git credentials (SSH keys, credential helpers) — no additional auth config needed
-- Shallow clone keeps it fast and small
-- Cached at `~/.codev/cache/protocols/<source-hash>/<ref>/`
-  - `<source-hash>` is a short hash of the normalized source URL (avoids path issues with special characters)
+Fetching goes through the forge's concept-command system (see `lib/forge.ts` and `scripts/forge/<provider>/`). A new `repo-archive` concept is added:
+
+**Concept**: `repo-archive`
+**Purpose**: Download and extract repository contents at a given ref
+**Environment variables** (set before invocation, following existing forge convention):
+- `CODEV_REPO` — `<owner>/<repo>`
+- `CODEV_REF` — tag, branch, or commit SHA
+- `CODEV_OUTPUT_DIR` — directory to extract into
+
+**Default implementation** (GitHub provider, `scripts/forge/github/repo-archive.sh`):
+```bash
+# Download tarball via gh CLI and extract
+gh api "repos/${CODEV_REPO}/tarball/${CODEV_REF}" > /tmp/codev-archive.tar.gz
+mkdir -p "${CODEV_OUTPUT_DIR}"
+tar xzf /tmp/codev-archive.tar.gz -C "${CODEV_OUTPUT_DIR}" --strip-components=1
+rm /tmp/codev-archive.tar.gz
+```
+
+Other forge providers (GitLab, Bitbucket) implement the same concept using their platform's equivalent API. Projects can also override the command in their forge config, just like any other forge concept.
+
+**Why forge, not `git clone`**:
+- Uses the forge's existing auth (e.g., `gh` CLI token for GitHub, `glab` for GitLab)
+- No dependency on `git` CLI being installed
+- Platform-agnostic — works with any forge provider
+- Consistent with how codev already interacts with external platforms
+- Teams using custom forge providers (spec #589) get remote protocols for free
 
 #### Cache Behavior
+
+Downloaded archives are extracted to `~/.codev/cache/protocols/<source-hash>/<ref>/`:
+- `<source-hash>` is a short hash of the normalized source identifier
 
 | Scenario | Behavior |
 |----------|----------|
@@ -308,11 +332,11 @@ When a remote source is configured, it slots between local overrides and package
 ```
 .codev/<path>              ← user customization (highest priority)
 codev/<path>               ← project-level (legacy local copies)
-<cache>/<path>             ← remote protocol source (fetched from git)
+<cache>/<path>             ← remote protocol source (fetched via forge)
 <package>/skeleton/<path>  ← npm package defaults (lowest priority)
 ```
 
-This means a team's shared protocols override the package defaults, but any project-level or user-level customizations still take precedence.
+A team's shared protocols override the package defaults, but project-level or user-level customizations still take precedence.
 
 #### Remote Repo Layout
 
@@ -331,13 +355,14 @@ consult-types/
   custom-review.md
 ```
 
-Only the directories/files that exist in the remote are used. Missing directories fall through to the package defaults. This allows teams to override just protocols without needing to provide roles, templates, etc.
+Only the directories/files that exist in the remote are used. Missing directories fall through to the package defaults. Teams can override just protocols without needing to provide roles, templates, etc.
 
 #### Security Considerations
 
 - Remote repos can contain arbitrary prompt text (protocol instructions, review prompts, role definitions). This is inherently a trust decision — similar to adding a dependency.
 - `ref` is required (not optional) to prevent silent drift from upstream changes.
 - Immutable refs (tags, SHAs) are strongly recommended for production use.
+- Auth is handled by the forge provider (e.g., `gh auth` for GitHub) — no credentials stored in codev config.
 - The `codev protocols fetch` command shows what's being fetched and from where, so users can audit.
 - Future enhancement: a `codev protocols verify` command could check content against a lockfile (out of scope for this spec).
 
@@ -365,7 +390,8 @@ Only the directories/files that exist in the remote are used. Missing directorie
 - [ ] `codev adopt --update` flag updates Claude-specific files only
 - [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
-- [ ] Remote protocol source fetched via shallow git clone, cached at `~/.codev/cache/`
+- [ ] Remote protocol source fetched via forge `repo-archive` concept, cached at `~/.codev/cache/`
+- [ ] New `repo-archive` forge concept implemented for GitHub provider
 - [ ] `ref` is required when `source` is not `"local"` (error if missing)
 - [ ] Immutable refs (tags, SHAs) use cache without re-fetch; branches require explicit `codev protocols fetch`
 - [ ] Fetch failure produces clear error (no silent fallback to package)
@@ -409,7 +435,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
 
 **Phase 3 — Runtime Resolution**: Unify the two resolution chains into a single `resolveFile()`. Add `.codev/` as top-tier. Minimize what `codev init` copies. Deprecate `codev update`.
 
-**Phase 4 — Remote Sources**: Add remote protocol fetching via shallow git clone, caching, and `codev protocols fetch` command.
+**Phase 4 — Remote Sources**: New `repo-archive` forge concept, cache management, `codev protocols fetch` command, resolution chain integration.
 
 **Pros**:
 - Each phase delivers value independently
@@ -502,13 +528,14 @@ Only the directories/files that exist in the remote are used. Missing directorie
 12. **Adopt --update**: `codev adopt --update` refreshes Claude-specific files only
 13. **Existing projects**: Projects with full skeleton copies continue to work (local precedence)
 14. **Worktree behavior**: `.codev/config.json` accessible from git worktrees (symlink from spawn-worktree)
-15. **Remote source fetch**: `github:owner/repo` expanded to HTTPS URL, shallow cloned, cached
+15. **Remote source fetch**: `owner/repo` fetched via forge `repo-archive` concept, extracted to cache
 16. **Remote source ref required**: Missing `ref` with non-local source emits error
 17. **Remote source cache hit**: Immutable ref (tag/SHA) serves from cache without network
 18. **Remote source cache miss**: First use triggers fetch with progress message
 19. **Remote source fetch failure**: Network error, bad ref, or auth failure produces clear error (no fallback)
 20. **Remote source resolution order**: Remote overrides package but not local overrides
-21. **Remote source subdirectory**: `github:owner/repo/path` uses subdirectory as root
+21. **Remote source subdirectory**: `owner/repo/path` uses subdirectory as root
+24. **Forge concept**: `repo-archive` script invoked with correct env vars (CODEV_REPO, CODEV_REF, CODEV_OUTPUT_DIR)
 22. **`codev protocols fetch`**: Re-fetches branch refs, no-ops for immutable refs
 23. **`codev protocols fetch --force`**: Deletes cache and re-fetches regardless of ref type
 16. **Null removal**: Setting a key to `null` in project config deletes it from merged result
@@ -534,7 +561,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
   - `scaffold.ts` (init/adopt shared utilities)
   - `init.ts` and `adopt.ts` (config file creation)
   - `update.ts` (codev update command)
-- **External**: `git` CLI (required for remote protocol fetching)
+- **External**: Forge provider CLI (e.g., `gh` for GitHub) — already a dependency for forge concepts
 
 ## Risks and Mitigation
 
