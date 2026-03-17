@@ -91,6 +91,10 @@ export interface SpawnOptions {
   // Resume mode
   resume?: boolean;       // Resume existing worktree: --resume
 
+  // Branch mode (Spec 609): use an existing remote branch
+  branch?: string;        // --branch <name>: checkout existing remote branch instead of creating new one
+  remote?: string;        // --remote <name>: specify which remote to fetch the branch from (for fork PRs)
+
   // General options
   noRole?: boolean;
   instruction?: string;

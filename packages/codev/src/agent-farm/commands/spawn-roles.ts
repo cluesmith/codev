@@ -43,6 +43,7 @@ export interface TemplateContext {
   };
   task_text?: string;
   spec_missing?: boolean;
+  existing_branch?: string;  // Spec 609: when --branch is used, the name of the existing branch
 }
 
 /**

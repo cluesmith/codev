@@ -37,7 +37,7 @@ function elapsed(startedAt: string | null, idleMs: number): string {
 }
 
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
-  const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
+  const displayId = builder.issueId ? `#${builder.issueId}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
   const isBlocked = builder.blocked !== null && builder.blocked !== '';
   const pct = Math.min(100, Math.max(0, Math.round(builder.progress ?? 0)));

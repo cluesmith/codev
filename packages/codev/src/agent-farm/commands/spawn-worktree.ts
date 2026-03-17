@@ -35,6 +35,26 @@ export async function checkDependencies(): Promise<void> {
 // =============================================================================
 
 /**
+ * Symlink config files from workspace root into a worktree (if they exist).
+ * Shared by createWorktree() and createWorktreeFromBranch().
+ */
+export function symlinkConfigFiles(config: Config, worktreePath: string): void {
+  const symlinks = ['.env', 'af-config.json'];
+  for (const file of symlinks) {
+    const rootPath = resolve(config.workspaceRoot, file);
+    const worktreeFilePath = resolve(worktreePath, file);
+    if (existsSync(rootPath) && !existsSync(worktreeFilePath)) {
+      try {
+        symlinkSync(rootPath, worktreeFilePath);
+        logger.info(`Linked ${file} from workspace root`);
+      } catch (error) {
+        logger.debug(`Failed to symlink ${file}: ${error}`);
+      }
+    }
+  }
+}
+
+/**
  * Create git branch and worktree
  */
 export async function createWorktree(config: Config, branchName: string, worktreePath: string): Promise<void> {
@@ -53,20 +73,238 @@ export async function createWorktree(config: Config, branchName: string, worktre
     fatal(`Failed to create worktree: ${error}`);
   }
 
-  // Symlink config files from workspace root into worktree (if they exist)
-  const symlinks = ['.env', 'af-config.json'];
-  for (const file of symlinks) {
-    const rootPath = resolve(config.workspaceRoot, file);
-    const worktreFilePath = resolve(worktreePath, file);
-    if (existsSync(rootPath) && !existsSync(worktreFilePath)) {
+  symlinkConfigFiles(config, worktreePath);
+}
+
+/**
+ * Validate a branch name for safe use in shell commands.
+ * Only allows valid git branch name characters: alphanumeric, dots, hyphens, underscores, slashes.
+ * Rejects anything that could be used for shell injection.
+ */
+const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9._\/-]+$/;
+
+export function validateBranchName(name: string): void {
+  if (!name || name.length === 0) {
+    fatal('--branch requires a branch name');
+  }
+  if (!SAFE_BRANCH_REGEX.test(name)) {
+    fatal(`Invalid branch name: "${name}". Branch names may only contain alphanumeric characters, dots, hyphens, underscores, and slashes.`);
+  }
+}
+
+/**
+ * Validate a remote name for safe use in shell commands.
+ * Same character restrictions as branch names.
+ */
+export function validateRemoteName(name: string): void {
+  if (!name || name.length === 0) {
+    fatal('--remote requires a remote name');
+  }
+  if (!SAFE_BRANCH_REGEX.test(name)) {
+    fatal(`Invalid remote name: "${name}". Remote names may only contain alphanumeric characters, dots, hyphens, underscores, and slashes.`);
+  }
+}
+
+/**
+ * Detect if a branch belongs to a fork PR by querying GitHub.
+ * Uses `gh pr list --head <branch>` to find open PRs with this branch name.
+ * If a cross-repository (fork) PR is found, returns the fork owner and repo URL.
+ * Returns null if no fork PR is found or `gh` is unavailable.
+ */
+export async function detectForkRemote(
+  config: Config,
+  branch: string,
+): Promise<{ owner: string; url: string } | null> {
+  // Fetch PR data — network/parse errors return null (graceful degradation)
+  let prs: Array<Record<string, unknown>>;
+  try {
+    const { stdout } = await run(
+      `gh pr list --head "${branch}" --json number,headRepositoryOwner,headRepository,isCrossRepository --state open`,
+      { cwd: config.workspaceRoot },
+    );
+    const trimmed = stdout.trim();
+    if (!trimmed) return null;
+    prs = JSON.parse(trimmed);
+    if (!Array.isArray(prs) || prs.length === 0) return null;
+  } catch {
+    return null;
+  }
+
+  // Validation is outside try/catch so fatal() propagates
+  const forkPrs = prs.filter((pr) => pr.isCrossRepository);
+  if (forkPrs.length === 0) return null;
+
+  // Ambiguity check: if multiple forks have the same branch name, require --remote
+  if (forkPrs.length > 1) {
+    const owners = forkPrs.map((pr) =>
+      (pr.headRepositoryOwner as Record<string, string>)?.login,
+    ).filter(Boolean);
+    fatal(
+      `Multiple fork PRs found for branch '${branch}' from: ${owners.join(', ')}.\n` +
+      `Use --remote <name> to specify which fork to use.`
+    );
+  }
+
+  const forkPr = forkPrs[0];
+  const owner = (forkPr.headRepositoryOwner as Record<string, string>)?.login;
+  const repo = (forkPr.headRepository as Record<string, string>)?.name;
+  if (!owner || !repo) return null;
+
+  return {
+    owner,
+    url: `https://github.com/${owner}/${repo}.git`,
+  };
+}
+
+/**
+ * Ensure a git remote exists with the given name and URL.
+ * Adds the remote if it doesn't exist. If it exists but points to a
+ * different URL, fatals with a clear message to avoid silent misrouting.
+ */
+async function ensureRemote(
+  config: Config,
+  name: string,
+  url: string,
+): Promise<void> {
+  let existingUrl: string | null = null;
+  try {
+    const { stdout } = await run(`git remote get-url "${name}"`, { cwd: config.workspaceRoot });
+    existingUrl = stdout.trim();
+  } catch {
+    // Remote doesn't exist — add it
+    logger.info(`Adding remote '${name}' → ${url}`);
+    await run(`git remote add "${name}" "${url}"`, { cwd: config.workspaceRoot });
+    return;
+  }
+
+  // Remote exists — verify URL matches (outside try/catch so fatal propagates)
+  if (existingUrl !== url) {
+    fatal(
+      `Remote '${name}' already exists but points to '${existingUrl}' (expected '${url}').\n` +
+      `Remove or update the remote, or use --remote with the correct remote name.`
+    );
+  }
+  logger.debug(`Remote '${name}' already configured`);
+}
+
+/**
+ * Create a worktree from an existing remote branch (Spec 609).
+ * Fetches the branch from the specified remote (or origin by default),
+ * checks it's not already checked out, and creates a worktree on it.
+ *
+ * When the branch doesn't exist on origin and no explicit remote is given,
+ * auto-detects fork PRs via `gh pr list` and fetches from the fork remote.
+ */
+export async function createWorktreeFromBranch(
+  config: Config,
+  branch: string,
+  worktreePath: string,
+  options?: { remote?: string },
+): Promise<void> {
+  validateBranchName(branch);
+  if (options?.remote) validateRemoteName(options.remote);
+
+  const explicitRemote = options?.remote;
+  let remote = explicitRemote || 'origin';
+
+  // Fetch latest from remote
+  logger.info(`Fetching from remote '${remote}'...`);
+  try {
+    await run(`git fetch "${remote}"`, { cwd: config.workspaceRoot });
+  } catch (error) {
+    fatal(`Failed to fetch from remote '${remote}': ${error}`);
+  }
+
+  // Verify branch exists on the remote
+  let branchExists = false;
+  try {
+    const { stdout } = await run(`git ls-remote --heads "${remote}" "${branch}"`, { cwd: config.workspaceRoot });
+    branchExists = !!stdout.trim();
+  } catch (error) {
+    fatal(`Failed to check remote branch: ${error}`);
+  }
+
+  // If branch not found and no explicit remote was given, try fork detection
+  if (!branchExists && !explicitRemote) {
+    logger.info(`Branch '${branch}' not found on origin. Checking for fork PRs...`);
+    const fork = await detectForkRemote(config, branch);
+    if (fork) {
+      validateRemoteName(fork.owner);
+      logger.info(`Found fork PR from '${fork.owner}'. Fetching from fork...`);
+      await ensureRemote(config, fork.owner, fork.url);
+      remote = fork.owner;
       try {
-        symlinkSync(rootPath, worktreFilePath);
-        logger.info(`Linked ${file} from workspace root`);
+        await run(`git fetch "${remote}" "${branch}"`, { cwd: config.workspaceRoot });
       } catch (error) {
-        logger.debug(`Failed to symlink ${file}: ${error}`);
+        fatal(`Failed to fetch branch '${branch}' from fork remote '${remote}': ${error}`);
+      }
+      // Re-verify after fetching from fork
+      try {
+        const { stdout } = await run(`git ls-remote --heads "${remote}" "${branch}"`, { cwd: config.workspaceRoot });
+        branchExists = !!stdout.trim();
+      } catch {
+        // Fall through to error below
       }
     }
   }
+
+  if (!branchExists) {
+    if (explicitRemote) {
+      fatal(`Branch '${branch}' does not exist on remote '${explicitRemote}'. Check the branch name and try again.`);
+    } else {
+      fatal(
+        `Branch '${branch}' does not exist on the remote. Check the branch name and try again.\n` +
+        `If this branch is from a fork, use --remote <name> to specify the fork remote.`
+      );
+    }
+  }
+
+  // Pre-check: is the branch already checked out in another worktree?
+  let alreadyCheckedOutAt: string | null = null;
+  try {
+    const { stdout } = await run('git worktree list --porcelain', { cwd: config.workspaceRoot });
+    const lines = stdout.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('branch refs/heads/') && line === `branch refs/heads/${branch}`) {
+        // Find the worktree path for this branch (it's the preceding 'worktree' line)
+        const idx = lines.indexOf(line);
+        let wtPath = '(unknown)';
+        for (let i = idx - 1; i >= 0; i--) {
+          if (lines[i].startsWith('worktree ')) {
+            wtPath = lines[i].replace('worktree ', '');
+            break;
+          }
+        }
+        alreadyCheckedOutAt = wtPath;
+        break;
+      }
+    }
+  } catch (error) {
+    // Non-fatal — git worktree list failing shouldn't block spawn
+    logger.debug(`Worktree list check: ${error}`);
+  }
+  if (alreadyCheckedOutAt) {
+    fatal(
+      `Branch '${branch}' is already checked out at '${alreadyCheckedOutAt}'.\n` +
+      `Switch that checkout to a different branch first, or use 'af cleanup' to remove the worktree.`
+    );
+  }
+
+  // Create worktree with the existing branch.
+  // Try creating a local tracking branch first; if it already exists, use it directly.
+  logger.info(`Creating worktree on branch '${branch}'...`);
+  try {
+    await run(`git worktree add "${worktreePath}" -b "${branch}" "${remote}/${branch}"`, { cwd: config.workspaceRoot });
+  } catch {
+    // Local branch may already exist — try using it directly
+    try {
+      await run(`git worktree add "${worktreePath}" "${branch}"`, { cwd: config.workspaceRoot });
+    } catch (error) {
+      fatal(`Failed to create worktree on branch '${branch}': ${error}`);
+    }
+  }
+
+  symlinkConfigFiles(config, worktreePath);
 }
 
 /**

@@ -274,7 +274,7 @@ async function computeProjectsByProtocol(
 ): Promise<Record<string, ProtocolStats>> {
   // Group PRs by protocol and collect linked issue numbers
   const byProtocol = new Map<string, MergedPR[]>();
-  const issueToProtocolPRs = new Map<number, MergedPR[]>();
+  const issueToProtocolPRs = new Map<string, MergedPR[]>();
 
   for (const pr of mergedPRs) {
     const protocol = protocolFromBranch(pr.headRefName ?? '');

@@ -36,7 +36,7 @@ test.describe('Work view: backlog clickability and artifacts', () => {
     // Each backlog item must have a url field
     for (const item of data.backlog) {
       expect(item).toHaveProperty('url');
-      expect(item).toHaveProperty('number');
+      expect(item).toHaveProperty('id');
       expect(item).toHaveProperty('title');
       expect(item).toHaveProperty('type');
       expect(item).toHaveProperty('priority');
@@ -56,7 +56,7 @@ test.describe('Work view: backlog clickability and artifacts', () => {
     // Each recently-closed item must have url and closedAt
     for (const item of data.recentlyClosed) {
       expect(item).toHaveProperty('url');
-      expect(item).toHaveProperty('number');
+      expect(item).toHaveProperty('id');
       expect(item).toHaveProperty('title');
       expect(item).toHaveProperty('closedAt');
     }
