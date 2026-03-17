@@ -69,10 +69,10 @@ export type ConsultationMode = 'default' | 'parent';
  * session to review builder work at each phase boundary.
  *
  * Returns 'default' when config is missing, invalid, or has an unknown value.
- * Uses findConfigRoot() so it works from builder worktrees.
+ * Works from builder worktrees because af-config.json is symlinked there.
  */
 export function loadConsultationMode(workspaceRoot: string): ConsultationMode {
-  const configPath = path.join(findConfigRoot(workspaceRoot), 'af-config.json');
+  const configPath = path.join(workspaceRoot, 'af-config.json');
 
   if (!fs.existsSync(configPath)) {
     return 'default';
