@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
+import type { ArtifactResolver } from './artifacts.js';
 
 /** Directory for project state (relative to project root) */
 export const PROJECTS_DIR = 'codev/projects';
@@ -33,24 +34,31 @@ export function stripIdPrefix(title: string, projectId: string): string {
  * This prevents doubled IDs like "364-0364-name" when state.id is unpadded
  * but spec files use zero-padded IDs.
  */
-export function resolveArtifactBaseName(workspaceRoot: string, projectId: string, title: string): string {
+export function resolveArtifactBaseName(workspaceRoot: string, projectId: string, title: string, resolver?: ArtifactResolver): string {
   const isNumericId = /^\d+$/.test(projectId);
   if (isNumericId) {
-    const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-    if (fs.existsSync(specsDir)) {
-      const normalizedId = projectId.replace(/^0+/, '') || '0';
-      try {
-        const files = fs.readdirSync(specsDir);
-        const specFile = files.find(f => {
-          if (!f.endsWith('.md')) return false;
-          const numMatch = f.match(/^(\d+)/);
-          if (!numMatch) return false;
-          return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-        });
-        if (specFile) {
-          return specFile.replace(/\.md$/, '');
-        }
-      } catch { /* ignore */ }
+    // Try resolver first (supports both local and FAVA Trails backends)
+    if (resolver) {
+      const baseName = resolver.findSpecBaseName(projectId, title);
+      if (baseName) return baseName;
+    } else {
+      // Legacy direct-fs path (backward compatible when no resolver is passed)
+      const specsDir = path.join(workspaceRoot, 'codev', 'specs');
+      if (fs.existsSync(specsDir)) {
+        const normalizedId = projectId.replace(/^0+/, '') || '0';
+        try {
+          const files = fs.readdirSync(specsDir);
+          const specFile = files.find(f => {
+            if (!f.endsWith('.md')) return false;
+            const numMatch = f.match(/^(\d+)/);
+            if (!numMatch) return false;
+            return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+          });
+          if (specFile) {
+            return specFile.replace(/\.md$/, '');
+          }
+        } catch { /* ignore */ }
+      }
     }
   }
   // Fallback: strip any existing ID prefix from title, then prepend projectId

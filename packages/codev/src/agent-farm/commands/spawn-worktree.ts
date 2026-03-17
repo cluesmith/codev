@@ -7,8 +7,8 @@
  * and terminal session creation via the Tower REST API.
  */
 
-import { resolve } from 'node:path';
-import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
@@ -39,8 +39,9 @@ export async function checkDependencies(): Promise<void> {
  * Shared by createWorktree() and createWorktreeFromBranch().
  */
 export function symlinkConfigFiles(config: Config, worktreePath: string): void {
-  const symlinks = ['.env', 'af-config.json'];
-  for (const file of symlinks) {
+  // Symlink config files
+  const fileSymlinks = ['.env', 'af-config.json'];
+  for (const file of fileSymlinks) {
     const rootPath = resolve(config.workspaceRoot, file);
     const worktreeFilePath = resolve(worktreePath, file);
     if (existsSync(rootPath) && !existsSync(worktreeFilePath)) {
@@ -49,6 +50,25 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
         logger.info(`Linked ${file} from workspace root`);
       } catch (error) {
         logger.debug(`Failed to symlink ${file}: ${error}`);
+      }
+    }
+  }
+
+  // Symlink protocol/resource directories so builders can find them even when gitignored
+  const dirSymlinks = ['codev/protocols', 'codev/resources', 'codev/roles'];
+  for (const dir of dirSymlinks) {
+    const rootPath = resolve(config.workspaceRoot, dir);
+    const worktreeDirPath = resolve(worktreePath, dir);
+    if (existsSync(rootPath) && !existsSync(worktreeDirPath)) {
+      try {
+        const parentDir = dirname(worktreeDirPath);
+        if (!existsSync(parentDir)) {
+          mkdirSync(parentDir, { recursive: true });
+        }
+        symlinkSync(rootPath, worktreeDirPath);
+        logger.info(`Linked ${dir} from workspace root`);
+      } catch (error) {
+        logger.debug(`Failed to symlink ${dir}: ${error}`);
       }
     }
   }

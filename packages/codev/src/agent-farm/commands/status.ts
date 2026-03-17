@@ -9,6 +9,8 @@ import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { getTypeColor } from '../utils/display.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import chalk from 'chalk';
 
 /**
@@ -33,6 +35,8 @@ export async function status(): Promise<void> {
       logger.kv('  Active Workspaces', health.activeWorkspaces);
       logger.kv('  Memory', `${Math.round(health.memoryUsage / 1024 / 1024)}MB`);
     }
+
+    showArtifactConfig(workspacePath);
 
     logger.blank();
 
@@ -66,6 +70,9 @@ export async function status(): Promise<void> {
   // Tower not running - show message and fall back to local state
   logger.kv('Tower', chalk.gray('not running'));
   logger.info(`Run 'af tower start' to start the tower daemon`);
+
+  showArtifactConfig(workspacePath);
+
   logger.blank();
 
   // Fall back to local state for legacy display
@@ -145,6 +152,42 @@ export async function status(): Promise<void> {
     }
   } else {
     logger.info('Annotations: none');
+  }
+}
+
+function showArtifactConfig(workspacePath: string): void {
+  const configPath = join(workspacePath, 'af-config.json');
+  if (!existsSync(configPath)) return;
+
+  let artifacts: { backend?: string; scope?: string; command?: string } | undefined;
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    artifacts = config?.artifacts;
+  } catch { return; }
+
+  if (!artifacts?.backend) return;
+
+  logger.blank();
+
+  if (artifacts.backend === 'cli') {
+    logger.kv('Artifacts', chalk.cyan(`cli (${artifacts.command || 'not configured'})`));
+    if (artifacts.scope) {
+      logger.kv('  Scope', artifacts.scope);
+    }
+    let dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO;
+    if (!dataRepo) {
+      const envPath = join(workspacePath, '.env');
+      try {
+        const envContent = readFileSync(envPath, 'utf-8');
+        const match = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
+        if (match) dataRepo = match[1].trim();
+      } catch { /* .env may not exist */ }
+    }
+    if (dataRepo) {
+      logger.kv('  Data Repo', dataRepo);
+    }
+  } else {
+    logger.kv('Artifacts', `${artifacts.backend} (codev/specs/, codev/plans/)`);
   }
 }
 
