@@ -237,12 +237,18 @@ All three existing resolution chains (`readCodevFile()` in `skeleton.ts`, `PROTO
 - Detects existing `codev/protocols/` etc. — leaves them in place (they take precedence via resolution order)
 - Creates `.codev/config.json` if not present
 
-**Stale skeleton file cleanup** (update shadowing prevention):
-Existing projects may have unmodified skeleton files in `codev/protocols/`, `codev/roles/`, etc. that were copied by `codev init` or `codev update`. These files will shadow newer versions from the npm package, preventing updates. To address this:
-- `codev update` performs a **one-time migration**: reads `codev/.update-hashes.json`, identifies files whose hash still matches the original skeleton hash (i.e., user never modified them), and deletes those files. This allows them to fall back to the package defaults.
-- Files whose hash differs from the original (user-modified) are left in place.
-- After cleanup, `codev update` emits: "Cleaned up N unmodified skeleton files. Framework files now resolve from the installed package. Future `codev update` calls are no longer needed."
-- Subsequent calls to `codev update` emit a deprecation warning and become a no-op.
+**`codev update` becomes the migration tool**:
+
+The next time a user runs `codev update` after upgrading to the new version, it performs a **full migration** to the new system:
+
+1. **Move config**: If `af-config.json` exists and `.codev/config.json` doesn't, move it: `af-config.json` → `.codev/config.json`
+2. **Clean up unmodified skeleton files**: Read `codev/.update-hashes.json`, identify files whose hash still matches the original skeleton hash (user never modified them), and delete those files. This allows them to fall back to the package defaults at runtime.
+3. **Preserve user-modified files**: Files whose hash differs from the original are left in place — they become local overrides in the resolution chain.
+4. **Update Claude-specific files**: Refresh `.claude/skills/`, `CLAUDE.md`, `AGENTS.md` from the latest package (these can't be runtime-resolved).
+5. **Clean up tracking files**: Remove `codev/.update-hashes.json` (no longer needed).
+6. **Report**: Emit summary: "Migrated to .codev/config.json. Cleaned up N unmodified skeleton files. M user-modified files preserved as local overrides. Framework files now resolve from the installed package."
+
+On subsequent runs, `codev update` detects the migration is complete and emits: "Already migrated. Use `codev sync` to fetch remote framework sources, or `codev adopt --update` to refresh Claude-specific files."
 
 **New `codev adopt --update` flag**:
 - Updates Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) from the latest package without touching other files
@@ -262,19 +268,37 @@ Teams can point to a shared repository containing their development framework �
 }
 ```
 
-The config key is `framework`, not `protocols`, because a team's shared methodology includes more than just protocols — it includes roles, consult-types, templates, and porch prompts. The entire framework bundle is fetched and cached as a unit.
+Or with a custom command for self-hosted / non-forge sources:
+
+```json
+{
+  "framework": {
+    "type": "command",
+    "source": "fetch-framework --org acme --output $CODEV_OUTPUT_DIR",
+    "ref": "v1.2.0"
+  }
+}
+```
+
+The config key is `framework`, not `protocols`, because a team's shared methodology includes more than just protocols — it includes roles, consult-types, templates, porch prompts, and base config. The entire framework bundle is fetched and cached as a unit.
 
 #### Configuration
 
-- `source`: `"local"` (default) | `"<owner>/<repo>"` | `"<owner>/<repo>/<path>"`
-  - `"local"` — use only local overrides + package defaults (current behavior)
-  - `"<owner>/<repo>"` — fetch from a repository via the forge (platform-agnostic)
-  - `"<owner>/<repo>/<path>"` — use a subdirectory within the repo as the root
-- `ref`: A tag, branch, or commit SHA identifying the version to fetch.
-  - **Required when `source` is not `"local"`**. Omitting `ref` is an error — this prevents silent drift.
-  - Tags and commit SHAs are immutable and preferred. Branch names work but require explicit `codev sync` to update.
+- `type`: `"forge"` (default) | `"command"`
+  - `"forge"` — fetch via the project's configured forge provider (GitHub, GitLab, etc.)
+  - `"command"` — run an arbitrary shell command. The command receives `CODEV_OUTPUT_DIR` as an environment variable and must extract framework files into that directory.
 
-The `source` is a **forge-relative** identifier, not a raw git URL. The forge determines how to fetch it based on the project's configured provider (GitHub by default, but could be GitLab, Bitbucket, etc.). This keeps remote sources decoupled from any specific VCS or hosting platform.
+- `source`: Depends on `type`:
+  - When `type` is `"forge"`: `"local"` (default) | `"<owner>/<repo>"` | `"<owner>/<repo>/<path>"` | a full URL
+    - `"local"` — use only local overrides + package defaults (current behavior)
+    - `"<owner>/<repo>"` — shorthand, resolved by the forge provider
+    - `"https://gitlab.example.com/team/protocols"` — full URL, passed to the forge's `repo-archive` concept
+  - When `type` is `"command"`: the shell command to execute (supports `$CODEV_OUTPUT_DIR` and `$CODEV_REF`)
+
+- `ref`: A tag, branch, or commit SHA identifying the version to fetch.
+  - **Optional**. If omitted, the forge fetches the repository's default branch (or the command runs without `CODEV_REF` set).
+  - When specified, tags and commit SHAs are treated as immutable (cached without re-fetch). Branch names require explicit `codev sync` to update.
+  - Pinning to a ref is recommended for reproducibility but not required.
 
 #### `codev sync`
 
@@ -293,21 +317,24 @@ codev sync --status # Show current cache state (source, ref, last fetched)
 
 When no `framework.source` is configured (or set to `"local"`), `codev sync` emits: "No remote framework source configured. Nothing to sync."
 
-#### Fetch Mechanism: Forge Concept `repo-archive`
+#### Fetch Mechanism
+
+**When `type` is `"forge"` (default)**:
 
 Fetching goes through the forge's concept-command system (see `lib/forge.ts` and `scripts/forge/<provider>/`). A new `repo-archive` concept is added:
 
 **Concept**: `repo-archive`
 **Purpose**: Download and extract repository contents at a given ref
 **Environment variables** (set before invocation, following existing forge convention):
-- `CODEV_REPO` — `<owner>/<repo>`
-- `CODEV_REF` — tag, branch, or commit SHA
+- `CODEV_REPO` — `<owner>/<repo>` or full URL
+- `CODEV_REF` — tag, branch, or commit SHA (empty string if not specified)
 - `CODEV_OUTPUT_DIR` — directory to extract into
 
 **Default implementation** (GitHub provider, `scripts/forge/github/repo-archive.sh`):
 ```bash
 # Download tarball via gh CLI and extract
-gh api "repos/${CODEV_REPO}/tarball/${CODEV_REF}" > /tmp/codev-archive.tar.gz
+REF_PART="${CODEV_REF:-HEAD}"
+gh api "repos/${CODEV_REPO}/tarball/${REF_PART}" > /tmp/codev-archive.tar.gz
 mkdir -p "${CODEV_OUTPUT_DIR}"
 tar xzf /tmp/codev-archive.tar.gz -C "${CODEV_OUTPUT_DIR}" --strip-components=1
 rm /tmp/codev-archive.tar.gz
@@ -315,12 +342,29 @@ rm /tmp/codev-archive.tar.gz
 
 Other forge providers (GitLab, Bitbucket) implement the same concept using their platform's equivalent API. Projects can also override the command in their forge config, just like any other forge concept.
 
-**Why forge, not `git clone`**:
-- Uses the forge's existing auth (e.g., `gh` CLI token for GitHub, `glab` for GitLab)
-- No dependency on `git` CLI being installed
-- Platform-agnostic — works with any forge provider
-- Consistent with how codev already interacts with external platforms
-- Teams using custom forge providers (spec #589) get remote framework sources for free
+**When `type` is `"command"`**:
+
+The `source` field is executed as a shell command via `sh -c`. Environment variables are set before invocation:
+- `CODEV_OUTPUT_DIR` — the directory the command must extract framework files into
+- `CODEV_REF` — the configured ref (empty string if not specified)
+
+Examples:
+```json
+// Self-hosted git server
+{ "type": "command", "source": "git archive --remote=git@internal:team/framework.git $CODEV_REF | tar -xC $CODEV_OUTPUT_DIR" }
+
+// S3 bucket
+{ "type": "command", "source": "aws s3 cp s3://our-bucket/framework-$CODEV_REF.tar.gz - | tar xzC $CODEV_OUTPUT_DIR" }
+
+// Local network share
+{ "type": "command", "source": "cp -r /mnt/shared/codev-framework/* $CODEV_OUTPUT_DIR" }
+```
+
+The `command` type is an escape hatch for any source the forge doesn't natively support. The only contract is: populate `CODEV_OUTPUT_DIR` with framework files.
+
+**Why two types**:
+- `"forge"` (default): Uses existing auth, platform-agnostic, zero config for most teams
+- `"command"`: Handles self-hosted git, NFS mounts, S3 buckets, custom artifact stores — anything a shell command can reach
 
 #### Cache Behavior
 
@@ -330,8 +374,8 @@ Downloaded archives are extracted to `~/.codev/cache/framework/<source-hash>/<re
 | Scenario | Behavior |
 |----------|----------|
 | Cache exists and ref is a tag or SHA | Use cache. Immutable refs never re-fetch (unless `--force`). |
-| Cache exists and ref is a branch | `codev sync` re-fetches. Direct resolution uses cache as-is. |
-| Cache missing | Fetch on first use. Emit: "Fetching framework from <source>@<ref>..." |
+| Cache exists and ref is a branch or omitted | `codev sync` re-fetches. Direct resolution uses cache as-is. |
+| Cache missing | Fetch on first use. Emit: "Fetching framework from <source>..." |
 | Fetch fails (network, auth, bad ref) | **Fail hard** with clear error. Do NOT fall back to package defaults silently — the user explicitly configured a remote source and should know it's not working. |
 | `source` is `"local"` | Skip remote entirely. No fetch, no cache check. |
 
@@ -346,7 +390,18 @@ codev/<path>               ← project-level (legacy local copies)
 <package>/skeleton/<path>  ← npm package defaults (lowest priority)
 ```
 
-A team's shared framework overrides the package defaults, but project-level or user-level customizations still take precedence. This applies uniformly to all framework file types — protocols, roles, consult-types, templates, and porch prompts.
+A team's shared framework overrides the package defaults, but project-level or user-level customizations still take precedence. This applies uniformly to all framework file types — protocols, roles, consult-types, templates, porch prompts, **and base config**.
+
+**Base config from remote framework**: A remote framework repo can include a `config.json` at its root. This acts as a team-wide base config that slots into the config layering:
+
+```
+~/.codev/config.json         ← user global (highest priority)
+.codev/config.json           ← project-level
+<cache>/config.json          ← remote framework base config
+hardcoded defaults           ← package defaults (lowest priority)
+```
+
+This allows a team to set shared defaults (e.g., preferred consultation models, shell commands, porch checks) that all projects using their framework inherit, while still allowing per-project and per-user overrides.
 
 #### Remote Repo Layout
 
@@ -401,18 +456,20 @@ Only the directories/files that exist in the remote are used. Missing directorie
 - [ ] Unified `resolveFile()` replaces `readCodevFile()`, `PROTOCOL_PATHS` in protocol.ts, and `PROTOCOL_PATHS` in prompts.ts
 - [ ] `codev init` creates minimal project (no skeleton copies for codev-readable files)
 - [ ] `codev adopt` works with existing projects (leaves local files, creates .codev/config.json)
-- [ ] `codev update` performs one-time skeleton cleanup (unmodified files), then becomes a no-op on subsequent calls
+- [ ] `codev update` performs full migration (move config, clean skeleton, update Claude files), then becomes a no-op
 - [ ] `codev adopt --update` flag updates Claude-specific files only
 - [ ] Claude-specific files (`.claude/skills/`, `CLAUDE.md`, `AGENTS.md`) still copied by init/adopt
 - [ ] Existing projects with local skeleton files continue to work unchanged
 - [ ] Remote framework source fetched via forge `repo-archive` concept, cached at `~/.codev/cache/framework/`
 - [ ] New `repo-archive` forge concept implemented for GitHub provider
-- [ ] `ref` is required when `framework.source` is not `"local"` (error if missing)
+- [ ] `ref` is optional — defaults to repo's default branch when omitted
+- [ ] `framework.type` supports `"forge"` (default) and `"command"` (arbitrary CLI)
 - [ ] Immutable refs (tags, SHAs) use cache without re-fetch; branches re-fetch on `codev sync`
 - [ ] Fetch failure produces clear error (no silent fallback to package)
 - [ ] `codev sync`, `codev sync --force`, and `codev sync --status` work correctly
 - [ ] Remote framework slots into resolution chain between local and package
-- [ ] All framework file types supported: protocols, roles, consult-types, templates, porch prompts
+- [ ] All framework file types supported: protocols, roles, consult-types, templates, porch prompts, base config
+- [ ] Remote framework base `config.json` participates in config layering
 - [ ] Worktree symlink pattern updated from `af-config.json` to `.codev/config.json`
 - [ ] All 10 `af-config.json` usage sites migrated to centralized loader
 - [ ] All existing tests pass
@@ -443,7 +500,7 @@ Only the directories/files that exist in the remote are used. Missing directorie
 
 ### Approach 1: Phased Migration (Recommended)
 
-**Description**: Implement the four concerns in phases, maintaining backward compatibility throughout.
+**Description**: Implement the four concerns in phases, maintaining backward compatibility throughout. `codev update` becomes the **migration entry point** — the next time a user runs it after upgrading, it performs the full migration (moves `af-config.json` → `.codev/config.json`, cleans up unmodified skeleton files, etc.) and then retires itself.
 
 **Phase 1 — Config Foundation**: Create `.codev/config.json` schema, loading, and layering. Centralize config loading. Migrate `af-config.json` with deprecation. This unblocks everything else.
 
