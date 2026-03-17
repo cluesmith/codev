@@ -27,6 +27,7 @@ vi.mock('node:fs', async (importOriginal) => {
     chmodSync: vi.fn(),
     symlinkSync: vi.fn(),
     readdirSync: vi.fn(() => []),
+    mkdirSync: vi.fn(),
   };
 });
 
@@ -238,6 +239,58 @@ describe('spawn-worktree', () => {
         .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)
         .mockRejectedValueOnce(new Error('worktree add failed'));
       await expect(createWorktree(config, 'my-branch', '/tmp/wt')).rejects.toThrow('Failed to create worktree');
+    });
+
+    it('symlinks codev/protocols, codev/resources, codev/roles when they exist in workspace root', async () => {
+      const { run } = await import('../utils/shell.js');
+      const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');
+      vi.mocked(run).mockResolvedValue({ stdout: '', stderr: '' } as any);
+      // existsSync: rootPath exists for all dirs, worktree paths do not exist
+      vi.mocked(existsSync).mockImplementation((p: any) => {
+        const s = String(p);
+        // The workspace root dirs exist, the worktree dirs do not, parent 'codev/' does not
+        if (s === '/projects/test/codev/protocols') return true;
+        if (s === '/projects/test/codev/resources') return true;
+        if (s === '/projects/test/codev/roles') return true;
+        return false;
+      });
+      await createWorktree(config, 'my-branch', '/tmp/wt');
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/codev/protocols', '/tmp/wt/codev/protocols');
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/codev/resources', '/tmp/wt/codev/resources');
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/codev/roles', '/tmp/wt/codev/roles');
+      // Parent dir codev/ should be created since it didn't exist
+      expect(mkdirSync).toHaveBeenCalledWith('/tmp/wt/codev', { recursive: true });
+    });
+
+    it('skips dir symlink when target already exists in worktree (git-tracked)', async () => {
+      const { run } = await import('../utils/shell.js');
+      const { existsSync, symlinkSync } = await import('node:fs');
+      vi.mocked(run).mockResolvedValue({ stdout: '', stderr: '' } as any);
+      // Both root path and worktree path exist
+      vi.mocked(existsSync).mockImplementation((p: any) => {
+        const s = String(p);
+        if (s === '/projects/test/codev/protocols') return true;
+        if (s === '/tmp/wt/codev/protocols') return true;
+        return false;
+      });
+      await createWorktree(config, 'my-branch', '/tmp/wt');
+      expect(symlinkSync).not.toHaveBeenCalledWith(
+        '/projects/test/codev/protocols',
+        '/tmp/wt/codev/protocols',
+      );
+    });
+
+    it('skips dir symlink when source does not exist in workspace', async () => {
+      const { run } = await import('../utils/shell.js');
+      const { existsSync, symlinkSync } = await import('node:fs');
+      vi.mocked(run).mockResolvedValue({ stdout: '', stderr: '' } as any);
+      // Nothing exists
+      vi.mocked(existsSync).mockReturnValue(false);
+      await createWorktree(config, 'my-branch', '/tmp/wt');
+      expect(symlinkSync).not.toHaveBeenCalledWith(
+        expect.stringContaining('codev/protocols'),
+        expect.any(String),
+      );
     });
   });
 
