@@ -464,6 +464,10 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   if (hasExplicitProtocol) {
     validateProtocol(config, options.protocol!);
     const protocol = options.protocol!.toLowerCase();
+
+    if (!options.resume) {
+      await initPorchInWorktree(worktreePath, protocol, builderId, worktreeName);
+    }
     const protocolDef = loadProtocol(config, protocol);
     const mode = resolveMode(options, protocolDef);
     const templateContext: TemplateContext = {

@@ -156,7 +156,7 @@ export function runArtifactCheck(
       if (content === null) {
         return { name, command, passed: false, error: 'Plan not found', duration_ms: Date.now() - startTime };
       }
-      const has = content.includes('"phases":');
+      const has = /"phases"\s*:/.test(content);
       return {
         name,
         command,
