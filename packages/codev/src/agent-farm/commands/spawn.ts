@@ -24,6 +24,7 @@ import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
 import { fetchIssue as fetchIssueNonFatal } from '../../lib/github.js';
+import { getResolver } from '../../commands/porch/artifacts.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -300,11 +301,27 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     }
   }
 
-  // Fetch forge issue context.
-  // When no spec file exists, this is fatal (we need a project name).
-  // When spec file exists, this is non-fatal (spec filename is the fallback).
-  let forgeIssue: Awaited<ReturnType<typeof fetchIssueNonFatal>> = null;
+  // Try artifact resolver to get spec name before falling back to GitHub.
+  // This supports external backends (e.g., CLI backend) where specs exist
+  // remotely but not as local files under codev/specs/.
+  let resolverSpecName: string | null = null;
   if (!specFile) {
+    try {
+      const resolver = getResolver(config.workspaceRoot);
+      resolverSpecName = resolver.findSpecBaseName(specLookupId, '');
+      if (resolverSpecName) {
+        logger.info(`Found spec via resolver: ${resolverSpecName}`);
+      }
+    } catch {
+      // Non-fatal: if resolver fails, fall through to GitHub issue fetch
+    }
+  }
+
+  // Fetch forge issue context.
+  // When no spec file exists and resolver didn't find a name, this is fatal (we need a project name).
+  // When spec file exists or resolver found the name, this is non-fatal (spec name is the fallback).
+  let forgeIssue: Awaited<ReturnType<typeof fetchIssueNonFatal>> = null;
+  if (!specFile && !resolverSpecName) {
     // Fatal fetch — we need the issue title for naming
     forgeIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
   } else {
@@ -312,12 +329,15 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   // Derive specName for naming.
-  // Priority: GitHub issue title > spec filename
+  // Priority: GitHub issue title > resolver spec name > local spec filename
   let specName: string;
   if (forgeIssue) {
     specName = `${strippedId}-${slugify(forgeIssue.title)}`;
+  } else if (resolverSpecName) {
+    // Spec found in external backend — use its base name for branch/worktree naming
+    specName = resolverSpecName.replace(/\.md$/, '');
   } else {
-    // No GitHub issue — fall back to spec filename (specFile must exist here)
+    // No GitHub issue or resolver — fall back to spec filename (specFile must exist here)
     specName = basename(specFile!, '.md');
   }
 
