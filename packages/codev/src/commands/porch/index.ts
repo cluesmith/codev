@@ -45,7 +45,7 @@ import {
   allChecksPassed,
   type CheckEnv,
 } from './checks.js';
-import { loadCheckOverrides } from './config.js';
+import { loadCheckOverrides, loadConsultationMode } from './config.js';
 
 // ============================================================================
 // Output Helpers
@@ -112,6 +112,10 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
   console.log(header(`PROJECT: ${state.id} - ${state.title}`));
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
+  const consultationMode = loadConsultationMode(workspaceRoot);
+  if (consultationMode !== 'default') {
+    console.log(`  CONSULTATION: ${consultationMode}`);
+  }
 
   // For phased protocols, show plan phase status
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {

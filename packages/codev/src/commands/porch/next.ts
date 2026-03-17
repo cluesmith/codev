@@ -35,7 +35,7 @@ import {
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
-import { loadCheckOverrides } from './config.js';
+import { loadCheckOverrides, loadConsultationMode } from './config.js';
 
 import type {
   ProjectState,
@@ -363,6 +363,28 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     }
   }
 
+  // Check for pending phase-review gate (parent-delegated consultation)
+  // Only check the gate scoped to the current phase/planPhase/iteration —
+  // stale gates from previous phases (e.g. after rollback) must not block.
+  {
+    const expectedGate = `phase-review-${state.phase}-${state.current_plan_phase || 'main'}-iter${state.iteration}`;
+    const gateEntry = state.gates[expectedGate];
+    if (gateEntry?.status === 'pending') {
+      return {
+        status: 'gate_pending',
+        phase: state.phase,
+        iteration: state.iteration,
+        plan_phase: state.current_plan_phase || undefined,
+        gate: expectedGate,
+        tasks: [{
+          subject: `Waiting for parent session to review`,
+          activeForm: `Waiting for parent review`,
+          description: `Parent-delegated consultation is active. STOP and wait.\n\nRun: porch approve ${state.id} ${expectedGate} --a-human-explicitly-approved-this`,
+        }],
+      };
+    }
+  }
+
   // Handle build_verify / per_plan_phase phases
   if (isBuildVerify(protocol, state.phase)) {
     return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath);
@@ -459,6 +481,36 @@ async function handleBuildVerify(
 
   // --- NEED VERIFY ---
   if (state.build_complete && verifyConfig) {
+    // Parent-delegated consultation: emit phase-review gate instead of consult commands
+    const consultationMode = loadConsultationMode(workspaceRoot);
+    if (consultationMode === 'parent') {
+      const phaseReviewGate = `phase-review-${state.phase}-${state.current_plan_phase || 'main'}-iter${state.iteration}`;
+
+      if (!state.gates[phaseReviewGate]) {
+        state.gates[phaseReviewGate] = { status: 'pending', requested_at: new Date().toISOString() };
+        writeState(statusPath, state);
+      }
+
+      if (state.gates[phaseReviewGate]?.status === 'pending') {
+        return {
+          status: 'gate_pending',
+          ...baseResponse,
+          gate: phaseReviewGate,
+          tasks: [{
+            subject: `Waiting for parent session to review ${state.phase}${state.current_plan_phase ? ` / ${state.current_plan_phase}` : ''}`,
+            activeForm: `Waiting for parent review`,
+            description: `Parent-delegated consultation is active. STOP and wait.\n\nThe parent session will review this phase and approve.\nRun: porch approve ${state.id} ${phaseReviewGate} --a-human-explicitly-approved-this`,
+          }],
+        };
+      }
+
+      // Gate approved — advance past verification
+      if (state.gates[phaseReviewGate]?.status === 'approved') {
+        return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, []);
+      }
+    }
+
+    // Default consultation: use consult commands
     const reviews = findReviewFiles(workspaceRoot, state, verifyConfig.models);
 
     // No review files yet — emit consultation tasks
@@ -667,7 +719,9 @@ async function handleVerifyApproved(
       tasks: [{
         subject: `Request human approval: ${gateName}`,
         activeForm: `Requesting ${gateName} approval`,
-        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`,
+        description: reviews.length > 0
+          ? `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`
+          : `Approved via parent-delegated phase-review gate.\n\nSTOP and wait for human approval.`,
       }],
     };
   }
