@@ -332,6 +332,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     // state captures viewportY=0 and safeFit "restores" to the top.
     const scrollState = { viewportY: 0, baseY: 0, wasAtBottom: true };
 
+    // Guard: prevent fitAddon.fit() while xterm processes a large write (Bugfix #625).
+    // Resizing mid-write causes garbled rendering with overlapping lines.
+    let writingLargeChunk = false;
+
     // Update tracked scroll state on every scroll event — but reject
     // viewport resets caused by display:none or browser tab visibility.
     // Three checks (Bugfix #573):
@@ -367,6 +371,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     // Uses externally-tracked scroll state instead of reading from xterm's
     // buffer to avoid stale values after display:none toggling (Bugfix #560).
     const safeFit = () => {
+      // Defer fit while a large write is being processed (Bugfix #625).
+      // Calling fitAddon.fit() mid-write causes garbled rendering.
+      if (writingLargeChunk) return;
+
       // Skip fit when container is hidden (display: none) or has zero dimensions.
       // ResizeObserver fires with 0x0 when tabs switch — fitting at that size
       // causes buffer reflow that resets the viewport to the top.
@@ -479,16 +487,25 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
         }
         if (rc.initialBuffer) {
           const filtered = filterDA(rc.initialBuffer);
+          rc.initialBuffer = '';
           if (filtered) {
+            // Track write to prevent resize-during-write race (Bugfix #625).
+            // fitAddon.fit() mid-write causes garbled rendering.
+            writingLargeChunk = true;
             term.write(filtered, () => {
+              writingLargeChunk = false;
               term.scrollToBottom();
               // Sync tracked scroll state after replay (Bugfix #560)
               scrollState.wasAtBottom = true;
+              // Fit AFTER write completes — prevents garbled rendering (Bugfix #625)
+              debouncedFit();
             });
+          } else {
+            debouncedFit();
           }
-          rc.initialBuffer = '';
+        } else {
+          debouncedFit();
         }
-        debouncedFit();
         setTimeout(() => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
