@@ -322,7 +322,7 @@ describe('ScrollController', () => {
       expect(ctrl.state.viewportY).toBe(0);
     });
 
-    it('ignores events during programmatic scroll', () => {
+    it('updates state but does not take corrective action during programmatic scroll', () => {
       const { ctrl, term } = createController();
       ctrl.enterInteractive();
 
@@ -331,35 +331,47 @@ describe('ScrollController', () => {
       term.buffer.active.viewportY = 200;
       term._triggerScroll();
 
-      // Now simulate a programmatic scrollToBottom
-      // This sets isProgrammaticScroll=true, calls scrollToBottom, then clears it
-      // The mock scrollToBottom doesn't actually change buffer state, so viewportY stays 200
+      // scrollToBottom sets wasAtBottom explicitly
       ctrl.scrollToBottom();
-
-      // viewportY should still be 200 (from the previous user scroll)
-      // because the programmatic scroll's onScroll was ignored for state update
-      // (well, actually the mock doesn't trigger onScroll from scrollToBottom)
-      // The key test: wasAtBottom was explicitly set by scrollToBottom()
       expect(ctrl.state.wasAtBottom).toBe(true);
+    });
+
+    it('warns on unexpected scroll-to-top in interactive phase', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { ctrl, term } = createController();
+      ctrl.enterInteractive();
+
+      // User was at line 200
+      term.buffer.active.baseY = 500;
+      term.buffer.active.viewportY = 200;
+      term._triggerScroll();
+
+      // Unexpected scroll to top (viewportY=0 with scrollback)
+      term.buffer.active.viewportY = 0;
+      term._triggerScroll();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('unexpected scroll-to-top'),
+        expect.any(String),
+      );
+      warnSpy.mockRestore();
     });
   });
 
   describe('programmatic scroll guard', () => {
-    it('scrollToBottom sets isProgrammaticScroll during the call', () => {
+    it('updates state during programmatic scroll (no corrective action)', () => {
       const term = createMockTerm();
-      let wasProgrammatic = false;
       term.scrollToBottom.mockImplementation(() => {
-        // During the scrollToBottom call, check if onScroll would be ignored
+        // During the scrollToBottom call, xterm fires onScroll with new position
         term.buffer.active.baseY = 500;
         term.buffer.active.viewportY = 500;
         term._triggerScroll();
-        // The onScroll handler should ignore this because isProgrammaticScroll is true
       });
 
       const { ctrl } = createController({ term });
       ctrl.enterInteractive();
 
-      // Set up initial state
+      // Set up initial state: user scrolled to line 200
       term.buffer.active.baseY = 500;
       term.buffer.active.viewportY = 200;
       term._triggerScroll();
@@ -368,8 +380,9 @@ describe('ScrollController', () => {
       // Call scrollToBottom — the mock triggers onScroll during the call
       ctrl.scrollToBottom();
 
-      // State should not have been updated by the onScroll during programmatic scroll
-      // (viewportY stays at 200 from the handler perspective, but wasAtBottom was set by scrollToBottom)
+      // State SHOULD have been updated by the onScroll during programmatic scroll
+      expect(ctrl.state.viewportY).toBe(500);
+      expect(ctrl.state.baseY).toBe(500);
       expect(ctrl.state.wasAtBottom).toBe(true);
     });
 

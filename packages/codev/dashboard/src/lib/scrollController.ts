@@ -194,9 +194,17 @@ export class ScrollController {
   // --- Internal ---
 
   private handleScroll(): void {
-    // Ignore during programmatic scrolls to prevent recursion
+    // During programmatic scrolls: update internal state but don't take
+    // corrective action. This ensures state stays fresh after controller-
+    // initiated scrolls (e.g., scrollToLine to same position is a no-op
+    // in xterm and won't fire onScroll, so we pre-update in programmaticScroll).
     if (this._isProgrammaticScroll) {
-      this.log('onScroll', 'ignored (programmatic)');
+      const baseY = this.term.buffer?.active?.baseY ?? 0;
+      const viewportY = this.term.buffer?.active?.viewportY ?? 0;
+      this._baseY = baseY;
+      this._viewportY = viewportY;
+      this._wasAtBottom = !baseY || viewportY >= baseY;
+      this.log('onScroll', `programmatic update: viewportY=${viewportY} baseY=${baseY}`);
       return;
     }
 
@@ -214,6 +222,12 @@ export class ScrollController {
 
     const baseY = this.term.buffer?.active?.baseY ?? 0;
     const viewportY = this.term.buffer?.active?.viewportY ?? 0;
+
+    // Detect unexpected scroll-to-top in interactive phase (replaces magic thresholds)
+    if (viewportY === 0 && baseY > 0 && this._viewportY > 0) {
+      console.warn('[ScrollController] unexpected scroll-to-top in interactive phase:',
+        `was viewportY=${this._viewportY}, now viewportY=0, baseY=${baseY}`);
+    }
 
     this._baseY = baseY;
     this._viewportY = viewportY;
