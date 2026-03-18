@@ -412,4 +412,20 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     // NOW fit() should have been called
     expect(mockFitInstance.fit).toHaveBeenCalled();
   });
+
+  it('does not use setInterval for scroll management (#627)', () => {
+    // Regression test: the 200ms scroll monitor setInterval has been removed.
+    // ScrollController uses event-driven design — no polling.
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const callsBefore = setIntervalSpy.mock.calls.length;
+
+    render(<Terminal wsPath="/ws/terminal/test" />);
+    mockContainerRect();
+    transitionToInteractive();
+
+    // Check no setInterval was called during terminal setup
+    const callsAfter = setIntervalSpy.mock.calls.length;
+    expect(callsAfter).toBe(callsBefore);
+    setIntervalSpy.mockRestore();
+  });
 });
