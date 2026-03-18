@@ -119,7 +119,7 @@ A single, unified scroll management system that:
 - File path link decorations and virtual keyboard are out of scope
 
 ## Assumptions
-- xterm.js `onScroll` fires reliably for all programmatic scroll changes (scrollToBottom, scrollToLine)
+- xterm.js `onScroll` fires reliably for programmatic scroll changes (scrollToBottom, scrollToLine) — **caveat**: `scrollToLine()` to the same line is a no-op and won't fire `onScroll`. The controller must update internal state *before* calling scroll methods, not rely solely on the event to confirm.
 - xterm.js `buffer.active.viewportY` correctly reports 0 during display:none (this is the known behavior we must handle)
 - ResizeObserver fires with 0x0 dimensions when container becomes hidden
 - The 350ms post-flush delay is a timing hack that can be replaced with event-driven completion detection
@@ -138,9 +138,13 @@ The ScrollController:
 - Container visibility checks happen once in the controller, not duplicated
 
 Phase-specific behavior:
-- **initial-load**: All scroll events ignored. No fit corrections. Transitions to `buffer-replay` or `interactive` on first write.
-- **buffer-replay**: Scroll events ignored (replay writes will generate many). `safeFit()` deferred. Transitions to `interactive` when replay completes (callback-based, no setTimeout).
-- **interactive**: Full scroll tracking active. `safeFit()` preserves position. Spurious reset detection uses phase awareness (not thresholds).
+- **initial-load**: All scroll events ignored. No fit corrections. Transitions to `buffer-replay` when `beginReplay()` is called (from `flushInitialBuffer()`), or directly to `interactive` when the first normal WebSocket message arrives without a replay phase.
+- **buffer-replay**: Scroll events ignored (replay writes will generate many). `safeFit()` deferred (fit suppression active). Transitions to `interactive` when `endReplay()` is called from the `term.write()` completion callback — this replaces the 350ms setTimeout with deterministic callback-based detection.
+- **interactive**: Full scroll tracking active. `safeFit()` preserves position. Spurious reset detection uses phase awareness (not thresholds). Container visibility checks gate all operations.
+
+**Fit suppression**: The controller exposes a general `suppressFit()`/`unsuppressFit()` mechanism (used by `beginReplay()`/`endReplay()` internally). This ensures fit suppression works for any large write, not just replay — e.g., if large paste support is added in the future.
+
+**Programmatic scroll guard**: When the controller calls `term.scrollToBottom()` or `term.scrollToLine()`, it sets an internal `isProgrammaticScroll` flag before the call and clears it after. This prevents the `onScroll` handler from treating controller-initiated scrolls as user events, avoiding infinite recursion or state bouncing.
 
 **Pros**:
 - Single source of truth
@@ -214,16 +218,17 @@ The current architecture's fundamental problem is that three independent mechani
 - [x] None — the issue analysis is thorough and the codebase is well-understood
 
 ### Important (Affects Design)
-- [ ] Should the ScrollController be a class or a plain factory function returning an interface? (Recommend class for encapsulation and testability)
-- [ ] Should structured scroll logs be gated behind a debug flag, or always-on? (Recommend debug flag — `console.warn` in production is noisy)
+- [x] Should the ScrollController be a class or a plain factory function returning an interface? **Decision: Class** — provides encapsulation, testability, and clear lifecycle (constructor/dispose).
+- [x] Should structured scroll logs be gated behind a debug flag, or always-on? **Decision: Gated behind a `debug` constructor option** (default `false`). Logs use `console.debug()` so they're filterable in browser devtools. Critical warnings (e.g., unexpected scroll-to-top in interactive phase) always log via `console.warn()`.
 
 ### Nice-to-Know (Optimization)
 - [ ] Can the 150ms debounce on fit() be reduced now that phase awareness prevents spurious fits during replay?
 
 ## Performance Requirements
 - **No polling**: Replace 200ms setInterval with event-driven approach
+- **No timing hacks**: The 350ms post-flush setTimeout (lines 509-516) is explicitly eliminated — replaced by the `term.write()` completion callback triggering `endReplay()`, which transitions the controller to interactive phase and calls `scrollToBottom()` deterministically
 - **Fit debounce**: Maintain <=150ms debounce for resize coalescing
-- **No jank**: Scroll position restoration must happen synchronously after fit() — no visible jump
+- **No jank**: Scroll position restoration must happen synchronously after fit() — no visible jump. For visibility change events, the controller should synchronously restore scroll position from its tracked state even if the actual `fitAddon.fit()` is debounced
 
 ## Security Considerations
 - No security implications — this is purely UI scroll management
@@ -234,11 +239,13 @@ The current architecture's fundamental problem is that three independent mechani
 ### Functional Tests
 1. **Interactive resize**: User scrolled to line N, window resizes, scroll position preserved at line N
 2. **Interactive resize at bottom**: User at bottom, window resizes, stays at bottom
-3. **Tab switch preservation**: User scrolled up, switches to another terminal tab and back, position preserved
-4. **Buffer replay**: Reconnection replays buffered content, terminal ends at bottom
-5. **Large write during resize**: Large buffer write while resize occurs — no garbled rendering
-6. **Display:none transition**: Container hidden and shown — scroll position preserved
-7. **Phase transitions**: initial-load → buffer-replay → interactive with correct behavior at each stage
+3. **User scrolls to bottom then resize**: User manually scrolls to bottom, `wasAtBottom` tracked correctly, resize stays at bottom
+4. **Tab switch preservation**: User scrolled up, switches to another terminal tab and back, position preserved
+5. **Buffer replay**: Reconnection replays buffered content, terminal ends at bottom
+6. **Large write during resize**: Large buffer write while resize occurs — no garbled rendering (fit suppression active)
+7. **Display:none transition**: Container hidden and shown — scroll position preserved
+8. **Phase transitions**: initial-load → buffer-replay → interactive with correct behavior at each stage
+9. **Direct to interactive**: First message is normal (no replay) → transitions straight from initial-load to interactive
 
 ### Non-Functional Tests
 1. **No polling**: Verify no setInterval in scroll management code
@@ -267,7 +274,28 @@ The current architecture's fundamental problem is that three independent mechani
 | #442, #451 | Reconnection with seq numbers, initial buffer batching | Out of scope (reconnection logic stays) — only scroll parts absorbed |
 | #560 | External scrollState tracking | ScrollController owns the single source of truth |
 | #573 | Reject fake scroll events (3 guards) + scroll monitor | Phase-aware onScroll handler eliminates both guards and monitor |
-| #625 | writingLargeChunk flag defers fit | ScrollController.beginReplay()/endReplay() replaces flag |
+| #625 | writingLargeChunk flag defers fit | ScrollController.suppressFit()/unsuppressFit() (called by beginReplay/endReplay) replaces flag |
+| — | 350ms post-flush setTimeout (lines 509-516) | Eliminated entirely — `term.write()` callback calls `endReplay()` which handles scroll-to-bottom deterministically |
+
+## Expert Consultation
+
+**Date**: 2026-03-17
+**Models Consulted**: Gemini, Codex (GPT-5.2), Claude
+**Round**: 1 (post-initial-draft)
+
+### Gemini (APPROVE, HIGH confidence)
+- **Visibility change jank**: Noted that `visibilitychange` → `debouncedFit()` has a 150ms window where viewport shows stale position. **Incorporated**: Spec now requires synchronous scroll restoration from tracked state on visibility change, even if fit is debounced.
+- **Infinite recursion guard**: Controller's `scrollToBottom()`/`scrollToLine()` calls trigger `onScroll` events. **Incorporated**: Added `isProgrammaticScroll` flag to prevent the controller from reacting to its own scroll commands.
+
+### Codex (REQUEST_CHANGES, MEDIUM confidence)
+- **Phase transition triggers underspecified**: Wanted concrete definitions for what triggers each phase transition. **Incorporated**: Phase behavior section now specifies exact triggers: `beginReplay()` called from `flushInitialBuffer()`, `endReplay()` from `term.write()` callback, direct-to-interactive on first normal WebSocket message.
+- **Logging schema and gating**: Wanted defined schema and toggle mechanism. **Incorporated**: Open questions section now commits to `debug` constructor option (default false), `console.debug()` for filterable logs, `console.warn()` for critical warnings.
+- **onScroll fallback**: Wanted fallback if `onScroll` doesn't fire for programmatic scrolls. **Incorporated**: Updated assumption with caveat about scrollToLine no-ops; controller updates state before calling scroll methods.
+
+### Claude (APPROVE, HIGH confidence)
+- **350ms setTimeout not explicitly called out**: The most problematic timing hack was only implicitly eliminated. **Incorporated**: Added explicit performance requirement and patch inventory entry stating the 350ms setTimeout is eliminated by callback-based `endReplay()`.
+- **writingLargeChunk → beginReplay mapping too narrow**: Fit suppression should work for any large write, not just replay. **Incorporated**: Added general `suppressFit()`/`unsuppressFit()` mechanism that `beginReplay()`/`endReplay()` uses internally.
+- **Missing wasAtBottom test scenario**: No test for user scrolls to bottom → resize → stays at bottom. **Incorporated**: Added as functional test #3.
 
 ---
 
