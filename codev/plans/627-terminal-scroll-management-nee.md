@@ -152,7 +152,7 @@ Phase 1 creates a new file only — no existing code is modified. Rollback = del
 - Lines 718-743: Remove 200ms scroll monitor setInterval
 
 **Additions:**
-- Import `ScrollController` from `../lib/scrollController.js`
+- Import `ScrollController` from `../lib/scrollController.js` (project uses `.js` extension for ESM imports — matches existing imports like `../lib/filePathLinkProvider.js`)
 - After creating the xterm Terminal and FitAddon instances, instantiate `ScrollController`:
   ```
   const scrollCtrl = new ScrollController({
@@ -161,12 +161,12 @@ Phase 1 creates a new file only — no existing code is modified. Rollback = del
   ```
 - Replace `safeFit()` calls with `scrollCtrl.safeFit()`
 - Replace `debouncedFit` to wrap `scrollCtrl.safeFit()` instead of the standalone function
-- In `flushInitialBuffer()`:
-  - Call `scrollCtrl.beginReplay()` before `term.write()`
-  - In the `term.write()` callback: call `scrollCtrl.endReplay()` (replaces `writingLargeChunk=false` + `scrollToBottom()` + `scrollState.wasAtBottom=true` + `debouncedFit()`)
-  - Remove the 350ms setTimeout entirely — `endReplay()` handles scroll-to-bottom and fit
-  - After `endReplay()`, send the resize control message to PTY (the SIGWINCH that was in the 350ms timer)
-- In the `ws.onmessage` handler: if first real message and not in replay phase, call `scrollCtrl.enterInteractive()`
+- In `flushInitialBuffer()` — all three branches must transition the controller out of initial-load:
+  - **`rc.skipReplay` branch** (lines 475-486): Call `scrollCtrl.enterInteractive()` after discarding replay data. Then send the resize control message to PTY (SIGWINCH). This branch currently calls `debouncedFit()` and sends SIGWINCH — replace with `scrollCtrl.enterInteractive()` + SIGWINCH.
+  - **`rc.initialBuffer` with content branch** (lines 488-502): Call `scrollCtrl.beginReplay()` before `term.write()`. In the `term.write()` callback: call `scrollCtrl.endReplay()` (replaces `writingLargeChunk=false` + `scrollToBottom()` + `scrollState.wasAtBottom=true` + `debouncedFit()`). After `endReplay()`, send the resize control message to PTY.
+  - **Empty/no-content branches** (lines 503-507, where `rc.initialBuffer` is empty or `filtered` is empty): Call `scrollCtrl.enterInteractive()` then `debouncedFit()`. Send the resize control message to PTY.
+  - **Remove the 350ms setTimeout entirely** (lines 509-516) — all branches above handle scroll-to-bottom and SIGWINCH directly via callbacks.
+- **No `ws.onmessage` changes needed**: `flushInitialBuffer()` is the exclusive gatekeeper for phase transitions. By the time `rc.initialPhase` is false (and messages flow normally), the controller is already in interactive phase via one of the three branches above.
 - In cleanup: call `scrollCtrl.dispose()` and remove the `clearInterval(scrollMonitor)` and `scrollDisposable.dispose()`
 - For visibility change handler: call `scrollCtrl.safeFit()` (via debouncedFit, same as before)
 
@@ -247,6 +247,7 @@ Git revert the Terminal.tsx changes — Phase 1's ScrollController file can rema
 #### Test Plan
 - **Run full test suite**: `npm test` from packages/codev
 - **Verify no regressions**: All Terminal.*.test.tsx files pass
+- **Playwright E2E**: Run terminal-related E2E tests to validate real browser scroll behavior (resize while scrolled, tab switch, display:none transitions). Per repo instructions, UI changes must be verified with Playwright before claiming the fix works. See `codev/resources/testing-guide.md` for Playwright patterns.
 
 #### Rollback Strategy
 Tests can be reverted independently since they don't affect runtime behavior.
@@ -277,6 +278,26 @@ Linear dependency chain — each phase builds on the previous.
 1. **After Phase 1**: ScrollController unit tests pass in isolation. Class API is stable.
 2. **After Phase 2**: Terminal.tsx compiles. Existing tests run (some may fail due to timing changes).
 3. **After Phase 3**: All tests pass. No regressions. Full coverage.
+
+## Expert Review
+**Date**: 2026-03-18
+**Models Consulted**: Gemini, Codex (GPT-5.2), Claude
+**Round**: 1
+
+### Key Feedback and Resolutions
+
+**Gemini (REQUEST_CHANGES, HIGH confidence):**
+- **Empty buffer regression**: The 350ms setTimeout runs unconditionally, but `beginReplay()`/`endReplay()` only covers the large write path. **Fixed**: Phase 2 now explicitly handles all three branches of `flushInitialBuffer()` — skipReplay, buffer-with-content, and empty/no-content.
+- **skipReplay path missing**: `scrollCtrl.enterInteractive()` must be called in the `rc.skipReplay` branch. **Fixed**: Added to Phase 2 integration details.
+- **ws.onmessage redundancy**: Since `flushInitialBuffer()` handles all transitions, the ws.onmessage enterInteractive call is unnecessary. **Fixed**: Removed from plan.
+
+**Codex (REQUEST_CHANGES, HIGH confidence):**
+- **Missing Playwright testing**: UI changes require Playwright validation per repo instructions. **Fixed**: Added Playwright E2E step to Phase 3.
+- **Import style ambiguity**: Clarified `.js` extension matches project ESM conventions.
+
+**Claude (COMMENT, HIGH confidence):**
+- **Empty/small buffer case**: Same issue as Gemini. **Fixed**: See above.
+- **enterInteractive trigger location**: Now moot since ws.onmessage logic was removed per Gemini's feedback.
 
 ## Documentation Updates Required
 - [ ] Update `codev/resources/arch.md` with ScrollController module description
