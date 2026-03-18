@@ -3,12 +3,12 @@
  *
  * After Tower restart, the shellper replay buffer is sent to the browser via WebSocket.
  * The Terminal component buffers the first 500ms of data (to filter DA sequences),
- * then flushes it to xterm.js. Without scrollToBottom(), the viewport stays at line 0
- * (the top of the scrollback buffer) instead of showing the current terminal state.
+ * then flushes it to xterm.js.
  *
- * Fix: flushInitialBuffer() calls scrollToBottom() both in the term.write() callback
- * and again after a 350ms delay (to account for fitAddon.fit() resetting viewport).
- * A forced resize is also sent to the PTY so the shell redraws at the correct size.
+ * Fix (post-#627 consolidation): flushInitialBuffer() uses ScrollController:
+ * - beginReplay() suppresses fit during replay write
+ * - endReplay() in term.write() callback scrolls to bottom + triggers fit
+ * - sendResize() sends SIGWINCH to PTY in the callback (no 350ms delay)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
@@ -139,32 +139,39 @@ describe('Terminal replay scroll-to-bottom (Issue #205 reopened)', () => {
     expect(mockTermInstance.scrollToBottom).toHaveBeenCalled();
   });
 
-  it('calls scrollToBottom again after deferred fit + resize (350ms)', () => {
+  it('calls scrollToBottom via endReplay callback (no 350ms timer)', () => {
+    // After ScrollController consolidation (#627), scrollToBottom happens
+    // in the term.write() completion callback via endReplay(), not via
+    // a separate 350ms setTimeout.
     render(<Terminal wsPath="/ws/terminal/test" />);
 
     // Simulate replay data
     mockWsInstance.onmessage?.({ data: buildDataFrame('replay data\r\n') });
 
-    // Flush the initial buffer (500ms)
+    // Flush the initial buffer (500ms) — write callback fires synchronously in mock
     vi.advanceTimersByTime(500);
-    const scrollCountAfterFlush = mockTermInstance.scrollToBottom.mock.calls.length;
-    expect(scrollCountAfterFlush).toBeGreaterThanOrEqual(1);
 
-    // Advance another 350ms for the deferred scroll + resize
+    // scrollToBottom should have been called at least once (via endReplay)
+    expect(mockTermInstance.scrollToBottom).toHaveBeenCalled();
+
+    // No additional scrollToBottom should fire after 350ms (timer removed)
+    const countAfterFlush = mockTermInstance.scrollToBottom.mock.calls.length;
     vi.advanceTimersByTime(350);
-    expect(mockTermInstance.scrollToBottom.mock.calls.length).toBeGreaterThan(scrollCountAfterFlush);
+    expect(mockTermInstance.scrollToBottom.mock.calls.length).toBe(countAfterFlush);
   });
 
   it('sends a forced resize to PTY after replay flush', () => {
+    // After ScrollController consolidation (#627), the resize is sent
+    // in the term.write() completion callback, not after a 350ms delay.
     render(<Terminal wsPath="/ws/terminal/test" />);
 
     mockWsInstance.onmessage?.({ data: buildDataFrame('replay data\r\n') });
 
-    // Record send calls before the deferred resize
+    // Record send calls before the flush
     const sendCallsBefore = mockWsSend.mock.calls.length;
 
-    // Flush buffer (500ms) + deferred resize (350ms)
-    vi.advanceTimersByTime(500 + 350);
+    // Flush buffer (500ms) — write callback fires synchronously in mock
+    vi.advanceTimersByTime(500);
 
     // Find control frames sent after the flush
     const controlFrames = mockWsSend.mock.calls.slice(sendCallsBefore)
@@ -182,17 +189,28 @@ describe('Terminal replay scroll-to-bottom (Issue #205 reopened)', () => {
     });
   });
 
-  it('calls scrollToBottom even when replay buffer is empty', () => {
+  it('transitions to interactive even when replay buffer is empty', () => {
+    // With ScrollController (#627), empty buffer takes the enterInteractive()
+    // path — no beginReplay/endReplay needed. The sendResize + debouncedFit
+    // handle the transition. No explicit scrollToBottom is needed since there's
+    // nothing to scroll to (buffer is empty).
     render(<Terminal wsPath="/ws/terminal/test" />);
 
     // Send an empty data frame to trigger the flush timer
     mockWsInstance.onmessage?.({ data: buildDataFrame('') });
 
-    // Flush (500ms) + deferred (350ms)
-    vi.advanceTimersByTime(500 + 350);
+    // Flush (500ms) + debounced fit (150ms)
+    vi.advanceTimersByTime(500 + 150);
 
-    // The deferred scrollToBottom should still fire
-    expect(mockTermInstance.scrollToBottom).toHaveBeenCalled();
+    // A resize control message should have been sent to PTY
+    const controlFrames = mockWsSend.mock.calls
+      .filter((call) => {
+        const bytes = new Uint8Array(call[0]);
+        return bytes[0] === FRAME_CONTROL;
+      })
+      .map((call) => decodeControlFrame(call[0]));
+    const resizeFrame = controlFrames.find(f => f.type === 'resize');
+    expect(resizeFrame).toBeDefined();
   });
 
   it('filters DA sequences from replay buffer before writing', () => {

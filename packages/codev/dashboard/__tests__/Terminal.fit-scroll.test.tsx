@@ -142,6 +142,22 @@ function mockContainerRect(width = 800, height = 600) {
   }
 }
 
+/**
+ * Helper: transition ScrollController from initial-load to interactive.
+ * After #627, safeFit() only preserves scroll position in interactive phase.
+ * This simulates a WebSocket open + empty message + flush to trigger
+ * enterInteractive() in flushInitialBuffer().
+ */
+function transitionToInteractive() {
+  // Simulate WebSocket open
+  mockWsInstance?.onopen?.({} as Event);
+  // Send an empty data frame to trigger the flush timer
+  const emptyFrame = new Uint8Array([0x01]); // FRAME_DATA with no payload
+  mockWsInstance?.onmessage?.({ data: emptyFrame.buffer });
+  // Advance 500ms to flush + 150ms for debounced fit
+  vi.advanceTimersByTime(500 + 150);
+}
+
 describe('Terminal fit() scroll position preservation (Issue #423, #560)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -158,6 +174,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
   it('calls scrollToBottom after fit() when viewport is at the bottom', () => {
     render(<Terminal wsPath="/ws/terminal/test" />);
     mockContainerRect();
+    transitionToInteractive();
 
     // Simulate scroll state: terminal has scrollback, user is at the bottom
     simulateScroll(500, 500);
@@ -178,6 +195,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
   it('calls scrollToLine to restore position when user has scrolled up', () => {
     render(<Terminal wsPath="/ws/terminal/test" />);
     mockContainerRect();
+    transitionToInteractive();
 
     // Simulate: terminal has scrollback, user scrolled up to line 200
     simulateScroll(500, 200);
@@ -217,6 +235,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
   it('preserves position across multiple rapid ResizeObserver triggers', () => {
     render(<Terminal wsPath="/ws/terminal/test" />);
     mockContainerRect();
+    transitionToInteractive();
 
     // User is scrolled up
     simulateScroll(1000, 300);
@@ -245,6 +264,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     // the correct position.
     render(<Terminal wsPath="/ws/terminal/test" />);
     mockContainerRect();
+    transitionToInteractive();
 
     // Step 1: Simulate user scrolled to line 200 (not at bottom)
     simulateScroll(500, 200);
@@ -276,6 +296,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     // as "scrolled up to the top" → scrollToLine(0) → stuck at top.
     render(<Terminal wsPath="/ws/terminal/test" />);
     mockContainerRect();
+    transitionToInteractive();
 
     // User is at the bottom
     simulateScroll(500, 500);
@@ -390,5 +411,21 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
 
     // NOW fit() should have been called
     expect(mockFitInstance.fit).toHaveBeenCalled();
+  });
+
+  it('does not use setInterval for scroll management (#627)', () => {
+    // Regression test: the 200ms scroll monitor setInterval has been removed.
+    // ScrollController uses event-driven design — no polling.
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const callsBefore = setIntervalSpy.mock.calls.length;
+
+    render(<Terminal wsPath="/ws/terminal/test" />);
+    mockContainerRect();
+    transitionToInteractive();
+
+    // Check no setInterval was called during terminal setup
+    const callsAfter = setIntervalSpy.mock.calls.length;
+    expect(callsAfter).toBe(callsBefore);
+    setIntervalSpy.mockRestore();
   });
 });

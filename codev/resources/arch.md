@@ -602,7 +602,8 @@ packages/codev/dashboard/
 │   │   └── useMediaQuery.ts     # Responsive breakpoints
 │   ├── lib/
 │   │   ├── api.ts               # REST client + getTerminalWsPath() + overview API
-│   │   └── constants.ts         # Breakpoints, configuration
+│   │   ├── constants.ts         # Breakpoints, configuration
+│   │   └── scrollController.ts  # Terminal scroll state machine (Spec 627)
 │   └── main.tsx
 ├── dist/                         # Built assets (served by tower-server)
 ├── vite.config.ts
@@ -616,6 +617,7 @@ packages/codev/dashboard/
 - WebSocket connection to `/ws/terminal/<id>` using hybrid binary protocol
 - DA (Device Attribute) response filtering: buffers initial 300ms to catch `ESC[?...c` sequences
 - Canvas renderer with dark theme
+- **ScrollController** (Spec 627, `dashboard/src/lib/scrollController.ts`): Unified scroll state machine with lifecycle phases (`initial-load` → `buffer-replay` → `interactive`). Replaces the previous three competing mechanisms (safeFit, scroll monitor setInterval, post-flush setTimeout). Event-driven, no polling. Provides `safeFit()`, `beginReplay()`/`endReplay()`, `enterInteractive()`, `reset()` (for reconnection), and `suppressFit()`/`unsuppressFit()`.
 - **Persistent prop** (Spec 0104): Accepts `persistent?: boolean`. When `persistent === false`, renders a yellow warning banner: "Session persistence unavailable -- this terminal will not survive a restart". Prop flows from `/api/state` through `useTabs` hook → `Tab` interface → `App.tsx` → `Terminal.tsx`.
 
 **Tab System**:
