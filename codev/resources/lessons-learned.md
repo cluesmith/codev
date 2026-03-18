@@ -358,7 +358,11 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0116] Shellper requires both `persistent: true` and `cwd` in terminal creation API requests. Without both, the handler falls through to the non-Shellper path. Easy to miss in E2E tests.
 - [From 0118] `socket.write()` returning `false` means kernel buffer is full, not that the write failed. The aggressive approach (destroy on `false`) is correct for broadcast scenarios where slow clients should not degrade output to others.
 
+- [From 627] When multiple bugfix patches compete over the same state, consolidate them into a single owner (e.g., a state machine) rather than adding more guards. Three scroll mechanisms fighting each other created more bugs than they fixed.
+- [From 627] Lifecycle phases (initial-load → buffer-replay → interactive) eliminate magic thresholds. Instead of asking "is this scroll event real?", ask "what phase am I in?" to determine behavior.
+- [From 627] Always add a `reset()` method to state machines that persist across reconnections. The ScrollController's phase transitions were one-way until reconnection revealed the need to return to initial-load.
+
 ---
 
-*Last updated: 2026-02-18 (Spec 422 — documentation sweep, Phase 3: Refinement)*
+*Last updated: 2026-03-18 (Spec 627 — terminal scroll management consolidation)*
 *Source: codev/reviews/*
