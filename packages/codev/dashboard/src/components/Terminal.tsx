@@ -10,6 +10,7 @@ import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage } from '../lib/api.js';
+import { ScrollController } from '../lib/scrollController.js';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)
@@ -324,98 +325,14 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
     containerRef.current.addEventListener('paste', onNativePaste);
 
-    // Scroll state tracked externally in JS variables (Bugfix #560, #573).
-    // xterm's buffer.active.viewportY (backed by ydisp) resets to 0 when
-    // the container is hidden via display:none (tab switches, panel collapse).
-    // xterm fires onScroll during this reset, so the handler must ignore
-    // scroll events when the container is hidden — otherwise the tracked
-    // state captures viewportY=0 and safeFit "restores" to the top.
-    const scrollState = { viewportY: 0, baseY: 0, wasAtBottom: true };
-
-    // Guard: prevent fitAddon.fit() while xterm processes a large write (Bugfix #625).
-    // Resizing mid-write causes garbled rendering with overlapping lines.
-    let writingLargeChunk = false;
-
-    // Update tracked scroll state on every scroll event — but reject
-    // viewport resets caused by display:none or browser tab visibility.
-    // Three checks (Bugfix #573):
-    // 1. Container hidden (display:none) → zero dimensions → reject
-    // 2. Full reset: both baseY and viewportY drop to 0 while we had scrollback
-    // 3. Partial reset: only viewportY drops to 0 while baseY still shows scrollback
-    const scrollDisposable = term.onScroll(() => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0 || rect.height === 0) return;
-
-      const baseY = term.buffer?.active?.baseY ?? 0;
-      const viewportY = term.buffer?.active?.viewportY ?? 0;
-
-      // Reject full reset: both drop to 0 while we had scrollback
-      if (baseY === 0 && viewportY === 0 && scrollState.baseY > 0) return;
-
-      // Reject partial reset: viewportY drops to 0 while scrollback exists
-      if (viewportY === 0 && baseY > 0 && scrollState.viewportY > 5) return;
-
-      // ALERT: if viewportY=0 slips past our checks with real scrollback
-      if (viewportY === 0 && scrollState.viewportY > 5 && baseY > 5) {
-        console.warn('[onScroll] LEAKED RESET: viewportY=0 accepted! was:', scrollState.viewportY, 'baseY:', baseY);
-      }
-
-      scrollState.baseY = baseY;
-      scrollState.viewportY = viewportY;
-      scrollState.wasAtBottom = !baseY || viewportY >= baseY;
+    // Unified scroll management — replaces competing safeFit/scrollMonitor/
+    // post-flush setTimeout mechanisms with a single state machine.
+    // See: codev/specs/627-terminal-scroll-management-nee.md
+    const scrollCtrl = new ScrollController({
+      term,
+      fitAddon,
+      getContainer: () => containerRef.current,
     });
-
-    // Scroll-aware fit: preserves the viewport scroll position across
-    // fit() calls.  Without this, fit() → resize() → buffer reflow can
-    // reset the viewport to the top of the scrollback (Bugfix #423).
-    // Uses externally-tracked scroll state instead of reading from xterm's
-    // buffer to avoid stale values after display:none toggling (Bugfix #560).
-    const safeFit = () => {
-      // Defer fit while a large write is being processed (Bugfix #625).
-      // Calling fitAddon.fit() mid-write causes garbled rendering.
-      if (writingLargeChunk) return;
-
-      // Skip fit when container is hidden (display: none) or has zero dimensions.
-      // ResizeObserver fires with 0x0 when tabs switch — fitting at that size
-      // causes buffer reflow that resets the viewport to the top.
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0 || rect.height === 0) return;
-
-      const baseY = term.buffer?.active?.baseY;
-      const viewportYBefore = term.buffer?.active?.viewportY ?? -1;
-      // Use tracked baseY as fallback — buffer's baseY can read 0 during
-      // display:none transitions even when scrollback exists (Bugfix #573)
-      const hasScrollback = baseY || scrollState.baseY > 0;
-
-      if (!hasScrollback) {
-        fitAddon.fit();
-        return;
-      }
-
-      // (buffer baseY=0 but scrollState has scrollback — using tracked state)
-
-      // Use externally-tracked state — immune to display:none scroll reset
-      const wasAtBottom = scrollState.wasAtBottom;
-      const restoreY = scrollState.viewportY;
-
-      fitAddon.fit();
-      const viewportYAfter = term.buffer?.active?.viewportY ?? -1;
-      if (viewportYBefore > 0 && viewportYAfter === 0 && !wasAtBottom) {
-        console.warn('[safeFit] FIT CAUSED SCROLL-TO-TOP (protected path): before=', viewportYBefore,
-          'after=', viewportYAfter, 'restoring to=', wasAtBottom ? 'bottom' : restoreY);
-      }
-
-      if (wasAtBottom) {
-        term.scrollToBottom();
-      } else if (restoreY > 0) {
-        term.scrollToLine(restoreY);
-      } else {
-        // restoreY=0 with scrollback — likely corrupted, scroll to bottom
-        // as the safest default (most users work at the bottom)
-        console.warn('[safeFit] restoreY=0 with scrollback — defaulting to bottom');
-        term.scrollToBottom();
-      }
-    };
 
     // Debounced fit: coalesce multiple fit() triggers into one resize event.
     // This prevents resize storms from multiple sources (initial fit, CSS
@@ -425,11 +342,11 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       if (fitTimer) clearTimeout(fitTimer);
       fitTimer = setTimeout(() => {
         fitTimer = null;
-        safeFit();
+        scrollCtrl.safeFit();
       }, 150);
     };
 
-    safeFit();
+    scrollCtrl.safeFit();
     // Single delayed re-fit to catch CSS layout settling
     const refitTimer1 = setTimeout(debouncedFit, 300);
 
@@ -472,48 +389,47 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       const flushInitialBuffer = () => {
         rc.initialPhase = false;
         rc.flushTimer = null;
+
+        // Helper: send SIGWINCH to make the shell redraw at the correct size.
+        const sendResize = () => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
+          }
+        };
+
         if (rc.skipReplay) {
           // Discard replay data — ring buffer may contain corrupted escape sequences.
           // Just send SIGWINCH to make the running program redraw from scratch.
           rc.initialBuffer = '';
           rc.skipReplay = false;
+          scrollCtrl.enterInteractive();
           debouncedFit();
-          setTimeout(() => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
-            }
-          }, 100);
+          sendResize();
           return;
         }
         if (rc.initialBuffer) {
           const filtered = filterDA(rc.initialBuffer);
           rc.initialBuffer = '';
           if (filtered) {
-            // Track write to prevent resize-during-write race (Bugfix #625).
-            // fitAddon.fit() mid-write causes garbled rendering.
-            writingLargeChunk = true;
+            // Begin replay: suppresses fit during the large write (Bugfix #625).
+            scrollCtrl.beginReplay();
             term.write(filtered, () => {
-              writingLargeChunk = false;
-              term.scrollToBottom();
-              // Sync tracked scroll state after replay (Bugfix #560)
-              scrollState.wasAtBottom = true;
-              // Fit AFTER write completes — prevents garbled rendering (Bugfix #625)
-              debouncedFit();
+              // End replay: transitions to interactive, scrolls to bottom, triggers fit.
+              scrollCtrl.endReplay();
+              sendResize();
             });
           } else {
+            // Filtered content was empty — go straight to interactive.
+            scrollCtrl.enterInteractive();
             debouncedFit();
+            sendResize();
           }
         } else {
+          // No initial buffer — go straight to interactive.
+          scrollCtrl.enterInteractive();
           debouncedFit();
+          sendResize();
         }
-        setTimeout(() => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            sendControl(wsRef.current, 'resize', { cols: term.cols, rows: term.rows });
-          }
-          term.scrollToBottom();
-          // Sync tracked scroll state after replay (Bugfix #560)
-          scrollState.wasAtBottom = true;
-        }, 350);
       };
 
       ws.onopen = () => {
@@ -715,45 +631,17 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Scroll-to-top auto-correction (Bugfix #573).
-    // Despite onScroll rejection guards, the actual viewport can still reset
-    // to 0 (xterm internal reflow, display:none transitions, etc.). Our guards
-    // preserve scrollState but don't fix the actual viewport. This monitor
-    // detects the reset and auto-corrects using the preserved scrollState.
-    let lastMonitorViewportY = -1;
-    const scrollMonitor = setInterval(() => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0 || rect.height === 0) return;
-
-      const viewportY = term.buffer?.active?.viewportY ?? 0;
-      const baseY = term.buffer?.active?.baseY ?? 0;
-
-      // Detect transition TO 0 with real scrollback — auto-correct
-      if (viewportY === 0 && lastMonitorViewportY > 10 && baseY > 10) {
-        console.warn('[scroll-fix] auto-correcting scroll-to-top (was:', lastMonitorViewportY, 'baseY:', baseY, ')');
-        if (scrollState.wasAtBottom) {
-          term.scrollToBottom();
-        } else if (scrollState.viewportY > 0) {
-          term.scrollToLine(scrollState.viewportY);
-        } else {
-          term.scrollToBottom();
-        }
-      }
-      if (baseY > 0) lastMonitorViewportY = viewportY;
-    }, 200);
-
     return () => {
       rc.disposed = true;
       if (rc.timer) clearTimeout(rc.timer);
       if (rc.flushTimer) clearTimeout(rc.flushTimer);
       clearTimeout(refitTimer1);
-      clearInterval(scrollMonitor);
       if (fitTimer) clearTimeout(fitTimer);
       if (textarea) {
         textarea.removeEventListener('compositionstart', onCompositionStart);
         textarea.removeEventListener('compositionend', onCompositionEnd);
       }
-      scrollDisposable.dispose();
+      scrollCtrl.dispose();
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       containerRef.current?.removeEventListener('paste', onNativePaste);
