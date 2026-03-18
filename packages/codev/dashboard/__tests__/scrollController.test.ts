@@ -532,6 +532,50 @@ describe('ScrollController', () => {
     });
   });
 
+  describe('reset (for reconnection)', () => {
+    it('returns to initial-load phase from interactive', () => {
+      const { ctrl } = createController();
+      ctrl.enterInteractive();
+      expect(ctrl.phase).toBe('interactive');
+
+      ctrl.reset();
+      expect(ctrl.phase).toBe('initial-load');
+      expect(ctrl.state.viewportY).toBe(0);
+      expect(ctrl.state.baseY).toBe(0);
+      expect(ctrl.state.wasAtBottom).toBe(true);
+      expect(ctrl.state.fitSuppressed).toBe(false);
+    });
+
+    it('allows beginReplay/endReplay cycle after reset', () => {
+      const { ctrl, term } = createController();
+      // First connection: go through full cycle
+      ctrl.beginReplay();
+      ctrl.endReplay();
+      expect(ctrl.phase).toBe('interactive');
+
+      // Reconnection: reset and go through cycle again
+      ctrl.reset();
+      expect(ctrl.phase).toBe('initial-load');
+
+      ctrl.beginReplay();
+      expect(ctrl.phase).toBe('buffer-replay');
+      expect(ctrl.state.fitSuppressed).toBe(true);
+
+      ctrl.endReplay();
+      expect(ctrl.phase).toBe('interactive');
+      expect(term.scrollToBottom).toHaveBeenCalled();
+    });
+
+    it('clears fitSuppressed state on reset', () => {
+      const { ctrl } = createController();
+      ctrl.suppressFit();
+      expect(ctrl.state.fitSuppressed).toBe(true);
+
+      ctrl.reset();
+      expect(ctrl.state.fitSuppressed).toBe(false);
+    });
+  });
+
   describe('dispose', () => {
     it('disposes the onScroll subscription', () => {
       const term = createMockTerm();

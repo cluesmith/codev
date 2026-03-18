@@ -108,6 +108,20 @@ export class ScrollController {
     this.log('phase', 'initial-load → interactive');
   }
 
+  /**
+   * Reset the controller back to initial-load phase. Called on reconnection
+   * so the replay flow (beginReplay/endReplay) can run again.
+   */
+  reset(): void {
+    this._phase = 'initial-load';
+    this._viewportY = 0;
+    this._baseY = 0;
+    this._wasAtBottom = true;
+    this._fitSuppressed = false;
+    this._isProgrammaticScroll = false;
+    this.log('reset', 'back to initial-load');
+  }
+
   // --- Fit suppression ---
 
   suppressFit(): void {

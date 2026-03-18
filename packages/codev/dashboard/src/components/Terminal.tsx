@@ -381,10 +381,13 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
-      // Reset DA filter state for this connection
+      // Reset DA filter state and scroll controller for this connection.
+      // On reconnection, the controller needs to return to initial-load so
+      // beginReplay()/endReplay() can properly suppress fit during replay.
       rc.initialPhase = true;
       rc.initialBuffer = '';
       if (rc.flushTimer) { clearTimeout(rc.flushTimer); rc.flushTimer = null; }
+      scrollCtrl.reset();
 
       const flushInitialBuffer = () => {
         rc.initialPhase = false;
@@ -403,7 +406,6 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
           rc.initialBuffer = '';
           rc.skipReplay = false;
           scrollCtrl.enterInteractive();
-          debouncedFit();
           sendResize();
           return;
         }
