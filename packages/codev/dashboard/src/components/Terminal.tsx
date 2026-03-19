@@ -345,6 +345,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const scrollCtrl = new ScrollController({
       term,
       fitAddon,
+      debug: false,
       getContainer: () => containerRef.current,
     });
 

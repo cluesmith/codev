@@ -249,7 +249,10 @@ export class ScrollController {
 
     this._baseY = baseY;
     this._viewportY = viewportY;
-    this._wasAtBottom = !baseY || viewportY >= baseY;
+    // "At bottom" when viewportY is at or near baseY. During active output,
+    // viewportY can lag baseY by 1-2 lines due to write batching, so use
+    // a small tolerance instead of exact equality.
+    this._wasAtBottom = !baseY || viewportY >= baseY - 2;
 
     this.log('onScroll', `viewportY=${viewportY} baseY=${baseY} wasAtBottom=${this._wasAtBottom}`);
   }
