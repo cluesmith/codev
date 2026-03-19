@@ -336,7 +336,7 @@ describe('ScrollController', () => {
       expect(ctrl.state.wasAtBottom).toBe(true);
     });
 
-    it('warns on unexpected scroll-to-top in interactive phase', () => {
+    it('warns on unexpected scroll-to-top but does not auto-correct (Issue #630)', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { ctrl, term } = createController();
       ctrl.enterInteractive();
@@ -350,10 +350,17 @@ describe('ScrollController', () => {
       term.buffer.active.viewportY = 0;
       term._triggerScroll();
 
+      // Should warn but NOT auto-correct — viewportY=0 is also the normal
+      // state when a user intentionally scrolls to the top of history.
+      // Root causes are prevented upstream by EscapeBuffer and WebGL handler.
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('unexpected scroll-to-top'),
         expect.any(String),
       );
+      // State IS updated (no correction, user may be at top intentionally)
+      expect(ctrl.state.viewportY).toBe(0);
+      expect(term.scrollToLine).not.toHaveBeenCalled();
+      expect(term.scrollToBottom).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
   });

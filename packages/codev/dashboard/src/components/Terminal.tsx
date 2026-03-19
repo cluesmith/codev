@@ -11,6 +11,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
+import { EscapeBuffer } from '../lib/escapeBuffer.js';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)
@@ -246,8 +247,21 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     try {
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => {
+        // Save scroll position before renderer transition (Issue #630).
+        // WebGL context loss resets xterm's viewport, causing scroll-to-top.
+        const savedViewportY = term.buffer?.active?.viewportY ?? 0;
+        const savedBaseY = term.buffer?.active?.baseY ?? 0;
+        const wasAtBottom = !savedBaseY || savedViewportY >= savedBaseY;
+
         webglAddon.dispose();
         loadCanvasFallback();
+
+        // Restore scroll position after switching to canvas renderer
+        if (wasAtBottom) {
+          term.scrollToBottom();
+        } else if (savedViewportY > 0) {
+          term.scrollToLine(savedViewportY);
+        }
       });
       term.loadAddon(webglAddon);
     } catch {
@@ -375,6 +389,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       return text;
     };
 
+    // Buffer incomplete escape sequences to prevent xterm parsing errors
+    // from split WebSocket frames causing scroll-to-top (Issue #630).
+    const escBuf = new EscapeBuffer();
+
     /** Create a WebSocket connection, optionally resuming from a sequence number. */
     const connect = (resumeSeq?: number) => {
       const wsUrl = resumeSeq !== undefined ? `${wsBase}?resume=${resumeSeq}` : wsBase;
@@ -382,12 +400,15 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
-      // Reset DA filter state and scroll controller for this connection.
-      // On reconnection, the controller needs to return to initial-load so
-      // beginReplay()/endReplay() can properly suppress fit during replay.
+      // Reset DA filter state, escape buffer, and scroll controller for this
+      // connection. On reconnection, the controller needs to return to
+      // initial-load so beginReplay()/endReplay() can properly suppress fit
+      // during replay. Flush escape buffer to discard stale pending bytes
+      // from the previous connection (CMAP feedback, Issue #630).
       rc.initialPhase = true;
       rc.initialBuffer = '';
       if (rc.flushTimer) { clearTimeout(rc.flushTimer); rc.flushTimer = null; }
+      escBuf.flush();
       scrollCtrl.reset();
 
       const flushInitialBuffer = () => {
@@ -457,20 +478,12 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
               rc.flushTimer = setTimeout(flushInitialBuffer, 500);
             }
           } else {
-            const filtered = filterDA(text);
-            if (filtered) {
-              // Capture scroll position before write — term.write() can cause
-              // buffer reflow that resets viewportY to 0 without firing onScroll.
-              const preWriteViewportY = term.buffer?.active?.viewportY ?? 0;
-              const preWriteBaseY = term.buffer?.active?.baseY ?? 0;
-              term.write(filtered, () => {
-                const postViewportY = term.buffer?.active?.viewportY ?? 0;
-                if (postViewportY === 0 && preWriteViewportY > 0 && preWriteBaseY > 0) {
-                  console.warn('[Terminal] write caused scroll-to-top, correcting:',
-                    `was viewportY=${preWriteViewportY}, baseY=${preWriteBaseY}`);
-                  scrollCtrl.scrollToBottom();
-                }
-              });
+            // Buffer through EscapeBuffer first (ensures complete escape
+            // sequences), then strip DA responses before writing to xterm.
+            const complete = escBuf.write(text);
+            if (complete) {
+              const filtered = filterDA(complete);
+              if (filtered) term.write(filtered);
             }
           }
         } else if (prefix === FRAME_CONTROL) {
