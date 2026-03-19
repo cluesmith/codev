@@ -237,28 +237,6 @@ export class ScrollController {
     const baseY = this.term.buffer?.active?.baseY ?? 0;
     const viewportY = this.term.buffer?.active?.viewportY ?? 0;
 
-    // Detect and correct sudden scroll-to-top resets in interactive phase.
-    // A jump of >50 lines to viewportY=0 is clearly an xterm internal reset
-    // (buffer reflow, parsing error residual), not a user scrolling up.
-    // User scrolling generates incremental onScroll events (1-few lines at a time).
-    if (viewportY === 0 && baseY > 0 && this._viewportY > 50) {
-      console.warn('[ScrollController] correcting scroll-to-top reset:',
-        `was viewportY=${this._viewportY}, now viewportY=0, baseY=${baseY}`);
-      const wasBottom = this._wasAtBottom;
-      if (wasBottom) {
-        this.programmaticScroll(() => this.term.scrollToBottom());
-        this._viewportY = baseY;
-        this._wasAtBottom = true;
-      } else {
-        const clampedY = Math.min(this._viewportY, baseY);
-        this.programmaticScroll(() => this.term.scrollToLine(clampedY));
-        this._viewportY = clampedY;
-        this._wasAtBottom = clampedY >= baseY - 2;
-      }
-      this._baseY = baseY;
-      return;
-    }
-
     this._baseY = baseY;
     this._viewportY = viewportY;
     // "At bottom" when viewportY is at or near baseY. During active output,

@@ -339,6 +339,28 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
     containerRef.current.addEventListener('paste', onNativePaste);
 
+    // Block ESC[3J (clear scrollback) — Claude CLI sends this as part of TUI refresh,
+    // which wipes scroll history and resets ydisp to 0, causing scroll-to-top.
+    // ESC[2J (clear screen) is allowed through — it doesn't affect scrollback.
+    // Root cause identified via scroll-trace instrumentation (Issue #627/#630).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const core = (term as any)._core;
+      const inputHandler = core?._inputHandler;
+      if (inputHandler && typeof inputHandler.eraseInDisplay === 'function') {
+        const origErase = inputHandler.eraseInDisplay.bind(inputHandler);
+        inputHandler.eraseInDisplay = (params: { params: number[] }, t?: boolean) => {
+          if (params.params[0] === 3) {
+            // Block ESC[3J — preserve scrollback buffer
+            return true;
+          }
+          return origErase(params, t);
+        };
+      }
+    } catch {
+      // Non-critical — worst case scrollback gets cleared occasionally
+    }
+
     // Unified scroll management — replaces competing safeFit/scrollMonitor/
     // post-flush setTimeout mechanisms with a single state machine.
     // See: codev/specs/627-terminal-scroll-management-nee.md
