@@ -11,6 +11,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
+import { EscapeBuffer } from '../lib/escapeBuffer.js';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)
@@ -246,8 +247,21 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     try {
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => {
+        // Save scroll position before renderer transition (Issue #630).
+        // WebGL context loss resets xterm's viewport, causing scroll-to-top.
+        const savedViewportY = term.buffer?.active?.viewportY ?? 0;
+        const savedBaseY = term.buffer?.active?.baseY ?? 0;
+        const wasAtBottom = !savedBaseY || savedViewportY >= savedBaseY;
+
         webglAddon.dispose();
         loadCanvasFallback();
+
+        // Restore scroll position after switching to canvas renderer
+        if (wasAtBottom) {
+          term.scrollToBottom();
+        } else if (savedViewportY > 0) {
+          term.scrollToLine(savedViewportY);
+        }
       });
       term.loadAddon(webglAddon);
     } catch {
@@ -374,6 +388,10 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       return text;
     };
 
+    // Buffer incomplete escape sequences to prevent xterm parsing errors
+    // from split WebSocket frames causing scroll-to-top (Issue #630).
+    const escBuf = new EscapeBuffer();
+
     /** Create a WebSocket connection, optionally resuming from a sequence number. */
     const connect = (resumeSeq?: number) => {
       const wsUrl = resumeSeq !== undefined ? `${wsBase}?resume=${resumeSeq}` : wsBase;
@@ -456,8 +474,13 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
               rc.flushTimer = setTimeout(flushInitialBuffer, 500);
             }
           } else {
-            const filtered = filterDA(text);
-            if (filtered) term.write(filtered);
+            // Buffer through EscapeBuffer first (ensures complete escape
+            // sequences), then strip DA responses before writing to xterm.
+            const complete = escBuf.write(text);
+            if (complete) {
+              const filtered = filterDA(complete);
+              if (filtered) term.write(filtered);
+            }
           }
         } else if (prefix === FRAME_CONTROL) {
           // Parse control frames for seq updates (Bugfix #442)
