@@ -139,6 +139,21 @@ describe('EscapeBuffer', () => {
       expect(buf.flush()).toBe('\x1b');
       expect(buf.hasPending).toBe(false);
     });
+
+    it('prevents stale pending bytes from leaking into next stream (reconnect scenario)', () => {
+      const buf = new EscapeBuffer();
+      // Connection 1: data ends with incomplete escape
+      buf.write('Hello\x1b[3');
+      expect(buf.hasPending).toBe(true);
+
+      // Disconnect — flush discards stale bytes
+      buf.flush();
+      expect(buf.hasPending).toBe(false);
+
+      // Connection 2: fresh data should not be contaminated
+      const out = buf.write('World\x1b[31m!');
+      expect(out).toBe('World\x1b[31m!');
+    });
   });
 
   describe('edge cases', () => {

@@ -399,12 +399,15 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
-      // Reset DA filter state and scroll controller for this connection.
-      // On reconnection, the controller needs to return to initial-load so
-      // beginReplay()/endReplay() can properly suppress fit during replay.
+      // Reset DA filter state, escape buffer, and scroll controller for this
+      // connection. On reconnection, the controller needs to return to
+      // initial-load so beginReplay()/endReplay() can properly suppress fit
+      // during replay. Flush escape buffer to discard stale pending bytes
+      // from the previous connection (CMAP feedback, Issue #630).
       rc.initialPhase = true;
       rc.initialBuffer = '';
       if (rc.flushTimer) { clearTimeout(rc.flushTimer); rc.flushTimer = null; }
+      escBuf.flush();
       scrollCtrl.reset();
 
       const flushInitialBuffer = () => {
