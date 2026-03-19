@@ -30,6 +30,9 @@ let mockResizeObserverCallback: (() => void) | null = null;
 let mockOnScrollCallback: (() => void) | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockWsInstance: any = null;
+// Track eraseInDisplay calls to verify ESC[3J blocking
+let eraseInDisplayCalls: Array<{ params: number[]; blocked: boolean }> = [];
+let origEraseInDisplay: ((params: { params: number[] }, t?: boolean) => boolean) | null = null;
 
 // Mock @xterm/xterm
 vi.mock('@xterm/xterm', () => {
@@ -58,6 +61,15 @@ vi.mock('@xterm/xterm', () => {
         type: 'normal',
         viewportY: 0,
         baseY: 0,
+      },
+    };
+    // Expose _core._inputHandler so Terminal.tsx can install ESC[3J interceptor
+    _core = {
+      _inputHandler: {
+        eraseInDisplay: (params: { params: number[] }, t?: boolean) => {
+          eraseInDisplayCalls.push({ params: params.params, blocked: false });
+          return true;
+        },
       },
     };
     constructor() {
@@ -164,6 +176,7 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     mockResizeObserverCallback = null;
     mockOnScrollCallback = null;
     mockWsInstance = null;
+    eraseInDisplayCalls = [];
   });
 
   afterEach(() => {
@@ -427,5 +440,30 @@ describe('Terminal fit() scroll position preservation (Issue #423, #560)', () =>
     const callsAfter = setIntervalSpy.mock.calls.length;
     expect(callsAfter).toBe(callsBefore);
     setIntervalSpy.mockRestore();
+  });
+
+  it('blocks ESC[3J (clear scrollback) to prevent scroll-to-top (root cause #627/#630)', () => {
+    render(<Terminal wsPath="/ws/terminal/test" />);
+    mockContainerRect();
+    transitionToInteractive();
+    eraseInDisplayCalls = [];
+
+    // Get the intercepted eraseInDisplay from the mock's _core
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inputHandler = (mockTermInstance as any)._core._inputHandler;
+
+    // ESC[2J (clear screen) should pass through
+    inputHandler.eraseInDisplay({ params: [2] });
+    const case2Calls = eraseInDisplayCalls.filter(c => c.params[0] === 2);
+
+    // ESC[3J (clear scrollback) should be blocked — the interceptor
+    // replaces eraseInDisplay, so calling it with params[0]=3 should
+    // return true without forwarding to the original
+    const result = inputHandler.eraseInDisplay({ params: [3] });
+    expect(result).toBe(true);
+
+    // The original eraseInDisplay should NOT have been called with params[0]=3
+    const case3Calls = eraseInDisplayCalls.filter(c => c.params[0] === 3);
+    expect(case3Calls.length).toBe(0);
   });
 });
