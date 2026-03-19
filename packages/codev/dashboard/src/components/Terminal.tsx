@@ -331,6 +331,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
     const scrollCtrl = new ScrollController({
       term,
       fitAddon,
+      debug: false,
       getContainer: () => containerRef.current,
     });
 
@@ -457,7 +458,20 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
             }
           } else {
             const filtered = filterDA(text);
-            if (filtered) term.write(filtered);
+            if (filtered) {
+              // Capture scroll position before write — term.write() can cause
+              // buffer reflow that resets viewportY to 0 without firing onScroll.
+              const preWriteViewportY = term.buffer?.active?.viewportY ?? 0;
+              const preWriteBaseY = term.buffer?.active?.baseY ?? 0;
+              term.write(filtered, () => {
+                const postViewportY = term.buffer?.active?.viewportY ?? 0;
+                if (postViewportY === 0 && preWriteViewportY > 0 && preWriteBaseY > 0) {
+                  console.warn('[Terminal] write caused scroll-to-top, correcting:',
+                    `was viewportY=${preWriteViewportY}, baseY=${preWriteBaseY}`);
+                  scrollCtrl.scrollToBottom();
+                }
+              });
+            }
           }
         } else if (prefix === FRAME_CONTROL) {
           // Parse control frames for seq updates (Bugfix #442)

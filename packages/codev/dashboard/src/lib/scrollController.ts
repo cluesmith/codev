@@ -237,15 +237,36 @@ export class ScrollController {
     const baseY = this.term.buffer?.active?.baseY ?? 0;
     const viewportY = this.term.buffer?.active?.viewportY ?? 0;
 
-    // Detect unexpected scroll-to-top in interactive phase (replaces magic thresholds)
+    // Detect and correct unexpected scroll-to-top in interactive phase.
+    // xterm can internally reset viewportY to 0 during buffer reflow
+    // (new output, fit, etc.). Restore the previous position.
     if (viewportY === 0 && baseY > 0 && this._viewportY > 0) {
-      console.warn('[ScrollController] unexpected scroll-to-top in interactive phase:',
+      console.warn('[ScrollController] correcting unexpected scroll-to-top:',
         `was viewportY=${this._viewportY}, now viewportY=0, baseY=${baseY}`);
+      const restoreY = this._viewportY;
+      const wasBottom = this._wasAtBottom;
+      // Restore — use programmaticScroll to prevent recursion
+      if (wasBottom) {
+        this.programmaticScroll(() => this.term.scrollToBottom());
+        this._viewportY = baseY;
+        this._wasAtBottom = true;
+      } else {
+        // Clamp to new baseY in case buffer shrank
+        const clampedY = Math.min(restoreY, baseY);
+        this.programmaticScroll(() => this.term.scrollToLine(clampedY));
+        this._viewportY = clampedY;
+        this._wasAtBottom = clampedY >= baseY - 2;
+      }
+      this._baseY = baseY;
+      return;
     }
 
     this._baseY = baseY;
     this._viewportY = viewportY;
-    this._wasAtBottom = !baseY || viewportY >= baseY;
+    // "At bottom" when viewportY is at or near baseY. During active output,
+    // viewportY can lag baseY by 1-2 lines due to write batching, so use
+    // a small tolerance instead of exact equality.
+    this._wasAtBottom = !baseY || viewportY >= baseY - 2;
 
     this.log('onScroll', `viewportY=${viewportY} baseY=${baseY} wasAtBottom=${this._wasAtBottom}`);
   }
