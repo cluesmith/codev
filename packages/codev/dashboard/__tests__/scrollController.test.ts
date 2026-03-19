@@ -336,54 +336,31 @@ describe('ScrollController', () => {
       expect(ctrl.state.wasAtBottom).toBe(true);
     });
 
-    it('corrects unexpected scroll-to-top by restoring previous position (Issue #630)', () => {
+    it('warns on unexpected scroll-to-top but does not auto-correct (Issue #630)', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { ctrl, term } = createController();
       ctrl.enterInteractive();
 
-      // User was at line 200 (not at bottom)
+      // User was at line 200
       term.buffer.active.baseY = 500;
       term.buffer.active.viewportY = 200;
       term._triggerScroll();
-      expect(ctrl.state.viewportY).toBe(200);
-      expect(ctrl.state.wasAtBottom).toBe(false);
 
       // Unexpected scroll to top (viewportY=0 with scrollback)
       term.buffer.active.viewportY = 0;
       term._triggerScroll();
 
-      // Should warn and correct by restoring to line 200
+      // Should warn but NOT auto-correct — viewportY=0 is also the normal
+      // state when a user intentionally scrolls to the top of history.
+      // Root causes are prevented upstream by EscapeBuffer and WebGL handler.
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('unexpected scroll-to-top'),
         expect.any(String),
       );
-      expect(term.scrollToLine).toHaveBeenCalledWith(200);
-      // State should NOT have been updated with corrupted values
-      expect(ctrl.state.viewportY).toBe(200);
-      warnSpy.mockRestore();
-    });
-
-    it('corrects unexpected scroll-to-top with scrollToBottom when user was at bottom (Issue #630)', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const { ctrl, term } = createController();
-      ctrl.enterInteractive();
-
-      // User was at bottom
-      term.buffer.active.baseY = 500;
-      term.buffer.active.viewportY = 500;
-      term._triggerScroll();
-      expect(ctrl.state.wasAtBottom).toBe(true);
-
-      // Unexpected scroll to top
-      term.buffer.active.viewportY = 0;
-      term._triggerScroll();
-
-      // Should correct by scrolling to bottom
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('unexpected scroll-to-top'),
-        expect.any(String),
-      );
-      expect(term.scrollToBottom).toHaveBeenCalled();
+      // State IS updated (no correction, user may be at top intentionally)
+      expect(ctrl.state.viewportY).toBe(0);
+      expect(term.scrollToLine).not.toHaveBeenCalled();
+      expect(term.scrollToBottom).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
   });

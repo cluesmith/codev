@@ -237,19 +237,14 @@ export class ScrollController {
     const baseY = this.term.buffer?.active?.baseY ?? 0;
     const viewportY = this.term.buffer?.active?.viewportY ?? 0;
 
-    // Detect and correct unexpected scroll-to-top in interactive phase.
-    // This happens when xterm resets its viewport due to parsing errors
-    // (split escape sequences) or WebGL context loss (Issue #630).
+    // Detect unexpected scroll-to-top in interactive phase (diagnostic only).
+    // Root causes (split escape sequences, WebGL context loss) are prevented
+    // upstream by EscapeBuffer and the context loss handler (Issue #630).
+    // We don't auto-correct here because viewportY=0 is also the normal state
+    // when a user intentionally scrolls to the top of their history.
     if (viewportY === 0 && baseY > 0 && this._viewportY > 0) {
       console.warn('[ScrollController] unexpected scroll-to-top in interactive phase:',
-        `was viewportY=${this._viewportY}, now viewportY=0, baseY=${baseY} — correcting`);
-      if (this._wasAtBottom) {
-        this.programmaticScroll(() => this.term.scrollToBottom());
-      } else {
-        this.programmaticScroll(() => this.term.scrollToLine(this._viewportY));
-      }
-      // Don't update tracked state with corrupted values
-      return;
+        `was viewportY=${this._viewportY}, now viewportY=0, baseY=${baseY}`);
     }
 
     this._baseY = baseY;
