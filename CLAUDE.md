@@ -238,7 +238,7 @@ Use sequential numbering with descriptive names (no leading zeros):
 
 **DEFAULT BEHAVIOR**: Consultation is ENABLED by default with:
 - **Gemini 3 Pro** (gemini-3-pro-preview) for deep analysis
-- **GPT-5.2 Codex** (gpt-5.2-codex) for coding and architecture perspective
+- **GPT-5.4 Codex** (gpt-5.4-codex) for coding and architecture perspective
 
 To disable: User must explicitly say "without multi-agent consultation"
 

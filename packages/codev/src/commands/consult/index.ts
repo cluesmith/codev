@@ -402,7 +402,7 @@ export async function runCodexConsultation(
     });
 
     const thread = codex.startThread({
-      model: 'gpt-5.2-codex',
+      model: 'gpt-5.4-codex',
       sandboxMode: 'read-only',
       modelReasoningEffort: 'medium',
       workingDirectory: workspaceRoot,
