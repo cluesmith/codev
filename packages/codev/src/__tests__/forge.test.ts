@@ -240,7 +240,7 @@ describe('executeForgeCommand', () => {
     expect(result).toContain('diff --git');
   });
 
-  it('loads forge config from workspaceRoot af-config.json', async () => {
+  it('loads forge config from workspaceRoot .codev/config.json', async () => {
     const result = await executeForgeCommand('issue-view', {}, {
       workspaceRoot: TEST_DIR,
     });

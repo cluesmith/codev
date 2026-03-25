@@ -238,12 +238,8 @@ function extractExecutable(command: string): string | null {
  * when config is already loaded (e.g., from loadConfig in lib/config.ts).
  */
 export function loadForgeConfig(workspaceRoot: string): ForgeConfig | null {
-  try {
-    const config = loadCodevConfig(workspaceRoot);
-    return (config.forge as ForgeConfig) ?? null;
-  } catch {
-    return null;
-  }
+  const config = loadCodevConfig(workspaceRoot);
+  return (config.forge as ForgeConfig) ?? null;
 }
 
 /** Resolve forge config from options: explicit > loaded from workspace > loaded from cwd > null. */

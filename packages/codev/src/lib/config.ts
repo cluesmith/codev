@@ -129,7 +129,19 @@ export function deepMerge<T extends Record<string, unknown>>(base: T, override: 
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   if (!existsSync(filePath)) return null;
 
-  const content = readFileSync(filePath, 'utf-8');
+  let content: string;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    // Permission errors: warn and fall back to defaults (per spec)
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EACCES' || code === 'EPERM') {
+      console.warn(`Warning: Cannot read ${filePath} (${code}). Using defaults.`);
+      return null;
+    }
+    throw err;
+  }
+
   try {
     const parsed = JSON.parse(content);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
