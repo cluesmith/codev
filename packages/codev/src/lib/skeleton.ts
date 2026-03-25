@@ -4,7 +4,8 @@
  * Resolution order (first match wins):
  * 1. .codev/<path>              — user customization (optional overrides)
  * 2. codev/<path>               — project-level (legacy local copies)
- * 3. <package>/skeleton/<path>  — npm package defaults
+ * 3. <cache>/<path>             — remote framework (fetched via forge)
+ * 4. <package>/skeleton/<path>  — npm package defaults
  */
 
 import * as fs from 'node:fs';
@@ -47,12 +48,13 @@ export function findWorkspaceRoot(startDir?: string): string {
 }
 
 /**
- * Resolve a codev file using the unified three-tier resolution chain.
+ * Resolve a codev file using the unified four-tier resolution chain.
  *
  * Resolution order (first match wins):
  * 1. .codev/<path>              — user customization
  * 2. codev/<path>               — project-level (legacy local copies)
- * 3. <package>/skeleton/<path>  — npm package defaults
+ * 3. <cache>/<path>             — remote framework (fetched via codev sync)
+ * 4. <package>/skeleton/<path>  — npm package defaults
  *
  * @param relativePath - Path relative to codev/ (e.g., 'roles/consultant.md')
  * @param workspaceRoot - Optional workspace root (auto-detected if not provided)
@@ -73,7 +75,16 @@ export function resolveCodevFile(relativePath: string, workspaceRoot?: string): 
     return localPath;
   }
 
-  // 3. Fall back to embedded skeleton (npm package defaults)
+  // 3. Check remote framework cache (fetched via codev sync)
+  const cacheDir = _getFrameworkCacheDir(root);
+  if (cacheDir) {
+    const cachePath = path.join(cacheDir, relativePath);
+    if (fs.existsSync(cachePath)) {
+      return cachePath;
+    }
+  }
+
+  // 4. Fall back to embedded skeleton (npm package defaults)
   const skeletonDir = getSkeletonDir();
   const embeddedPath = path.join(skeletonDir, relativePath);
   if (fs.existsSync(embeddedPath)) {
@@ -81,6 +92,24 @@ export function resolveCodevFile(relativePath: string, workspaceRoot?: string): 
   }
 
   return null;
+}
+
+/**
+ * Set the framework cache directory for the current process.
+ * Called once during startup by commands that need remote framework resolution.
+ */
+let _frameworkCacheDir: string | null = null;
+
+export function setFrameworkCacheDir(dir: string | null): void {
+  _frameworkCacheDir = dir;
+}
+
+export function getFrameworkCacheDir(): string | null {
+  return _frameworkCacheDir;
+}
+
+function _getFrameworkCacheDir(_workspaceRoot: string): string | null {
+  return _frameworkCacheDir;
 }
 
 /**

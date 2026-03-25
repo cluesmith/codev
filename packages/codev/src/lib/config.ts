@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -182,20 +183,31 @@ export function resolveProjectConfigPath(workspaceRoot: string): string | null {
  *
  * Layer order (lowest → highest priority):
  *   1. Hardcoded defaults
- *   2. ~/.codev/config.json
- *   3. .codev/config.json
+ *   2. <cache>/config.json (remote framework base config)
+ *   3. ~/.codev/config.json (global)
+ *   4. .codev/config.json (project)
  */
 export function loadConfig(workspaceRoot: string): CodevConfig {
   let merged: CodevConfig = structuredClone(DEFAULT_CONFIG);
 
-  // Layer 2: global config
+  // Layer 2: remote framework base config (if cached)
+  const cacheDir = _getFrameworkCacheDir();
+  if (cacheDir) {
+    const cacheConfigPath = resolve(cacheDir, 'config.json');
+    const cacheConfig = readJsonFile(cacheConfigPath);
+    if (cacheConfig) {
+      merged = deepMerge(merged as unknown as Record<string, unknown>, cacheConfig) as CodevConfig;
+    }
+  }
+
+  // Layer 3: global config
   const globalPath = resolve(homedir(), '.codev', 'config.json');
   const globalConfig = readJsonFile(globalPath);
   if (globalConfig) {
     merged = deepMerge(merged as unknown as Record<string, unknown>, globalConfig) as CodevConfig;
   }
 
-  // Layer 3: project config (also checks for legacy af-config.json)
+  // Layer 4: project config (also checks for legacy af-config.json)
   const projectPath = resolveProjectConfigPath(workspaceRoot);
   if (projectPath) {
     const projectConfig = readJsonFile(projectPath);

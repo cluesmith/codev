@@ -11,6 +11,7 @@ import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
+import { sync } from './commands/sync.js';
 import { consult } from './commands/consult/index.js';
 import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
@@ -138,6 +139,21 @@ program
         console.log(JSON.stringify(output));
         process.exit(1);
       }
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Sync command
+program
+  .command('sync')
+  .description('Fetch and cache remote framework sources')
+  .option('-f, --force', 'Delete cache and re-fetch from scratch')
+  .option('-s, --status', 'Show current cache state')
+  .action(async (options) => {
+    try {
+      await sync({ force: options.force, status: options.status });
+    } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
