@@ -18,7 +18,7 @@ import { TowerClient } from '../lib/tower-client.js';
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
 /**
- * Detect workspace root from CWD by walking up to find .git or af-config.json.
+ * Detect workspace root from CWD by walking up to find .git or .codev/.
  * Builder worktrees are at .builders/<id>/ which is inside the workspace root.
  */
 export function detectWorkspaceRoot(): string | null {
@@ -28,7 +28,7 @@ export function detectWorkspaceRoot(): string | null {
   if (buildersMatch) return buildersMatch[1];
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
-    if (existsSync(join(dir, 'af-config.json')) || existsSync(join(dir, '.git'))) return dir;
+    if (existsSync(join(dir, '.codev')) || existsSync(join(dir, '.git'))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

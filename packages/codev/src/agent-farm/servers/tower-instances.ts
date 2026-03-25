@@ -352,11 +352,11 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
     if (!entry.architect) {
       const manager = _deps.getTerminalManager();
 
-      // Read architect command: env var override (for CI/testing), af-config.json, or default
+      // Read architect command: env var override (for CI/testing), .codev/config.json, or default
       let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
       if (!architectCmd) {
         architectCmd = 'claude';
-        const configPath = path.join(workspacePath, 'af-config.json');
+        const configPath = path.join(workspacePath, '.codev', 'config.json');
         if (fs.existsSync(configPath)) {
           try {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

@@ -257,7 +257,7 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
 }
 
 /**
- * Get check definitions for a phase, optionally merging in af-config.json overrides.
+ * Get check definitions for a phase, optionally merging in .codev/config.json overrides.
  *
  * Override semantics (applied per check name):
  *   - skip: true   → check is omitted from the result
@@ -333,7 +333,7 @@ export function isPhased(protocol: Protocol, phaseId: string): boolean {
 /**
  * Get checks to run when a plan phase completes (after evaluate stage).
  *
- * Accepts optional overrides from af-config.json:
+ * Accepts optional overrides from .codev/config.json:
  *   - skip: true   → condition removed from gating (does NOT auto-pass)
  *   - command set  → replaces the protocol's command string
  *

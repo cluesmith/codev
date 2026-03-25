@@ -521,7 +521,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     let restartOptions: ReconnectRestartOptions | undefined;
     if (dbSession.type === 'architect') {
       let architectCmd = 'claude';
-      const configPath = path.join(workspacePath, 'af-config.json');
+      const configPath = path.join(workspacePath, '.codev', 'config.json');
       if (fs.existsSync(configPath)) {
         try {
           const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -713,7 +713,7 @@ export async function getTerminalsForWorkspace(
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
           let architectCmd = 'claude';
-          const configPath = path.join(dbSession.workspace_path, 'af-config.json');
+          const configPath = path.join(dbSession.workspace_path, '.codev', 'config.json');
           if (fs.existsSync(configPath)) {
             try {
               const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

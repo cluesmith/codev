@@ -2,7 +2,7 @@
  * Shared forge utilities for Codev.
  *
  * Provides non-fatal forge API access via configurable concept commands.
- * Default commands wrap the `gh` CLI. Projects can override via af-config.json.
+ * Default commands wrap the `gh` CLI. Projects can override via .codev/config.json.
  * All functions return `null` on failure instead of throwing,
  * enabling graceful degradation when forge is unavailable.
  *
@@ -72,7 +72,7 @@ export async function fetchIssueOrThrow(
     throw new Error(
       `Failed to fetch issue #${issueId}. Ensure the 'issue-view' forge concept command is configured ` +
       `(default: 'gh' CLI must be installed and authenticated). ` +
-      `Configure forge commands in af-config.json if using a non-GitHub forge.`,
+      `Configure forge commands in .codev/config.json if using a non-GitHub forge.`,
     );
   }
   return issue;

@@ -2,12 +2,14 @@
  * Configuration management for Agent Farm
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import type { Config, UserConfig, ResolvedCommands } from '../types.js';
 import { getSkeletonDir } from '../../lib/skeleton.js';
+import { loadConfig } from '../../lib/config.js';
+import type { CodevConfig } from '../../lib/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -167,20 +169,14 @@ function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): stri
 }
 
 /**
- * Load af-config.json from project root
+ * Load config from unified config loader (.codev/config.json).
+ * Returns as UserConfig for backward compatibility with existing callers.
  */
 function loadUserConfig(workspaceRoot: string): UserConfig | null {
-  const configPath = resolve(workspaceRoot, 'af-config.json');
-  if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, 'utf-8');
-      return JSON.parse(content) as UserConfig;
-    } catch (error) {
-      throw new Error(`Failed to parse af-config.json: ${error}`);
-    }
-  }
-
-  return null;
+  const config = loadConfig(workspaceRoot);
+  // The unified loader always returns a config (with defaults merged in).
+  // Convert to UserConfig shape for backward compat.
+  return config as UserConfig;
 }
 
 /**

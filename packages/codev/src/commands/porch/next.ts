@@ -429,7 +429,7 @@ async function handleBuildVerify(
         tasks.push({
           subject: `Check "${name}" skipped`,
           activeForm: `Skipping ${name} check`,
-          description: `Check "${name}" is skipped via af-config.json porch.checks override.`,
+          description: `Check "${name}" is skipped via .codev/config.json porch.checks override.`,
           sequential: true,
         });
         continue;
@@ -437,7 +437,7 @@ async function handleBuildVerify(
       const checkDef = checks[name];
       if (!checkDef) continue;
       const cwdNote = checkDef.cwd ? `\n\nIMPORTANT: Run this from the \`${checkDef.cwd}\` subdirectory (relative to project root).` : '';
-      const overrideNote = override?.command ? `\n\n(Command overridden via af-config.json)` : '';
+      const overrideNote = override?.command ? `\n\n(Command overridden via .codev/config.json)` : '';
       tasks.push({
         subject: `Run check: ${name}`,
         activeForm: `Running ${name} check`,

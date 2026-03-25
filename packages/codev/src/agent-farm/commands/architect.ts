@@ -40,7 +40,7 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
 
     child.on('error', (err) => {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        reject(new Error(`Architect command not found: ${cmd}. Check af-config.json or install claude.`));
+        reject(new Error(`Architect command not found: ${cmd}. Check .codev/config.json or install claude.`));
       } else {
         reject(err);
       }

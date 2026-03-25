@@ -1,43 +1,50 @@
 /**
  * Tests for porch config loader (loadCheckOverrides)
+ *
+ * Config is now loaded from .codev/config.json via the unified config loader.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { tmpdir } from 'node:os';
+import * as os from 'node:os';
 import { loadCheckOverrides } from '../config.js';
 
 describe('loadCheckOverrides', () => {
-  const testDir = path.join(tmpdir(), `porch-config-test-${Date.now()}`);
+  let testDir: string;
+  let origHome: string | undefined;
 
   beforeEach(() => {
-    fs.mkdirSync(testDir, { recursive: true });
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'porch-config-test-'));
+    origHome = process.env.HOME;
+    // Isolate global config by pointing HOME to a temp dir
+    process.env.HOME = path.join(testDir, 'fake-home');
   });
 
   afterEach(() => {
+    process.env.HOME = origHome;
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('returns null when af-config.json does not exist', () => {
+  function writeConfig(config: Record<string, unknown>) {
+    const dir = path.join(testDir, '.codev');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
+  }
+
+  it('returns null when no config exists', () => {
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
 
-  it('returns null when af-config.json has no porch key', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ shell: { builder: 'claude' } })
-    );
+  it('returns null when config has no porch key', () => {
+    writeConfig({ shell: { builder: 'claude' } });
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
 
   it('returns null when porch key exists but no checks key', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: { someOtherKey: 'value' } })
-    );
+    writeConfig({ porch: { someOtherKey: 'value' } });
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
@@ -48,10 +55,7 @@ describe('loadCheckOverrides', () => {
       tests: { command: 'cargo test' },
       e2e_tests: { skip: true },
     };
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: { checks: overrides } })
-    );
+    writeConfig({ porch: { checks: overrides } });
     const result = loadCheckOverrides(testDir);
     expect(result).toEqual(overrides);
   });
@@ -60,62 +64,43 @@ describe('loadCheckOverrides', () => {
     const overrides = {
       build: { command: 'make', cwd: 'src/' },
     };
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: { checks: overrides } })
-    );
+    writeConfig({ porch: { checks: overrides } });
     const result = loadCheckOverrides(testDir);
     expect(result).toEqual(overrides);
     expect(result?.build?.cwd).toBe('src/');
   });
 
   it('throws on malformed JSON', () => {
-    fs.writeFileSync(path.join(testDir, 'af-config.json'), '{ invalid json }');
-    expect(() => loadCheckOverrides(testDir)).toThrow('Failed to parse af-config.json');
-  });
-
-  it('returns null when af-config.json contains a non-object value', () => {
-    fs.writeFileSync(path.join(testDir, 'af-config.json'), '"just a string"');
-    const result = loadCheckOverrides(testDir);
-    expect(result).toBeNull();
+    const dir = path.join(testDir, '.codev');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), '{ invalid json }');
+    expect(() => loadCheckOverrides(testDir)).toThrow('Failed to parse');
   });
 
   it('returns null when porch is not an object', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: 'not-an-object' })
-    );
+    writeConfig({ porch: 'not-an-object' });
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
 
   it('returns null when porch.checks is not an object', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: { checks: 'not-an-object' } })
-    );
+    writeConfig({ porch: { checks: 'not-an-object' } });
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
 
   it('returns null when porch.checks is an array (not a map)', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({ porch: { checks: [{ command: 'cargo build' }] } })
-    );
+    writeConfig({ porch: { checks: [{ command: 'cargo build' }] } });
     const result = loadCheckOverrides(testDir);
     expect(result).toBeNull();
   });
 
-  it('ignores non-porch keys in af-config.json', () => {
-    fs.writeFileSync(
-      path.join(testDir, 'af-config.json'),
-      JSON.stringify({
-        shell: { builder: 'claude' },
-        porch: { checks: { build: { command: 'go build ./...' } } },
-        templates: { dir: 'codev/templates' },
-      })
-    );
+  it('ignores non-porch keys in config', () => {
+    writeConfig({
+      shell: { builder: 'claude' },
+      porch: { checks: { build: { command: 'go build ./...' } } },
+      templates: { dir: 'codev/templates' },
+    });
     const result = loadCheckOverrides(testDir);
     expect(result).toEqual({ build: { command: 'go build ./...' } });
   });

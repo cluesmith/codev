@@ -157,7 +157,7 @@ export async function fetchTeamGitHubData(
 
   const repo = await getRepoInfo(cwd);
   if (!repo) {
-    return { data: new Map(), error: 'Could not determine repository. Configure forge concepts in af-config.json.' };
+    return { data: new Map(), error: 'Could not determine repository. Configure forge concepts in .codev/config.json.' };
   }
 
   const query = buildTeamGraphQLQuery(validMembers, repo.owner, repo.name);

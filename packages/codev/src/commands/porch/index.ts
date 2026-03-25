@@ -65,7 +65,7 @@ function section(title: string, content: string): string {
  * Only emits output when overrides are actually in use.
  * @param phaseCheckNames - original check names from the protocol phase
  * @param resolvedChecks - checks after applying overrides (skipped ones absent)
- * @param overrides - raw override map from af-config.json (null if not configured)
+ * @param overrides - raw override map from .codev/config.json (null if not configured)
  */
 function logCheckOverrides(
   phaseCheckNames: string[],
@@ -79,7 +79,7 @@ function logCheckOverrides(
     if (!override) continue;
 
     if (override.skip) {
-      console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (af-config.json)`));
+      console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (.codev/config.json)`));
     } else if (override.command || override.cwd) {
       const parts: string[] = [];
       if (override.command) parts.push(resolvedChecks[name]?.command ?? override.command);
@@ -223,7 +223,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
   console.log('');
 
   if (Object.keys(checks).length === 0) {
-    console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+    console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
     console.log('');
     console.log(chalk.green('RESULT: ALL CHECKS PASSED'));
     console.log(`\n  Run: porch done ${state.id} (to advance)`);
@@ -290,7 +290,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
           process.exit(1);
         }
       } else {
-        console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+        console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
       }
     }
   }
@@ -548,7 +548,7 @@ export async function approve(
         process.exit(1);
       }
     } else {
-      console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+      console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
     }
   }
 

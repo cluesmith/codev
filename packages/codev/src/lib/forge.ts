@@ -3,7 +3,7 @@
  *
  * Routes forge operations (issue fetch, PR list, etc.) through configurable
  * external commands. Default commands wrap the `gh` CLI for GitHub repos.
- * Projects override commands via the `forge` section in af-config.json.
+ * Projects override commands via the `forge` section in .codev/config.json.
  *
  * Concept commands are executed via shell (`sh -c`) to support pipes,
  * redirects, and variable expansion in user-configured commands.
@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadConfig as loadCodevConfig } from './config.js';
 
 const execAsync = promisify(exec);
 
@@ -39,16 +40,16 @@ const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 // Types
 // =============================================================================
 
-/** Forge config from af-config.json `forge` section (concept overrides + optional provider). */
+/** Forge config from .codev/config.json `forge` section (concept overrides + optional provider). */
 export type ForgeConfig = Record<string, string | null> & { provider?: string };
 
 /** Options for forge command execution. */
 export interface ForgeCommandOptions {
   /** Working directory for command execution. */
   cwd?: string;
-  /** Workspace root for loading af-config.json (only used if forgeConfig not provided). */
+  /** Workspace root for loading .codev/config.json (only used if forgeConfig not provided). */
   workspaceRoot?: string;
-  /** Pre-loaded forge config. Avoids repeated af-config.json reads. */
+  /** Pre-loaded forge config. Avoids repeated .codev/config.json reads. */
   forgeConfig?: ForgeConfig | null;
   /** If true, return stdout as raw string instead of parsing as JSON. */
   raw?: boolean;
@@ -230,20 +231,16 @@ function extractExecutable(command: string): string | null {
 // =============================================================================
 
 /**
- * Load forge configuration from af-config.json.
+ * Load forge configuration from .codev/config.json (via unified config loader).
  * Returns the forge section or null if not configured.
  *
  * Prefer passing forge config directly via ForgeCommandOptions.forgeConfig
- * when config is already loaded (e.g., from loadUserConfig in config.ts).
+ * when config is already loaded (e.g., from loadConfig in lib/config.ts).
  */
 export function loadForgeConfig(workspaceRoot: string): ForgeConfig | null {
-  const configPath = resolve(workspaceRoot, 'af-config.json');
-  if (!existsSync(configPath)) return null;
-
   try {
-    const content = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(content);
-    return config.forge ?? null;
+    const config = loadCodevConfig(workspaceRoot);
+    return (config.forge as ForgeConfig) ?? null;
   } catch {
     return null;
   }
