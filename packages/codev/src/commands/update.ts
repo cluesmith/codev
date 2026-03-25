@@ -189,7 +189,8 @@ export async function update(options: UpdateOptions = {}): Promise<UpdateResult>
 
     // Update .claude/skills/
     if (!dryRun) {
-      const skillsResult = copySkills(targetDir, templatesDir, { skipExisting: !force });
+      // Always update skills (they're Claude-specific files that should be refreshed)
+      const skillsResult = copySkills(targetDir, templatesDir);
       for (const skill of skillsResult.copied) {
         const fullPath = `.claude/skills/${skill}/`;
         result.newFiles.push(fullPath);
