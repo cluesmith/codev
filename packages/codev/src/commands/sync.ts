@@ -38,8 +38,8 @@ export function getCacheDir(source: string, ref?: string): string {
 function isImmutableRef(ref: string): boolean {
   // SHA-like (40 hex chars)
   if (/^[0-9a-f]{40}$/i.test(ref)) return true;
-  // Tag-like (starts with v, or contains digits and dots)
-  if (/^v?\d/.test(ref)) return true;
+  // Semver-like tags (v1.0, v1.2.3, 1.0.0, etc.)
+  if (/^v?\d+(\.\d+)+/.test(ref)) return true;
   return false;
 }
 
@@ -112,18 +112,32 @@ function fetchFromCommand(
   ref: string | undefined,
   outputDir: string,
 ): void {
-  fs.mkdirSync(outputDir, { recursive: true });
+  // Use temp dir + atomic rename to prevent corrupted cache on failure
+  const tmpDir = `${outputDir}.tmp-${Date.now()}`;
+  fs.mkdirSync(tmpDir, { recursive: true });
 
-  const env = {
-    ...process.env,
-    CODEV_OUTPUT_DIR: outputDir,
-    CODEV_REF: ref || '',
-  };
+  try {
+    const env = {
+      ...process.env,
+      CODEV_OUTPUT_DIR: tmpDir,
+      CODEV_REF: ref || '',
+    };
 
-  execSync(command, {
-    env: env as NodeJS.ProcessEnv,
-    stdio: 'inherit',
-  });
+    execSync(command, {
+      env: env as NodeJS.ProcessEnv,
+      stdio: 'inherit',
+    });
+
+    // Atomic move to final location
+    fs.mkdirSync(path.dirname(outputDir), { recursive: true });
+    fs.renameSync(tmpDir, outputDir);
+  } catch (err) {
+    // Clean up temp dir on failure — no partial cache
+    if (fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+    throw err;
+  }
 }
 
 /**

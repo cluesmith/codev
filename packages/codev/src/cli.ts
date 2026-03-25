@@ -11,7 +11,8 @@ import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
-import { sync } from './commands/sync.js';
+import { sync, getFrameworkCacheDir as _getFrameworkCacheDir } from './commands/sync.js';
+import { setFrameworkCacheDir } from './lib/skeleton.js';
 import { consult } from './commands/consult/index.js';
 import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
@@ -31,6 +32,11 @@ function requireWorkspace(): string {
     console.error('Error: Not inside a Codev workspace. Run from a project that has a codev/ directory.');
     process.exit(1);
   }
+
+  // Initialize framework cache for remote source resolution
+  const cacheDir = _getFrameworkCacheDir(root);
+  if (cacheDir) setFrameworkCacheDir(cacheDir);
+
   return root;
 }
 
