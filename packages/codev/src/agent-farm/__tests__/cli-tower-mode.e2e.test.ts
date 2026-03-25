@@ -37,8 +37,9 @@ function createTestWorkspace(): string {
   const workspacePath = mkdtempSync(resolve(tmpdir(), 'codev-cli-test-'));
   mkdirSync(resolve(workspacePath, 'codev'), { recursive: true });
   mkdirSync(resolve(workspacePath, '.agent-farm'), { recursive: true });
+  mkdirSync(resolve(workspacePath, '.codev'), { recursive: true });
   writeFileSync(
-    resolve(workspacePath, 'af-config.json'),
+    resolve(workspacePath, '.codev', 'config.json'),
     JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
   );
   return workspacePath;

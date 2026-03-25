@@ -461,9 +461,10 @@ describe('tower-instances', () => {
     it('uses TOWER_ARCHITECT_CMD env var when set (Bugfix #473)', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-launch-env-'));
       fs.mkdirSync(path.join(tmpDir, 'codev'));
-      // Write an af-config.json with a different architect command
+      // Write a .codev/config.json with a different architect command
+      fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpDir, 'af-config.json'),
+        path.join(tmpDir, '.codev', 'config.json'),
         JSON.stringify({ shell: { architect: 'claude --dangerously-skip-permissions' } }),
       );
 

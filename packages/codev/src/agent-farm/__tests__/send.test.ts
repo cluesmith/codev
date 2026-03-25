@@ -48,8 +48,8 @@ vi.mock('node:fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((p: string) => {
-      // detectWorkspaceRoot looks for af-config.json or .git
-      if (typeof p === 'string' && (p.endsWith('af-config.json') || p.endsWith('.git'))) {
+      // detectWorkspaceRoot looks for .codev or .git
+      if (typeof p === 'string' && (p.endsWith('.codev') || p.endsWith('.git'))) {
         return false;
       }
       // For file reading in --file tests
