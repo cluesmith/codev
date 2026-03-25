@@ -158,6 +158,8 @@ The `models` field accepts either an array of model names or a string for specia
 
 **Type**: `string | string[]` — the config loader normalizes to a canonical form for downstream consumers.
 
+**Note on model names**: Model names in the array must be one of the three registered backends: `gemini`, `codex`, `claude`. User-defined model backends (e.g., custom model names or third-party providers) are a future feature and out of scope for this spec.
+
 **Behavior in porch verify steps**:
 
 When porch encounters a `verify` step in a protocol, it uses the configured models instead of the hardcoded list in `protocol.json`. The protocol's `verify.models` field becomes a fallback default, overridden by user config.
@@ -202,6 +204,7 @@ Example: When porch needs `protocols/spir/protocol.json`, it checks `.codev/prot
 - **Fresh projects**: `codev init` no longer copies protocols/roles/templates. They resolve from the package.
 - **Existing projects**: Local copies in `codev/protocols/` etc. continue to work (they take precedence). Over time, unmodified copies are cleaned up (see "Stale skeleton file cleanup" below).
 - **Customization**: To customize a protocol, copy just that file into `.codev/protocols/<name>/protocol.json`. Your override takes precedence over the package version.
+- **Override vs. create**: Using the same name as a built-in protocol (e.g., `.codev/protocols/spir/`) overrides it — your version is used instead of the package default. Using a new name (e.g., `.codev/protocols/my-custom-protocol/`) creates a net-new protocol. The resolution chain handles both cases identically: it checks `.codev/<path>` first, then falls through to `codev/<path>`, then the package.
 - **Upgrades**: `npm install -g @cluesmith/codev` is all that's needed. No `codev update` step.
 
 #### Scope of Runtime Resolution
@@ -341,6 +344,8 @@ rm /tmp/codev-archive.tar.gz
 ```
 
 Other forge providers (GitLab, Bitbucket) implement the same concept using their platform's equivalent API. Projects can also override the command in their forge config, just like any other forge concept.
+
+**Subpath sources**: When the source includes a subdirectory path (e.g., `"myorg/repo/team-a"`), the forge fetches the full repository archive but only extracts the specified subdirectory into `CODEV_OUTPUT_DIR`. The cache key includes the full source string (`owner/repo/path`), so different subpaths from the same repository are cached independently. For example, `"myorg/shared-frameworks/team-a"` and `"myorg/shared-frameworks/team-b"` each get their own cache entry even though they reference the same underlying repository.
 
 **When `type` is `"command"`**:
 
