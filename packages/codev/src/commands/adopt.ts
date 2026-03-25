@@ -14,10 +14,6 @@ import { confirm } from '../lib/cli-prompts.js';
 import {
   createUserDirs,
   createProjectsDir,
-  copyConsultTypes,
-  copyResourceTemplates,
-  copyRoles,
-  copyProtocols,
   copySkills,
   copyRootFiles,
   updateGitignore,
@@ -129,45 +125,9 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
     fileCount++;
   }
 
-  // Copy resource templates - skip existing
-  const resourcesResult = copyResourceTemplates(targetDir, skeletonDir, { skipExisting: true });
-  for (const file of resourcesResult.copied) {
-    console.log(chalk.green('  +'), `codev/resources/${file}`);
-    fileCount++;
-  }
-
-  // Copy consult-types - skip existing
-  const consultTypesResult = copyConsultTypes(targetDir, skeletonDir, { skipExisting: true });
-  if (consultTypesResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/consult-types/');
-    fileCount++;
-  }
-  for (const file of consultTypesResult.copied) {
-    console.log(chalk.green('  +'), `codev/consult-types/${file}`);
-    fileCount++;
-  }
-
-  // Copy role definitions - skip existing (preserve user customizations)
-  const rolesResult = copyRoles(targetDir, skeletonDir, { skipExisting: true });
-  if (rolesResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/roles/');
-    fileCount++;
-  }
-  for (const file of rolesResult.copied) {
-    console.log(chalk.green('  +'), `codev/roles/${file}`);
-    fileCount++;
-  }
-
-  // Copy protocol definitions (required for porch orchestration) - skip existing
-  const protocolsResult = copyProtocols(targetDir, skeletonDir, { skipExisting: true });
-  if (protocolsResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/protocols/');
-    fileCount++;
-  }
-  for (const protocol of protocolsResult.copied) {
-    console.log(chalk.green('  +'), `codev/protocols/${protocol}`);
-    fileCount++;
-  }
+  // Framework files (protocols, roles, consult-types, templates) are NOT copied.
+  // They resolve at runtime from the installed npm package via the unified file resolver.
+  // Existing local copies in codev/ are left in place — they take precedence via the resolution chain.
 
   // Copy .claude/skills/ - skip existing (preserve user customizations)
   const skillsResult = copySkills(targetDir, skeletonDir, { skipExisting: true });
@@ -191,18 +151,22 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
     skippedCount++;
   }
 
-  // Create af-config.json if it doesn't exist
-  const afConfigPath = path.join(targetDir, 'af-config.json');
-  if (!fs.existsSync(afConfigPath)) {
-    const afConfig: Record<string, unknown> = {
+  // Create .codev/config.json if it doesn't exist
+  const codevConfigDir = path.join(targetDir, '.codev');
+  const codevConfigPath = path.join(codevConfigDir, 'config.json');
+  if (!fs.existsSync(codevConfigPath)) {
+    if (!fs.existsSync(codevConfigDir)) {
+      fs.mkdirSync(codevConfigDir, { recursive: true });
+    }
+    const codevConfig: Record<string, unknown> = {
       shell: {
         architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
         builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
         shell: 'bash',
       },
     };
-    fs.writeFileSync(afConfigPath, JSON.stringify(afConfig, null, 2) + '\n');
-    console.log(chalk.green('  +'), 'af-config.json');
+    fs.writeFileSync(codevConfigPath, JSON.stringify(codevConfig, null, 2) + '\n');
+    console.log(chalk.green('  +'), '.codev/config.json');
     fileCount++;
   }
 
