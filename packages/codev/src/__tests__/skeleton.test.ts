@@ -141,6 +141,46 @@ describe('skeleton module', () => {
       const result = resolveCodevFile('nonexistent/file.md', testBaseDir);
       expect(result).toBeNull();
     });
+
+    it('should prefer .codev/ override over codev/ local file', async () => {
+      const { resolveCodevFile } = await import('../lib/skeleton.js');
+
+      // Create file in both .codev/ and codev/
+      const overrideDir = path.join(testBaseDir, '.codev', 'roles');
+      const localDir = path.join(testBaseDir, 'codev', 'roles');
+      fs.mkdirSync(overrideDir, { recursive: true });
+      fs.mkdirSync(localDir, { recursive: true });
+      fs.writeFileSync(path.join(overrideDir, 'test.md'), 'override content');
+      fs.writeFileSync(path.join(localDir, 'test.md'), 'local content');
+
+      const result = resolveCodevFile('roles/test.md', testBaseDir);
+      expect(result).toBe(path.join(overrideDir, 'test.md'));
+    });
+
+    it('should use .codev/ override even when no codev/ exists', async () => {
+      const { resolveCodevFile } = await import('../lib/skeleton.js');
+
+      // Create file only in .codev/
+      const overrideDir = path.join(testBaseDir, '.codev', 'protocols', 'custom');
+      fs.mkdirSync(overrideDir, { recursive: true });
+      fs.writeFileSync(path.join(overrideDir, 'protocol.json'), '{}');
+
+      const result = resolveCodevFile('protocols/custom/protocol.json', testBaseDir);
+      expect(result).toBe(path.join(overrideDir, 'protocol.json'));
+    });
+
+    it('should fall through from .codev/ to codev/ when override missing', async () => {
+      const { resolveCodevFile } = await import('../lib/skeleton.js');
+
+      // Create .codev/ but no file there, file only in codev/
+      fs.mkdirSync(path.join(testBaseDir, '.codev'), { recursive: true });
+      const localDir = path.join(testBaseDir, 'codev', 'roles');
+      fs.mkdirSync(localDir, { recursive: true });
+      fs.writeFileSync(path.join(localDir, 'test.md'), 'local content');
+
+      const result = resolveCodevFile('roles/test.md', testBaseDir);
+      expect(result).toBe(path.join(localDir, 'test.md'));
+    });
   });
 
   describe('readCodevFile', () => {

@@ -15,13 +15,7 @@ import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './proto
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import { fetchIssue } from '../../lib/github.js';
-
-/** Locations to search for protocol prompts */
-const PROTOCOL_PATHS = [
-  'codev/protocols',
-  'codev-skeleton/protocols',
-  'skeleton/protocols',  // Used in packages/codev
-];
+import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -79,12 +73,28 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
 
 /**
  * Find the prompts directory for a protocol.
+ * Uses the unified file resolver (.codev/ → codev/ → skeleton/).
+ *
+ * We probe for the directory by checking for a known file inside it.
+ * resolveCodevFile works on files, so we look for the dir by checking if
+ * any prompt file resolves, then extract the directory.
  */
 function findPromptsDir(workspaceRoot: string, protocolName: string): string | null {
-  for (const basePath of PROTOCOL_PATHS) {
-    const promptsDir = path.join(workspaceRoot, basePath, protocolName, 'prompts');
-    if (fs.existsSync(promptsDir)) {
-      return promptsDir;
+  // resolveCodevFile works on files. Check if the prompts directory exists
+  // by probing for a marker — try resolving the prompts dir path directly.
+  const promptsRelative = `protocols/${protocolName}/prompts`;
+
+  // Check each tier for directory existence
+  const candidates = [
+    path.join(workspaceRoot, '.codev', promptsRelative),
+    path.join(workspaceRoot, 'codev', promptsRelative),
+  ];
+  // Add embedded skeleton dir
+  candidates.push(path.join(getSkeletonDir(), promptsRelative));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
     }
   }
   return null;

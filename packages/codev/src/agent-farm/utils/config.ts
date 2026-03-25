@@ -141,7 +141,8 @@ function getServersDir(): string {
 }
 
 /**
- * Get the roles directory (from codev/roles/, config override, or embedded skeleton)
+ * Get the roles directory using the unified resolution chain.
+ * Priority: config override → .codev/roles/ → codev/roles/ → skeleton/roles/
  */
 function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): string {
   // Check config.json override
@@ -152,20 +153,26 @@ function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): stri
     }
   }
 
-  // Try local codev/roles/ first
+  // Check .codev/roles/ (user customization)
+  const overridePath = resolve(workspaceRoot, '.codev/roles');
+  if (existsSync(overridePath)) {
+    return overridePath;
+  }
+
+  // Try local codev/roles/ (legacy local copies)
   const rolesPath = resolve(workspaceRoot, 'codev/roles');
   if (existsSync(rolesPath)) {
     return rolesPath;
   }
 
-  // Fall back to embedded skeleton
+  // Fall back to embedded skeleton (package defaults)
   const skeletonRolesPath = resolve(getSkeletonDir(), 'roles');
   if (existsSync(skeletonRolesPath)) {
     return skeletonRolesPath;
   }
 
   // This should not happen if the package is installed correctly
-  throw new Error(`Roles directory not found in local codev/roles/ or embedded skeleton`);
+  throw new Error(`Roles directory not found in .codev/roles/, codev/roles/, or embedded skeleton`);
 }
 
 /**

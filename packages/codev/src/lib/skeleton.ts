@@ -1,9 +1,10 @@
 /**
- * Skeleton resolver - finds codev files with local override support
+ * Skeleton resolver - finds codev files with unified resolution
  *
- * Resolution order:
- * 1. Local codev/ directory (user overrides)
- * 2. Embedded skeleton in npm package (defaults)
+ * Resolution order (first match wins):
+ * 1. .codev/<path>              — user customization (optional overrides)
+ * 2. codev/<path>               — project-level (legacy local copies)
+ * 3. <package>/skeleton/<path>  — npm package defaults
  */
 
 import * as fs from 'node:fs';
@@ -46,7 +47,12 @@ export function findWorkspaceRoot(startDir?: string): string {
 }
 
 /**
- * Resolve a codev file, checking local first then embedded skeleton.
+ * Resolve a codev file using the unified three-tier resolution chain.
+ *
+ * Resolution order (first match wins):
+ * 1. .codev/<path>              — user customization
+ * 2. codev/<path>               — project-level (legacy local copies)
+ * 3. <package>/skeleton/<path>  — npm package defaults
  *
  * @param relativePath - Path relative to codev/ (e.g., 'roles/consultant.md')
  * @param workspaceRoot - Optional workspace root (auto-detected if not provided)
@@ -55,13 +61,19 @@ export function findWorkspaceRoot(startDir?: string): string {
 export function resolveCodevFile(relativePath: string, workspaceRoot?: string): string | null {
   const root = workspaceRoot || findWorkspaceRoot();
 
-  // 1. Check local codev/ directory first (user overrides)
+  // 1. Check .codev/ directory first (user customization overrides)
+  const overridePath = path.join(root, '.codev', relativePath);
+  if (fs.existsSync(overridePath)) {
+    return overridePath;
+  }
+
+  // 2. Check local codev/ directory (legacy local copies)
   const localPath = path.join(root, 'codev', relativePath);
   if (fs.existsSync(localPath)) {
     return localPath;
   }
 
-  // 2. Fall back to embedded skeleton
+  // 3. Fall back to embedded skeleton (npm package defaults)
   const skeletonDir = getSkeletonDir();
   const embeddedPath = path.join(skeletonDir, relativePath);
   if (fs.existsSync(embeddedPath)) {
