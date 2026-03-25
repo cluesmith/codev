@@ -15,7 +15,7 @@ This plan implements a four-part configuration overhaul for codev: (1) a layered
 - [ ] All specification success criteria met (see spec for full list)
 - [ ] All existing tests pass after each phase
 - [ ] New tests cover config loading, layering, merge semantics, migration, and file resolution
-- [ ] Zero breaking changes for existing projects (backward compat maintained)
+- [ ] Clean migration path for existing projects (`codev update` migrates config)
 
 ## Phases (Machine Readable)
 
@@ -41,12 +41,12 @@ This plan implements a four-part configuration overhaul for codev: (1) a layered
 - Create a single centralized config loading module that replaces the two independent loaders
 - Implement layered config: global `~/.codev/config.json` → project `.codev/config.json` → hardcoded defaults
 - Implement deep merge semantics (objects merge, arrays replace, null removes)
-- Backward compat: detect and read `af-config.json` with deprecation warning
+- Error if `af-config.json` found — tell user to migrate to `.codev/config.json` (no backward compat)
 
 #### Deliverables
 - [ ] New `packages/codev/src/lib/config.ts` — centralized config loader
 - [ ] Deep merge utility with spec-defined semantics
-- [ ] Backward-compatible `af-config.json` detection and migration warning
+- [ ] Hard error when `af-config.json` detected — no fallback reading
 - [ ] Unit tests for config loading, layering, and merge semantics
 
 #### Implementation Details
@@ -56,18 +56,19 @@ This plan implements a four-part configuration overhaul for codev: (1) a layered
 Core functions:
 - `loadConfig(workspaceRoot: string): CodevConfig` — loads and merges config from all layers
 - `deepMerge(base: object, override: object): object` — implements spec merge semantics
-- `resolveConfigPath(workspaceRoot: string): { path: string; legacy: boolean }` — finds config file, handles `af-config.json` fallback
+- `resolveConfigPath(workspaceRoot: string): string | null` — finds `.codev/config.json`, errors if `af-config.json` found
 
 Config resolution order:
 1. Hardcoded defaults (base)
 2. `~/.codev/config.json` (global, merged on top)
-3. `.codev/config.json` (project, merged on top) — OR `af-config.json` with deprecation warning
+3. `.codev/config.json` (project, merged on top)
 
-Error handling per spec:
+`af-config.json` handling: If `af-config.json` exists in the workspace root, emit a hard error: `"af-config.json is no longer supported. Run 'codev update' to migrate to .codev/config.json."` Do not read it. Do not fall back.
+
+Error handling:
 - Missing file: not an error, use defaults
 - Invalid JSON: fail hard with clear error
 - Permission error: warn, fall back to defaults
-- Both `af-config.json` and `.codev/config.json` exist: use `.codev/config.json`, emit info message
 
 **Modify: `packages/codev/src/agent-farm/utils/config.ts`**
 - Replace `loadUserConfig()` internals to delegate to `lib/config.ts`
@@ -85,13 +86,13 @@ Error handling per spec:
 #### Acceptance Criteria
 - [ ] `loadConfig()` returns correct merged config from global + project layers
 - [ ] Deep merge: objects merge recursively, arrays replace, null removes keys
-- [ ] `af-config.json` detected with deprecation warning when `.codev/config.json` absent
+- [ ] `af-config.json` present → hard error with migration instructions
 - [ ] Invalid JSON fails with clear error message including file path
 - [ ] All existing agent-farm and porch tests pass
 - [ ] New unit tests for `lib/config.ts` cover all merge edge cases
 
 #### Test Plan
-- **Unit Tests**: `tests/unit/lib/config.test.ts` — merge semantics, layer priority, error handling, `af-config.json` compat
+- **Unit Tests**: `tests/unit/lib/config.test.ts` — merge semantics, layer priority, error handling, `af-config.json` rejection
 - **Integration Tests**: Verify existing agent-farm and porch functionality unchanged
 
 #### Risks
@@ -219,14 +220,12 @@ Type: `string | string[]` — normalized by config loader.
 #### Objectives
 - `codev init` no longer copies framework files (protocols, roles, consult-types, templates) — only user data dirs and Claude-specific files
 - `codev adopt` creates `.codev/config.json`, leaves existing local files in place
-- `codev update` performs one-time migration, then becomes a no-op
-- New `codev adopt --update` flag for refreshing Claude-specific files
+- `codev update` performs one-time migration (move config, clean unmodified skeleton files) AND always refreshes CLAUDE.md/AGENTS.md/skills from the package
 
 #### Deliverables
 - [ ] Updated `codev init` — minimal project creation
 - [ ] Updated `codev adopt` — creates `.codev/config.json`, detects existing files
-- [ ] Updated `codev update` — migration tool (move config, clean unmodified skeleton files)
-- [ ] New `codev adopt --update` flag
+- [ ] Updated `codev update` — migration + Claude-specific file refresh
 - [ ] Tests for init, adopt, update migration
 
 #### Implementation Details
@@ -241,25 +240,25 @@ Type: `string | string[]` — normalized by config loader.
 - Same changes as init for file copying
 - Add: create `.codev/config.json` if not present
 - Detect existing `codev/protocols/` etc. — leave in place (resolution order handles it)
-- Add `--update` flag: only refresh `.claude/skills/`, `CLAUDE.md`, `AGENTS.md`
 
 **Modify: `packages/codev/src/commands/update.ts`**
-- Replace current logic with migration:
-  1. Move `af-config.json` → `.codev/config.json` (if applicable)
-  2. Read `codev/.update-hashes.json`, identify unmodified skeleton files, delete them
-  3. Preserve user-modified files (they become local overrides)
-  4. Update Claude-specific files from package
-  5. Remove `codev/.update-hashes.json`
-  6. Emit summary report
-- On subsequent runs: detect migration complete, emit "Already migrated" message
+- Replace current logic with two responsibilities:
+  **A. One-time migration** (runs once, then skips on subsequent runs):
+    1. Move `af-config.json` → `.codev/config.json` (if applicable)
+    2. Read `codev/.update-hashes.json`, identify unmodified skeleton files, delete them
+    3. Preserve user-modified files (they become local overrides)
+    4. Remove `codev/.update-hashes.json`
+  **B. Claude-specific file refresh** (runs every time):
+    1. Update CLAUDE.md, AGENTS.md, `.claude/skills/` from the installed package
+    2. Emit summary report of what was updated
+- On subsequent runs: skip migration (already done), still refresh Claude files
 
 #### Acceptance Criteria
 - [ ] `codev init` creates `.codev/config.json` + user data dirs + Claude files only
 - [ ] `codev init` does NOT copy protocols, roles, consult-types, templates
 - [ ] `codev adopt` creates `.codev/config.json`, leaves existing files
-- [ ] `codev adopt --update` refreshes only Claude-specific files
-- [ ] `codev update` performs full migration on first run
-- [ ] `codev update` is a no-op on subsequent runs
+- [ ] `codev update` performs migration on first run + refreshes Claude files
+- [ ] `codev update` on subsequent runs: skips migration, still refreshes Claude files
 - [ ] Migration preserves user-modified files, removes unmodified skeleton copies
 
 #### Test Plan
@@ -293,18 +292,10 @@ Type: `string | string[]` — normalized by config loader.
 
 #### Implementation Details
 
-**New file: `scripts/forge/github/repo-archive.sh`**
-```bash
-REF_PART="${CODEV_REF:-HEAD}"
-gh api "repos/${CODEV_REPO}/tarball/${REF_PART}" > /tmp/codev-archive.tar.gz
-mkdir -p "${CODEV_OUTPUT_DIR}"
-tar xzf /tmp/codev-archive.tar.gz -C "${CODEV_OUTPUT_DIR}" --strip-components=1
-rm /tmp/codev-archive.tar.gz
-```
-Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mentions Bitbucket, but the actual codebase has `gitea` as the third forge provider. We implement for the existing providers: github, gitlab, gitea.)
-
 **Modify: `packages/codev/src/lib/forge.ts`**
 - Add `'repo-archive'` to `KNOWN_CONCEPTS` array
+- This concept is how `codev sync` downloads remote framework sources. It fetches a tarball of a repo (or subpath) and extracts it to a target directory. The existing forge infrastructure handles provider detection (github/gitlab/gitea) and script dispatch — `repo-archive` is just a new concept script in each provider's directory, following the same pattern as `issue-view`, `pr-list`, etc.
+- Add `repo-archive.sh` script to each existing forge provider directory (`scripts/forge/github/`, `scripts/forge/gitlab/`, `scripts/forge/gitea/`)
 - Support subpath extraction: when source is `owner/repo/path`, fetch full archive then extract only `path/` into `CODEV_OUTPUT_DIR`
 
 **New file: `packages/codev/src/commands/sync.ts`**
@@ -360,7 +351,7 @@ Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mention
 **Dependencies**: Phase 1, Phase 4
 
 #### Objectives
-- Update worktree symlink from `af-config.json` to `.codev/config.json`
+- Update worktree symlink: rename `af-config.json` → `.codev/config.json` in the symlink list
 - Remove all dead code: old config loading paths, `PROTOCOL_PATHS` arrays, obsolete update logic
 - Ensure all tests pass end-to-end
 - Final integration testing
@@ -375,9 +366,8 @@ Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mention
 
 **Modify: `packages/codev/src/agent-farm/commands/spawn-worktree.ts`**
 - Update `symlinkConfigFiles()` (lines 41-55):
-  - Change symlink list from `['.env', 'af-config.json']` to `['.env', '.codev']`
-  - Symlink the entire `.codev/` directory (so `config.json` and any user overrides are available in worktree)
-  - Keep `af-config.json` symlink for backward compat if the file exists
+  - Change symlink list from `['.env', 'af-config.json']` to `['.env', '.codev/config.json']`
+  - Ensure `.codev/` directory exists in worktree before symlinking the config file into it
 
 **Cleanup across codebase:**
 - Remove `PROTOCOL_PATHS` from `protocol.ts` and `prompts.ts` (done in Phase 2, verify removed)
@@ -392,8 +382,8 @@ Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mention
 - Verify porch runs correctly with new config and resolution
 
 #### Acceptance Criteria
-- [ ] Worktree symlink updated to `.codev/` directory
-- [ ] No remaining direct `af-config.json` reads (except backward-compat detection in config.ts)
+- [ ] Worktree symlink updated to `.codev/config.json`
+- [ ] No remaining direct `af-config.json` reads anywhere in codebase
 - [ ] All existing tests pass
 - [ ] No dead code from old system left in codebase
 
@@ -404,7 +394,7 @@ Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mention
 
 #### Risks
 - **Risk**: Worktree symlink change breaks existing builders mid-session
-  - **Mitigation**: Keep `af-config.json` symlink as fallback; only add `.codev/` symlink. Unified config loader already handles both.
+  - **Mitigation**: Existing builders will still work until their session ends. New builders get the new symlink path.
 
 ---
 
@@ -432,13 +422,13 @@ Phase 1 (Config Loader) ──→ Phase 2 (File Resolver) ──→ Phase 4 (Ini
 ### Backward Compatibility Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| Existing `af-config.json` projects break | L | H | Auto-detection with deprecation warning; full backward compat |
+| Existing `af-config.json` projects break | L | H | `codev update` migrates config; hard error with clear migration instructions |
 | Projects with local skeleton files break | L | H | Local files still take precedence in resolution chain |
 | Worktree symlink change breaks active builders | M | M | Keep old symlink as fallback alongside new one |
 
 ## Validation Checkpoints
 
-1. **After Phase 1**: Config loads correctly from `.codev/config.json` with `af-config.json` fallback. All agent-farm commands work.
+1. **After Phase 1**: Config loads correctly from `.codev/config.json`. `af-config.json` produces hard error. All agent-farm commands work.
 2. **After Phase 2**: All file resolution uses single `resolveFile()`. Porch loads protocols correctly.
 3. **After Phase 3**: Consultation models configurable. Single-model mode works. `"none"` mode skips consultations.
 4. **After Phase 4**: `codev init` creates minimal project. `codev update` performs migration.
