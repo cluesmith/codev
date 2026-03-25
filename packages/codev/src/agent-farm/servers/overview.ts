@@ -451,6 +451,14 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const tickMatch = dirName.match(/^tick-(\d+)/);
   if (tickMatch) return tickMatch[1];
 
+  // AIR: air-633-slug → "633"
+  const airMatch = dirName.match(/^air-(\d+)/);
+  if (airMatch) return airMatch[1];
+
+  // ASPIR: aspir-633-slug → "633"
+  const aspirMatch = dirName.match(/^aspir-(\d+)/);
+  if (aspirMatch) return aspirMatch[1];
+
   // Bugfix: bugfix-382-slug → "bugfix-382" (porch uses this, not "builder-bugfix-382")
   const bugfixMatch = dirName.match(/^bugfix-(\d+)/);
   if (bugfixMatch) return `bugfix-${bugfixMatch[1]}`;

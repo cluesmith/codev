@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The SPIR Protocol</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Google Sans Flex', sans-serif;
+    background: #1a1a1a;
+    color: #e4e4e7;
+    padding: 60px 40px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 48px;
+    font-weight: 700;
+    color: #fafafa;
+    margin-bottom: 56px;
+  }
+  h1 .accent { color: #818cf8; }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .phase {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ─── Arrow header ─── */
+  .arrow {
+    position: relative;
+    background: #818cf8;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+    padding: 14px 20px 14px 28px;
+    width: 100%;
+    clip-path: polygon(0 0, calc(100% - 24px) 0, 100% 50%, calc(100% - 24px) 100%, 0 100%, 24px 50%);
+  }
+  .phase:first-child .arrow {
+    clip-path: polygon(0 0, calc(100% - 24px) 0, 100% 50%, calc(100% - 24px) 100%, 0 100%);
+    padding-left: 20px;
+    border-radius: 6px 0 0 6px;
+  }
+  .phase:last-child .arrow {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 24px 50%);
+    border-radius: 0 6px 6px 0;
+  }
+
+  /* ─── Emoji icon ─── */
+  .icon {
+    font-size: 48px;
+    margin: 24px 0 16px;
+  }
+
+  /* ─── Bullet list ─── */
+  .bullets {
+    list-style: none;
+    padding: 0 20px;
+    width: 100%;
+  }
+  .bullets li {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.45;
+    color: #d4d4d8;
+    padding: 6px 0 6px 20px;
+    position: relative;
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #818cf8;
+  }
+
+  /* ─── Footer logo ─── */
+  .footer-logo {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .footer-logo img { width: 28px; height: 28px; opacity: 0.5; }
+  .footer-logo span {
+    font-size: 18px;
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    color: #52525b;
+  }
+</style>
+</head>
+<body>
+
+<h1>The <span class="accent">SPIR</span> Protocol</h1>
+
+<div class="columns">
+
+  <!-- Specify -->
+  <div class="phase">
+    <div class="arrow">Specify</div>
+    <div class="icon">📋</div>
+    <ul class="bullets">
+      <li>Builder drafts spec (the what)</li>
+      <li>3-way review (Codex, Gemini, Claude)</li>
+      <li>Builder addresses or rebuts feedback</li>
+      <li>Spec block on final human review + approval</li>
+    </ul>
+  </div>
+
+  <!-- Plan -->
+  <div class="phase">
+    <div class="arrow">Plan</div>
+    <div class="icon">🗺️</div>
+    <ul class="bullets">
+      <li>Builder drafts plan (the how)</li>
+      <li>Breaks down project into phases</li>
+      <li>3-way review</li>
+      <li>Builder addresses or rebuts feedback</li>
+      <li>Plan block on final human review + approval</li>
+    </ul>
+  </div>
+
+  <!-- Implement -->
+  <div class="phase">
+    <div class="arrow">Implement</div>
+    <div class="icon">🔨</div>
+    <ul class="bullets">
+      <li>For each phase:</li>
+      <li>Builder implements phase</li>
+      <li>3-way review + run test suite</li>
+      <li>Repeat until tests and reviews are good</li>
+    </ul>
+  </div>
+
+  <!-- Review -->
+  <div class="phase">
+    <div class="arrow">Review</div>
+    <div class="icon">🔍</div>
+    <ul class="bullets">
+      <li>Create a PR</li>
+      <li>Final 3-way review</li>
+      <li>Verify product meets criteria in spec</li>
+      <li>Write review</li>
+      <li>Update architecture / lessons learned</li>
+      <li>Tell architect it's done</li>
+    </ul>
+  </div>
+
+</div>
+
+<div class="footer-logo">
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQAAQAAAABXZhYuAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACdFJOUwAAdpPNOAAAAAJiS0dEAAHdihOkAAAAB3RJTUUH6gIXEyMNEn249wAAFzlJREFUeNrtnVvOtKyWx7FN2r7jti86TQ9hD6ATprKHse90aAyFIXBZF5WyH5XD4mAJCFbSWf98+d6nrFJ+wDooIhKCQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoVKVG8WOAaf05wPu3AOO6qh8W/z8bwCp+B6B2gM/Pyh9fZPgDWF+/AqAaYJU/AuAGYF1+A7C1/QHwG18ct3IPgN/YIY0BnjUH5gBeZsv6ZGiet4rP0A2e9YhhdQBi3zI9aw4TADi2MADzgNgOwIEXevbQX/Ne8x1A7RvGA+ApMxxWByD2LVQDyGcApgOAuTrz9VsfjK3jNTtyAAtN4KwPWOszl9kBKF3F9VsftHbQQWdBagukFiCVmsbW1jkCgGXfwtdvfUBbRwiqgw61TevKT/UBb+0e3AG8QJOc9oELF6X63/TmVQNMsQmkzpDG+hjJk1tH09ZTwgQSdaX1502zTG2lDiA2gURRvD5RzsmG4wZgTJhAog9uZIk0t23qMWUCUR+MJ6aRBZDabQQAC2wSo4Ca1gMMSe+hFmBImUAUdHhqYzZAwnhd4huSJhC63FoPkI7hrphBek2S7oPpPEJmAUTgA6jn4jVJug/oDYApFVYmAHBojgBgHxg8lVFgqqzICFgYcIaofK8P1hsANOU+cwgwxQCgD6yF1iQDmug7V18DwBIAL/8YtQAssaOrr2nnOQHgnIeHvMUAn8Q2CDCkyrd9EDdYiXjkU7C+n7BJUn0QN1g5gIKbYH3DJkn1AbsFMMdtN0ZlzGkAGX1bDeDtSUOAtAkY7Ji3SH5lQK+AI04nAEf8oOGGKoBXvMkdkZ0BvML+KQcwrQvMZ4wA5jOA7WuveUQ1AGCnIcBwWv5mBfM9AFtdlTSBHWBasyXrAZwjekf8agItACavqMgE1u8mEEndADDd55nAJ2qS1gA02tdr8DdJnI9+UXk+dgDJzPsmifPRpgCgvksC4EWKbLAiH4Ojy2MLD/t07goAitPNN4UABeVX5GNY32OLF/fk1zjYAgC2r4h6ZdtU4gQV+RgCyLgPRFEgrgFYYwC4bSnzwop8nAJg3vFYVwDPwrQNwF4npQCiBYAzjM2oeVeA+OzH64MPKYtD5fk4DeCdJBSVXwzg+ZjbPFcDqDYAVG95FQbCcgAK9gVhdHAAZYGwOB+HAP+lt3Nbn84ADOy7dThfPDBZGomL83EEIL0+6A/Ag9ab394XojQVFOfjCMAEg8kAsL4AM9j3z+KI86N901IMUJqPYwBTBaaPxvsCwF3lYXvi+GasBFhuAxhPnmtyUSlAmI3hxC12/FlYfmE+TgGAPijPRaUAYTbenc/1wbs4F5Xm4ySAMWRakQxLAcJsTGErjhW5qDQfpwFsH/QHoGDPzeSZRdm/lcW5qDQfnwDofhxEcS4qBWBgzz0buz8TiFkqy8cnAGv6Fx0AONjzyMZeH9QAlOXjM4B38hcdAGawpyIg7i6pX+SpDYD6AYCEcdc2ZHH5Zfn4FMAe5kEA4cVd3QfFuagwH58D6D4oTgU3AJZoeKoOQJYA8HOAow+Kc9ENAJK6Vq4AUJUAnwDg6ANaVPZtAAYPtOdVVlS2268C4B0V9wQAOP6bhJlHkIpcVA/wiop71QEUnRAEALN3pJoLsxsAqhVA0QlBABAfqbz8MgDq9pNRcTUXZpvqAYLiHgYQUXHlo5SHlmqAoDj1LMCSAqjIRWUnBKCAJSpOPgtAouJElAxfWXFBVgMExcUAS1ZyqgP4kERxQXmvvD5RBQDO7KLTgR2Ahxty3KIOID4diEYpt3SVE5ny8/E/AgC/vlEuWrZ9ugG8LgGO487XAPn5+F8BwBwdJ2qAnDOUEgDXpSoFAHtcZ1l2DZCfj0OAqCsH/+Mm2hLgBUqQkYUr3+lkNkB+Pi4CEMc+OZEot/zhDcoUUZCRfmmHDWZFoiUfgOQDmJ0aAoxvf1TqazIsGbMRzQCY+/TuADC9/Sf4qH+YJbpu2TVfA8hcgA84XAxAUtOsskJhLgAFAIls7BemzF7sGkBlArCvAEEusrWifQDS2Rh8tIaVEYly8/F3gPcJQEYkygXgqys0mY1h0FnMXhmRKDcffwd4pab5twWYAYAiYYhRqYFTQnIiUW4+rgSYmwFsHWsAZNS20jN40Kr8EiAzHw/wSicJQD2LMGJdAETkX8IDUG4/eg2wtABYohEkrYxAkAcwQoAlCnFLas6xBm8GIL4A+OYmPOO9ksgCmPRz1aY4+g0A1ml+BCBIhhCAXwLILAAKANLZ2G8PK/YIgJ8Mt+//E+x4IZUFwPST5aY4v2X9XLR/D6z3cYA9WZqGvfbDvBMCDgDibKy8mm7fu8M+BTB5n4izRH4FkHdCMG/HnWABUNIDkHvDmz5gDQHGLwDUfRJ2ZtcmegWQd0KwAgB5kY2Xoz2WY89LN2gBILyWJgeA7oNrN8gpf4AAInU64ADMMOrbsX/XkgnwOgdYoLHbUczFms99gHEHcOuexacDrhg7iKgy3UA0BlAG4J3pBjkAEwQgqdEB90HaZl/y3KAUIDFW75masJ9UnhvIDAC6t6gDYCGAP6VGfzpZEaMe4DjU+wIAtPrRB/wCQGUAsACAnwN8AIDKcoNSgFcKwB9JN07yyXKDnHzMA4D5HEDBIkWOG+QCmCESRRK37v01sGyjqxw3yMnHcwCwngMssIc+OW5QCiDjQ0IA83PQB/w7QE4+Xn2AIQKwW95+lXOm92QADLqYWVfqC0Bwu+6T4wb5AFwDjPERzJ8yMPscNygEWL4CbJ0e3jm4coPlEmAMAKYYYAYF0gDgyg0KAUgSgB9/vUOjIxluIC4BJg1qAGhwhMVueoXlkQw3yAfYDvRJA+hG2WzQi5Mkww2uAWgAwGKAAZS3hgAXbiCLABKnA3sVZmsCQwQw3AVgAQBPAFB7qDECIG0AjiGS1Lw9aWoZ9zjJcAN1CcADgDlVBWYyO+ygrNvoZQAqAXAcgX/i6n6gEdUDzAHA9yPMMcDYEEAmjNo7qfK+/bpKVD6A6enpBOB0haTv62Ql+S8BRKJBk0vPmW/+I7SLcoDhCuB8bPSjn05m7QCW1O3IBfyaBwD/HTVLMYAdnDoFEFF/OQC2kAs3yAfQyxPS6BAyai4AIMiFG6grgOkSQEU/BgA73dwKIJWNvUakEYCKLKMUgF4CnN4p3ACi07RagJcZAE3U5sQGd4DLa4NLAGYAhlMAERgsaBp2eW0gSwBS2Xg9nzOxA1y5wSUAvwY4m7ayA8i4a+oBVPpYZ1OX3naBbn4OIK4AZnuw80WP9EGmFMCVGxQByJPuVMkeOACu3GC5AlgzAI4+SJ0p8MtL5CIAcXYomWznA+DCDa7KH7IA0jOZ3/p+1zc3uBwhAasSzulsrCuSqOQBEF2yhr/5LlOvK4CTg/P1wg3KAEjZM20HwHc3yD0juwHw3Q3UFYCJAxtAOhuf63UAfHUDcQlgStRXXxUAX91guQRw78PgJ9n4CkB9cYPcgdJbAN/cIHew/AA4ycZXAN/cQGYATKazWCXANze4NgHibhjuZ7gF5VuAczfIu3c93wU4d4O8CRTMAMjCh+pe4C5H2npzTMC9paMa4NwNssrXrScIFYUP1RmAUzfIn9N6D+DUDVQmwKQBlsKH6l5ugCndeSITYLgLcOYGmeUfh/kDIGXZ2AGcuEH+Y0Zsr8VUDXDiBrkmYObF/Dspy8ZbAQfAiRvkmsDRf3cATtwgv3x7dl32iLsDEORqhPNC9CaA1M3oSRYA2BdoznUAKgW/FAD8HegWQMoNyhbjMS/iKil/2wUWRv1vy1aEmu4BpNygxASImaZZ9oy98u8qBzsXmYA+I60HkFHzlS7QSF+JVswH2DuQ15vA/ibVOwCxGxSawPbYKSl9xh4AxG5QaAJ6vnY1QOQGlW+3o9UAgiQfze0LIAHA3uV3TOAQqwZQ2+7zDRO4CxC4Qe0LDnk1QOAGta/krQfY3cA5kaoEmAsBgN0LAt1APg+wF2k/LZUAReX7AMqrQGX5hQAifPjEukGtExQuuSNOp9bVvgS3cMWbJXoU1LiBegbA7zMBmlBWApQlw9QD0QDmGQDuPu7NPpvOeaILgnlf0A0qyy/0AjjNevXcoP5du0UAisQzTCfXGFWaSwHCZ8IH2zZ14iUAMkCWtg1VNQArARABsrJAshqAlgAsAbKbaC2qAYr8cAdIukE9QJEfRsgWaKkGKPHD+I62IHDuZZ3mfIB3tIfUVbjzzm9eDAD2UBqoPg4V+WG8LpLJBvVxqMgP1bFHwg3UDYCChKyLSbiBvAFQEAj+itkGd4O3Pm1uIG4AFASCv2K2Af7oivRWGCjxw0XPJuR+FxyzAOrFSwD2t71Q3wj1/LZqsWwAcrxVIHq7K70TBgr8cD8n3jzeX1bvD0jdAnC3si8A9mUJ/Lcu6pdyy1sAoz3UNcAQPPt1JwJaDcbArprgpdcvAXZ7r+2NrDVdBEW1t9bW3NZs7rW90WzacrgEmI5KW1LRBIDbqsxfAeRede/Vm20A2Gpi6XcjEDuA5wZLE4CtR4+/vhvBchDCpmpS/lasDmXjFQDXzc6aAgzOn/ejvk9aQtdcEgLXUGkh588zqGkoMzqhXF/dywFOs/Vnvp6/YdYsEPMm1mFbAXDrTmw9n5tgVksDbtAkEu/FLvovusYXgEYv96yoN42hgai15unLuwuU6RlhAWVVcbEma82jzbBJgMkWS5sCjNaY3JovMYA0xSrbQqIRwOCMyUbX2BGFAXBusDQCIMr+ZU9wYytczEbnBs0A/ukAzhe9WcBMSO0GrcrfNe2H46Y3khNUZtsZ9oHZdjrC4fEQD0mcnIBxYqlbqCmAfuDleIxp01kkBm7QKhLrHjieuhKuRdKRGLhBq0i8ix1mtk1vOxT64cublb63RlMAfvTt5BElI7FzA9USYD7K+De7gcYA3skwaxeJNw1r2KRhOpLB5QBtF4k3jca4/C2pSLza+wYtASZrXFvrpgAWYBbaDZaGANQa1wYDzroSkdi6QcPy7YoAm/jxx2kk1j+8OTATiAGANbU8i3/HTpDbAzOBuD2uXjEr9XIbzyXuDswEmh2AifJ+KPRXEN7doCmAq9jJi279V7vsVtoyEg8AgIdOZwJhuICvag+gbG+IBEBiNftmAksVEtMW1AOQqXe/tRNYLXIwKD6ASL7RoJmoA7Cjdj7A0mTi2KkY8C5j5lMIAENTUxck4EFccPHhA4BfWTfoA8BMAfHiE9AvlrYAs2tYZmrsAexNDq1CtAUAxfBzgH5uAM+3Z9PEHkA0ktrWDUYAYPvYOyNRsKHauwEAMMWKFEA3N5guAeT+u25uQB3AmAYQ3u+auwFzAJOr8hrVt5sbcAdAvwF0cwMAwNIA+oe93GB2teIO4J+uy43N93KDNQZQ23YGqytJPzcAADMEGAHAsG3p5AbWtlTw/ALsm9G/Z9rUDQDA4ANQ92n8kG5uAEodfYDR1fYYxuvjBqNr1ckHADNGqX/PtKkbnAOAoUnmr5na1A3AfUgaADBbFvNXjW3qBmDwiQUA1ALwtZ8bTK5ReQCgv9o7Ixw3aecGFgAMCijYO3p0YtvQxQ0AQNS+tqh17ecGYEHkCGDWAMO69nMDd0YWPzDBdW+PazB1oKUbmIO+gJEbAKYNwowcjX0BpujgVNNMutOTr5pqBaBAnAkBqPZGOHjWqnxwIsoiAP2c/gGwVZl3BACB0DbvqD8wYxjuJ+3dEARCCzDoD9xEJ2cm7QPRAjqY6HuIZtLuvEZu0C4Uu8VpYP+OdlzGjhP7btAc4OMvWU/tuwvcRTMhcbpoB/D25+lxO2btrlm3JrF2IpsBDHEgfNu253CceCvTuoFoDaCAhb+s9XE4Try1euOJZB6AC4T6/FjsFVbeUKptpqUZgB2sd0FG2hjM4MCx5wbtyre3KzgAYLrJqXfHzv266dXpHMUhHZWPIePFWd7W7Lw9ANe1cwCLPROh3h27v94wMC0HCJiuEQyEsy5k8u7Y/fUJNMimAG8/EJp/J++OHXCDlgA0DoSDA4CvOQNuoBoCTEeNYKYdTVeM/h07YptDNgQYwzj0ggDeHbuFeHc5G2kAsUc3r53wPfp37LZ6s+YA5CgrCoTHmLUKn/CebFs0E1/tCxVgHDpGbCXxOse9gKGh2O7yMBByByDCRxqG9gCTv7qDOz3dAJbwLWPmRSwNdTwoEwVCC8AhG1gisGEffEgiEB5Pu5Po8TLWOBBqxYFwBwiedlbEvBOruRKBcKsvuJMF3UD1BHjB+xbBbArjBrI9AAyE1AG426meG4ieABLet1AknrvAuwC4aooQIBwXYe3nUHgACzwF+/vPGxfRLdK+fA9gtgDD3tYAQLtBBwBn6nDhp2Hxv9MDpq0nEHiFgMtkAxC5QespFB4AODuU+jsKADYi3iEQOoBXDBC5QQ8AG2/BZbIBiNxA9QWgsLa7QjeQ1cVkAMjEIEToBl0BwGWyBQjdoIcsABgvXMyXoRt0BfBYtLqMkp8AwMvk/Yvt5S3QDWR3AP9S8JhnPD8HAALhEfG5IJ4b9AYAl8lHxN9fuQ3cQHQGAHFIAyjinRQtnQGkP4tdL28O3KBT+baXoxu4LLhZ1B/AGpzcv6D+KHmPcxEPYIFZYdO0m52l6nEu4gEEiyBu3b+BsO4ALA6Ey/7F4I+S9zgXgQDvMBD+AXluoHoBUFPBIBDqNz2AE9XeAFPY29xzg24A9l1XNARg3s0i0RkgCoRb20jXQt0isen6eCaLXlrY9Eyv8g3AEt+Ymzw36AZgXy1qA6HQFwAjfNy6WyR2twhgHNor7C2+0S0Q2vvDAwCYzAuR//6vu6YjAD+O7zK/uWtI4OPW3SIxMTfKYCDk5tb1hjH1jcR2vggMhKu5ee/cQPYDMO91cHHIzJ+YgRt0BNDzRZgDMDeQOXAD0Q9ANzgIhJOuMgc3i5aOALN9ZxPMCtK+bIB2DYTEOB0IhEybPQNu0BNg1BZn45B2TLP42tg3EhM9+AXikA5NG4Bxg46B0AjEoVkD0NW6wbMA5l+62mzQMRJr2VwE7mDT1d4sUs8BgBvIdLVuIJ8DUG5Sr3kQdnwUQPoA2g1Ed4B4ovfiItDcNRJHAMwD2OrOnwSwp8eLTUpg3ZwHAMCTd5M5FZr6RmIP4AOevJtW4wYPBELw6J0PsFf+QYCXdUgNsHf/v54EGBMA/3gOQIHZtg7gAbk79zRhAw8CiBDgAfvb5UyP+QD9zwR8ADhy+SOA2QdQzwKAcQLicsEj8k/IHIB4FuAFAeijALOOQyAr0cMUHgVw4wSfBy4KPfE0wFOB0M3YNIHw/TQA084PANiDkdgtjmQi8avb9LkTmdRnANTTACNodw3AH4zEbokwk4skXE/3EYFq6wjInwyEdkFYADA/C8BdtXUInp+MxHZAxgCQo1OeK39zAzCRVK/H9VwgJGZwfLaBcHgagOml1yDAc5HYaraR2Dzx+hsA1W0icyaAPADULwHGZyNxACDI7obieQBuA2GnmdSZAPrP5VcA5l0pz5cPb5T2mUl9JeYA+kxkzgM4AtAvIjFYIrvTROY8AHm0xi8A4NLgXSYy5wEs+99dJjJfaQQAx1MGD6vDI2UVAL/wfysbh36l+TcnQk7PXpImRH9zHuI0PXtBFmv4sRNsVqh+CzD9tgdQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBQKhUKhUCgUCoVCoVAoFAqFQqFQKBTq/4/+Dzu5vDkWZ6RxAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDI2LTAyLTIzVDE5OjAwOjQ3KzAwOjAwrFrFXAAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyNi0wMi0yM1QxOTowMDo0NyswMDowMN0HfeAAAAAodEVYdGRhdGU6dGltZXN0YW1wADIwMjYtMDItMjNUMTk6MzU6MTMrMDA6MDBJdtsNAAAAAElFTkSuQmCC" alt="CodevOS">
+  <span>Codev<strong style="font-weight:600;">OS</strong></span>
+</div>
+
+</body>
+</html>

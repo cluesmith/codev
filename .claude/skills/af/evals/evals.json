@@ -1,0 +1,35 @@
+{
+  "skill_name": "af",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Spawn a builder for issue 71 using the ASPIR protocol. I want to call it e2e-staging-tests.",
+      "expected_output": "Should run `af spawn 71 --protocol aspir` without trying -t, --title, --name, or any flag for naming. Should note that branch names are auto-generated.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Clean up the builder for project 42. The branch wasn't merged yet so force it.",
+      "expected_output": "Should run `af cleanup -p 42 -f` (plain number, not 0042).",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Send a message to builder 42 telling it to check the failing test and include the test output file at /tmp/test-results.txt",
+      "expected_output": "Should run `af send 0042 \"check the failing test\" --file /tmp/test-results.txt` (zero-padded ID for send).",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I need to restart Tower to pick up new code changes.",
+      "expected_output": "Should run `af tower stop && af tower start`. Should NOT try `af tower restart` which doesn't exist.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Spawn a TICK builder for issue 88 that amends spec 45. There are uncommitted changes but they're not relevant.",
+      "expected_output": "Should run `af spawn 88 --protocol tick --amends 45 --force`. Must include both --amends and --force.",
+      "files": []
+    }
+  ]
+}
