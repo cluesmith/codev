@@ -25,6 +25,7 @@ vi.mock('node:fs', async (importOriginal) => {
     writeFileSync: vi.fn(),
     chmodSync: vi.fn(),
     symlinkSync: vi.fn(),
+    mkdirSync: vi.fn(),
     readdirSync: vi.fn(() => []),
   };
 });
@@ -502,15 +503,17 @@ describe('spawn-worktree', () => {
   describe('symlinkConfigFiles', () => {
     const config = { workspaceRoot: '/projects/test' } as any;
 
-    it('symlinks .env and af-config.json when they exist at root', async () => {
-      const { existsSync, symlinkSync } = await import('node:fs');
+    it('symlinks .env and .codev/config.json when they exist at root', async () => {
+      const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');
       vi.mocked(existsSync)
         .mockReturnValueOnce(true)   // .env exists at root
         .mockReturnValueOnce(false)  // .env not in worktree
-        .mockReturnValueOnce(true)   // af-config.json exists at root
-        .mockReturnValueOnce(false); // af-config.json not in worktree
+        .mockReturnValueOnce(true)   // .codev/config.json exists at root
+        .mockReturnValueOnce(false)  // .codev/ dir not in worktree
+        .mockReturnValueOnce(false); // .codev/config.json not in worktree
       symlinkConfigFiles(config, '/tmp/wt');
       expect(symlinkSync).toHaveBeenCalledTimes(2);
+      expect(mkdirSync).toHaveBeenCalled();
     });
 
     it('skips symlink when file already exists in worktree', async () => {
@@ -518,8 +521,9 @@ describe('spawn-worktree', () => {
       vi.mocked(existsSync)
         .mockReturnValueOnce(true)  // .env exists at root
         .mockReturnValueOnce(true)  // .env already in worktree
-        .mockReturnValueOnce(true)  // af-config.json exists at root
-        .mockReturnValueOnce(true); // af-config.json already in worktree
+        .mockReturnValueOnce(true)  // .codev/config.json exists at root
+        .mockReturnValueOnce(true)  // .codev/ dir exists in worktree
+        .mockReturnValueOnce(true); // .codev/config.json already in worktree
       symlinkConfigFiles(config, '/tmp/wt');
       expect(symlinkSync).not.toHaveBeenCalled();
     });
