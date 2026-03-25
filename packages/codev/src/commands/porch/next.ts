@@ -62,12 +62,8 @@ const VALID_MODELS = ['gemini', 'codex', 'claude'];
  */
 function resolveConsultationModels(workspaceRoot: string, protocolModels: string[]): { models: string[]; mode: 'normal' | 'none' | 'parent' } {
   let configModels: string | string[] | undefined;
-  try {
-    const config = loadConfig(workspaceRoot);
-    configModels = config.porch?.consultation?.models;
-  } catch {
-    // Config load failed — use protocol defaults
-  }
+  const config = loadConfig(workspaceRoot);
+  configModels = config.porch?.consultation?.models;
 
   if (configModels === undefined) {
     return { models: protocolModels, mode: 'normal' };
