@@ -15,7 +15,7 @@ import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './proto
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import { fetchIssue } from '../../lib/github.js';
-import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
+import { resolveCodevFile } from '../../lib/skeleton.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -72,43 +72,15 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
 }
 
 /**
- * Find the prompts directory for a protocol.
- * Uses the unified file resolver (.codev/ → codev/ → skeleton/).
- *
- * We probe for the directory by checking for a known file inside it.
- * resolveCodevFile works on files, so we look for the dir by checking if
- * any prompt file resolves, then extract the directory.
+ * Load a prompt file using per-file unified resolution.
+ * Each prompt file is resolved independently via .codev/ → codev/ → skeleton/,
+ * so partial overrides work correctly (e.g., overriding just one prompt).
  */
-function findPromptsDir(workspaceRoot: string, protocolName: string): string | null {
-  // resolveCodevFile works on files. Check if the prompts directory exists
-  // by probing for a marker — try resolving the prompts dir path directly.
-  const promptsRelative = `protocols/${protocolName}/prompts`;
-
-  // Check each tier for directory existence
-  const candidates = [
-    path.join(workspaceRoot, '.codev', promptsRelative),
-    path.join(workspaceRoot, 'codev', promptsRelative),
-  ];
-  // Add embedded skeleton dir
-  candidates.push(path.join(getSkeletonDir(), promptsRelative));
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-/**
- * Load a prompt file from the protocol's prompts directory.
- */
-function loadPromptFile(promptsDir: string, promptFile: string): string | null {
-  const promptPath = path.join(promptsDir, promptFile);
-  if (fs.existsSync(promptPath)) {
-    return fs.readFileSync(promptPath, 'utf-8');
-  }
-  return null;
+function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile: string): string | null {
+  const relativePath = `protocols/${protocolName}/prompts/${promptFile}`;
+  const resolved = resolveCodevFile(relativePath, workspaceRoot);
+  if (!resolved) return null;
+  return fs.readFileSync(resolved, 'utf-8');
 }
 
 /**
@@ -264,14 +236,13 @@ export async function buildPhasePrompt(
   // Resolve canonical artifact base name (prevents doubled IDs like "364-0364-name")
   const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
 
-  // Try to load prompt from protocol directory
-  const promptsDir = findPromptsDir(workspaceRoot, state.protocol);
-  if (promptsDir) {
+  // Try to load prompt using per-file unified resolution
+  {
     // Get prompt filename from protocol's build config, fallback to phase.md
     const buildConfig = getBuildConfig(protocol, state.phase);
     const promptFileName = buildConfig?.prompt || `${state.phase}.md`;
 
-    const promptContent = loadPromptFile(promptsDir, promptFileName);
+    const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
       let result = substituteVariables(promptContent, state, artifactBaseName, currentPlanPhase, summary);
 
