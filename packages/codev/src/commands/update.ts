@@ -15,6 +15,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { deepMerge } from '../lib/config.js';
 import chalk from 'chalk';
 import {
   getTemplatesDir,
@@ -83,11 +84,28 @@ function runMigration(
         fs.mkdirSync(codevConfigDir, { recursive: true });
       }
       if (!fs.existsSync(codevConfigPath)) {
+        // No .codev/config.json yet — move af-config.json there
         fs.copyFileSync(afConfigPath, codevConfigPath);
+        fs.unlinkSync(afConfigPath);
+        log(chalk.blue('  ~ (migrated)'), 'af-config.json → .codev/config.json');
+      } else {
+        // Both exist — merge af-config.json into .codev/config.json to preserve customizations
+        try {
+          const afContent = JSON.parse(fs.readFileSync(afConfigPath, 'utf-8'));
+          const existingContent = JSON.parse(fs.readFileSync(codevConfigPath, 'utf-8'));
+          // deepMerge imported at top of file
+          const merged = deepMerge(existingContent, afContent);
+          fs.writeFileSync(codevConfigPath, JSON.stringify(merged, null, 2) + '\n');
+          fs.unlinkSync(afConfigPath);
+          log(chalk.blue('  ~ (merged)'), 'af-config.json merged into .codev/config.json');
+        } catch (err) {
+          log(chalk.yellow('  ⚠ (preserved)'), 'af-config.json — merge failed, kept for manual review');
+          log(chalk.dim(`    Error: ${err instanceof Error ? err.message : String(err)}`));
+        }
       }
-      fs.unlinkSync(afConfigPath);
+    } else {
+      log(chalk.blue('  ~ (would migrate)'), 'af-config.json → .codev/config.json');
     }
-    log(chalk.blue('  ~ (migrated)'), 'af-config.json → .codev/config.json');
   }
 
   // 2. Clean unmodified skeleton files using .update-hashes.json

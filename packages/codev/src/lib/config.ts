@@ -161,20 +161,22 @@ function readJsonFile(filePath: string): Record<string, unknown> | null {
 /**
  * Resolve the project-level config path.
  *
- * Returns .codev/config.json if it exists, otherwise null.
- * Errors if the legacy af-config.json is detected.
+ * Returns .codev/config.json if it exists. Falls back to af-config.json
+ * with a deprecation warning during migration period.
  */
 export function resolveProjectConfigPath(workspaceRoot: string): string | null {
   const newPath = resolve(workspaceRoot, '.codev', 'config.json');
   const legacyPath = resolve(workspaceRoot, 'af-config.json');
 
+  if (existsSync(newPath)) return newPath;
+
   if (existsSync(legacyPath)) {
-    throw new Error(
-      `af-config.json is no longer supported. Run 'codev update' to migrate to .codev/config.json.`
+    console.warn(
+      `Warning: af-config.json is deprecated. Run 'codev update' to migrate to .codev/config.json.`
     );
+    return legacyPath;
   }
 
-  if (existsSync(newPath)) return newPath;
   return null;
 }
 

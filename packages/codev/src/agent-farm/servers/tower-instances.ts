@@ -13,6 +13,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
+import { loadConfig } from '../../lib/config.js';
 
 const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
@@ -352,20 +353,20 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
     if (!entry.architect) {
       const manager = _deps.getTerminalManager();
 
-      // Read architect command: env var override (for CI/testing), .codev/config.json, or default
+      // Read architect command: env var override (for CI/testing), unified config, or default
       let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
       if (!architectCmd) {
         architectCmd = 'claude';
-        const configPath = path.join(workspacePath, '.codev', 'config.json');
-        if (fs.existsSync(configPath)) {
-          try {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            if (config.shell?.architect) {
-              architectCmd = config.shell.architect;
-            }
-          } catch {
-            // Ignore config read errors, use default
+        try {
+          const config = loadConfig(workspacePath);
+          const shellArchitect = config.shell?.architect;
+          if (typeof shellArchitect === 'string') {
+            architectCmd = shellArchitect;
+          } else if (Array.isArray(shellArchitect)) {
+            architectCmd = shellArchitect.join(' ');
           }
+        } catch {
+          // Config load errors — use default
         }
       }
 

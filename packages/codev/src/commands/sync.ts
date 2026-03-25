@@ -45,11 +45,20 @@ function isImmutableRef(ref: string): boolean {
 
 /**
  * Parse source string to extract owner/repo and optional subpath.
+ * Handles both shorthand and full URL formats.
+ *
  * Examples:
  *   "myorg/repo" → { repo: "myorg/repo", subpath: null }
  *   "myorg/repo/team-a" → { repo: "myorg/repo", subpath: "team-a" }
+ *   "https://gitlab.example.com/team/protocols" → { repo: "https://gitlab.example.com/team/protocols", subpath: null }
  */
 function parseSource(source: string): { repo: string; subpath: string | null } {
+  // Full URLs: treat the entire string as the repo identifier
+  if (source.startsWith('http://') || source.startsWith('https://') || source.startsWith('git@')) {
+    return { repo: source, subpath: null };
+  }
+
+  // Shorthand: owner/repo or owner/repo/subpath
   const parts = source.split('/');
   if (parts.length <= 2) {
     return { repo: source, subpath: null };

@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { loadConfig } from '../../lib/config.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -521,15 +522,12 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     let restartOptions: ReconnectRestartOptions | undefined;
     if (dbSession.type === 'architect') {
       let architectCmd = 'claude';
-      const configPath = path.join(workspacePath, '.codev', 'config.json');
-      if (fs.existsSync(configPath)) {
-        try {
-          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-          if (config.shell?.architect) {
-            architectCmd = config.shell.architect;
-          }
-        } catch { /* use default */ }
-      }
+      try {
+        const config = loadConfig(workspacePath);
+        const shellArchitect = config.shell?.architect;
+        if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+        else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+      } catch { /* use default */ }
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
@@ -713,15 +711,12 @@ export async function getTerminalsForWorkspace(
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
           let architectCmd = 'claude';
-          const configPath = path.join(dbSession.workspace_path, '.codev', 'config.json');
-          if (fs.existsSync(configPath)) {
-            try {
-              const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-              if (config.shell?.architect) {
-                architectCmd = config.shell.architect;
-              }
-            } catch { /* use default */ }
-          }
+          try {
+            const config = loadConfig(dbSession.workspace_path);
+            const shellArchitect = config.shell?.architect;
+            if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+            else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+          } catch { /* use default */ }
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];

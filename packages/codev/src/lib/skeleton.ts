@@ -95,21 +95,63 @@ export function resolveCodevFile(relativePath: string, workspaceRoot?: string): 
 }
 
 /**
- * Set the framework cache directory for the current process.
- * Called once during startup by commands that need remote framework resolution.
+ * Framework cache directory management.
+ *
+ * Uses lazy initialization: the cache dir is computed on first access
+ * by reading the config to find framework.source and checking if a
+ * cache exists. This avoids requiring explicit startup wiring.
  */
-let _frameworkCacheDir: string | null = null;
+let _frameworkCacheDir: string | null | undefined;
+let _frameworkCacheDirWorkspace: string | null = null;
+let _frameworkCacheDirExplicit = false;
 
 export function setFrameworkCacheDir(dir: string | null): void {
   _frameworkCacheDir = dir;
+  _frameworkCacheDirExplicit = true;
 }
 
 export function getFrameworkCacheDir(): string | null {
-  return _frameworkCacheDir;
+  return _frameworkCacheDir ?? null;
 }
 
-function _getFrameworkCacheDir(_workspaceRoot: string): string | null {
-  return _frameworkCacheDir;
+function _getFrameworkCacheDir(workspaceRoot: string): string | null {
+  // If explicitly set (by test or startup), use that
+  if (_frameworkCacheDirExplicit) return _frameworkCacheDir ?? null;
+
+  // Return cached result if we already computed for this workspace
+  if (_frameworkCacheDir !== undefined && _frameworkCacheDirWorkspace === workspaceRoot) {
+    return _frameworkCacheDir;
+  }
+
+  // Lazy init: try to compute the cache dir from config
+  _frameworkCacheDirWorkspace = workspaceRoot;
+  try {
+    // Read config directly (minimal — just framework.source and framework.ref)
+    const configPath = path.join(workspaceRoot, '.codev', 'config.json');
+    if (!fs.existsSync(configPath)) {
+      _frameworkCacheDir = null;
+      return null;
+    }
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const source = config?.framework?.source;
+    if (!source || source === 'local') {
+      _frameworkCacheDir = null;
+      return null;
+    }
+
+    // Compute cache dir
+    const { createHash } = require('node:crypto') as typeof import('node:crypto');
+    const { homedir } = require('node:os') as typeof import('node:os');
+    const sourceHash = createHash('sha256').update(source).digest('hex').slice(0, 12);
+    const ref = config?.framework?.ref || 'default';
+    const cacheDir = path.join(homedir(), '.codev', 'cache', 'framework', sourceHash, ref);
+
+    _frameworkCacheDir = fs.existsSync(cacheDir) ? cacheDir : null;
+    return _frameworkCacheDir;
+  } catch {
+    _frameworkCacheDir = null;
+    return null;
+  }
 }
 
 /**

@@ -5,7 +5,7 @@
  * af-config.json rejection.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -105,10 +105,20 @@ describe('resolveProjectConfigPath', () => {
     expect(resolveProjectConfigPath(tmpDir)).toBeNull();
   });
 
-  it('throws when af-config.json exists', () => {
+  it('falls back to af-config.json with deprecation warning', () => {
     fs.writeFileSync(path.join(tmpDir, 'af-config.json'), '{}');
-    expect(() => resolveProjectConfigPath(tmpDir)).toThrow('af-config.json is no longer supported');
-    expect(() => resolveProjectConfigPath(tmpDir)).toThrow("codev update");
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = resolveProjectConfigPath(tmpDir);
+    expect(result).toBe(path.join(tmpDir, 'af-config.json'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('deprecated'));
+    warnSpy.mockRestore();
+  });
+
+  it('prefers .codev/config.json over af-config.json', () => {
+    writeProjectConfig(tmpDir, { shell: { architect: 'new' } });
+    fs.writeFileSync(path.join(tmpDir, 'af-config.json'), '{}');
+    const result = resolveProjectConfigPath(tmpDir);
+    expect(result).toBe(path.join(tmpDir, '.codev', 'config.json'));
   });
 });
 
@@ -180,9 +190,13 @@ describe('loadConfig', () => {
     expect(() => loadConfig(tmpDir)).toThrow('Failed to parse');
   });
 
-  it('throws when af-config.json is present', () => {
-    fs.writeFileSync(path.join(tmpDir, 'af-config.json'), '{}');
-    expect(() => loadConfig(tmpDir)).toThrow('af-config.json is no longer supported');
+  it('reads af-config.json with deprecation warning when .codev/config.json absent', () => {
+    fs.writeFileSync(path.join(tmpDir, 'af-config.json'), JSON.stringify({ shell: { architect: 'legacy-cmd' } }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const config = loadConfig(tmpDir);
+    expect(config.shell?.architect).toBe('legacy-cmd');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('deprecated'));
+    warnSpy.mockRestore();
   });
 
   it('handles forge config', () => {
