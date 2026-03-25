@@ -59,7 +59,7 @@ export interface CheckDef {
 }
 
 /**
- * Per-check override from af-config.json porch.checks section.
+ * Per-check override from .codev/config.json porch.checks section.
  * Any or all fields may be specified; absent fields use the protocol default.
  */
 export interface CheckOverride {
@@ -68,7 +68,7 @@ export interface CheckOverride {
   skip?: boolean;      // Omit this check entirely when true
 }
 
-/** Map of check name → override, from af-config.json `porch.checks` */
+/** Map of check name → override, from .codev/config.json `porch.checks` */
 export type CheckOverrides = Record<string, CheckOverride>;
 
 /**

@@ -13,7 +13,7 @@ import * as path from 'node:path';
 const ROOT = path.resolve(__dirname, '../../../../../..');
 
 describe('bugfix #568: pr_exists check uses --state all', () => {
-  const protocolDirs = ['codev-skeleton/protocols', 'codev/protocols'];
+  const protocolDirs = ['codev/protocols'];
 
   for (const protocolDir of protocolDirs) {
     const fullDir = path.join(ROOT, protocolDir);

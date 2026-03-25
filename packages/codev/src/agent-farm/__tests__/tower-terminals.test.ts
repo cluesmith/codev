@@ -505,7 +505,7 @@ describe('tower-terminals', () => {
       const origExistsSync = fs.existsSync;
       vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
         if (String(p) === '/existing/project') return true;
-        if (String(p).endsWith('af-config.json')) return false;
+        if (String(p).endsWith('.codev/config.json')) return false;
         return origExistsSync(p);
       });
 
@@ -582,7 +582,7 @@ describe('tower-terminals', () => {
 
       vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
         if (String(p) === '/real/project') return true;
-        if (String(p).endsWith('af-config.json')) return false;
+        if (String(p).endsWith('.codev/config.json')) return false;
         return false;
       });
 

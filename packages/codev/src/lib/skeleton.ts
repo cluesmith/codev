@@ -1,9 +1,11 @@
 /**
- * Skeleton resolver - finds codev files with local override support
+ * Skeleton resolver - finds codev files with unified resolution
  *
- * Resolution order:
- * 1. Local codev/ directory (user overrides)
- * 2. Embedded skeleton in npm package (defaults)
+ * Resolution order (first match wins):
+ * 1. .codev/<path>              — user customization (optional overrides)
+ * 2. codev/<path>               — project-level (legacy local copies)
+ * 3. <cache>/<path>             — remote framework (fetched via forge)
+ * 4. <package>/skeleton/<path>  — npm package defaults
  */
 
 import * as fs from 'node:fs';
@@ -46,7 +48,13 @@ export function findWorkspaceRoot(startDir?: string): string {
 }
 
 /**
- * Resolve a codev file, checking local first then embedded skeleton.
+ * Resolve a codev file using the unified four-tier resolution chain.
+ *
+ * Resolution order (first match wins):
+ * 1. .codev/<path>              — user customization
+ * 2. codev/<path>               — project-level (legacy local copies)
+ * 3. <cache>/<path>             — remote framework (fetched via codev sync)
+ * 4. <package>/skeleton/<path>  — npm package defaults
  *
  * @param relativePath - Path relative to codev/ (e.g., 'roles/consultant.md')
  * @param workspaceRoot - Optional workspace root (auto-detected if not provided)
@@ -55,13 +63,28 @@ export function findWorkspaceRoot(startDir?: string): string {
 export function resolveCodevFile(relativePath: string, workspaceRoot?: string): string | null {
   const root = workspaceRoot || findWorkspaceRoot();
 
-  // 1. Check local codev/ directory first (user overrides)
+  // 1. Check .codev/ directory first (user customization overrides)
+  const overridePath = path.join(root, '.codev', relativePath);
+  if (fs.existsSync(overridePath)) {
+    return overridePath;
+  }
+
+  // 2. Check local codev/ directory (legacy local copies)
   const localPath = path.join(root, 'codev', relativePath);
   if (fs.existsSync(localPath)) {
     return localPath;
   }
 
-  // 2. Fall back to embedded skeleton
+  // 3. Check remote framework cache (fetched via codev sync)
+  const cacheDir = _getFrameworkCacheDir(root);
+  if (cacheDir) {
+    const cachePath = path.join(cacheDir, relativePath);
+    if (fs.existsSync(cachePath)) {
+      return cachePath;
+    }
+  }
+
+  // 4. Fall back to embedded skeleton (npm package defaults)
   const skeletonDir = getSkeletonDir();
   const embeddedPath = path.join(skeletonDir, relativePath);
   if (fs.existsSync(embeddedPath)) {
@@ -69,6 +92,66 @@ export function resolveCodevFile(relativePath: string, workspaceRoot?: string): 
   }
 
   return null;
+}
+
+/**
+ * Framework cache directory management.
+ *
+ * Uses lazy initialization: the cache dir is computed on first access
+ * by reading the config to find framework.source and checking if a
+ * cache exists. This avoids requiring explicit startup wiring.
+ */
+let _frameworkCacheDir: string | null | undefined;
+let _frameworkCacheDirWorkspace: string | null = null;
+let _frameworkCacheDirExplicit = false;
+
+export function setFrameworkCacheDir(dir: string | null): void {
+  _frameworkCacheDir = dir;
+  _frameworkCacheDirExplicit = true;
+}
+
+export function getFrameworkCacheDir(): string | null {
+  return _frameworkCacheDir ?? null;
+}
+
+function _getFrameworkCacheDir(workspaceRoot: string): string | null {
+  // If explicitly set (by test or startup), use that
+  if (_frameworkCacheDirExplicit) return _frameworkCacheDir ?? null;
+
+  // Return cached result if we already computed for this workspace
+  if (_frameworkCacheDir !== undefined && _frameworkCacheDirWorkspace === workspaceRoot) {
+    return _frameworkCacheDir;
+  }
+
+  // Lazy init: try to compute the cache dir from config
+  _frameworkCacheDirWorkspace = workspaceRoot;
+  try {
+    // Read config directly (minimal — just framework.source and framework.ref)
+    const configPath = path.join(workspaceRoot, '.codev', 'config.json');
+    if (!fs.existsSync(configPath)) {
+      _frameworkCacheDir = null;
+      return null;
+    }
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const source = config?.framework?.source;
+    if (!source || source === 'local') {
+      _frameworkCacheDir = null;
+      return null;
+    }
+
+    // Compute cache dir
+    const { createHash } = require('node:crypto') as typeof import('node:crypto');
+    const { homedir } = require('node:os') as typeof import('node:os');
+    const sourceHash = createHash('sha256').update(source).digest('hex').slice(0, 12);
+    const ref = config?.framework?.ref || 'default';
+    const cacheDir = path.join(homedir(), '.codev', 'cache', 'framework', sourceHash, ref);
+
+    _frameworkCacheDir = fs.existsSync(cacheDir) ? cacheDir : null;
+    return _frameworkCacheDir;
+  } catch {
+    _frameworkCacheDir = null;
+    return null;
+  }
 }
 
 /**

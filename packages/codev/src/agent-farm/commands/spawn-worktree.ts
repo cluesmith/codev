@@ -8,7 +8,7 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
@@ -39,16 +39,32 @@ export async function checkDependencies(): Promise<void> {
  * Shared by createWorktree() and createWorktreeFromBranch().
  */
 export function symlinkConfigFiles(config: Config, worktreePath: string): void {
-  const symlinks = ['.env', 'af-config.json'];
-  for (const file of symlinks) {
-    const rootPath = resolve(config.workspaceRoot, file);
-    const worktreeFilePath = resolve(worktreePath, file);
-    if (existsSync(rootPath) && !existsSync(worktreeFilePath)) {
+  // Symlink .env at root level
+  const envRoot = resolve(config.workspaceRoot, '.env');
+  const envWorktree = resolve(worktreePath, '.env');
+  if (existsSync(envRoot) && !existsSync(envWorktree)) {
+    try {
+      symlinkSync(envRoot, envWorktree);
+      logger.info(`Linked .env from workspace root`);
+    } catch (error) {
+      logger.debug(`Failed to symlink .env: ${error}`);
+    }
+  }
+
+  // Symlink .codev/config.json
+  const configRoot = resolve(config.workspaceRoot, '.codev', 'config.json');
+  if (existsSync(configRoot)) {
+    const codevDir = resolve(worktreePath, '.codev');
+    if (!existsSync(codevDir)) {
+      mkdirSync(codevDir, { recursive: true });
+    }
+    const configWorktree = resolve(codevDir, 'config.json');
+    if (!existsSync(configWorktree)) {
       try {
-        symlinkSync(rootPath, worktreeFilePath);
-        logger.info(`Linked ${file} from workspace root`);
+        symlinkSync(configRoot, configWorktree);
+        logger.info(`Linked .codev/config.json from workspace root`);
       } catch (error) {
-        logger.debug(`Failed to symlink ${file}: ${error}`);
+        logger.debug(`Failed to symlink .codev/config.json: ${error}`);
       }
     }
   }
@@ -377,7 +393,7 @@ export async function fetchGitHubIssue(
       `Failed to fetch issue #${issueNumber}. ` +
       `Ensure the 'issue-view' forge concept command is configured ` +
       `(default: 'gh' CLI must be installed and authenticated). ` +
-      `Configure forge commands in af-config.json if using a non-GitHub forge.`,
+      `Configure forge commands in .codev/config.json if using a non-GitHub forge.`,
     );
     throw error; // TypeScript doesn't know fatal() never returns
   }

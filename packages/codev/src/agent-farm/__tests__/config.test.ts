@@ -8,6 +8,17 @@ import { existsSync } from 'node:fs';
 import { rm, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+// Mock loadConfig to avoid depending on the real workspace's config files.
+// The agent-farm config.ts imports from lib/config.ts which would detect
+// af-config.json in the real workspace and error.
+vi.mock('../../lib/config.js', () => ({
+  loadConfig: () => ({
+    shell: { architect: 'claude', builder: 'claude', shell: 'bash' },
+    porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
+    framework: { source: 'local' },
+  }),
+}));
+
 describe('getConfig', () => {
   it('should return a valid config object', () => {
     const config = getConfig();

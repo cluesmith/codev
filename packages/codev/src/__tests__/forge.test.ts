@@ -72,8 +72,9 @@ beforeAll(() => {
     '#!/bin/sh\necho "diff --git a/file.ts b/file.ts"\necho "--- a/file.ts"\necho "+++ b/file.ts"\n');
   chmodSync(join(MOCK_SCRIPTS_DIR, 'diff-output.sh'), 0o755);
 
-  // af-config.json with forge overrides
-  writeFileSync(join(TEST_DIR, 'af-config.json'), JSON.stringify({
+  // .codev/config.json with forge overrides
+  mkdirSync(join(TEST_DIR, '.codev'), { recursive: true });
+  writeFileSync(join(TEST_DIR, '.codev', 'config.json'), JSON.stringify({
     forge: {
       'issue-view': join(MOCK_SCRIPTS_DIR, 'json-output.sh'),
       'pr-list': join(MOCK_SCRIPTS_DIR, 'json-array.sh'),
@@ -239,7 +240,7 @@ describe('executeForgeCommand', () => {
     expect(result).toContain('diff --git');
   });
 
-  it('loads forge config from workspaceRoot af-config.json', async () => {
+  it('loads forge config from workspaceRoot .codev/config.json', async () => {
     const result = await executeForgeCommand('issue-view', {}, {
       workspaceRoot: TEST_DIR,
     });
@@ -306,7 +307,7 @@ describe('executeForgeCommandSync', () => {
 // =============================================================================
 
 describe('getKnownConcepts', () => {
-  it('returns all 15 known concept names', () => {
+  it('returns all 16 known concept names', () => {
     const concepts = getKnownConcepts();
     expect(concepts).toContain('issue-view');
     expect(concepts).toContain('pr-list');
@@ -323,7 +324,8 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('pr-view');
     expect(concepts).toContain('pr-diff');
     expect(concepts).toContain('auth-status');
-    expect(concepts.length).toBe(15);
+    expect(concepts).toContain('repo-archive');
+    expect(concepts.length).toBe(16);
   });
 });
 
@@ -399,22 +401,22 @@ describe('validateForgeConfig', () => {
 // =============================================================================
 
 describe('loadForgeConfig', () => {
-  it('returns null when no af-config.json exists', () => {
+  it('returns null when no config exists', () => {
     expect(loadForgeConfig('/nonexistent/path')).toBeNull();
   });
 
-  it('returns forge section from af-config.json', () => {
+  it('returns forge section from .codev/config.json', () => {
     const config = loadForgeConfig(TEST_DIR);
     expect(config).toBeTruthy();
     expect(config!['team-activity']).toBeNull();
     expect(config!['issue-view']).toContain('json-output.sh');
   });
 
-  it('returns null when af-config.json has no forge section', () => {
+  it('returns null when config has no forge section', () => {
     // Create a temp config without forge section
     const noForgeDir = join(TEST_DIR, 'no-forge');
-    mkdirSync(noForgeDir, { recursive: true });
-    writeFileSync(join(noForgeDir, 'af-config.json'), JSON.stringify({ shell: {} }));
+    mkdirSync(join(noForgeDir, '.codev'), { recursive: true });
+    writeFileSync(join(noForgeDir, '.codev', 'config.json'), JSON.stringify({ shell: {} }));
     expect(loadForgeConfig(noForgeDir)).toBeNull();
     rmSync(noForgeDir, { recursive: true, force: true });
   });
@@ -508,9 +510,9 @@ describe('graceful degradation when command not found', () => {
 // =============================================================================
 
 describe('resolveAllConcepts', () => {
-  it('returns all 15 concepts with default source when no config', () => {
+  it('returns all 16 concepts with default source when no config', () => {
     const resolutions = resolveAllConcepts();
-    expect(resolutions).toHaveLength(15);
+    expect(resolutions).toHaveLength(16);
     expect(resolutions.every(r => r.source === 'default')).toBe(true);
     expect(resolutions.every(r => r.executable !== null)).toBe(true);
   });

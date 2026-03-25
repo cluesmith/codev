@@ -8,19 +8,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides } from './types.js';
-
-/** Known protocol locations (relative to project root) */
-const PROTOCOL_PATHS = [
-  'codev/protocols',
-  'codev-skeleton/protocols',
-];
+import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 // ============================================================================
 // Protocol Loading
 // ============================================================================
 
 /**
- * Find and load a protocol by name
+ * Find and load a protocol by name.
+ * Uses the unified file resolver (.codev/ → codev/ → skeleton/).
  * Fails loudly if not found or invalid.
  */
 export function loadProtocol(workspaceRoot: string, protocolName: string): Protocol {
@@ -29,7 +25,7 @@ export function loadProtocol(workspaceRoot: string, protocolName: string): Proto
   if (!protocolFile) {
     throw new Error(
       `Protocol '${protocolName}' not found.\n` +
-      `Searched in: ${PROTOCOL_PATHS.map(p => path.join(workspaceRoot, p, protocolName)).join(', ')}`
+      `Searched in: .codev/protocols/${protocolName}/, codev/protocols/${protocolName}/, <package>/skeleton/protocols/${protocolName}/`
     );
   }
 
@@ -46,21 +42,24 @@ export function loadProtocol(workspaceRoot: string, protocolName: string): Proto
 }
 
 /**
- * Find protocol.json file in {name}/protocol.json format.
- * Falls back to alias lookup: scans all protocol.json files for a matching "alias" field.
+ * Find protocol.json file using the unified resolver.
+ * Falls back to alias lookup: scans protocol directories for a matching "alias" field.
  */
 function findProtocolFile(workspaceRoot: string, protocolName: string): string | null {
-  // Direct lookup first
-  for (const basePath of PROTOCOL_PATHS) {
-    const fullPath = path.resolve(workspaceRoot, basePath, protocolName, 'protocol.json');
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
-    }
-  }
+  // Direct lookup via unified resolver
+  const resolved = resolveCodevFile(`protocols/${protocolName}/protocol.json`, workspaceRoot);
+  if (resolved) return resolved;
 
-  // Alias lookup: scan all protocol.json files for matching alias
-  for (const basePath of PROTOCOL_PATHS) {
-    const protocolsDir = path.resolve(workspaceRoot, basePath);
+  // Alias lookup: scan protocol directories for matching alias
+  // Check each tier in resolution order
+  const protocolDirs = [
+    path.resolve(workspaceRoot, '.codev', 'protocols'),
+    path.resolve(workspaceRoot, 'codev', 'protocols'),
+  ];
+  // Add embedded skeleton dir
+  protocolDirs.push(path.join(getSkeletonDir(), 'protocols'));
+
+  for (const protocolsDir of protocolDirs) {
     if (!fs.existsSync(protocolsDir)) continue;
     try {
       const dirs = fs.readdirSync(protocolsDir, { withFileTypes: true })
@@ -257,7 +256,7 @@ export function getNextPhase(protocol: Protocol, currentPhaseId: string): Protoc
 }
 
 /**
- * Get check definitions for a phase, optionally merging in af-config.json overrides.
+ * Get check definitions for a phase, optionally merging in .codev/config.json overrides.
  *
  * Override semantics (applied per check name):
  *   - skip: true   → check is omitted from the result
@@ -333,7 +332,7 @@ export function isPhased(protocol: Protocol, phaseId: string): boolean {
 /**
  * Get checks to run when a plan phase completes (after evaluate stage).
  *
- * Accepts optional overrides from af-config.json:
+ * Accepts optional overrides from .codev/config.json:
  *   - skip: true   → condition removed from gating (does NOT auto-pass)
  *   - command set  → replaces the protocol's command string
  *

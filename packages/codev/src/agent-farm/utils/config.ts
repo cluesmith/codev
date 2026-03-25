@@ -2,12 +2,14 @@
  * Configuration management for Agent Farm
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import type { Config, UserConfig, ResolvedCommands } from '../types.js';
 import { getSkeletonDir } from '../../lib/skeleton.js';
+import { loadConfig } from '../../lib/config.js';
+import type { CodevConfig } from '../../lib/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -139,7 +141,8 @@ function getServersDir(): string {
 }
 
 /**
- * Get the roles directory (from codev/roles/, config override, or embedded skeleton)
+ * Get the roles directory using the unified resolution chain.
+ * Priority: config override → .codev/roles/ → codev/roles/ → skeleton/roles/
  */
 function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): string {
   // Check config.json override
@@ -150,37 +153,37 @@ function getRolesDir(workspaceRoot: string, userConfig: UserConfig | null): stri
     }
   }
 
-  // Try local codev/roles/ first
+  // Check .codev/roles/ (user customization)
+  const overridePath = resolve(workspaceRoot, '.codev/roles');
+  if (existsSync(overridePath)) {
+    return overridePath;
+  }
+
+  // Try local codev/roles/ (legacy local copies)
   const rolesPath = resolve(workspaceRoot, 'codev/roles');
   if (existsSync(rolesPath)) {
     return rolesPath;
   }
 
-  // Fall back to embedded skeleton
+  // Fall back to embedded skeleton (package defaults)
   const skeletonRolesPath = resolve(getSkeletonDir(), 'roles');
   if (existsSync(skeletonRolesPath)) {
     return skeletonRolesPath;
   }
 
   // This should not happen if the package is installed correctly
-  throw new Error(`Roles directory not found in local codev/roles/ or embedded skeleton`);
+  throw new Error(`Roles directory not found in .codev/roles/, codev/roles/, or embedded skeleton`);
 }
 
 /**
- * Load af-config.json from project root
+ * Load config from unified config loader (.codev/config.json).
+ * Returns as UserConfig for backward compatibility with existing callers.
  */
 function loadUserConfig(workspaceRoot: string): UserConfig | null {
-  const configPath = resolve(workspaceRoot, 'af-config.json');
-  if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, 'utf-8');
-      return JSON.parse(content) as UserConfig;
-    } catch (error) {
-      throw new Error(`Failed to parse af-config.json: ${error}`);
-    }
-  }
-
-  return null;
+  const config = loadConfig(workspaceRoot);
+  // The unified loader always returns a config (with defaults merged in).
+  // Convert to UserConfig shape for backward compat.
+  return config as UserConfig;
 }
 
 /**

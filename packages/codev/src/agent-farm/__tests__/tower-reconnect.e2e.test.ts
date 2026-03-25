@@ -39,8 +39,9 @@ function createTestWorkspace(): string {
   const wp = mkdtempSync(resolve(testBase, 'codev-reconnect-'));
   mkdirSync(resolve(wp, 'codev'), { recursive: true });
   mkdirSync(resolve(wp, '.agent-farm'), { recursive: true });
+  mkdirSync(resolve(wp, '.codev'), { recursive: true });
   writeFileSync(
-    resolve(wp, 'af-config.json'),
+    resolve(wp, '.codev', 'config.json'),
     JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } }),
   );
   return wp;

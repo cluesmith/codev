@@ -13,10 +13,6 @@ import { prompt, confirm } from '../lib/cli-prompts.js';
 import {
   createUserDirs,
   createProjectsDir,
-  copyConsultTypes,
-  copyResourceTemplates,
-  copyRoles,
-  copyProtocols,
   copySkills,
   copyRootFiles,
   createGitignore,
@@ -93,47 +89,10 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
     fileCount++;
   }
 
-  // Copy resource templates (lessons-learned.md, arch.md)
-  const resourcesResult = copyResourceTemplates(targetDir, skeletonDir);
-  for (const file of resourcesResult.copied) {
-    console.log(chalk.green('  +'), `codev/resources/${file}`);
-    fileCount++;
-  }
+  // Framework files (protocols, roles, consult-types, templates) are NOT copied.
+  // They resolve at runtime from the installed npm package via the unified file resolver.
 
-  // Copy consult-types (review type prompts)
-  const consultTypesResult = copyConsultTypes(targetDir, skeletonDir);
-  if (consultTypesResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/consult-types/');
-    fileCount++;
-  }
-  for (const file of consultTypesResult.copied) {
-    console.log(chalk.green('  +'), `codev/consult-types/${file}`);
-    fileCount++;
-  }
-
-  // Copy role definitions (architect, builder, consultant prompts)
-  const rolesResult = copyRoles(targetDir, skeletonDir);
-  if (rolesResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/roles/');
-    fileCount++;
-  }
-  for (const file of rolesResult.copied) {
-    console.log(chalk.green('  +'), `codev/roles/${file}`);
-    fileCount++;
-  }
-
-  // Copy protocol definitions (required for porch orchestration)
-  const protocolsResult = copyProtocols(targetDir, skeletonDir);
-  if (protocolsResult.directoryCreated) {
-    console.log(chalk.green('  +'), 'codev/protocols/');
-    fileCount++;
-  }
-  for (const protocol of protocolsResult.copied) {
-    console.log(chalk.green('  +'), `codev/protocols/${protocol}`);
-    fileCount++;
-  }
-
-  // Copy .claude/skills/ (Claude Code slash commands)
+  // Copy .claude/skills/ (Claude Code slash commands — must exist on disk)
   const skillsResult = copySkills(targetDir, skeletonDir);
   if (skillsResult.directoryCreated) {
     console.log(chalk.green('  +'), '.claude/skills/');
@@ -156,8 +115,12 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   console.log(chalk.green('  +'), '.gitignore');
   fileCount++;
 
-  // Create af-config.json
-  const afConfig: Record<string, unknown> = {
+  // Create .codev/config.json
+  const codevConfigDir = path.join(targetDir, '.codev');
+  if (!fs.existsSync(codevConfigDir)) {
+    fs.mkdirSync(codevConfigDir, { recursive: true });
+  }
+  const codevConfig: Record<string, unknown> = {
     shell: {
       architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
       builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
@@ -165,10 +128,10 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
     },
   };
   fs.writeFileSync(
-    path.join(targetDir, 'af-config.json'),
-    JSON.stringify(afConfig, null, 2) + '\n'
+    path.join(codevConfigDir, 'config.json'),
+    JSON.stringify(codevConfig, null, 2) + '\n'
   );
-  console.log(chalk.green('  +'), 'af-config.json');
+  console.log(chalk.green('  +'), '.codev/config.json');
   fileCount++;
 
   // Initialize git if requested

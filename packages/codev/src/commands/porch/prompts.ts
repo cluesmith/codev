@@ -15,13 +15,7 @@ import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './proto
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import { fetchIssue } from '../../lib/github.js';
-
-/** Locations to search for protocol prompts */
-const PROTOCOL_PATHS = [
-  'codev/protocols',
-  'codev-skeleton/protocols',
-  'skeleton/protocols',  // Used in packages/codev
-];
+import { resolveCodevFile } from '../../lib/skeleton.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -78,27 +72,15 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
 }
 
 /**
- * Find the prompts directory for a protocol.
+ * Load a prompt file using per-file unified resolution.
+ * Each prompt file is resolved independently via .codev/ → codev/ → skeleton/,
+ * so partial overrides work correctly (e.g., overriding just one prompt).
  */
-function findPromptsDir(workspaceRoot: string, protocolName: string): string | null {
-  for (const basePath of PROTOCOL_PATHS) {
-    const promptsDir = path.join(workspaceRoot, basePath, protocolName, 'prompts');
-    if (fs.existsSync(promptsDir)) {
-      return promptsDir;
-    }
-  }
-  return null;
-}
-
-/**
- * Load a prompt file from the protocol's prompts directory.
- */
-function loadPromptFile(promptsDir: string, promptFile: string): string | null {
-  const promptPath = path.join(promptsDir, promptFile);
-  if (fs.existsSync(promptPath)) {
-    return fs.readFileSync(promptPath, 'utf-8');
-  }
-  return null;
+function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile: string): string | null {
+  const relativePath = `protocols/${protocolName}/prompts/${promptFile}`;
+  const resolved = resolveCodevFile(relativePath, workspaceRoot);
+  if (!resolved) return null;
+  return fs.readFileSync(resolved, 'utf-8');
 }
 
 /**
@@ -254,14 +236,13 @@ export async function buildPhasePrompt(
   // Resolve canonical artifact base name (prevents doubled IDs like "364-0364-name")
   const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
 
-  // Try to load prompt from protocol directory
-  const promptsDir = findPromptsDir(workspaceRoot, state.protocol);
-  if (promptsDir) {
+  // Try to load prompt using per-file unified resolution
+  {
     // Get prompt filename from protocol's build config, fallback to phase.md
     const buildConfig = getBuildConfig(protocol, state.phase);
     const promptFileName = buildConfig?.prompt || `${state.phase}.md`;
 
-    const promptContent = loadPromptFile(promptsDir, promptFileName);
+    const promptContent = loadPromptFile(workspaceRoot, state.protocol, promptFileName);
     if (promptContent) {
       let result = substituteVariables(promptContent, state, artifactBaseName, currentPlanPhase, summary);
 

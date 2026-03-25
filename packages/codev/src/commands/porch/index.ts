@@ -46,6 +46,7 @@ import {
   type CheckEnv,
 } from './checks.js';
 import { loadCheckOverrides } from './config.js';
+import { loadConfig } from '../../lib/config.js';
 
 // ============================================================================
 // Output Helpers
@@ -65,7 +66,7 @@ function section(title: string, content: string): string {
  * Only emits output when overrides are actually in use.
  * @param phaseCheckNames - original check names from the protocol phase
  * @param resolvedChecks - checks after applying overrides (skipped ones absent)
- * @param overrides - raw override map from af-config.json (null if not configured)
+ * @param overrides - raw override map from .codev/config.json (null if not configured)
  */
 function logCheckOverrides(
   phaseCheckNames: string[],
@@ -79,7 +80,7 @@ function logCheckOverrides(
     if (!override) continue;
 
     if (override.skip) {
-      console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (af-config.json)`));
+      console.log(chalk.yellow(`  ⚠ Check "${name}" skipped (.codev/config.json)`));
     } else if (override.command || override.cwd) {
       const parts: string[] = [];
       if (override.command) parts.push(resolvedChecks[name]?.command ?? override.command);
@@ -223,7 +224,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
   console.log('');
 
   if (Object.keys(checks).length === 0) {
-    console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+    console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
     console.log('');
     console.log(chalk.green('RESULT: ALL CHECKS PASSED'));
     console.log(`\n  Run: porch done ${state.id} (to advance)`);
@@ -290,7 +291,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
           process.exit(1);
         }
       } else {
-        console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+        console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
       }
     }
   }
@@ -305,28 +306,59 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
     return;
   }
 
-  // Enforce 3-way verification for build_verify phases
+  // Enforce verification for build_verify phases (config-aware)
   const verifyConfig = getVerifyConfig(protocol, state.phase);
   if (verifyConfig) {
-    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
-    const phase = state.current_plan_phase || state.phase;
-    const missingModels: string[] = [];
+    // Resolve effective models from config (overrides protocol defaults)
+    let effectiveModels = verifyConfig.models;
+    let consultMode: 'normal' | 'none' | 'parent' = 'normal';
 
-    for (const model of verifyConfig.models) {
-      // Look for any review file for this model+phase (any iteration)
-      const pattern = path.join(projectDir, `${state.id}-${phase}-iter*-${model}.txt`);
-      const matches = globSync(pattern);
-      if (matches.length === 0) {
-        missingModels.push(model);
+    try {
+      const config = loadConfig(workspaceRoot);
+      const configModels = config.porch?.consultation?.models;
+      if (configModels !== undefined) {
+        if (configModels === 'none') {
+          consultMode = 'none';
+        } else if (configModels === 'parent') {
+          consultMode = 'parent';
+        } else if (Array.isArray(configModels)) {
+          effectiveModels = configModels;
+        } else if (typeof configModels === 'string') {
+          effectiveModels = [configModels];
+        }
       }
+    } catch {
+      // Config load failed — use protocol defaults
     }
 
-    if (missingModels.length > 0) {
-      console.log('');
-      console.log(chalk.red('VERIFICATION REQUIRED'));
-      console.log(`\n  3-way review not completed. Missing: ${missingModels.join(', ')}`);
-      console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
-      process.exit(1);
+    // "none" mode: skip verification
+    if (consultMode === 'none') {
+      console.log(chalk.dim('  (consultation skipped — configured: none)'));
+    } else if (consultMode === 'parent') {
+      // "parent" mode: verification is handled by architect gate, not review files
+      console.log(chalk.dim('  (consultation delegated to architect — configured: parent)'));
+    } else {
+      // Normal mode: check for review files from effective models
+      const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
+      const phase = state.current_plan_phase || state.phase;
+      const missingModels: string[] = [];
+
+      for (const model of effectiveModels) {
+        // Look for any review file for this model+phase (any iteration)
+        const pattern = path.join(projectDir, `${state.id}-${phase}-iter*-${model}.txt`);
+        const matches = globSync(pattern);
+        if (matches.length === 0) {
+          missingModels.push(model);
+        }
+      }
+
+      if (missingModels.length > 0) {
+        console.log('');
+        console.log(chalk.red('VERIFICATION REQUIRED'));
+        console.log(`\n  ${effectiveModels.length}-way review not completed. Missing: ${missingModels.join(', ')}`);
+        console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
+        process.exit(1);
+      }
     }
   }
 
@@ -548,7 +580,7 @@ export async function approve(
         process.exit(1);
       }
     } else {
-      console.log(chalk.dim('  (all checks skipped via af-config.json)'));
+      console.log(chalk.dim('  (all checks skipped via .codev/config.json)'));
     }
   }
 
