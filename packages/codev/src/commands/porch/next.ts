@@ -36,6 +36,7 @@ import {
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides } from './config.js';
+import { loadConfig } from '../../lib/config.js';
 
 import type {
   ProjectState,
@@ -45,6 +46,54 @@ import type {
   PorchTask,
   ReviewResult,
 } from './types.js';
+
+/** Valid model backends for consultation. */
+const VALID_MODELS = ['gemini', 'codex', 'claude'];
+
+/**
+ * Resolve the effective consultation models for a verify step.
+ *
+ * Priority: config porch.consultation.models > protocol verify.models
+ *
+ * Special modes:
+ * - "none": skip consultations entirely
+ * - "parent": emit a gate instead of running consult (for #614)
+ * - string[]: validate each name is a registered backend
+ */
+function resolveConsultationModels(workspaceRoot: string, protocolModels: string[]): { models: string[]; mode: 'normal' | 'none' | 'parent' } {
+  let configModels: string | string[] | undefined;
+  try {
+    const config = loadConfig(workspaceRoot);
+    configModels = config.porch?.consultation?.models;
+  } catch {
+    // Config load failed — use protocol defaults
+  }
+
+  if (configModels === undefined) {
+    return { models: protocolModels, mode: 'normal' };
+  }
+
+  // Handle special string modes
+  if (typeof configModels === 'string') {
+    if (configModels === 'none') return { models: [], mode: 'none' };
+    if (configModels === 'parent') return { models: [], mode: 'parent' };
+    // Single model name as a string — normalize to array
+    configModels = [configModels];
+  }
+
+  // Validate model names
+  for (const model of configModels) {
+    if (!VALID_MODELS.includes(model)) {
+      throw new Error(
+        `Invalid consultation model "${model}" in .codev/config.json. ` +
+        `Valid models: ${VALID_MODELS.join(', ')}. ` +
+        `Special modes: "none", "parent".`
+      );
+    }
+  }
+
+  return { models: configModels, mode: 'normal' };
+}
 
 /**
  * Check if an artifact file has YAML frontmatter indicating it was
@@ -459,7 +508,35 @@ async function handleBuildVerify(
 
   // --- NEED VERIFY ---
   if (state.build_complete && verifyConfig) {
-    const reviews = findReviewFiles(workspaceRoot, state, verifyConfig.models);
+    // Resolve effective models from config (overrides protocol defaults)
+    const { models: effectiveModels, mode: consultMode } = resolveConsultationModels(
+      workspaceRoot, verifyConfig.models
+    );
+
+    // "none" mode: skip verification entirely
+    if (consultMode === 'none') {
+      const tasks: PorchTask[] = [{
+        subject: 'Consultation skipped (configured: none)',
+        activeForm: 'Skipping consultation',
+        description: 'Consultation is disabled via .codev/config.json `porch.consultation.models: "none"`. Verification auto-passes.\n\nRun: porch done ' + state.id,
+        sequential: true,
+      }];
+      return { status: 'tasks', ...baseResponse, tasks };
+    }
+
+    // "parent" mode: emit a gate for the architect to review
+    if (consultMode === 'parent') {
+      const gateName = `phase-review-${state.current_plan_phase || state.phase}`;
+      const tasks: PorchTask[] = [{
+        subject: `Request architect review: ${gateName}`,
+        activeForm: `Requesting ${gateName} approval`,
+        description: `Consultation is set to "parent" mode. The architect must review this phase directly.\n\nGate ${gateName} is pending. STOP and wait for architect approval.`,
+        sequential: true,
+      }];
+      return { status: 'tasks', ...baseResponse, tasks };
+    }
+
+    const reviews = findReviewFiles(workspaceRoot, state, effectiveModels);
 
     // No review files yet — emit consultation tasks
     if (reviews.length === 0) {
@@ -483,13 +560,13 @@ async function handleBuildVerify(
         }
       }
 
-      const consultCmds = verifyConfig.models.map(
+      const consultCmds = effectiveModels.map(
         m => `consult -m ${m} --protocol ${state.protocol} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}"`
       );
 
       tasks.push({
-        subject: `Run ${verifyConfig.models.length}-way consultation`,
-        activeForm: `Running ${verifyConfig.models.length}-way consultation`,
+        subject: `Run ${effectiveModels.length}-way consultation`,
+        activeForm: `Running ${effectiveModels.length}-way consultation`,
         description: `Run these commands in parallel in the background:\n\n${consultCmds.join('\n')}\n\nWait for all to complete, then call \`porch next ${state.id}\` to get the next step.`,
       });
 
@@ -497,9 +574,9 @@ async function handleBuildVerify(
     }
 
     // Review files exist — check if all models reviewed
-    if (reviews.length < verifyConfig.models.length) {
+    if (reviews.length < effectiveModels.length) {
       // Partial reviews — still waiting. Emit same consultation tasks (idempotent).
-      const missingModels = verifyConfig.models.filter(
+      const missingModels = effectiveModels.filter(
         m => !reviews.find(r => r.model === m)
       );
       const planPhaseFlagPartial = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
