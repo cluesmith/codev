@@ -221,22 +221,22 @@ describe('porch protocol loading', () => {
     });
   });
 
-  describe('codev-skeleton fallback', () => {
-    it('should load from codev-skeleton if not in codev', () => {
+  describe('.codev/ override fallback', () => {
+    it('should load from .codev/ if not in codev/', () => {
       // Remove from codev/protocols/spir
       fs.rmSync(path.join(protocolsDir, 'protocol.json'));
 
-      // Create in codev-skeleton/protocols/spir
-      const skeletonDir = path.join(testDir, 'codev-skeleton/protocols/spir');
-      fs.mkdirSync(skeletonDir, { recursive: true });
+      // Create in .codev/protocols/spir (user customization tier)
+      const overrideDir = path.join(testDir, '.codev/protocols/spir');
+      fs.mkdirSync(overrideDir, { recursive: true });
       fs.writeFileSync(
-        path.join(skeletonDir, 'protocol.json'),
-        JSON.stringify({ ...spiderProtocol, description: 'From skeleton' })
+        path.join(overrideDir, 'protocol.json'),
+        JSON.stringify({ ...spiderProtocol, description: 'From .codev override' })
       );
 
       const protocol = loadProtocol(testDir, 'spir');
       expect(protocol.name).toBe('spir');
-      expect(protocol.description).toBe('From skeleton');
+      expect(protocol.description).toBe('From .codev override');
     });
   });
 

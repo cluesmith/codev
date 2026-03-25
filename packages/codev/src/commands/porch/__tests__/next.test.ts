@@ -21,7 +21,7 @@ function createTestDir(): string {
 }
 
 function setupProtocol(testDir: string, protocolName: string, protocol: object): void {
-  const protocolDir = path.join(testDir, 'codev-skeleton', 'protocols', protocolName);
+  const protocolDir = path.join(testDir, 'codev', 'protocols', protocolName);
   fs.mkdirSync(protocolDir, { recursive: true });
   fs.writeFileSync(
     path.join(protocolDir, 'protocol.json'),
@@ -30,7 +30,7 @@ function setupProtocol(testDir: string, protocolName: string, protocol: object):
 }
 
 function setupPrompts(testDir: string, protocolName: string, prompts: Record<string, string>): void {
-  const promptsDir = path.join(testDir, 'codev-skeleton', 'protocols', protocolName, 'prompts');
+  const promptsDir = path.join(testDir, 'codev', 'protocols', protocolName, 'prompts');
   fs.mkdirSync(promptsDir, { recursive: true });
   for (const [name, content] of Object.entries(prompts)) {
     fs.writeFileSync(path.join(promptsDir, name), content);

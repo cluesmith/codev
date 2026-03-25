@@ -29,7 +29,7 @@ function createTestDir(): string {
 }
 
 function setupProtocol(testDir: string, protocolName: string, protocol: object): void {
-  const protocolDir = path.join(testDir, 'codev-skeleton', 'protocols', protocolName);
+  const protocolDir = path.join(testDir, 'codev', 'protocols', protocolName);
   fs.mkdirSync(protocolDir, { recursive: true });
   fs.writeFileSync(
     path.join(protocolDir, 'protocol.json'),
