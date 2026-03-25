@@ -80,7 +80,7 @@ Error handling per spec:
 
 **Modify: all other `af-config.json` consumers**
 - Update imports across ~10 files that directly reference `af-config.json`
-- Includes: `forge.ts` (`loadForgeConfig`), `spawn-worktree.ts`, `architect.ts`, `send.ts`, etc.
+- Includes: `forge.ts` (`loadForgeConfig`), `spawn-worktree.ts`, `tower-terminals.ts`, `tower-instances.ts`, `send.ts`, etc.
 
 #### Acceptance Criteria
 - [ ] `loadConfig()` returns correct merged config from global + project layers
@@ -179,7 +179,7 @@ Error handling per spec:
   - Handle array: run consult for each listed model (current behavior, but configurable)
 
 **Modify: `packages/codev/src/commands/consult/index.ts`**
-- Add validation: if model name not in `['gemini', 'codex', 'claude']`, fail with clear error
+- Add validation: if model name not in `['gemini', 'codex', 'claude']`, fail with clear error. The special string modes `"parent"` and `"none"` are validated separately at the config level before model names are checked — they never reach the model validation path.
 - Accept model list from caller (for porch integration) rather than only from CLI args
 
 **Config shape** (already defined in spec):
@@ -264,6 +264,7 @@ Type: `string | string[]` — normalized by config loader.
 
 #### Test Plan
 - **Unit Tests**: `tests/unit/commands/` — init output, adopt behavior, update migration
+- **Migration edge-case tests**: missing `.update-hashes.json`, partially migrated state (some files already cleaned), corrupt hash file, `af-config.json` already migrated to `.codev/config.json`
 - **Integration Tests**: End-to-end init → file resolution, update migration flow
 
 #### Risks
@@ -300,7 +301,7 @@ mkdir -p "${CODEV_OUTPUT_DIR}"
 tar xzf /tmp/codev-archive.tar.gz -C "${CODEV_OUTPUT_DIR}" --strip-components=1
 rm /tmp/codev-archive.tar.gz
 ```
-Plus similar scripts for `gitlab` and `gitea` providers.
+Plus similar scripts for `gitlab` and `gitea` providers. (Note: the spec mentions Bitbucket, but the actual codebase has `gitea` as the third forge provider. We implement for the existing providers: github, gitlab, gitea.)
 
 **Modify: `packages/codev/src/lib/forge.ts`**
 - Add `'repo-archive'` to `KNOWN_CONCEPTS` array
@@ -313,6 +314,7 @@ Plus similar scripts for `gitlab` and `gitea` providers.
 - Cache location: `~/.codev/cache/framework/<source-hash>/<ref>/`
 - Immutable refs (tags, SHAs): use cache. Branches: re-fetch on sync.
 - Fetch failure: fail hard, no silent fallback
+- When `framework.type === "command"`, set `CODEV_OUTPUT_DIR` and `CODEV_REF` environment variables before executing the user's shell command
 
 **Modify: `packages/codev/src/lib/skeleton.ts`**
 - Extend `resolveFile()` resolution chain to include cache tier:
@@ -322,11 +324,11 @@ Plus similar scripts for `gitlab` and `gitea` providers.
   4. `<package>/skeleton/<path>` (package defaults)
 
 **Modify: `packages/codev/src/lib/config.ts`**
-- Add remote framework base config to layering:
-  1. Hardcoded defaults
+- Add remote framework base config to layering (project overrides global, per spec):
+  1. Hardcoded defaults (lowest priority)
   2. `<cache>/config.json` (remote framework base config)
-  3. `.codev/config.json` (project)
-  4. `~/.codev/config.json` (global, highest priority)
+  3. `~/.codev/config.json` (global)
+  4. `.codev/config.json` (project, highest priority)
 
 #### Acceptance Criteria
 - [ ] `repo-archive` forge concept works for GitHub (and has GitLab/Gitea stubs)
@@ -337,10 +339,12 @@ Plus similar scripts for `gitlab` and `gitea` providers.
 - [ ] Resolution chain includes remote cache between local and package
 - [ ] Remote base `config.json` participates in config layering
 - [ ] Fetch failure produces clear error (no silent fallback)
-- [ ] `framework.type: "command"` executes arbitrary shell command
+- [ ] `framework.type: "command"` executes arbitrary shell command with `CODEV_OUTPUT_DIR` and `CODEV_REF` env vars
+- [ ] `ref` is optional; when omitted, forge fetches default branch (or command runs without `CODEV_REF`)
+- [ ] Immutable refs (tags, SHAs) cached without re-fetch; branch refs re-fetch on `codev sync`
 
 #### Test Plan
-- **Unit Tests**: `tests/unit/commands/sync.test.ts` — sync logic, cache behavior, config integration
+- **Unit Tests**: `tests/unit/commands/sync.test.ts` — sync logic, cache behavior, config integration, ref handling (tags vs branches vs omitted)
 - **Unit Tests**: `tests/unit/lib/skeleton.test.ts` — four-tier resolution with cache
 - **Integration Tests**: End-to-end sync with mock forge (or real GitHub for E2E)
 
