@@ -1118,7 +1118,7 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
   switch (type) {
     case 'spec': {
       const spec = findSpecContent(workspaceRoot, projectId);
-      if (!spec) throw new Error(`Spec ${projectId} not found in codev/specs/`);
+      if (!spec) throw new Error(`Spec ${projectId} not found`);
       const plan = findPlanContent(workspaceRoot, projectId);
       console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
@@ -1127,7 +1127,7 @@ function resolveBuilderQuery(workspaceRoot: string, type: string, options: Consu
 
     case 'plan': {
       const plan = findPlanContent(workspaceRoot, projectId);
-      if (!plan) throw new Error(`Plan ${projectId} not found in codev/plans/`);
+      if (!plan) throw new Error(`Plan ${projectId} not found`);
       const spec = findSpecContent(workspaceRoot, projectId);
       console.error(`Plan: ${plan.label}`);
       if (spec) console.error(`Spec: ${spec.label}`);
@@ -1195,7 +1195,7 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
   switch (type) {
     case 'spec': {
       const spec = findSpecContent(workspaceRoot, issueId);
-      if (!spec) throw new Error(`Spec ${issueId} not found in codev/specs/`);
+      if (!spec) throw new Error(`Spec ${issueId} not found`);
       const plan = findPlanContent(workspaceRoot, issueId);
       console.error(`Spec: ${spec.label}`);
       if (plan) console.error(`Plan: ${plan.label}`);
@@ -1204,7 +1204,7 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
 
     case 'plan': {
       const plan = findPlanContent(workspaceRoot, issueId);
-      if (!plan) throw new Error(`Plan ${issueId} not found in codev/plans/`);
+      if (!plan) throw new Error(`Plan ${issueId} not found`);
       const spec = findSpecContent(workspaceRoot, issueId);
       console.error(`Plan: ${plan.label}`);
       if (spec) console.error(`Spec: ${spec.label}`);

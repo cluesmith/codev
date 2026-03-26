@@ -290,18 +290,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // Resolve spec file (supports legacy zero-padded IDs)
   const specFile = await findSpecFile(config.codevDir, specLookupId);
 
-  // When no spec file exists, check if the protocol allows spawning without one.
-  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
-  if (!specFile) {
-    if (protocolDef?.input?.required === false && !options.amends) {
-      // Protocol allows no-spec spawn — will derive naming from GitHub issue title
-      logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
-    } else {
-      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
-    }
-  }
-
-  // Try artifact resolver to get spec name before falling back to GitHub.
+  // Try artifact resolver before the local-file check.
   // This supports external backends (e.g., CLI backend) where specs exist
   // remotely but not as local files under codev/specs/.
   let resolverSpecName: string | null = null;
@@ -314,6 +303,17 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
       }
     } catch {
       // Non-fatal: if resolver fails, fall through to GitHub issue fetch
+    }
+  }
+
+  // When no spec file exists (locally or in resolver), check if the protocol allows it.
+  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
+  if (!specFile && !resolverSpecName) {
+    if (protocolDef?.input?.required === false && !options.amends) {
+      // Protocol allows no-spec spawn — will derive naming from GitHub issue title
+      logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
+    } else {
+      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
     }
   }
 

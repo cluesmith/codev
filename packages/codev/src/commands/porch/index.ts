@@ -232,7 +232,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
   }
 
   const resolver = getResolver(workspaceRoot);
-  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
@@ -291,7 +291,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
       console.log(chalk.dim('Checks skipped (gate approved <60s ago).'));
     } else {
       const resolver = getResolver(workspaceRoot);
-      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
       console.log('');
       console.log(chalk.bold('RUNNING CHECKS...'));
@@ -553,7 +553,7 @@ export async function approve(
 
   if (phaseCheckNames.length > 0) {
     const resolver = getResolver(workspaceRoot);
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));

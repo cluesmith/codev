@@ -220,6 +220,15 @@ describe('getResolver', () => {
     expect(() => getResolver(testDir)).toThrow('no artifacts.command');
   });
 
+  it('returns CliResolver for backend: "fava-trails" (alias for cli)', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'af-config.json'),
+      JSON.stringify({ artifacts: { backend: 'fava-trails', command: 'my-tool', scope: 'org/proj' } }),
+    );
+    const resolver = getResolver(testDir);
+    expect(resolver).toBeInstanceOf(CliResolver);
+  });
+
   it('throws for unknown backend', () => {
     fs.writeFileSync(
       path.join(testDir, 'af-config.json'),

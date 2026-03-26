@@ -387,7 +387,7 @@ export function findConfigRoot(workspaceRoot: string): string {
 // =============================================================================
 
 export interface ArtifactConfig {
-  backend?: 'local' | 'cli';
+  backend?: 'local' | 'cli' | 'fava-trails';
   scope?: string;
   command?: string;
 }
@@ -418,16 +418,17 @@ function loadArtifactConfig(workspaceRoot: string): ArtifactConfig | null {
 export function getResolver(workspaceRoot: string): ArtifactResolver {
   const config = loadArtifactConfig(workspaceRoot);
 
-  if (config?.backend === 'cli') {
+  // 'fava-trails' is accepted as an alias for 'cli'
+  if (config?.backend === 'cli' || config?.backend === 'fava-trails') {
     if (!config.scope) {
       throw new Error(
-        `af-config.json has artifacts.backend: "cli" but no artifacts.scope.\n` +
+        `af-config.json has artifacts.backend: "${config.backend}" but no artifacts.scope.\n` +
         `Add: "artifacts": { "backend": "cli", "command": "my-tool", "scope": "org/project/codev-assets" }`
       );
     }
     if (!config.command) {
       throw new Error(
-        `af-config.json has artifacts.backend: "cli" but no artifacts.command.\n` +
+        `af-config.json has artifacts.backend: "${config.backend}" but no artifacts.command.\n` +
         `Add: "artifacts": { "backend": "cli", "command": "my-tool", "scope": "org/project/codev-assets" }`
       );
     }
@@ -437,7 +438,7 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
   if (config?.backend && config.backend !== 'local') {
     throw new Error(
       `af-config.json has unknown artifacts.backend: "${config.backend}".\n` +
-      `Valid values: "local" (default), "cli"`
+      `Valid values: "local" (default), "cli", "fava-trails" (alias for cli)`
     );
   }
 

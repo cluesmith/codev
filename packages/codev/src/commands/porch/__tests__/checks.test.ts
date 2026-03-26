@@ -7,10 +7,12 @@ import { tmpdir } from 'node:os';
 import {
   runCheck,
   runPhaseChecks,
+  runArtifactCheck,
   formatCheckResults,
   allChecksPassed,
   type CheckEnv,
 } from '../checks.js';
+import type { ArtifactResolver } from '../artifacts.js';
 
 describe('porch check runner', () => {
   const cwd = tmpdir();
@@ -187,6 +189,135 @@ describe('porch check runner', () => {
       const results = await runPhaseChecks(checks, cwd, defaultEnv);
       expect(results).toHaveLength(2);
       expect(results.every(r => r.passed)).toBe(true);
+    });
+  });
+});
+
+// =============================================================================
+// runArtifactCheck
+// =============================================================================
+
+function makeResolver(overrides: Partial<ArtifactResolver> = {}): ArtifactResolver {
+  return {
+    findSpecBaseName: () => null,
+    getSpecContent: () => null,
+    getPlanContent: () => null,
+    getReviewContent: () => null,
+    hasPreApproval: () => false,
+    ...overrides,
+  };
+}
+
+describe('runArtifactCheck', () => {
+  const env: CheckEnv = { PROJECT_ID: '42', PROJECT_TITLE: '42-my-feature' };
+
+  it('returns null for unrecognized check names (fall through to shell)', () => {
+    const resolver = makeResolver();
+    expect(runArtifactCheck('custom_check', 'echo hi', resolver, env)).toBeNull();
+  });
+
+  describe('plan_exists', () => {
+    it('passes when resolver returns plan content', () => {
+      const resolver = makeResolver({ getPlanContent: () => '# Plan' });
+      const result = runArtifactCheck('plan_exists', 'check-plan', resolver, env);
+      expect(result).not.toBeNull();
+      expect(result!.passed).toBe(true);
+    });
+
+    it('fails when resolver returns null', () => {
+      const resolver = makeResolver({ getPlanContent: () => null });
+      const result = runArtifactCheck('plan_exists', 'check-plan', resolver, env);
+      expect(result).not.toBeNull();
+      expect(result!.passed).toBe(false);
+      expect(result!.error).toBeDefined();
+    });
+  });
+
+  describe('has_phases_json', () => {
+    it('passes when plan contains "phases": key', () => {
+      const resolver = makeResolver({ getPlanContent: () => '```json\n{"phases": []}\n```' });
+      const result = runArtifactCheck('has_phases_json', 'cmd', resolver, env);
+      expect(result!.passed).toBe(true);
+    });
+
+    it('fails when plan has no "phases": key', () => {
+      const resolver = makeResolver({ getPlanContent: () => '# Plan with no phases' });
+      const result = runArtifactCheck('has_phases_json', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+
+    it('fails when plan not found', () => {
+      const resolver = makeResolver({ getPlanContent: () => null });
+      const result = runArtifactCheck('has_phases_json', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+  });
+
+  describe('min_two_phases', () => {
+    it('passes when plan has 2+ phases', () => {
+      const content = '{"id": "phase-1"} {"id": "phase-2"}';
+      const resolver = makeResolver({ getPlanContent: () => content });
+      const result = runArtifactCheck('min_two_phases', 'cmd', resolver, env);
+      expect(result!.passed).toBe(true);
+    });
+
+    it('fails when plan has only 1 phase', () => {
+      const resolver = makeResolver({ getPlanContent: () => '{"id": "phase-1"}' });
+      const result = runArtifactCheck('min_two_phases', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+  });
+
+  describe('review_has_arch_updates', () => {
+    it('passes when review has Architecture Updates section', () => {
+      const resolver = makeResolver({ getReviewContent: () => '## Architecture Updates\n...' });
+      const result = runArtifactCheck('review_has_arch_updates', 'cmd', resolver, env);
+      expect(result!.passed).toBe(true);
+    });
+
+    it('fails when review is missing the section', () => {
+      const resolver = makeResolver({ getReviewContent: () => '## Other Section' });
+      const result = runArtifactCheck('review_has_arch_updates', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+
+    it('fails when review not found', () => {
+      const resolver = makeResolver({ getReviewContent: () => null });
+      const result = runArtifactCheck('review_has_arch_updates', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+  });
+
+  describe('review_has_lessons_updates', () => {
+    it('passes when review has Lessons Learned Updates section', () => {
+      const resolver = makeResolver({ getReviewContent: () => '## Lessons Learned Updates\n...' });
+      const result = runArtifactCheck('review_has_lessons_updates', 'cmd', resolver, env);
+      expect(result!.passed).toBe(true);
+    });
+
+    it('fails when review is missing the section', () => {
+      const resolver = makeResolver({ getReviewContent: () => '## Other' });
+      const result = runArtifactCheck('review_has_lessons_updates', 'cmd', resolver, env);
+      expect(result!.passed).toBe(false);
+    });
+  });
+
+  describe('resolver integration with runPhaseChecks', () => {
+    it('uses resolver path when resolver handles the check, skipping shell', async () => {
+      const resolver = makeResolver({ getPlanContent: () => '# Plan' });
+      const checks = { plan_exists: 'some-shell-cmd-that-would-fail' };
+      const results = await runPhaseChecks(checks, tmpdir(), env, undefined, resolver);
+      expect(results[0].passed).toBe(true);
+      expect(results[0].output).toContain('resolver');
+    });
+
+    it('falls through to shell when check is in overriddenChecks', async () => {
+      const resolver = makeResolver({ getPlanContent: () => '# Plan' });
+      const checks = { plan_exists: 'echo shell-ran' };
+      const overridden = new Set(['plan_exists']);
+      const results = await runPhaseChecks(checks, tmpdir(), env, undefined, resolver, overridden);
+      // Shell ran, not resolver
+      expect(results[0].output).toContain('shell-ran');
     });
   });
 });
