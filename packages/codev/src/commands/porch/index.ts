@@ -32,12 +32,12 @@ import {
   getVerifyConfig,
 } from './protocol.js';
 import {
-  findPlanFile,
-  extractPhasesFromFile,
   getCurrentPlanPhase,
   getPhaseContent,
   allPlanPhasesComplete,
   isPlanPhaseComplete,
+  getPlanContent,
+  extractPlanPhasesResolved,
 } from './plan.js';
 import {
   runPhaseChecks,
@@ -46,7 +46,7 @@ import {
   type CheckEnv,
 } from './checks.js';
 import { loadCheckOverrides } from './config.js';
-import { getResolver } from './artifacts.js';
+import { getResolver, type ArtifactResolver } from './artifacts.js';
 
 // ============================================================================
 // Output Helpers
@@ -159,10 +159,9 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
       console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
 
       // Show phase content from plan
-      const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-      if (planPath) {
-        const content = fs.readFileSync(planPath, 'utf-8');
-        const phaseContent = getPhaseContent(content, currentPlanPhase.id);
+      const planContent = getPlanContent(workspaceRoot, state.id, state.title, getResolver(workspaceRoot));
+      if (planContent) {
+        const phaseContent = getPhaseContent(planContent, currentPlanPhase.id);
         if (phaseContent) {
           console.log(section('FROM THE PLAN', phaseContent.slice(0, 500)));
         }
@@ -372,10 +371,10 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
   }
 
   // Advance to next protocol phase
-  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath);
+  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, getResolver(workspaceRoot));
 }
 
-function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string): void {
+function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver: ArtifactResolver): void {
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
@@ -391,15 +390,12 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
   state.build_complete = false;
   state.iteration = 1;
 
-  // If entering a phased phase (implement), extract plan phases
+  // If entering a phased phase (implement), extract plan phases via resolver
   if (isPhased(protocol, nextPhase.id)) {
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      state.plan_phases = extractPhasesFromFile(planPath);
-      // extractPhasesFromFile already marks first phase as in_progress
-      if (state.plan_phases.length > 0) {
-        state.current_plan_phase = state.plan_phases[0].id;
-      }
+    const phases = extractPlanPhasesResolved(workspaceRoot, state.id, state.title, resolver);
+    if (phases.length > 0) {
+      state.plan_phases = phases;
+      state.current_plan_phase = phases[0].id;
     }
   }
 
@@ -417,10 +413,9 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
     console.log(chalk.bold(`YOUR TASK: ${firstPhase.id} - "${firstPhase.title}"`));
 
     // Show phase content from plan
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      const content = fs.readFileSync(planPath, 'utf-8');
-      const phaseContent = getPhaseContent(content, firstPhase.id);
+    const planContent = getPlanContent(workspaceRoot, state.id, state.title, resolver);
+    if (planContent) {
+      const phaseContent = getPhaseContent(planContent, firstPhase.id);
       if (phaseContent) {
         console.log(section('FROM THE PLAN', phaseContent.slice(0, 800)));
       }
@@ -641,18 +636,9 @@ export async function rollback(
 
   // If rolling back to a phased phase, re-extract plan phases from plan file
   if (isPhased(protocol, targetPhase)) {
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      state.plan_phases = extractPhasesFromFile(planPath);
-      if (state.plan_phases.length > 0) {
-        state.current_plan_phase = state.plan_phases[0].id;
-      } else {
-        state.current_plan_phase = null;
-      }
-    } else {
-      state.plan_phases = [];
-      state.current_plan_phase = null;
-    }
+    const phases = extractPlanPhasesResolved(workspaceRoot, state.id, state.title, getResolver(workspaceRoot));
+    state.plan_phases = phases;
+    state.current_plan_phase = phases.length > 0 ? phases[0].id : null;
   } else {
     state.plan_phases = [];
     state.current_plan_phase = null;

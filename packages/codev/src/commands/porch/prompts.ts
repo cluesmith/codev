@@ -41,7 +41,6 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
     if (issue?.title) {
       return issue.title;
     }
-    console.error(`[porch] project summary: GitHub issue #${issueNumber} not found, trying spec`);
   }
 
   // 2. Fallback: read first heading from spec via resolver
@@ -52,9 +51,6 @@ export async function getProjectSummary(workspaceRoot: string, projectId: string
     if (headingMatch) {
       return headingMatch[1].trim();
     }
-    console.error(`[porch] project summary: spec found but no heading, using title`);
-  } else {
-    console.error(`[porch] project summary: spec not found via resolver, using title`);
   }
 
   // 3. Last resort: project title from status.yaml

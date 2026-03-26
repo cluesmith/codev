@@ -196,52 +196,6 @@ function loadDotenv(workspaceRoot: string): void {
 }
 
 /**
- * Find a spec file by ID. Returns null if not found.
- * Errors if multiple matches found.
- */
-function findSpec(workspaceRoot: string, id: string): string | null {
-  const specsDir = path.join(workspaceRoot, 'codev', 'specs');
-  const unpadded = id.replace(/^0+/, '') || '0';
-  const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : id;
-
-  if (fs.existsSync(specsDir)) {
-    const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.md'));
-    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`) || f.startsWith(`${id}-`));
-    if (matches.length > 1) {
-      const list = matches.map(f => `  - codev/specs/${f}`).join('\n');
-      throw new Error(`Multiple spec files match '${id}':\n${list}`);
-    }
-    if (matches.length === 1) {
-      return path.join(specsDir, matches[0]);
-    }
-  }
-  return null;
-}
-
-/**
- * Find a plan file by ID. Returns null if not found.
- * Errors if multiple matches found.
- */
-function findPlan(workspaceRoot: string, id: string): string | null {
-  const plansDir = path.join(workspaceRoot, 'codev', 'plans');
-  const unpadded = id.replace(/^0+/, '') || '0';
-  const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : id;
-
-  if (fs.existsSync(plansDir)) {
-    const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.md'));
-    const matches = files.filter(f => f.startsWith(`${unpadded}-`) || f.startsWith(`${padded}-`) || f.startsWith(`${id}-`));
-    if (matches.length > 1) {
-      const list = matches.map(f => `  - codev/plans/${f}`).join('\n');
-      throw new Error(`Multiple plan files match '${id}':\n${list}`);
-    }
-    if (matches.length === 1) {
-      return path.join(plansDir, matches[0]);
-    }
-  }
-  return null;
-}
-
-/**
  * Find spec content via artifact resolver.
  * Uses the configured resolver (cli or local). Config errors propagate
  * so misconfiguration is visible rather than silently falling back.
@@ -1190,7 +1144,6 @@ function resolveArchitectQuery(workspaceRoot: string, type: string, options: Con
   }
 
   const issueId = options.issue;
-
 
   switch (type) {
     case 'spec': {
