@@ -199,7 +199,7 @@ function extractExecutable(command: string): string | null {
       // Look for `exec <tool>` or first non-comment, non-shebang, non-blank line
       for (const line of content.split('\n')) {
         const l = line.trim();
-        if (!l || l.startsWith('#') || l.startsWith('if') || l.startsWith('else') || l.startsWith('fi')) continue;
+        if (!l || l.startsWith('#') || l.startsWith('if') || l.startsWith('else') || l.startsWith('fi') || /^\w+=/.test(l)) continue;
         const execMatch = l.match(/^exec\s+(\S+)/);
         if (execMatch) return execMatch[1];
         // First substantive command

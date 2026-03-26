@@ -401,12 +401,6 @@ function checkCodevStructure(workspaceRoot: string): { warnings: string[] } {
   const warnings: string[] = [];
   const codevDir = resolve(workspaceRoot, 'codev');
 
-  // Check for consult-types/ directory (new location)
-  const consultTypesDir = resolve(codevDir, 'consult-types');
-  if (!existsSync(consultTypesDir)) {
-    warnings.push('consult-types/ directory not found - review types may not work correctly');
-  }
-
   // Check for deprecated roles/review-types/ directory
   const oldReviewTypes = resolve(codevDir, 'roles', 'review-types');
   if (existsSync(oldReviewTypes)) {

@@ -343,17 +343,12 @@ describe('doctor command', () => {
       }
     });
 
-    it('should warn when consult-types/ directory is missing', async () => {
-      // Create a codev directory without consult-types/
+    it('should not warn about consult-types/ (resolved at runtime from package)', async () => {
+      // Create a codev directory without consult-types/ — this is normal now
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
-      fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
-        '# Consultant Role'
-      );
 
       process.chdir(testBaseDir);
 
-      // Mock all dependencies as present to isolate our test
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which')) {
           return Buffer.from('/usr/bin/command');
@@ -383,7 +378,6 @@ describe('doctor command', () => {
 
       vi.resetModules();
 
-      // Capture console.log output
       const logOutput: string[] = [];
       vi.spyOn(console, 'log').mockImplementation((...args) => {
         logOutput.push(args.join(' '));
@@ -392,11 +386,11 @@ describe('doctor command', () => {
       const { doctor } = await import('../commands/doctor.js');
       await doctor();
 
-      // Should have warning about missing consult-types/
+      // Should NOT warn about consult-types — they resolve from the package at runtime
       const hasWarning = logOutput.some(line =>
         line.includes('consult-types/') && line.includes('not found')
       );
-      expect(hasWarning).toBe(true);
+      expect(hasWarning).toBe(false);
     });
 
     it('should warn when deprecated roles/review-types/ still exists', async () => {
@@ -461,13 +455,16 @@ describe('doctor command', () => {
     });
 
     it('should display warning details in summary (regression test for #129)', async () => {
-      // Create a codev directory with missing consult-types/ to trigger a warning
+      // Create a codev directory without git remote to trigger a warning
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
 
       process.chdir(testBaseDir);
 
-      // Mock all core dependencies as present
+      // Mock all core dependencies as present, but no git remote
       vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('git remote')) {
+          return Buffer.from('');
+        }
         if (cmd.includes('which')) {
           return Buffer.from('/usr/bin/command');
         }
@@ -477,7 +474,18 @@ describe('doctor command', () => {
         return Buffer.from('');
       });
 
-      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: readonly string[]) => {
+        // Return empty output for git remote -v to trigger no-remote warning
+        if (cmd === 'git' && args && args[0] === 'remote') {
+          return {
+            status: 0,
+            stdout: '',
+            stderr: '',
+            signal: null,
+            output: [null, '', ''],
+            pid: 0,
+          };
+        }
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',
@@ -506,19 +514,18 @@ describe('doctor command', () => {
       await doctor();
 
       // Issue #129: Summary should show WHICH dependencies have warnings
-      // Look for warning details in the summary section (after the separator)
       const separatorIndex = logOutput.findIndex(line => line.includes('============'));
       const summaryLines = logOutput.slice(separatorIndex);
 
-      // Should mention "issues detected" (not vague "below recommended version")
+      // Should mention "issues detected"
       const hasIssuesMessage = summaryLines.some(line =>
         line.includes('issue') && line.includes('detected')
       );
       expect(hasIssuesMessage).toBe(true);
 
-      // Should list the specific warning with its name
+      // Should list the specific warning about missing git remote
       const hasSpecificWarning = summaryLines.some(line =>
-        line.includes('Project structure') && line.includes('consult-types')
+        line.includes('Project structure') && line.includes('No git remote')
       );
       expect(hasSpecificWarning).toBe(true);
     });
