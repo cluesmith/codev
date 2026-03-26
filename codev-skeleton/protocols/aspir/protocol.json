@@ -51,7 +51,7 @@
       },
       "checks": {
         "plan_exists": "test -f codev/plans/${PROJECT_TITLE}.md",
-        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_TITLE}.md",
+        "has_phases_json": "grep -qE '\"phases\"\\s*:' codev/plans/${PROJECT_TITLE}.md",
         "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_TITLE}.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
       },
       "next": "implement"

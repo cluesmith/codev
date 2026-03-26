@@ -424,6 +424,9 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
     };
     const prompt = buildPromptFromTemplate(config, protocol, templateContext);
     builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${prompt}`;
+    if (!options.resume) {
+      await initPorchInWorktree(worktreePath, protocol, builderId, worktreeName);
+    }
   } else {
     builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n# Task\n\n${taskDescription}`;
   }
