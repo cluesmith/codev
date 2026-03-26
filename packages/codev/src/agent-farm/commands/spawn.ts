@@ -313,7 +313,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
       // Protocol allows no-spec spawn — will derive naming from GitHub issue title
       logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
     } else {
-      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
+      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected spec ID: ${specLookupId}`);
     }
   }
 
