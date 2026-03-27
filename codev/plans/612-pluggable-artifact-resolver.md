@@ -67,3 +67,14 @@ Error messages must be backend-agnostic (no hardcoded `codev/specs/` paths).
 1. `npm run build` — compiles clean
 2. `npm test` in `packages/codev` — all tests pass
 3. Manual: configure `backend: "cli"` in `.codev/config.json` and run `porch status`, `porch next`
+
+## Amendment History
+
+### TICK-001: Integrate with v3.0.0 config system (2026-03-27)
+
+**Changes**:
+- Phase 1 (updated): Remove `findConfigRoot()`, `loadArtifactConfig()`, and `ArtifactConfig` from `artifacts.ts`; add `artifacts` field to `CodevConfig` in `lib/config.ts`; rewrite `getResolver()` to call `loadConfig(workspaceRoot)` and read `config.artifacts`; update error messages to reference `.codev/config.json`
+- Phase 2 (updated): Replace `isArtifactPreApproved()` in `next.ts` with `getResolver(workspaceRoot).hasPreApproval(artifactGlob)`; remove unused `globSync` import; update `showArtifactConfig()` in `agent-farm/commands/status.ts` to use `loadConfig()` instead of reading `af-config.json` directly; fix stale `af-config.json` comment in `checks.ts`
+- Phase 3 (updated): Add unit tests for `getResolver()` with `.codev/config.json` fixtures; verify `af-config.json` presence now causes an error (via `loadConfig()`)
+
+**Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
