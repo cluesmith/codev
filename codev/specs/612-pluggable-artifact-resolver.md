@@ -7,7 +7,7 @@ validated: [gpt-5.3-codex, gemini-3.1-pro, deepseek-v3.2]
 
 ## Metadata
 - **ID**: 612
-- **Status**: implemented (pre-v3.0.0, needs rewrite — see TICK amendment)
+- **Status**: implemented (v3.0.0 — TICK-001 config migration + TICK-002 cross-subsystem integration)
 - **Created**: 2026-03-16
 - **GitHub Issue**: https://github.com/cluesmith/codev/issues/612
 
@@ -85,17 +85,17 @@ Wraps existing filesystem logic. Zero behavior change for existing users.
 
 ## Success Criteria
 
-- [ ] Porch with `artifacts.backend: "local"` (or unset) behaves identically to current behavior
-- [ ] Porch with `artifacts.backend: "cli"` resolves artifacts via configurable CLI command
-- [ ] `artifacts.command` is required when backend is `"cli"`
-- [ ] Resolver threaded through all code paths including `handleOncePhase`
-- [ ] CLI errors cached as negative sentinel
-- [ ] `hasPreApproval()` works for both resolvers via shared helper
-- [ ] Artifact-dependent checks use resolver
-- [ ] `af status` shows configured artifact backend
-- [ ] All existing tests pass unchanged
-- [ ] Configuration uses `.codev/config.json` via `loadConfig()` (v3.0.0 pattern)
-- [ ] `CodevConfig` interface extended with `artifacts` section
+- [x] Porch with `artifacts.backend: "local"` (or unset) behaves identically to current behavior
+- [x] Porch with `artifacts.backend: "cli"` resolves artifacts via configurable CLI command
+- [x] `artifacts.command` is required when backend is `"cli"`
+- [x] Resolver threaded through all code paths including `handleOncePhase`
+- [x] CLI errors cached as negative sentinel
+- [x] `hasPreApproval()` works for both resolvers via shared helper
+- [x] Artifact-dependent checks use resolver
+- [x] `af status` shows configured artifact backend
+- [x] All existing tests pass unchanged
+- [x] Configuration uses `.codev/config.json` via `loadConfig()` (v3.0.0 pattern)
+- [x] `CodevConfig` interface extended with `artifacts` section
 
 ## Expert Consultation
 
@@ -145,11 +145,11 @@ PR #636 threads the resolver through porch but 3 subsystems remain hardcoded:
 
 **Spec Changes**:
 - Success Criteria additions:
-  - [ ] Consult CLI uses resolver for spec/plan content (no filesystem dependency)
-  - [ ] `af spawn` tries resolver before fatal error for CLI backends
-  - [ ] PTY sessions propagate `CODEV_ARTIFACTS_DATA_REPO` to child processes
-  - [ ] Query builders embed artifact content inline (not "read from disk" instructions)
-  - [ ] Error messages are backend-agnostic (no hardcoded `codev/specs/` paths in consult or spawn)
+  - [x] Consult CLI uses resolver for spec/plan content (no filesystem dependency)
+  - [x] `af spawn` tries resolver before fatal error for CLI backends
+  - [x] PTY sessions propagate `CODEV_ARTIFACTS_DATA_REPO` to child processes
+  - [x] Query builders embed artifact content inline (not "read from disk" instructions)
+  - [x] Error messages are backend-agnostic (no hardcoded `codev/specs/` paths in consult or spawn)
 
 **Plan Changes**:
 - Phase 1: Replace `findSpec()`/`findPlan()` in consult/index.ts with resolver-based `findSpecContent()`/`findPlanContent()` returning `ContentRef { content, label }`. Update query builders to embed content inline. Remove hardcoded path error messages.

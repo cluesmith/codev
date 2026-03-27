@@ -114,7 +114,7 @@ describe('porch done — verification enforcement', () => {
   // Test 1: porch done blocks when review files missing
   // --------------------------------------------------------------------------
 
-  it.skip('blocks when review files are missing (build_complete, gate approved)', async () => { // FLAKY: skipped pending investigation — parent consultation mode mismatch
+  it('blocks when review files are missing (build_complete, gate approved)', async () => {
     const state = makeState({
       build_complete: true,
       gates: {
