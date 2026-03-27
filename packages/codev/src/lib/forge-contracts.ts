@@ -36,6 +36,7 @@ export interface IssueListItem {
   labels: Array<{ name: string }>;
   createdAt: string;
   closedAt?: string;
+  author?: { login: string };
 }
 
 /** Output of the `issue-list` concept command. */
@@ -60,6 +61,7 @@ export interface PrListItem {
   body: string;
   createdAt: string;
   mergedAt?: string;
+  author?: { login: string };
 }
 
 /** Output of the `pr-list` concept command. */

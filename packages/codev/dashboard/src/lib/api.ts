@@ -138,6 +138,7 @@ export interface OverviewPR {
   reviewStatus: string;
   linkedIssue: string | null;
   createdAt: string;
+  author?: string;
 }
 
 export interface OverviewBacklogItem {
@@ -151,6 +152,7 @@ export interface OverviewBacklogItem {
   hasReview: boolean;
   hasBuilder: boolean;
   createdAt: string;
+  author?: string;
   specPath?: string;
   planPath?: string;
   reviewPath?: string;
