@@ -56,6 +56,19 @@ approved: 2026-01-01
     expect(isPreApprovedContent(content)).toBe(false);
   });
 
+  it('returns true for YAML block list format (validated with dashes)', () => {
+    const content = `---
+approved: 2026-01-01
+validated:
+  - gemini
+  - codex
+  - claude
+---
+
+# Spec`;
+    expect(isPreApprovedContent(content)).toBe(true);
+  });
+
   it('returns false when missing approved field', () => {
     const content = `---
 validated: [gemini, codex, claude]

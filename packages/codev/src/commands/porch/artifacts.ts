@@ -50,7 +50,8 @@ export function isPreApprovedContent(content: string): boolean {
 
   const frontmatter = frontmatterMatch[1];
   const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
-  const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
+  // Accept both inline YAML arrays (validated: [a, b]) and block YAML lists (validated:\n  - a)
+  const hasValidated = /^validated:\s*(\[.+\]|$)/m.test(frontmatter);
   return hasApproved && hasValidated;
 }
 
@@ -385,7 +386,7 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
   if (artifacts?.backend && artifacts.backend !== 'local') {
     throw new Error(
       `.codev/config.json has unknown artifacts.backend: "${artifacts.backend}".\n` +
-      `Valid values: "local" (default), "cli"`
+      `Valid values: "local" (default), "cli", "fava-trails" (alias for cli with command defaulting to fava-trails)`
     );
   }
 

@@ -14,6 +14,7 @@ import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord 
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
+import type { ArtifactResolver } from './artifacts.js';
 import { fetchIssue } from '../../lib/github.js';
 import { resolveCodevFile } from '../../lib/skeleton.js';
 
@@ -197,7 +198,8 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
 export async function buildPhasePrompt(
   workspaceRoot: string,
   state: ProjectState,
-  protocol: Protocol
+  protocol: Protocol,
+  resolver?: ArtifactResolver
 ): Promise<string> {
   const phaseConfig = getPhaseConfig(protocol, state.phase);
   if (!phaseConfig) {
@@ -234,7 +236,7 @@ export async function buildPhasePrompt(
   }
 
   // Resolve canonical artifact base name (prevents doubled IDs like "364-0364-name")
-  const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+  const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver);
 
   // Try to load prompt using per-file unified resolution
   {
@@ -258,7 +260,7 @@ export async function buildPhasePrompt(
 
       // Add plan phase context if applicable
       if (currentPlanPhase) {
-        result = addPlanPhaseContext(workspaceRoot, state, currentPlanPhase, result);
+        result = addPlanPhaseContext(workspaceRoot, state, currentPlanPhase, result, resolver);
       }
 
       // Prepend history if this is a retry
@@ -288,15 +290,24 @@ function addPlanPhaseContext(
   workspaceRoot: string,
   state: ProjectState,
   planPhase: PlanPhase,
-  prompt: string
+  prompt: string,
+  resolver?: ArtifactResolver
 ): string {
-  const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-  if (!planPath) {
+  // Use resolver if available, otherwise fall back to filesystem
+  let planContent: string | null = null;
+  if (resolver) {
+    planContent = resolver.getPlanContent(state.id, state.title);
+  } else {
+    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
+    if (planPath) {
+      try { planContent = fs.readFileSync(planPath, 'utf-8'); } catch { /* ignore */ }
+    }
+  }
+  if (!planContent) {
     return prompt;
   }
 
   try {
-    const planContent = fs.readFileSync(planPath, 'utf-8');
     const phaseContent = getPhaseContent(planContent, planPhase.id);
     if (phaseContent) {
       return prompt + `\n\n## Current Plan Phase Details\n\n**${planPhase.id}: ${planPhase.title}**\n\n${phaseContent}\n`;
