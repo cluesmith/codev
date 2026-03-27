@@ -9,6 +9,7 @@ import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { getTypeColor } from '../utils/display.js';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
 import chalk from 'chalk';
