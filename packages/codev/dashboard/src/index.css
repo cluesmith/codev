@@ -1216,6 +1216,12 @@ a.pr-row {
   white-space: nowrap;
 }
 
+.pr-row-author {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* Needs Attention rows */
 .attention-rows {
   display: flex;
@@ -1398,6 +1404,12 @@ a.attention-row {
 
 .backlog-row-age {
   font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.backlog-row-author {
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }

@@ -60,6 +60,7 @@ export function BacklogList({ items, onRefresh }: BacklogListProps) {
             <span className="backlog-row-number">#{item.id}</span>
             <span className={`backlog-type-tag ${TYPE_CLASS[item.type] ?? ''}`}>{item.type}</span>
             <span className="backlog-row-title">{item.title}</span>
+            {item.author && <span className="backlog-row-author">@{item.author}</span>}
             <span className="backlog-row-age">{timeAgo(item.createdAt)}</span>
           </a>
           {(item.specPath || item.planPath || item.reviewPath) && (

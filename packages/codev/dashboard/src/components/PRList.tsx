@@ -33,6 +33,7 @@ export function PRList({ prs }: PRListProps) {
           <a key={pr.id} className="pr-row" href={pr.url} target="_blank" rel="noopener noreferrer">
             <span className="pr-row-number">#{pr.id}</span>
             <span className="pr-row-title">{pr.title}</span>
+            {pr.author && <span className="pr-row-author">@{pr.author}</span>}
             <span className={`pr-row-status ${status.className}`}>{status.label}</span>
             <span className="pr-row-age">{timeAgo(pr.createdAt)}</span>
           </a>
