@@ -1,3 +1,8 @@
+---
+approved: 2026-03-27
+validated: [gemini, claude]
+---
+
 # Plan: Show GitHub Author in Backlog and PR Views
 
 ## Metadata
