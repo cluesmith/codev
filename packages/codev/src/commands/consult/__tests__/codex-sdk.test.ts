@@ -265,7 +265,7 @@ describe('runCodexConsultation() with mocked SDK', () => {
     // Verify startThread receives model, sandboxMode, and workingDirectory
     expect(mockStartThreadArgs).toBeDefined();
     const threadArgs = mockStartThreadArgs as Record<string, unknown>;
-    expect(threadArgs.model).toBe('gpt-5.2-codex');
+    expect(threadArgs.model).toBe('gpt-5.4-codex');
     expect(threadArgs.sandboxMode).toBe('read-only');
     expect(threadArgs.workingDirectory).toBe(tmpDir);
   });
