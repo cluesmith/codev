@@ -54,6 +54,7 @@ export interface PROverview {
   reviewStatus: string;
   linkedIssue: string | null;
   createdAt: string;
+  author?: string;
 }
 
 export interface BacklogItem {
@@ -67,6 +68,7 @@ export interface BacklogItem {
   hasReview: boolean;
   hasBuilder: boolean;
   createdAt: string;
+  author?: string;
   specPath?: string;
   planPath?: string;
   reviewPath?: string;
@@ -651,6 +653,7 @@ export function deriveBacklog(
         hasReview: !!reviewFile,
         hasBuilder: activeBuilderIssues.has(id),
         createdAt: issue.createdAt,
+        author: issue.author?.login,
       };
       if (specFile) item.specPath = `codev/specs/${specFile}`;
       if (planFile) item.planPath = `codev/plans/${planFile}`;
@@ -715,6 +718,7 @@ export class OverviewCache {
         reviewStatus: pr.reviewDecision || 'REVIEW_REQUIRED',
         linkedIssue: parseLinkedIssue(pr.body || '', pr.title),
         createdAt: pr.createdAt,
+        author: pr.author?.login,
       }));
     }
 

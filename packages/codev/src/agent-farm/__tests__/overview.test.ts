@@ -1245,6 +1245,27 @@ describe('overview', () => {
       expect(backlog[0].hasPlan).toBe(false);
       expect(backlog[0].hasReview).toBe(false);
     });
+
+    it('maps author login when present', () => {
+      const issues = [{ ...issueItem(42, 'Test'), author: { login: 'timeleft--' } }];
+
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].author).toBe('timeleft--');
+    });
+
+    it('sets author to undefined when author is missing', () => {
+      const issues = [issueItem(42, 'Test')];
+
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].author).toBeUndefined();
+    });
+
+    it('sets author to undefined when author is null', () => {
+      const issues = [{ ...issueItem(42, 'Test'), author: null as unknown as { login: string } }];
+
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].author).toBeUndefined();
+    });
   });
 
   // ==========================================================================
@@ -1287,6 +1308,42 @@ describe('overview', () => {
       expect(data.recentlyClosed[0].type).toBe('bug');
 
       expect(data.errors).toBeUndefined();
+    });
+
+    it('maps PR author login to pendingPRs', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 10, title: 'Add feature', url: 'https://github.com/org/repo/pull/10', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z', author: { login: 'contributor' } },
+      ]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs[0].author).toBe('contributor');
+    });
+
+    it('maps backlog author login from issues', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([
+        { ...issueItem(42, 'Test'), author: { login: 'external-dev' } },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.backlog[0].author).toBe('external-dev');
+    });
+
+    it('handles PR without author field', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 10, title: 'Add feature', url: 'https://github.com/org/repo/pull/10', reviewDecision: 'APPROVED', body: '', createdAt: '2026-01-10T00:00:00Z' },
+      ]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs[0].author).toBeUndefined();
     });
 
     it('caches PR data within TTL', async () => {
