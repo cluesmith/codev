@@ -113,3 +113,22 @@ The original implementation (PR #613) targeted v2.x with `af-config.json`. PR #6
 - Hard error if `af-config.json` exists
 
 The artifact resolver must be rewritten to integrate with the new config and porch patterns.
+
+## Amendments
+
+### TICK-001: Integrate with v3.0.0 config system (2026-03-27)
+
+**Summary**: Rewrite the factory and config section of `artifacts.ts` to use `loadConfig()` from `lib/config.ts` instead of `af-config.json`.
+
+**Problem Addressed**:
+The initial implementation (PR #613) read artifact config from `af-config.json` via `findConfigRoot()`. In v3.0.0, `af-config.json` is rejected with a hard error. The config factory (`getResolver()`) and related helpers must be updated to use the unified `loadConfig()` system, and `CodevConfig` must be extended with an `artifacts` section.
+
+**Spec Changes**:
+- Configuration section: Updated to reference `.codev/config.json` as the config source (not `af-config.json`)
+- Success Criteria: Resolver correctly reads artifacts config via `loadConfig()` from `lib/config.ts`; `af status` reads artifact backend from `.codev/config.json`
+
+**Plan Changes**:
+- Phase 1: Extend `CodevConfig` in `lib/config.ts` with `artifacts` section; rewrite `getResolver()` to use `loadConfig()`; remove `findConfigRoot()` and `loadArtifactConfig()`
+- Phase 2: Update `isArtifactPreApproved()` in `next.ts` to use resolver; update `showArtifactConfig()` in `status.ts` to use `loadConfig()`
+
+**Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
