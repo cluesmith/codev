@@ -2,13 +2,26 @@
  * Tests for porch next command
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { next } from '../next.js';
 import { writeState, getProjectDir, getStatusPath, PROJECTS_DIR } from '../state.js';
 import type { ProjectState, Protocol, PorchNextResponse } from '../types.js';
+
+// Mock loadConfig to return defaults, preventing workspace/global config from leaking in.
+// Without this, loadConfig reads ~/.codev/config.json and framework cache, which can
+// override consultation models (e.g., "parent") and break tests expecting 3-model defaults.
+vi.mock('../../../lib/config.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../lib/config.js')>();
+  return {
+    ...original,
+    loadConfig: (_workspaceRoot: string) => ({
+      porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
+    }),
+  };
+});
 
 // ============================================================================
 // Test Fixtures
@@ -795,5 +808,27 @@ describe('porch next', () => {
     // Second task: merge PR
     expect(result.tasks![1].subject).toContain('Merge');
     expect(result.tasks![1].description).toContain('pr-merge');
+  });
+
+  // --------------------------------------------------------------------------
+  // Regression: config isolation (#639)
+  // --------------------------------------------------------------------------
+
+  it('verify tasks use default 3-model consultation regardless of workspace config', async () => {
+    // This test ensures the loadConfig mock is active: even if the real workspace
+    // has consultation.models set to "parent" or "none", tests always get defaults.
+    setupState(testDir, makeState({ build_complete: true }));
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks!.length).toBe(1);
+    const desc = result.tasks![0].description!;
+    // All 3 default models must appear in the consultation command
+    expect(desc).toContain('gemini');
+    expect(desc).toContain('codex');
+    expect(desc).toContain('claude');
+    // Must NOT indicate parent/none delegation
+    expect(desc).not.toContain('parent');
   });
 });

@@ -12,6 +12,19 @@ import { done } from '../index.js';
 import { writeState, getProjectDir, getStatusPath } from '../state.js';
 import type { ProjectState } from '../types.js';
 
+// Mock loadConfig to return defaults, preventing workspace/global config from leaking in.
+// Without this, loadConfig reads ~/.codev/config.json and framework cache, which can
+// override consultation models (e.g., "parent") and break tests expecting 3-model defaults.
+vi.mock('../../../lib/config.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../lib/config.js')>();
+  return {
+    ...original,
+    loadConfig: (_workspaceRoot: string) => ({
+      porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
+    }),
+  };
+});
+
 // ============================================================================
 // Test Fixtures
 // ============================================================================
