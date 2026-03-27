@@ -359,6 +359,18 @@ program
     // The args after 'agent-farm' need to be passed through
   });
 
+// When invoked via standalone bin shim (e.g. `consult` not `codev consult`),
+// strip the parent "codev" prefix from help usage lines
+const standaloneCmd = process.env.CODEV_STANDALONE;
+if (standaloneCmd) {
+  const stripParent = { commandUsage: (cmd: { name: () => string; usage: () => string }) => cmd.name() + ' ' + cmd.usage() };
+  for (const cmd of program.commands) {
+    if (cmd.name() === standaloneCmd) {
+      cmd.configureHelp(stripParent);
+    }
+  }
+}
+
 /**
  * Run the CLI with given arguments
  * Used by bin shims (af.js, consult.js) to inject commands
