@@ -9,6 +9,8 @@ import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { getTypeColor } from '../utils/display.js';
+import { join } from 'node:path';
+import { loadConfig } from '../../lib/config.js';
 import chalk from 'chalk';
 
 /**
@@ -33,6 +35,8 @@ export async function status(): Promise<void> {
       logger.kv('  Active Workspaces', health.activeWorkspaces);
       logger.kv('  Memory', `${Math.round(health.memoryUsage / 1024 / 1024)}MB`);
     }
+
+    showArtifactConfig(workspacePath);
 
     logger.blank();
 
@@ -66,6 +70,9 @@ export async function status(): Promise<void> {
   // Tower not running - show message and fall back to local state
   logger.kv('Tower', chalk.gray('not running'));
   logger.info(`Run 'af tower start' to start the tower daemon`);
+
+  showArtifactConfig(workspacePath);
+
   logger.blank();
 
   // Fall back to local state for legacy display
@@ -145,6 +152,39 @@ export async function status(): Promise<void> {
     }
   } else {
     logger.info('Annotations: none');
+  }
+}
+
+function showArtifactConfig(workspacePath: string): void {
+  let artifacts: { backend?: string; scope?: string; command?: string } | undefined;
+  try {
+    artifacts = loadConfig(workspacePath).artifacts;
+  } catch { return; }
+
+  if (!artifacts?.backend) return;
+
+  logger.blank();
+
+  if (artifacts.backend === 'cli' || artifacts.backend === 'fava-trails') {
+    const command = artifacts.command || 'fava-trails';
+    logger.kv('Artifacts', chalk.cyan(`cli (${command})`));
+    if (artifacts.scope) {
+      logger.kv('  Scope', artifacts.scope);
+    }
+    // Resolve data repo: env var first, then .env file, then default
+    let dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO || process.env.FAVA_TRAILS_DATA_REPO;
+    if (!dataRepo) {
+      const envPath = join(workspacePath, '.env');
+      try {
+        const envContent = readFileSync(envPath, 'utf-8');
+        const newMatch = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
+        const legacyMatch = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
+        dataRepo = newMatch?.[1]?.trim() || legacyMatch?.[1]?.trim();
+      } catch { /* .env may not exist */ }
+    }
+    logger.kv('  Data Repo', dataRepo || chalk.yellow('(default)'));
+  } else {
+    logger.kv('Artifacts', `${artifacts.backend} (codev/specs/, codev/plans/)`);
   }
 }
 

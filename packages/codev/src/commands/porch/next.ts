@@ -11,7 +11,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { globSync } from 'glob';
 import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import {
@@ -37,6 +36,7 @@ import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides } from './config.js';
 import { loadConfig } from '../../lib/config.js';
+import { getResolver } from './artifacts.js';
 
 import type {
   ProjectState,
@@ -91,34 +91,6 @@ function resolveConsultationModels(workspaceRoot: string, protocolModels: string
   return { models: configModels, mode: 'normal' };
 }
 
-/**
- * Check if an artifact file has YAML frontmatter indicating it was
- * already approved and validated (3-way review).
- *
- * Frontmatter format:
- * ---
- * approved: 2026-01-29
- * validated: [gemini, codex, claude]
- * ---
- */
-function isArtifactPreApproved(workspaceRoot: string, artifactGlob: string): boolean {
-  const matches = globSync(artifactGlob, { cwd: workspaceRoot });
-  if (matches.length === 0) return false;
-
-  const filePath = path.join(workspaceRoot, matches[0]);
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) return false;
-
-    const frontmatter = frontmatterMatch[1];
-    const hasApproved = /^approved:\s*.+$/m.test(frontmatter);
-    const hasValidated = /^validated:\s*\[.+\]$/m.test(frontmatter);
-    return hasApproved && hasValidated;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Find review files for the current iteration in the project directory.
@@ -326,7 +298,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       const artifactGlob = buildConfig.artifact
         .replace('${PROJECT_ID}', state.id)
         .replace('${PROJECT_TITLE}', artifactBaseName);
-      if (isArtifactPreApproved(workspaceRoot, artifactGlob)) {
+      if (getResolver(workspaceRoot).hasPreApproval(artifactGlob)) {
         // Auto-approve gate and advance
         const gateName = getPhaseGate(protocol, state.phase);
         if (gateName) {
