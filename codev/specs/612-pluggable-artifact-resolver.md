@@ -132,3 +132,25 @@ The initial implementation (PR #613) read artifact config from `af-config.json` 
 - Phase 2: Update `isArtifactPreApproved()` in `next.ts` to use resolver; update `showArtifactConfig()` in `status.ts` to use `loadConfig()`
 
 **Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
+
+### TICK-002: Extend resolver to consult CLI, af spawn, and PTY (2026-03-27)
+
+**Summary**: Port the remaining cross-subsystem artifact resolver integration from PR #613 to v3.0.0. Three subsystems still use hardcoded `codev/specs/` paths, breaking the CLI artifact backend for upstream users.
+
+**Problem Addressed**:
+PR #636 threads the resolver through porch but 3 subsystems remain hardcoded:
+- `consult/index.ts`: `findSpec()`/`findPlan()` (lines 195-235) scan `codev/specs/` and `codev/plans/` directories. When `porch next` emits consult tasks, the consult CLI crashes for CLI backend users because specs aren't on disk.
+- `spawn.ts`: `fatal()` at line 299 expects `codev/specs/${id}-*.md`. Path construction at lines 382-383 hardcodes `codev/specs/` and `codev/plans/`. Blocks `af spawn` for CLI backend.
+- `pty-manager.ts`: Missing `CODEV_ARTIFACTS_DATA_REPO` env var propagation. CliResolver in builder worktrees can't locate the data repo.
+
+**Spec Changes**:
+- Success Criteria additions:
+  - [ ] Consult CLI uses resolver for spec/plan content (no filesystem dependency)
+  - [ ] `af spawn` tries resolver before fatal error for CLI backends
+  - [ ] PTY sessions propagate `CODEV_ARTIFACTS_DATA_REPO` to child processes
+  - [ ] Query builders embed artifact content inline (not "read from disk" instructions)
+  - [ ] Error messages are backend-agnostic (no hardcoded `codev/specs/` paths in consult or spawn)
+
+**Plan Changes**:
+- Phase 1: Replace `findSpec()`/`findPlan()` in consult/index.ts with resolver-based `findSpecContent()`/`findPlanContent()` returning `ContentRef { content, label }`. Update query builders to embed content inline. Remove hardcoded path error messages.
+- Phase 2: Add resolver fallback in spawn.ts before `fatal()`. Propagate `CODEV_ARTIFACTS_DATA_REPO` in pty-manager.ts `baseEnv`.

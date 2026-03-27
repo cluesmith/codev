@@ -78,3 +78,34 @@ Error messages must be backend-agnostic (no hardcoded `codev/specs/` paths).
 - Phase 3 (updated): Add unit tests for `getResolver()` with `.codev/config.json` fixtures; verify `af-config.json` presence now causes an error (via `loadConfig()`)
 
 **Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
+
+### TICK-002: Extend resolver to consult CLI, af spawn, and PTY (2026-03-27)
+
+```json
+{
+  "phases": [
+    {"id": "phase_1", "title": "consult CLI resolver integration"},
+    {"id": "phase_2", "title": "spawn resolver fallback + PTY env"}
+  ]
+}
+```
+
+**Phase 1: consult CLI resolver integration**
+- Add `ContentRef` type (`{ content: string; label: string }`) to `packages/codev/src/commands/consult/index.ts`
+- Replace `findSpec()` (lines 195-212) and `findPlan()` (lines 218-235) with `findSpecContent()` and `findPlanContent()` using `getResolver(workspaceRoot)` from `../porch/artifacts.js`
+- `findSpecContent(workspaceRoot, id)`: returns `ContentRef | null` via `resolver.getSpecContent(id, '')`; label from `resolver.findSpecBaseName(id, '') ?? id`
+- `findPlanContent(workspaceRoot, id)`: same pattern via `resolver.getPlanContent(id, '')`
+- Update `buildSpecQuery()`, `buildPlanQuery()`, `buildImplQuery()`, `buildPhaseQuery()` signatures: accept `ContentRef` instead of file path strings
+- Embed artifact content directly in query strings: `query += \`## Specification\n\n${spec.content}\n\n\`` instead of telling reviewer to "read from disk"
+- Remove hardcoded `codev/specs/` and `codev/plans/` error messages at lines 1110, 1119, 1186, 1195 — use `"Spec ${id} not found"` (backend-agnostic)
+- Done: `npm run build` compiles clean, existing consult tests pass
+
+**Phase 2: spawn resolver fallback + PTY env**
+- `packages/codev/src/agent-farm/commands/spawn.ts`:
+  - Import: `import { getResolver } from '../../commands/porch/artifacts.js';`
+  - Add resolver fallback before `fatal()` at ~line 299: try `getResolver(config.workspaceRoot).findSpecBaseName(specLookupId, '')` — non-fatal try/catch
+  - Update fatal message: remove `codev/specs/` reference, use `"Expected spec ID: ${specLookupId}"`
+  - Add `resolverSpecName` to actualSpecName priority: `issueSpecName || resolverSpecName || specFile?.replace(/\.md$/, '') || ...`
+- `packages/codev/src/terminal/pty-manager.ts`:
+  - Add to `baseEnv` (~line 73): `...(process.env.CODEV_ARTIFACTS_DATA_REPO ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO } : {}),`
+- Done: `npm run build` compiles clean, all tests pass
