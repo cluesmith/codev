@@ -13,12 +13,17 @@ import type { ProjectState, Protocol, PorchNextResponse } from '../types.js';
 // Mock loadConfig to return defaults, preventing workspace/global config from leaking in.
 // Without this, loadConfig reads ~/.codev/config.json and framework cache, which can
 // override consultation models (e.g., "parent") and break tests expecting 3-model defaults.
+// Use vi.hoisted mutable ref so individual tests can override consultation models.
+const { configRef } = vi.hoisted(() => ({
+  configRef: { models: ['gemini', 'codex', 'claude'] as string | string[] },
+}));
+
 vi.mock('../../../lib/config.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../lib/config.js')>();
   return {
     ...original,
     loadConfig: (_workspaceRoot: string) => ({
-      porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
+      porch: { consultation: { models: configRef.models } },
     }),
   };
 });
@@ -149,6 +154,7 @@ describe('porch next', () => {
 
   afterEach(() => {
     fs.rmSync(testDir, { recursive: true, force: true });
+    configRef.models = ['gemini', 'codex', 'claude'];
   });
 
   // --------------------------------------------------------------------------
@@ -830,5 +836,43 @@ describe('porch next', () => {
     expect(desc).toContain('claude');
     // Must NOT indicate parent/none delegation
     expect(desc).not.toContain('parent');
+  });
+
+  // --------------------------------------------------------------------------
+  // Solo mode — single consultation model (#641, #592, #618)
+  // --------------------------------------------------------------------------
+
+  it('emits single VERIFY task when only one model is configured (solo mode)', async () => {
+    configRef.models = ['claude'];
+    setupState(testDir, makeState({ build_complete: true }));
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks).toBeDefined();
+    expect(result.tasks!.length).toBe(1);
+    expect(result.tasks![0].subject).toContain('1-way consultation');
+    expect(result.tasks![0].description).toContain('claude');
+    expect(result.tasks![0].description).not.toContain('gemini');
+    expect(result.tasks![0].description).not.toContain('codex');
+  });
+
+  // --------------------------------------------------------------------------
+  // None mode — consultation disabled (#641, #592)
+  // --------------------------------------------------------------------------
+
+  it('skips consultation when mode is "none"', async () => {
+    configRef.models = 'none';
+    setupState(testDir, makeState({ build_complete: true }));
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks).toBeDefined();
+    expect(result.tasks!.length).toBe(1);
+    expect(result.tasks![0].subject).toContain('Consultation skipped');
+    expect(result.tasks![0].description).toContain('none');
+    // Must NOT contain consult commands
+    expect(result.tasks![0].description).not.toContain('consult -m');
   });
 });
