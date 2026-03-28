@@ -278,6 +278,82 @@ updated_at: "${state.updated_at}"
       const result = findStatusPath(emptyDir, '0074');
       expect(result).toBeNull();
     });
+
+    // ========================================================================
+    // Bugfix #622: find projects in builder worktrees from repo root
+    // ========================================================================
+
+    it('should find project in .builders worktree when not in local codev/projects (bugfix #622)', () => {
+      // Simulate a builder worktree with a project
+      const worktreeProjectsDir = path.join(testDir, '.builders', 'bugfix-622-fix-porch', PROJECTS_DIR);
+      const worktreeProjectDir = path.join(worktreeProjectsDir, 'bugfix-622-bug-porch-status');
+      fs.mkdirSync(worktreeProjectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(worktreeProjectDir, 'status.yaml'),
+        'id: "bugfix-622"\nprotocol: bugfix\nphase: investigate\n',
+      );
+
+      const result = findStatusPath(testDir, 'bugfix-622');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('.builders/bugfix-622-fix-porch');
+      expect(result).toContain('bugfix-622-bug-porch-status/status.yaml');
+    });
+
+    it('should find numeric project in .builders worktree (bugfix #622)', () => {
+      const worktreeProjectsDir = path.join(testDir, '.builders', 'spir-0042-feature', PROJECTS_DIR);
+      const worktreeProjectDir = path.join(worktreeProjectsDir, '0042-some-feature');
+      fs.mkdirSync(worktreeProjectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(worktreeProjectDir, 'status.yaml'),
+        'id: "0042"\nprotocol: spir\nphase: specify\n',
+      );
+
+      const result = findStatusPath(testDir, '0042');
+
+      expect(result).not.toBeNull();
+      expect(result).toContain('.builders/spir-0042-feature');
+      expect(result).toContain('0042-some-feature/status.yaml');
+    });
+
+    it('should prefer local codev/projects over .builders worktrees (bugfix #622)', () => {
+      // Create project in both local and worktree
+      const localProjectDir = path.join(projectsDir, '0074-test-feature');
+      fs.mkdirSync(localProjectDir, { recursive: true });
+      fs.writeFileSync(path.join(localProjectDir, 'status.yaml'), 'id: "0074"\nprotocol: spir\nphase: specify\n');
+
+      const worktreeProjectsDir = path.join(testDir, '.builders', 'spir-0074-test', PROJECTS_DIR);
+      const worktreeProjectDir = path.join(worktreeProjectsDir, '0074-test-feature');
+      fs.mkdirSync(worktreeProjectDir, { recursive: true });
+      fs.writeFileSync(path.join(worktreeProjectDir, 'status.yaml'), 'id: "0074"\nprotocol: spir\nphase: implement\n');
+
+      const result = findStatusPath(testDir, '0074');
+
+      expect(result).not.toBeNull();
+      // Should find the local one, not the worktree one
+      expect(result).not.toContain('.builders');
+      expect(result).toContain('0074-test-feature');
+    });
+
+    it('should return null when project not in local or any worktree (bugfix #622)', () => {
+      // Create .builders dir with an unrelated worktree
+      const worktreeProjectsDir = path.join(testDir, '.builders', 'bugfix-100-other', PROJECTS_DIR);
+      const worktreeProjectDir = path.join(worktreeProjectsDir, 'bugfix-100-other-fix');
+      fs.mkdirSync(worktreeProjectDir, { recursive: true });
+      fs.writeFileSync(path.join(worktreeProjectDir, 'status.yaml'), 'id: "bugfix-100"\nprotocol: bugfix\nphase: investigate\n');
+
+      const result = findStatusPath(testDir, 'bugfix-999');
+      expect(result).toBeNull();
+    });
+
+    it('should skip non-directory entries in .builders (bugfix #622)', () => {
+      // Create a file (not directory) in .builders
+      fs.mkdirSync(path.join(testDir, '.builders'), { recursive: true });
+      fs.writeFileSync(path.join(testDir, '.builders', 'some-file.txt'), 'not a worktree');
+
+      const result = findStatusPath(testDir, 'bugfix-622');
+      expect(result).toBeNull();
+    });
   });
 
   describe('detectProjectId (filesystem scan)', () => {
