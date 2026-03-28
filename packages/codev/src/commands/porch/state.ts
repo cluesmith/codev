@@ -180,14 +180,10 @@ export function createInitialState(
 // ============================================================================
 
 /**
- * Find status.yaml by project ID (searches for NNNN-* directories)
+ * Search a single codev/projects/ directory for a matching project.
  */
-export function findStatusPath(workspaceRoot: string, projectId: string): string | null {
-  const projectsDir = path.join(workspaceRoot, PROJECTS_DIR);
-
-  if (!fs.existsSync(projectsDir)) {
-    return null;
-  }
+function findProjectInDir(projectsDir: string, projectId: string): string | null {
+  if (!fs.existsSync(projectsDir)) return null;
 
   const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
 
@@ -197,6 +193,30 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
       if (fs.existsSync(statusPath)) {
         return statusPath;
       }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find status.yaml by project ID.
+ * Searches local codev/projects/ first, then falls back to
+ * .builders/* /codev/projects/ worktrees (enables porch status from repo root).
+ */
+export function findStatusPath(workspaceRoot: string, projectId: string): string | null {
+  // 1. Search local codev/projects/
+  const localResult = findProjectInDir(path.join(workspaceRoot, PROJECTS_DIR), projectId);
+  if (localResult) return localResult;
+
+  // 2. Search builder worktrees (.builders/*/codev/projects/)
+  const buildersDir = path.join(workspaceRoot, '.builders');
+  if (fs.existsSync(buildersDir)) {
+    const worktrees = fs.readdirSync(buildersDir, { withFileTypes: true });
+    for (const wt of worktrees) {
+      if (!wt.isDirectory()) continue;
+      const result = findProjectInDir(path.join(buildersDir, wt.name, PROJECTS_DIR), projectId);
+      if (result) return result;
     }
   }
 
