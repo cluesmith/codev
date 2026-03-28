@@ -166,24 +166,25 @@ function showArtifactConfig(workspacePath: string): void {
 
   logger.blank();
 
-  if (artifacts.backend === 'cli' || artifacts.backend === 'fava-trails') {
-    const command = artifacts.command || 'fava-trails';
+  if (artifacts.backend === 'cli') {
+    const command = artifacts.command || '(not configured)';
     logger.kv('Artifacts', chalk.cyan(`cli (${command})`));
     if (artifacts.scope) {
       logger.kv('  Scope', artifacts.scope);
     }
-    // Resolve data repo: env var first, then .env file, then default
-    let dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO || process.env.FAVA_TRAILS_DATA_REPO;
+    // Resolve data repo from env var or .env file
+    let dataRepo = process.env.CODEV_ARTIFACTS_DATA_REPO;
     if (!dataRepo) {
       const envPath = join(workspacePath, '.env');
       try {
         const envContent = readFileSync(envPath, 'utf-8');
-        const newMatch = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
-        const legacyMatch = envContent.match(/^FAVA_TRAILS_DATA_REPO=(.+)$/m);
-        dataRepo = newMatch?.[1]?.trim() || legacyMatch?.[1]?.trim();
+        const match = envContent.match(/^CODEV_ARTIFACTS_DATA_REPO=(.+)$/m);
+        dataRepo = match?.[1]?.trim();
       } catch { /* .env may not exist */ }
     }
-    logger.kv('  Data Repo', dataRepo || chalk.yellow('(default)'));
+    if (dataRepo) {
+      logger.kv('  Data Repo', dataRepo);
+    }
   } else {
     logger.kv('Artifacts', `${artifacts.backend} (codev/specs/, codev/plans/)`);
   }

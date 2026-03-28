@@ -291,7 +291,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const specFile = await findSpecFile(config.codevDir, specLookupId);
 
   // Try artifact resolver as fallback when no local spec file exists.
-  // CLI backend users may store specs externally (e.g. fava-trails).
+  // CLI backend users may store specs externally.
   let resolverSpecName: string | null = null;
   if (!specFile) {
     try {

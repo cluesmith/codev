@@ -39,7 +39,7 @@ export interface CodevConfig {
     dir?: string;
   };
   artifacts?: {
-    backend?: 'local' | 'cli' | 'fava-trails';
+    backend?: 'local' | 'cli';
     command?: string;
     scope?: string;
   };

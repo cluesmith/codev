@@ -197,20 +197,25 @@ describe('getResolver', () => {
     expect(resolver).toBeInstanceOf(CliResolver);
   });
 
-  it('returns CliResolver when artifacts.backend is "fava-trails" (alias)', () => {
+  it('throws when cli backend has no command', () => {
     writeFile(tmpDir, '.codev/config.json', JSON.stringify({
-      artifacts: { backend: 'fava-trails', scope: 'org/project' },
+      artifacts: { backend: 'cli', scope: 'org/project' },
     }));
-    const resolver = getResolver(tmpDir);
-    expect(resolver).toBeInstanceOf(CliResolver);
+    expect(() => getResolver(tmpDir)).toThrow('no artifacts.command');
   });
 
   it('throws when cli backend has no scope', () => {
     writeFile(tmpDir, '.codev/config.json', JSON.stringify({
-      artifacts: { backend: 'cli' },
+      artifacts: { backend: 'cli', command: 'my-tool' },
     }));
-    expect(() => getResolver(tmpDir)).toThrow('.codev/config.json');
-    expect(() => getResolver(tmpDir)).toThrow('scope');
+    expect(() => getResolver(tmpDir)).toThrow('no artifacts.scope');
+  });
+
+  it('rejects fava-trails as unknown backend', () => {
+    writeFile(tmpDir, '.codev/config.json', JSON.stringify({
+      artifacts: { backend: 'fava-trails', scope: 'org/project' },
+    }));
+    expect(() => getResolver(tmpDir)).toThrow('unknown artifacts.backend');
   });
 
   it('throws for unknown backend', () => {
