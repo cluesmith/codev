@@ -8,7 +8,7 @@
  * Spec 559: Porch Artifact Resolver
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { globSync } from 'glob';
@@ -369,7 +369,7 @@ export class CliResolver implements ArtifactResolver {
  */
 function deriveDefaultScope(workspaceRoot: string): string | null {
   try {
-    const url = execSync('git remote get-url origin', {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: workspaceRoot,
       encoding: 'utf-8',
       timeout: 3000,

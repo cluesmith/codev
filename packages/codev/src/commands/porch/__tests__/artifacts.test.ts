@@ -223,9 +223,7 @@ describe('getResolver', () => {
     }));
     const resolver = getResolver(tmpDir);
     expect(resolver).toBeInstanceOf(CliResolver);
-    // Verify the scope was derived correctly by checking the resolver's internal state
-    // We can do this by checking that listChildren uses the expected scope prefix
-    // For now, just confirm it didn't throw and returned a CliResolver
+    expect((resolver as any).scope).toBe('codev-artifacts/TestOrg/test-repo');
   });
 
   it('throws for unknown backend', () => {
