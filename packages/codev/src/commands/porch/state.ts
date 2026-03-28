@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
+import type { ArtifactResolver } from './artifacts.js';
 
 /** Directory for project state (relative to project root) */
 export const PROJECTS_DIR = 'codev/projects';
@@ -33,7 +34,20 @@ export function stripIdPrefix(title: string, projectId: string): string {
  * This prevents doubled IDs like "364-0364-name" when state.id is unpadded
  * but spec files use zero-padded IDs.
  */
-export function resolveArtifactBaseName(workspaceRoot: string, projectId: string, title: string): string {
+export function resolveArtifactBaseName(
+  workspaceRoot: string, projectId: string, title: string,
+  resolver?: ArtifactResolver
+): string {
+  // When a resolver is provided, delegate to it first
+  if (resolver) {
+    const resolved = resolver.findSpecBaseName(projectId, title);
+    if (resolved) return resolved;
+    // Fall through to ID-based fallback
+    const cleanTitle = stripIdPrefix(title, projectId);
+    return `${projectId}-${cleanTitle}`;
+  }
+
+  // Legacy: scan codev/specs/ directory directly
   const isNumericId = /^\d+$/.test(projectId);
   if (isNumericId) {
     const specsDir = path.join(workspaceRoot, 'codev', 'specs');

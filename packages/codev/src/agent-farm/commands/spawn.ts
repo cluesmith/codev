@@ -34,6 +34,7 @@ import {
   loadProtocol,
   resolveMode,
 } from './spawn-roles.js';
+import { getResolver } from '../../commands/porch/artifacts.js';
 import {
   checkDependencies,
   createWorktree,
@@ -289,14 +290,26 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // Resolve spec file (supports legacy zero-padded IDs)
   const specFile = await findSpecFile(config.codevDir, specLookupId);
 
-  // When no spec file exists, check if the protocol allows spawning without one.
-  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
+  // Try artifact resolver as fallback when no local spec file exists.
+  // CLI backend users may store specs externally (e.g. fava-trails).
+  let resolverSpecName: string | null = null;
   if (!specFile) {
+    try {
+      const resolver = getResolver(config.workspaceRoot);
+      resolverSpecName = resolver.findSpecBaseName(specLookupId, '');
+    } catch {
+      // Resolver unavailable — fall through to normal error handling
+    }
+  }
+
+  // When no spec file exists (and resolver didn't find one), check if the protocol allows spawning without one.
+  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
+  if (!specFile && !resolverSpecName) {
     if (protocolDef?.input?.required === false && !options.amends) {
       // Protocol allows no-spec spawn — will derive naming from GitHub issue title
       logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
     } else {
-      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
+      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected spec ID: ${specLookupId}`);
     }
   }
 
@@ -304,7 +317,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // When no spec file exists, this is fatal (we need a project name).
   // When spec file exists, this is non-fatal (spec filename is the fallback).
   let forgeIssue: Awaited<ReturnType<typeof fetchIssueNonFatal>> = null;
-  if (!specFile) {
+  if (!specFile && !resolverSpecName) {
     // Fatal fetch — we need the issue title for naming
     forgeIssue = await fetchGitHubIssue(issueNumber, { cwd: config.workspaceRoot, forgeConfig });
   } else {
@@ -312,10 +325,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   // Derive specName for naming.
-  // Priority: GitHub issue title > spec filename
+  // Priority: GitHub issue title > resolver spec name > spec filename
   let specName: string;
   if (forgeIssue) {
     specName = `${strippedId}-${slugify(forgeIssue.title)}`;
+  } else if (resolverSpecName) {
+    specName = resolverSpecName;
   } else {
     // No GitHub issue — fall back to spec filename (specFile must exist here)
     specName = basename(specFile!, '.md');

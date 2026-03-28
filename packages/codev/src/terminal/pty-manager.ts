@@ -71,6 +71,8 @@ export class TerminalManager {
       // UTF-8 locale for proper Unicode character rendering
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? '',
+      // Propagate artifact data repo for CliResolver in builder worktrees
+      ...(process.env.CODEV_ARTIFACTS_DATA_REPO ? { CODEV_ARTIFACTS_DATA_REPO: process.env.CODEV_ARTIFACTS_DATA_REPO } : {}),
     };
 
     const defaults = defaultSessionOptions();

@@ -38,6 +38,11 @@ export interface CodevConfig {
   roles?: {
     dir?: string;
   };
+  artifacts?: {
+    backend?: 'local' | 'cli' | 'fava-trails';
+    command?: string;
+    scope?: string;
+  };
   terminal?: {
     backend?: 'node-pty';
   };

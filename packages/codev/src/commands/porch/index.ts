@@ -33,12 +33,13 @@ import {
 } from './protocol.js';
 import {
   findPlanFile,
-  extractPhasesFromFile,
+  extractPlanPhases,
   getCurrentPlanPhase,
   getPhaseContent,
   allPlanPhasesComplete,
   isPlanPhaseComplete,
 } from './plan.js';
+import { getResolver, type ArtifactResolver } from './artifacts.js';
 import {
   runPhaseChecks,
   formatCheckResults,
@@ -98,7 +99,7 @@ function logCheckOverrides(
  * porch status <id>
  * Shows current state and prescriptive next steps.
  */
-export async function status(workspaceRoot: string, projectId: string): Promise<void> {
+export async function status(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.\nRun 'porch init' to create a new project.`);
@@ -143,11 +144,11 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
       console.log('');
       console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
 
-      // Show phase content from plan
-      const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-      if (planPath) {
-        const content = fs.readFileSync(planPath, 'utf-8');
-        const phaseContent = getPhaseContent(content, currentPlanPhase.id);
+      // Show phase content from plan (via resolver if available)
+      const planContent = resolver?.getPlanContent(state.id, state.title)
+        ?? (() => { const p = findPlanFile(workspaceRoot, state.id, state.title); return p ? fs.readFileSync(p, 'utf-8') : null; })();
+      if (planContent) {
+        const phaseContent = getPhaseContent(planContent, currentPlanPhase.id);
         if (phaseContent) {
           console.log(section('FROM THE PLAN', phaseContent.slice(0, 500)));
         }
@@ -198,7 +199,7 @@ export async function status(workspaceRoot: string, projectId: string): Promise<
  * porch check <id>
  * Runs the phase checks and reports results.
  */
-export async function check(workspaceRoot: string, projectId: string): Promise<void> {
+export async function check(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
@@ -216,7 +217,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
-  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
@@ -232,7 +233,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
-  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -250,7 +251,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
  * porch done <id>
  * Advances to next phase if checks pass. Refuses if checks fail.
  */
-export async function done(workspaceRoot: string, projectId: string): Promise<void> {
+export async function done(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
@@ -274,14 +275,14 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
       console.log('');
       console.log(chalk.dim('Checks skipped (gate approved <60s ago).'));
     } else {
-      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
       console.log('');
       console.log(chalk.bold('RUNNING CHECKS...'));
       logCheckOverrides(phaseCheckNames, checks, overrides);
 
       if (Object.keys(checks).length > 0) {
-        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
         console.log(formatCheckResults(results));
 
         if (!allChecksPassed(results)) {
@@ -386,10 +387,10 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
   }
 
   // Advance to next protocol phase
-  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath);
+  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
 }
 
-function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string): void {
+function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): void {
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
@@ -407,10 +408,11 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
 
   // If entering a phased phase (implement), extract plan phases
   if (isPhased(protocol, nextPhase.id)) {
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      state.plan_phases = extractPhasesFromFile(planPath);
-      // extractPhasesFromFile already marks first phase as in_progress
+    const planContent = resolver?.getPlanContent(state.id, state.title)
+      ?? (() => { const p = findPlanFile(workspaceRoot, state.id, state.title); return p ? fs.readFileSync(p, 'utf-8') : null; })();
+    if (planContent) {
+      state.plan_phases = extractPlanPhases(planContent);
+      // extractPlanPhases already marks first phase as in_progress
       if (state.plan_phases.length > 0) {
         state.current_plan_phase = state.plan_phases[0].id;
       }
@@ -430,11 +432,11 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
     console.log('');
     console.log(chalk.bold(`YOUR TASK: ${firstPhase.id} - "${firstPhase.title}"`));
 
-    // Show phase content from plan
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      const content = fs.readFileSync(planPath, 'utf-8');
-      const phaseContent = getPhaseContent(content, firstPhase.id);
+    // Show phase content from plan (via resolver if available)
+    const planContentForDisplay = resolver?.getPlanContent(state.id, state.title)
+      ?? (() => { const p = findPlanFile(workspaceRoot, state.id, state.title); return p ? fs.readFileSync(p, 'utf-8') : null; })();
+    if (planContentForDisplay) {
+      const phaseContent = getPhaseContent(planContentForDisplay, firstPhase.id);
       if (phaseContent) {
         console.log(section('FROM THE PLAN', phaseContent.slice(0, 800)));
       }
@@ -460,7 +462,7 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
  * porch gate <id>
  * Requests human approval for current gate.
  */
-export async function gate(workspaceRoot: string, projectId: string): Promise<void> {
+export async function gate(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
@@ -490,7 +492,7 @@ export async function gate(workspaceRoot: string, projectId: string): Promise<vo
   console.log('');
 
   // Show relevant artifact and open it for review
-  const artifact = getArtifactForPhase(workspaceRoot, state);
+  const artifact = getArtifactForPhase(workspaceRoot, state, resolver);
   if (artifact) {
     const fullPath = path.join(workspaceRoot, artifact);
     if (fs.existsSync(fullPath)) {
@@ -524,7 +526,8 @@ export async function approve(
   workspaceRoot: string,
   projectId: string,
   gateName: string,
-  hasHumanFlag: boolean
+  hasHumanFlag: boolean,
+  resolver?: ArtifactResolver
 ): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
@@ -563,14 +566,14 @@ export async function approve(
   const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
   if (phaseCheckNames.length > 0) {
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
     logCheckOverrides(phaseCheckNames, checks, overrides);
 
     if (Object.keys(checks).length > 0) {
-      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
       console.log(formatCheckResults(results));
 
       if (!allChecksPassed(results)) {
@@ -601,7 +604,8 @@ export async function approve(
 export async function rollback(
   workspaceRoot: string,
   projectId: string,
-  targetPhase: string
+  targetPhase: string,
+  resolver?: ArtifactResolver
 ): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
@@ -649,11 +653,12 @@ export async function rollback(
   state.build_complete = false;
   state.history = [];
 
-  // If rolling back to a phased phase, re-extract plan phases from plan file
+  // If rolling back to a phased phase, re-extract plan phases
   if (isPhased(protocol, targetPhase)) {
-    const planPath = findPlanFile(workspaceRoot, state.id, state.title);
-    if (planPath) {
-      state.plan_phases = extractPhasesFromFile(planPath);
+    const planContent = resolver?.getPlanContent(state.id, state.title)
+      ?? (() => { const p = findPlanFile(workspaceRoot, state.id, state.title); return p ? fs.readFileSync(p, 'utf-8') : null; })();
+    if (planContent) {
+      state.plan_phases = extractPlanPhases(planContent);
       if (state.plan_phases.length > 0) {
         state.current_plan_phase = state.plan_phases[0].id;
       } else {
@@ -777,8 +782,8 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
   return `Complete the phase work, then run: porch done ${state.id}`;
 }
 
-function getArtifactForPhase(workspaceRoot: string, state: ProjectState): string | null {
-  const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+function getArtifactForPhase(workspaceRoot: string, state: ProjectState, resolver?: ArtifactResolver): string | null {
+  const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver);
   switch (state.phase) {
     case 'specify':
       return `codev/specs/${baseName}.md`;
@@ -798,6 +803,7 @@ function getArtifactForPhase(workspaceRoot: string, state: ProjectState): string
 export async function cli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   const workspaceRoot = process.cwd();
+  const resolver = getResolver(workspaceRoot);
 
   // Auto-detect project ID for commands that need it
   function getProjectId(provided?: string): string {
@@ -826,30 +832,30 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       case 'status':
-        await status(workspaceRoot, getProjectId(rest[0]));
+        await status(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
       case 'check':
-        await check(workspaceRoot, getProjectId(rest[0]));
+        await check(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
       case 'done':
-        await done(workspaceRoot, getProjectId(rest[0]));
+        await done(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
       case 'gate':
-        await gate(workspaceRoot, getProjectId(rest[0]));
+        await gate(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
       case 'approve':
         if (!rest[0] || !rest[1]) throw new Error('Usage: porch approve <id> <gate> --a-human-explicitly-approved-this');
         const hasHumanFlag = rest.includes('--a-human-explicitly-approved-this');
-        await approve(workspaceRoot, rest[0], rest[1], hasHumanFlag);
+        await approve(workspaceRoot, rest[0], rest[1], hasHumanFlag, resolver);
         break;
 
       case 'rollback':
         if (!rest[0] || !rest[1]) throw new Error('Usage: porch rollback <id> <phase>');
-        await rollback(workspaceRoot, rest[0], rest[1]);
+        await rollback(workspaceRoot, rest[0], rest[1], resolver);
         break;
 
       case 'init':
