@@ -8,7 +8,7 @@
  * Spec 559: Porch Artifact Resolver
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { globSync } from 'glob';
@@ -360,6 +360,32 @@ export class CliResolver implements ArtifactResolver {
 }
 
 // =============================================================================
+// Scope derivation
+// =============================================================================
+
+/**
+ * Derive a default fava-trails scope from the git remote origin URL.
+ * Returns "codev-artifacts/<Org>/<Repo>" or null if the remote can't be parsed.
+ */
+function deriveDefaultScope(workspaceRoot: string): string | null {
+  try {
+    const url = execSync('git remote get-url origin', {
+      cwd: workspaceRoot,
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim();
+
+    // Match HTTPS (github.com/Org/Repo.git) or SSH (git@github.com:Org/Repo.git)
+    const match = url.match(/[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+    if (!match) return null;
+
+    return `codev-artifacts/${match[1]}/${match[2]}`;
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
 // Factory
 // =============================================================================
 
@@ -373,14 +399,16 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
 
   // 'cli' is the canonical backend; 'fava-trails' is accepted as an alias
   if (artifacts?.backend === 'cli' || artifacts?.backend === 'fava-trails') {
-    if (!artifacts.scope) {
+    const scope = artifacts.scope || deriveDefaultScope(workspaceRoot);
+    if (!scope) {
       throw new Error(
-        `.codev/config.json has artifacts.backend: "${artifacts.backend}" but no artifacts.scope.\n` +
-        `Add: "artifacts": { "backend": "cli", "scope": "org/project/codev-assets" }`
+        `.codev/config.json has artifacts.backend: "${artifacts.backend}" but no artifacts.scope ` +
+        `and could not auto-derive scope from git remote.\n` +
+        `Add: "artifacts": { "backend": "cli", "scope": "codev-artifacts/Org/Repo" }`
       );
     }
     const command = artifacts.command || 'fava-trails';
-    return new CliResolver(artifacts.scope, command, workspaceRoot);
+    return new CliResolver(scope, command, workspaceRoot);
   }
 
   if (artifacts?.backend && artifacts.backend !== 'local') {
