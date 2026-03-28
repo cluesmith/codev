@@ -12,7 +12,7 @@
     }
 
     body {
-      background: #000000;
+      background: #4D4D4D;
       color: #e0e0e0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       overflow: hidden;
@@ -276,7 +276,7 @@
     function init() {
       // Scene
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000000);
+      scene.background = new THREE.Color(0x4D4D4D);
 
       // Cameras (Z-up coordinate system)
       const aspect = container.clientWidth / container.clientHeight;
@@ -378,21 +378,20 @@
           geometry.computeBoundingBox();
           const center = new THREE.Vector3();
           geometry.boundingBox.getCenter(center);
-          geometry.translate(-center.x, -center.y, -center.z);
+          // Only center in XY; Three.js translate() auto-updates boundingBox
+          geometry.translate(-center.x, -center.y, 0);
 
           // Move to sit on grid (Z=0 plane)
-          const minZ = geometry.boundingBox.min.z - center.z;
-          geometry.translate(0, 0, -minZ);
+          geometry.translate(0, 0, -geometry.boundingBox.min.z);
 
-          // Recalculate bounding box after translation
-          geometry.computeBoundingBox();
+          // Compute vertex normals for smooth Phong shading
+          geometry.computeVertexNormals();
 
           // Material
           const material = new THREE.MeshPhongMaterial({
             color: 0x3b82f6,
-            specular: 0x111111,
-            shininess: 30,
-            flatShading: false
+            specular: 0x222222,
+            shininess: 60
           });
 
           model = new THREE.Mesh(geometry, material);
@@ -775,21 +774,20 @@
         geometry.computeBoundingBox();
         const center = new THREE.Vector3();
         geometry.boundingBox.getCenter(center);
-        geometry.translate(-center.x, -center.y, -center.z);
+        // Only center in XY; Three.js translate() auto-updates boundingBox
+        geometry.translate(-center.x, -center.y, 0);
 
         // Move to sit on grid (Z=0 plane)
-        const minZ = geometry.boundingBox.min.z - center.z;
-        geometry.translate(0, 0, -minZ);
+        geometry.translate(0, 0, -geometry.boundingBox.min.z);
 
-        // Recalculate bounding box after translation
-        geometry.computeBoundingBox();
+        // Compute vertex normals for smooth Phong shading
+        geometry.computeVertexNormals();
 
         // Create new material
         const material = new THREE.MeshPhongMaterial({
           color: 0x3b82f6,
-          specular: 0x111111,
-          shininess: 30,
-          flatShading: false
+          specular: 0x222222,
+          shininess: 60
         });
 
         model = new THREE.Mesh(geometry, material);
