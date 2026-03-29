@@ -22,6 +22,9 @@ This is a usability problem that affects every AI-assisted interaction with the 
 - The bin shim lives at `packages/codev/bin/af.js`
 - The CLI parser in `packages/codev/src/agent-farm/cli.ts` sets `.name('af')`
 - ~11+ source files contain hardcoded `af` references in help text, error messages, and deprecation warnings
+- The `codev` CLI (`src/cli.ts`) registers `af` as an alias for `agent-farm` (`.alias('af')`) and intercepts `args[0] === 'af'`
+- `porch/index.ts` programmatically spawns `af` via `spawn('af', ['open', ...])` to open the annotation viewer
+- `doctor.ts` checks for `af` installation via `commandExists('af')`
 - ~197 markdown documentation files contain ~1,224 occurrences of `af` as a CLI command
 - ~20+ skeleton files in `codev-skeleton/` reference `af` commands (deployed to user projects)
 - Test files reference `af` in describe blocks and assertions
@@ -51,6 +54,8 @@ This is a usability problem that affects every AI-assisted interaction with the 
 - [ ] CLAUDE.md and AGENTS.md updated to reference `afx`
 - [ ] `.claude/skills/af/` renamed to `.claude/skills/afx/` (both repo and skeleton)
 - [ ] Existing tests pass (updated to reference `afx` where appropriate)
+- [ ] `codev agent-farm` alias updated from `af` to `afx` (with `af` kept as deprecated alias)
+- [ ] Programmatic `spawn('af', ...)` and `commandExists('af')` calls updated to `afx`
 - [ ] `af-config.json` legacy error message unchanged (it references the old file name correctly)
 - [ ] `.af-cron/` directory left as-is (out of scope — see Notes)
 
@@ -133,8 +138,10 @@ This is a usability problem that affects every AI-assisted interaction with the 
 2. `afx spawn`, `afx send`, `afx open`, `afx cleanup` all work correctly
 3. `af status` prints deprecation warning to stderr then works correctly
 4. `af --help` shows help with `afx` branding and a deprecation notice
-5. Tab completion works for `afx` subcommands
-6. Cron loading still works (`.af-cron/` path unchanged)
+5. `codev afx` works as alias for `codev agent-farm` (replacing `codev af`)
+6. `spawn('afx', ['open', ...])` in porch works correctly
+7. `commandExists('afx')` in doctor check works correctly
+8. Cron loading still works (`.af-cron/` path unchanged)
 7. Skill discovery works for `/afx` skill (renamed from `/af`)
 
 ### Non-Functional Tests
@@ -176,10 +183,15 @@ The largest portion of work is updating ~197 markdown files with ~1,224 occurren
 **Date**: 2026-03-29
 **Models Consulted**: Claude (Gemini failed due to tool mismatch; Codex unavailable)
 **Verdict**: REQUEST_CHANGES (addressed in this revision)
-**Key Feedback Addressed**:
+**Key Feedback Addressed (Claude)**:
 - Added `.af-cron/` directory scope decision (leave as-is)
 - Added `.claude/skills/af/` directory rename to scope (rename to `afx`)
 - Added MEMORY.md out-of-scope note
 - Moved deprecation stderr requirement to success criteria
 - Added cron loading and skill discovery to test scenarios
 - Corrected documentation scope numbers (~197 files, ~1,224 occurrences)
+
+**Key Feedback Addressed (Gemini)**:
+- Added `codev` CLI alias (`.alias('af')` and `args[0] === 'af'`) to scope
+- Added programmatic `spawn('af', ...)` and `commandExists('af')` calls to scope
+- Removed non-existent tab completion test scenario (Codev has no tab completion)
