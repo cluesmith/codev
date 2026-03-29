@@ -83,13 +83,14 @@ run(['agent-farm', ...args]);
 **`packages/codev/src/cli.ts`**:
 - `.alias('af')` → `.alias('afx')` (primary)
 - Keep `af` as additional deprecated alias
-- `args[0] === 'af'` → also match `'afx'`
+- `args[0] === 'af'` → also match `'afx'`, and add `console.warn` deprecation when `args[0] === 'af'`
 
 **`packages/codev/src/commands/porch/index.ts`**:
 - `spawn('af', ['open', ...])` → `spawn('afx', ['open', ...])`
 
 **`packages/codev/src/commands/doctor.ts`**:
 - `commandExists('af')` → `commandExists('afx')`
+- Update string `'installed (via af)'` → `'installed (via afx)'`
 
 #### Acceptance Criteria
 - [ ] `afx status` works
@@ -125,26 +126,42 @@ Revert the bin shim changes, restore original `af.js`, and revert package.json.
 
 #### Implementation Details
 
-**Source files to update** (help text, error messages, deprecation warnings):
+**Source files to update** — the list below is a starting point, NOT exhaustive. The builder MUST grep for all `af ` patterns in `packages/codev/src/` and update every user-facing reference found:
+
+Known files with user-facing `af` references:
 - `packages/codev/src/agent-farm/cli.ts` — deprecation messages (`af dash`, `af team`)
 - `packages/codev/src/agent-farm/commands/spawn.ts` — help text
 - `packages/codev/src/agent-farm/commands/db.ts` — help text
 - `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — help text
 - `packages/codev/src/agent-farm/commands/status.ts` — help text (3 instances)
+- `packages/codev/src/agent-farm/commands/send.ts` — error messages (3 instances)
+- `packages/codev/src/agent-farm/commands/rename.ts` — usage text
+- `packages/codev/src/agent-farm/commands/tower-cloud.ts` — `af tower connect` references
+- `packages/codev/src/agent-farm/commands/attach.ts` — `af` references
+- `packages/codev/src/agent-farm/commands/team-update.ts` — `af team update` reference
+- `packages/codev/src/agent-farm/commands/open.ts` — `af open` references
+- `packages/codev/src/agent-farm/commands/shell.ts` — `af` references
 - `packages/codev/src/agent-farm/lib/tunnel-client.ts` — error message
 - `packages/codev/src/agent-farm/lib/cloud-config.ts` — error messages (2 instances)
+- `packages/codev/src/agent-farm/servers/tower-tunnel.ts` — `af tower connect` references
+
+Source code comments referencing `af` commands (e.g., in `send-buffer.ts`, `tower-terminals.ts`, `tower-cron.ts`) should also be updated for consistency.
 
 **Skill directory rename**:
 - `git mv .claude/skills/af .claude/skills/afx`
 - `git mv codev-skeleton/.claude/skills/af codev-skeleton/.claude/skills/afx`
 - Update content in `SKILL.md` to reference `afx` commands
 
-**Test files to update**:
+**Test files to update** — same as source: grep for all `af` patterns, not just the list below:
+
+Known test files:
 - `packages/codev/src/agent-farm/__tests__/tower-cloud-cli.test.ts` — assertions
 - `packages/codev/src/agent-farm/__tests__/af-architect.test.ts` — describe block
 - `packages/codev/src/agent-farm/__tests__/status-naming.test.ts` — describe block
 - `packages/codev/src/agent-farm/__tests__/bench.test.ts` — describe block
 - `packages/codev/src/agent-farm/__tests__/spawn.test.ts` — test data
+- `packages/codev/src/__tests__/team-cli.test.ts` — `af team` references
+- Any e2e tests and bugfix tests referencing `af` commands
 
 #### Acceptance Criteria
 - [ ] No source files contain `af ` in user-facing messages (except deprecation text in `bin/af.js`)
