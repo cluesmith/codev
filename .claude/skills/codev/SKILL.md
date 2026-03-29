@@ -16,7 +16,7 @@ codev doctor                   Check system dependencies
 
 ## codev init
 
-Creates a **new directory** with the full codev structure: specs/, plans/, reviews/, protocols, CLAUDE.md, AGENTS.md, .claude/skills/, af-config.json, .gitignore.
+Creates a **new directory** with the full codev structure: specs/, plans/, reviews/, protocols, CLAUDE.md, AGENTS.md, .claude/skills/, .codev/config.json, .gitignore.
 
 ```bash
 codev init my-app              # Interactive setup

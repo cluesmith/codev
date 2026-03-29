@@ -332,7 +332,7 @@ af open file.ts            # Open file in annotation viewer (NOT system open)
 
 ### Configuration
 
-Agent Farm is configured via `af-config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
+Agent Farm is configured via `.codev/config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
 
 ## Porch - Protocol Orchestrator
 

@@ -112,7 +112,7 @@ All codev commands support:
 
 ## Configuration
 
-Customize agent-farm commands via `af-config.json` (project root):
+Customize agent-farm commands via `.codev/config.json` (project root):
 
 ```json
 {

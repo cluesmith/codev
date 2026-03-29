@@ -537,7 +537,7 @@ af db stats [options]
 
 ## Configuration
 
-Customize commands via `af-config.json` at the project root:
+Customize commands via `.codev/config.json` at the project root:
 
 ```json
 {
@@ -564,7 +564,7 @@ af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 |------|-------------|
 | `.agent-farm/state.db` | Project runtime state (SQLite) |
 | `~/.agent-farm/global.db` | Global port registry (SQLite) |
-| `af-config.json` | Agent Farm configuration (project root) |
+| `.codev/config.json` | Agent Farm configuration (project root) |
 
 ---
 

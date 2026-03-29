@@ -832,7 +832,7 @@ const CONFIG = {
 - **Markdown**: Documentation format for specs, plans, reviews, and agent definitions
 - **Git**: Version control with worktree support for isolated builder environments
 - **YAML**: Configuration format for protocol manifests
-- **JSON**: Configuration format for agent-farm (`af-config.json` at project root) and state management
+- **JSON**: Configuration format for agent-farm (`.codev/config.json` at project root) and state management
 
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
@@ -878,7 +878,7 @@ This is where the Codev project uses Codev to develop itself:
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
   - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotation viewer
-  - Note: Shell command configuration is in `af-config.json` at the project root
+  - Note: Shell command configuration is in `.codev/config.json` at the project root
 
 **Example**: `codev/specs/0001-test-infrastructure.md` documents the test infrastructure feature we built for Codev.
 
@@ -894,7 +894,7 @@ This is what gets distributed to users when they install Codev:
   - `agents/` - Agent definitions (copied during installation)
   - `roles/` - Role definitions for architect and builder
   - `templates/` - HTML templates for Agent Farm (`af`) dashboard UI
-  - Note: Shell command configuration is in `af-config.json` at the project root
+  - Note: Shell command configuration is in `.codev/config.json` at the project root
 
 **Key Distinction**: `codev-skeleton/` provides templates for other projects to use when they install Codev. Our own `codev/` directory has nearly identical structure but contains our actual specs, plans, and reviews. The skeleton's empty placeholder directories become populated with real content in each project that adopts Codev.
 
@@ -978,7 +978,7 @@ codev/                                  # Project root (git repository)
 │   ├── dist/                           # Compiled JavaScript
 │   ├── package.json                    # npm package config
 │   └── tsconfig.json                   # TypeScript configuration
-├── af-config.json                      # Shell command configuration (project root)
+├── .codev/config.json                      # Shell command configuration (project root)
 ├── codev/                              # Our self-hosted instance
 │   ├── roles/                          # Role definitions
 │   │   ├── architect.md                # Architect role and commands
@@ -1216,7 +1216,7 @@ af workspace start --architect-cmd "claude --model opus"
 af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
-#### Configuration (`af-config.json`)
+#### Configuration (`.codev/config.json`)
 
 ```json
 {
@@ -1234,7 +1234,7 @@ af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 }
 ```
 
-**Configuration Hierarchy**: CLI args > af-config.json > Defaults
+**Configuration Hierarchy**: CLI args > .codev/config.json > Defaults
 
 **Features**:
 - Commands can be strings OR arrays (arrays avoid shell-escaping issues)
@@ -1597,10 +1597,10 @@ All interactions with the repository hosting platform (GitHub by default) are ro
 **Core module**: `src/lib/forge.ts`
 - `executeForgeCommand(concept, envVars, options)` — async dispatcher
 - `executeForgeCommandSync(concept, envVars, options)` — sync variant
-- `loadForgeConfig(workspaceRoot)` — loads `af-config.json` forge section
+- `loadForgeConfig(workspaceRoot)` — loads `.codev/config.json` forge section
 - `validateForgeConfig(config)` — validates concept overrides
 
-**Configuration**: `af-config.json` `forge` section maps concept names to shell commands. Set to `null` to disable a concept. Omit to use the default (`gh`-based) command.
+**Configuration**: `.codev/config.json` `forge` section maps concept names to shell commands. Set to `null` to disable a concept. Omit to use the default (`gh`-based) command.
 
 **15 concepts**: `issue-view`, `pr-list`, `issue-list`, `issue-comment`, `pr-exists`, `recently-closed`, `recently-merged`, `user-identity`, `team-activity`, `on-it-timestamps`, `pr-merge`, `pr-search`, `pr-view`, `pr-diff`, `auth-status`.
 
@@ -1654,10 +1654,10 @@ try {
 
 **Precedence** (highest to lowest):
 1. CLI arguments (`--port`, `--architect-cmd`, etc.)
-2. Config file (`af-config.json`)
+2. Config file (`.codev/config.json`)
 3. Embedded defaults in code
 
-**Config file location**: `af-config.json` (project root, project-level)
+**Config file location**: `.codev/config.json` (project root, project-level)
 
 ### State Persistence
 

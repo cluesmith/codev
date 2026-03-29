@@ -6,7 +6,7 @@ Codev uses **forge concept commands** to interact with your repository hosting p
 
 ### Using a Provider Preset
 
-Add to `af-config.json`:
+Add to `.codev/config.json`:
 
 ```json
 {

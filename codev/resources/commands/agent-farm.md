@@ -594,7 +594,7 @@ af db stats [options]
 
 ## Configuration
 
-Customize commands via `af-config.json` (project root):
+Customize commands via `.codev/config.json` (project root):
 
 ```json
 {
@@ -608,7 +608,7 @@ Customize commands via `af-config.json` (project root):
 
 ### Language-Agnostic Porch Checks
 
-By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `af-config.json`:
+By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `.codev/config.json`:
 
 ```json
 {
@@ -679,7 +679,7 @@ Go:
 **Notes:**
 - Check names must match exactly the names defined in the protocol's `checks` section (e.g., `build`, `tests`, `e2e_tests`, `build_succeeds`, `tests_pass`)
 - Unknown check names in the override emit a yellow warning (typo detection)
-- Overrides in `af-config.json` survive `codev update` — they are not in `protocol.json`
+- Overrides in `.codev/config.json` survive `codev update` — they are not in `protocol.json`
 - Skipping a `phase_completion` check (e.g., `build_succeeds`, `tests_pass`) removes that gating condition; it does NOT auto-pass
 
 Or override via CLI flags:
@@ -697,7 +697,7 @@ af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 |------|-------------|
 | `.agent-farm/state.db` | Project runtime state (SQLite) |
 | `~/.agent-farm/global.db` | Global port registry (SQLite) |
-| `af-config.json` | Project configuration |
+| `.codev/config.json` | Project configuration |
 
 ---
 

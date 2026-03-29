@@ -152,7 +152,7 @@ af tutorial --reset             # Start tutorial fresh
 
 ## Configuration
 
-Customize commands via `af-config.json` (project root):
+Customize commands via `.codev/config.json` (project root):
 
 ```json
 {
@@ -182,6 +182,6 @@ Agent-farm uses SQLite databases for state:
 
 - `.agent-farm/state.db` - Local runtime state (SQLite)
 - `~/.agent-farm/global.db` - Global port registry (SQLite)
-- `af-config.json` - Project configuration
+- `.codev/config.json` - Project configuration
 - `codev/templates/` - Dashboard and annotation templates
 - `codev/roles/` - Architect and builder role prompts

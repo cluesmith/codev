@@ -397,7 +397,7 @@ Builders need permission-skipping flags to run autonomously without human approv
 | Claude Code | `--dangerously-skip-permissions` | Skip permission prompts for file/command operations |
 | Gemini CLI | `--yolo` | Enable autonomous mode without confirmations |
 
-Configure in `af-config.json` (created by `codev init` or `codev adopt`):
+Configure in `.codev/config.json` (created by `codev init` or `codev adopt`):
 ```json
 {
   "shell": {

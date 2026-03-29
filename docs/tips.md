@@ -4,7 +4,7 @@ Practical tips for getting the most out of Codev and Agent Farm.
 
 ## Skip Permission Prompts
 
-Add `--dangerously-skip-permissions` to your `af-config.json` to reduce permission prompts:
+Add `--dangerously-skip-permissions` to your `.codev/config.json` to reduce permission prompts:
 
 ```json
 {
@@ -119,7 +119,7 @@ Register your tower with [codevos.ai](https://codevos.ai) for secure remote acce
 
 ## Non-Node.js Projects
 
-Configure porch checks for your language stack in `af-config.json`:
+Configure porch checks for your language stack in `.codev/config.json`:
 
 ```json
 {

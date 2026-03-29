@@ -24,7 +24,7 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 
 ## Configuration
 
-In `af-config.json`:
+In `.codev/config.json`:
 
 ```json
 {
