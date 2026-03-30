@@ -351,7 +351,7 @@ teamCmd
 // Agent-farm command (delegates to existing agent-farm CLI)
 program
   .command('agent-farm', { hidden: false })
-  .alias('afx')
+  .aliases(['afx', 'af'])
   .description('Agent farm commands (start, spawn, status, etc.)')
   .allowUnknownOption(true)
   .action(async () => {
@@ -396,6 +396,9 @@ if (isMainModule) {
   // Check for agent-farm subcommand before commander parses
   const args = process.argv.slice(2);
   if (args[0] === 'agent-farm' || args[0] === 'afx' || args[0] === 'af') {
+    if (args[0] === 'af') {
+      process.stderr.write('⚠ `codev af` is deprecated. Use `codev afx` or `afx` instead.\n');
+    }
     runAgentFarm(args.slice(1)).catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
