@@ -442,8 +442,8 @@ function checkNpmDependencies(): CheckResult {
     return { status: 'ok', version: 'installed' };
   }
 
-  if (commandExists('af')) {
-    return { status: 'ok', version: 'installed (via af)' };
+  if (commandExists('afx')) {
+    return { status: 'ok', version: 'installed (via afx)' };
   }
 
   return {

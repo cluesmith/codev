@@ -47,7 +47,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   const program = new Command();
 
   program
-    .name('af')
+    .name('afx')
     .description('Agent Farm - Multi-agent orchestration for software development')
     .version(version);
 
@@ -716,5 +716,5 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   // Parse with provided args
-  await program.parseAsync(['node', 'af', ...args]);
+  await program.parseAsync(['node', 'afx', ...args]);
 }

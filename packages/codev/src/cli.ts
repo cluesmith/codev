@@ -351,7 +351,7 @@ teamCmd
 // Agent-farm command (delegates to existing agent-farm CLI)
 program
   .command('agent-farm', { hidden: false })
-  .alias('af')
+  .alias('afx')
   .description('Agent farm commands (start, spawn, status, etc.)')
   .allowUnknownOption(true)
   .action(async () => {
@@ -373,7 +373,7 @@ if (standaloneCmd) {
 
 /**
  * Run the CLI with given arguments
- * Used by bin shims (af.js, consult.js) to inject commands
+ * Used by bin shims (afx.js, consult.js) to inject commands
  */
 export async function run(args: string[]): Promise<void> {
   // Check if this is an agent-farm command
@@ -395,7 +395,7 @@ const isMainModule = import.meta.url === `file://${process.argv[1]}` ||
 if (isMainModule) {
   // Check for agent-farm subcommand before commander parses
   const args = process.argv.slice(2);
-  if (args[0] === 'agent-farm' || args[0] === 'af') {
+  if (args[0] === 'agent-farm' || args[0] === 'afx' || args[0] === 'af') {
     runAgentFarm(args.slice(1)).catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
