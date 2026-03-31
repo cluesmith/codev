@@ -2,14 +2,14 @@
 
 ## Summary
 
-Add 3D model viewing capability to the dashboard annotation viewer, supporting STL and 3MF formats. Enables users of OpenSCAD, FreeCAD, PrusaSlicer, Bambu Studio, and other CAD/slicer tools to view their 3D output directly via the `af open` command.
+Add 3D model viewing capability to the dashboard annotation viewer, supporting STL and 3MF formats. Enables users of OpenSCAD, FreeCAD, PrusaSlicer, Bambu Studio, and other CAD/slicer tools to view their 3D output directly via the `afx open` command.
 
 ## Goals
 
 ### Must Have
 
-1. **STL file detection** - `af open model.stl` recognizes STL files and serves 3D viewer
-2. **3MF file detection** - `af open model.3mf` recognizes 3MF files and serves 3D viewer
+1. **STL file detection** - `afx open model.stl` recognizes STL files and serves 3D viewer
+2. **3MF file detection** - `afx open model.3mf` recognizes 3MF files and serves 3D viewer
 3. **3D rendering** - Display models with proper 3D visualization using WebGL
 4. **Interactive controls** - Rotate, zoom, and pan using TrackballControls (quaternion-based, no gimbal lock)
 5. **Binary and ASCII STL support** - Handle both STL formats
@@ -109,8 +109,8 @@ Use TrackballControls instead of OrbitControls:
 
 ## Acceptance Criteria
 
-1. `af open path/to/model.stl` opens 3D viewer in dashboard tab
-2. `af open path/to/model.3mf` opens 3D viewer in dashboard tab
+1. `afx open path/to/model.stl` opens 3D viewer in dashboard tab
+2. `afx open path/to/model.3mf` opens 3D viewer in dashboard tab
 3. STL models render correctly with visible surface detail
 4. Single-color 3MF files render with their assigned color
 5. Multi-color 3MF files render with correct per-object/per-triangle colors
@@ -187,7 +187,7 @@ Currently users must convert 3MF to STL to view, losing color information.
 **Spec Changes**:
 
 1. **Goals - Must Have** additions:
-   - 3MF file detection: `af open model.3mf` recognizes 3MF files
+   - 3MF file detection: `afx open model.3mf` recognizes 3MF files
    - Multi-color rendering: Display objects/triangles with their assigned colors
    - Multi-object support: Show all objects in a 3MF file
 
@@ -201,7 +201,7 @@ Currently users must convert 3MF to STL to view, losing color information.
    - Keep: OBJ, GLTF (future), editing, animation, assemblies
 
 **Acceptance Criteria**:
-1. `af open path/to/model.3mf` opens 3MF viewer in dashboard
+1. `afx open path/to/model.3mf` opens 3MF viewer in dashboard
 2. Single-color 3MF files render with their assigned color
 3. Multi-color 3MF files render with correct per-object/per-triangle colors
 4. Multi-object 3MF files show all objects

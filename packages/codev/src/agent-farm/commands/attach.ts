@@ -73,9 +73,9 @@ async function displayBuilderList(): Promise<void> {
     logger.info('No builders running.');
     logger.blank();
     logger.info('Spawn a builder with:');
-    logger.info('  af spawn -p <project-id>');
-    logger.info('  af spawn --issue <number>');
-    logger.info('  af spawn --task "description"');
+    logger.info('  afx spawn -p <project-id>');
+    logger.info('  afx spawn --issue <number>');
+    logger.info('  afx spawn --task "description"');
     return;
   }
 
@@ -101,9 +101,9 @@ async function displayBuilderList(): Promise<void> {
 
   logger.blank();
   logger.info('Attach with:');
-  logger.info('  af attach -p <id>         # terminal mode (direct)');
-  logger.info('  af attach --issue <num>   # by issue number');
-  logger.info('  af attach -p <id> --browser  # open in browser');
+  logger.info('  afx attach -p <id>         # terminal mode (direct)');
+  logger.info('  afx attach --issue <num>   # by issue number');
+  logger.info('  afx attach -p <id> --browser  # open in browser');
 }
 
 
@@ -287,12 +287,12 @@ export async function attach(options: AttachOptions): Promise<void> {
   if (options.issue) {
     builder = findBuilderByIssue(options.issue);
     if (!builder) {
-      fatal(`No builder found for issue #${options.issue}. Use 'af status' to see running builders.`);
+      fatal(`No builder found for issue #${options.issue}. Use 'afx status' to see running builders.`);
     }
   } else if (options.project) {
     builder = findBuilderById(options.project);
     if (!builder) {
-      fatal(`Builder "${options.project}" not found. Use 'af status' to see running builders.`);
+      fatal(`Builder "${options.project}" not found. Use 'afx status' to see running builders.`);
     }
   }
 

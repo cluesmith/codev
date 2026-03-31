@@ -164,7 +164,7 @@ echo "Restored 2 files"
 
 **Integration Points**:
 1. `architecture-documenter` - called during SYNC phase
-2. Future: `af spawn --protocol cleanup` (requires 0014)
+2. Future: `afx spawn --protocol cleanup` (requires 0014)
 3. Manual invocation instructions until 0014 is complete
 
 **Required .gitignore additions**:

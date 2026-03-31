@@ -9,7 +9,7 @@ Create a tips and tricks documentation page for Codev users, linked from the mai
 1. Create `docs/tips.md` with practical tips covering:
    - Permission management (`--dangerously-skip-permissions`)
    - Recovery & resumption (`/resume` command)
-   - Agent Farm dashboard features (hammer icon, `af consult`)
+   - Agent Farm dashboard features (hammer icon, `afx consult`)
    - Productivity tips (parallel consultations, quick spawning)
    - Git workflow tips
    - Debugging commands

@@ -25,8 +25,8 @@ Time-boxed technical feasibility exploration. Answer "Can we do X?" and "What wo
 ## Spawning a Spike
 
 ```bash
-af spawn --task "Can we use WebSockets for real-time updates?" --protocol spike
-af spawn --task "What would it take to support SQLite FTS?" --protocol spike
+afx spawn --task "Can we use WebSockets for real-time updates?" --protocol spike
+afx spawn --task "What would it take to support SQLite FTS?" --protocol spike
 ```
 
 Spikes are always soft mode — no porch orchestration, no gates, no consultation.
@@ -83,7 +83,7 @@ POC code from the iterate step is committed to the spike branch alongside the fi
 
 In all cases, notify the architect:
 ```bash
-af send architect "Spike <id> complete. Verdict: [feasible/not feasible/caveats]"
+afx send architect "Spike <id> complete. Verdict: [feasible/not feasible/caveats]"
 ```
 
 ## Git Workflow

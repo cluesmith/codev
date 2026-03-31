@@ -65,9 +65,9 @@ export async function connectTerminalWs(terminalId: string): Promise<WebSocket>;
 
 ## Phase 1: Tower API Layer
 
-Add tower APIs. `af dash` becomes a thin wrapper that calls these APIs.
+Add tower APIs. `afx dash` becomes a thin wrapper that calls these APIs.
 
-**No standalone mode.** Tower is the single daemon. `af dash start` = call tower API + open browser.
+**No standalone mode.** Tower is the single daemon. `afx dash start` = call tower API + open browser.
 
 ### Files to Modify
 
@@ -293,7 +293,7 @@ async function recoverActiveProjects() {
 ```
 
 4. **`packages/codev/src/agent-farm/commands/tower.ts`** (tower stop behavior)
-   - `af tower stop` sends SIGTERM to tower process
+   - `afx tower stop` sends SIGTERM to tower process
    - Tower handles SIGTERM: kill all PTY sessions, save state, exit
    - Add `--force` flag to send SIGKILL if SIGTERM times out (10s)
    - Update state.db to mark all terminals as stopped
@@ -317,7 +317,7 @@ describe('Tower Terminal Management (Phase 2)', () => {
   it('WebSocket reconnection works after brief disconnect')
 
   // Tower stop (Codex feedback)
-  describe('af tower stop', () => {
+  describe('afx tower stop', () => {
     it('SIGTERM triggers graceful shutdown')
     it('all PTY sessions killed on shutdown')
     it('all tmux sessions killed on shutdown')
@@ -330,7 +330,7 @@ describe('Tower Terminal Management (Phase 2)', () => {
 
 ## Phase 3: Migrate CLI Commands
 
-Change `af dash start`, `af dash stop`, and `af status` to use tower API.
+Change `afx dash start`, `afx dash stop`, and `afx status` to use tower API.
 
 ### Files to Modify
 
@@ -353,7 +353,7 @@ Change `af dash start`, `af dash stop`, and `af status` to use tower API.
 
 4. **`packages/codev/src/agent-farm/commands/start.ts`** (remote workflow)
    - Update `--remote` to work with tower architecture
-   - SSH to remote, ensure tower running (`af tower start`)
+   - SSH to remote, ensure tower running (`afx tower start`)
    - Set up SSH tunnel: `ssh -L 4100:localhost:4100 user@host`
    - Open browser to `http://localhost:4100/project/<encoded-path>/`
    - Handle Ctrl+C to clean up tunnel
@@ -363,7 +363,7 @@ Change `af dash start`, `af dash stop`, and `af status` to use tower API.
    - Read local key from `~/.agent-farm/local-key`
    - Auto-create local key if missing (random 32-byte hex)
    - Include `codev-web-key` header in all requests
-   - Reuse client across `af dash start|stop|status` commands
+   - Reuse client across `afx dash start|stop|status` commands
 
 ### CLI Auth Integration Detail (Codex feedback)
 
@@ -402,27 +402,27 @@ export async function towerRequest(path: string, options: RequestInit = {}) {
 // packages/codev/src/agent-farm/__tests__/cli-tower-mode.test.ts
 
 describe('CLI Tower Mode', () => {
-  describe('af dash start', () => {
+  describe('afx dash start', () => {
     it('starts tower if not running')
     it('calls activate API')
     it('opens browser to tower URL')
     it('respects --no-browser flag')
   });
 
-  describe('af dash stop', () => {
+  describe('afx dash stop', () => {
     it('calls deactivate API')
     it('does not stop tower')
     it('handles tower not running gracefully')
   });
 
-  describe('af status', () => {
+  describe('afx status', () => {
     it('queries tower API when tower running')
     it('shows "Tower not running" when tower down')
     it('shows all active projects and terminals')
   });
 
   // Remote workflow (Codex feedback)
-  describe('af dash start --remote', () => {
+  describe('afx dash start --remote', () => {
     it('SSHs to remote host and starts tower')
     it('sets up SSH tunnel to tower port')
     it('opens local browser to tunneled port')
@@ -445,13 +445,13 @@ describe('CLI Tower Mode', () => {
 ### Tests for Phase 3
 
 ```typescript
-describe('af dash via Tower (Phase 3)', () => {
-  it('af dash start calls tower API when tower running')
-  it('af dash start starts tower if not running')
-  it('af dash stop deactivates project via tower')
-  it('af dash stop does not stop tower')
+describe('afx dash via Tower (Phase 3)', () => {
+  it('afx dash start calls tower API when tower running')
+  it('afx dash start starts tower if not running')
+  it('afx dash stop deactivates project via tower')
+  it('afx dash stop does not stop tower')
   it('browser opens to tower URL with project path')
-  it('af status shows tower-managed state')
+  it('afx status shows tower-managed state')
 });
 ```
 
@@ -459,7 +459,7 @@ describe('af dash via Tower (Phase 3)', () => {
 
 Migrate any existing state.db files to global.db for projects that existed before tower architecture.
 
-**Migration execution:** Runs automatically on first `af tower start` after upgrade. Safe to run multiple times (idempotent).
+**Migration execution:** Runs automatically on first `afx tower start` after upgrade. Safe to run multiple times (idempotent).
 
 ### Files to Delete
 
@@ -687,9 +687,9 @@ describe('Operational Hardening (Phase 2)', () => {
 ## Success Metrics
 
 1. All Phase 0 baseline tests pass after refactor
-2. `af tower start && af dash start` works
+2. `afx tower start && afx dash start` works
 3. No more "No terminal session" errors from stale state
 4. Single process manages all terminals
-5. Clean `af tower stop` kills all terminals
-6. `af status` shows consistent state from tower
+5. Clean `afx tower stop` kills all terminals
+6. `afx status` shows consistent state from tower
 7. Migration completes without data loss

@@ -1,4 +1,4 @@
-# Plan: Markdown Preview for af open
+# Plan: Markdown Preview for afx open
 
 ## Metadata
 - **ID**: 0048
@@ -8,13 +8,13 @@
 
 ## Executive Summary
 
-Implement a toggle button in the `af open` file viewer that allows users to switch between the default annotated view (line numbers + syntax highlighting) and a rendered markdown preview. The implementation uses marked.js for markdown parsing, DOMPurify for XSS sanitization, and Prism.js (already loaded) for syntax highlighting code blocks.
+Implement a toggle button in the `afx open` file viewer that allows users to switch between the default annotated view (line numbers + syntax highlighting) and a rendered markdown preview. The implementation uses marked.js for markdown parsing, DOMPurify for XSS sanitization, and Prism.js (already loaded) for syntax highlighting code blocks.
 
 This is a small, focused change affecting primarily the `open.html` template with minor changes to `open-server.ts`.
 
 ## Architecture Clarification
 
-**Important:** The `af open` UI has three distinct containers:
+**Important:** The `afx open` UI has three distinct containers:
 
 1. **`#viewMode`** - The default view showing line numbers and syntax-highlighted code in a grid layout. This is what users see when they first open a file.
 
@@ -583,7 +583,7 @@ Phase 1 (Server) ──→ Phase 2 (CDN) ──→ Phase 3 (Toggle UI) ──→
 
 ### Development Resources
 - **Engineers**: 1 (familiar with TypeScript, HTML/CSS/JS)
-- **Environment**: Local development with `af start`
+- **Environment**: Local development with `afx start`
 
 ### Infrastructure
 - No database changes

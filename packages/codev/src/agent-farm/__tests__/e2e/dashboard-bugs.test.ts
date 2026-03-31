@@ -5,7 +5,7 @@
  * 3. Panel layout is wrong (should be: info header, 2-col TABS+FILES, PROJECTS)
  *
  * Prerequisites:
- *   - af tower start (tower on :4100)
+ *   - afx tower start (tower on :4100)
  *   - Workspace activated
  *   - npx playwright install chromium
  *

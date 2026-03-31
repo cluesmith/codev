@@ -1533,7 +1533,7 @@ async function handleWorkspaceShellCreate(
         // Strip CLAUDECODE so spawned Claude processes don't detect nesting
         const shellEnv = { ...process.env } as Record<string, string>;
         delete shellEnv['CLAUDECODE'];
-        // Inject session identity for af rename (Spec 468)
+        // Inject session identity for afx rename (Spec 468)
         shellEnv['SHELLPER_SESSION_ID'] = sessionId;
         shellEnv['TOWER_PORT'] = String(ctx.port);
         const client = await shellperManager.createSession({

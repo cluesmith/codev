@@ -31,7 +31,7 @@ Implemented the two-pillar rewrite of Agent Farm's terminal and dashboard infras
 
 ### Phase 3: WebSocket Multiplexing
 - Added `terminalBackend` to Config interface
-- Wired `af spawn`, `af shell`, and `af start` to create PTY sessions via REST API when backend=node-pty
+- Wired `afx spawn`, `afx shell`, and `afx start` to create PTY sessions via REST API when backend=node-pty
 - Added `terminalId` to Builder and UtilTerminal types
 - All code paths fall back gracefully to ttyd if node-pty REST call fails
 - Dashboard `api.ts` updated with `getTerminalWsUrl()` helper
@@ -86,7 +86,7 @@ The crab icon bug required multiple attempts. The breakthrough came from creatin
 
 1. **Config flags enable safe migration**: The dual-backend approach (ttyd/node-pty, legacy/react) with config flags allows incremental rollout and instant rollback without code changes.
 
-2. **REST API for terminal creation**: Using POST /api/terminals to create PTY sessions from af spawn/shell decouples the terminal lifecycle from the process that creates it. The dashboard server owns the PTY, not the spawning command.
+2. **REST API for terminal creation**: Using POST /api/terminals to create PTY sessions from afx spawn/shell decouples the terminal lifecycle from the process that creates it. The dashboard server owns the PTY, not the spawning command.
 
 3. **Fallback gracefully**: Every node-pty code path catches errors and falls back to ttyd. This means the feature can ship even if node-pty has platform-specific issues.
 

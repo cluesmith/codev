@@ -1,4 +1,4 @@
-# Plan: af send Typing Awareness
+# Plan: afx send Typing Awareness
 
 ## Metadata
 - **ID**: plan-2026-02-17-af-send-typing-awareness
@@ -23,7 +23,7 @@ The implementation adds `lastInputAt` tracking to PtySession, a per-session mess
 - [ ] Messages are delayed when user is actively typing (input within last 3 seconds)
 - [ ] Messages are delivered promptly when user is idle (>3 seconds since last input)
 - [ ] Buffered messages have a maximum age of 60 seconds, after which they deliver regardless
-- [ ] `af send` returns 200 immediately with `deferred: true/false` indicator
+- [ ] `afx send` returns 200 immediately with `deferred: true/false` indicator
 - [ ] No messages are lost — buffer survives until delivery or max age
 - [ ] Multiple messages arriving while user is typing are delivered in order
 - [ ] All existing tests continue to pass
@@ -94,9 +94,9 @@ Revert the 3 files. No data migrations, no protocol changes.
 **Dependencies**: Phase 1
 
 #### Objectives
-- Buffer `af send` messages when the target session has an active user typing
+- Buffer `afx send` messages when the target session has an active user typing
 - Deliver buffered messages when the user becomes idle or the max buffer age (60s) is reached
-- Return `deferred: true/false` in the `af send` API response
+- Return `deferred: true/false` in the `afx send` API response
 
 #### Deliverables
 - [ ] New module `send-buffer.ts` with `SendBuffer` class
@@ -195,8 +195,8 @@ The `SendBuffer` singleton is created at module level and started when the tower
 - [ ] Buffered messages are delivered when user becomes idle (checked every 500ms)
 - [ ] Messages older than 60 seconds are delivered regardless of typing state
 - [ ] Multiple buffered messages for the same session are delivered in order
-- [ ] `af send` returns `deferred: true` when message is buffered
-- [ ] `af send` returns `deferred: false` when message is delivered immediately
+- [ ] `afx send` returns `deferred: true` when message is buffered
+- [ ] `afx send` returns `deferred: false` when message is delivered immediately
 - [ ] Broadcast happens at delivery time, not at buffer time
 - [ ] Messages for dead sessions are discarded with a warning log (session died — delivery is impossible, not a message "loss" per spec intent)
 - [ ] `interrupt: true` option bypasses buffering — delivers immediately regardless of typing state
@@ -215,7 +215,7 @@ The `SendBuffer` singleton is created at module level and started when the tower
 - **Unit Tests (tower-routes.test.ts updates)**:
   - handleSend returns `deferred: false` when session is idle
   - handleSend returns `deferred: true` when session has recent input
-- **Manual Testing**: Send `af send` while typing in dashboard terminal, verify message arrives after pause
+- **Manual Testing**: Send `afx send` while typing in dashboard terminal, verify message arrives after pause
 - **Note on Playwright**: The spec states "No changes to the dashboard" — this feature is server-side only. Playwright is not required since no UI code is modified.
 
 #### Rollback Strategy
@@ -248,7 +248,7 @@ Phase 1: Input Tracking ──→ Phase 2: Message Buffering
 3. **Before PR**: All existing tests pass, new tests cover core paths
 
 ## Documentation Updates Required
-- [ ] No user-facing docs needed (transparent to `af send` callers)
+- [ ] No user-facing docs needed (transparent to `afx send` callers)
 - [ ] arch.md update for new `send-buffer.ts` module
 
 ## Notes

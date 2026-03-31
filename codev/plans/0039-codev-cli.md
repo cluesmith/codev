@@ -118,7 +118,7 @@ All imports in agent-farm code need updating:
 - `../lib/state` → `./lib/state`
 - Keep internal structure intact
 
-### 2.3 Wire Up af Shim
+### 2.3 Wire Up afx Shim
 
 ```javascript
 // bin/af.js
@@ -136,7 +136,7 @@ run(['agent-farm', ...args]);
 // src/cli.ts
 program
   .command('agent-farm')
-  .alias('af')  // Also accessible as codev af
+  .alias('afx')  // Also accessible as codev afx
   .description('Agent farm commands (start, spawn, status, etc.)')
   .action(() => {
     // Delegate to agent-farm CLI
@@ -145,9 +145,9 @@ program
 ```
 
 **Tests:**
-- `af start` works
-- `af spawn --project 0039` works
-- All existing af commands unchanged
+- `afx start` works
+- `afx spawn --project 0039` works
+- All existing afx commands unchanged
 
 ---
 
@@ -311,7 +311,7 @@ export async function tower() {
 
 ### 5.2 Update Routing
 
-Remove tower from af, add to codev:
+Remove tower from afx, add to codev:
 
 ```typescript
 // src/cli.ts
@@ -370,8 +370,8 @@ codev doctor
 codev init test-project
 cd test-project
 codev adopt  # Should fail (already has codev)
-af start
-af status
+afx start
+afx status
 codev consult --model gemini general "Hello"
 codev tower
 codev update --dry-run
@@ -410,10 +410,10 @@ console.warn('   npm install -g @cluesmith/codev');
 - [ ] `codev consult --model gemini spec 39` works
 - [ ] `codev consult --model codex pr 33` works
 - [ ] `consult` alias works (bin/consult.js shim → codev consult)
-- [ ] `af start` unchanged
-- [ ] `af spawn --project 0039` unchanged
-- [ ] `af status` unchanged
-- [ ] All existing af commands work
+- [ ] `afx start` unchanged
+- [ ] `afx spawn --project 0039` unchanged
+- [ ] `afx status` unchanged
+- [ ] All existing afx commands work
 - [ ] npm publish succeeds
 - [ ] Global install works: `npm install -g @cluesmith/codev`
 
@@ -587,7 +587,7 @@ function loadRole(): string {
 }
 ```
 
-### 9.3 Update af to use resolver
+### 9.3 Update afx to use resolver
 
 Key files that need resolution:
 - `roles/builder.md`
@@ -666,7 +666,7 @@ Delete the duplicate templates directory - skeleton is now the single source of 
 - [ ] `skeleton/` directory created at build time from `codev-skeleton/`
 - [ ] `resolveCodevFile()` utility implemented and tested
 - [ ] `consult` uses resolver for consultant.md
-- [ ] `af` uses resolver for roles and protocols
+- [ ] `afx` uses resolver for roles and protocols
 - [ ] `codev init` creates minimal structure (specs/, plans/, reviews/ only)
 - [ ] `codev eject` command implemented
 - [ ] Existing projects with full codev/ directory continue to work
@@ -839,7 +839,7 @@ function isUserModified(localPath: string, skeletonPath: string): boolean {
 }
 ```
 
-### 10.4 Remove runtime resolution from af/consult
+### 10.4 Remove runtime resolution from afx/consult
 
 Update these files to read directly from `codev/`:
 - `src/commands/consult/index.ts` - Load from `codev/roles/consultant.md`
@@ -917,6 +917,6 @@ Since files are now copied, eject is no longer needed.
 - [ ] `codev update` implemented with merge strategy
 - [ ] `codev update --dry-run` shows what would change
 - [ ] `codev update --force` overwrites even modified files
-- [ ] Runtime resolution removed from af and consult
+- [ ] Runtime resolution removed from afx and consult
 - [ ] E2E tests updated and passing
 - [ ] `codev eject` command removed

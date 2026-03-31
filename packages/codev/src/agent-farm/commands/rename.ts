@@ -14,7 +14,7 @@ interface RenameOptions {
 
 export async function rename(options: RenameOptions): Promise<void> {
   if (!options.name || options.name.trim().length === 0) {
-    fatal('Name is required. Usage: af rename <name>');
+    fatal('Name is required. Usage: afx rename <name>');
   }
 
   const sessionId = process.env.SHELLPER_SESSION_ID;

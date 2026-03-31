@@ -1,15 +1,15 @@
-# Review: Porch Gate Notifications via `af send`
+# Review: Porch Gate Notifications via `afx send`
 
 ## Summary
 
-Replaced the broken polling-based gate watcher with direct `af send` calls from porch. When porch sets a gate to `status: pending`, it now immediately calls `af send architect` to notify the architect terminal. The old gate watcher (10s polling, blind to builder worktrees) has been removed.
+Replaced the broken polling-based gate watcher with direct `afx send` calls from porch. When porch sets a gate to `status: pending`, it now immediately calls `afx send architect` to notify the architect terminal. The old gate watcher (10s polling, blind to builder worktrees) has been removed.
 
 ## Spec Compliance
 
 - [x] When porch hits any gate, the architect terminal receives a notification within seconds
 - [x] Notification works regardless of whether the builder is in a worktree or the main repo
 - [x] Gate watcher polling code removed (no more 10s polling)
-- [x] If `af send` fails, porch continues normally (fire-and-forget)
+- [x] If `afx send` fails, porch continues normally (fire-and-forget)
 - [x] Message format matches convention: `GATE: {name} (Builder {id})`
 
 ## Deviations from Spec
@@ -43,4 +43,4 @@ Replaced the broken polling-based gate watcher with direct `af send` calls from 
 ## Follow-up Items
 
 - When Spec 0110 (messaging infrastructure) lands, `notifyArchitect()` will benefit from the message bus and standardized agent names automatically — no changes needed in porch.
-- The task description text in `next.ts` still contains human-readable `af send` instructions for the builder AI as a fallback. These could be removed since porch now handles notification directly, but they're harmless.
+- The task description text in `next.ts` still contains human-readable `afx send` instructions for the builder AI as a fallback. These could be removed since porch now handles notification directly, but they're harmless.

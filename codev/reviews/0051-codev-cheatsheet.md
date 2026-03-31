@@ -32,7 +32,7 @@ Created a comprehensive cheatsheet documenting Codev's core philosophies, concep
 | Roles (Architect, Builder, Consultant) | All explained including consultant flavors |
 | Information Hierarchy | ASCII diagram included |
 | Tools: codev | All commands documented |
-| Tools: agent-farm (af) | All commands documented |
+| Tools: agent-farm (afx) | All commands documented |
 | Tools: consult | All commands and parameters documented |
 
 ## Consultation Results

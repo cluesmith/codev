@@ -41,20 +41,20 @@ codev init
 codev doctor
 
 # 4. Start the workspace (optional)
-af workspace start
+afx workspace start
 ```
 
 Then open a GitHub Issue describing what you want to build, and run:
 
 ```bash
-af spawn <issue-number>
+afx spawn <issue-number>
 ```
 
 For the full walkthrough, see **[Getting Started](https://codevos.ai/getting-started)**.
 
 **CLI Commands:**
 - `codev` - Main CLI (init, adopt, doctor, update)
-- `af` - Agent Farm for parallel AI builders
+- `afx` - Agent Farm for parallel AI builders
 - `consult` - Multi-model consultation
 
 See [CLI Reference](codev/resources/commands/overview.md) for details.
@@ -62,7 +62,7 @@ See [CLI Reference](codev/resources/commands/overview.md) for details.
 ## How It Works
 
 1. **Write a spec** — Describe what you want. The architect helps refine it.
-2. **Spawn a builder** — `af spawn 42` kicks off an autonomous agent in an isolated worktree.
+2. **Spawn a builder** — `afx spawn 42` kicks off an autonomous agent in an isolated worktree.
 3. **Review the plan** — The builder writes an implementation plan. You approve or annotate.
 4. **Walk away** — The builder implements, tests, and opens a PR. You review and merge.
 
@@ -364,26 +364,26 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 
 ```bash
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Spawn a builder for a spec
-af spawn 3 --protocol spir
+afx spawn 3 --protocol spir
 
 # Check status
-af status
+afx status
 
 # Stop everything
-af workspace stop
+afx workspace stop
 ```
 
-The `af` command is globally available after installing `@cluesmith/codev`.
+The `afx` command is globally available after installing `@cluesmith/codev`.
 
 ### Remote Access
 
 Access Agent Farm from any device via cloud connectivity:
 
 ```bash
-af tower connect
+afx tower connect
 ```
 
 Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser — no SSH tunnels or port forwarding needed.

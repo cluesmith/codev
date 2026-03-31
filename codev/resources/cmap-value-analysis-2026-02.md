@@ -29,7 +29,7 @@ Issues surfaced by 3-way consultation during spec development that would have sh
 | CLI hard-codes server URL | 0097 | Codex (iter 4) | `CODEVOS_URL` had no env override; CLI couldn't target local/staging instances. |
 | Error type conflation | 0099 | All three (phase 5) | `shell.ts` treated connection failures and server errors identically — "Tower not running" for all errors. |
 | Config watcher boot race | 0097 | Codex (iter 2) | `connectTunnel()` didn't start config watcher after tunnel creation; registration after boot would leave watcher dead. |
-| Incomplete naming sweep | 0099 | All three (phase 2) | 4 iterations to find all `af dash start` literals across `status.ts`, `hq-connector.ts`, and remote `start.ts`. |
+| Incomplete naming sweep | 0099 | All three (phase 2) | 4 iterations to find all `afx dash start` literals across `status.ts`, `hq-connector.ts`, and remote `start.ts`. |
 
 ### Quality / Completeness
 
@@ -39,7 +39,7 @@ Issues surfaced by 3-way consultation during spec development that would have sh
 | Missing Playwright E2E tests | 0100 | Codex (iter 1) | Plan specified E2E tests but builder initially overlooked them. Added in iter 2. |
 | Coverage thresholds miscalibrated | 0096 | Codex (iter 1) | Plan assumed 70% baseline; actual was 62.31%. Would have failed every CI build. |
 | Stale JSDoc | 0098 | Claude (iter 1) | Global schema JSDoc still said "Stores port allocations" after port removal. |
-| SSH tunnel port conflict | 0098 | Codex (iter 3) | Remote `af dash start` hardcoded local tunnel port to 4100, conflicting with local Tower. |
+| SSH tunnel port conflict | 0098 | Codex (iter 3) | Remote `afx dash start` hardcoded local tunnel port to 4100, conflicting with local Tower. |
 | `types.test.ts` compilation | 0098 | Claude (iter 1) | Config test fixture still had removed port fields; would break TypeScript compilation. |
 | Test logic duplication | 0099 | Codex (phases 3-4) | Tests duplicated parsing logic instead of calling production functions. Led to better module extraction. |
 | Documentation regressions | 0097 | Codex (iter 4-5) | `agent-farm.md` still documented old `--web`/`CODEV_WEB_KEY` flow; skeleton docs out of sync. |
@@ -61,11 +61,11 @@ Issues surfaced by 3-way consultation during spec development that would have sh
 
 | Issue | PR | Origin Spec | Description | Why CMAP Missed It |
 |-------|-----|-------------|-------------|-------------------|
-| #195 | #198 | 0090 | `af attach` fails with port=0 SQLite records | Edge case in pre-existing schema interaction; 0090 review predates CMAP window |
+| #195 | #198 | 0090 | `afx attach` fails with port=0 SQLite records | Edge case in pre-existing schema interaction; 0090 review predates CMAP window |
 | #199 | #201 | 0090 | Zombie builder tab after cleanup | React state management; WebSocket disconnect timing not reviewed |
 | #205 | #207 | 0092 | Garbled terminal on tab revisit | xterm.js remount behavior; React lifecycle not in review scope |
 | #213 | #214 | MAINT-006 | Architect doesn't auto-restart | Stale closure reference in exit handler; runtime-only observable |
-| #217 | #218 | 0095 | `af spawn --resume` resets porch state | Interaction between builder prompt and porch init; not in spec scope |
+| #217 | #218 | 0095 | `afx spawn --resume` resets porch state | Interaction between builder prompt and porch init; not in spec scope |
 | #222 | #223 | 0097 | Dashboard 404s behind reverse proxy | Proxy path prefix not in spec's test matrix |
 | #234 | #235 | 0097 | Dashboard links broken behind proxy | Same root cause as #222; absolute paths vs proxy prefix |
 | #242 | #243 | 0090 | Tower doesn't reconnect to bugfix builders | Regex `(\d{4,})$` only matched SPIR builders; other naming patterns missed |
@@ -80,7 +80,7 @@ Issues surfaced by 3-way consultation during spec development that would have sh
 | #203 | #206 | Copy/paste broken in dashboard | Pre-existing xterm.js gap; never had clipboard handling |
 | #228 | #229 | Stale input characters on architect start | Terminal DA query timing; environment-specific |
 | #236 | #238 | machineId is hostname+arch, not UUID | Design flaw in original implementation; security-adjacent |
-| #237 | #239 | `af spawn` should pre-initialize porch | Workflow friction, not a bug per se |
+| #237 | #239 | `afx spawn` should pre-initialize porch | Workflow friction, not a bug per se |
 | #240 | #241 | Diff truncation causes false reviews | Meta-bug in consultation infrastructure itself |
 
 ### Excluded (terminal scroll saga)

@@ -57,7 +57,7 @@ tests/
 │   ├── init.bats            # TC-002: codev init
 │   ├── adopt.bats           # TC-003: codev adopt
 │   ├── doctor.bats          # TC-004: codev doctor
-│   ├── af.bats              # TC-005: af commands
+│   ├── af.bats              # TC-005: afx commands
 │   └── consult.bats         # TC-006: consult help
 ├── install/                 # Existing installation tests
 └── lib/                     # Existing library tests
@@ -120,7 +120,7 @@ teardown() {
   assert_output --partial "1.1.0"
 }
 
-@test "af --version returns expected version" {
+@test "afx --version returns expected version" {
   # Similar pattern
 }
 ```
@@ -266,29 +266,29 @@ teardown() {
 }
 ```
 
-#### TC-005: af commands (af.bats)
+#### TC-005: afx commands (af.bats)
 
 ```bash
-@test "af --help shows available commands" {
+@test "afx --help shows available commands" {
   cd "$TEST_DIR"
   npm init -y
   npm install "$E2E_TARBALL"
 
-  run ./node_modules/.bin/af --help
+  run ./node_modules/.bin/afx --help
   assert_success
   assert_output --partial "start"
   assert_output --partial "spawn"
   assert_output --partial "status"
 }
 
-@test "af status works without running dashboard" {
+@test "afx status works without running dashboard" {
   cd "$TEST_DIR"
   npm init -y
   npm install "$E2E_TARBALL"
   ./node_modules/.bin/codev init project --yes
   cd project
 
-  run ../node_modules/.bin/af status
+  run ../node_modules/.bin/afx status
   # Should report no builders, not crash
   assert_success
   assert_output --partial "Architect"

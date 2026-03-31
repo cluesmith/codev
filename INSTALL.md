@@ -12,7 +12,7 @@ npm install -g @cluesmith/codev
 
 This provides three CLI commands:
 - `codev` - Main CLI (init, adopt, doctor, update, tower)
-- `af` - Agent-farm CLI for parallel development
+- `afx` - Agent-farm CLI for parallel development
 - `consult` - Multi-agent consultation tool
 
 ### Initialize a New Project
@@ -408,7 +408,7 @@ codev doctor
 
 ### Setup
 
-The architect-builder tools are available globally via the `af` command after installing `@cluesmith/codev`:
+The architect-builder tools are available globally via the `afx` command after installing `@cluesmith/codev`:
 
 ```bash
 # Ensure .builders/ and .agent-farm/ are in your .gitignore
@@ -416,7 +416,7 @@ echo ".builders/" >> .gitignore
 echo ".agent-farm/" >> .gitignore
 
 # Verify the agent-farm CLI is available
-af --help
+afx --help
 ```
 
 ### Configuration
@@ -441,40 +441,40 @@ Create `codev/config.json` to customize commands:
 
 Override via CLI:
 ```bash
-af workspace start --architect-cmd "claude --model opus"
-af spawn 3 --protocol spir --builder-cmd "claude"
+afx workspace start --architect-cmd "claude --model opus"
+afx spawn 3 --protocol spir --builder-cmd "claude"
 ```
 
 ### Quick Start
 
 ```bash
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Spawn a builder for a spec
-af spawn 3 --protocol spir
+afx spawn 3 --protocol spir
 
 # Check status of all builders
-af status
+afx status
 
 # Open a utility shell
-af shell
+afx shell
 
 # Open a file in annotation viewer
-af open src/auth/login.ts
+afx open src/auth/login.ts
 
 # Clean up a builder (checks for uncommitted changes first)
-af cleanup --project 0003
+afx cleanup --project 0003
 
 # Force cleanup (WARNING: may lose uncommitted work)
-af cleanup --project 0003 --force
+afx cleanup --project 0003 --force
 
 # Stop the workspace and all builders
-af workspace stop
+afx workspace stop
 
 # Manage port allocations (for multi-project support)
-af ports list
-af ports cleanup
+afx ports list
+afx ports cleanup
 ```
 
 ### How It Works

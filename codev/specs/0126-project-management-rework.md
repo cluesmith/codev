@@ -31,11 +31,11 @@
 
 ### What does NOT read projectlist.md
 
-- `af spawn` — filesystem glob on `codev/specs/`
+- `afx spawn` — filesystem glob on `codev/specs/`
 - Porch state — `codev/projects/<id>/status.yaml`
 - Spec/plan/review discovery — filename-based
-- `af cleanup` — doesn't touch it
-- `af status` — reads Tower state, not projectlist
+- `afx cleanup` — doesn't touch it
+- `afx status` — reads Tower state, not projectlist
 - **Soft mode builders** — no porch, no status tracking at all
 
 The actual hard dependencies are surprisingly small: one function in porch (strict mode only) and one dashboard panel.
@@ -49,7 +49,7 @@ The GitHub Issue is created **before** the spec. The issue number becomes the un
 **New workflow:**
 1. `gh issue create --title "Feature name"` → Issue #315 auto-assigned
 2. Write spec: `codev/specs/315-feature-name.md`
-3. `af spawn 315` → finds spec on disk + fetches issue context from GitHub
+3. `afx spawn 315` → finds spec on disk + fetches issue context from GitHub
 4. Builder works, creates PR referencing #315
 5. PR merged → issue closed
 
@@ -104,23 +104,23 @@ Detailed phase tracking (specify → plan → implement → review) stays in por
 ### Simplified spawn CLI
 
 ```bash
-af spawn 315 --protocol spir           # Feature: SPIR protocol
-af spawn 315 --protocol bugfix         # Bug: BUGFIX protocol
-af spawn 320 --protocol tick --amends 315  # Amendment: TICK on spec 315, tracked as issue 320
-af spawn 315 --soft                    # Soft mode (no porch)
-af spawn 315 --resume                  # Resume existing worktree
-af spawn --task "fix the bug"          # Ad-hoc (no issue)
-af spawn --protocol maintain           # Protocol-only run
-af spawn --shell                       # Bare session
+afx spawn 315 --protocol spir           # Feature: SPIR protocol
+afx spawn 315 --protocol bugfix         # Bug: BUGFIX protocol
+afx spawn 320 --protocol tick --amends 315  # Amendment: TICK on spec 315, tracked as issue 320
+afx spawn 315 --soft                    # Soft mode (no porch)
+afx spawn 315 --resume                  # Resume existing worktree
+afx spawn --task "fix the bug"          # Ad-hoc (no issue)
+afx spawn --protocol maintain           # Protocol-only run
+afx spawn --shell                       # Bare session
 ```
 
-The number is a positional argument, not a flag. `af spawn 315` replaces both `af spawn -p 315` and `af spawn --issue 315`. Protocol must be specified explicitly via `--protocol` — no magic auto-detection. The architect AI should recommend protocols based on convention (SPIR for features, BUGFIX for bugs, TICK for amendments) but the human always chooses.
+The number is a positional argument, not a flag. `afx spawn 315` replaces both `afx spawn -p 315` and `afx spawn --issue 315`. Protocol must be specified explicitly via `--protocol` — no magic auto-detection. The architect AI should recommend protocols based on convention (SPIR for features, BUGFIX for bugs, TICK for amendments) but the human always chooses.
 
 **TICK amendments**: Create a new issue for the amendment work, then spawn with `--amends <original>`. The new issue tracks the work, the original spec is modified in-place, and the review file uses the new issue number.
 
 The spawn flow:
 1. Validate: `--protocol` is required (fail if missing)
-2. Resolve spec: glob `codev/specs/<N>-*.md` (strips leading zeros for legacy specs, e.g., `af spawn 76` matches `0076-*.md`)
+2. Resolve spec: glob `codev/specs/<N>-*.md` (strips leading zeros for legacy specs, e.g., `afx spawn 76` matches `0076-*.md`)
 3. Fetch context: `gh issue view <N> --json title,body,comments` (non-fatal if issue doesn't exist — spec-only mode)
 4. Dispatch: use the explicitly specified `--protocol` to choose the code path (SPIR, BUGFIX, TICK, etc.)
 
@@ -137,7 +137,7 @@ The top navigation tabs remain. The **Projects** and **Terminals** tabs are remo
 **Layout (2/3 – 1/3 vertical split):**
 
 - **Top 2/3: Work view** — everything the architect needs on one screen
-- **Bottom 1/3: File panel** — annotated file viewer (`af open`), collapsible to just the file search bar. When collapsed, the Work view expands to fill the full height.
+- **Bottom 1/3: File panel** — annotated file viewer (`afx open`), collapsible to just the file search bar. When collapsed, the Work view expands to fill the full height.
 
 **Work view sections (top to bottom):**
 
@@ -170,7 +170,7 @@ The top navigation tabs remain. The **Projects** and **Terminals** tabs are remo
 
 **What does NOT change:**
 - Top navigation tabs (still present, Work replaces Projects/Terminals/Files)
-- `af open` functionality (opens file in a new tab at the top, just repositioned within Work tab)
+- `afx open` functionality (opens file in a new tab at the top, just repositioned within Work tab)
 
 **What the Work view does NOT show:**
 - Completed/integrated work (closed issues — use `gh issue list --state closed`)
@@ -256,14 +256,14 @@ There is no migration step. `projectlist.md` becomes a dead file:
 
 ### Legacy spec compatibility
 
-Existing specs use zero-padded 4-digit IDs (e.g., `0076`). GitHub issues use plain integers (e.g., `76`). The spec file lookup strips leading zeros before globbing: `af spawn 76` matches `codev/specs/0076-*.md`. The `stripLeadingZeros()` function already exists in the codebase.
+Existing specs use zero-padded 4-digit IDs (e.g., `0076`). GitHub issues use plain integers (e.g., `76`). The spec file lookup strips leading zeros before globbing: `afx spawn 76` matches `codev/specs/0076-*.md`. The `stripLeadingZeros()` function already exists in the codebase.
 
 For legacy specs with no corresponding GitHub issue, spawn works in spec-only mode — the spec file provides all context, and the `gh issue view` step is non-fatal.
 
 ## Success Criteria
 
 - [ ] No code reads projectlist.md
-- [ ] `af spawn <N>` works as positional arg for both features and bugs
+- [ ] `afx spawn <N>` works as positional arg for both features and bugs
 - [ ] Porch reads project summary from GitHub Issues (with spec-file fallback)
 - [ ] Dashboard shows: active builders, blocked gates, pending PRs, backlog
 - [ ] Backlog + open bugs derived from open issues — no manual tracking
@@ -276,7 +276,7 @@ For legacy specs with no corresponding GitHub issue, spawn works in spec-only mo
 
 - GitHub is required — `gh` CLI must be installed and authenticated
 - GitHub API rate limits: 5000/hr authenticated — sufficient for cached queries
-- Must not break existing `af spawn -p` for numbered specs already on disk
+- Must not break existing `afx spawn -p` for numbered specs already on disk
 - Soft mode builders need zero tracking infrastructure
 - Work view must be responsive / usable on mobile (check builder status, approve gates, see PRs on the go)
 
@@ -294,7 +294,7 @@ For legacy specs with no corresponding GitHub issue, spawn works in spec-only mo
 
 - **Playwright**: Work view layout, builder cards, PR list, backlog rendering, collapsible file panel, responsive layout
 - **Unit tests**: `getProjectSummary()` replacement (GitHub fetch, spec-file fallback, neither), PR-to-issue linkage parsing, label defaults, `stripLeadingZeros()` matching
-- **Integration tests**: `af spawn` positional arg with `--protocol`, legacy `-p` alias, `/api/overview` endpoint with mocked `gh` output, degraded mode (gh failure)
+- **Integration tests**: `afx spawn` positional arg with `--protocol`, legacy `-p` alias, `/api/overview` endpoint with mocked `gh` output, degraded mode (gh failure)
 - **E2E**: Full spawn → build → PR flow using issue numbers
 
 ## Resolved Questions
@@ -305,7 +305,7 @@ For legacy specs with no corresponding GitHub issue, spawn works in spec-only mo
 - **Supersedes 0119**: No work from 0119 was started (it was abandoned before implementation). Nothing to discard or roll in.
 - **Issue number vs legacy ID collision**: Issue #76 and spec `0076-feature.md` are expected to refer to the same thing. If they're unrelated, the spec file takes precedence (it's the implementation artifact).
 - **"Open" button**: Opens the builder's Claude session as a new tab in the dashboard's tab bar (not a browser tab).
-- **File panel search bar**: Reuses the existing `af open` search functionality, just repositioned into the collapsible panel.
+- **File panel search bar**: Reuses the existing `afx open` search functionality, just repositioned into the collapsible panel.
 
 ## Consultation Log
 
@@ -342,4 +342,4 @@ Also flagged lower-severity items: `projectlist-archive.md` fate, offline behavi
 | Cache TTL (Claude) | Added: both PR and issue use same 60s TTL, in-memory, manual refresh via `POST /api/overview/refresh` |
 | Legacy spec matching (Claude) | Added "Legacy spec compatibility" section: `stripLeadingZeros()` matching, spec-only mode when no issue exists |
 | "Open" button ambiguity (Claude) | Added to Resolved Questions: opens in dashboard tab bar, not browser tab |
-| File panel search bar (Claude) | Added to Resolved Questions: reuses existing `af open` search |
+| File panel search bar (Claude) | Added to Resolved Questions: reuses existing `afx open` search |

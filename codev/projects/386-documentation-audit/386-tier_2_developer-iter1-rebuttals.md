@@ -5,9 +5,9 @@ No action needed.
 
 ## Claude: REQUEST_CHANGES
 
-### `af start` / `af stop` in arch.md (lines 1334, 1335, 1366, 1379)
+### `afx start` / `afx stop` in arch.md (lines 1334, 1335, 1366, 1379)
 **Status: FIXED**
-Updated all four instances to `af dash start` / `af dash stop`. Verified with grep — zero remaining `af start` / `af stop` references in arch.md.
+Updated all four instances to `afx dash start` / `afx dash stop`. Verified with grep — zero remaining `afx start` / `afx stop` references in arch.md.
 
 ### `cmap-value-analysis-2026-02.md` scope concern
 **Status: ACKNOWLEDGED, KEPT**

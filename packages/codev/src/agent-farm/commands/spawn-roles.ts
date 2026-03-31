@@ -206,7 +206,7 @@ export function loadProtocolRole(config: Config, protocolName: string): { conten
 
 /**
  * Find a spec file by project ID.
- * Handles legacy zero-padded IDs: `af spawn 76` matches `0076-feature.md`.
+ * Handles legacy zero-padded IDs: `afx spawn 76` matches `0076-feature.md`.
  * Strips leading zeros from both the input ID and spec file prefixes for comparison.
  */
 export async function findSpecFile(codevDir: string, projectId: string): Promise<string | null> {

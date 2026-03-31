@@ -295,20 +295,20 @@ project-root/
 
 ### 8. Direct CLI Access for Power Users
 
-Power users often prefer terminal-first workflows without the browser overhead. The `af architect` command provides direct access to the architect role via tmux:
+Power users often prefer terminal-first workflows without the browser overhead. The `afx architect` command provides direct access to the architect role via tmux:
 
 ```bash
-af architect              # Start/attach to architect tmux session
-af architect "prompt"     # With initial prompt
-af architect --layout     # Multi-pane layout with status and shell
+afx architect              # Start/attach to architect tmux session
+afx architect "prompt"     # With initial prompt
+afx architect --layout     # Multi-pane layout with status and shell
 ```
 
-**Basic Mode** (`af architect`):
+**Basic Mode** (`afx architect`):
 - If `af-architect` tmux session exists → attach to it
 - If no session exists → create new session with architect role
 - Session persists after detach (Ctrl+B, D)
 
-**Layout Mode** (`af architect --layout`):
+**Layout Mode** (`afx architect --layout`):
 Creates a two-pane tmux layout:
 ```
 ┌────────────────────────────────┬──────────────────────────────┐
@@ -319,7 +319,7 @@ Creates a two-pane tmux layout:
 └────────────────────────────────┴──────────────────────────────┘
 ```
 - Left pane: Architect Claude session (main workspace)
-- Right pane: Utility shell for running `af spawn`, `af status`, etc.
+- Right pane: Utility shell for running `afx spawn`, `afx status`, etc.
 - Navigate panes: Ctrl+B ←/→ | Zoom: Ctrl+B z | Detach: Ctrl+B d
 
 **Why tmux?** Consistency with other agent farm commands which all use tmux internally for session persistence.
@@ -328,8 +328,8 @@ Creates a two-pane tmux layout:
 
 ```bash
 # Direct CLI access to architect (power users)
-af architect              # Start/attach to architect tmux session
-af architect --layout     # Multi-pane layout
+afx architect              # Start/attach to architect tmux session
+afx architect --layout     # Multi-pane layout
 
 # Spawn a new builder for a project (spec)
 architect spawn --project 0003
@@ -509,16 +509,16 @@ Git worktrees provide isolation without the overhead of full clones:
 
 ### TICK-001: Direct CLI Access (2025-12-27)
 
-**Summary**: Add `af architect` command for terminal-first access to architect role, with optional multi-pane layout mode.
+**Summary**: Add `afx architect` command for terminal-first access to architect role, with optional multi-pane layout mode.
 
 **Problem Addressed**:
-Power users prefer direct terminal access without browser overhead. Currently, accessing the architect requires either starting the full dashboard (`af start`) or knowing tmux internals (`tmux attach -t af-architect-4301`).
+Power users prefer direct terminal access without browser overhead. Currently, accessing the architect requires either starting the full dashboard (`afx start`) or knowing tmux internals (`tmux attach -t af-architect-4301`).
 
 **Spec Changes**:
 - Added "8. Direct CLI Access for Power Users" section
-- Basic mode: `af architect` for simple session
-- Layout mode: `af architect --layout` for multi-pane tmux layout
-- Updated CLI Interface to include `af architect` command
+- Basic mode: `afx architect` for simple session
+- Layout mode: `afx architect --layout` for multi-pane tmux layout
+- Updated CLI Interface to include `afx architect` command
 
 **Plan Changes**:
 - Added Phase 8: Direct CLI Access implementation
@@ -529,10 +529,10 @@ Power users prefer direct terminal access without browser overhead. Currently, a
 
 ### TICK-002: Protocol-Agnostic Spawn System (2026-01-27)
 
-**Summary**: Refactor `af spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
+**Summary**: Refactor `afx spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
 
 **Problem Addressed**:
-Currently, specific protocols are deeply baked into `af spawn`:
+Currently, specific protocols are deeply baked into `afx spawn`:
 - `spawnBugfix()` hardcodes BUGFIX protocol path and instructions
 - `spawnSpec()` defaults to SPIR with protocol-specific prompts
 - Adding a new protocol requires modifying spawn.ts
@@ -563,8 +563,8 @@ Separate three orthogonal concerns:
 
 1. **Add `--protocol` as universal flag** that works with any input type:
    ```bash
-   af spawn -p 0001 --protocol tick     # Spec with TICK protocol
-   af spawn -i 42 --protocol spir     # Issue with SPIR protocol (unusual)
+   afx spawn -p 0001 --protocol tick     # Spec with TICK protocol
+   afx spawn -i 42 --protocol spir     # Issue with SPIR protocol (unusual)
    ```
 
 2. **Protocol-defined prompts**: Each protocol provides `protocols/{name}/builder-prompt.md` template with placeholders:
@@ -640,14 +640,14 @@ Separate three orthogonal concerns:
 
 ```bash
 # Standard usage (unchanged behavior)
-af spawn -p 0001                    # strict, spir
-af spawn -i 42                      # soft, bugfix
+afx spawn -p 0001                    # strict, spir
+afx spawn -i 42                      # soft, bugfix
 
 # New flexibility
-af spawn -p 0001 --protocol tick    # strict, tick
-af spawn -i 42 --protocol spir    # soft, spir (escalate bug to full feature)
-af spawn --protocol maintain        # soft, maintain
-af spawn --strict --protocol experiment  # strict, experiment via porch
+afx spawn -p 0001 --protocol tick    # strict, tick
+afx spawn -i 42 --protocol spir    # soft, spir (escalate bug to full feature)
+afx spawn --protocol maintain        # soft, maintain
+afx spawn --strict --protocol experiment  # strict, experiment via porch
 ```
 
 **Benefits**:

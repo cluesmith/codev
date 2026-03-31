@@ -47,7 +47,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   const program = new Command();
 
   program
-    .name('af')
+    .name('afx')
     .description('Agent Farm - Multi-agent orchestration for software development')
     .version(version);
 
@@ -103,17 +103,17 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Deprecated alias: `af dash` → `af workspace`
+  // Deprecated alias: `afx dash` → `afx workspace`
   const dashCmd = program
     .command('dash')
-    .description('(deprecated) Use "af workspace" instead')
+    .description('(deprecated) Use "afx workspace" instead')
     .hook('preAction', () => {
-      logger.warn('`af dash` is deprecated. Use `af workspace` instead.');
+      logger.warn('`afx dash` is deprecated. Use `afx workspace` instead.');
     });
 
   dashCmd
     .command('start')
-    .description('(deprecated) Use "af workspace start" instead')
+    .description('(deprecated) Use "afx workspace start" instead')
     .option('--no-browser', 'Skip opening browser after start')
     .action(async (options) => {
       try {
@@ -128,7 +128,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   dashCmd
     .command('stop')
-    .description('(deprecated) Use "af workspace stop" instead')
+    .description('(deprecated) Use "afx workspace stop" instead')
     .action(async () => {
       try {
         await stop();
@@ -214,11 +214,11 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     const allArgs = process.argv.slice(2);
     for (const arg of allArgs) {
       if (arg === '-p' || arg === '--project') {
-        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol spir`);
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  afx spawn 315 --protocol spir`);
         process.exit(1);
       }
       if (arg === '-i' || arg === '--issue') {
-        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol bugfix`);
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  afx spawn 315 --protocol bugfix`);
         process.exit(1);
       }
     }
@@ -556,7 +556,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('list')
     .description('List team members from codev/team/people/')
     .action(async () => {
-      console.warn('⚠ `af team` is deprecated. Use `team list` instead.');
+      console.warn('⚠ `afx team` is deprecated. Use `team list` instead.');
       const { teamList } = await import('./commands/team.js');
       try {
         await teamList({ cwd: process.cwd() });
@@ -571,7 +571,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Post a message to the team message log')
     .option('-a, --author <name>', 'Override author (default: auto-detect from gh/git)')
     .action(async (text, options) => {
-      console.warn('⚠ `af team` is deprecated. Use `team message` instead.');
+      console.warn('⚠ `afx team` is deprecated. Use `team message` instead.');
       const { teamMessage } = await import('./commands/team.js');
       try {
         await teamMessage({ text, author: options.author, cwd: process.cwd() });
@@ -585,7 +585,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('update')
     .description('Post hourly activity summary (used by cron, can run manually)')
     .action(async () => {
-      console.warn('⚠ `af team` is deprecated. Use `team update` instead.');
+      console.warn('⚠ `afx team` is deprecated. Use `team update` instead.');
       const { teamUpdate } = await import('./commands/team-update.js');
       try {
         await teamUpdate({ cwd: process.cwd() });
@@ -716,5 +716,5 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   // Parse with provided args
-  await program.parseAsync(['node', 'af', ...args]);
+  await program.parseAsync(['node', 'afx', ...args]);
 }

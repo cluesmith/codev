@@ -5,7 +5,7 @@ Codev provides three CLI tools for AI-assisted software development:
 | Tool | Description |
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
-| `af` | Agent Farm - multi-agent orchestration for development |
+| `afx` | Agent Farm - multi-agent orchestration for development |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
 
 ## Quick Start
@@ -21,7 +21,7 @@ codev adopt
 codev doctor
 
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Consult an AI model about a spec
 consult -m gemini --protocol spir --type spec
@@ -33,7 +33,7 @@ consult -m gemini --protocol spir --type spec
 npm install -g @cluesmith/codev
 ```
 
-This installs all three commands globally: `codev`, `af`, and `consult`.
+This installs all three commands globally: `codev`, `afx`, and `consult`.
 
 ## Command Summaries
 
@@ -49,19 +49,19 @@ This installs all three commands globally: `codev`, `af`, and `consult`.
 
 See [codev.md](codev.md) for full documentation.
 
-### af - Agent Farm
+### afx - Agent Farm
 
 | Command | Description |
 |---------|-------------|
-| `af workspace start` | Start the workspace |
-| `af workspace stop` | Stop all agent farm processes |
-| `af spawn` | Spawn a new builder |
-| `af status` | Show status of all agents |
-| `af cleanup` | Clean up a builder worktree |
-| `af send` | Send instructions to a builder |
-| `af open` | Open file annotation viewer |
-| `af shell` | Spawn a utility shell |
-| `af tower` | Cross-project dashboard |
+| `afx workspace start` | Start the workspace |
+| `afx workspace stop` | Stop all agent farm processes |
+| `afx spawn` | Spawn a new builder |
+| `afx status` | Show status of all agents |
+| `afx cleanup` | Clean up a builder worktree |
+| `afx send` | Send instructions to a builder |
+| `afx open` | Open file annotation viewer |
+| `afx shell` | Spawn a utility shell |
+| `afx tower` | Cross-project dashboard |
 
 See [agent-farm.md](agent-farm.md) for full documentation.
 

@@ -92,7 +92,7 @@ Wraps existing filesystem logic. Zero behavior change for existing users.
 - [x] CLI errors cached as negative sentinel
 - [x] `hasPreApproval()` works for both resolvers via shared helper
 - [x] Artifact-dependent checks use resolver
-- [x] `af status` shows configured artifact backend
+- [x] `afx status` shows configured artifact backend
 - [x] All existing tests pass unchanged
 - [x] Configuration uses `.codev/config.json` via `loadConfig()` (v3.0.0 pattern)
 - [x] `CodevConfig` interface extended with `artifacts` section
@@ -125,7 +125,7 @@ The initial implementation (PR #613) read artifact config from `af-config.json` 
 
 **Spec Changes**:
 - Configuration section: Updated to reference `.codev/config.json` as the config source (not `af-config.json`)
-- Success Criteria: Resolver correctly reads artifacts config via `loadConfig()` from `lib/config.ts`; `af status` reads artifact backend from `.codev/config.json`
+- Success Criteria: Resolver correctly reads artifacts config via `loadConfig()` from `lib/config.ts`; `afx status` reads artifact backend from `.codev/config.json`
 
 **Plan Changes**:
 - Phase 1: Extend `CodevConfig` in `lib/config.ts` with `artifacts` section; rewrite `getResolver()` to use `loadConfig()`; remove `findConfigRoot()` and `loadArtifactConfig()`
@@ -133,20 +133,20 @@ The initial implementation (PR #613) read artifact config from `af-config.json` 
 
 **Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
 
-### TICK-002: Extend resolver to consult CLI, af spawn, and PTY (2026-03-27)
+### TICK-002: Extend resolver to consult CLI, afx spawn, and PTY (2026-03-27)
 
 **Summary**: Port the remaining cross-subsystem artifact resolver integration from PR #613 to v3.0.0. Three subsystems still use hardcoded `codev/specs/` paths, breaking the CLI artifact backend for upstream users.
 
 **Problem Addressed**:
 PR #636 threads the resolver through porch but 3 subsystems remain hardcoded:
 - `consult/index.ts`: `findSpec()`/`findPlan()` (lines 195-235) scan `codev/specs/` and `codev/plans/` directories. When `porch next` emits consult tasks, the consult CLI crashes for CLI backend users because specs aren't on disk.
-- `spawn.ts`: `fatal()` at line 299 expects `codev/specs/${id}-*.md`. Path construction at lines 382-383 hardcodes `codev/specs/` and `codev/plans/`. Blocks `af spawn` for CLI backend.
+- `spawn.ts`: `fatal()` at line 299 expects `codev/specs/${id}-*.md`. Path construction at lines 382-383 hardcodes `codev/specs/` and `codev/plans/`. Blocks `afx spawn` for CLI backend.
 - `pty-manager.ts`: Missing `CODEV_ARTIFACTS_DATA_REPO` env var propagation. CliResolver in builder worktrees can't locate the data repo.
 
 **Spec Changes**:
 - Success Criteria additions:
   - [x] Consult CLI uses resolver for spec/plan content (no filesystem dependency)
-  - [x] `af spawn` tries resolver before fatal error for CLI backends
+  - [x] `afx spawn` tries resolver before fatal error for CLI backends
   - [x] PTY sessions propagate `CODEV_ARTIFACTS_DATA_REPO` to child processes
   - [x] Query builders embed artifact content inline (not "read from disk" instructions)
   - [x] Error messages are backend-agnostic (no hardcoded `codev/specs/` paths in consult or spawn)

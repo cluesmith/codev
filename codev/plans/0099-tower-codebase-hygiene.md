@@ -62,7 +62,7 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 #### Test Plan
 - **Unit Tests**: Update existing type tests if any reference port/pid
 - **Build Test**: `npm run build` must succeed — TypeScript compiler catches any missed port/pid references
-- **Manual Test**: `af stop` still works correctly without orphan scanning
+- **Manual Test**: `afx stop` still works correctly without orphan scanning
 
 ---
 
@@ -76,7 +76,7 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 
 #### Files to Modify
 - `packages/codev/src/agent-farm/commands/architect.ts` — change `SESSION_NAME` from `af-architect` to `architect-{basename}`, change `LAYOUT_SESSION_NAME` similarly
-- `packages/codev/src/agent-farm/commands/consult.ts` — line 28: "af dash start" → "af tower start"
+- `packages/codev/src/agent-farm/commands/consult.ts` — line 28: "afx dash start" → "afx tower start"
 - `packages/codev/src/agent-farm/commands/status.ts` — line 73: update dashboard reference
 - `packages/codev/src/commands/adopt.ts` — line 231: update message
 - `packages/codev/src/commands/init.ts` — line 197: update message
@@ -85,12 +85,12 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 
 #### Acceptance Criteria
 - [ ] `architect.ts` uses `architect-{basename}` naming pattern
-- [ ] All four files reference "af tower start" not "af dash start"
+- [ ] All four files reference "afx tower start" not "afx dash start"
 - [ ] No docstrings reference "dashboard-server.ts"
 - [ ] `npm run build` succeeds
 
 #### Test Plan
-- **Grep verification**: `grep -r "af dash start" packages/codev/src/` returns no results
+- **Grep verification**: `grep -r "afx dash start" packages/codev/src/` returns no results
 - **Grep verification**: `grep -r "dashboard-server.ts" packages/codev/src/` returns no results (except git history)
 - **Build Test**: TypeScript compilation succeeds
 
@@ -104,12 +104,12 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 - Route `shell.ts` and `open.ts` through TowerClient (remove duplicate `encodeProjectPath`, add auth headers)
 - Fix `attach.ts` URL construction
 - Fix `getGateStatusForProject()` to read porch YAML instead of dead HTTP fetch
-- Remove `af start --remote` and all associated code
+- Remove `afx start --remote` and all associated code
 
 #### Files to Modify
 - `packages/codev/src/agent-farm/commands/consult.ts` — rewrite: remove dashboard shell tab creation entirely. Use `child_process.spawn` with `{ stdio: 'inherit' }` to run the consult command directly as a subprocess. This makes `consult` work with or without Tower
 - `packages/codev/src/agent-farm/commands/open.ts` — import `encodeProjectPath` from `tower-client.ts` instead of local duplicate; use TowerClient for API calls (gets auth header automatically)
-- `packages/codev/src/agent-farm/utils/shell.ts` — replace local `encodeProjectPath` (if present) with import from `tower-client.ts`; route Tower API calls through TowerClient for auth headers. Note: the spec's "shell.ts" refers to the `af shell` command behavior, which may live in a different file — verify and update the correct file
+- `packages/codev/src/agent-farm/utils/shell.ts` — replace local `encodeProjectPath` (if present) with import from `tower-client.ts`; route Tower API calls through TowerClient for auth headers. Note: the spec's "shell.ts" refers to the `afx shell` command behavior, which may live in a different file — verify and update the correct file
 - `packages/codev/src/agent-farm/commands/attach.ts` — remove `builder.port` URL construction; use `TowerClient.getProjectUrl()` for browser mode
 - `packages/codev/src/agent-farm/servers/tower-server.ts` — rewrite `getGateStatusForProject()` to read porch YAML files from the project path. Use `fs.readFileSync` and simple YAML key extraction (porch status files are simple enough to parse without a YAML library — look for `gate:` and `status:` lines)
 - `packages/codev/src/agent-farm/commands/start.ts` — remove `startRemote()`, `parseRemote()`, `checkPasswordlessSSH()`, `checkRemoteVersions()`, `--remote` option from `StartOptions`
@@ -119,7 +119,7 @@ Systematic cleanup of post-migration debt across the Tower codebase. Five phases
 - [ ] `consult.ts` works without Tower running (spawns process via `child_process.spawn`)
 - [ ] `open.ts` imports `encodeProjectPath` from `tower-client.ts`, no local duplicate
 - [ ] `open.ts` sends auth header (`codev-web-key`) via TowerClient
-- [ ] `shell.ts` / `af shell` uses TowerClient, no duplicate `encodeProjectPath`
+- [ ] `shell.ts` / `afx shell` uses TowerClient, no duplicate `encodeProjectPath`
 - [ ] `attach.ts --browser` generates Tower dashboard URL via `TowerClient.getProjectUrl()`
 - [ ] `getGateStatusForProject()` reads porch YAML, no HTTP fetch
 - [ ] `--remote` flag and all SSH code removed from start.ts
@@ -194,7 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
 
 #### Files to Modify
 - `packages/codev/src/agent-farm/utils/notifications.ts` — log non-200 responses at warn level
-- `packages/codev/src/agent-farm/utils/shell.ts` — differentiate connection errors vs server errors (if shell.ts is utils/shell.ts; spec says "shell.ts error handling" which refers to `af shell` behavior)
+- `packages/codev/src/agent-farm/utils/shell.ts` — differentiate connection errors vs server errors (if shell.ts is utils/shell.ts; spec says "shell.ts error handling" which refers to `afx shell` behavior)
 - `packages/codev/src/agent-farm/commands/architect.ts` — extract shared setup logic into private `createSession()` helper
 - **CREATE** `packages/codev/src/agent-farm/utils/session.ts` — shared `getSessionName(config, builderId)` function
 - `packages/codev/src/agent-farm/commands/spawn.ts` — import `getSessionName` from utils/session.ts
@@ -228,8 +228,8 @@ CREATE INDEX IF NOT EXISTS idx_file_tabs_project ON file_tabs(project_path);
 | Tower route changes break dashboard UI | Low | Medium | Test with Playwright if UI changes are affected |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `npm run build` succeeds, `af stop` works without orphan scanning
-2. **After Phase 3**: `consult` works standalone, `af open` uses TowerClient auth
+1. **After Phase 1**: `npm run build` succeeds, `afx stop` works without orphan scanning
+2. **After Phase 3**: `consult` works standalone, `afx open` uses TowerClient auth
 3. **After Phase 4**: File tabs survive Tower restart
 4. **After Phase 5**: Full test suite passes, no duplicate code
 

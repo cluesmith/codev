@@ -2,7 +2,7 @@
 
 ## Summary
 
-Implemented a "Tip of the Day" banner in the dashboard Work view. The banner displays a rotating tip that changes daily, supports arrow navigation, dismissal via localStorage, and renders inline code spans from backtick-delimited text. Ships with 51 tips covering af, porch, consult, workflow, dashboard, and protocol categories.
+Implemented a "Tip of the Day" banner in the dashboard Work view. The banner displays a rotating tip that changes daily, supports arrow navigation, dismissal via localStorage, and renders inline code spans from backtick-delimited text. Ships with 51 tips covering afx, porch, consult, workflow, dashboard, and protocol categories.
 
 ## Spec Compliance
 

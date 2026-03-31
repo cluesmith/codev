@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Project 0046 created comprehensive reference documentation for Codev's three CLI tools (codev, af, consult). The implementation was straightforward and successfully addressed the gap in user-facing documentation. All planned deliverables were completed, adding 1,115 lines of documentation across four files. The documentation was integrated into both the main repository and the codev-skeleton for distribution to all projects.
+Project 0046 created comprehensive reference documentation for Codev's three CLI tools (codev, afx, consult). The implementation was straightforward and successfully addressed the gap in user-facing documentation. All planned deliverables were completed, adding 1,115 lines of documentation across four files. The documentation was integrated into both the main repository and the codev-skeleton for distribution to all projects.
 
 ## Specification Compliance
 

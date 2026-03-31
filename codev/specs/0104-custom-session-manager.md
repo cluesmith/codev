@@ -264,7 +264,7 @@ Remove `terminal-tmux.md` documentation (replaced by this spec's architecture). 
 2. Multiple dashboard tabs viewing the same terminal see identical output
 3. Scrollback works natively in xterm.js — no alternate-screen artifacts, no mouse interception
 4. Architect sessions auto-restart on exit (including non-zero exit codes)
-5. `af spawn` creates builder sessions that: start a shell in the correct worktree, connect to the dashboard, accept input, display output, and survive Tower restart
+5. `afx spawn` creates builder sessions that: start a shell in the correct worktree, connect to the dashboard, accept input, display output, and survive Tower restart
 6. No tmux dependency in Codev's codebase (tmux may still be installed but is not required)
 7. After Tower restart, reconnected terminals display recent output from shepherd's replay buffer (not blank)
 8. All existing Playwright E2E tests pass

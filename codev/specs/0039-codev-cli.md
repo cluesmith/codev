@@ -65,7 +65,7 @@ This creates friction:
 5. **`codev tower`** - Cross-project dashboard
    - Shows all running agent-farm instances across projects
    - Launch capability for multiple projects
-   - Lives in codev (not af) because it's cross-project scope
+   - Lives in codev (not afx) because it's cross-project scope
 
 6. **`codev consult`** - AI consultation
    - Native TypeScript implementation (ported from Python)
@@ -106,17 +106,17 @@ codev update             # Update templates
 codev tower              # Cross-project dashboard
 codev consult            # AI consultation
 
-# af - agent-farm operations (backwards compatible)
-af start                 # Start single-project dashboard
-af spawn                 # Spawn builder
-af status                # Project status
-af cleanup               # Clean up builders
-# ... all existing af commands
+# afx - agent-farm operations (backwards compatible)
+afx start                 # Start single-project dashboard
+afx spawn                 # Spawn builder
+afx status                # Project status
+afx cleanup               # Clean up builders
+# ... all existing afx commands
 ```
 
-**Design choice**: `af` is NOT aliased as `codev af`. They are separate entry points for different purposes:
+**Design choice**: `afx` is NOT aliased as `codev af`. They are separate entry points for different purposes:
 - `codev` = framework-level operations
-- `af` = project-level builder operations
+- `afx` = project-level builder operations
 
 ---
 
@@ -190,7 +190,7 @@ run(['consult', ...process.argv.slice(2)]);
 **bin/af.js** (thin shim):
 ```javascript
 #!/usr/bin/env node
-// af is shorthand for codev agent-farm
+// afx is shorthand for codev agent-farm
 const { run } = require('../dist/cli.js');
 run(['agent-farm', ...process.argv.slice(2)]);
 ```
@@ -227,7 +227,7 @@ The codev-skeleton is embedded in the npm package at build time:
 - Ensures offline capability and version consistency
 - `codev update` compares embedded vs local and offers merge
 
-**Note**: `af` commands still require a local `codev/` directory with roles. The embedded skeleton is only used for init/adopt/update, not runtime.
+**Note**: `afx` commands still require a local `codev/` directory with roles. The embedded skeleton is only used for init/adopt/update, not runtime.
 
 ---
 
@@ -237,7 +237,7 @@ The codev-skeleton is embedded in the npm package at build time:
 
 1. `npm uninstall -g @cluesmith/agent-farm`
 2. `npm install -g @cluesmith/codev`
-3. `af` commands continue to work unchanged
+3. `afx` commands continue to work unchanged
 4. New `codev` commands available
 5. `codev update` to get latest protocol templates
 
@@ -247,7 +247,7 @@ The codev-skeleton is embedded in the npm package at build time:
 2. `codev doctor` to verify system dependencies
 3. For new project: `codev init my-project`
 4. For existing project: `cd my-project && codev adopt`
-5. `af start` to begin development
+5. `afx start` to begin development
 
 ---
 
@@ -260,7 +260,7 @@ The codev-skeleton is embedded in the npm package at build time:
 - [ ] `codev update` updates templates with safe merge strategy
 - [ ] `codev tower` shows cross-project dashboard
 - [ ] `codev consult` works for AI consultation (TypeScript native)
-- [ ] Existing `af` commands continue to work unchanged
+- [ ] Existing `afx` commands continue to work unchanged
 - [ ] Single version number for entire toolchain
 
 ---
@@ -299,7 +299,7 @@ The codev-skeleton is embedded in the npm package at build time:
    - Ship in `templates/` directory
    - Ensures offline capability
    - Version matches CLI version
-   - `af` still reads local `codev/roles/` at runtime
+   - `afx` still reads local `codev/roles/` at runtime
 
 5. **Package naming**: `@cluesmith/codev` (scoped npm package)
 
@@ -307,7 +307,7 @@ The codev-skeleton is embedded in the npm package at build time:
 
 ## Risks
 
-1. **Breaking existing agent-farm users**: Mitigated by backwards-compatible `af` command
+1. **Breaking existing agent-farm users**: Mitigated by backwards-compatible `afx` command
 2. **Package name conflicts**: Check npm for availability before publishing
 3. **Large package size**: Monitor bundle size, consider tree-shaking
 
@@ -316,8 +316,8 @@ The codev-skeleton is embedded in the npm package at build time:
 ## Testing Strategy
 
 1. **Unit tests**: Command routing, skeleton copying, config parsing
-2. **Integration tests**: `codev init` creates valid project, `af` shim works
-3. **E2E tests**: Full workflow from install to `af spawn`
+2. **Integration tests**: `codev init` creates valid project, `afx` shim works
+3. **E2E tests**: Full workflow from install to `afx spawn`
 4. **Mock strategy**: Mock external CLIs (gemini, codex, claude) in consult tests
 
 ---
@@ -386,7 +386,7 @@ This creates problems:
    ├── reviews/
    └── config.json (optional)
    ```
-3. **Runtime resolution**: `af` and `consult` look for files in order:
+3. **Runtime resolution**: `afx` and `consult` look for files in order:
    - Local `codev/` directory (user overrides)
    - Embedded skeleton in npm package (defaults)
 4. **Optional customization**: Users can create local overrides only when needed:
@@ -407,7 +407,7 @@ This creates problems:
 
 - [ ] `packages/codev/templates/` removed (use codev-skeleton/ directly at build)
 - [ ] `codev init` creates minimal directory structure
-- [ ] `af` resolves roles from embedded skeleton, local overrides take precedence
+- [ ] `afx` resolves roles from embedded skeleton, local overrides take precedence
 - [ ] `consult` resolves consultant.md from embedded skeleton, local overrides take precedence
 - [ ] `codev eject <path>` command to copy embedded file locally for customization
 - [ ] Existing projects continue to work (local files still take precedence)
@@ -465,7 +465,7 @@ Key recommendations:
    - If user modified, create `.codev-new` file and prompt for merge
    - Track version in `codev/.framework-version`
 
-4. **Remove runtime resolution**: `af` and `consult` read directly from local `codev/` directory (no fallback to node_modules)
+4. **Remove runtime resolution**: `afx` and `consult` read directly from local `codev/` directory (no fallback to node_modules)
 
 5. **Update E2E tests**: Tests should expect `codev/protocols/` to exist after init
 

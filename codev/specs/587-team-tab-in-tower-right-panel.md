@@ -34,7 +34,7 @@ The Tower dashboard currently has no visibility into team composition or what ot
 - Each team member defined in a `codev/team/people/<github-handle>.md` file with YAML frontmatter
 - The tab displays per-member: assigned issues, open PRs, and recent GitHub activity
 - A `codev/team/messages.md` append-only message log displayed in the Team tab for team communication
-- New `af team` CLI commands for team interactions (message, list)
+- New `afx team` CLI commands for team interactions (message, list)
 - Communication channel abstraction designed for extensibility (messages.md now, Slack/other channels later)
 - Automatic hourly team updates from architect sessions: notable activity (spawned builders, approved gates, merged PRs, completed reviews) summarized and appended to messages.md
 - Foundation for richer inter-architect messaging in the future
@@ -50,8 +50,8 @@ The Tower dashboard currently has no visibility into team composition or what ot
 - [ ] Tab loads team member files and displays parsed frontmatter (name, role, GitHub handle)
 - [ ] Tab fetches and displays per-member GitHub data (assigned issues, open PRs, recent activity)
 - [ ] `codev/team/messages.md` append-only message log parsed and displayed in Team tab
-- [ ] `af team message` CLI command appends a timestamped message to `messages.md`
-- [ ] `af team list` CLI command displays team members from `people/` directory
+- [ ] `afx team message` CLI command appends a timestamped message to `messages.md`
+- [ ] `afx team list` CLI command displays team members from `people/` directory
 - [ ] Communication channel abstraction supports messages.md as first channel, extensible to future channels
 - [ ] Automatic hourly team updates: architect activity (spawned builders, approved gates, merged PRs, completed reviews) summarized and appended to messages.md
 - [ ] Manual refresh button works
@@ -69,7 +69,7 @@ The Tower dashboard currently has no visibility into team composition or what ot
 - Team member files use YAML frontmatter parsed with the same library used elsewhere (gray-matter or similar)
 
 ### Business Constraints
-- Dashboard is read-only — no editing team files or messages from the UI. Messages are appended via `af team message` CLI.
+- Dashboard is read-only — no editing team files or messages from the UI. Messages are appended via `afx team message` CLI.
 - No real-time presence or online status — just GitHub activity data and message log
 - Richer inter-architect messaging (e.g., inline replies, notifications) is out of scope for v1
 - Only the `file` (messages.md) communication channel is implemented in v1; Slack and other channels are future work
@@ -83,7 +83,7 @@ The Tower dashboard currently has no visibility into team composition or what ot
 
 ### Approach 1: File-Based Team Directory with GitHub Integration (Recommended)
 
-**Description**: Each team member gets a `codev/team/people/<handle>.md` file with YAML frontmatter. The Tower backend reads these files, enriches with GitHub API data, and serves via a new `/api/team` endpoint. The frontend renders a new Team tab. A new `af team` CLI command provides team interactions. Communication uses a channel abstraction for extensibility.
+**Description**: Each team member gets a `codev/team/people/<handle>.md` file with YAML frontmatter. The Tower backend reads these files, enriches with GitHub API data, and serves via a new `/api/team` endpoint. The frontend renders a new Team tab. A new `afx team` CLI command provides team interactions. Communication uses a channel abstraction for extensibility.
 
 **Directory structure**:
 ```
@@ -131,13 +131,13 @@ Each message is a block separated by `---`, with a header line of `**<github-han
 
 For performance, use a single batched GraphQL query via `gh api graphql` (see existing pattern in `src/lib/github.ts` `fetchOnItTimestamps`). All member queries run in a single request to stay within the 2s target.
 
-**`af team` CLI commands**:
+**`afx team` CLI commands**:
 ```bash
-af team list                    # List team members from codev/team/people/
-af team message "your message"  # Append a timestamped message to codev/team/messages.md
+afx team list                    # List team members from codev/team/people/
+afx team message "your message"  # Append a timestamped message to codev/team/messages.md
 ```
 
-`af team message` appends a new entry with the current user's GitHub handle (from `gh` CLI or git config), UTC timestamp, and the provided message text. The file is created with the header if it doesn't exist.
+`afx team message` appends a new entry with the current user's GitHub handle (from `gh` CLI or git config), UTC timestamp, and the provided message text. The file is created with the header if it doesn't exist.
 
 **Communication channel abstraction**:
 
@@ -158,12 +158,12 @@ The backend reads from all configured channels and merges messages chronological
 **Automatic team updates**:
 
 Architect sessions automatically post hourly activity summaries to `messages.md`. Notable events tracked:
-- Builder spawned (`af spawn`)
+- Builder spawned (`afx spawn`)
 - Gate approved (`porch approve`)
 - PR merged (`gh pr merge`)
 - Review completed (porch phase transition to `review`)
 
-Implementation: A cron task (via `af cron` or Tower's existing cron infrastructure) runs hourly, collects events from the last hour (from git log, porch status, and `gh` CLI), summarizes them, and appends to `messages.md` via `af team message`. The message author is the workspace name or architect handle. If no notable events occurred in the last hour, no message is appended.
+Implementation: A cron task (via `afx cron` or Tower's existing cron infrastructure) runs hourly, collects events from the last hour (from git log, porch status, and `gh` CLI), summarizes them, and appends to `messages.md` via `afx team message`. The message author is the workspace name or architect handle. If no notable events occurred in the last hour, no message is appended.
 
 **Pros**:
 - Simple, version-controlled team definition
@@ -205,7 +205,7 @@ Implementation: A cron task (via `af cron` or Tower's existing cron infrastructu
 - [x] File format for team member definitions — **Resolved**: YAML frontmatter in `.md` files under `codev/team/people/`
 - [x] Message log format — **Resolved**: Append-only `codev/team/messages.md` with `---`-separated entries
 - [x] Tab visibility rules — **Resolved**: Tab only shows when `codev/team/` exists with 2+ member files in `people/`. No empty state.
-- [x] CLI tooling for team interactions — **Resolved**: `af team message` and `af team list` subcommands
+- [x] CLI tooling for team interactions — **Resolved**: `afx team message` and `afx team list` subcommands
 - [x] Communication extensibility — **Resolved**: Channel abstraction with `MessageChannel` interface; `file` channel in v1
 
 ### Important (Affects Design)
@@ -247,9 +247,9 @@ Implementation: A cron task (via `af cron` or Tower's existing cron infrastructu
 12. Messages from `codev/team/messages.md` display in reverse chronological order
 13. Malformed message entries are skipped (not crash)
 14. Missing messages file shows "No messages yet" state
-15. `af team list` displays all members from `people/` directory
-16. `af team message "text"` appends a correctly formatted entry to `messages.md`
-17. `af team message` creates `messages.md` with header if file doesn't exist
+15. `afx team list` displays all members from `people/` directory
+16. `afx team message "text"` appends a correctly formatted entry to `messages.md`
+17. `afx team message` creates `messages.md` with header if file doesn't exist
 18. Messages include `channel: "file"` field in API response
 19. Hourly auto-update appends summary when notable events exist
 20. Hourly auto-update does NOT append when no notable events occurred
@@ -263,7 +263,7 @@ Implementation: A cron task (via `af cron` or Tower's existing cron infrastructu
 
 ## Dependencies
 - **External Services**: GitHub API (via `gh` CLI or Octokit)
-- **Internal Systems**: Tower server (new `/api/team` endpoint), Dashboard React app, `af` CLI (new `team` subcommand)
+- **Internal Systems**: Tower server (new `/api/team` endpoint), Dashboard React app, `afx` CLI (new `team` subcommand)
 - **Libraries**: gray-matter (or existing YAML frontmatter parser), existing React component patterns
 
 ## Risks and Mitigation
@@ -286,7 +286,7 @@ Implementation: A cron task (via `af cron` or Tower's existing cron infrastructu
 **Architect revision** (2026-03-07):
 - Moved member files to `codev/team/people/` subdirectory
 - Tab only appears with 2+ member files (no empty state)
-- Added `af team` CLI commands (message, list)
+- Added `afx team` CLI commands (message, list)
 - Added communication channel abstraction for extensibility (messages.md is first channel, Slack etc. as future channels)
 - Added automatic hourly team updates from architect sessions (cron-based activity summaries)
 
@@ -294,6 +294,6 @@ Implementation: A cron task (via `af cron` or Tower's existing cron infrastructu
 
 The `codev/team/` directory and file format should also be added to the `codev-skeleton/` template so new projects adopting codev get the convention. However, the skeleton update is a small follow-up and not core to this spec.
 
-The `codev/team/messages.md` append-only log is the foundation for inter-architect communication. v1 is read-only in the dashboard — messages are appended via `af team message`. The communication channel abstraction means adding Slack or other channels later requires only implementing the `MessageChannel` interface on the backend — no UI or API changes needed.
+The `codev/team/messages.md` append-only log is the foundation for inter-architect communication. v1 is read-only in the dashboard — messages are appended via `afx team message`. The communication channel abstraction means adding Slack or other channels later requires only implementing the `MessageChannel` interface on the backend — no UI or API changes needed.
 
 The team member file format is intentionally extensible — additional frontmatter fields can be added later without breaking existing files.

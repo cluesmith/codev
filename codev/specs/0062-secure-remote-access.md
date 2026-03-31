@@ -21,16 +21,16 @@ Agent Farm currently binds to localhost only for security. Users want to run Age
 - Manual SSH tunneling requires multiple steps across two machines
 - No seamless "just works" experience
 
-## Solution: `af start --remote`
+## Solution: `afx start --remote`
 
 ### User Experience
 
 ```bash
 # On your Mac - one command does everything:
-af start --remote tidybot@192.168.50.16
+afx start --remote tidybot@192.168.50.16
 
 # Or with explicit project path:
-af start --remote tidybot@192.168.50.16:/home/tidybot/robot-project
+afx start --remote tidybot@192.168.50.16:/home/tidybot/robot-project
 ```
 
 This single command:
@@ -47,10 +47,10 @@ The dashboard and terminals work identically to local development.
 ┌─────────────────────────────────────────────────────────────┐
 │  Your Mac (local)                                           │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  af start --remote tidybot@192.168.50.16            │    │
+│  │  afx start --remote tidybot@192.168.50.16            │    │
 │  │                                                     │    │
 │  │  1. Spawns: ssh -L 4200:localhost:4200 tidybot@...  │    │
-│  │  2. Runs: cd /project && af start (on remote)       │    │
+│  │  2. Runs: cd /project && afx start (on remote)       │    │
 │  │  3. Opens: http://localhost:4200 (local browser)    │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                          │                                  │
@@ -88,14 +88,14 @@ The dashboard and terminals work identically to local development.
 
 ### In Scope (MVP)
 
-1. **`--remote` flag for `af start`** - Single command to start remote Agent Farm
+1. **`--remote` flag for `afx start`** - Single command to start remote Agent Farm
 2. **Reverse proxy** - Routes `/terminal/:id` to correct ttyd instance
 3. **Dashboard UI update** - Change iframes to use proxied URLs
 4. **Documentation** - README, CLAUDE.md, AGENTS.md updates
 
 ### Out of Scope (Future)
 
-- `af stop --remote` to tear down remote sessions
+- `afx stop --remote` to tear down remote sessions
 - Multiple simultaneous remote connections
 - Remote project discovery/selection UI
 - Tailscale/WireGuard integration
@@ -108,19 +108,19 @@ The dashboard and terminals work identically to local development.
 
 ---
 
-## Component 1: `af start --remote`
+## Component 1: `afx start --remote`
 
 ### Usage
 
 ```bash
 # Basic - uses current directory name to find project on remote
-af start --remote user@host
+afx start --remote user@host
 
 # Explicit path
-af start --remote user@host:/path/to/project
+afx start --remote user@host:/path/to/project
 
 # With custom port
-af start --remote user@host --port 4300
+afx start --remote user@host --port 4300
 ```
 
 ### Implementation
@@ -152,12 +152,12 @@ async function startRemote(options: StartOptions): Promise<void> {
 
   // Build the remote command
   const cdCommand = remotePath ? `cd ${remotePath} && ` : '';
-  const remoteCommand = `${cdCommand}af start --port ${localPort}`;
+  const remoteCommand = `${cdCommand}afx start --port ${localPort}`;
 
   // Spawn SSH with port forwarding
   const ssh = spawn('ssh', [
     '-L', `${localPort}:localhost:${localPort}`,
-    '-t',  // Force TTY for remote af start
+    '-t',  // Force TTY for remote afx start
     `${user}@${host}`,
     remoteCommand
   ], {
@@ -192,7 +192,7 @@ function parseRemote(remote: string): { user: string; host: string; remotePath?:
 
 ### Connection Lifecycle
 
-1. **Start**: `af start --remote` spawns SSH subprocess
+1. **Start**: `afx start --remote` spawns SSH subprocess
 2. **Running**: SSH keeps tunnel open, Ctrl+C in local terminal ends session
 3. **Stop**: SSH exit triggers local cleanup
 
@@ -282,12 +282,12 @@ content.innerHTML = `<iframe src="${getTerminalUrl(tab)}"></iframe>`;
 
 ## Error Handling
 
-### `af start --remote` Errors
+### `afx start --remote` Errors
 
 | Condition | Behavior |
 |-----------|----------|
 | SSH connection fails | Exit with error: "Could not connect to user@host" |
-| Remote `af` not found | Exit with error: "Agent Farm not installed on remote" |
+| Remote `afx` not found | Exit with error: "Agent Farm not installed on remote" |
 | Remote path not found | Exit with error: "Directory not found: /path" |
 | Port already in use | Exit with error: "Port 4200 already in use locally" |
 | SSH disconnects | Exit and show "Remote session ended" |
@@ -303,11 +303,11 @@ content.innerHTML = `<iframe src="${getTerminalUrl(tab)}"></iframe>`;
 
 ## Acceptance Criteria
 
-### `af start --remote`
+### `afx start --remote`
 
 - [ ] Parses `user@host` and `user@host:/path` formats
 - [ ] Establishes SSH connection with port forwarding
-- [ ] Runs `af start` on remote machine
+- [ ] Runs `afx start` on remote machine
 - [ ] Waits for remote Agent Farm to be ready
 - [ ] Opens local browser to `http://localhost:4200`
 - [ ] Keeps connection alive until Ctrl+C
@@ -336,13 +336,13 @@ content.innerHTML = `<iframe src="${getTerminalUrl(tab)}"></iframe>`;
 ### `--allow-insecure-remote`
 
 This flag is deprecated. On use:
-1. Print warning: "DEPRECATED: Use `af start --remote user@host` for secure remote access"
+1. Print warning: "DEPRECATED: Use `afx start --remote user@host` for secure remote access"
 2. Continue to function for backward compatibility
 3. Remove in a future version
 
-### `af tunnel` (if implemented)
+### `afx tunnel` (if implemented)
 
-The `af tunnel` command from the original design is not needed. Remove if present.
+The `afx tunnel` command from the original design is not needed. Remove if present.
 
 ---
 
@@ -370,7 +370,7 @@ The `af tunnel` command from the original design is not needed. Remove if presen
 ### Manual Tests
 
 4. **End-to-end remote access**
-   - Run `af start --remote user@remote-host`
+   - Run `afx start --remote user@remote-host`
    - Verify dashboard opens locally
    - Interact with architect terminal
    - Spawn builder, verify it works

@@ -53,7 +53,7 @@ Verified: no build scripts, `.npmignore`, `package.json` `files` field, or runti
 
 - `packages/codev/dashboard/` — the active React dashboard (source + dist)
 - `packages/codev/templates/tower.html` — Tower homepage (active)
-- `packages/codev/templates/open.html` — af open viewer (active)
+- `packages/codev/templates/open.html` — afx open viewer (active)
 - `packages/codev/templates/3d-viewer.html` — 3D model viewer (active)
 - `packages/codev/templates/vendor/` — PrismJS, marked, DOMPurify (active, added in bugfix #269)
 

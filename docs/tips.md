@@ -45,7 +45,7 @@ This runs all three in the background simultaneously, saving significant time.
 By default, the `consult` command runs in the background. If you want to watch a consultation happen in the dashboard terminal:
 
 ```
-af consult -m gemini --protocol spir --type spec
+afx consult -m gemini --protocol spir --type spec
 ```
 
 Instead of:
@@ -53,14 +53,14 @@ Instead of:
 consult -m gemini --protocol spir --type spec
 ```
 
-The `af consult` variant runs in a visible dashboard terminal so you can observe the model's analysis.
+The `afx consult` variant runs in a visible dashboard terminal so you can observe the model's analysis.
 
 ## Quick Builder Spawning
 
 Spawn a builder directly from an issue number:
 
 ```bash
-af spawn 42 --protocol spir
+afx spawn 42 --protocol spir
 ```
 
 The builder gets its own isolated git worktree, automatically receives the spec and plan context, and starts implementing immediately.
@@ -112,7 +112,7 @@ vim codev/roles/consultant.md
 Access Agent Farm from any device via cloud connectivity:
 
 ```bash
-af tower connect
+afx tower connect
 ```
 
 Register your tower with [codevos.ai](https://codevos.ai) for secure remote access from any browser.
@@ -144,8 +144,8 @@ Builders work in isolated git worktrees. Their changes don't affect your main br
 ### Workspace Won't Start
 
 ```bash
-af workspace stop    # Kill any orphaned processes
-af workspace start   # Fresh start
+afx workspace stop    # Kill any orphaned processes
+afx workspace start   # Fresh start
 ```
 
 ### Orphaned Sessions
@@ -153,8 +153,8 @@ af workspace start   # Fresh start
 If things are really stuck, restart Tower:
 
 ```bash
-af workspace stop    # Stop Tower and all shellper sessions
-af workspace start   # Fresh start
+afx workspace stop    # Stop Tower and all shellper sessions
+afx workspace start   # Fresh start
 ```
 
 ### Port Conflicts
@@ -162,8 +162,8 @@ af workspace start   # Fresh start
 If you're having port issues across multiple projects:
 
 ```bash
-af ports list     # See all port allocations
-af ports cleanup  # Remove stale entries
+afx ports list     # See all port allocations
+afx ports cleanup  # Remove stale entries
 ```
 
 ### Database Inspection
@@ -171,9 +171,9 @@ af ports cleanup  # Remove stale entries
 View the Agent Farm database state:
 
 ```bash
-af db dump           # Dump local project database
-af db dump --global  # Dump global port registry
-af db stats          # Show database statistics
+afx db dump           # Dump local project database
+afx db dump --global  # Dump global port registry
+afx db stats          # Show database statistics
 ```
 
 ### Advanced: Architect Knows the Internals

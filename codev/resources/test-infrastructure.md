@@ -62,7 +62,7 @@ The default vitest config **excludes** tests that need a running tower:
 | `tower-baseline.test.ts` | Server startup, health endpoint, project activation/deactivation lifecycle |
 | `tower-api.test.ts` | Full REST API: project CRUD, terminal creation, WebSocket connections |
 | `tower-terminals.test.ts` | Terminal session management, PTY/Shellper lifecycle, output streaming |
-| `cli-tower-mode.test.ts` | CLI `af tower` command startup and shutdown |
+| `cli-tower-mode.test.ts` | CLI `afx tower` command startup and shutdown |
 | `bugfix-202-stale-temp-projects.test.ts` | Stale temp directory filtering (spawns its own tower on port 14600) |
 
 **Important**: These tests run sequentially (`maxConcurrency: 1`) with 20-minute timeout per test. They spawn real server processes and need ports 14200-14600.
@@ -114,7 +114,7 @@ These are the most expensive tests and are NOT run in CI.
 | `tests/e2e/init.bats` | `codev init` creates correct files and directories |
 | `tests/e2e/adopt.bats` | `codev adopt` for existing projects |
 | `tests/e2e/doctor.bats` | `codev doctor` diagnostics |
-| `tests/e2e/af.bats` | `af` subcommands (status, help, etc.) |
+| `tests/e2e/af.bats` | `afx` subcommands (status, help, etc.) |
 | `tests/e2e/consult.bats` | `consult` subcommands |
 
 ### Legacy/framework tests
@@ -148,7 +148,7 @@ These are the most expensive tests and are NOT run in CI.
 
 **Config**: `packages/codev/playwright.config.ts`
 
-**Prerequisites**: Tower must be running (`af tower start` or `af workspace start --no-browser`)
+**Prerequisites**: Tower must be running (`afx tower start` or `afx workspace start --no-browser`)
 
 ### Test files
 
@@ -187,7 +187,7 @@ cd packages/codev && npm run build && npm run test:e2e
 cd packages/codev && npm run test:e2e:bats
 
 # Playwright dashboard tests (after UI changes)
-af tower start
+afx tower start
 cd packages/codev && npx playwright test
 
 # Single test file

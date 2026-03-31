@@ -1,4 +1,4 @@
-# Specification: af spawn Improvements
+# Specification: afx spawn Improvements
 
 ## Metadata
 - **ID**: spec-2026-02-19-spawn-improvements
@@ -15,7 +15,7 @@
 
 ## Problem Statement
 
-`af spawn` currently requires a spec file (`codev/specs/N-*.md`) to exist before spawning a builder for SPIR/ASPIR protocols. This forces the architect to create a stub spec, commit it, and push before spawning — unnecessary friction when the protocol's own Specify phase will create the spec.
+`afx spawn` currently requires a spec file (`codev/specs/N-*.md`) to exist before spawning a builder for SPIR/ASPIR protocols. This forces the architect to create a stub spec, commit it, and push before spawning — unnecessary friction when the protocol's own Specify phase will create the spec.
 
 Additionally, SPIR/ASPIR project naming is derived from the spec filename slug (e.g., `spawn-improvements`), while bugfix derives its project name from the GitHub issue title. This creates inconsistency: the spec filename is often abbreviated while the issue title is descriptive.
 
@@ -24,14 +24,14 @@ Additionally, SPIR/ASPIR project naming is derived from the spec filename slug (
 ### Spec-file requirement (`spawnSpec()` in `spawn.ts:245-259`)
 
 ```
-af spawn 444 --protocol aspir
+afx spawn 444 --protocol aspir
 → [error] Spec not found for issue #444. Expected: codev/specs/444-*.md
 ```
 
 The architect must:
 1. Create `codev/specs/444-stub.md` with minimal content
 2. Commit it to `main`
-3. Then run `af spawn 444 --protocol aspir`
+3. Then run `afx spawn 444 --protocol aspir`
 
 This adds 2-3 extra steps per spawn. The protocol definition (`aspir/protocol.json`) already declares `"input": { "required": false }`, but the spawn code ignores this field.
 
@@ -44,7 +44,7 @@ Project names are derived from the spec filename:
 - Porch project name: `spawn-improvements`
 
 By contrast, bugfix mode fetches the GitHub issue title and uses `slugify(issue.title)`:
-- Issue title: "af spawn should not require a pre-existing spec file"
+- Issue title: "afx spawn should not require a pre-existing spec file"
 - Slug: `af-spawn-should-not-require-a`
 - Worktree: `.builders/bugfix-444-af-spawn-should-not-require-a`
 
@@ -54,7 +54,7 @@ SPIR/ASPIR already fetches the GitHub issue non-fatally (line 301) but only uses
 
 ### 1. Spec-file requirement removed for protocols with a Specify phase
 
-When a protocol's `input.required` is `false` (or the protocol has a `specify` phase), `af spawn` should proceed without a spec file. When no spec file exists:
+When a protocol's `input.required` is `false` (or the protocol has a `specify` phase), `afx spawn` should proceed without a spec file. When no spec file exists:
 - The project slug is derived from the GitHub issue title via `slugify()`
 - The worktree, branch, and porch project are named using this slug
 - The builder prompt indicates no spec exists yet and the Specify phase will create it
@@ -69,17 +69,17 @@ When spawning with a GitHub issue number, the project name should always prefer 
 This makes naming consistent across all protocols and produces more descriptive project names.
 
 ## Stakeholders
-- **Primary Users**: Architects spawning builders via `af spawn`
+- **Primary Users**: Architects spawning builders via `afx spawn`
 - **Secondary Users**: Builders that receive the initial prompt
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria
-- [ ] `af spawn 444 --protocol aspir` succeeds without a spec file when protocol has `input.required: false`
-- [ ] `af spawn 444 --protocol spir` succeeds without a spec file (same condition)
+- [ ] `afx spawn 444 --protocol aspir` succeeds without a spec file when protocol has `input.required: false`
+- [ ] `afx spawn 444 --protocol spir` succeeds without a spec file (same condition)
 - [ ] When no spec file exists, the worktree/branch/porch use the GitHub issue title slug
 - [ ] When a spec file exists, porch behavior is unchanged (spec is used as pre-approved artifact)
 - [ ] Naming uses GitHub issue title even when a spec file exists (naming behavior change)
-- [ ] `af spawn 444 --protocol tick --amends 30` still requires the amends spec file (TICK unchanged)
+- [ ] `afx spawn 444 --protocol tick --amends 30` still requires the amends spec file (TICK unchanged)
 - [ ] All existing tests pass
 - [ ] New unit tests cover the no-spec spawn path
 - [ ] Documentation updated (if any user-facing docs reference the spec requirement)

@@ -51,8 +51,8 @@ Add E2E tests that grep the compiled JavaScript to verify `tmuxSessionExists` is
 ### Manual Testing Checklist
 | Test | Steps | Expected |
 |------|-------|----------|
-| Terminated shell | `af util` → type `exit` → click X | Tab closes without dialog |
-| Active shell | `af util` → run `sleep 100` → click X | Dialog appears |
+| Terminated shell | `afx util` → type `exit` → click X | Tab closes without dialog |
+| Active shell | `afx util` → run `sleep 100` → click X | Dialog appears |
 | Terminated builder | Spawn builder → type `exit` → click X | Tab closes without dialog |
 | Active builder | Spawn builder → leave running → click X | Dialog appears |
 | Shift+click bypass | Active shell → Shift+click X | Tab closes without dialog |

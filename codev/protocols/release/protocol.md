@@ -23,7 +23,7 @@ git status
 git push
 
 # Verify no running builders
-af status
+afx status
 
 # Check for incomplete work
 grep -E "status: (implementing|implemented|committed)" codev/projectlist.md

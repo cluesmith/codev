@@ -27,8 +27,8 @@ Add action buttons at the top of the dashboard:
 
 | Button | Action | Description |
 |--------|--------|-------------|
-| **Open Dashboard (Local)** | Opens local directory | Prompts for directory path, runs `af start` |
-| **Open Dashboard (Remote)** | Opens remote SSH target | Prompts for `user@host:/path`, runs `af start --remote` |
+| **Open Dashboard (Local)** | Opens local directory | Prompts for directory path, runs `afx start` |
+| **Open Dashboard (Remote)** | Opens remote SSH target | Prompts for `user@host:/path`, runs `afx start --remote` |
 | **Create New Repo** | Initialize new project | Prompts for directory, runs `codev init` |
 | **Adopt Existing Repo** | Add codev to existing repo | Prompts for directory, runs `codev adopt` |
 | **Update Existing Repo** | Update codev in repo | Prompts for directory, runs `codev update` |
@@ -58,7 +58,7 @@ When any action button is clicked:
 1. Tower dashboard shows one row per registered project/dashboard
 2. All five action buttons are present and functional
 3. Clicking any action button opens a terminal showing command output
-4. Commands execute correctly (init, adopt, update, af start local/remote)
+4. Commands execute correctly (init, adopt, update, afx start local/remote)
 5. Terminal can be closed after command completes
 6. Error states are clearly communicated to user
 

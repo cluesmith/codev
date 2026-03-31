@@ -1,4 +1,4 @@
-# Specification: af spawn --branch: Allow Builders to Work on Existing PR Branches
+# Specification: afx spawn --branch: Allow Builders to Work on Existing PR Branches
 
 ## Metadata
 - **ID**: spec-609
@@ -21,7 +21,7 @@
 
 ## Problem Statement
 
-When a team member opens a PR and the architect identifies issues, there's currently no way to spawn a builder to fix those issues on the same branch. `af spawn` always creates a new branch from HEAD, which means:
+When a team member opens a PR and the architect identifies issues, there's currently no way to spawn a builder to fix those issues on the same branch. `afx spawn` always creates a new branch from HEAD, which means:
 
 - The original PR must be closed to avoid conflicts
 - Review history and context from the original PR is lost
@@ -31,7 +31,7 @@ This is a real workflow gap. The use case that prompted this: Nat opened PR #604
 
 ## Current State
 
-`af spawn` always creates a new branch from HEAD via `createWorktree()` in `spawn-worktree.ts`:
+`afx spawn` always creates a new branch from HEAD via `createWorktree()` in `spawn-worktree.ts`:
 
 ```
 git branch ${branchName}        # creates new branch from HEAD
@@ -44,7 +44,7 @@ The branch name is deterministically generated from the protocol, issue number, 
 
 ## Desired State
 
-A new `--branch <name>` flag on `af spawn` that:
+A new `--branch <name>` flag on `afx spawn` that:
 
 1. Fetches the specified branch from the remote
 2. Creates a worktree checked out to that branch (instead of creating a new branch)
@@ -53,16 +53,16 @@ A new `--branch <name>` flag on `af spawn` that:
 
 Example usage:
 ```bash
-af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-string-
+afx spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-string-
 ```
 
 ## Stakeholders
-- **Primary Users**: Architects using `af spawn` to delegate work on existing PRs
+- **Primary Users**: Architects using `afx spawn` to delegate work on existing PRs
 - **Secondary Users**: Builders that need context about the branch they're continuing
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria
-- [ ] `af spawn <id> --protocol <proto> --branch <name>` creates a worktree on the specified existing remote branch
+- [ ] `afx spawn <id> --protocol <proto> --branch <name>` creates a worktree on the specified existing remote branch
 - [ ] The branch must exist on the remote; if not, the command fails with a clear error
 - [ ] If the branch is already checked out in another worktree, the command fails with a clear, actionable error
 - [ ] `--branch` is mutually exclusive with `--resume` (error if both provided)
@@ -160,7 +160,7 @@ Instead of specifying the branch name, accept a `--pr <number>` flag and use `gh
 ## Test Scenarios
 
 ### Functional Tests
-1. **Happy path**: `af spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree on the specified branch
+1. **Happy path**: `afx spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree on the specified branch
 2. **Branch doesn't exist on remote**: Command fails with error "Branch 'foo' does not exist on the remote"
 3. **Branch already checked out**: Command fails with a clear, actionable error when the branch is already checked out in another worktree or the main directory
 4. **Mutual exclusion**: `--branch` + `--resume` produces an error

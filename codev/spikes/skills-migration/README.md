@@ -41,7 +41,7 @@ Keep Codev as the engine. Add Skills as a natural language interface.
 │  Translates intent → Codev commands         │
 │  /implement, /status, /review, /consult     │
 └─────────────────┬───────────────────────────┘
-                  │ Bash: af spawn -p 0064
+                  │ Bash: afx spawn -p 0064
                   ▼
 ┌─────────────────────────────────────────────┐
 │         Codev (Engine)                      │
@@ -118,7 +118,7 @@ User wants to start new work: "Let's implement X", "I need to build Y"
 4. **Create plan** using template from codev/protocols/spir/templates/plan.md
 5. **Consult** (remind user to run: consult --model codex plan XXXX)
 6. **Commit** spec and plan
-7. **Ready to spawn**: Tell user to run `af spawn -p XXXX`
+7. **Ready to spawn**: Tell user to run `afx spawn -p XXXX`
 
 ## Templates
 - Spec: [codev/protocols/spir/templates/spec.md](../../protocols/spir/templates/spec.md)
@@ -149,7 +149,7 @@ User says: "Implement spec 0064", "Start working on 0064", "Spawn a builder for 
 
 3. **Spawn builder**:
    ```bash
-   af spawn -p XXXX
+   afx spawn -p XXXX
    ```
 
 4. **Update** projectlist.md status to 'implementing'
@@ -160,7 +160,7 @@ User says: "Implement spec 0064", "Start working on 0064", "Spawn a builder for 
 
 ## Note
 The builder works autonomously. You don't control it.
-Check status with: af status
+Check status with: afx status
 ```
 
 ### The `/review` Skill
@@ -198,7 +198,7 @@ User says: "Review PR 42", "Check the builder's work", "Run consultation on 0064
 
 5. **Notify** builder:
    ```bash
-   af send XXXX "Check PR comments"
+   afx send XXXX "Check PR comments"
    ```
 ```
 
@@ -220,7 +220,7 @@ User asks: "What's the status?", "How's the builder doing?", "Show me progress"
 
 ### Quick status
 ```bash
-af status
+afx status
 ```
 
 ### Detailed builder info
@@ -246,12 +246,12 @@ Skills cannot BE a builder. A builder is a separate Claude instance in a worktre
 The I-D-E phases require an autonomous agent. Skills can't do that.
 
 ### Don't: Put Codev's internal logic in Skills
-Skills should CALL Codev (`af`, `consult`), not REPLACE it.
+Skills should CALL Codev (`afx`, `consult`), not REPLACE it.
 
 ## Migration Path
 
 ### Phase 1: Proof of Concept (Now)
-Create `/status` skill only. Test if Skills can call `af status`.
+Create `/status` skill only. Test if Skills can call `afx status`.
 
 ### Phase 2: Core Skills (If Phase 1 works)
 Add `/implement`, `/review`, `/plan`.
@@ -261,7 +261,7 @@ Add auto-discovery so Claude suggests skills at right moments.
 
 ## Open Questions
 
-1. **Can Skills call Bash reliably?** Need to test `af` commands work from Skills.
+1. **Can Skills call Bash reliably?** Need to test `afx` commands work from Skills.
 2. **Context pollution?** Does switching between skill contexts confuse Claude?
 3. **User expectations?** Will users expect Skills to DO the work vs DELEGATE it?
 

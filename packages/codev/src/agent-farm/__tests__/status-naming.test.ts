@@ -1,5 +1,5 @@
 /**
- * Tests for af status display with new agent naming convention.
+ * Tests for afx status display with new agent naming convention.
  * Spec 0110: Messaging Infrastructure — Phase 4
  *
  * Verifies that the legacy (no Tower) status display correctly shows
@@ -61,7 +61,7 @@ import { status } from '../commands/status.js';
 // Tests
 // ============================================================================
 
-describe('af status naming display (Phase 4)', () => {
+describe('afx status naming display (Phase 4)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Tower not running → forces legacy display

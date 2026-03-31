@@ -1,4 +1,4 @@
-# Review: af open Image Support
+# Review: afx open Image Support
 
 ## Metadata
 - **ID**: 0053
@@ -9,7 +9,7 @@
 
 ## Summary
 
-This review documents the implementation of image viewing support for the `af open` command. The feature allows users to view PNG, JPG, GIF, WebP, and SVG images in the dashboard viewer with zoom controls, replacing the previous behavior of showing binary garbage or errors.
+This review documents the implementation of image viewing support for the `afx open` command. The feature allows users to view PNG, JPG, GIF, WebP, and SVG images in the dashboard viewer with zoom controls, replacing the previous behavior of showing binary garbage or errors.
 
 ## Implementation Overview
 
@@ -59,9 +59,9 @@ Issues raised:
 ## Testing Summary
 
 ### Functional Tests Verified
-- [x] `af open test.svg` displays SVG correctly
-- [x] `af open test.png` displays PNG correctly
-- [x] `af open gradient.png` displays larger image with scrolling
+- [x] `afx open test.svg` displays SVG correctly
+- [x] `afx open test.png` displays PNG correctly
+- [x] `afx open gradient.png` displays larger image with scrolling
 - [x] Zoom Fit button centers image within viewport
 - [x] Zoom 100% shows actual pixel size
 - [x] Zoom +/- buttons scale correctly (10% min, 1000% max)

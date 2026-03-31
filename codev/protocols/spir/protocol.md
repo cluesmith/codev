@@ -51,13 +51,13 @@ When a gate is reached, porch notifies the architect and blocks until approved.
 **USING AF SPAWN (Architect-Builder Pattern):**
 ```bash
 # Create worktree and start porch-driven builder (default)
-af spawn -p 0073
+afx spawn -p 0073
 
 # Or for flexible, protocol-guided work (soft mode)
-af spawn --soft -p 0073
+afx spawn --soft -p 0073
 
 # Monitor builder status
-af status
+afx status
 
 # Approve gates via dashboard or CLI
 porch approve 0073 spec_approval

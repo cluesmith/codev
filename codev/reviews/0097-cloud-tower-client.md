@@ -6,13 +6,13 @@ Replaced cloudflared integration with a built-in HTTP/2 role-reversal tunnel cli
 
 ## Spec Compliance
 
-- [x] `af tower register` successfully registers a tower with codevos.ai
+- [x] `afx tower register` successfully registers a tower with codevos.ai
 - [x] Tower automatically connects to codevos.ai on startup (when registered)
 - [x] HTTP requests proxied through tunnel reach localhost:4100 and return correct responses
 - [x] WebSocket connections (xterm.js terminals) work through the tunnel
 - [x] Tower reconnects automatically after network disruption or machine sleep/wake
 - [x] Tower stops retrying on authentication failures (circuit breaker)
-- [x] `af tower deregister` removes registration and stops connection attempts
+- [x] `afx tower deregister` removes registration and stops connection attempts
 - [x] cloudflared integration code removed from tower-server
 - [x] Tower operates normally without registration (local-only mode)
 - [x] All existing tests pass; new tests cover tunnel client behavior
@@ -20,14 +20,14 @@ Replaced cloudflared integration with a built-in HTTP/2 role-reversal tunnel cli
 - [x] Tunnel path blocking: `/api/tunnel/*` requests rejected before proxying
 - [x] Exponential backoff with jitter (1s -> 60s cap) for transient failures
 - [x] Rate limiting: 60s first retry, escalates to 5-minute intervals
-- [x] `af tower status` extended with cloud registration info
+- [x] `afx tower status` extended with cloud registration info
 - [x] CloudStatus component in tower dashboard
 
 ## Deviations from Plan
 
 - **Phase 3 (Tunnel Client)**: Metadata delivery uses a dual mechanism instead of the plan's single H2 POST (which was architecturally impossible since the tower is the H2 server and cannot initiate requests). The implementation uses: (1) GET `/__tower/metadata` handler for codevos.ai H2 client polling, and (2) outbound HTTPS POST to `${serverUrl}/api/tower/metadata` for proactive push when metadata changes.
 
-- **Phase 5 (CLI Commands)**: `af tower register` does not auto-launch a browser or run a local callback server. The registration flow uses a simpler approach: the CLI generates a token via the codevos.ai API and prompts the user to paste the token. The plan allowed for this fallback pattern ("if callback fails, prompt for token").
+- **Phase 5 (CLI Commands)**: `afx tower register` does not auto-launch a browser or run a local callback server. The registration flow uses a simpler approach: the CLI generates a token via the codevos.ai API and prompts the user to paste the token. The plan allowed for this fallback pattern ("if callback fails, prompt for token").
 
 - **Phase 7 (E2E Tests)**: Rate limiting behavior tested via mock server instead of against real codevos.ai. Triggering real rate limits requires environment-specific knowledge of threshold configuration and could interfere with concurrent tests. Client-side rate_limited response handling is validated through the mock server. Documented in the test file header.
 
@@ -70,7 +70,7 @@ Replaced cloudflared integration with a built-in HTTP/2 role-reversal tunnel cli
 - **TICK-001 (WebSocket transport)**: ✅ **COMPLETED** — Rewrote tunnel-client.ts to use WebSocket (`ws` library) + `createWebSocketStream()` instead of raw TCP/TLS. Auth is now JSON messages over WebSocket matching the codevos.ai server protocol. All 13 E2E tests pass against the real codevos.ai server. Found and fixed a WebSocket close race condition (stale WS close events could destroy new connections after disconnect+reconnect).
 - CI pipeline integration for E2E tests (start codevos.ai in CI, run tunnel E2E suite)
 - 24-hour stability soak test (deferred per plan — impractical in automated testing)
-- `af tower register --reauth` flow (re-authentication without re-registration)
+- `afx tower register --reauth` flow (re-authentication without re-registration)
 
 ### TICK-001 E2E Results (against codevos.ai localhost:3000)
 
@@ -112,7 +112,7 @@ Codex requested changes on two issues. Both valid and now addressed:
 
 1. **CLI hard-codes `CODEVOS_URL`**: `tower-cloud.ts` had `const CODEVOS_URL = 'https://codevos.ai'` with no env override. The E2E tests already used `process.env.CODEVOS_URL`, but the CLI didn't. **Fixed**: Changed to `process.env.CODEVOS_URL || 'https://codevos.ai'` so CLI can target local/staging instances.
 
-2. **Documentation regression**: `agent-farm.md` still documented the old `--web`/`CODEV_WEB_KEY` flow and didn't mention `af tower register`, `deregister`, or `status`. **Fixed**: Replaced the outdated `af tower` section with full documentation for all tower subcommands including `register`, `deregister`, `status`, and the `CODEVOS_URL` env var.
+2. **Documentation regression**: `agent-farm.md` still documented the old `--web`/`CODEV_WEB_KEY` flow and didn't mention `afx tower register`, `deregister`, or `status`. **Fixed**: Replaced the outdated `afx tower` section with full documentation for all tower subcommands including `register`, `deregister`, `status`, and the `CODEVOS_URL` env var.
 
 ## Review Iteration 6 — Codex Feedback (Fixed)
 
@@ -122,7 +122,7 @@ Codex identified a security regression: `writeCloudConfig()` passes `{ mode: 0o6
 
 Codex requested changes on two issues; Claude noted one minor issue. All three addressed:
 
-1. **Custom-port towers**: `signalTower()` hard-coded port 4100, so `af tower register`/`deregister` couldn't signal towers on custom ports. **Fixed**: Added `port` parameter to `signalTower()`, `TowerRegisterOptions`, and `towerDeregister()`. Added `-p, --port` CLI option to both `af tower register` and `af tower deregister`.
+1. **Custom-port towers**: `signalTower()` hard-coded port 4100, so `afx tower register`/`deregister` couldn't signal towers on custom ports. **Fixed**: Added `port` parameter to `signalTower()`, `TowerRegisterOptions`, and `towerDeregister()`. Added `-p, --port` CLI option to both `afx tower register` and `afx tower deregister`.
 
 2. **Skeleton docs**: `codev-skeleton/resources/commands/agent-farm.md` still documented old `--web`/`CODEV_WEB_KEY` flow. **Fixed**: Mirrored the new tower cloud documentation into the skeleton template.
 

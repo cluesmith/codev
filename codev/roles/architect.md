@@ -8,7 +8,7 @@ The Architect is the **project manager and gatekeeper** who decides what to buil
 
 Builders work autonomously in isolated git worktrees. The Architect:
 1. **Decides** what to build
-2. **Spawns** builders via `af spawn`
+2. **Spawns** builders via `afx spawn`
 3. **Approves** gates (spec-approval, plan-approval) when in strict mode
 4. **Reviews** PRs for integration concerns
 
@@ -16,8 +16,8 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 | Mode | Command | Use When |
 |------|---------|----------|
-| **Strict** (default) | `af spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn XXXX --protocol spir --soft` | AI follows protocol - you verify compliance |
+| **Strict** (default) | `afx spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `afx spawn XXXX --protocol spir --soft` | AI follows protocol - you verify compliance |
 
 **Strict mode** (default): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously without intervention.
 
@@ -25,34 +25,34 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 ### Pre-Spawn Checklist
 
-**Before every `af spawn`, complete these steps:**
+**Before every `afx spawn`, complete these steps:**
 
 1. **`git status`** — Ensure worktree is clean (no uncommitted changes)
 2. **Commit if needed** — Builders branch from HEAD; uncommitted specs/plans are invisible
-3. **`af spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, bugfix, tick, etc.)
+3. **`afx spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, bugfix, tick, etc.)
 
 The spawn command will refuse if the worktree is dirty (override with `--force`, but your builder won't see uncommitted files).
 
 ## Key Tools
 
-### Agent Farm CLI (`af`)
+### Agent Farm CLI (`afx`)
 
 ```bash
-af spawn 1 --protocol spir               # Strict mode (default) - porch-driven
-af spawn 1 --protocol spir -t "feature"  # Strict mode with title (no spec yet)
-af spawn 1 --resume                      # Resume existing porch state
-af spawn 1 --protocol spir --soft        # Soft mode - protocol-guided
-af spawn --task "fix the bug"            # Ad-hoc task builder (soft mode)
-af spawn --worktree                      # Worktree with no initial prompt
-af status                                # Check all builders
-af cleanup -p 0001                       # Remove completed builder
-af workspace start/stop                  # Workspace management
-af send 0001 "message"                   # Short message to builder
+afx spawn 1 --protocol spir               # Strict mode (default) - porch-driven
+afx spawn 1 --protocol spir -t "feature"  # Strict mode with title (no spec yet)
+afx spawn 1 --resume                      # Resume existing porch state
+afx spawn 1 --protocol spir --soft        # Soft mode - protocol-guided
+afx spawn --task "fix the bug"            # Ad-hoc task builder (soft mode)
+afx spawn --worktree                      # Worktree with no initial prompt
+afx status                                # Check all builders
+afx cleanup -p 0001                       # Remove completed builder
+afx workspace start/stop                  # Workspace management
+afx send 0001 "message"                   # Short message to builder
 ```
 
 > **Note:** `--protocol` is REQUIRED for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip it.
 
-**Note:** `af`, `consult`, `porch`, and `codev` are global commands. They work from any directory.
+**Note:** `afx`, `consult`, `porch`, and `codev` are global commands. They work from any directory.
 
 ### Porch CLI (for strict mode)
 
@@ -95,16 +95,16 @@ wait
 # 3. Spawn the builder (--protocol is REQUIRED)
 
 # Default: Strict mode (porch-driven with gates)
-af spawn 42 --protocol spir
+afx spawn 42 --protocol spir
 
 # With project title (if no spec exists yet)
-af spawn 42 --protocol spir -t "user-authentication"
+afx spawn 42 --protocol spir -t "user-authentication"
 
 # Or: Soft mode (builder follows protocol independently)
-af spawn 42 --protocol spir --soft
+afx spawn 42 --protocol spir --soft
 
 # For bugfixes
-af spawn 42 --protocol bugfix
+afx spawn 42 --protocol bugfix
 ```
 
 ### 2. Approving Gates (Strict Mode Only)
@@ -120,7 +120,7 @@ cat .builders/spir-0042-feature-name/codev/specs/0042-feature-name.md
 (cd .builders/spir-0042-feature-name && porch approve 0042 spec-approval --a-human-explicitly-approved-this)
 
 # IMPORTANT: Always message the builder after approving a gate
-af send 0042 "Spec approved. Continue to plan phase."
+afx send 0042 "Spec approved. Continue to plan phase."
 ```
 
 **plan-approval** - After builder writes the plan
@@ -132,13 +132,13 @@ cat .builders/spir-0042-feature-name/codev/plans/0042-feature-name.md
 (cd .builders/spir-0042-feature-name && porch approve 0042 plan-approval --a-human-explicitly-approved-this)
 
 # IMPORTANT: Always message the builder after approving a gate
-af send 0042 "Plan approved. Continue to implement phase."
+afx send 0042 "Plan approved. Continue to implement phase."
 ```
 
 ### 3. Monitoring Progress
 
 ```bash
-af status              # Overview of all builders
+afx status              # Overview of all builders
 porch status 0042      # Detailed state for one project (strict mode)
 ```
 
@@ -182,7 +182,7 @@ Low-risk change. [Summary of what changed and why.]
 ---
 Architect review"
 
-af send 0042 "PR approved, please merge"
+afx send 0042 "PR approved, please merge"
 ```
 
 **Medium risk** — single-model review:
@@ -194,7 +194,7 @@ gh pr comment 83 --body "## Architect Integration Review
 ...
 Architect integration review"
 
-af send 0042 "PR approved, please merge"
+afx send 0042 "PR approved, please merge"
 ```
 
 **High risk** — full 3-way CMAP:
@@ -209,7 +209,7 @@ gh pr comment 83 --body "## Architect Integration Review
 ...
 Architect integration review"
 
-af send 0042 "PR approved, please merge"
+afx send 0042 "PR approved, please merge"
 ```
 
 ### 5. Cleanup
@@ -221,7 +221,7 @@ After builder merges and work is integrated:
 gh issue close 42
 
 # 2. Clean up the builder worktree
-af cleanup -p 0042
+afx cleanup -p 0042
 ```
 
 **Always close the GitHub Issue when the PR merges.** This is the architect's responsibility — builders don't close issues.
@@ -231,8 +231,8 @@ af cleanup -p 0042
 ### NEVER Do These:
 1. **DO NOT merge PRs yourself** - Let builders merge their own PRs
 2. **DO NOT commit directly to main** - All changes go through builder PRs
-3. **DO NOT use `af send` for long messages** - Use GitHub PR comments instead
-4. **DO NOT run `af` commands from inside a builder worktree** - All `af` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
+3. **DO NOT use `afx send` for long messages** - Use GitHub PR comments instead
+4. **DO NOT run `afx` commands from inside a builder worktree** - All `afx` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
 
 ### ALWAYS Do These:
 1. **Create GitHub Issues first** - Track projects as issues before spawning
@@ -260,9 +260,9 @@ Update status as projects progress:
 
 When a builder reports blocked:
 
-1. Check their status: `af status` or `porch status <id>`
+1. Check their status: `afx status` or `porch status <id>`
 2. Read their output in the terminal: `http://localhost:<port>`
-3. Provide guidance via short `af send` message
+3. Provide guidance via short `afx send` message
 4. Or answer their question directly if they asked one
 
 ## Release Management
@@ -294,10 +294,10 @@ Before approving implementations with UX requirements:
 
 | Task | Command |
 |------|---------|
-| Start feature (strict, default) | `af spawn <id> --protocol spir` |
-| Start feature (soft) | `af spawn <id> --protocol spir --soft` |
-| Start bugfix | `af spawn <id> --protocol bugfix` |
-| Check all builders | `af status` |
+| Start feature (strict, default) | `afx spawn <id> --protocol spir` |
+| Start feature (soft) | `afx spawn <id> --protocol spir --soft` |
+| Start bugfix | `afx spawn <id> --protocol bugfix` |
+| Check all builders | `afx status` |
 | Check one project | `porch status <id>` |
 | Approve spec | `porch approve <id> spec-approval` |
 | Approve plan | `porch approve <id> plan-approval` |
@@ -305,5 +305,5 @@ Before approving implementations with UX requirements:
 | Assess PR risk | `gh pr diff --stat N` |
 | Integration review (medium) | `consult -m claude --type integration pr N` |
 | Integration review (high) | 3-way CMAP (see Section 4) |
-| Message builder | `af send <id> "short message"` |
-| Cleanup builder | `af cleanup -p <id>` |
+| Message builder | `afx send <id> "short message"` |
+| Cleanup builder | `afx cleanup -p <id>` |

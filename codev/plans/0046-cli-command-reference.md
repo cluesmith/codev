@@ -40,14 +40,14 @@ For each: synopsis, description, options, examples.
 ### Step 4: Create agent-farm.md
 
 Create `codev/docs/commands/agent-farm.md` documenting:
-- `af start` - Start architect dashboard
-- `af stop` - Stop all agent-farm processes
-- `af spawn` - Spawn a builder
-- `af status` - Check status
-- `af cleanup` - Remove completed builders
-- `af send` - Send message to builder
-- `af open` - Open file in annotation viewer
-- `af util` - Open utility shell
+- `afx start` - Start architect dashboard
+- `afx stop` - Stop all agent-farm processes
+- `afx spawn` - Spawn a builder
+- `afx status` - Check status
+- `afx cleanup` - Remove completed builders
+- `afx send` - Send message to builder
+- `afx open` - Open file in annotation viewer
+- `afx util` - Open utility shell
 
 For each: synopsis, description, options, examples.
 

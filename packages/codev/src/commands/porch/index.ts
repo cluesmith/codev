@@ -499,9 +499,9 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
       console.log(`  Artifact: ${artifact}`);
       console.log('');
       console.log(chalk.cyan('  Opening artifact for human review...'));
-      // Use af open to display in annotation viewer
+      // Use afx open to display in annotation viewer
       const { spawn } = await import('node:child_process');
-      spawn('af', ['open', fullPath], {
+      spawn('afx', ['open', fullPath], {
         stdio: 'inherit',
         detached: true
       }).unref();
@@ -688,7 +688,7 @@ export async function rollback(
  * Initialize a new project.
  *
  * Idempotent: if status.yaml already exists, preserves it and reports
- * current state. This supports `af spawn --resume` where the builder
+ * current state. This supports `afx spawn --resume` where the builder
  * may re-run `porch init` after a session restart.
  */
 export async function init(

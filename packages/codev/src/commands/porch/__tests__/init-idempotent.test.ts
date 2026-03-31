@@ -1,6 +1,6 @@
 /**
  * Regression test for GitHub Issue #217:
- * af spawn --resume resets porch state to phase: specify
+ * afx spawn --resume resets porch state to phase: specify
  *
  * Tests that `porch init` is idempotent: when status.yaml already exists
  * (e.g., from a previous builder session), calling init again preserves

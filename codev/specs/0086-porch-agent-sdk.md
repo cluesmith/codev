@@ -88,7 +88,7 @@ The Builder **cannot skip the protocol** because:
 - **Protocol definitions** (protocol.json) — unchanged
 - **Consultation** (consult CLI, verdict parsing) — unchanged
 - **Builder role** (builder.md) — outer Claude still follows this
-- **`af spawn`** — still creates worktree, tmux session, starts builder Claude
+- **`afx spawn`** — still creates worktree, tmux session, starts builder Claude
 
 ---
 
@@ -182,5 +182,5 @@ async function buildPhase(prompt: string, cwd: string): Promise<BuildResult> {
 - Changing the consultation/verify flow (consult CLI works well)
 - Changing the state machine or protocol definitions
 - Multi-turn Agent SDK sessions (each phase is a fresh `query()`)
-- Changing `af spawn` or builder worktree creation
+- Changing `afx spawn` or builder worktree creation
 - Dashboard or terminal UI changes (that's spec 0085)

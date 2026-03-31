@@ -29,9 +29,9 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 ### Phase 2: Naming & Terminology Fix
 
-1. **Align tmux session naming** — `af architect` (`architect.ts:16`) creates `af-architect`. Tower creates `architect-{basename}`. Standardize on Tower's convention (`architect-{basename}`) everywhere. Migration: existing sessions with the old name won't be found after upgrade. Users must restart their architect session. No backward-compat shim — the old name was only used by the legacy `af architect` path which is being updated.
+1. **Align tmux session naming** — `afx architect` (`architect.ts:16`) creates `af-architect`. Tower creates `architect-{basename}`. Standardize on Tower's convention (`architect-{basename}`) everywhere. Migration: existing sessions with the old name won't be found after upgrade. Users must restart their architect session. No backward-compat shim — the old name was only used by the legacy `afx architect` path which is being updated.
 
-2. **Update user-facing messages** — Replace all "Start with: af dash start" with "Start with: af tower start" in:
+2. **Update user-facing messages** — Replace all "Start with: afx dash start" with "Start with: afx tower start" in:
    - `consult.ts:28`
    - `status.ts:73`
    - `commands/adopt.ts:231`
@@ -49,7 +49,7 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 4. **Fix `getGateStatusForProject()`** — `tower-server.ts:1051-1056` fetches `localhost:${basePort}/api/status` (dead port). Decision: query Tower's own in-memory state directly. Tower already tracks project terminals and can read porch status files (`codev/projects/<id>/status.yaml`) from the project path. Replace the dead HTTP fetch with a direct file read of the porch status YAML.
 
-5. **Remove `af start --remote`** — `start.ts:200-268` implements remote orchestration over SSH. Remove the `--remote` flag and all associated code. Users who want remote access should run a Tower server on the remote host directly. This eliminates a complex, under-tested code path.
+5. **Remove `afx start --remote`** — `start.ts:200-268` implements remote orchestration over SSH. Remove the `--remote` flag and all associated code. Users who want remote access should run a Tower server on the remote host directly. This eliminates a complex, under-tested code path.
 
 ### Phase 4: State Management Fixes
 
@@ -87,7 +87,7 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 7. All existing tests pass (updated as needed); new tests for file tab persistence
 8. Builder/UtilTerminal types no longer carry `port`/`pid` fields
 9. `getGateStatusForProject()` reads porch status from filesystem, not dead HTTP port
-10. `--remote` flag removed from `af start`
+10. `--remote` flag removed from `afx start`
 11. Tower error responses are structured JSON with `console.error` logging
 
 ## Consultation Log
@@ -97,7 +97,7 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 **Key feedback addressed:**
 
 - **Gemini**: Resolve `getGateStatusForProject()` either/or → decided: query Tower's own state via porch YAML files. Add tests for file tab persistence. Note tmux naming transition.
-- **Codex**: Add SQLite schema for file tabs (`file_tabs` table). Clarify TowerClient method availability. Resolve gate status ambiguity. Clarify `af start --remote` approach (SSH + command fix). Specify dedup destination modules.
+- **Codex**: Add SQLite schema for file tabs (`file_tabs` table). Clarify TowerClient method availability. Resolve gate status ambiguity. Clarify `afx start --remote` approach (SSH + command fix). Specify dedup destination modules.
 - **Claude**: Clarify `stop.ts` ordering (can't call Tower API during shutdown). Note `startBuilderSession` return type needs updating. Note potential Spec 0098 conflicts. Acknowledge file tab persistence is a small feature within hygiene scope.
 
 All feedback incorporated into spec body above.

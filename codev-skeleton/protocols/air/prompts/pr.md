@@ -75,12 +75,12 @@ If you ran CMAP:
 Send notification with PR link:
 
 ```bash
-af send architect "PR #<number> ready for review (implements issue #{{issue.number}})"
+afx send architect "PR #<number> ready for review (implements issue #{{issue.number}})"
 ```
 
 If CMAP was run, include verdicts:
 ```bash
-af send architect "PR #<number> ready for review (implements issue #{{issue.number}}). CMAP: gemini=<verdict>, codex=<verdict>, claude=<verdict>"
+afx send architect "PR #<number> ready for review (implements issue #{{issue.number}}). CMAP: gemini=<verdict>, codex=<verdict>, claude=<verdict>"
 ```
 
 ## Signals

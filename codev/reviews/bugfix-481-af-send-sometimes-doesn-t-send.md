@@ -1,8 +1,8 @@
-# Bugfix #481: af send sometimes doesn't send Enter
+# Bugfix #481: afx send sometimes doesn't send Enter
 
 ## Summary
 
-Fixed a race condition where `af send` would type the message into a builder's terminal but sometimes fail to send the Enter key (`\r`), leaving the message typed but unsent.
+Fixed a race condition where `afx send` would type the message into a builder's terminal but sometimes fail to send the Enter key (`\r`), leaving the message typed but unsent.
 
 ## Root Cause
 

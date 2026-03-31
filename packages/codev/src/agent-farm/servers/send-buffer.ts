@@ -1,6 +1,6 @@
 /**
- * Message buffering for typing-aware af send delivery.
- * Spec 403: af send Typing Awareness — Phase 2
+ * Message buffering for typing-aware afx send delivery.
+ * Spec 403: afx send Typing Awareness — Phase 2
  *
  * Buffers messages when a user is actively typing in a terminal session.
  * Messages are delivered when the user goes idle or after a maximum age.

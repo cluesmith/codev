@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn XXXX                                  │
+│         Architect spawns builder: afx spawn XXXX                                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -78,38 +78,38 @@ AI agents must stop and wait for human action at these gates.
 
 ```bash
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Spawn a builder for a project
-af spawn 44 --protocol spir
+afx spawn 44 --protocol spir
 
 # Check all builder statuses
-af status
+afx status
 
 # Send message to builder
-af send 44 "Check PR comments and address feedback"
+afx send 44 "Check PR comments and address feedback"
 
 # Open a file for review
-af open codev/specs/44-name.md
+afx open codev/specs/44-name.md
 
 # Clean up after merge
-af cleanup -p 44
+afx cleanup -p 44
 
 # Stop everything
-af workspace stop
+afx workspace stop
 ```
 
 ### Builder Commands
 
 ```bash
 # Check your own status
-af status
+afx status
 
 # Send message to architect
-af send architect "Question about the spec..."
+afx send architect "Question about the spec..."
 
 # Open a file in the annotation viewer
-af open src/path/to/file.ts
+afx open src/path/to/file.ts
 ```
 
 ### Protocol Import
@@ -212,7 +212,7 @@ gh pr merge N --merge --delete-branch
 ### Post-Merge Cleanup (Architect)
 ```bash
 git pull                    # Get merged changes
-af cleanup -p XXXX          # Clean up builder worktree
+afx cleanup -p XXXX          # Clean up builder worktree
 ```
 
 ## Troubleshooting
@@ -221,7 +221,7 @@ af cleanup -p XXXX          # Clean up builder worktree
 
 1. Check builder terminal for blocker message
 2. Review any `// REVIEW(@architect):` comments in code
-3. Provide guidance via `af send XXXX "guidance here"`
+3. Provide guidance via `afx send XXXX "guidance here"`
 4. Builder will resume work after receiving help
 
 ### PR Has Conflicts
@@ -238,7 +238,7 @@ af cleanup -p XXXX          # Clean up builder worktree
 git worktree list
 
 # Force cleanup (only if work is committed/pushed)
-af cleanup -p XXXX --force
+afx cleanup -p XXXX --force
 ```
 
 ## Related Documentation

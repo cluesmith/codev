@@ -164,7 +164,7 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   console.log('');
   console.log(`  cd ${projectBaseName}`);
   console.log('  git remote add origin <url>  # Required for builders to create PRs');
-  console.log('  af tower start               # Start the Tower daemon');
+  console.log('  afx tower start               # Start the Tower daemon');
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));
 }

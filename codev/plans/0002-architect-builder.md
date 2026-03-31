@@ -582,7 +582,7 @@ Phases 2, 3, 4, 5 can be done in parallel after Phase 1.
 
 ### Phase 8: Direct CLI Access (TICK-001)
 
-**Goal**: Add `af architect` command for terminal-first access to the architect role.
+**Goal**: Add `afx architect` command for terminal-first access to the architect role.
 
 **Tasks**:
 1. Add `architect` subcommand to `src/agent-farm/cli.ts`
@@ -623,7 +623,7 @@ export async function architect(args: string[]): Promise<void> {
 ```
 
 **Acceptance criteria**:
-- [ ] `af architect` starts or attaches to tmux session
+- [ ] `afx architect` starts or attaches to tmux session
 - [ ] Session persists after detach (Ctrl+B, D)
 - [ ] Architect role is loaded correctly
 - [ ] Additional arguments passed to claude
@@ -634,7 +634,7 @@ export async function architect(args: string[]): Promise<void> {
 
 ### Phase 9: Protocol-Agnostic Spawn Refactor (TICK-002)
 
-**Goal**: Decouple input types from protocols in `af spawn`, making the system extensible without hardcoding protocol-specific logic.
+**Goal**: Decouple input types from protocols in `afx spawn`, making the system extensible without hardcoding protocol-specific logic.
 
 **Tasks**:
 
@@ -739,9 +739,9 @@ export async function architect(args: string[]): Promise<void> {
 - `codev-skeleton/protocols/*/builder-prompt.md` - create templates
 
 **Acceptance criteria**:
-- [ ] `af spawn -p 0001 --protocol tick` uses TICK instead of SPIR
-- [ ] `af spawn -i 42 --protocol spir` uses SPIR instead of BUGFIX
-- [ ] `af spawn --protocol maintain` works with soft mode
+- [ ] `afx spawn -p 0001 --protocol tick` uses TICK instead of SPIR
+- [ ] `afx spawn -i 42 --protocol spir` uses SPIR instead of BUGFIX
+- [ ] `afx spawn --protocol maintain` works with soft mode
 - [ ] Protocol-specific hooks (collision check, issue comment) are data-driven
 - [ ] New protocols work by adding protocol.json + builder-prompt.md (no code changes)
 - [ ] Existing commands work unchanged (backwards compatible)
@@ -757,7 +757,7 @@ export async function architect(args: string[]): Promise<void> {
 
 **Changes**:
 - Added Phase 8: Direct CLI Access implementation
-- New command: `af architect` for terminal-first architect access
+- New command: `afx architect` for terminal-first architect access
 
 **Review**: See `reviews/0002-architect-builder-tick-001.md`
 

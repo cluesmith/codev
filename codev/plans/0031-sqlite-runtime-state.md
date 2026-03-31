@@ -122,7 +122,7 @@ Remove `await` from all state function calls.
 
 ## Phase 4: CLI Commands (3 tasks)
 
-### Task 4.1: Add `af db dump` command
+### Task 4.1: Add `afx db dump` command
 
 **Files**: `agent-farm/src/commands/db.ts`, `agent-farm/src/index.ts`
 
@@ -131,7 +131,7 @@ Implement command to export all tables to JSON:
 - Excludes `_migrations` table
 - JSON output to stdout
 
-### Task 4.2: Add `af db query` command
+### Task 4.2: Add `afx db query` command
 
 **Files**: `agent-farm/src/commands/db.ts`
 
@@ -140,7 +140,7 @@ Implement command for ad-hoc queries:
 - `--global` flag
 - JSON output
 
-### Task 4.3: Add `af db reset` command
+### Task 4.3: Add `afx db reset` command
 
 **Files**: `agent-farm/src/commands/db.ts`
 
@@ -216,11 +216,11 @@ test('parallel upserts all succeed', async () => {
 **Files**: `agent-farm/src/__tests__/integration.test.ts`
 
 Tests:
-1. Full workflow: `af start` → `af spawn` → `af status` → `af cleanup`
+1. Full workflow: `afx start` → `afx spawn` → `afx status` → `afx cleanup`
 2. Dashboard API reads builders correctly
 3. Fresh install (no JSON, no DB) works
-4. `af db dump` outputs valid JSON
-5. `af db query "SELECT * FROM builders"` works
+4. `afx db dump` outputs valid JSON
+5. `afx db query "SELECT * FROM builders"` works
 
 ---
 
@@ -251,10 +251,10 @@ Before marking complete:
 
 - [ ] `npm run build` passes with no errors
 - [ ] `npm test` passes all tests (including new ones)
-- [ ] Manual test: `af start` works with fresh install (no JSON)
-- [ ] Manual test: `af start` migrates existing JSON correctly
-- [ ] Manual test: `af spawn` multiple builders, all appear in `af status`
-- [ ] Manual test: `af db dump` shows all state
+- [ ] Manual test: `afx start` works with fresh install (no JSON)
+- [ ] Manual test: `afx start` migrates existing JSON correctly
+- [ ] Manual test: `afx spawn` multiple builders, all appear in `afx status`
+- [ ] Manual test: `afx db dump` shows all state
 - [ ] Manual test: Kill process, restart, state preserved
 - [ ] No race conditions in parallel builder spawns
 

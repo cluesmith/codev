@@ -6,10 +6,10 @@ Verified and enhanced the existing Tower shellper reconnection implementation. T
 
 ## Spec Compliance
 
-- [x] After `af tower stop && af tower start`, all surviving builders appear in dashboard — verified via E2E test and existing reconciliation logic
+- [x] After `afx tower stop && afx tower start`, all surviving builders appear in dashboard — verified via E2E test and existing reconciliation logic
 - [x] Tower reconnects to shellper sockets and receives PTY output — covered by session-manager reconnection tests and tower-shellper-integration tests
 - [x] Dead sessions (shellper process exited) are cleaned up from SQLite — covered by reconnectSession null-return tests and Phase 2 sweep logic
-- [x] `af spawn --resume` works correctly with reconnected sessions — not directly testable in unit tests (higher-level CLI behavior) but reconnection registers sessions correctly
+- [x] `afx spawn --resume` works correctly with reconnected sessions — not directly testable in unit tests (higher-level CLI behavior) but reconnection registers sessions correctly
 - [x] No duplicate sessions created for already-reconnected shellpers — covered by _reconciling flag tests (Bugfix #274) and matchedSessionIds set
 - [x] Reconnection happens during Tower startup, before accepting HTTP connections — verified by startup ordering tests and tower-server.ts calling reconcile before initInstances
 

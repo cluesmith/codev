@@ -46,7 +46,7 @@ Create `codev/resources/cheatsheet.md` with the following structure:
 ### codev
 [Commands table]
 
-### agent-farm (af)
+### agent-farm (afx)
 [Commands table]
 
 ### consult

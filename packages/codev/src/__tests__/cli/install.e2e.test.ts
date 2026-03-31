@@ -11,8 +11,8 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   setupCliEnv, teardownCliEnv, CliEnv,
-  runCodev, runAf, runConsult,
-  CODEV_BIN, AF_BIN, CONSULT_BIN,
+  runCodev, runAfx, runAf, runConsult,
+  CODEV_BIN, AFX_BIN, AF_BIN, CONSULT_BIN,
 } from './helpers.js';
 
 describe('package installation (CLI)', () => {
@@ -30,7 +30,11 @@ describe('package installation (CLI)', () => {
     expect(existsSync(CODEV_BIN)).toBe(true);
   });
 
-  it('af binary exists', () => {
+  it('afx binary exists', () => {
+    expect(existsSync(AFX_BIN)).toBe(true);
+  });
+
+  it('deprecated af binary exists', () => {
     expect(existsSync(AF_BIN)).toBe(true);
   });
 
@@ -44,8 +48,8 @@ describe('package installation (CLI)', () => {
     expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
   });
 
-  it('af --version returns a version string', () => {
-    const result = runAf(['--version'], env.dir, env.env);
+  it('afx --version returns a version string', () => {
+    const result = runAfx(['--version'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
   });
@@ -58,8 +62,8 @@ describe('package installation (CLI)', () => {
     expect(result.stdout).toContain('doctor');
   });
 
-  it('af --help shows available commands', () => {
-    const result = runAf(['--help'], env.dir, env.env);
+  it('afx --help shows available commands', () => {
+    const result = runAfx(['--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('start');
     expect(result.stdout).toContain('spawn');
@@ -79,8 +83,8 @@ describe('package installation (CLI)', () => {
     expect(result.status).not.toBe(0);
   });
 
-  it('af fails gracefully with unknown command', () => {
-    const result = runAf(['unknown-command-that-does-not-exist'], env.dir, env.env);
+  it('afx fails gracefully with unknown command', () => {
+    const result = runAfx(['unknown-command-that-does-not-exist'], env.dir, env.env);
     expect(result.status).not.toBe(0);
   });
 

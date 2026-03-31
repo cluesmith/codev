@@ -47,7 +47,7 @@ We need a way to:
 ### Should Have
 
 5. **Integration points** - Other tools can use pcheck
-   - `af spawn` calls pcheck before spawning
+   - `afx spawn` calls pcheck before spawning
    - Could be used by CI/CD
    - Scriptable with exit codes
 
@@ -178,7 +178,7 @@ gates:
       - plan_has_phases
       - plan_covers_spec
     guidance:
-      pass: "Plan is ready. Run 'af spawn --project {project}' to start implementation."
+      pass: "Plan is ready. Run 'afx spawn --project {project}' to start implementation."
       fail: "Complete the failing checks before spawning a builder."
 
   pr_ready:

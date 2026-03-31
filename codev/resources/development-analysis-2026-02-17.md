@@ -288,7 +288,7 @@ Bugs that shipped to `main` despite CMAP review, identified via GitHub issues fi
 |-------|-------------|-------------|----------|
 | #302 | 0107 | Dashboard tab titles show duplicated 'Builder builder-spir...' | String formatting edge case |
 | #315 | 0108/0126 | Stale gate notification indicators persist | UI state management |
-| #316 | 0126 | `af spawn --resume` fails when issue title changed | Edge case in title-based matching |
+| #316 | 0126 | `afx spawn --resume` fails when issue title changed | Edge case in title-based matching |
 | #323 | 0126 | Multiple implementation issues from spec | Complex multi-file interaction |
 | #326 | 0126 | `discoverBuilders()` doesn't match project to worktree | Regex/path matching edge case |
 | #332 | 0126 | Bugfix builders waste turns discovering project ID | Porch context resolution |
@@ -427,7 +427,7 @@ Bugs that shipped to `main` despite CMAP review, identified via GitHub issues fi
 | 0105 | Tower Server Decomposition | #258 |
 | 0106 | Rename Shepherd to Shellper | #263 |
 | 0107 | Tower Cloud Registration UI | #265 |
-| 0108 | Porch Gate Notifications (af send) | #272 |
+| 0108 | Porch Gate Notifications (afx send) | #272 |
 | 0109 | Tunnel Keepalive | #271 |
 | 0110 | Messaging Infrastructure | #293 |
 | 0111 | Remove Dead Vanilla Dashboard | #273 |

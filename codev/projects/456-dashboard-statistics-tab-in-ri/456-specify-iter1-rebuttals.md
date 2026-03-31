@@ -56,4 +56,4 @@
 - **Verdict distribution**: Added distribution by `review_type` (spec/plan/pr) and `protocol` (spir/tick/bugfix) from the metrics DB. Note: the DB does not store the actual verdict text (APPROVE/REQUEST_CHANGES/COMMENT) — only exit_code. Added this limitation to Out of Scope with a note that adding a verdict column would be a separate spec.
 - **Cost per project**: Added top-10 cost-per-project list grouped by `project_id`.
 - **Trends**: Deferred to v2 — the spec explicitly excludes sparklines/charts. Trend visualization is listed in Out of Scope.
-- **`af bench` results**: Moved to Out of Scope. Bench results are standalone timing files not in the metrics DB. Integrating them requires either parsing text files or adding bench data to the DB, which is a separate enhancement.
+- **`afx bench` results**: Moved to Out of Scope. Bench results are standalone timing files not in the metrics DB. Integrating them requires either parsing text files or adding bench data to the DB, which is a separate enhancement.

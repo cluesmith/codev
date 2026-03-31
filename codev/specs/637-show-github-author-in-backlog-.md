@@ -33,7 +33,7 @@ The forge concept commands (`issue-list.sh`, `pr-list.sh`) do not fetch the `aut
 
 ## Stakeholders
 - **Primary Users**: Architect (Waleed) reviewing the dashboard to triage work and understand who's contributing
-- **Secondary Users**: Any team member using `af status` or the dashboard
+- **Secondary Users**: Any team member using `afx status` or the dashboard
 - **Technical Team**: Codev maintainers
 - **Business Owners**: Waleed (project owner)
 

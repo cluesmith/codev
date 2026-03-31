@@ -12,22 +12,22 @@ This mirrors the pattern in the actual root CLAUDE.md/AGENTS.md files. The body 
 
 ## Claude: REQUEST_CHANGES
 
-### `af spawn` synopsis in agent-farm.md still shows `-p, --project`
+### `afx spawn` synopsis in agent-farm.md still shows `-p, --project`
 **Status: FIXED**
-Updated synopsis from `af spawn [options]` with `-p, --project <id>` to `af spawn [issue-number] [options]` with positional argument documentation. Examples were already correct; now the synopsis matches.
+Updated synopsis from `afx spawn [options]` with `-p, --project <id>` to `afx spawn [issue-number] [options]` with positional argument documentation. Examples were already correct; now the synopsis matches.
 
 ## Gemini: REQUEST_CHANGES
 
-### `af spawn` synopsis — same as Claude's finding
+### `afx spawn` synopsis — same as Claude's finding
 **Status: FIXED** (see Claude section above)
 
 ### CLAUDE.md template `(start, spawn, status, cleanup)` description
 **Status: ACKNOWLEDGED, KEPT**
-The parenthetical "(start, spawn, status, cleanup)" describes high-level capabilities of the `af` tool, not actual CLI subcommands. "Start" refers to the dashboard start functionality. This is a summary description pattern, not command-line syntax. Changing it to "(dash start, spawn, status, cleanup)" would be awkward and less readable. The full CLI reference is linked immediately below.
+The parenthetical "(start, spawn, status, cleanup)" describes high-level capabilities of the `afx` tool, not actual CLI subcommands. "Start" refers to the dashboard start functionality. This is a summary description pattern, not command-line syntax. Changing it to "(dash start, spawn, status, cleanup)" would be awkward and less readable. The full CLI reference is linked immediately below.
 
-### `af tower start` in codev table of cheatsheet template
+### `afx tower start` in codev table of cheatsheet template
 **Status: FIXED**
-Removed from the `codev` table — it was already correctly listed in the `af` table below. Also fixed the same issue in `codev/resources/cheatsheet.md` for consistency.
+Removed from the `codev` table — it was already correctly listed in the `afx` table below. Also fixed the same issue in `codev/resources/cheatsheet.md` for consistency.
 
 ### Missing `codev import` documentation in codev.md
 **Status: DEFERRED**

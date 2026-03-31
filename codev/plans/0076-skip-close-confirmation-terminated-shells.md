@@ -136,16 +136,16 @@ Both phases are small (< 20 lines of changes each) and can be completed in a sin
 After implementation, verify:
 
 1. **Terminated shell closes immediately**
-   - `af start` → `af util` → type `exit` → click X → tab closes without dialog
+   - `afx start` → `afx util` → type `exit` → click X → tab closes without dialog
 
 2. **Active shell shows confirmation**
-   - `af start` → `af util` → run `sleep 100` → click X → dialog appears
+   - `afx start` → `afx util` → run `sleep 100` → click X → dialog appears
 
 3. **Terminated builder closes immediately**
-   - `af start` → spawn builder → type `exit` → click X → tab closes without dialog
+   - `afx start` → spawn builder → type `exit` → click X → tab closes without dialog
 
 4. **Active builder shows confirmation**
-   - `af start` → spawn builder → (leave running) → click X → dialog appears
+   - `afx start` → spawn builder → (leave running) → click X → dialog appears
 
 5. **Shift+click bypass unchanged**
    - Active shell → Shift+click X → closes without dialog

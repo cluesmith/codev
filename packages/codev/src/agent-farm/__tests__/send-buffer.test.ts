@@ -1,6 +1,6 @@
 /**
  * Tests for SendBuffer — typing-aware message delivery.
- * Spec 403: af send Typing Awareness — Phase 2
+ * Spec 403: afx send Typing Awareness — Phase 2
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

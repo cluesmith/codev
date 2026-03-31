@@ -97,8 +97,8 @@ cd packages/codev && npm run build
 
 ### Manual Tests
 
-1. **Architect terminal**: Run `af start`, verify no tmux status bar visible
-2. **Builder terminal**: Run `af spawn -p XXXX`, verify no tmux status bar visible
+1. **Architect terminal**: Run `afx start`, verify no tmux status bar visible
+2. **Builder terminal**: Run `afx spawn -p XXXX`, verify no tmux status bar visible
 3. **Util shell**: Click "New Shell" in dashboard, verify no tmux status bar visible
 4. **User's other tmux**: Verify user's regular tmux sessions still have status bar (unaffected)
 

@@ -57,11 +57,11 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
 
   if (result.connectionRefused) {
     logger.error('Tower is not running.');
-    logger.info('Start it with: af tower start');
-    logger.info('Then try again: af shell');
+    logger.info('Start it with: afx tower start');
+    logger.info('Then try again: afx shell');
   } else {
     logger.error(`Tower returned an error: ${result.error || 'unknown'}`);
-    logger.info('Check Tower logs: af tower log');
+    logger.info('Check Tower logs: afx tower log');
   }
   process.exit(1);
 }

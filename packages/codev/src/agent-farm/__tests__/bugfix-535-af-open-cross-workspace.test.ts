@@ -1,9 +1,9 @@
 /**
- * Regression test for bugfix #535: af open does not reliably work on files
+ * Regression test for bugfix #535: afx open does not reliably work on files
  * outside the current directory
  *
  * Root cause: `open.ts` derived the workspace from the FILE's location
- * (via findWorkspaceRoot(dirname(filePath))). When running `af open` from
+ * (via findWorkspaceRoot(dirname(filePath))). When running `afx open` from
  * workspace A but targeting a file in workspace B, the file opened in B's
  * annotation viewer instead of A's.
  *
@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-describe('Bugfix #535: af open cross-workspace file resolution', () => {
+describe('Bugfix #535: afx open cross-workspace file resolution', () => {
   const openSrc = readFileSync(
     resolve(import.meta.dirname, '../commands/open.ts'),
     'utf-8',

@@ -37,7 +37,7 @@ The Codev repository's public-facing documentation is significantly out of date.
 - `codev/resources/workflow-reference.md` — Stage-by-stage workflow
 - `codev/resources/commands/overview.md` — CLI quick start
 - `codev/resources/commands/codev.md` — codev CLI reference
-- `codev/resources/commands/agent-farm.md` — af CLI reference
+- `codev/resources/commands/agent-farm.md` — afx CLI reference
 - `codev/resources/commands/consult.md` — consult CLI reference
 - `codev/resources/testing-guide.md` — Playwright and testing
 - `codev/resources/protocol-format.md` — Protocol definition format
@@ -88,7 +88,7 @@ The Codev repository's public-facing documentation is significantly out of date.
 - [ ] CHANGELOG.md covers all releases from v1.0.0 through v2.0.7
 - [ ] CLAUDE.md and AGENTS.md are confirmed identical (root-level pair and skeleton pair)
 - [ ] Zero references to tmux, ttyd, JSON state files, or `npx agent-farm` in any audited file
-- [ ] All CLI examples in docs use current syntax (consult v2 `--prompt` flag, `af tower start` not `codev tower`, etc.)
+- [ ] All CLI examples in docs use current syntax (consult v2 `--prompt` flag, `afx tower start` not `codev tower`, etc.)
 - [ ] Release notes exist for every tagged release
 - [ ] Each Tier 2 file has been read and verified accurate for v2.0.7
 - [ ] Each Tier 3 template has been read and verified accurate for v2.0.7
@@ -111,8 +111,8 @@ These are known stale references that should be verified and fixed:
 | `tmux` | All `.md` files | Remove/replace with Shellper |
 | `ttyd` | All `.md` files | Remove entirely |
 | `state.json` or `ports.json` | All `.md` files | Replace with SQLite references |
-| `npx agent-farm` | All `.md` files | Replace with `af` commands |
+| `npx agent-farm` | All `.md` files | Replace with `afx` commands |
 | `consult general` | All `.md` files | Update to `consult --prompt` |
-| `codev tower` | All `.md` files | Replace with `af tower` |
+| `codev tower` | All `.md` files | Replace with `afx tower` |
 | `dashboard-server` | All `.md` files | Replace with Tower single daemon |
 | `projectlist.md` | All `.md` files | Replace with GitHub Issues |

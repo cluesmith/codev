@@ -36,7 +36,7 @@ Successfully replaced the undocumented `CODEX_SYSTEM_MESSAGE` environment variab
 
 ### Quality Analysis
 - **Before**: APPROVE, HIGH confidence - approved the PR
-- **After**: REQUEST_CHANGES, MEDIUM confidence - found a valid issue (missing `af spawn` integration)
+- **After**: REQUEST_CHANGES, MEDIUM confidence - found a valid issue (missing `afx spawn` integration)
 
 The "after" implementation actually caught an issue that the baseline review missed, indicating that quality was maintained or improved despite faster execution.
 

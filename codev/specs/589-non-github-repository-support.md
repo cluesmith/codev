@@ -75,7 +75,7 @@ While the codev methodology (SPIR, ASPIR, etc.) is forge-agnostic, the tooling i
 - [ ] Projects can override any concept command via `af-config.json` with an external program
 - [ ] Projects can disable individual concepts (e.g., `null` to skip issue commenting)
 - [ ] `codev adopt` succeeds on a repository with no GitHub remote and no `gh` installed
-- [ ] `af spawn` works when forge concepts are unavailable (no errors, graceful skip)
+- [ ] `afx spawn` works when forge concepts are unavailable (no errors, graceful skip)
 - [ ] `porch check` and `porch done` work with overridden `pr-exists` concept
 - [ ] Work view renders without errors when forge concepts return empty (builders + local state visible)
 - [ ] Analytics page renders without errors when forge concepts return empty (git-derived metrics shown)
@@ -225,7 +225,7 @@ Setting a concept to `null` explicitly disables it (codev skips that operation g
 
 - [x] Should concept commands receive arguments via environment variables, command-line arguments, or stdin? **Decision: Environment variables.** Codev sets them explicitly for each invocation. Avoids shell escaping, language-agnostic, consistent.
 - [x] Should `codev adopt` scaffold a commented-out `forge` section in `af-config.json` when no GitHub remote is detected? **Decision: No.** Reserve examples for user-level documentation only.
-- [x] How should `af spawn <issueID>` work when `issue-view` is not configured? **Decision: Fail with a helpful error.** An issue ID is required. The error message should suggest that the `issue-view` concept command needs to be configured in `af-config.json`, or removed to fall back to the `gh` default.
+- [x] How should `afx spawn <issueID>` work when `issue-view` is not configured? **Decision: Fail with a helpful error.** An issue ID is required. The error message should suggest that the `issue-view` concept command needs to be configured in `af-config.json`, or removed to fall back to the `gh` default.
 - [x] Should codev ship community concept command packages (e.g., `@codev/forge-gitlab`)? **Decision: No.** Leave to the community. User documentation should include one or two worked examples.
 
 ### Nice-to-Know (Optimization)

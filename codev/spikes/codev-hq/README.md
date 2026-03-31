@@ -72,7 +72,7 @@ A minimal CODEV_HQ implementation can demonstrate:
 
 ### Phase 2: HQ Connector for Agent Farm (1.5h)
 1. Add `hq-connector.ts` to agent-farm package
-2. Connect on `af start` if `CODEV_HQ_URL` set
+2. Connect on `afx start` if `CODEV_HQ_URL` set
 3. Send `register` with project list
 4. Watch status files, send `status_update` on change
 5. Handle `approval` messages, update status files
@@ -358,7 +358,7 @@ cd packages/codev-hq && npm run dev
 
 # In another terminal - start Agent Farm with HQ
 export CODEV_HQ_URL="ws://localhost:4300/ws"
-af start
+afx start
 
 # Open HQ dashboard
 open http://localhost:4300

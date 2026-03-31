@@ -81,7 +81,7 @@ Consultation exceeded time limit. Results unavailable.
 | Framework files NOT copied to project | ✅ | No protocols/ or roles/ in new projects |
 | `resolveCodevFile()` checks local first | ✅ | Unit tests verify local override behavior |
 | Embedded skeleton distributed with package | ✅ | `skeleton/` copied at build time |
-| `af` commands use resolver for roles | ✅ | `config.ts` uses `resolveCodevFile()` |
+| `afx` commands use resolver for roles | ✅ | `config.ts` uses `resolveCodevFile()` |
 | Documentation updated | ✅ | INSTALL.md, README.md updated |
 
 ## Test Coverage

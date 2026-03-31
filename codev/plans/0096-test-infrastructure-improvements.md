@@ -260,7 +260,7 @@ test: {
 - Tests run `node dist/codev.js` (built artifact) to test the real CLI, not source imports
 - XDG sandboxing via env overrides (HOME, XDG_CONFIG_HOME, etc.) — same as BATS
 - `realpathSync` for macOS `/var` → `/private/var` normalization
-- Tests that need `sqlite3` CLI (af stale state tests) use the `better-sqlite3` npm package instead
+- Tests that need `sqlite3` CLI (afx stale state tests) use the `better-sqlite3` npm package instead
 
 **`verify-install.mjs`**: Standalone script that `npm pack` → `npm install -g` → verifies binaries. Used by `post-release-e2e.yml` to replace BATS install verification.
 
@@ -298,7 +298,7 @@ test: {
 - **Cross-platform**: Verify on macOS (primary dev environment)
 
 #### Risks
-- **sqlite3 CLI dependency**: BATS af tests use `sqlite3` CLI directly. Vitest tests should use `better-sqlite3` (already a project dependency) or `execa` to call sqlite3.
+- **sqlite3 CLI dependency**: BATS afx tests use `sqlite3` CLI directly. Vitest tests should use `better-sqlite3` (already a project dependency) or `execa` to call sqlite3.
 - **Mitigation**: Use `better-sqlite3` for database setup in tests.
 
 ---

@@ -9,11 +9,11 @@
 
 ## Overview
 
-Refactor `af spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
+Refactor `afx spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
 
 ## Problem Statement
 
-Currently, specific protocols are deeply baked into `af spawn`:
+Currently, specific protocols are deeply baked into `afx spawn`:
 - `spawnBugfix()` hardcodes BUGFIX protocol path, collision checks, and issue commenting
 - `spawnSpec()` defaults to SPIR with protocol-specific prompts
 - `spawnStrict()` ignores protocol metadata in spec files
@@ -126,13 +126,13 @@ Follow: codev/protocols/{{protocol}}/protocol.md
 
 ```bash
 # Standard (unchanged behavior)
-af spawn -p 0001                         # strict, spir
-af spawn -i 42                           # soft, bugfix
+afx spawn -p 0001                         # strict, spir
+afx spawn -i 42                           # soft, bugfix
 
 # New flexibility
-af spawn -p 0001 --use-protocol tick     # strict, tick
-af spawn -i 42 --use-protocol spir     # soft, spir (escalate bug)
-af spawn --protocol maintain             # soft, maintain
+afx spawn -p 0001 --use-protocol tick     # strict, tick
+afx spawn -i 42 --use-protocol spir     # soft, spir (escalate bug)
+afx spawn --protocol maintain             # soft, maintain
 ```
 
 ## Implementation
@@ -160,9 +160,9 @@ af spawn --protocol maintain             # soft, maintain
 
 ### Acceptance Criteria
 
-- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
-- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
-- [ ] `af spawn --protocol maintain` works
+- [ ] `afx spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
+- [ ] `afx spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
+- [ ] `afx spawn --protocol maintain` works
 - [ ] Protocol hooks (collision check, issue comment) are data-driven
 - [ ] Existing commands work unchanged (backwards compatible)
 - [ ] Prompt templates render correctly
@@ -172,12 +172,12 @@ af spawn --protocol maintain             # soft, maintain
 Manual testing:
 ```bash
 # Verify backwards compatibility
-af spawn -p 0001              # Should work as before
-af spawn -i 42                # Should work as before
+afx spawn -p 0001              # Should work as before
+afx spawn -i 42                # Should work as before
 
 # Verify new flexibility
-af spawn -p 0001 --use-protocol tick
-af spawn --protocol maintain
+afx spawn -p 0001 --use-protocol tick
+afx spawn --protocol maintain
 ```
 
 ## Notes

@@ -6,7 +6,7 @@
  * to mock tunnel API responses.
  *
  * Prerequisites:
- *   - Tower running: `af tower start`
+ *   - Tower running: `afx tower start`
  *   - Playwright browsers installed: `npx playwright install chromium`
  *
  * Run: npx playwright test tower-cloud-connect

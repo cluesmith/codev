@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-Comprehensive audit and update of all public-facing and developer-facing markdown documentation across three tiers: public (GitHub visitors), developer reference (architects/builders), and skeleton templates (shipped to other projects). Eliminated all stale references to removed technologies (tmux, ttyd, state.json, ports.json) and outdated CLI syntax (npx agent-farm, codev tower, af spawn -p) across 30+ files. Created missing release notes for v2.0.1, v2.0.2, and v2.0.6. Added deprecation notices to obsolete files.
+Comprehensive audit and update of all public-facing and developer-facing markdown documentation across three tiers: public (GitHub visitors), developer reference (architects/builders), and skeleton templates (shipped to other projects). Eliminated all stale references to removed technologies (tmux, ttyd, state.json, ports.json) and outdated CLI syntax (npx agent-farm, codev tower, afx spawn -p) across 30+ files. Created missing release notes for v2.0.1, v2.0.2, and v2.0.6. Added deprecation notices to obsolete files.
 
 ## Spec Compliance
 
@@ -43,7 +43,7 @@ Comprehensive audit and update of all public-facing and developer-facing markdow
 
 ### What Went Well
 1. **Tier-based organization** — Working tier-by-tier prevented context overload and made consultations focused
-2. **3-way consultation effectiveness** — Reviewers consistently caught real issues: af start/stop in arch.md (Claude), config.json references (Gemini), codev/roles/ files missed entirely (all three)
+2. **3-way consultation effectiveness** — Reviewers consistently caught real issues: afx start/stop in arch.md (Claude), config.json references (Gemini), codev/roles/ files missed entirely (all three)
 3. **Comprehensive grep sweep** — Running a final stale pattern grep across the entire repo in Phase 4 caught edge cases
 
 ### Challenges Encountered

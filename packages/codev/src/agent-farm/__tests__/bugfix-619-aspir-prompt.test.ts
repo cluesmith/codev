@@ -1,7 +1,7 @@
 /**
  * Regression tests for issue #619:
  *   1. ASPIR builder-prompt referenced SPIR protocol path
- *   2. af spawn --task with --protocol skipped porch init
+ *   2. afx spawn --task with --protocol skipped porch init
  *   3. has_phases_json check used fragile literal string (now uses -E regex)
  */
 

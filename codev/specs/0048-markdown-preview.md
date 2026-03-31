@@ -1,4 +1,4 @@
-# Specification: Markdown Preview for af open
+# Specification: Markdown Preview for afx open
 
 ## Metadata
 - **ID**: 0048
@@ -7,13 +7,13 @@
 
 ## Problem Statement
 
-When using `af open` to view markdown files (specs, plans, reviews, documentation), the content is displayed as raw text with syntax highlighting. While this is useful for editing, it makes it harder to read and review the document's actual rendered content - headings, lists, code blocks, tables, and links are not visually distinguished.
+When using `afx open` to view markdown files (specs, plans, reviews, documentation), the content is displayed as raw text with syntax highlighting. While this is useful for editing, it makes it harder to read and review the document's actual rendered content - headings, lists, code blocks, tables, and links are not visually distinguished.
 
 Architects and reviewers frequently need to read markdown documents to understand specifications and plans. The current raw view requires mental parsing of markdown syntax, reducing readability and review efficiency.
 
 ## Current State
 
-The `af open` command:
+The `afx open` command:
 1. Opens files in a browser-based editor with Prism.js syntax highlighting
 2. Treats markdown files the same as any other text file
 3. Shows line numbers and raw markdown syntax
@@ -35,7 +35,7 @@ Add a **preview toggle** for markdown files that:
 
 ## Stakeholders
 - **Primary Users**: Architects reviewing specs/plans, builders reading documentation
-- **Secondary Users**: Anyone using `af open` on markdown files
+- **Secondary Users**: Anyone using `afx open` on markdown files
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria

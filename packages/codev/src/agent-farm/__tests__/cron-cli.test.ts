@@ -1,4 +1,4 @@
-// Tests for `af cron` CLI handlers (Spec 399 Phase 4)
+// Tests for `afx cron` CLI handlers (Spec 399 Phase 4)
 // Mocks TowerClient.request to test each handler function.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';

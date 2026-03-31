@@ -15,8 +15,8 @@ Comprehensive grep across all in-scope markdown files for all stale patterns. Re
 | `dashboard-server` | 0 | CLEAN — remaining hits are architectural history notes in arch.md and reviews |
 | `projectlist.md` | 0 | CLEAN — remaining hits in INSTALL.md (deprecated), MIGRATION-1.0.md (deprecated), reviews |
 | `codev/config.json` | 0 | CLEAN — remaining hits in MIGRATION-1.0.md (deprecated), reviews |
-| `af spawn -p` | 0 | CLEAN — no remaining hits in instructional docs; MANIFESTO.md fixed |
-| `af start` (without dash/tower) | 0 | CLEAN — all fixed to `af dash start` |
+| `afx spawn -p` | 0 | CLEAN — no remaining hits in instructional docs; MANIFESTO.md fixed |
+| `afx start` (without dash/tower) | 0 | CLEAN — all fixed to `afx dash start` |
 | `ansari-project` | 0 (in instructional docs) | CLEAN — remaining hits in README/why.md are external org links to live repos |
 
 ## 2. CLAUDE.md / AGENTS.md Sync — PASS
@@ -63,7 +63,7 @@ Note: No v2.0.4, v2.0.5, or v2.0.7 tags exist. CHANGELOG includes v2.0.7 (Unrele
 |------|--------|----------------|
 | `INSTALL.md` | Deprecated — banner added Phase 1 | Keep with deprecation notice; links to npm installation |
 | `MIGRATION-1.0.md` | Deprecated — banner added Phase 1 | Keep with deprecation notice; useful for v1.x→v2.x migration |
-| `codev-skeleton/builders.md` | Obsoleted by SQLite/Tower | Updated Phase 3 — now a reference file pointing to `af status` |
+| `codev-skeleton/builders.md` | Obsoleted by SQLite/Tower | Updated Phase 3 — now a reference file pointing to `afx status` |
 
 No files recommended for deletion — all either have deprecation banners or have been updated.
 
@@ -71,8 +71,8 @@ No files recommended for deletion — all either have deprecation banners or hav
 
 | Topic | Tier 1 | Tier 2 | Tier 3 | Consistent? |
 |-------|--------|--------|--------|-------------|
-| `af spawn` syntax | `af spawn 42` (README) | `af spawn 42` (arch, cheatsheet) | `af spawn 42` (roles, workflow-ref) | YES |
-| `af dash start` | `af dash start` (README) | `af dash start` (arch, cheatsheet, cloud-instances) | `af dash start` (agent-farm.md, roles) | YES |
+| `afx spawn` syntax | `afx spawn 42` (README) | `afx spawn 42` (arch, cheatsheet) | `afx spawn 42` (roles, workflow-ref) | YES |
+| `afx dash start` | `afx dash start` (README) | `afx dash start` (arch, cheatsheet, cloud-instances) | `afx dash start` (agent-farm.md, roles) | YES |
 | Config file name | `af-config.json` (README) | `af-config.json` (arch, cheatsheet, agent-farm.md) | `af-config.json` (CLAUDE.md template, SKILL) | YES |
 | State management | SQLite (README) | state.db, global.db (arch, commands) | state.db, global.db (agent-farm.md) | YES |
 | Terminal system | Shellper (README) | Shellper/node-pty (arch, lessons) | Terminal-agnostic (roles, builder) | YES |
@@ -105,34 +105,34 @@ No files recommended for deletion — all either have deprecation banners or hav
 - `MIGRATION-1.0.md` — Added deprecation notice
 
 ### Phase 2: Tier 2 — Developer Reference (2 commits)
-- `codev/resources/cheatsheet.md` — `codev tower`→`af tower start`, project list→GitHub Issues, removed misplaced `af tower` from codev table
+- `codev/resources/cheatsheet.md` — `codev tower`→`afx tower start`, project list→GitHub Issues, removed misplaced `afx tower` from codev table
 - `codev/resources/lifecycle.md` — projectlist.md→GitHub Issues
 - `codev/resources/lessons-learned.md` — tmux→terminal-agnostic
 - `codev/resources/test-infrastructure.md` — projectlist.md, tmux→PTY/Shellper
-- `codev/resources/cloud-instances.md` — Removed tmux, `af start`→`af dash start`
+- `codev/resources/cloud-instances.md` — Removed tmux, `afx start`→`afx dash start`
 - `codev/resources/claude_vs_codev_task.md` — Added historical document notice
 - `codev/resources/cmap-value-analysis-2026-02.md` — tmux label→terminal label
 - `codev/resources/commands/codev.md` — Removed `codev tower` section
 - `codev/resources/commands/agent-farm.md` — tmux→Shellper, state.json→state.db, ports.json→global.db, config.json→af-config.json
 - `codev/resources/commands/overview.md` — config.json→af-config.json
 - `codev/resources/agent-farm.md` — config.json→af-config.json, spawn syntax
-- `codev/resources/arch.md` — Glossary, ttyd refs, file tree (removed bin/, config.json, stale HTML templates), `af start`→`af dash start`, config.json→af-config.json throughout
+- `codev/resources/arch.md` — Glossary, ttyd refs, file tree (removed bin/, config.json, stale HTML templates), `afx start`→`afx dash start`, config.json→af-config.json throughout
 - `codev/resources/workflow-reference.md` — ansari-project→codev
 
 ### Phase 3: Tier 3 — Skeleton Templates (2 commits)
 - `codev-skeleton/resources/commands/agent-farm.md` — state.json→state.db, ports.json→global.db, spawn synopsis fixed (positional args)
 - `codev-skeleton/resources/commands/codev.md` — Removed ttyd from deps, removed `codev tower` section
-- `codev-skeleton/resources/workflow-reference.md` — af spawn→positional, ansari-project→codev
-- `codev-skeleton/roles/architect.md` — af spawn→positional throughout
-- `codev-skeleton/roles/builder.md` — af spawn→positional
-- `codev-skeleton/DEPENDENCIES.md` — @google/gemini-cli (was @anthropic-ai), af ports cleanup (was ./codev/bin/agent-farm)
+- `codev-skeleton/resources/workflow-reference.md` — afx spawn→positional, ansari-project→codev
+- `codev-skeleton/roles/architect.md` — afx spawn→positional throughout
+- `codev-skeleton/roles/builder.md` — afx spawn→positional
+- `codev-skeleton/DEPENDENCIES.md` — @google/gemini-cli (was @anthropic-ai), afx ports cleanup (was ./codev/bin/agent-farm)
 - `codev-skeleton/builders.md` — Updated to reflect SQLite/Tower tracking
-- `codev-skeleton/templates/cheatsheet.md` — Removed misplaced `af tower` from codev table
-- `MANIFESTO.md` — af spawn→positional, af start→af dash start, SPIDER→SPIR
+- `codev-skeleton/templates/cheatsheet.md` — Removed misplaced `afx tower` from codev table
+- `MANIFESTO.md` — afx spawn→positional, afx start→afx dash start, SPIDER→SPIR
 
 ### Phase 4: Final Verification (1 commit)
-- `codev/roles/architect.md` — af spawn→positional, projectlist.md→GitHub Issues, tmux send-keys→terminal
-- `codev/roles/builder.md` — af spawn→positional
+- `codev/roles/architect.md` — afx spawn→positional, projectlist.md→GitHub Issues, tmux send-keys→terminal
+- `codev/roles/builder.md` — afx spawn→positional
 - `codev/resources/arch.md` — assert_spider_protocol→assert_spir_protocol
 - `codev/projects/386-documentation-audit/386-final-verification.md` — This report
 

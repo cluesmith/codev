@@ -17,7 +17,7 @@ No changes to SPIR files, porch source code, or protocol schema.
 - [x] `protocol.json` has no `gate` property on the `plan` phase
 - [x] `protocol.json` retains `"gate": "pr"` on the `review` phase
 - [x] All phases, checks, and verify blocks identical to SPIR (except gate removal)
-- [x] `af spawn N --protocol aspir` discovers the protocol (filesystem-based discovery)
+- [x] `afx spawn N --protocol aspir` discovers the protocol (filesystem-based discovery)
 - [x] `protocol.md` documents the protocol and when to use it
 - [x] ASPIR added to Protocol Selection Guide in `CLAUDE.md` and `AGENTS.md`
 - [x] ASPIR added to Available Protocols in skeleton templates

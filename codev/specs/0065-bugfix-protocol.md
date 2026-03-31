@@ -30,17 +30,17 @@ We need a lightweight protocol for bug fixes that:
    - Success criteria checklist for builders
    - Edge case handling (can't reproduce, too complex, etc.)
 
-2. **CLI Support: `af spawn --issue <N>`**
+2. **CLI Support: `afx spawn --issue <N>`**
    - Fetch issue content automatically via `gh issue view`
    - Create branch with consistent naming: `builder/bugfix-<N>-<slug>`
    - Create worktree at `.builders/bugfix-<N>/`
    - Load bugfix-specific builder context
    - Optionally auto-comment "On it..." on the issue
 
-3. **CLI Support: `af cleanup --issue <N>`**
+3. **CLI Support: `afx cleanup --issue <N>`**
    - Clean up bugfix worktrees by issue number
    - Delete remote branch after merge
-   - Consistent with existing `af cleanup --project` pattern
+   - Consistent with existing `afx cleanup --project` pattern
 
 4. **Builder Role Clarity**
    - Builder knows they're in BUGFIX mode (via task context)
@@ -50,8 +50,8 @@ We need a lightweight protocol for bug fixes that:
 ### Should Have
 
 5. **Integration with existing tooling**
-   - `af status` shows bugfix builders
-   - `af send` works with bugfix builders
+   - `afx status` shows bugfix builders
+   - `afx send` works with bugfix builders
    - Dashboard displays bugfix builders
 
 ### Won't Have (Explicit Exclusions)
@@ -73,7 +73,7 @@ ARCHITECT                              BUILDER
 1. Identify issue #N
       │
       ▼
-2. af spawn --issue N  ───────────────►  3. Comment "On it..."
+2. afx spawn --issue N  ───────────────►  3. Comment "On it..."
       │                                        │
       │                                        ▼
       │                                  4. Investigate & Fix
@@ -82,29 +82,29 @@ ARCHITECT                              BUILDER
       │                               │                 │
       │                         Too Complex?      Simple Fix
       │                               │                 │
-      │◄── af send "Complex" ◄────────┘                 │
+      │◄── afx send "Complex" ◄────────┘                 │
       │                                                 ▼
       │                                  5. Create PR + CMAP review
       │                                        │
-      │◄────────────────── af send "PR ready" ◄┘
+      │◄────────────────── afx send "PR ready" ◄┘
       │
       ▼
 6. Review PR + CMAP integration
       │
       ├─── gh pr comment ──────────────►  7. Address feedback
       │                                        │
-      │◄────────────────── af send "Fixed" ◄───┘
+      │◄────────────────── afx send "Fixed" ◄───┘
       │
       ▼
-8. af send "Merge it"  ────────────────►  9. gh pr merge --merge
+8. afx send "Merge it"  ────────────────►  9. gh pr merge --merge
       │                                        │
-      │◄────────────────── af send "Merged" ◄──┘
+      │◄────────────────── afx send "Merged" ◄──┘
       │
       ▼
 10. git pull && verify
       │
       ▼
-11. af cleanup --issue N && close issue
+11. afx cleanup --issue N && close issue
 ```
 
 #### Success Criteria Checklist (Builder)
@@ -152,7 +152,7 @@ Builder escalates to Architect when:
 | Unrelated test failures | Do NOT fix (out of scope), notify Architect |
 | Documentation-only bug | Use BUGFIX (still a valid bug) |
 | Stale "On it" comment | If no PR after 24h, comment "Stalled - clearing lock" and continue |
-| Worktree already exists | Run `af cleanup --issue N` first, then retry spawn |
+| Worktree already exists | Run `afx cleanup --issue N` first, then retry spawn |
 | Multiple bugs in one issue | Fix primary bug only, note others for separate issues |
 
 #### CMAP Review Strategy
@@ -163,15 +163,15 @@ BUGFIX uses **PR-only CMAP reviews** (not throughout like SPIR). This is intenti
 - **When**: Builder runs 3-way CMAP before marking PR ready; Architect runs 3-way integration review
 - **Types**: `pr-ready` for builder, `integration-review` for Architect
 
-### 2. CLI Changes: `af spawn --issue`
+### 2. CLI Changes: `afx spawn --issue`
 
 **New option**: `--issue <N>` or `-i <N>`
 
 ```bash
-af spawn --issue 42
-af spawn -i 42
-af spawn --issue 42 --no-comment    # Skip "On it" comment
-af spawn --issue 42 --force         # Override collision detection
+afx spawn --issue 42
+afx spawn -i 42
+afx spawn --issue 42 --no-comment    # Skip "On it" comment
+afx spawn --issue 42 --force         # Override collision detection
 ```
 
 **Behavior**:
@@ -188,13 +188,13 @@ af spawn --issue 42 --force         # Override collision detection
 - Blocks if open PR references the issue
 - Use `--force` to override
 
-### 3. CLI Changes: `af cleanup --issue`
+### 3. CLI Changes: `afx cleanup --issue`
 
 **New option**: `--issue <N>`
 
 ```bash
-af cleanup --issue 42
-af cleanup --issue 42 --force    # Skip safety checks
+afx cleanup --issue 42
+afx cleanup --issue 42 --force    # Skip safety checks
 ```
 
 **Behavior**:
@@ -255,7 +255,7 @@ This differs from SPIR's `[Spec XXXX][Phase]` format intentionally:
 gh issue view 42
 
 # 2. Architect spawns builder
-af spawn --issue 42
+afx spawn --issue 42
 # → Creates .builders/bugfix-42/
 # → Creates branch builder/bugfix-42-login-fails-when-userna
 # → Comments "On it!" on issue #42
@@ -280,7 +280,7 @@ gh pr create --title "[Bugfix #42] Fix login for usernames with spaces" \
   --body "Fixes #42..."
 
 # 7. Builder notifies Architect
-af send architect "PR #50 ready (fixes issue #42)"
+afx send architect "PR #50 ready (fixes issue #42)"
 
 # 8. Architect reviews + CMAP integration review
 consult --model gemini --type integration-review pr 50 &
@@ -290,15 +290,15 @@ wait
 
 # 9. Architect approves
 gh pr review 50 --approve
-af send bugfix-42 "LGTM. Merge it."
+afx send bugfix-42 "LGTM. Merge it."
 
 # 10. Builder merges (no --delete-branch due to worktree)
 gh pr merge 50 --merge
-af send architect "Merged. Ready for cleanup."
+afx send architect "Merged. Ready for cleanup."
 
 # 11. Architect cleans up
 git pull
-af cleanup --issue 42
+afx cleanup --issue 42
 # → Removes .builders/bugfix-42/
 # → Deletes origin/builder/bugfix-42-login-fails-when-userna
 
@@ -425,11 +425,11 @@ describe('--issue cleanup', () => {
 Add `tests/e2e/bugfix.bats` for full workflow testing:
 
 ```bash
-@test "af spawn --issue creates worktree and branch" {
+@test "afx spawn --issue creates worktree and branch" {
   # Uses test repo with sample issues
 }
 
-@test "af cleanup --issue removes worktree and remote branch" {
+@test "afx cleanup --issue removes worktree and remote branch" {
   # Cleanup after spawn
 }
 ```
@@ -437,9 +437,9 @@ Add `tests/e2e/bugfix.bats` for full workflow testing:
 ## Acceptance Criteria
 
 1. **Protocol documented** - `codev/protocols/bugfix/protocol.md` is complete with workflow, success criteria, edge cases
-2. **af spawn --issue works** - Creates worktree, branch, comments on issue, spawns builder
+2. **afx spawn --issue works** - Creates worktree, branch, comments on issue, spawns builder
 3. **Collision detection works** - Blocks spawn if existing worktree, recent "On it" comment, or open PR
-4. **af cleanup --issue works** - Removes worktree, verifies PR merged, deletes remote branch
+4. **afx cleanup --issue works** - Removes worktree, verifies PR merged, deletes remote branch
 5. **Builder receives context** - Issue title/body included in task prompt
 6. **Dashboard shows bugfix builders** - With appropriate type indicator
 7. **Documentation updated** - CLAUDE.md, AGENTS.md, builder role updated

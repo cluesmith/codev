@@ -11,9 +11,9 @@
 Implement the spike protocol as the lightest-weight protocol in the codev ecosystem. Files are created in BOTH directories following the dual-directory convention:
 
 - **`codev-skeleton/protocols/spike/`** — The template shipped to other projects via `codev init`/`codev adopt`. Contains all files: protocol.json, protocol.md, builder-prompt.md, templates/findings.md.
-- **`codev/protocols/spike/`** — Our own instance of the protocol. Contains the runtime files used by porch/af: protocol.json, protocol.md, templates/findings.md.
+- **`codev/protocols/spike/`** — Our own instance of the protocol. Contains the runtime files used by porch/afx: protocol.json, protocol.md, templates/findings.md.
 
-This matches the pattern used by existing protocols (e.g., experiment has protocol.md + templates in both directories; SPIR has protocol.json, protocol.md, consult-types, templates in both). builder-prompt.md only lives in codev-skeleton/ (it's a template rendered by af spawn, not used directly at runtime).
+This matches the pattern used by existing protocols (e.g., experiment has protocol.md + templates in both directories; SPIR has protocol.json, protocol.md, consult-types, templates in both). builder-prompt.md only lives in codev-skeleton/ (it's a template rendered by afx spawn, not used directly at runtime).
 
 No runtime code changes needed — this is purely configuration and documentation.
 

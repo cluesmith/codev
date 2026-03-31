@@ -11,7 +11,7 @@
 
 Create comprehensive documentation and verification tooling for all codev dependencies:
 1. Update README with Prerequisites section (core + AI CLIs)
-2. Expand `af start` dependency checks beyond just ttyd
+2. Expand `afx start` dependency checks beyond just ttyd
 3. Add `codev doctor` command for full environment verification
 4. Update INSTALL.md to use `codev doctor` for verification
 
@@ -29,7 +29,7 @@ Create comprehensive documentation and verification tooling for all codev depend
 - Add ttyd Linux build instructions
 - Reference `codev doctor` for verification
 
-### Step 2: Expand af start dependency checks
+### Step 2: Expand afx start dependency checks
 **Files**: `agent-farm/src/commands/start.ts`, `agent-farm/src/utils/deps.ts` (new)
 **Changes**:
 - Create `deps.ts` utility with `checkDependency()` and `checkAllDependencies()` functions
@@ -69,7 +69,7 @@ Create comprehensive documentation and verification tooling for all codev depend
 ## Testing Strategy
 
 ### Manual Testing
-1. Fresh machine without ttyd - `af start` shows install instructions
+1. Fresh machine without ttyd - `afx start` shows install instructions
 2. Old tmux version - warning shown with version info
 3. All deps present - normal startup
 4. Run `codev doctor` with all deps - shows green checkmarks
@@ -82,7 +82,7 @@ Create comprehensive documentation and verification tooling for all codev depend
 
 ## Success Criteria
 - [ ] README has comprehensive Prerequisites section
-- [ ] `af start` checks node, tmux, ttyd, git with versions
+- [ ] `afx start` checks node, tmux, ttyd, git with versions
 - [ ] `codev doctor` verifies full environment (core + AI CLIs + Python)
 - [ ] INSTALL.md uses `codev doctor` for verification
 - [ ] Clear error messages with install instructions

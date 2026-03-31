@@ -69,8 +69,8 @@ codev-skeleton/templates/  # REMOVED (no longer needed)
 - [ ] Annotate server loads from `agent-farm/templates/`
 - [ ] `codev/templates/` directory removed
 - [ ] `codev-skeleton/templates/` directory removed
-- [ ] Dashboard still works after change (`af start`, refresh browser)
-- [ ] Annotation viewer still works (`af annotate <file>`)
+- [ ] Dashboard still works after change (`afx start`, refresh browser)
+- [ ] Annotation viewer still works (`afx annotate <file>`)
 - [ ] Build succeeds (`npm run build` in agent-farm)
 
 ## Technical Approach
@@ -129,6 +129,6 @@ Same pattern as dashboard-server.ts.
 ## Testing
 
 1. `npm run build` in agent-farm
-2. `af start` - dashboard should load
-3. `af annotate codev/specs/0032-consolidate-templates.md` - should open file
+2. `afx start` - dashboard should load
+3. `afx annotate codev/specs/0032-consolidate-templates.md` - should open file
 4. Verify no 404 errors in browser console

@@ -1,8 +1,8 @@
-# Review: af spawn --branch — Allow Builders to Work on Existing PR Branches
+# Review: afx spawn --branch — Allow Builders to Work on Existing PR Branches
 
 ## Summary
 
-Added a `--branch <name>` flag to `af spawn` that creates a worktree on an existing remote branch instead of creating a new one. This enables the "hand-off" workflow where a builder picks up an existing PR to complete another contributor's work.
+Added a `--branch <name>` flag to `afx spawn` that creates a worktree on an existing remote branch instead of creating a new one. This enables the "hand-off" workflow where a builder picks up an existing PR to complete another contributor's work.
 
 **Files modified**: 5 source files, 2 test files
 - `packages/codev/src/agent-farm/types.ts` — Added `branch` to `SpawnOptions`
@@ -16,7 +16,7 @@ Added a `--branch <name>` flag to `af spawn` that creates a worktree on an exist
 
 ## Spec Compliance
 
-- [x] `af spawn <id> --protocol <proto> --branch <name>` creates a worktree on the specified existing remote branch
+- [x] `afx spawn <id> --protocol <proto> --branch <name>` creates a worktree on the specified existing remote branch
 - [x] The branch must exist on the remote; if not, command fails with clear error
 - [x] If the branch is already checked out in another worktree, command fails with actionable error
 - [x] `--branch` is mutually exclusive with `--resume` (error if both provided)

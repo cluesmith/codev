@@ -9,7 +9,7 @@ The implementation successfully delivers the secure remote access features outli
 ### 1. Reverse Proxy (`dashboard-server.ts`)
 - **Correctness**: The proxy correctly routes `/terminal/:id` to the appropriate `ttyd` port for architects, builders, and utilities.
 - **WebSocket Support**: properly handles connection upgrades, ensuring interactive terminal sessions work through the proxy.
-- **Security**: The `isRequestAllowed` function maintains protection against DNS rebinding and CSRF, while `af tunnel` implicitly relies on SSH for secure transport. The proxy correctly enforces localhost-only access unless `insecureRemoteMode` is explicitly enabled.
+- **Security**: The `isRequestAllowed` function maintains protection against DNS rebinding and CSRF, while `afx tunnel` implicitly relies on SSH for secure transport. The proxy correctly enforces localhost-only access unless `insecureRemoteMode` is explicitly enabled.
 
 ### 2. Dashboard UI (`tabs.js`)
 - **URL Handling**: The `getTerminalUrl` function correctly generates proxied paths for terminal tabs.
@@ -40,4 +40,4 @@ All requested changes have been addressed.
 
 ## Notes & Future Considerations
 
-- **File Tabs Remote Access**: Currently, file tabs (via `open-server`) are not proxied. While this meets the current spec (focused on `ttyd`), it means that clicking "Open File" when accessing remotely via the `af tunnel` (single port forwarded) will fail to load the file content. Future iterations might consider proxying `open-server` traffic as well to provide a complete remote experience over a single port.
+- **File Tabs Remote Access**: Currently, file tabs (via `open-server`) are not proxied. While this meets the current spec (focused on `ttyd`), it means that clicking "Open File" when accessing remotely via the `afx tunnel` (single port forwarded) will fail to load the file content. Future iterations might consider proxying `open-server` traffic as well to provide a complete remote experience over a single port.

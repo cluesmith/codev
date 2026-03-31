@@ -69,7 +69,7 @@ Users can choose their preferred interface:
 - **Business Owners**: Project owner (Waleed)
 
 ## Success Criteria
-- [ ] `af` commands accessible via VSCode Command Palette
+- [ ] `afx` commands accessible via VSCode Command Palette
 - [ ] Builder status visible in VSCode Status Bar
 - [ ] Terminal sessions openable in VSCode terminal panel
 - [ ] File clicks from terminal open in VSCode editor
@@ -103,7 +103,7 @@ Keep ttyd + tmux as the authoritative terminal layer. VSCode extension spawns te
 - Minimal additional maintenance burden
 
 ## Assumptions
-- Agent Farm daemon runs independently (started via `af start`)
+- Agent Farm daemon runs independently (started via `afx start`)
 - VSCode has access to the same filesystem as Agent Farm
 - tmux is available on the system
 - Users have the Claude Code CLI installed
@@ -148,7 +148,7 @@ Keep ttyd + tmux as the authoritative terminal layer. VSCode extension spawns te
 - Fallback: Web dashboard always available
 
 **Cons:**
-- Requires Agent Farm running (`af start` still needed)
+- Requires Agent Farm running (`afx start` still needed)
 - Two UIs to maintain (though extension is thin)
 
 **Estimated Complexity**: Medium

@@ -67,7 +67,7 @@ The **PR gate** is preserved — a human reviews all code before merge.
 
 ```bash
 # Spawn a builder using AIR
-af spawn 42 --protocol air
+afx spawn 42 --protocol air
 
 # The builder implements autonomously and stops at the PR gate
 ```

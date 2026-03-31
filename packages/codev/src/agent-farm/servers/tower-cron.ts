@@ -1,4 +1,4 @@
-// Core cron scheduler module for af cron (Spec 399).
+// Core cron scheduler module for afx cron (Spec 399).
 //
 // Loads .af-cron/*.yaml task definitions per workspace, executes due tasks
 // asynchronously via child_process.exec, evaluates conditions, and delivers

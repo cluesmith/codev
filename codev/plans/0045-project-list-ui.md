@@ -305,7 +305,7 @@ Based on 3-way consultation (Gemini, Codex, Claude): **Keep projectlist.md as th
    - Link to spec file (if exists)
    - Link to plan file (if exists)
    - Link to review file (if exists)
-   - Use `af open` style URLs
+   - Use `afx open` style URLs
 
 4. Add CSS for expanded details:
    - Subtle background tint

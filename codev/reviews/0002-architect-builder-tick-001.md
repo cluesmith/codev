@@ -1,4 +1,4 @@
-# Review: TICK-001 - Direct CLI Access for af architect
+# Review: TICK-001 - Direct CLI Access for afx architect
 
 **Spec**: 0002-architect-builder.md
 **TICK**: 001
@@ -7,15 +7,15 @@
 
 ## Summary
 
-Added `af architect` command for power users who prefer terminal-first access to the architect role without the browser-based dashboard.
+Added `afx architect` command for power users who prefer terminal-first access to the architect role without the browser-based dashboard.
 
 ## What Was Implemented
 
-### New Command: `af architect`
+### New Command: `afx architect`
 
 ```bash
-af architect              # Start or attach to architect tmux session
-af architect "prompt"     # With initial prompt passed to claude
+afx architect              # Start or attach to architect tmux session
+afx architect "prompt"     # With initial prompt passed to claude
 ```
 
 **Behavior**:
@@ -35,7 +35,7 @@ af architect "prompt"     # With initial prompt passed to claude
 
 ### Key Implementation Details
 
-1. **Launch Script Approach**: Uses a bash launch script (like `af start`) to avoid shell escaping issues with the architect.md role file which contains backticks and special characters.
+1. **Launch Script Approach**: Uses a bash launch script (like `afx start`) to avoid shell escaping issues with the architect.md role file which contains backticks and special characters.
 
 2. **Role Loading**: Reuses the pattern from `start.ts` - checks local `codev/roles/architect.md` first, falls back to bundled.
 
@@ -51,7 +51,7 @@ af architect "prompt"     # With initial prompt passed to claude
 
 ### Challenge 1: Shell Escaping
 **Problem**: Direct tmux command failed with "unknown command: put" due to architect.md content being interpreted.
-**Solution**: Create launch script in `.agent-farm/` directory, same approach as `af start`.
+**Solution**: Create launch script in `.agent-farm/` directory, same approach as `afx start`.
 
 ### Challenge 2: Consistency with Dashboard
 **Decision**: Use same tmux settings (mouse, clipboard, passthrough) for consistent UX if user switches between modes.
@@ -68,18 +68,18 @@ af architect "prompt"     # With initial prompt passed to claude
 
 ## Testing Performed
 
-- [x] `af architect` creates new session when none exists
-- [x] `af architect` attaches to existing session
+- [x] `afx architect` creates new session when none exists
+- [x] `afx architect` attaches to existing session
 - [x] Session persists after Ctrl+B, D (detach)
 - [x] Architect role loads correctly (local path)
-- [x] `af --help` shows architect command
+- [x] `afx --help` shows architect command
 - [x] Error handling when role file missing
 
 ## Lessons Learned
 
 1. **Shell escaping in tmux**: Complex role files with backticks, $variables need launch scripts - direct command passing breaks.
 
-2. **Reuse patterns**: The launch script approach from `af start` was the right solution.
+2. **Reuse patterns**: The launch script approach from `afx start` was the right solution.
 
 3. **TICK workflow**: Amending existing spec/plan keeps related functionality together rather than fragmenting across multiple specs.
 

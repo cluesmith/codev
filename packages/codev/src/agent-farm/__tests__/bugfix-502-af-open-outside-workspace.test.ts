@@ -1,5 +1,5 @@
 /**
- * Regression test for bugfix #502: af open blocks files outside workspace directory
+ * Regression test for bugfix #502: afx open blocks files outside workspace directory
  *
  * Root cause: The POST /api/tabs/file handler in tower-routes.ts had a workspace
  * containment check that rejected any file path not under the workspace root with
@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-describe('Bugfix #502: af open allows files outside workspace', () => {
+describe('Bugfix #502: afx open allows files outside workspace', () => {
   const routesSrc = readFileSync(
     resolve(import.meta.dirname, '../servers/tower-routes.ts'),
     'utf-8',

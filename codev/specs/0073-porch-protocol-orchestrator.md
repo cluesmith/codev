@@ -19,7 +19,7 @@ Porch exists as the middle layer of a three-level architecture:
 |-------|------|-------------|----------|
 | 1 | Protocols only | Raw Claude + `codev/protocols/*.md` | Manual protocol following |
 | 2 | **porch** | Interactive REPL wrapping Claude | Enforced protocol execution |
-| 3 | **af** | UI for managing porch sessions | Multi-project orchestration |
+| 3 | **afx** | UI for managing porch sessions | Multi-project orchestration |
 
 **Level 1: Protocols Only**
 Just tell Claude to follow SPIR. No tooling required. Useful for simple tasks or when you want full control.
@@ -27,7 +27,7 @@ Just tell Claude to follow SPIR. No tooling required. Useful for simple tasks or
 **Level 2: Porch (this spec)**
 Our take on [Ralph](https://www.anthropic.com/engineering/claude-code-best-practices), but as a REPL. Ralph is Anthropic's recommended pattern for long-running agent tasks: fresh context per iteration, state persisted to files. Porch is an interactive state machine that wraps Claude with protocol enforcement. It persists state to YAML files, blocks on human gates, runs defense checks (build/test), and orchestrates multi-agent consultations. You run `porch` directly and interact with it. Each iteration gets fresh context while state persists between iterations.
 
-**Level 3: af (Agent Farm)**
+**Level 3: afx (Agent Farm)**
 A UI layer that enables the **Architect-Builder pattern**. The human architect uses the dashboard to kickoff builders (porch sessions in worktrees), monitor their progress, and approve gates. Each porch session IS a builder - it runs the full protocol lifecycle autonomously until it needs human input.
 
 ## Key Decisions (from discussion)
@@ -36,7 +36,7 @@ A UI layer that enables the **Architect-Builder pattern**. The human architect u
 |----------|--------|
 | Replaces or coexists with current protocols? | **Replaces** |
 | porch is a standalone command? | **Yes** - `porch`, not `codev porch` |
-| Integration with `af kickoff`? | **Yes** - af kickoffs porch processes |
+| Integration with `afx kickoff`? | **Yes** - afx kickoffs porch processes |
 | Builder owns full lifecycle? | **Yes** - S→P→I→D→E→R |
 | Worktree tied to builder or project? | **Project** - worktrees persist independently |
 | Protocol definitions location? | `codev-skeleton/protocols/*.json` |
@@ -53,7 +53,7 @@ ARCHITECT (main)                    BUILDER (worktree in .builders/)
             │ Human reviews
   Plan ─────┤
             │
-            └── af kickoff ───────────► Claude session
+            └── afx kickoff ───────────► Claude session
                                      ├── Implement
                                      ├── Defend
                                      ├── Evaluate
@@ -75,7 +75,7 @@ ARCHITECT (main)                    BUILDER (worktree in .builders/)
 ARCHITECT (main)                    PROJECT WORKTREE (projects/0073/)
 ════════════════                    ══════════════════════════════════
 
-  af kickoff 0073 ────────────────────► PORCH REPL:
+  afx kickoff 0073 ────────────────────► PORCH REPL:
                                      │
                                      ├─► Specify ───┐
                                      │              │◄── notify architect
@@ -146,10 +146,10 @@ codev-project/
 - Multiple projects can exist simultaneously
 
 **Worktree lifecycle:**
-- `af kickoff 0073` creates worktree + starts porch (builder)
-- `af stop 0073` stops porch but preserves worktree
-- `af resume 0073` resumes porch in existing worktree
-- `af cleanup 0073` removes worktree (after project complete or abandoned)
+- `afx kickoff 0073` creates worktree + starts porch (builder)
+- `afx stop 0073` stops porch but preserves worktree
+- `afx resume 0073` resumes porch in existing worktree
+- `afx cleanup 0073` removes worktree (after project complete or abandoned)
 
 ### 2. Porch as Builder
 
@@ -157,10 +157,10 @@ When you kickoff a project, porch becomes the builder:
 
 ```bash
 # Current system
-af kickoff 0073                # Spawns Claude session that follows SPIR protocol
+afx kickoff 0073                # Spawns Claude session that follows SPIR protocol
 
 # New system (porch)
-af kickoff 0073                # Creates worktree at worktrees/spir_0073_*/
+afx kickoff 0073                # Creates worktree at worktrees/spir_0073_*/
                               # Runs: porch run spir 0073
                               # Porch orchestrates the entire lifecycle
 ```
@@ -236,7 +236,7 @@ Porch notifies the architect when human review is needed:
    ```
    Extends the signal protocol upward - porch emits state, architect Claude polls.
 
-2. **Dashboard (for humans)** - af dashboard shows pending approvals
+2. **Dashboard (for humans)** - afx dashboard shows pending approvals
 3. **CODEV_HQ (for remote)** - Push notifications via event relay (design TBD)
 
 ## Technical Design
@@ -249,7 +249,7 @@ The codev ecosystem splits into three distinct commands:
 |---------|---------|-------|
 | `codev` | Project setup/utilities | Foundation |
 | `porch` | Protocol REPL (this spec) | Engine |
-| `af` | Multi-session UI (Agent Farm) | Orchestration |
+| `afx` | Multi-session UI (Agent Farm) | Orchestration |
 
 **codev** - Project initialization and utilities
 - `codev init` - Initialize a new project
@@ -261,7 +261,7 @@ The codev ecosystem splits into three distinct commands:
 - Persists state to `codev/projects/<id>/status.yaml`
 - No dependency on tmux or the orchestration layer
 
-**af** - Agent Farm (Orchestration UI)
+**afx** - Agent Farm (Orchestration UI)
 - Dashboard for managing multiple porch sessions (builders)
 - Creates worktrees, kickoffs porch processes
 - Provides web UI for monitoring
@@ -731,7 +731,7 @@ config:
 3. Lock timeout: 5 seconds (then retry or fail)
 
 **Race condition handling:**
-- `af status` while `porch run` active → reads last committed state (safe)
+- `afx status` while `porch run` active → reads last committed state (safe)
 - Two porch instances on same project → second instance fails with "already running"
 - Multiple projects → independent, no conflict (separate status files)
 
@@ -798,9 +798,9 @@ diagnose → fix → test → pr → complete
 
 **Protocol selection:**
 ```bash
-af kickoff 0073                # SPIR (new feature)
-af kickoff --tick 0073 name    # TICK (amend existing spec 0073)
-af kickoff --issue 142         # BUGFIX (GitHub issue)
+afx kickoff 0073                # SPIR (new feature)
+afx kickoff --tick 0073 name    # TICK (amend existing spec 0073)
+afx kickoff --issue 142         # BUGFIX (GitHub issue)
 ```
 
 ### Notification Mechanism
@@ -823,13 +823,13 @@ Porch writes pending gates to status file. Architect discovery via:
 
 2. **Dashboard polling** (for human):
    ```
-   af status   # Shows all projects with gate status
+   afx status   # Shows all projects with gate status
    ```
 
 3. **File watcher** (optional):
    ```bash
    fswatch -o codev/projects/*/status.yaml | while read; do
-     af status --pending-only
+     afx status --pending-only
    done
    ```
 
@@ -839,12 +839,12 @@ Porch writes pending gates to status file. Architect discovery via:
 
 ```bash
 # Project lifecycle
-af kickoff 0073                       # Create worktree + start porch
-af status                             # Show all projects and states
-af status 0073                        # Show specific project state
-af approve 0073 specify_approval      # Approve a gate
-af stop 0073                          # Stop porch (worktree persists)
-af resume 0073                        # Resume porch on existing worktree
+afx kickoff 0073                       # Create worktree + start porch
+afx status                             # Show all projects and states
+afx status 0073                        # Show specific project state
+afx approve 0073 specify_approval      # Approve a gate
+afx stop 0073                          # Stop porch (worktree persists)
+afx resume 0073                        # Resume porch on existing worktree
 
 # Direct porch access (standalone command)
 porch run spir 0073                 # Run protocol REPL
@@ -862,7 +862,7 @@ porch approve 0073 <gate>             # Approve gate
 - [ ] Human gates block and notify architect
 - [ ] Architect can approve via CLI or dashboard
 - [ ] State persists to files, survives porch restart
-- [ ] `af kickoff` creates persistent worktree and runs porch
+- [ ] `afx kickoff` creates persistent worktree and runs porch
 - [ ] Worktree persists after porch stops
 - [ ] Can resume a paused project
 - [ ] Multiple porch instances can run simultaneously (different worktrees)
@@ -883,7 +883,7 @@ porch approve 0073 <gate>             # Approve gate
 1. Move protocol definitions: Create `protocols/*.json` alongside existing `protocols/*.md`
 2. Keep prompts as markdown
 3. Change `.builders/` to `worktrees/` and `codev/projects/`
-4. Update `af kickoff` to run porch instead of Claude directly
+4. Update `afx kickoff` to run porch instead of Claude directly
 
 ### Claude Migration Instructions
 
@@ -904,7 +904,7 @@ Migration steps:
 
 ### Backward Compatibility
 
-- `af kickoff --legacy` runs old Claude-based builder (transitional)
+- `afx kickoff --legacy` runs old Claude-based builder (transitional)
 - Existing `.builders/` worktrees can be migrated or cleaned up
 
 ## Resolved Decisions
@@ -916,7 +916,7 @@ Migration steps:
 5. **Error recovery**: Atomic writes + crash recovery on resume
 6. **Plan phase extraction**: Parse `### Phase N: <title>` headers from plan markdown
 7. **File format**: Pure YAML for status (not markdown with frontmatter)
-8. **Orchestration command**: `af` (Agent Farm - keeping existing name)
+8. **Orchestration command**: `afx` (Agent Farm - keeping existing name)
 9. **Action verb**: `kickoff` instead of `spawn` (conductor kicks off the performance)
 10. **Multi-agent consultation**: `consultation` field in phase definition triggers 3-way parallel reviews
 11. **Multiple instances**: Supported - each project runs in its own worktree

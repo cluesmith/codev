@@ -38,7 +38,7 @@ MAINTAIN is executed by a Builder, spawned by the Architect:
 ```
 Architect: "Time for maintenance"
     ↓
-af spawn --protocol maintain
+afx spawn --protocol maintain
     ↓
 Builder executes MAINTAIN protocol
     ↓

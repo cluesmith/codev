@@ -177,6 +177,6 @@ codev update --agent
 
 ## See Also
 
-- [af](agent-farm.md) - Agent Farm commands
+- [afx](agent-farm.md) - Agent Farm commands
 - [consult](consult.md) - AI consultation
 - [overview](overview.md) - CLI overview

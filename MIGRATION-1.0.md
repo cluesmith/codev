@@ -20,7 +20,7 @@ npm install -g @cluesmith/codev
 
 This provides three CLI commands:
 - `codev` - Main CLI (init, adopt, doctor, update, tower)
-- `af` - Agent-farm CLI for parallel development
+- `afx` - Agent-farm CLI for parallel development
 - `consult` - Multi-agent consultation tool
 
 ### Verify dependencies
@@ -127,7 +127,7 @@ After installing `@cluesmith/codev` globally, verify the commands are available:
 ```bash
 # Check all three commands work
 codev --help
-af --help
+afx --help
 consult --help
 ```
 
@@ -203,13 +203,13 @@ The AI migration assistant should merge these template improvements while preser
 
 ```bash
 # Check CLI works
-af --help
+afx --help
 
 # Run health check
 codev doctor
 
 # Test starting the dashboard
-af dash start
+afx dash start
 ```
 
 ---
@@ -219,10 +219,10 @@ af dash start
 - [ ] npm package installed: `npm install -g @cluesmith/codev`
 - [ ] Dependencies installed (node 18+, git, AI CLIs)
 - [ ] `codev --help` shows available commands
-- [ ] `af --help` shows available commands
+- [ ] `afx --help` shows available commands
 - [ ] `consult --help` shows available commands
 - [ ] `codev doctor` passes all checks (AI CLIs show "working")
-- [ ] Dashboard starts with `af dash start`
+- [ ] Dashboard starts with `afx dash start`
 - [ ] Your specs in `codev/specs/` are intact
 - [ ] Your plans in `codev/plans/` are intact
 - [ ] Your reviews in `codev/reviews/` are intact
@@ -245,7 +245,7 @@ My project: /path/to/my/project
 
 Please:
 1. Install the npm package: npm install -g @cluesmith/codev
-2. Verify the three commands work: codev --help, af --help, consult --help
+2. Verify the three commands work: codev --help, afx --help, consult --help
 3. Check prerequisites (node, git, AI CLIs) with: codev doctor
 4. Clean up obsolete files (builders.md, .architect.pid, .builders/, etc.)
 5. Compare my codev/protocols/, codev/templates/, codev/roles/ with the
@@ -258,7 +258,7 @@ Please:
    - Sort active projects to the top
 8. Create codev/config.json with shell command configuration
 9. Run codev doctor to verify all dependencies work
-10. Test af dash start/stop
+10. Test afx dash start/stop
 
 Do NOT blindly overwrite - check for local modifications first.
 Preserve all existing project entries when updating projectlist.md.
@@ -271,7 +271,7 @@ Preserve all existing project entries when updating projectlist.md.
 ### Port already in use
 
 ```bash
-af ports cleanup
+afx ports cleanup
 ```
 
 ### Old state causing issues
@@ -281,7 +281,7 @@ rm -rf .agent-farm/
 rm -rf ~/.agent-farm/ports.json
 ```
 
-### Commands not found (codev, af, consult)
+### Commands not found (codev, afx, consult)
 
 Ensure npm global bin is in your PATH:
 ```bash

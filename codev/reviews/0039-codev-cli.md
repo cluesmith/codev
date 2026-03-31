@@ -25,7 +25,7 @@ packages/codev/
 ├── tsconfig.json          # TypeScript configuration
 ├── bin/
 │   ├── codev.js           # Main entry point
-│   ├── af.js              # Shim for af command (codev agent-farm)
+│   ├── af.js              # Shim for afx command (codev agent-farm)
 │   └── consult.js         # Shim for consult command
 ├── src/
 │   ├── cli.ts             # Main CLI with commander
@@ -67,7 +67,7 @@ packages/codev/
 | Command | Status | Notes |
 |---------|--------|-------|
 | `codev --help` | ✅ | Shows all commands |
-| `af --help` | ✅ | Shows agent-farm commands |
+| `afx --help` | ✅ | Shows agent-farm commands |
 | `codev doctor` | ✅ | Checks all dependencies correctly |
 | `codev init test-project --yes` | ✅ | Creates project with 37 files |
 | `codev consult -m gemini spec 39 --dry-run` | ✅ | Shows correct command |
@@ -86,7 +86,7 @@ packages/codev/
 | `codev update` updates templates safely | ✅ | Hash-based merge strategy |
 | `codev tower` shows cross-project dashboard | ✅ | Delegates to agent-farm tower |
 | `codev consult` works (TypeScript native) | ✅ | Dry-run test works |
-| Existing `af` commands work unchanged | ✅ | agent-farm subcommand works |
+| Existing `afx` commands work unchanged | ✅ | agent-farm subcommand works |
 
 ### Gemini (133.7s) - REQUEST_CHANGES
 
@@ -101,7 +101,7 @@ packages/codev/
 
 **Concerns raised were about spec/plan alignment, not implementation:**
 
-1. **Spec-plan `af` aliasing conflict** - The spec says `af` is NOT aliased as `codev af` (separate entry points). The plan shows `.alias('af')` which makes `codev af` ALSO work. Both behaviors are correct and complementary.
+1. **Spec-plan `afx` aliasing conflict** - The spec says `afx` is NOT aliased as `codev af` (separate entry points). The plan shows `.alias('af')` which makes `codev af` ALSO work. Both behaviors are correct and complementary.
 2. **Missing SPIR consultation checkpoints** - Plan documentation issue, not implementation
 3. **Consult history logs risk** - Logs are local to `.consult/` which is gitignored. Acceptable for local dev tooling.
 

@@ -19,7 +19,7 @@ Porch is now a standalone CLI that orchestrates development protocols (SPIR, TIC
 | 2 | Standalone `porch` binary | Complete |
 | 3 | Plan phase extraction, IDE loop, checks | Complete |
 | 4 | Multi-agent consultation loop | Complete |
-| 5 | AF integration, `af kickoff`, notifications | Complete |
+| 5 | AF integration, `afx kickoff`, notifications | Complete |
 | 6 | Protocol JSON definitions (SPIR, TICK, BUGFIX) | Complete |
 | 7 | Documentation updates | Complete |
 | 8 | Test infrastructure (72 tests) | Complete |
@@ -144,7 +144,7 @@ These items are noted in "Recommendations for Future Work" below.
 - [x] IDE phases loop over plan phases (phased implementation)
 - [x] Multi-agent consultation framework
 - [x] Human gates block and notify architect
-- [x] `af kickoff` creates worktree and runs porch
+- [x] `afx kickoff` creates worktree and runs porch
 - [x] TICK and BUGFIX protocols defined
 
 ### Testing Requirements (from spec)

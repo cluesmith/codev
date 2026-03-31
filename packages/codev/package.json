@@ -6,6 +6,7 @@
   "bin": {
     "codev": "./bin/codev.js",
     "porch": "./bin/porch.js",
+    "afx": "./bin/afx.js",
     "af": "./bin/af.js",
     "consult": "./bin/consult.js",
     "team": "./bin/team.js",

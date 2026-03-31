@@ -1,5 +1,5 @@
 /**
- * Regression test for bugfix #506: af open / annotator resolves builder file
+ * Regression test for bugfix #506: afx open / annotator resolves builder file
  * paths against main workspace instead of worktree.
  *
  * Root cause: The terminal_sessions table did not store the session's cwd.

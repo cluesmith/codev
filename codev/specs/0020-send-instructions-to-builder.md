@@ -33,17 +33,17 @@ Common scenarios where the Architect needs to communicate with a running Builder
 ### CLI Interface
 ```bash
 # Send message to a specific builder
-af send 0009 "PR review complete, please address the error handling feedback"
-af send --builder 0009 "Message here"
+afx send 0009 "PR review complete, please address the error handling feedback"
+afx send --builder 0009 "Message here"
 
 # Send with file attachment (inject file content into message)
-af send 0009 "Review this diff:" --file /tmp/review-comments.md
+afx send 0009 "Review this diff:" --file /tmp/review-comments.md
 
 # Send to all builders
-af send --all "Stopping for integration - please commit your work"
+afx send --all "Stopping for integration - please commit your work"
 
 # Interactive mode (opens a prompt)
-af send 0009 --interactive
+afx send 0009 --interactive
 ```
 
 ### Dashboard Interface
@@ -59,11 +59,11 @@ af send 0009 --interactive
 
 ## Success Criteria
 
-- [ ] `af send BUILDER_ID "message"` sends text to the builder's terminal
+- [ ] `afx send BUILDER_ID "message"` sends text to the builder's terminal
 - [ ] Message appears as if typed by user (builder sees it as input)
 - [ ] Builder's Claude instance receives and processes the message
-- [ ] `af send --all "message"` broadcasts to all active builders
-- [ ] `af send --file` can inject file contents into the message
+- [ ] `afx send --all "message"` broadcasts to all active builders
+- [ ] `afx send --file` can inject file contents into the message
 - [ ] Dashboard has text input for sending messages (optional stretch goal)
 - [ ] Works with builders in any status (implementing, blocked, etc.)
 - [ ] Graceful error handling for non-existent or dead builders
@@ -185,8 +185,8 @@ interface SendOptions {
   noEnter?: boolean;    // Don't send Enter after message
 }
 
-// Usage: af send [builder] [message] [options]
-// Can also read from stdin: echo "message" | af send 0009 -
+// Usage: afx send [builder] [message] [options]
+// Can also read from stdin: echo "message" | afx send 0009 -
 ```
 
 ### Message Flow
@@ -344,11 +344,11 @@ app.post('/api/builders/:id/send', async (req, res) => {
 ## Test Scenarios
 
 ### Functional Tests
-1. `af send 0009 "Hello"` - Message appears in builder terminal
-2. `af send 0009 "Line 1\nLine 2"` - Multi-line message works
-3. `af send --all "Pause"` - All builders receive message
-4. `af send 9999 "Test"` - Non-existent builder returns error
-5. `af send 0009 "Review:" --file comments.md` - File content included
+1. `afx send 0009 "Hello"` - Message appears in builder terminal
+2. `afx send 0009 "Line 1\nLine 2"` - Multi-line message works
+3. `afx send --all "Pause"` - All builders receive message
+4. `afx send 9999 "Test"` - Non-existent builder returns error
+5. `afx send 0009 "Review:" --file comments.md` - File content included
 6. Message with special chars ($, `, ", \) handled correctly
 
 ### Non-Functional Tests

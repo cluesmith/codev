@@ -1,4 +1,4 @@
-# Plan: `af bench` — Consultation Benchmarking CLI Command
+# Plan: `afx bench` — Consultation Benchmarking CLI Command
 
 ## Metadata
 - **ID**: plan-2026-02-19-af-bench-command
@@ -8,17 +8,17 @@
 
 ## Executive Summary
 
-Implement `af bench` as a TypeScript command module following the existing `af` CLI pattern (Approach 1 from spec). The command spawns `consult` as child processes, collects timing data via `performance.now()`, computes statistics, and formats output using the existing logger utilities.
+Implement `afx bench` as a TypeScript command module following the existing `afx` CLI pattern (Approach 1 from spec). The command spawns `consult` as child processes, collects timing data via `performance.now()`, computes statistics, and formats output using the existing logger utilities.
 
 Three phases: core command with parallel/sequential execution, statistics and output formatting, and tests.
 
 ## Success Metrics
 - [ ] All specification success criteria met
 - [ ] Test coverage >90% of bench.ts module
-- [ ] `af bench --help` works
-- [ ] `af bench` runs 3 engines in parallel
-- [ ] `af bench --sequential` runs engines serially
-- [ ] `af bench --iterations N` computes summary stats
+- [ ] `afx bench --help` works
+- [ ] `afx bench` runs 3 engines in parallel
+- [ ] `afx bench --sequential` runs engines serially
+- [ ] `afx bench --iterations N` computes summary stats
 - [ ] Results saved to timestamped file
 
 ## Phases (Machine Readable)
@@ -57,7 +57,7 @@ Three phases: core command with parallel/sequential execution, statistics and ou
 
 **Default prompt:** `"Please analyze the codev codebase and give me a list of potential impactful improvements."` (must match bench.sh exactly).
 
-**Project root resolution:** Use `process.cwd()` as the base for `codev/resources/bench-results/`. The `af` CLI is always invoked from the project root (same assumption as all other `af` commands).
+**Project root resolution:** Use `process.cwd()` as the base for `codev/resources/bench-results/`. The `afx` CLI is always invoked from the project root (same assumption as all other `afx` commands).
 
 **`bench.ts` structure:**
 ```typescript
@@ -110,8 +110,8 @@ program
 ```
 
 #### Acceptance Criteria
-- [ ] `af bench` spawns 3 consult processes in parallel
-- [ ] `af bench --sequential` spawns processes serially
+- [ ] `afx bench` spawns 3 consult processes in parallel
+- [ ] `afx bench --sequential` spawns processes serially
 - [ ] Engine failures recorded as FAILED, don't abort run
 - [ ] Engine timeouts recorded as TIMEOUT after configured seconds
 - [ ] `--iterations 0` fails with clear error
@@ -119,7 +119,7 @@ program
 
 #### Test Plan
 - **Unit Tests**: Mock `child_process.spawn` to test parallel/sequential logic, timeout handling, failure handling
-- **Manual Testing**: `af bench --iterations 1` against live engines
+- **Manual Testing**: `afx bench --iterations 1` against live engines
 
 ---
 
@@ -173,7 +173,7 @@ function computeStats(times: number[]): { avg: number; min: number; max: number;
 
 #### Test Plan
 - **Unit Tests**: Stats computation with known values, edge cases (all failures, single successful result)
-- **Manual Testing**: `af bench --iterations 3` → verify table formatting and saved file
+- **Manual Testing**: `afx bench --iterations 3` → verify table formatting and saved file
 
 ---
 
@@ -236,8 +236,8 @@ Phase 1 (Core) ──→ Phase 2 (Stats/Output) ──→ Phase 3 (Tests)
 | Host detection platform differences | Low | Low | Best-effort with 'unknown' fallback |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `af bench --iterations 1` runs and shows timing output
-2. **After Phase 2**: `af bench --iterations 3` shows stats table and saves to file
+1. **After Phase 1**: `afx bench --iterations 1` runs and shows timing output
+2. **After Phase 2**: `afx bench --iterations 3` shows stats table and saves to file
 3. **After Phase 3**: `npm test` passes with >90% bench.ts coverage
 
 ## Notes

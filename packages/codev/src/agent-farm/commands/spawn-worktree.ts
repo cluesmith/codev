@@ -302,7 +302,7 @@ export async function createWorktreeFromBranch(
   if (alreadyCheckedOutAt) {
     fatal(
       `Branch '${branch}' is already checked out at '${alreadyCheckedOutAt}'.\n` +
-      `Switch that checkout to a different branch first, or use 'af cleanup' to remove the worktree.`
+      `Switch that checkout to a different branch first, or use 'afx cleanup' to remove the worktree.`
     );
   }
 
@@ -416,7 +416,7 @@ export async function checkBugfixCollisions(
 ): Promise<void> {
   // 1. Check if worktree already exists
   if (existsSync(worktreePath)) {
-    fatal(`Worktree already exists at ${worktreePath}\nRun: af cleanup --issue ${issueNumber}`);
+    fatal(`Worktree already exists at ${worktreePath}\nRun: afx cleanup --issue ${issueNumber}`);
   }
 
   // 2. Check for recent "On it" comments (< 24h old)

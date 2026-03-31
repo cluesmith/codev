@@ -37,7 +37,7 @@ Follow this 3-step workflow. You can skip or reorder steps as the investigation 
 - Write findings to `codev/spikes/<id>-<name>.md` using the template
 - Provide a clear feasibility verdict: Feasible / Not Feasible / Feasible with Caveats
 - Commit the findings document
-- Notify the architect: `af send architect "Spike <id> complete. Verdict: [verdict]"`
+- Notify the architect: `afx send architect "Spike <id> complete. Verdict: [verdict]"`
 
 ## Key Principles
 

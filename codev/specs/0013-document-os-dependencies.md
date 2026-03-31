@@ -41,8 +41,8 @@ Users often encounter cryptic errors when dependencies are missing.
 - [ ] README has "Prerequisites" section with all dependencies for full codev environment
 - [ ] Installation commands for macOS (brew) and Linux (apt/dnf)
 - [ ] Version requirements documented
-- [ ] `af start` checks core dependencies (tmux, ttyd, node, git)
-- [ ] `codev doctor` command to verify full installation (af + consult + AI CLIs)
+- [ ] `afx start` checks core dependencies (tmux, ttyd, node, git)
+- [ ] `codev doctor` command to verify full installation (afx + consult + AI CLIs)
 - [ ] INSTALL.md uses `codev doctor` for verification step
 - [ ] Clear guidance on optional vs required dependencies (e.g., only need one AI CLI to start)
 
@@ -110,7 +110,7 @@ async function checkDependencies(): Promise<void> {
 
 ### In Scope
 - README documentation for full codev environment
-- Dependency checks in `af start` (core deps)
+- Dependency checks in `afx start` (core deps)
 - `codev doctor` command for full environment verification
 - INSTALL.md update to use `codev doctor` for verification
 
@@ -121,7 +121,7 @@ async function checkDependencies(): Promise<void> {
 
 ## Test Scenarios
 
-1. Fresh machine without ttyd - `af start` shows install instructions
+1. Fresh machine without ttyd - `afx start` shows install instructions
 2. Old tmux version - warning shown (if version check implemented)
 3. All deps present - normal startup
 

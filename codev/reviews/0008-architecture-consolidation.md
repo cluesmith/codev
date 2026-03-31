@@ -45,7 +45,7 @@ This spec addressed the brittleness in the architect-builder system caused by ha
    - Warnings for stale artifacts
 
 6. **Created Role Files**
-   - `codev/roles/architect.md` - comprehensive architect role with `af` commands
+   - `codev/roles/architect.md` - comprehensive architect role with `afx` commands
    - `codev/roles/builder.md` - updated builder role with status management
    - Synced to `codev-skeleton/roles/`
 

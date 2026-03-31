@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// af - Agent Farm CLI (standalone command)
-// Routes to agent-farm command handler
+// af - DEPRECATED: use afx instead
 import { run } from '../dist/cli.js';
 
+process.stderr.write('⚠ `af` is deprecated. Use `afx` instead.\n');
 const args = process.argv.slice(2);
 run(['agent-farm', ...args]);

@@ -2,9 +2,9 @@
  * Database CLI commands
  *
  * Commands for debugging and managing the SQLite databases:
- * - af db dump: Export all tables to JSON
- * - af db query: Run arbitrary SELECT queries
- * - af db reset: Delete database and start fresh
+ * - afx db dump: Export all tables to JSON
+ * - afx db query: Run arbitrary SELECT queries
+ * - afx db reset: Delete database and start fresh
  */
 
 import { existsSync, unlinkSync } from 'node:fs';
@@ -53,7 +53,7 @@ export function dbQuery(sql: string, options: QueryOptions = {}): void {
   // Safety check: only allow SELECT queries
   const normalizedSql = sql.trim().toLowerCase();
   if (!normalizedSql.startsWith('select')) {
-    fatal('Only SELECT queries are allowed for safety. Use "af db reset" to modify data.');
+    fatal('Only SELECT queries are allowed for safety. Use "afx db reset" to modify data.');
   }
 
   const db = options.global ? getGlobalDb() : getDb();

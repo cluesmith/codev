@@ -88,8 +88,8 @@ Replace JSON files with SQLite databases:
 - [ ] Tests verify concurrent access doesn't corrupt state
 - [ ] Dashboard reads/writes work without race conditions
 - [ ] Port allocation is atomic (uses `BEGIN IMMEDIATE`)
-- [ ] `af db dump` command for debugging
-- [ ] `af db query` command for ad-hoc queries
+- [ ] `afx db dump` command for debugging
+- [ ] `afx db query` command for ad-hoc queries
 
 ## Technical Approach
 
@@ -427,7 +427,7 @@ function migrateLocalFromJson(db: Database, jsonPath: string): void {
 Add to `agent-farm` CLI:
 
 ```typescript
-// af db dump - Export all tables to JSON
+// afx db dump - Export all tables to JSON
 program
   .command('db dump')
   .description('Export database state to JSON')
@@ -442,7 +442,7 @@ program
     console.log(JSON.stringify(dump, null, 2));
   });
 
-// af db query - Run arbitrary SELECT
+// afx db query - Run arbitrary SELECT
 program
   .command('db query <sql>')
   .description('Run a SELECT query against the database')
@@ -457,7 +457,7 @@ program
     console.log(JSON.stringify(results, null, 2));
   });
 
-// af db reset - Delete DB and start fresh
+// afx db reset - Delete DB and start fresh
 program
   .command('db reset')
   .description('Delete database and start fresh (DESTRUCTIVE)')
@@ -492,7 +492,7 @@ program
 | DB corruption on crash | WAL mode + `synchronous=NORMAL` provides good durability |
 | `SQLITE_BUSY` errors under contention | `busy_timeout=5000` + retry logic |
 | Learning curve for SQL | Schema is simple, operations are CRUD |
-| Debugging harder than JSON | `af db dump` and `af db query` commands |
+| Debugging harder than JSON | `afx db dump` and `afx db query` commands |
 | Migration fails mid-way | Transaction wraps migration; JSON preserved as `.bak` |
 | Downgrade incompatibility | Keep `.json.bak` permanently; document in MIGRATION.md |
 | WAL fails on NFS/network filesystems | Check and warn if WAL mode fails |
@@ -520,7 +520,7 @@ program
 
 ### Integration Tests
 
-11. **Full workflow** - `af start` → `af spawn` → `af status` → `af cleanup` with SQLite
+11. **Full workflow** - `afx start` → `afx spawn` → `afx status` → `afx cleanup` with SQLite
 12. **Dashboard reads** - Dashboard API reads from SQLite correctly
 13. **Backward compatibility** - Fresh install (no JSON) works
 
@@ -528,7 +528,7 @@ program
 
 Based on 3-way review feedback:
 
-1. **`af db dump` command** - YES, essential for debugging (moved from Questions to Success Criteria)
+1. **`afx db dump` command** - YES, essential for debugging (moved from Questions to Success Criteria)
 2. **Auto-migration** - YES, with safeguards (copy then delete, transaction wrap)
 3. **Indexes** - YES, on `builders.status` and `builders.project_id`
 4. **`BEGIN IMMEDIATE`** - YES, for port allocation to prevent race

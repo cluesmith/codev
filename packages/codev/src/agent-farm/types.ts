@@ -64,7 +64,7 @@ export interface StartOptions {
 
 export interface SpawnOptions {
   // Primary input: issue number as positional arg
-  issueNumber?: number;   // Positional arg: `af spawn 315`
+  issueNumber?: number;   // Positional arg: `afx spawn 315`
 
   // Protocol selection (required for issue-based spawns)
   protocol?: string;      // --protocol spir|aspir|air|bugfix|tick|maintain|experiment

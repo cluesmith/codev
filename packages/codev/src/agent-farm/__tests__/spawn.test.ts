@@ -830,9 +830,9 @@ describe('Spawn Command', () => {
 
     describe('specName derivation', () => {
       it('uses slugified GitHub title for naming when available', () => {
-        const result = deriveSpecName('444', 'af spawn should not require a pre-existing spec file', null);
+        const result = deriveSpecName('444', 'afx spawn should not require a pre-existing spec file', null);
         // slugify truncates to 30 chars; trailing hyphen may remain after truncation
-        expect(result).toBe(`444-${slugify('af spawn should not require a pre-existing spec file')}`);
+        expect(result).toBe(`444-${slugify('afx spawn should not require a pre-existing spec file')}`);
       });
 
       it('uses spec filename when GitHub unavailable', () => {
@@ -875,7 +875,7 @@ describe('Spawn Command', () => {
 
     describe('worktree naming with GitHub title', () => {
       it('constructs correct worktree name from GitHub issue title', () => {
-        const issueTitle = 'af spawn should not require a pre-existing spec file';
+        const issueTitle = 'afx spawn should not require a pre-existing spec file';
         const strippedId = '444';
         const slug = slugify(issueTitle);
         const specName = `${strippedId}-${slug}`;
@@ -889,7 +889,7 @@ describe('Spawn Command', () => {
 
   describe('TICK --amends spec resolution logic', () => {
     it('TICK with --amends resolves spec by amends number, not issue number', () => {
-      // For: af spawn 320 --protocol tick --amends 315
+      // For: afx spawn 320 --protocol tick --amends 315
       // The spec lookup should use "315" not "320"
       const options: SpawnOptions = { issueNumber: 320, protocol: 'tick', amends: 315 };
       const specLookupId = (options.protocol === 'tick' && options.amends)

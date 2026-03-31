@@ -433,7 +433,7 @@ function checkNpmDependencies(): CheckResult {
     // Fall through to other checks
   }
 
-  // Fallback: check if codev/af commands exist
+  // Fallback: check if codev/afx commands exist
   if (commandExists('codev')) {
     const output = runCommand('codev', ['--version']);
     if (output) {
@@ -442,8 +442,8 @@ function checkNpmDependencies(): CheckResult {
     return { status: 'ok', version: 'installed' };
   }
 
-  if (commandExists('af')) {
-    return { status: 'ok', version: 'installed (via af)' };
+  if (commandExists('afx')) {
+    return { status: 'ok', version: 'installed (via afx)' };
   }
 
   return {

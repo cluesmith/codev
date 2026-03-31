@@ -8,28 +8,28 @@
 
 ## Problem Statement
 
-The `af team` commands (`list`, `message`, `update`) currently live as subcommands of the `af` (Agent Farm) CLI. However, team management is conceptually separate from the GUI/orchestration toolkit — it's about people and communication, not builders and worktrees.
+The `afx team` commands (`list`, `message`, `update`) currently live as subcommands of the `afx` (Agent Farm) CLI. However, team management is conceptually separate from the GUI/orchestration toolkit — it's about people and communication, not builders and worktrees.
 
-This creates a misleading mental model: `af` is the orchestration layer (spawn, status, cleanup, tower), while team management is a coordination concern. Every other distinct domain already has its own top-level CLI (`codev`, `consult`, `porch`). Team should follow the same pattern.
+This creates a misleading mental model: `afx` is the orchestration layer (spawn, status, cleanup, tower), while team management is a coordination concern. Every other distinct domain already has its own top-level CLI (`codev`, `consult`, `porch`). Team should follow the same pattern.
 
 ## Current State
 
-- `af team list` — lists team members from `codev/team/people/`
-- `af team message <text>` — posts to `codev/team/messages.md`
-- `af team update` — hourly cron summary of notable events
+- `afx team list` — lists team members from `codev/team/people/`
+- `afx team message <text>` — posts to `codev/team/messages.md`
+- `afx team update` — hourly cron summary of notable events
 - Implementation lives in `packages/codev/src/agent-farm/commands/team.ts` and `team-update.ts`
 - Library code is already cleanly separated in `src/lib/team.ts` and `src/lib/team-github.ts`
-- Cron config at `.af-cron/team-update.yaml` references `af team update`
+- Cron config at `.af-cron/team-update.yaml` references `afx team update`
 - Tower route `GET /api/team` calls the library directly (not the CLI)
 - No `team add` command exists yet
 
 ## Desired State
 
 1. **`team` is a standalone top-level CLI** — `team list`, `team message`, `team update`, `team add`
-2. **`af team` keeps working** — prints a deprecation notice pointing to `team`, then delegates
+2. **`afx team` keeps working** — prints a deprecation notice pointing to `team`, then delegates
 3. **A new skill** (`.claude/skills/team/SKILL.md`) documents the CLI and team file format
 4. **Command reference** (`codev/resources/commands/team.md`) follows the pattern of existing docs
-5. **Cron and documentation updated** to reference `team` instead of `af team`
+5. **Cron and documentation updated** to reference `team` instead of `afx team`
 
 ## Stakeholders
 - **Primary Users**: AI agents (architect and builders) using team commands
@@ -63,10 +63,10 @@ role: Team Member
 - Validates the handle format using existing `isValidGitHubHandle()` — on failure exits with code 1 and message: `Error: Invalid GitHub handle '<handle>'`
 - Creates the `codev/team/people/` directory if it doesn't exist
 
-### R3: `af team` deprecation
-The existing `af team` subcommands continue to work but print a deprecation notice:
+### R3: `afx team` deprecation
+The existing `afx team` subcommands continue to work but print a deprecation notice:
 ```
-⚠ `af team` is deprecated. Use `team list` instead.
+⚠ `afx team` is deprecated. Use `team list` instead.
 ```
 Then delegate to the same underlying functions. No behavior change — just a warning on stderr.
 
@@ -82,15 +82,15 @@ New file `codev/resources/commands/team.md` following the pattern of `agent-farm
 
 ### R6: Update references
 - `.af-cron/team-update.yaml` → change command to `team update`
-- `CLAUDE.md` / `AGENTS.md` → add `team` to CLI tool list, update any `af team` references
+- `CLAUDE.md` / `AGENTS.md` → add `team` to CLI tool list, update any `afx team` references
 - `codev/resources/arch.md` → add `team` CLI to architecture documentation
 
 ## Success Criteria
-- [ ] `team list` works identically to current `af team list`
-- [ ] `team message "hello"` works identically to current `af team message "hello"`
-- [ ] `team update` works identically to current `af team update`
+- [ ] `team list` works identically to current `afx team list`
+- [ ] `team message "hello"` works identically to current `afx team message "hello"`
+- [ ] `team update` works identically to current `afx team update`
 - [ ] `team add waleedkadous` creates a properly formatted member file
-- [ ] `af team list` prints deprecation warning then works normally
+- [ ] `afx team list` prints deprecation warning then works normally
 - [ ] `team --help` shows all subcommands with descriptions
 - [ ] Existing unit tests pass without modification (or with minimal import path changes)
 - [ ] New tests cover `team add` and deprecation warnings
@@ -103,10 +103,10 @@ New file `codev/resources/commands/team.md` following the pattern of `agent-farm
 - Must reuse existing library code in `src/lib/team.ts` and `src/lib/team-github.ts`
 - Must follow the same CLI entry point pattern as `consult.js` and `af.js`
 - Tower API route (`GET /api/team`) must continue working — it calls library functions directly, not the CLI
-- Must not break existing `af` command structure
+- Must not break existing `afx` command structure
 
 ### Design Constraints
-- The `team` CLI should work from any directory within a codev project (same workspace detection as `af`)
+- The `team` CLI should work from any directory within a codev project (same workspace detection as `afx`)
 - When run outside a codev workspace (no `codev/` directory found), all commands fail immediately with: `Error: Not inside a Codev workspace. Run from a project that has a codev/ directory.` (exit code 1)
 - No new dependencies required — uses `commander`, `js-yaml`, and Node builtins already in the project
 
@@ -123,9 +123,9 @@ Follow the exact pattern used by `consult.js`:
 bin/team.js → dist/cli.js run(['team', ...args]) → commander team command group
 ```
 
-Register a `team` command group in `src/cli.ts` (the main CLI router) with the four subcommands. The `af team` commands get a deprecation wrapper that warns then calls the same functions.
+Register a `team` command group in `src/cli.ts` (the main CLI router) with the four subcommands. The `afx team` commands get a deprecation wrapper that warns then calls the same functions.
 
-**Why this approach**: It's identical to how `consult` and `af` already work. Minimal new code, consistent architecture, easy to maintain.
+**Why this approach**: It's identical to how `consult` and `afx` already work. Minimal new code, consistent architecture, easy to maintain.
 
 ## Open Questions
 
@@ -156,7 +156,7 @@ Register a `team` command group in `src/cli.ts` (the main CLI router) with the f
 5. `team add existing-member` — fails with clear error
 6. `team add --name "Jane Doe" --role "Developer" jdoe` — creates file with custom fields
 7. `team add "../bad"` — fails validation
-8. `af team list` — prints deprecation warning, then lists members
+8. `afx team list` — prints deprecation warning, then lists members
 
 ### Error Handling Tests
 1. `team list` outside a codev workspace — fails with "Not inside a Codev workspace" error
@@ -179,7 +179,7 @@ Register a `team` command group in `src/cli.ts` (the main CLI router) with the f
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| Breaking `af team` for existing users | Low | Medium | Keep `af team` working with deprecation warning |
+| Breaking `afx team` for existing users | Low | Medium | Keep `afx team` working with deprecation warning |
 | Cron job breaks after rename | Low | Low | Update `.af-cron/team-update.yaml` in same PR |
 | Import path changes break tests | Low | Low | Library code stays in place; only CLI wiring changes |
 

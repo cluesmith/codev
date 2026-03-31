@@ -48,7 +48,7 @@ Replace hardcoded artifact paths in all porch code paths:
 - **`index.ts`**: `getArtifactForPhase()` uses resolver; thread resolver through `check()`, `done()`, `approve()`
 - **`next.ts`**: Replace `isArtifactPreApproved()` globSync with resolver-based version; thread resolver through `handleBuildVerify()` and `handleOncePhase()`
 - **`prompts.ts`**: Use resolver in `getProjectSummary()` for artifact content
-- **`status.ts`**: Show artifact backend in `af status`
+- **`status.ts`**: Show artifact backend in `afx status`
 
 Error messages must be backend-agnostic (no hardcoded `codev/specs/` paths).
 
@@ -79,7 +79,7 @@ Error messages must be backend-agnostic (no hardcoded `codev/specs/` paths).
 
 **Review**: See `reviews/612-pluggable-artifact-resolver-tick-001.md`
 
-### TICK-002: Extend resolver to consult CLI, af spawn, and PTY (2026-03-27)
+### TICK-002: Extend resolver to consult CLI, afx spawn, and PTY (2026-03-27)
 
 ```json
 {

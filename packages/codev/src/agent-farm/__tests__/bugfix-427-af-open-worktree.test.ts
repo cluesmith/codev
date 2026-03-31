@@ -1,7 +1,7 @@
 /**
- * Regression test for bugfix #427: af open fails regularly — recent regression
+ * Regression test for bugfix #427: afx open fails regularly — recent regression
  *
- * Root cause: When `af open` runs from a builder worktree, `findWorkspaceRoot()`
+ * Root cause: When `afx open` runs from a builder worktree, `findWorkspaceRoot()`
  * returns the worktree root (because it has its own `codev/` directory). But
  * Tower only knows about the main repo workspace. The API call targets a
  * non-existent workspace, causing 404 or 403 errors.
@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 // Test 1: open.ts imports getMainRepoFromWorktree and uses it
 // ============================================================================
 
-describe('Bugfix #427: af open worktree fallback', () => {
+describe('Bugfix #427: afx open worktree fallback', () => {
   describe('source code contains the worktree fallback', () => {
     it('should import getMainRepoFromWorktree in open.ts', async () => {
       const { readFileSync } = await import('node:fs');

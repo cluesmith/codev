@@ -80,8 +80,8 @@ Update the documented branch naming convention:
 1. [ ] No directory named `spider/` in `codev-skeleton/protocols/` or `codev/protocols/`
 2. [ ] Zero references to "SPIR" in CLAUDE.md, AGENTS.md, README.md, INSTALL.md (except backward-compat notes)
 3. [ ] `protocol.json` has `"name": "spir"` with `"alias": "spider"` for backward compat
-4. [ ] `af spawn -p XXXX --use-protocol spir` still works (alias)
-5. [ ] `af spawn -p XXXX --use-protocol spir` works (new name)
+4. [ ] `afx spawn -p XXXX --use-protocol spir` still works (alias)
+5. [ ] `afx spawn -p XXXX --use-protocol spir` works (new name)
 6. [ ] All TypeScript source references updated
 7. [ ] All tests pass
 8. [ ] `SPIR` notation in docs replaced with `SPIR` (the phases are now S-P-I-R)

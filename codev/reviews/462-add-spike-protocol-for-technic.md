@@ -19,7 +19,7 @@ Added a new `spike` protocol to the codev ecosystem for time-boxed technical fea
 - [x] `protocol.md` documents the protocol clearly
 - [x] `builder-prompt.md` provides effective builder instructions with Handlebars templating
 - [x] `templates/findings.md` provides a useful findings template
-- [x] Protocol can be referenced by `af spawn --protocol spike`
+- [x] Protocol can be referenced by `afx spawn --protocol spike`
 - [x] Soft mode only — porch treats it as a no-orchestration protocol
 - [x] No gates defined in protocol.json
 - [x] Consultation disabled by default in protocol.json
@@ -29,7 +29,7 @@ Added a new `spike` protocol to the codev ecosystem for time-boxed technical fea
 
 ## Deviations from Plan
 
-- **Input type**: Spec originally said `none`, changed to `task` based on schema analysis. The `task` type maps directly to `af spawn --task "..."` usage pattern.
+- **Input type**: Spec originally said `none`, changed to `task` based on schema analysis. The `task` type maps directly to `afx spawn --task "..."` usage pattern.
 - **Phase structure**: Architect directed that phases be guidance-only in protocol.md, not formal porch phases in protocol.json. Plan was updated accordingly.
 - **Dual-directory**: Architect identified that files needed to exist in both `codev-skeleton/` and `codev/` directories. Plan was updated to include this.
 - **Schema compliance**: Codex review caught an invalid `transition.on_complete: null` in protocol.json. Fixed by removing the transition block entirely.

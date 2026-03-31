@@ -3,7 +3,7 @@
  * Spec 0364.
  *
  * Prerequisites:
- *   - Tower running: `af tower start`
+ *   - Tower running: `afx tower start`
  *   - Workspace activated
  *   - Playwright browsers installed: `npx playwright install chromium`
  *

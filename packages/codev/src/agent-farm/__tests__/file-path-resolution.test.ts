@@ -5,7 +5,7 @@
  * of tower-routes.ts.
  *
  * Note: Workspace containment checks were removed in bugfix #502 to allow
- * `af open` to work with files outside the workspace directory.
+ * `afx open` to work with files outside the workspace directory.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';

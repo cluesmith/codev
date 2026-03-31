@@ -7,7 +7,7 @@
 
 ## Summary
 
-Extend `af spawn` to support four modes: spec, task, protocol, and shell. Each mode uses explicit flags (no positional args). IDs use short 4-char alphanumeric suffixes.
+Extend `afx spawn` to support four modes: spec, task, protocol, and shell. Each mode uses explicit flags (no positional args). IDs use short 4-char alphanumeric suffixes.
 
 ## Implementation Phases
 
@@ -51,8 +51,8 @@ Extend `af spawn` to support four modes: spec, task, protocol, and shell. Each m
 
 ### Phase 3: Cleanup & Polish
 
-1. Update `af spawn --help` with all modes and examples
-2. Update `af status` to show builder types
+1. Update `afx spawn --help` with all modes and examples
+2. Update `afx status` to show builder types
 3. Update dashboard to group/display by type
 4. Handle error cases with clear messages
 
@@ -84,18 +84,18 @@ function generateShortId(): string {
 
 ```bash
 # Spec mode (existing)
-af spawn -p 0009
+afx spawn -p 0009
 
 # Task mode
-af spawn --task "Fix the login bug"
-af spawn --task "Refactor auth" --files src/auth.ts,src/login.ts
+afx spawn --task "Fix the login bug"
+afx spawn --task "Refactor auth" --files src/auth.ts,src/login.ts
 
 # Protocol mode
-af spawn --protocol cleanup
-af spawn --protocol experiment
+afx spawn --protocol cleanup
+afx spawn --protocol experiment
 
 # Shell mode
-af spawn --shell
+afx spawn --shell
 ```
 
 ## Validation
@@ -117,13 +117,13 @@ function validateSpawnFlags(opts: SpawnOptions): void {
 
 ## Test Plan
 
-1. `af spawn -p 0009` - backward compat ✓
-2. `af spawn --task "Fix bug"` - creates task-xxxx builder
-3. `af spawn --task "Fix" --files a.ts` - includes file context
-4. `af spawn --protocol cleanup` - loads cleanup protocol
-5. `af spawn --shell` - bare session, no worktree
-6. `af spawn` - error with available modes
-7. `af spawn -p 0009 --shell` - mutual exclusivity error
+1. `afx spawn -p 0009` - backward compat ✓
+2. `afx spawn --task "Fix bug"` - creates task-xxxx builder
+3. `afx spawn --task "Fix" --files a.ts` - includes file context
+4. `afx spawn --protocol cleanup` - loads cleanup protocol
+5. `afx spawn --shell` - bare session, no worktree
+6. `afx spawn` - error with available modes
+7. `afx spawn -p 0009 --shell` - mutual exclusivity error
 8. Same task twice → different IDs
 
 ## Dependencies

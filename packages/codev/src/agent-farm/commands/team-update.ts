@@ -1,7 +1,7 @@
 /**
  * Automatic hourly team update — collects notable events and posts a summary.
  *
- * Called by cron (via .af-cron/team-update.yaml) or manually via `af team update`.
+ * Called by cron (via .af-cron/team-update.yaml) or manually via `afx team update`.
  * Only posts a message when there are notable events in the last hour.
  *
  * Spec 587: Team Tab in Tower Right Panel.

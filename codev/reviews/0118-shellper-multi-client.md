@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replaced shellper's single-connection model (`currentConnection: net.Socket`) with a multi-client `Map<string, ConnectionEntry>`, extended the HELLO protocol with `clientType: 'tower' | 'terminal'`, implemented Tower-replacement semantics and terminal access control, then built `af attach` as a direct Unix-socket terminal client. Two implementation phases delivered all spec requirements.
+Replaced shellper's single-connection model (`currentConnection: net.Socket`) with a multi-client `Map<string, ConnectionEntry>`, extended the HELLO protocol with `clientType: 'tower' | 'terminal'`, implemented Tower-replacement semantics and terminal access control, then built `afx attach` as a direct Unix-socket terminal client. Two implementation phases delivered all spec requirements.
 
 ## Spec Compliance
 
@@ -19,8 +19,8 @@ Replaced shellper's single-connection model (`currentConnection: net.Socket`) wi
 - [x] `pendingSockets` set tracks pre-HELLO connections for clean shutdown
 - [x] Shutdown destroys all connections in map + pending sockets
 
-### Phase 2: af attach Terminal Mode
-- [x] `af attach -p <id>` connects to shellper Unix socket directly
+### Phase 2: afx attach Terminal Mode
+- [x] `afx attach -p <id>` connects to shellper Unix socket directly
 - [x] Raw terminal mode (no line buffering, no echo)
 - [x] PTY output streams to stdout via ShellperClient `data` events
 - [x] stdin pipes to shellper as DATA frames via `client.write()`
@@ -62,7 +62,7 @@ Replaced shellper's single-connection model (`currentConnection: net.Socket`) wi
 
 ## Follow-up Items
 
-- Consider adding a `--read-only` flag to `af attach` for observation-only mode (no stdin piping)
+- Consider adding a `--read-only` flag to `afx attach` for observation-only mode (no stdin piping)
 - Consider adding connection count logging to shellper for debugging multi-client issues
 - The `process.stdout.write('\n')` in cleanup could throw if stdout is piped — low risk but could be guarded
 

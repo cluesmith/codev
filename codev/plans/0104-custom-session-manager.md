@@ -417,7 +417,7 @@ When `sessionManager.createSession()` fails (shepherd spawn failure):
 - [ ] Reconciliation handles both tmux and shepherd sessions (dual-mode)
 - [ ] On-the-fly reconnection works for shepherd-backed sessions
 - [ ] SQLite records shepherd_socket, shepherd_pid, shepherd_start_time
-- [ ] `af spawn` creates builder sessions via shepherd
+- [ ] `afx spawn` creates builder sessions via shepherd
 - [ ] Graceful degradation: shepherd spawn failure falls back to non-persistent session
 - [ ] Dashboard shows "Session persistence unavailable" warning for non-persistent sessions
 - [ ] All existing E2E tests pass
@@ -544,10 +544,10 @@ Run `grep -r "tmux" packages/codev/src/` after all changes. Expected: zero resul
   - Multi-tab shared terminal
   - Architect auto-restart
 - **CLI Integration Tests**:
-  - `af spawn` creates working builder via shepherd
-  - `af attach` reconnects to builder terminal
-  - `af stop` cleanly stops builder
-  - `af send` delivers input to builder
+  - `afx spawn` creates working builder via shepherd
+  - `afx attach` reconnects to builder terminal
+  - `afx stop` cleanly stops builder
+  - `afx send` delivers input to builder
 - **Manual Testing**:
   - Dashboard shows all terminals
   - Clipboard and scroll work natively
@@ -560,7 +560,7 @@ Git revert. Schema migrations can be reversed by re-adding `tmux_session` column
 - **Risk**: Hidden tmux dependency in code not covered by grep
   - **Mitigation**: Full text search + E2E test suite as regression gate
 - **Risk**: CLI command changes break builder workflow
-  - **Mitigation**: Test `af spawn` → `af attach` → `af send` → `af stop` lifecycle end-to-end
+  - **Mitigation**: Test `afx spawn` → `afx attach` → `afx send` → `afx stop` lifecycle end-to-end
 
 ---
 
@@ -603,7 +603,7 @@ Linear dependency chain — each phase builds on the previous.
 
 ## Post-Implementation Tasks
 - [ ] Full E2E test suite pass
-- [ ] Manual testing: `af spawn`, dashboard, clipboard, scroll
+- [ ] Manual testing: `afx spawn`, dashboard, clipboard, scroll
 - [ ] Performance validation: measure shepherd memory usage
 - [ ] Create PR for architect review
 

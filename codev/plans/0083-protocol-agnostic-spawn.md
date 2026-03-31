@@ -8,12 +8,12 @@
 
 ## Executive Summary
 
-Refactor `af spawn` to decouple input types from protocols by adding a `--use-protocol` flag and making protocol selection data-driven via protocol.json. This is a single-phase implementation since the scope is well-defined and contained.
+Refactor `afx spawn` to decouple input types from protocols by adding a `--use-protocol` flag and making protocol selection data-driven via protocol.json. This is a single-phase implementation since the scope is well-defined and contained.
 
 ## Success Metrics
-- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
-- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
-- [ ] `af spawn --protocol maintain` works unchanged (this is the existing protocol-only mode)
+- [ ] `afx spawn -p 0001 --use-protocol tick` uses TICK instead of SPIR
+- [ ] `afx spawn -i 42 --use-protocol spir` uses SPIR instead of BUGFIX
+- [ ] `afx spawn --protocol maintain` works unchanged (this is the existing protocol-only mode)
 - [ ] Protocol hooks (collision check, issue comment) are data-driven
 - [ ] Existing commands work unchanged (backwards compatible)
 - [ ] All existing tests pass
@@ -35,7 +35,7 @@ Refactor `af spawn` to decouple input types from protocols by adding a `--use-pr
 **Dependencies**: None
 
 #### Objectives
-- Add `--use-protocol <name>` flag to `af spawn`
+- Add `--use-protocol <name>` flag to `afx spawn`
 - Make protocol selection data-driven via protocol.json
 - Add input, hooks, and defaults sections to protocol schema
 - Create prompt rendering from protocol-specific templates
@@ -257,10 +257,10 @@ Update tick/protocol.json:
 ```
 
 #### Acceptance Criteria
-- [ ] `af spawn -p 0001` works as before (backwards compatible)
-- [ ] `af spawn -i 42` works as before (backwards compatible)
-- [ ] `af spawn -p 0001 --use-protocol tick` uses TICK protocol
-- [ ] `af spawn -i 42 --use-protocol spir` uses SPIR protocol
+- [ ] `afx spawn -p 0001` works as before (backwards compatible)
+- [ ] `afx spawn -i 42` works as before (backwards compatible)
+- [ ] `afx spawn -p 0001 --use-protocol tick` uses TICK protocol
+- [ ] `afx spawn -i 42 --use-protocol spir` uses SPIR protocol
 - [ ] Collision checks happen when bugfix protocol specifies them
 - [ ] Issue comments happen when bugfix protocol specifies them
 - [ ] Spec file `**Protocol**: TICK` header still works (protocol resolution respects it)
@@ -308,10 +308,10 @@ describe('loadProtocol', () => {
 ```
 
 **Manual Tests**:
-- Verify `af spawn -p 0001` still works
-- Verify `af spawn -i 42` still works
-- Verify `af spawn -p 0001 --use-protocol tick` uses tick
-- Verify `af spawn --protocol maintain` works
+- Verify `afx spawn -p 0001` still works
+- Verify `afx spawn -i 42` still works
+- Verify `afx spawn -p 0001 --use-protocol tick` uses tick
+- Verify `afx spawn --protocol maintain` works
 - Verify error handling for invalid protocol names
 - Verify spec with `**Protocol**: TICK` header uses tick by default
 - Verify `--use-protocol spir` overrides spec header

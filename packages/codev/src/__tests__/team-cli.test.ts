@@ -1,5 +1,5 @@
 /**
- * Unit tests for af team CLI commands.
+ * Unit tests for afx team CLI commands.
  *
  * Spec 587: Team Tab in Tower Right Panel.
  */
@@ -236,11 +236,11 @@ describe('teamAdd', () => {
 });
 
 // =============================================================================
-// af team deprecation (Spec 599)
+// afx team deprecation (Spec 599)
 // =============================================================================
 
-describe('af team deprecation', () => {
-  it('af team list emits deprecation warning via runAgentFarm', async () => {
+describe('afx team deprecation', () => {
+  it('afx team list emits deprecation warning via runAgentFarm', async () => {
     const warns: string[] = [];
     vi.spyOn(console, 'warn').mockImplementation((...args) => warns.push(args.join(' ')));
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -255,7 +255,7 @@ describe('af team deprecation', () => {
     expect(warns.some(w => w.includes('team list'))).toBe(true);
   });
 
-  it('af team message emits deprecation warning via runAgentFarm', async () => {
+  it('afx team message emits deprecation warning via runAgentFarm', async () => {
     const warns: string[] = [];
     vi.spyOn(console, 'warn').mockImplementation((...args) => warns.push(args.join(' ')));
     vi.spyOn(console, 'log').mockImplementation(() => {});

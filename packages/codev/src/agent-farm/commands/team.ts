@@ -1,5 +1,5 @@
 /**
- * af team CLI commands — list members and post messages.
+ * afx team CLI commands — list members and post messages.
  *
  * Spec 587: Team Tab in Tower Right Panel.
  */

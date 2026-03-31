@@ -16,18 +16,18 @@ HN readers are technically sophisticated. Encountering stale CLI examples or bro
 
 ### Stale Command Syntax
 
-**README.md** uses deprecated `af dash` commands in multiple places:
-- Line 44: `af dash start` (should be `af workspace start`)
-- Line 354: `af dash start` (same)
-- Line 356: `af spawn 3` (missing required `--protocol` flag)
-- Line 361: `af dash stop` (should be `af workspace stop`)
-- Line 371: `af dash start` (same)
-- Line 376: `af tunnel` (may not exist as standalone command)
-- Line 389: `af dash start --allow-insecure-remote` (deprecated approach)
+**README.md** uses deprecated `afx dash` commands in multiple places:
+- Line 44: `afx dash start` (should be `afx workspace start`)
+- Line 354: `afx dash start` (same)
+- Line 356: `afx spawn 3` (missing required `--protocol` flag)
+- Line 361: `afx dash stop` (should be `afx workspace stop`)
+- Line 371: `afx dash start` (same)
+- Line 376: `afx tunnel` (may not exist as standalone command)
+- Line 389: `afx dash start --allow-insecure-remote` (deprecated approach)
 
 **docs/tips.md** uses deprecated commands:
-- Lines 119-121: `af dash stop` / `af dash start` (should be `af workspace stop` / `af workspace start`)
-- Lines 127-130: Same `af dash` usage in "Orphaned Sessions" section
+- Lines 119-121: `afx dash stop` / `afx dash start` (should be `afx workspace stop` / `afx workspace start`)
+- Lines 127-130: Same `afx dash` usage in "Orphaned Sessions" section
 
 **README.md** has stale version references:
 - Line 435: Example shows `v1.6.0` (current version is 2.1.1)
@@ -47,8 +47,8 @@ HN readers are technically sophisticated. Encountering stale CLI examples or bro
 - ASPIR protocol in protocol table
 - BUGFIX protocol in protocol table
 - `porch` CLI in tools reference
-- `af tower` commands in af table
-- Cross-workspace messaging in af table
+- `afx tower` commands in afx table
+- Cross-workspace messaging in afx table
 
 ### Inconsistencies
 
@@ -57,13 +57,13 @@ HN readers are technically sophisticated. Encountering stale CLI examples or bro
 - "SP(IDE)R-SOLO" — verify this variant still exists
 - "MCP support" as a tool dependency — may be outdated
 
-**README.md Remote Access section** describes a manual SSH tunnel workflow (`af tunnel`) that has been superseded by `af workspace start --remote`.
+**README.md Remote Access section** describes a manual SSH tunnel workflow (`afx tunnel`) that has been superseded by `afx workspace start --remote`.
 
 ## Desired State
 
 All user-facing documentation should:
-1. Use current CLI syntax (`af workspace` instead of `af dash`)
-2. Include required flags (`af spawn 42 --protocol spir`)
+1. Use current CLI syntax (`afx workspace` instead of `afx dash`)
+2. Include required flags (`afx spawn 42 --protocol spir`)
 3. Reference current version (2.1.1) and features
 4. Cover all current protocols (SPIR, ASPIR, AIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT)
 5. Document recent capabilities (remote access, cloud connectivity, porch, cross-workspace messaging)
@@ -75,10 +75,10 @@ All user-facing documentation should:
 - **Business Owners**: Codev maintainers preparing for HN launch
 
 ## Success Criteria
-- [ ] All `af dash` references replaced with `af workspace` across all docs
-- [ ] All `af spawn` examples include `--protocol` flag
+- [ ] All `afx dash` references replaced with `afx workspace` across all docs
+- [ ] All `afx spawn` examples include `--protocol` flag
 - [ ] README version references updated to current (2.1.1)
-- [ ] README Remote Access section uses `af workspace start --remote`
+- [ ] README Remote Access section uses `afx workspace start --remote`
 - [ ] FAQ covers all current protocols (ASPIR, AIR, BUGFIX at minimum)
 - [ ] Cheatsheet includes all current protocols and CLI tools
 - [ ] Tips uses current command syntax throughout
@@ -99,8 +99,8 @@ All user-facing documentation should:
 - Do not modify release notes (they are historical records)
 
 ## Assumptions
-- `af dash` is a deprecated alias that still works but should not appear in documentation
-- `af workspace start --remote` is the current recommended approach for remote access
+- `afx dash` is a deprecated alias that still works but should not appear in documentation
+- `afx workspace start --remote` is the current recommended approach for remote access
 - All protocols listed in CLAUDE.md (SPIR, ASPIR, AIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT) are current
 - Version 2.1.1 is the current released version
 
@@ -117,9 +117,9 @@ Audit each file against the current codebase state, fix stale content, add missi
 
 | File | Key Changes |
 |------|-------------|
-| `README.md` | Fix `af dash` → `af workspace`, fix `af spawn` examples, update version refs, update Remote Access section |
+| `README.md` | Fix `afx dash` → `afx workspace`, fix `afx spawn` examples, update version refs, update Remote Access section |
 | `docs/faq.md` | Add ASPIR/AIR/BUGFIX protocols, add porch orchestration |
-| `docs/tips.md` | Fix `af dash` → `af workspace`, add tips for new features |
+| `docs/tips.md` | Fix `afx dash` → `afx workspace`, add tips for new features |
 | `docs/why.md` | Verify model names, verify SP(IDE)R-SOLO reference, minor updates |
 | `codev/resources/cheatsheet.md` | Add ASPIR/BUGFIX protocols, add porch/tower to tools |
 | `codev/resources/commands/overview.md` | Add porch to CLI tools summary |

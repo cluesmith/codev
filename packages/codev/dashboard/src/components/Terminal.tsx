@@ -651,22 +651,18 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra }: Termi
       }
     });
 
-    // Full reconnect: reset terminal and reconnect. Discards the replay buffer
-    // (which may contain corrupted escape sequences) and sends SIGWINCH to make
-    // the running program redraw from scratch.
+    // Refresh: re-fit terminal to container and send SIGWINCH so the running
+    // program redraws at the correct width. Preserves all scroll history.
     reconnectRef.current = () => {
-      term.reset();
-      rc.lastSeq = 0;
-      rc.attempts = 0;
-      rc.skipReplay = true;
-      // Close existing connection and immediately reconnect (bypass backoff)
-      const oldWs = wsRef.current;
-      if (oldWs) {
-        rc.disposed = true;  // Prevent onclose from triggering its own reconnect
-        oldWs.close();
-        rc.disposed = false;
+      // Force an immediate fit (recalculates cols/rows from container size)
+      if (fitRef.current) {
+        fitRef.current.fit();
       }
-      connect();  // Fresh connect — replay discarded, SIGWINCH sent instead
+      // Send SIGWINCH via resize to make the running program redraw
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+      }
     };
 
     // Initial connection

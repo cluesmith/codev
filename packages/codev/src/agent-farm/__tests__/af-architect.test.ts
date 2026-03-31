@@ -1,7 +1,7 @@
 /**
- * Tests for af architect command
+ * Tests for afx architect command
  *
- * Bugfix #393: af architect starts a Claude session with the architect role
+ * Bugfix #393: afx architect starts a Claude session with the architect role
  * in the current terminal. No Tower dependency.
  */
 
@@ -35,7 +35,7 @@ vi.mock('../utils/roles.js', () => ({
   })),
 }));
 
-describe('af architect command', () => {
+describe('afx architect command', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });

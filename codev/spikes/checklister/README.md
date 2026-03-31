@@ -483,7 +483,7 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 ┌────────────────────────────────────────────────────────────────┐
 │                     WORKFLOW EXECUTION                          │
 │                                                                 │
-│  af spawn --project 0070                                       │
+│  afx spawn --project 0070                                       │
 │       │                                                         │
 │       ▼                                                         │
 │  ┌──────────────────┐                                          │
@@ -544,7 +544,7 @@ Three-way consultation (Claude, Codex, Gemini) unanimously recommended:
 ### Implication
 
 The checklister doesn't need to "induce" anything because:
-1. `af spawn` already loads Builder + Protocol + Spec
+1. `afx spawn` already loads Builder + Protocol + Spec
 2. The Builder role says "follow SPIR"
 3. The Protocol defines each phase
 4. The checklister adds **guardrails** - it blocks deviation, doesn't drive execution
@@ -633,7 +633,7 @@ ARCHITECT (main repo)
 
 1. Write spec: codev/specs/0070-feature.md
 2. Write plan: codev/plans/0070-feature.md
-3. Run: af spawn --project 0070
+3. Run: afx spawn --project 0070
 
                     │
                     ▼
@@ -679,7 +679,7 @@ ARCHITECT (main repo)
 
 8. Review PR
 9. Merge
-10. af cleanup --project 0070
+10. afx cleanup --project 0070
 ```
 
 ### Key Design Decisions

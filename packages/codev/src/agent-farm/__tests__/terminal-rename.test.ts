@@ -347,12 +347,12 @@ describe('CLI Command and Integration (Spec 468, Phase 3)', () => {
 
   describe('error message formatting', () => {
     it('should show specific message for missing session env var', () => {
-      const message = 'Not running inside a shellper session. Use this command from a shell created by `af shell`.';
+      const message = 'Not running inside a shellper session. Use this command from a shell created by `afx shell`.';
       expect(message).toContain('shellper session');
     });
 
     it('should show specific message for Tower not running', () => {
-      const message = 'Tower is not running. Start it with: af tower start';
+      const message = 'Tower is not running. Start it with: afx tower start';
       expect(message).toContain('Tower is not running');
     });
 

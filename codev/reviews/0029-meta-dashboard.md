@@ -14,12 +14,12 @@ However, the "Launch New Instance" feature is currently underspecified, particul
 **Critique:** Web browsers do not provide a native "Directory Picker" that returns a server-accessible absolute path without specific non-standard attributes (like `webkitdirectory`), which often only return file lists, not the path itself in a way usable by `spawn`.
 **Request:**
 -   Clarify the UI control for selecting the directory. Will it be a simple text input accepting an absolute path? Or a custom server-side directory navigation API (listing folders, allowing click-to-navigate)?
--   Specify how the `af` command is located and invoked.
+-   Specify how the `afx` command is located and invoked.
 
 ### 2. Process Lifecycle Management
 **Current:** Implicit "Launch" capability.
-**Critique:** When `af meta` spawns a new instance:
--   Is the new process **detached**? If I close the terminal running `af meta`, do all child instances die?
+**Critique:** When `afx meta` spawns a new instance:
+-   Is the new process **detached**? If I close the terminal running `afx meta`, do all child instances die?
 -   Where do the **logs** (stdout/stderr) of the spawned instances go? Are they piped to the meta-dashboard's console, written to a file, or ignored?
 -   **Recommendation:** Spawned instances should likely be detached so they survive the meta-dashboard restarting, but this needs to be explicit.
 
@@ -33,7 +33,7 @@ However, the "Launch New Instance" feature is currently underspecified, particul
 **Request:** Add a note about validating that the target directory is a valid Agent Farm project (e.g., contains `.agent-farm/` or `package.json`) before attempting to spawn.
 
 ## Minor Notes
--   **CLI Command:** `af meta` is good.
+-   **CLI Command:** `afx meta` is good.
 -   **Port:** 4100 is a reasonable default.
 
 Please update the "Technical Approach" section to address the Launch implementation details and Process lifecycle.
