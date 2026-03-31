@@ -1,18 +1,18 @@
 /**
- * CLI Integration: af (Agent Farm) Command Tests
+ * CLI Integration: afx (Agent Farm) Command Tests
  * Migrated from tests/e2e/af.bats
  *
- * Tests that the af CLI works correctly.
+ * Tests that the afx CLI works correctly.
  * Runs against dist/ (built artifact), not source.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { setupCliEnv, teardownCliEnv, CliEnv, runAf, runCodev } from './helpers.js';
+import { setupCliEnv, teardownCliEnv, CliEnv, runAfx, runCodev } from './helpers.js';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import Database from 'better-sqlite3';
 
-describe('af command (CLI)', () => {
+describe('afx command (CLI)', () => {
   let env: CliEnv;
 
   beforeEach(() => {
@@ -26,7 +26,7 @@ describe('af command (CLI)', () => {
   // === Help and Version ===
 
   it('--help shows available commands', () => {
-    const result = runAf(['--help'], env.dir, env.env);
+    const result = runAfx(['--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('start');
     expect(result.stdout).toContain('spawn');
@@ -34,45 +34,45 @@ describe('af command (CLI)', () => {
   });
 
   it('--version returns a version string', () => {
-    const result = runAf(['--version'], env.dir, env.env);
+    const result = runAfx(['--version'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
   });
 
   it('help shows usage information', () => {
-    const result = runAf(['help'], env.dir, env.env);
+    const result = runAfx(['help'], env.dir, env.env);
     expect([0, 1]).toContain(result.status);
   });
 
   // === Subcommand Help ===
 
   it('start --help shows options', () => {
-    const result = runAf(['start', '--help'], env.dir, env.env);
+    const result = runAfx(['start', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
   });
 
   it('spawn --help shows options', () => {
-    const result = runAf(['spawn', '--help'], env.dir, env.env);
+    const result = runAfx(['spawn', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     // Spec 0126: spawn now uses positional arg + --protocol instead of -p/--project
     expect(result.stdout).toContain('protocol');
   });
 
   it('spawn --help shows --branch option (Spec 609)', () => {
-    const result = runAf(['spawn', '--help'], env.dir, env.env);
+    const result = runAfx(['spawn', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('--branch');
   });
 
   it('cleanup --help shows options', () => {
-    const result = runAf(['cleanup', '--help'], env.dir, env.env);
+    const result = runAfx(['cleanup', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
   });
 
   // === Error Cases ===
 
   it('fails gracefully with unknown command', () => {
-    const result = runAf(['unknown-command-xyz'], env.dir, env.env);
+    const result = runAfx(['unknown-command-xyz'], env.dir, env.env);
     expect(result.status).not.toBe(0);
   });
 
@@ -80,7 +80,7 @@ describe('af command (CLI)', () => {
     // Initialize a codev project first
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['spawn'], projectDir, env.env);
+    const result = runAfx(['spawn'], projectDir, env.env);
     expect(result.status).not.toBe(0);
   });
 
@@ -89,7 +89,7 @@ describe('af command (CLI)', () => {
   it('spawn --branch rejects --resume (mutually exclusive)', () => {
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['spawn', '603', '--protocol', 'bugfix', '--branch', 'some-branch', '--resume'], projectDir, env.env);
+    const result = runAfx(['spawn', '603', '--protocol', 'bugfix', '--branch', 'some-branch', '--resume'], projectDir, env.env);
     expect(result.status).not.toBe(0);
     const output = result.stdout + result.stderr;
     expect(output).toContain('mutually exclusive');
@@ -98,7 +98,7 @@ describe('af command (CLI)', () => {
   it('spawn --branch rejects without issue number', () => {
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['spawn', '--protocol', 'maintain', '--branch', 'some-branch'], projectDir, env.env);
+    const result = runAfx(['spawn', '--protocol', 'maintain', '--branch', 'some-branch'], projectDir, env.env);
     expect(result.status).not.toBe(0);
     const output = result.stdout + result.stderr;
     expect(output).toContain('--branch requires an issue number');
@@ -107,7 +107,7 @@ describe('af command (CLI)', () => {
   // === --remote flag E2E tests (Bugfix #615) ===
 
   it('spawn --help shows --remote option (Bugfix #615)', () => {
-    const result = runAf(['spawn', '--help'], env.dir, env.env);
+    const result = runAfx(['spawn', '--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('--remote');
   });
@@ -115,7 +115,7 @@ describe('af command (CLI)', () => {
   it('spawn --remote rejects without --branch', () => {
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['spawn', '615', '--protocol', 'bugfix', '--remote', 'nharward'], projectDir, env.env);
+    const result = runAfx(['spawn', '615', '--protocol', 'bugfix', '--remote', 'nharward'], projectDir, env.env);
     expect(result.status).not.toBe(0);
     const output = result.stdout + result.stderr;
     expect(output).toContain('--remote requires --branch');
@@ -126,21 +126,21 @@ describe('af command (CLI)', () => {
   it('status works in a codev project', () => {
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['status'], projectDir, env.env);
+    const result = runAfx(['status'], projectDir, env.env);
     expect([0, 1]).toContain(result.status);
   });
 
   it('status shows agent farm info', () => {
     runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
     const projectDir = join(env.dir, 'test-project');
-    const result = runAf(['status'], projectDir, env.env);
+    const result = runAfx(['status'], projectDir, env.env);
     const output = result.stdout + result.stderr;
     const hasInfo = /Agent Farm|Tower|Status|running|stopped|No builders/i.test(output);
     expect(hasInfo).toBe(true);
   });
 
   it('status outside codev project handles gracefully', () => {
-    const result = runAf(['status'], env.dir, env.env);
+    const result = runAfx(['status'], env.dir, env.env);
     expect([0, 1]).toContain(result.status);
   });
 
@@ -171,7 +171,7 @@ describe('af command (CLI)', () => {
     db.close();
 
     // afx status should not crash with stale DB state
-    const result = runAf(['status'], projectDir, env.env);
+    const result = runAfx(['status'], projectDir, env.env);
     expect([0, 1]).toContain(result.status);
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/Agent Farm|Tower|Status/i);
@@ -202,7 +202,7 @@ describe('af command (CLI)', () => {
     db.close();
 
     // afx status should work correctly with valid architect state
-    const result = runAf(['status'], projectDir, env.env);
+    const result = runAfx(['status'], projectDir, env.env);
     expect([0, 1]).toContain(result.status);
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/Agent Farm|Tower|Status/i);

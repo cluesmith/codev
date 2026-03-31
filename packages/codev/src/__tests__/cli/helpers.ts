@@ -16,7 +16,10 @@ const BIN_DIR = resolve(import.meta.dirname, '../../../bin');
 /** Path to the codev CLI entry point */
 export const CODEV_BIN = join(BIN_DIR, 'codev.js');
 
-/** Path to the af CLI entry point */
+/** Path to the afx CLI entry point */
+export const AFX_BIN = join(BIN_DIR, 'afx.js');
+
+/** Path to the deprecated af CLI entry point */
 export const AF_BIN = join(BIN_DIR, 'af.js');
 
 /** Path to the consult CLI entry point */
@@ -116,7 +119,14 @@ export function runCodev(args: string[], cwd: string, env: NodeJS.ProcessEnv): E
 }
 
 /**
- * Run af CLI command.
+ * Run afx CLI command.
+ */
+export function runAfx(args: string[], cwd: string, env: NodeJS.ProcessEnv): ExecResult {
+  return runCli(AFX_BIN, args, { cwd, env });
+}
+
+/**
+ * Run deprecated af CLI command.
  */
 export function runAf(args: string[], cwd: string, env: NodeJS.ProcessEnv): ExecResult {
   return runCli(AF_BIN, args, { cwd, env });

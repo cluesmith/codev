@@ -20,8 +20,8 @@ const DOC_FILES = [
   'codev/resources/commands/agent-farm.md',
   'codev-skeleton/resources/commands/agent-farm.md',
   'codev/resources/workflow-reference.md',
-  '.claude/skills/af/SKILL.md',
-  'codev-skeleton/.claude/skills/af/SKILL.md',
+  '.claude/skills/afx/SKILL.md',
+  'codev-skeleton/.claude/skills/afx/SKILL.md',
 ];
 
 /**
