@@ -3,17 +3,17 @@
  * Each tip is a plain string with backtick-delimited code spans.
  */
 export const tips: string[] = [
-  // af CLI shortcuts
-  'Use `af spawn --task "description"` for quick one-off tasks that don\'t need a spec',
-  'Run `af status` to see all active builders and their current phase',
-  'Use `af send architect "message"` to notify the architect when you need guidance',
-  'Run `af cleanup --project 0042` after merging a PR to clean up the worktree',
-  'Use `af spawn --soft -p 42` for flexible, protocol-guided work without strict porch orchestration',
-  'Run `af dash start` to launch the architect dashboard',
-  'Use `af spawn 42 --resume` to resume an existing builder worktree instead of recreating it',
-  'Use `af open file.ts` to open a file in the dashboard annotation viewer',
-  'Run `af tower start` to start the Tower server — there is no `restart` command, use stop then start',
-  'Check `af-config.json` at your project root to customize builder and architect commands',
+  // afx CLI shortcuts
+  'Use `afx spawn --task "description"` for quick one-off tasks that don\'t need a spec',
+  'Run `afx status` to see all active builders and their current phase',
+  'Use `afx send architect "message"` to notify the architect when you need guidance',
+  'Run `afx cleanup --project 0042` after merging a PR to clean up the worktree',
+  'Use `afx spawn --soft -p 42` for flexible, protocol-guided work without strict porch orchestration',
+  'Run `afx workspace start` to launch the architect dashboard',
+  'Use `afx spawn 42 --resume` to resume an existing builder worktree instead of recreating it',
+  'Use `afx open file.ts` to open a file in the dashboard annotation viewer',
+  'Run `afx tower start` to start the Tower server — there is no `restart` command, use stop then start',
+  'Check `.codev/config.json` at your project root to customize builder and architect commands',
 
   // porch commands
   'Run `porch pending` to see all gates waiting for your approval across all projects',

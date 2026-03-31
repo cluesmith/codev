@@ -80,8 +80,8 @@ describe('TipBanner', () => {
 
     it('renders the correct code text from backtick-delimited spans', () => {
       vi.useFakeTimers();
-      // tips[0] is: Use `af spawn --task "description"` for quick one-off tasks...
-      // It has two code spans: "af spawn --task \"description\""
+      // tips[0] is: Use `afx spawn --task "description"` for quick one-off tasks...
+      // It has two code spans: "afx spawn --task \"description\""
       vi.setSystemTime(new Date(2026, 0, tips.length)); // day = tips.length → index 0
 
       render(<TipBanner />);

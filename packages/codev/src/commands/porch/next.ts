@@ -282,7 +282,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
             const mergeInstructions = mergeCmd
               ? `Merge the PR using:\n\n${mergeCmd}`
               : `The pr-merge concept is disabled for this forge. Merge the PR manually using your forge's merge mechanism.`;
-            return `The protocol is complete. ${mergeInstructions}\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\naf send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`;
+            return `The protocol is complete. ${mergeInstructions}\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect:\n\nafx send architect "Project ${state.id} complete. PR merged. Ready for cleanup."`;
           })(),
           sequential: true,
         },
