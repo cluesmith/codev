@@ -30,7 +30,7 @@ describe('package installation (CLI)', () => {
     expect(existsSync(CODEV_BIN)).toBe(true);
   });
 
-  it('af binary exists', () => {
+  it('afx binary exists', () => {
     expect(existsSync(AF_BIN)).toBe(true);
   });
 
@@ -44,7 +44,7 @@ describe('package installation (CLI)', () => {
     expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
   });
 
-  it('af --version returns a version string', () => {
+  it('afx --version returns a version string', () => {
     const result = runAf(['--version'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
@@ -58,7 +58,7 @@ describe('package installation (CLI)', () => {
     expect(result.stdout).toContain('doctor');
   });
 
-  it('af --help shows available commands', () => {
+  it('afx --help shows available commands', () => {
     const result = runAf(['--help'], env.dir, env.env);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('start');
@@ -79,7 +79,7 @@ describe('package installation (CLI)', () => {
     expect(result.status).not.toBe(0);
   });
 
-  it('af fails gracefully with unknown command', () => {
+  it('afx fails gracefully with unknown command', () => {
     const result = runAf(['unknown-command-that-does-not-exist'], env.dir, env.env);
     expect(result.status).not.toBe(0);
   });

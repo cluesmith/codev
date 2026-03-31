@@ -133,7 +133,7 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
     const workspace = '/home/user/project';
     const worktreePath = '/home/user/project/.builders/bugfix-42';
 
-    // Simulate tabs created by a builder via af open (stored under main workspace)
+    // Simulate tabs created by a builder via afx open (stored under main workspace)
     saveFileTab(db, 'file-wt1', workspace, `${worktreePath}/src/fix.ts`, 1000);
     saveFileTab(db, 'file-wt2', workspace, `${worktreePath}/tests/fix.test.ts`, 2000);
     // A tab from the main workspace (should survive)

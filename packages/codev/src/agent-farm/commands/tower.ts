@@ -206,7 +206,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     logger.blank();
     logger.success('Tower starting in background...');
     logger.kv('Dashboard', dashboardUrl);
-    logger.kv('Logs', `af tower log`);
+    logger.kv('Logs', `afx tower log`);
   }
 }
 
@@ -304,7 +304,7 @@ export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
   const { spawn } = await import('node:child_process');
 
   if (!existsSync(LOG_FILE)) {
-    logger.info('No tower logs found. Start the tower with: af tower start');
+    logger.info('No tower logs found. Start the tower with: afx tower start');
     return;
   }
 

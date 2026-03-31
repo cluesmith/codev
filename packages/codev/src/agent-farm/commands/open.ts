@@ -99,7 +99,7 @@ export async function open(options: OpenOptions): Promise<void> {
 
   // Tower not available - tell user to start it
   logger.error('Tower is not running.');
-  logger.info('Start it with: af tower start');
-  logger.info('Then try again: af open ' + options.file);
+  logger.info('Start it with: afx tower start');
+  logger.info('Then try again: afx open ' + options.file);
   process.exit(1);
 }

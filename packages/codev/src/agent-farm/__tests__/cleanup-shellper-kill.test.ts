@@ -1,7 +1,7 @@
 /**
  * Tests for cleanup command — shellper process kill (Bugfix #389)
  *
- * When `af cleanup` runs, it must kill shellper processes associated with the
+ * When `afx cleanup` runs, it must kill shellper processes associated with the
  * builder's worktree. Previously, cleanup relied solely on the Tower API which
  * silently fails when Tower is not running or the terminal was already removed.
  *

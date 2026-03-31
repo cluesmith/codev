@@ -170,7 +170,7 @@ describe('af command (CLI)', () => {
     `);
     db.close();
 
-    // af status should not crash with stale DB state
+    // afx status should not crash with stale DB state
     const result = runAf(['status'], projectDir, env.env);
     expect([0, 1]).toContain(result.status);
     const output = result.stdout + result.stderr;
@@ -201,7 +201,7 @@ describe('af command (CLI)', () => {
     `);
     db.close();
 
-    // af status should work correctly with valid architect state
+    // afx status should work correctly with valid architect state
     const result = runAf(['status'], projectDir, env.env);
     expect([0, 1]).toContain(result.status);
     const output = result.stdout + result.stderr;

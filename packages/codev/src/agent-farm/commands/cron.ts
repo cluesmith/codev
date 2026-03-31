@@ -1,4 +1,4 @@
-// CLI handlers for `af cron` subcommands (Spec 399 Phase 4).
+// CLI handlers for `afx cron` subcommands (Spec 399 Phase 4).
 // Each function calls the Tower API via TowerClient and formats output.
 
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';

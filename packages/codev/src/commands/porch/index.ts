@@ -688,7 +688,7 @@ export async function rollback(
  * Initialize a new project.
  *
  * Idempotent: if status.yaml already exists, preserves it and reports
- * current state. This supports `af spawn --resume` where the builder
+ * current state. This supports `afx spawn --resume` where the builder
  * may re-run `porch init` after a session restart.
  */
 export async function init(

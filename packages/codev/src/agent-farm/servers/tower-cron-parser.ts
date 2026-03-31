@@ -1,4 +1,4 @@
-// Minimal cron expression parser for af cron (Spec 399).
+// Minimal cron expression parser for afx cron (Spec 399).
 //
 // Supports standard 5-field cron expressions: minute hour day-of-month month day-of-week
 // Field types: * (any), step (*/N), fixed value, comma-separated values

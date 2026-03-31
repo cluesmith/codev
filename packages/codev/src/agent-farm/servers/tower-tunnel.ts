@@ -145,7 +145,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
       stopMetadataRefresh();
     }
     if (state === 'auth_failed') {
-      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower connect --reauth\' to update credentials.');
+      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'afx tower connect --reauth\' to update credentials.');
     }
   });
 
@@ -423,7 +423,7 @@ export async function handleTunnelEndpoint(
       const config = readCloudConfig();
       if (!config) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: "Not registered. Run 'af tower connect' or use the Connect button in the Tower UI." }));
+        res.end(JSON.stringify({ success: false, error: "Not registered. Run 'afx tower connect' or use the Connect button in the Tower UI." }));
         return;
       }
       if (tunnelClient) tunnelClient.resetCircuitBreaker();

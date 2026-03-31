@@ -260,7 +260,7 @@ describe('tower-tunnel', () => {
         const parsed = JSON.parse(body());
         expect(parsed.success).toBe(false);
         expect(parsed.error).toMatch(/not registered/i);
-        expect(parsed.error).toMatch(/af tower connect/i);
+        expect(parsed.error).toMatch(/afx tower connect/i);
       });
 
       it('reconnects when registered and no body', async () => {

@@ -1,7 +1,7 @@
 /**
  * Tests for HTML preview support in the annotation viewer (#536)
  *
- * When opening an HTML file with `af open`, the viewer should:
+ * When opening an HTML file with `afx open`, the viewer should:
  * 1. Detect HTML files via IS_HTML template variable
  * 2. Show a sandboxed iframe preview by default
  * 3. Allow toggling between preview and annotated code view

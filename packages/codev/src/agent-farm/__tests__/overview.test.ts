@@ -996,7 +996,7 @@ describe('overview', () => {
         'phase: complete',
       ].join('\n'));
 
-      // The bugfix's own project dir (created by porch init via af spawn)
+      // The bugfix's own project dir (created by porch init via afx spawn)
       const bugfixDir = path.join(projectsBase, 'bugfix-326-fix-discover');
       fs.mkdirSync(bugfixDir, { recursive: true });
       fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), [

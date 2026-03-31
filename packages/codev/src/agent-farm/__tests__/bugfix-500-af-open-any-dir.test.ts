@@ -1,5 +1,5 @@
 /**
- * Regression test for bugfix #500: af open should work from any directory
+ * Regression test for bugfix #500: afx open should work from any directory
  *
  * Root cause: `open.ts` used `getConfig().workspaceRoot` which derives the
  * workspace root from `process.cwd()`. When CWD is outside the workspace
@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-describe('Bugfix #500: af open works from any directory', () => {
+describe('Bugfix #500: afx open works from any directory', () => {
   const openSrc = readFileSync(
     resolve(import.meta.dirname, '../commands/open.ts'),
     'utf-8',

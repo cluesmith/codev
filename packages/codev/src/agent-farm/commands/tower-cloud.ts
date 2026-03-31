@@ -1,8 +1,8 @@
 /**
  * Cloud Tower Registration Commands (Spec 0097 Phase 5)
  *
- * Implements `af tower connect`, `af tower connect --reauth`,
- * `af tower disconnect`, and cloud status display for `af tower status`.
+ * Implements `afx tower connect`, `afx tower connect --reauth`,
+ * `afx tower disconnect`, and cloud status display for `afx tower status`.
  */
 
 import http from 'node:http';
@@ -217,7 +217,7 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 
   if (!config) {
     logger.blank();
-    logger.info('Cloud Registration: not registered. Run \'af tower connect\' to connect to codevos.ai.');
+    logger.info('Cloud Registration: not registered. Run \'afx tower connect\' to connect to codevos.ai.');
     return;
   }
 

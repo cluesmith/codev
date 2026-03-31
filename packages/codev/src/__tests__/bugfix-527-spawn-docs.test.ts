@@ -1,7 +1,7 @@
 /**
- * Regression test for bugfix #527: af spawn docs must include --protocol
+ * Regression test for bugfix #527: afx spawn docs must include --protocol
  *
- * Ensures all `af spawn <number>` examples in key documentation files
+ * Ensures all `afx spawn <number>` examples in key documentation files
  * include `--protocol` (or use an exempted form like --task, --shell,
  * --worktree, --resume).
  */
@@ -13,7 +13,7 @@ import * as path from 'node:path';
 // Resolve repo root (packages/codev -> repo root)
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
-/** Files that contain af spawn examples agents will read */
+/** Files that contain afx spawn examples agents will read */
 const DOC_FILES = [
   'codev-skeleton/roles/architect.md',
   'codev/roles/architect.md',
@@ -25,8 +25,8 @@ const DOC_FILES = [
 ];
 
 /**
- * Extract af spawn invocations from code blocks in a markdown file.
- * Returns lines that match `af spawn <number>` (with a numeric arg).
+ * Extract afx spawn invocations from code blocks in a markdown file.
+ * Returns lines that match `afx spawn <number>` (with a numeric arg).
  */
 function extractSpawnLines(content: string): string[] {
   const lines: string[] = [];
@@ -37,7 +37,7 @@ function extractSpawnLines(content: string): string[] {
       inCodeBlock = !inCodeBlock;
       continue;
     }
-    if (inCodeBlock && /af spawn\s+\d/.test(line)) {
+    if (inCodeBlock && /afx spawn\s+\d/.test(line)) {
       lines.push(line.trim());
     }
   }
@@ -52,11 +52,11 @@ function isExempted(line: string): boolean {
   return /--resume|--task|--shell|--worktree/.test(line);
 }
 
-describe('bugfix-527: af spawn docs require --protocol', () => {
+describe('bugfix-527: afx spawn docs require --protocol', () => {
   for (const relPath of DOC_FILES) {
     const fullPath = path.join(repoRoot, relPath);
 
-    it(`${relPath} — all numbered af spawn examples include --protocol`, () => {
+    it(`${relPath} — all numbered afx spawn examples include --protocol`, () => {
       if (!fs.existsSync(fullPath)) {
         // File doesn't exist in this context (e.g., skeleton not present) — skip
         return;
@@ -74,7 +74,7 @@ describe('bugfix-527: af spawn docs require --protocol', () => {
 
       expect(
         violations,
-        `Found af spawn examples without --protocol in ${relPath}:\n${violations.map(v => `  - ${v}`).join('\n')}`,
+        `Found afx spawn examples without --protocol in ${relPath}:\n${violations.map(v => `  - ${v}`).join('\n')}`,
       ).toHaveLength(0);
     });
   }

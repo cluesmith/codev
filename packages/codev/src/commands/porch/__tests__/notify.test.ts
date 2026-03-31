@@ -1,7 +1,7 @@
 /**
  * Tests for notifyArchitect (Spec 0108)
  *
- * Verifies that porch sends gate notifications via af send
+ * Verifies that porch sends gate notifications via afx send
  * and that failures are swallowed (fire-and-forget).
  */
 
@@ -109,11 +109,11 @@ describe('notifyArchitect', () => {
     consoleSpy.mockRestore();
   });
 
-  it('uses af binary path ending with bin/af.js', () => {
+  it('uses afx binary path ending with bin/afx.js', () => {
     notifyArchitect('0108', 'spec-approval', '/projects/test');
 
     const args = mockExecFile.mock.calls[0][1]!;
-    // The af binary should be a resolved path ending with bin/af.js
-    expect(args[0]).toMatch(/bin\/af\.js$/);
+    // The afx binary should be a resolved path ending with bin/afx.js
+    expect(args[0]).toMatch(/bin\/afx\.js$/);
   });
 });

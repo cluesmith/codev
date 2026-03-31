@@ -272,7 +272,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
       expect(allCommands).toContain('deregister');
     });
 
-    it('user-facing messages reference "af tower connect" not "af tower register"', async () => {
+    it('user-facing messages reference "afx tower connect" not "afx tower register"', async () => {
       const { readFileSync } = await import('node:fs');
       const { resolve } = await import('node:path');
 
@@ -281,32 +281,32 @@ describe('tower cloud CLI flows (Phase 5)', () => {
         resolve(import.meta.dirname, '../commands/tower-cloud.ts'),
         'utf-8',
       );
-      expect(cloudSource).toContain('af tower connect');
-      expect(cloudSource).not.toContain('af tower register');
+      expect(cloudSource).toContain('afx tower connect');
+      expect(cloudSource).not.toContain('afx tower register');
 
       // Check messages in cloud-config.ts reference new names
       const configSource = readFileSync(
         resolve(import.meta.dirname, '../lib/cloud-config.ts'),
         'utf-8',
       );
-      expect(configSource).toContain('af tower connect');
-      expect(configSource).not.toContain('af tower register');
+      expect(configSource).toContain('afx tower connect');
+      expect(configSource).not.toContain('afx tower register');
 
       // Check messages in tunnel-client.ts reference new names
       const tunnelSource = readFileSync(
         resolve(import.meta.dirname, '../lib/tunnel-client.ts'),
         'utf-8',
       );
-      expect(tunnelSource).toContain('af tower connect');
-      expect(tunnelSource).not.toContain('af tower register');
+      expect(tunnelSource).toContain('afx tower connect');
+      expect(tunnelSource).not.toContain('afx tower register');
 
       // Check messages in tower-tunnel.ts reference new names
       const tunnelServerSource = readFileSync(
         resolve(import.meta.dirname, '../servers/tower-tunnel.ts'),
         'utf-8',
       );
-      expect(tunnelServerSource).toContain('af tower connect');
-      expect(tunnelServerSource).not.toContain('af tower register');
+      expect(tunnelServerSource).toContain('afx tower connect');
+      expect(tunnelServerSource).not.toContain('afx tower register');
     });
   });
 });

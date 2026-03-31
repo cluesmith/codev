@@ -3,12 +3,12 @@
  * Spec 0126: Project Management Rework — Phase 2 (Spawn CLI Rework)
  *
  * Modes (protocol-driven for issue-based spawns):
- * - spec:     af spawn 315 --protocol spir     (feature)
- * - bugfix:   af spawn 315 --protocol bugfix   (bug fix)
- * - task:     af spawn --task "..."             (ad-hoc task)
- * - protocol: af spawn --protocol maintain      (protocol-only run)
- * - shell:    af spawn --shell                  (bare session)
- * - worktree: af spawn --worktree              (worktree, no prompt)
+ * - spec:     afx spawn 315 --protocol spir     (feature)
+ * - bugfix:   afx spawn 315 --protocol bugfix   (bug fix)
+ * - task:     afx spawn --task "..."             (ad-hoc task)
+ * - protocol: afx spawn --protocol maintain      (protocol-only run)
+ * - shell:    afx spawn --shell                  (bare session)
+ * - worktree: afx spawn --worktree              (worktree, no prompt)
  *
  * Role/prompt logic extracted to spawn-roles.ts.
  * Worktree/git logic extracted to spawn-worktree.ts.
@@ -110,12 +110,12 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal(
       'Must specify an issue number or one of: --task, --protocol, --shell, --worktree\n\n' +
       'Usage:\n' +
-      '  af spawn 315 --protocol spir      # Feature with SPIR protocol\n' +
-      '  af spawn 315 --protocol bugfix    # Bug fix\n' +
-      '  af spawn --task "fix the bug"     # Ad-hoc task\n' +
-      '  af spawn --protocol maintain      # Protocol-only run\n' +
-      '  af spawn --shell                  # Bare session\n\n' +
-      'Run "af spawn --help" for more options.'
+      '  afx spawn 315 --protocol spir      # Feature with SPIR protocol\n' +
+      '  afx spawn 315 --protocol bugfix    # Bug fix\n' +
+      '  afx spawn --task "fix the bug"     # Ad-hoc task\n' +
+      '  afx spawn --protocol maintain      # Protocol-only run\n' +
+      '  afx spawn --shell                  # Bare session\n\n' +
+      'Run "afx spawn --help" for more options.'
     );
   }
 
@@ -128,11 +128,11 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal(
       '--protocol is required when spawning with an issue number.\n\n' +
       'Usage:\n' +
-      '  af spawn 315 --protocol spir      # Feature\n' +
-      '  af spawn 315 --protocol bugfix    # Bug fix\n' +
-      '  af spawn 315 --protocol tick --amends 42  # Amendment\n' +
-      '  af spawn 315 --resume             # Resume (reads protocol from worktree)\n' +
-      '  af spawn 315 --soft               # Soft mode (defaults to SPIR)'
+      '  afx spawn 315 --protocol spir      # Feature\n' +
+      '  afx spawn 315 --protocol bugfix    # Bug fix\n' +
+      '  afx spawn 315 --protocol tick --amends 42  # Amendment\n' +
+      '  afx spawn 315 --resume             # Resume (reads protocol from worktree)\n' +
+      '  afx spawn 315 --soft               # Soft mode (defaults to SPIR)'
     );
   }
 

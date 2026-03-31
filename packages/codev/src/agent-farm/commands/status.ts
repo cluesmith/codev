@@ -64,13 +64,13 @@ export async function status(): Promise<void> {
 
     // Workspace not found in tower, show "not active"
     logger.kv('Workspace', chalk.gray('not active in tower'));
-    logger.info(`Run 'af tower start' to activate this workspace`);
+    logger.info(`Run 'afx tower start' to activate this workspace`);
     return;
   }
 
   // Tower not running - show message and fall back to local state
   logger.kv('Tower', chalk.gray('not running'));
-  logger.info(`Run 'af tower start' to start the tower daemon`);
+  logger.info(`Run 'afx tower start' to start the tower daemon`);
 
   showArtifactConfig(workspacePath);
 

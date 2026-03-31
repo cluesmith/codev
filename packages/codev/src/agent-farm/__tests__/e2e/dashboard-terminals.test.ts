@@ -2,7 +2,7 @@
  * E2E tests for dashboard terminal functionality after node-pty rewrite.
  *
  * Prerequisites:
- *   - Tower running: `af tower start`
+ *   - Tower running: `afx tower start`
  *   - Workspace activated (global-setup activates the repo root)
  *   - Playwright browsers installed: `npx playwright install chromium`
  *

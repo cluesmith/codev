@@ -157,11 +157,11 @@ export async function send(options: SendOptions): Promise<void> {
 
   // Validate inputs
   if (!message) {
-    fatal('No message provided. Usage: af send <builder> "message" or af send --all "message"');
+    fatal('No message provided. Usage: afx send <builder> "message" or afx send --all "message"');
   }
 
   if (!options.all && !target) {
-    fatal('Must specify a builder ID or use --all flag. Usage: af send <builder> "message"');
+    fatal('Must specify a builder ID or use --all flag. Usage: afx send <builder> "message"');
   }
 
   if (options.all && target) {
@@ -186,7 +186,7 @@ export async function send(options: SendOptions): Promise<void> {
   const client = new TowerClient();
   const towerRunning = await client.isRunning();
   if (!towerRunning) {
-    fatal('Tower is not running. Start it with: af tower start');
+    fatal('Tower is not running. Start it with: afx tower start');
   }
 
   if (options.all) {

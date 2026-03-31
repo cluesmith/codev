@@ -1,5 +1,5 @@
 /**
- * Tests for af bench command
+ * Tests for afx bench command
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -97,7 +97,7 @@ function createErrorProcess(errorCode: string) {
   return proc;
 }
 
-describe('af bench', () => {
+describe('afx bench', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
