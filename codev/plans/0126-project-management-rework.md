@@ -12,7 +12,7 @@ Replace `projectlist.md` as the project tracking mechanism with GitHub Issues + 
 
 ## Success Metrics
 - [ ] No code reads projectlist.md
-- [ ] `af spawn <N>` works as positional arg
+- [ ] `afx spawn <N>` works as positional arg
 - [ ] Porch reads project summary from GitHub Issues (with spec-file fallback)
 - [ ] Dashboard shows: active builders, blocked gates, pending PRs, backlog
 - [ ] Status derived from filesystem + Tower state
@@ -103,7 +103,7 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 **Dependencies**: Phase 1 (shared GitHub utility)
 
 #### Objectives
-- Accept issue number as positional argument: `af spawn 315`
+- Accept issue number as positional argument: `afx spawn 315`
 - Require `--protocol` flag explicitly (no auto-detection)
 - Remove `-p` and `--issue` flags (no backward compat aliases)
 - Unify spawn flow: positional arg + protocol flag drives the code path
@@ -112,7 +112,7 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 - [ ] Positional argument support in spawn CLI
 - [ ] `--protocol` flag required for non-alias invocations
 - [ ] `-p` and `--issue` flags removed
-- [ ] Legacy zero-padded spec matching (`af spawn 76` → `0076-*.md`)
+- [ ] Legacy zero-padded spec matching (`afx spawn 76` → `0076-*.md`)
 - [ ] Unit tests for CLI argument resolution
 - [ ] Integration tests for spawn with positional arg
 
@@ -138,7 +138,7 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 - Update `validateSpawnOptions()` (line 76) to handle unified `issueNumber`
 - Update `getSpawnMode()` (line 121): protocol flag drives mode selection, not the presence of spec vs issue
 - **`--resume` handling**: When `--resume` is specified, protocol is NOT required — it's read from the existing worktree's `status.yaml` (already initialized). No implicit detection needed.
-- **`--soft` handling**: `--soft` is a mode modifier, not a protocol. It still requires `--protocol` to be specified (e.g., `af spawn 315 --protocol spir --soft`). The spec example `af spawn 315 --soft` is shorthand for `af spawn 315 --protocol spir --soft` (SPIR is the default for `--soft` when a spec file exists).
+- **`--soft` handling**: `--soft` is a mode modifier, not a protocol. It still requires `--protocol` to be specified (e.g., `afx spawn 315 --protocol spir --soft`). The spec example `afx spawn 315 --soft` is shorthand for `afx spawn 315 --protocol spir --soft` (SPIR is the default for `--soft` when a spec file exists).
 - Update `spawnSpec()` to use `issueNumber` + `--protocol`
 - Merge relevant parts of `spawnBugfix()` into a unified flow
 - The spawn flow becomes:
@@ -148,17 +148,17 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
   4. Dispatch: protocol drives code path (SPIR → porch, BUGFIX → bugfix flow, TICK → tick flow)
 
 #### Acceptance Criteria
-- [ ] `af spawn 315 --protocol spir` finds spec and starts SPIR builder
-- [ ] `af spawn 315 --protocol bugfix` starts bugfix builder
-- [ ] `af spawn 320 --protocol tick --amends 315` starts TICK builder
-- [ ] `af spawn -p` and `af spawn --issue` give clear "removed, use positional arg" error
-- [ ] `af spawn 76 --protocol spir` finds `0076-*.md` (legacy zero-padded matching)
-- [ ] `af spawn 315` without `--protocol` gives clear error message
-- [ ] `af spawn 315 --resume` works (reads protocol from existing worktree, no `--protocol` needed)
-- [ ] `af spawn 315 --soft` works (defaults to SPIR when spec file exists)
-- [ ] `af spawn --task "fix bug"` still works (no positional arg needed)
-- [ ] `af spawn --shell` still works
-- [ ] `af spawn --protocol maintain` still works (no positional arg needed)
+- [ ] `afx spawn 315 --protocol spir` finds spec and starts SPIR builder
+- [ ] `afx spawn 315 --protocol bugfix` starts bugfix builder
+- [ ] `afx spawn 320 --protocol tick --amends 315` starts TICK builder
+- [ ] `afx spawn -p` and `afx spawn --issue` give clear "removed, use positional arg" error
+- [ ] `afx spawn 76 --protocol spir` finds `0076-*.md` (legacy zero-padded matching)
+- [ ] `afx spawn 315` without `--protocol` gives clear error message
+- [ ] `afx spawn 315 --resume` works (reads protocol from existing worktree, no `--protocol` needed)
+- [ ] `afx spawn 315 --soft` works (defaults to SPIR when spec file exists)
+- [ ] `afx spawn --task "fix bug"` still works (no positional arg needed)
+- [ ] `afx spawn --shell` still works
+- [ ] `afx spawn --protocol maintain` still works (no positional arg needed)
 
 #### Test Plan
 - **Unit Tests**: Argument parsing, option validation, mode determination, legacy alias mapping
@@ -168,7 +168,7 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 Old `-p`/`--issue` flags are removed but give a clear error message pointing to the new syntax. Rollback: re-add the flags if needed (code is in git history).
 
 #### Risks
-- **Risk**: Breaking existing `af spawn -p` workflows
+- **Risk**: Breaking existing `afx spawn -p` workflows
   - **Mitigation**: Clear error messages for removed flags; integration tests cover new syntax
 
 ---
@@ -338,7 +338,7 @@ Remove the two routes from tower-routes.ts. No existing functionality is modifie
 **Modify**: `packages/codev/dashboard/src/hooks/useTabs.ts`
 - Replace `'dashboard'` tab type with `'work'`
 - Remove dedicated `'files'` tab creation (file viewing integrated into Work view)
-- Keep `'file'` type for individual file tabs opened via `af open`
+- Keep `'file'` type for individual file tabs opened via `afx open`
 
 **Modify**: `packages/codev/dashboard/src/components/App.tsx`
 - Render `WorkView` when `activeTab.type === 'work'` (replaces StatusPanel)
@@ -404,7 +404,7 @@ Revert App.tsx and useTabs.ts changes; old StatusPanel.tsx is still in git histo
 **Modify**: `CLAUDE.md` and `AGENTS.md`
 - Remove all references to `projectlist.md`
 - Update "Project Tracking" section to describe issue-first workflow
-- Update `af spawn` examples to use positional arg + `--protocol`
+- Update `afx spawn` examples to use positional arg + `--protocol`
 - Update dashboard description (Work tab replaces Projects/Terminals/Files)
 
 **Modify**: `codev/resources/arch.md`
@@ -417,7 +417,7 @@ Revert App.tsx and useTabs.ts changes; old StatusPanel.tsx is still in git histo
 - Remove projectlist.md references
 
 **Modify**: `codev/resources/commands/agent-farm.md`
-- Update `af spawn` syntax to show positional arg + `--protocol`
+- Update `afx spawn` syntax to show positional arg + `--protocol`
 - Document `--amends` flag for TICK
 - Update examples
 
@@ -489,7 +489,7 @@ Phase 6 depends on all other phases.
 
 ## Validation Checkpoints
 1. **After Phase 1**: Porch can generate prompts without reading projectlist.md
-2. **After Phase 2**: `af spawn 315 --protocol spir` works end-to-end
+2. **After Phase 2**: `afx spawn 315 --protocol spir` works end-to-end
 3. **After Phase 4**: `GET /api/overview` returns valid data with active builders
 4. **After Phase 5**: Dashboard Work view is functional with real data
 5. **After Phase 6**: Zero references to projectlist.md in codebase
@@ -499,7 +499,7 @@ Phase 6 depends on all other phases.
 - [ ] AGENTS.md — same as CLAUDE.md (keep in sync)
 - [ ] codev/resources/arch.md — new GitHub layer, overview endpoint, Work view
 - [ ] codev/resources/workflow-reference.md — updated spawn examples
-- [ ] codev/resources/commands/agent-farm.md — `af spawn` CLI reference
+- [ ] codev/resources/commands/agent-farm.md — `afx spawn` CLI reference
 - [ ] codev/resources/commands/overview.md — spawn quick reference
 - [ ] codev/resources/commands/codev.md — init/doctor changes
 - [ ] Builder role definition — updated spawn instructions

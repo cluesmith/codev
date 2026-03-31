@@ -2,7 +2,7 @@
 
 ## Codex: REQUEST_CHANGES
 
-### `.builder-role.md` stale af spawn -p references
+### `.builder-role.md` stale afx spawn -p references
 **Status: NOT APPLICABLE**
 `.builder-role.md` is an auto-generated file in the builder worktree (untracked, not committed). It was generated at spawn time from the skeleton `roles/builder.md` which was already fixed in Phase 3. Not a source file.
 
@@ -20,7 +20,7 @@ The verification report is a Phase 4 deliverable; it can't list itself in the ma
 
 ## Claude: REQUEST_CHANGES
 
-### `codev/roles/architect.md` and `codev/roles/builder.md` still use `af spawn -p`
+### `codev/roles/architect.md` and `codev/roles/builder.md` still use `afx spawn -p`
 **Status: FIXED**
 Updated all instances in both files to use positional syntax. Also fixed `projectlist.md` → GitHub Issues and `tmux send-keys` → `terminal send-keys` in architect.md.
 
@@ -42,7 +42,7 @@ README.md: No SPIDER reference found (Gemini may have been mistaken — grep con
 **Status: FIXED**
 Updated to `assert_spir_protocol()` — the function no longer exists in the codebase under either name, so the corrected name matches the protocol directory.
 
-### `codev/roles/` af spawn -p references
+### `codev/roles/` afx spawn -p references
 **Status: FIXED** — see Claude rebuttal above.
 
 ### INSTALL.md ansari-project clone URL

@@ -16,7 +16,7 @@ All port references will use `DEFAULT_TOWER_PORT` (4100) following the existing 
 - [ ] `port-registry.ts` deleted
 - [ ] No code references `dashboardPort`, `architectPort`, `builderPortRange`, or `utilPortRange`
 - [ ] All existing tests pass (with port-related assertions updated/removed)
-- [ ] `af status` no longer shows per-project port numbers
+- [ ] `afx status` no longer shows per-project port numbers
 
 ## Phases (Machine Readable)
 
@@ -85,7 +85,7 @@ Revert the three file changes; they are isolated consumer fixes.
 - Delete `port-registry.ts` entirely
 - Remove `ProjectPorts` interface and all port fields from types and config
 - Remove `port_allocations` table from SQLite schema
-- Remove port display from `af status` and Tower API
+- Remove port display from `afx status` and Tower API
 - Clean up all imports and re-exports
 
 #### Deliverables
@@ -97,7 +97,7 @@ Revert the three file changes; they are isolated consumer fixes.
 - [ ] `port_allocations` table removed from `db/schema.ts`
 - [ ] `DbPortAllocation` interface removed from `db/types.ts`
 - [ ] Port migration code removed from `db/migrate.ts`
-- [ ] `basePort` removed from `af status` output
+- [ ] `basePort` removed from `afx status` output
 - [ ] Port fields removed from Tower API `/api/projects` response
 - [ ] Re-export removed from `utils/index.ts`
 - [ ] Port-related imports and call sites removed from `commands/start.ts`
@@ -155,7 +155,7 @@ Revert the three file changes; they are isolated consumer fixes.
 - [ ] `port-registry.ts` no longer exists
 - [ ] No TypeScript compilation errors (`npm run build` succeeds)
 - [ ] No runtime references to `dashboardPort`, `architectPort`, `builderPortRange`, `utilPortRange`
-- [ ] `af status` output shows no port numbers
+- [ ] `afx status` output shows no port numbers
 - [ ] Tower API `/api/projects` response has no port fields
 - [ ] Grep for `port-registry|ProjectPorts|dashboardPort|architectPort|builderPortRange|utilPortRange` returns zero hits in `src/`
 

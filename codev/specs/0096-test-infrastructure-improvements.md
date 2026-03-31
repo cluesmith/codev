@@ -127,7 +127,7 @@ Update `vitest.e2e.config.ts` to include `**/*.e2e.test.ts` instead of listing f
 
 The BATS tests do two things Vitest can also do:
 
-**a) CLI integration tests** (init, adopt, doctor, af, consult)
+**a) CLI integration tests** (init, adopt, doctor, afx, consult)
 
 Location: `packages/codev/src/__tests__/cli/` — a dedicated subdirectory to avoid mixing with existing unit tests. Files use `*.e2e.test.ts` suffix.
 
@@ -192,7 +192,7 @@ try {
   execSync(`npm install -g --prefix "${prefix}" "${tarball}"`, { stdio: 'inherit' });
 
   // Verify binaries
-  for (const bin of ['codev', 'af', 'porch', 'consult']) {
+  for (const bin of ['codev', 'afx', 'porch', 'consult']) {
     execSync(`"${join(prefix, 'bin', bin)}" --help`, { stdio: 'pipe' });
     console.log(`  OK: ${bin} --help`);
   }

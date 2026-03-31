@@ -218,7 +218,7 @@ Ensure no firewall is blocking the ports (default: 4200-4299):
 lsof -i :4200
 
 # Clean up stale port allocations
-af ports cleanup
+afx ports cleanup
 ```
 
 ### gh authentication issues

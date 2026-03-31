@@ -33,7 +33,7 @@ For debugging common issues, start here:
 | **"Terminal not persistent"** | `tower-instances.ts` → `launchInstance()` | Check shellper spawn succeeded, dashboard shows `persistent` flag |
 | **"Workspace shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `workspaceTerminals` Map has entry |
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `upsertBuilder()` | Worktree creation, shellper session, role injection |
-| **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `af send architect` directly at gate transitions (Spec 0108) |
+| **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `afx send architect` directly at gate transitions (Spec 0108) |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/db/schema.ts` | Global registry at `~/.agent-farm/global.db` |
@@ -92,7 +92,7 @@ tail -f ~/.agent-farm/tower.log
 
 2. **Single Tower Port**: All projects are served through Tower on port 4100. Per-project port blocks were removed in Spec 0098. Terminal sessions and workspace metadata are tracked in `~/.agent-farm/global.db`.
 
-3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `af cleanup`).
+3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `afx cleanup`).
 
 4. **CLAUDE.md ≡ AGENTS.md**: These files MUST be identical. They are the same content for different tool ecosystems.
 
@@ -106,7 +106,7 @@ tail -f ~/.agent-farm/tower.log
 
 ## Agent Farm Internals
 
-This section provides comprehensive documentation of how the Agent Farm (`af`) system works internally. Agent Farm is the most complex component of Codev, enabling parallel AI-assisted development through the architect-builder pattern.
+This section provides comprehensive documentation of how the Agent Farm (`afx`) system works internally. Agent Farm is the most complex component of Codev, enabling parallel AI-assisted development through the architect-builder pattern.
 
 ### Architecture Overview
 
@@ -241,7 +241,7 @@ All architect sessions (at all 3 creation points) receive a role prompt injected
 
 #### Builder Gate Notifications (Spec 0100, replaced by Spec 0108)
 
-As of Spec 0108, porch sends direct `af send architect` notifications via `execFile` when gates transition to pending. The `notifyArchitect()` function in `commands/porch/notify.ts` is fire-and-forget: 10s timeout, errors logged to stderr but never thrown. Called at the two gate-transition points in `next.ts`.
+As of Spec 0108, porch sends direct `afx send architect` notifications via `execFile` when gates transition to pending. The `notifyArchitect()` function in `commands/porch/notify.ts` is fire-and-forget: 10s timeout, errors logged to stderr but never thrown. Called at the two gate-transition points in `next.ts`.
 
 > **Historical note** (Spec 0100): Gate notifications were originally implemented as a polling-based `GateWatcher` class in Tower (`gate-watcher.ts`), which polled porch YAML status files on a 10-second interval. This was replaced by the direct notification approach in Spec 0108. The passive `gate-status.ts` reader is preserved for dashboard API use.
 
@@ -347,7 +347,7 @@ Git worktrees provide isolated working directories for each builder, enabling pa
 
 #### Worktree Creation
 
-When spawning a builder (`af spawn 3 --protocol spir`):
+When spawning a builder (`afx spawn 3 --protocol spir`):
 
 1. **Generate IDs**: Create builder ID and branch name
    ```
@@ -389,8 +389,8 @@ Builders can run in two modes:
 
 | Mode | Flag | Behavior |
 |------|------|----------|
-| **Strict** (default) | `af spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn XXXX --protocol spir --soft` | AI follows protocol - architect verifies compliance |
+| **Strict** (default) | `afx spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `afx spawn XXXX --protocol spir --soft` | AI follows protocol - architect verifies compliance |
 
 **Strict mode** (default for `--project`): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously.
 
@@ -409,7 +409,7 @@ Builders can run in two modes:
 
 #### Cleanup Process
 
-When cleaning up a builder (`af cleanup -p 0003`):
+When cleaning up a builder (`afx cleanup -p 0003`):
 
 1. **Check for uncommitted changes**: Refuses if dirty (unless `--force`)
 2. **Kill PTY session**: Terminal Manager kills node-pty session
@@ -652,7 +652,7 @@ packages/codev/dashboard/
 - `useTeam(isActive)` hook manages fetch lifecycle
 - Graceful degradation: shows member cards without GitHub data when API unavailable
 - Backend: `team.ts` (parsing), `team-github.ts` (GraphQL), `MessageChannel` interface for extensibility
-- CLI: `team list`, `team message`, `team update`, `team add` (standalone `team` CLI; `af team` is deprecated). Hourly cron via `.af-cron/team-update.yaml`
+- CLI: `team list`, `team message`, `team update`, `team add` (standalone `team` CLI; `afx team` is deprecated). Hourly cron via `.af-cron/team-update.yaml`
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
@@ -877,7 +877,7 @@ This is where the Codev project uses Codev to develop itself:
   - `protocols/` - Working copies of protocols for development
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
-  - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotation viewer
+  - `templates/` - HTML templates for Agent Farm (`afx`) dashboard and annotation viewer
   - Note: Shell command configuration is in `.codev/config.json` at the project root
 
 **Example**: `codev/specs/0001-test-infrastructure.md` documents the test infrastructure feature we built for Codev.
@@ -893,22 +893,22 @@ This is what gets distributed to users when they install Codev:
   - `resources/` - Empty directory (users add their own)
   - `agents/` - Agent definitions (copied during installation)
   - `roles/` - Role definitions for architect and builder
-  - `templates/` - HTML templates for Agent Farm (`af`) dashboard UI
+  - `templates/` - HTML templates for Agent Farm (`afx`) dashboard UI
   - Note: Shell command configuration is in `.codev/config.json` at the project root
 
 **Key Distinction**: `codev-skeleton/` provides templates for other projects to use when they install Codev. Our own `codev/` directory has nearly identical structure but contains our actual specs, plans, and reviews. The skeleton's empty placeholder directories become populated with real content in each project that adopts Codev.
 
 ### 3. `packages/codev/` - The npm Package
 This is the `@cluesmith/codev` npm package containing all CLI tools:
-- **Purpose**: Published npm package with codev, af, consult, team, and porch CLIs
+- **Purpose**: Published npm package with codev, afx, consult, team, and porch CLIs
 - **Contains**:
   - `src/` - TypeScript source code
-  - `src/agent-farm/` - Agent Farm orchestration (af command)
+  - `src/agent-farm/` - Agent Farm orchestration (afx command)
   - `src/commands/` - codev subcommands (init, adopt, doctor, update, eject, tower)
   - `src/commands/consult/` - Multi-agent consultation (consult command)
   - `bin/` - CLI entry points (codev.js, af.js, consult.js, team.js, porch.js)
   - `skeleton/` - Embedded copy of codev-skeleton (built during `npm run build`)
-  - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotator
+  - `templates/` - HTML templates for Agent Farm (`afx`) dashboard and annotator
   - `dist/` - Compiled JavaScript
 
 **Key Distinction**: packages/codev is the published npm package; codev-skeleton/ is the template embedded within it.
@@ -930,12 +930,12 @@ codev/                                  # Project root (git repository)
 │   │   │   ├── generate-image.ts       # codev generate-image
 │   │   │   └── consult/                # consult command
 │   │   │       └── index.ts            # Multi-agent consultation
-│   │   ├── agent-farm/                 # af subcommands
-│   │   │   ├── cli.ts                  # af CLI entry point
+│   │   ├── agent-farm/                 # afx subcommands
+│   │   │   ├── cli.ts                  # afx CLI entry point
 │   │   │   ├── index.ts                # Core orchestration
 │   │   │   ├── state.ts                # SQLite state management
 │   │   │   ├── types.ts                # Type definitions
-│   │   │   ├── commands/               # af CLI commands
+│   │   │   ├── commands/               # afx CLI commands
 │   │   │   │   ├── start.ts            # Start architect dashboard
 │   │   │   │   ├── stop.ts             # Stop all processes
 │   │   │   │   ├── spawn.ts            # Spawn builder
@@ -945,7 +945,7 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── open.ts             # File annotation viewer
 │   │   │   │   ├── send.ts             # Send message to builder
 │   │   │   │   ├── rename.ts           # Rename builder/util
-│   │   │   │   └── bench.ts            # Consultation benchmarking (af bench)
+│   │   │   │   └── bench.ts            # Consultation benchmarking (afx bench)
 │   │   │   ├── servers/                # Web servers (Spec 0105 decomposition)
 │   │   │   │   ├── tower-server.ts     # Orchestrator: HTTP/WS server creation, subsystem init, shutdown
 │   │   │   │   ├── tower-routes.ts     # HTTP route handlers (~30 routes)
@@ -966,7 +966,7 @@ codev/                                  # Project root (git repository)
 │   │       └── templates.ts            # Template file handling
 │   ├── bin/                            # CLI entry points
 │   │   ├── codev.js                    # codev command
-│   │   ├── af.js                       # af command
+│   │   ├── af.js                       # afx command
 │   │   ├── consult.js                  # consult command
 │   │   ├── team.js                     # team command
 │   │   └── porch.js                    # porch command
@@ -1096,11 +1096,11 @@ codev/                                  # Project root (git repository)
 
 **Workflow**:
 1. **Identify** - Architect identifies issue #N
-2. **Spawn** - `af spawn N --protocol bugfix` creates worktree and notifies issue
+2. **Spawn** - `afx spawn N --protocol bugfix` creates worktree and notifies issue
 3. **Fix** - Builder investigates, fixes, writes regression test
 4. **Review** - Builder runs CMAP, creates PR
 5. **Merge** - Architect reviews, builder merges
-6. **Cleanup** - `af cleanup --issue N` removes worktree
+6. **Cleanup** - `afx cleanup --issue N` removes worktree
 
 **Key Features**:
 - No spec/plan documents required
@@ -1157,63 +1157,63 @@ codev import https://github.com/owner/repo
 
 **Architecture**:
 - **Single canonical implementation** - All bash scripts deleted, TypeScript is the source of truth
-- **Thin wrapper invocation** - `af` command from npm package (installed globally)
+- **Thin wrapper invocation** - `afx` command from npm package (installed globally)
 - **Project-scoped state** - `.agent-farm/state.db` (SQLite) tracks current session
 - **Global registry** — `~/.agent-farm/global.db` (SQLite) tracks workspace registrations and session metadata across projects
 
 #### CLI Commands
 
 ```bash
-# af command is installed globally via: npm install -g @cluesmith/codev
+# afx command is installed globally via: npm install -g @cluesmith/codev
 
 # Starting/stopping
-af workspace start            # Start workspace
-af workspace stop             # Stop all agent-farm processes
+afx workspace start            # Start workspace
+afx workspace stop             # Stop all agent-farm processes
 
 # Managing builders
-af spawn 3 --protocol spir              # Spawn builder (strict mode, default)
-af spawn 3 --protocol spir --soft       # Soft mode - AI follows protocol, you verify compliance
-af spawn 42 --protocol bugfix           # Spawn builder for GitHub issue (BUGFIX protocol)
-af spawn 42 --protocol tick --amends 30 # TICK amendment to spec 30
-af status                     # Check all agent status
-af cleanup --project 0003     # Clean up builder (checks for uncommitted work)
-af cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
-af cleanup --issue 42         # Clean up bugfix builder and remote branch
+afx spawn 3 --protocol spir              # Spawn builder (strict mode, default)
+afx spawn 3 --protocol spir --soft       # Soft mode - AI follows protocol, you verify compliance
+afx spawn 42 --protocol bugfix           # Spawn builder for GitHub issue (BUGFIX protocol)
+afx spawn 42 --protocol tick --amends 30 # TICK amendment to spec 30
+afx status                     # Check all agent status
+afx cleanup --project 0003     # Clean up builder (checks for uncommitted work)
+afx cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
+afx cleanup --issue 42         # Clean up bugfix builder and remote branch
 
 # Utilities
-af util                       # Open a utility shell terminal
-af shell                      # Alias for util
-af open src/file.ts           # Open file annotation viewer
+afx util                       # Open a utility shell terminal
+afx shell                      # Alias for util
+afx open src/file.ts           # Open file annotation viewer
 
 # Communication
-af send 0003 "Check the tests"        # Send message to builder 0003
-af send --all "Stop and report"       # Broadcast to all builders
-af send architect "Need help"         # Builder sends to architect (from worktree)
-af send 0003 "msg" --file diff.txt    # Include file content
-af send 0003 "msg" --interrupt        # Send Ctrl+C first
-af send 0003 "msg" --raw              # Skip structured formatting
+afx send 0003 "Check the tests"        # Send message to builder 0003
+afx send --all "Stop and report"       # Broadcast to all builders
+afx send architect "Need help"         # Builder sends to architect (from worktree)
+afx send 0003 "msg" --file diff.txt    # Include file content
+afx send 0003 "msg" --interrupt        # Send Ctrl+C first
+afx send 0003 "msg" --raw              # Skip structured formatting
 
 # Direct CLI access (v1.5.0+)
-af architect                  # Start/attach to architect session
-af architect "initial prompt" # With initial prompt
+afx architect                  # Start/attach to architect session
+afx architect "initial prompt" # With initial prompt
 
 # Remote access (v1.5.2+)
-af tunnel                     # Show SSH command for remote access
-af workspace start --remote user@host  # Start on remote machine with tunnel
+afx tunnel                     # Show SSH command for remote access
+afx workspace start --remote user@host  # Start on remote machine with tunnel
 
 # Port management (multi-project support)
-af ports list                 # List workspace registrations (historical; port blocks removed in Spec 0098)
-af ports cleanup              # Remove stale allocations
+afx ports list                 # List workspace registrations (historical; port blocks removed in Spec 0098)
+afx ports cleanup              # Remove stale allocations
 
 # Database inspection
-af db dump                    # Dump state database
-af db query "SQL"             # Run SQL query
-af db reset                   # Reset state database
-af db stats                   # Show database statistics
+afx db dump                    # Dump state database
+afx db query "SQL"             # Run SQL query
+afx db reset                   # Reset state database
+afx db stats                   # Show database statistics
 
 # Command overrides
-af workspace start --architect-cmd "claude --model opus"
-af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
+afx workspace start --architect-cmd "claude --model opus"
+afx spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
 #### Configuration (`.codev/config.json`)
@@ -1256,7 +1256,7 @@ See the [Port System](#port-system) section above for details on the global regi
 - Responsibilities: decompose work, spawn builders, monitor progress, review and integrate
 - Execution strategy: Modified SPIR with delegation
 - Communication patterns with builders
-- Full `af` command reference
+- Full `afx` command reference
 
 **builder.md** - Builder role with status lifecycle:
 - Status definitions: spawning, implementing, blocked, pr, complete
@@ -1266,7 +1266,7 @@ See the [Port System](#port-system) section above for details on the global regi
 
 #### Global CLI Commands
 
-The `af`, `consult`, `codev`, `team`, and `porch` commands are installed globally via `npm install -g @cluesmith/codev` and work from any directory. No aliases or local scripts needed.
+The `afx`, `consult`, `codev`, `team`, and `porch` commands are installed globally via `npm install -g @cluesmith/codev` and work from any directory. No aliases or local scripts needed.
 
 ### 4. Test Infrastructure
 
@@ -1395,17 +1395,17 @@ The startup ordering is critical — race conditions have caused real bugs when 
 
 **Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
 
-### 7. Message Delivery (`af send`)
+### 7. Message Delivery (`afx send`)
 
 **Location**: `servers/send-buffer.ts`, `commands/send.ts`, `terminal/pty-session.ts`
 
-Messages sent via `af send` are not injected immediately — they pass through a **typing-aware send buffer** that prevents message injection while the user is actively typing.
+Messages sent via `afx send` are not injected immediately — they pass through a **typing-aware send buffer** that prevents message injection while the user is actively typing.
 
 #### How it works
 
 1. **User types** in terminal → WebSocket `data` event → `PtySession.recordUserInput()` updates `lastInputAt` timestamp
    - **PTY produces output** → `PtySession.onPtyData()` updates `lastDataAt` timestamp (Spec 467: used by dashboard for shell idle detection)
-2. **`af send` message arrives** → Tower buffers it via `SendBuffer.enqueue()`
+2. **`afx send` message arrives** → Tower buffers it via `SendBuffer.enqueue()`
 3. **Every 500ms**, `SendBuffer.flush()` checks each buffered session:
    - If `session.isUserIdle(3000ms)` → deliver all buffered messages
    - Else if any message age ≥ 60 seconds → deliver regardless (max buffer age)
@@ -1422,7 +1422,7 @@ Messages sent via `af send` are not injected immediately — they pass through a
 
 #### Address Resolution
 
-`af send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting.
+`afx send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting.
 
 ## Installation Architecture
 

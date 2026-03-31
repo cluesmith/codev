@@ -2,7 +2,7 @@
 
 ## Summary
 
-Fixed a race condition in Tower's startup sequence that caused architect terminal sessions to be permanently lost during `af tower stop && af tower start`.
+Fixed a race condition in Tower's startup sequence that caused architect terminal sessions to be permanently lost during `afx tower stop && afx tower start`.
 
 ## Root Cause
 

@@ -279,7 +279,7 @@ interface Tab {
 )}
 ```
 
-### 1.4 Update `af open` command
+### 1.4 Update `afx open` command
 
 **File**: `packages/codev/src/agent-farm/commands/open.ts`
 
@@ -296,7 +296,7 @@ export async function open(options: OpenOptions): Promise<void> {
   }
 
   // No fallback - just tell user to start dashboard
-  fatal('Dashboard not running. Start with: af dash start');
+  fatal('Dashboard not running. Start with: afx dash start');
 }
 ```
 
@@ -332,11 +332,11 @@ export async function open(options: OpenOptions): Promise<void> {
 cd packages/codev && npm run build && npm pack && npm install -g ./cluesmith-codev-*.tgz
 
 # Start tower and dashboard
-af tower start
-af dash start
+afx tower start
+afx dash start
 
-# Test af open
-af open README.md  # Should open in dashboard tab
+# Test afx open
+afx open README.md  # Should open in dashboard tab
 
 # Verify no open-server processes
 ps aux | grep open-server  # Should find nothing

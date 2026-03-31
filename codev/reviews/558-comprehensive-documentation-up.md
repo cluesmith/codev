@@ -13,13 +13,13 @@ Documentation-only update across 8 files to fix deprecated CLI syntax, add missi
 ## Changes Made
 
 ### Phase 1: Fix Deprecated CLI Commands
-- Replaced all `af dash` with `af workspace` in README.md, docs/tips.md, AGENTS.md, CLAUDE.md, MANIFESTO.md, INSTALL.md
-- Added required `--protocol` flag to `af spawn` examples
+- Replaced all `afx dash` with `afx workspace` in README.md, docs/tips.md, AGENTS.md, CLAUDE.md, MANIFESTO.md, INSTALL.md
+- Added required `--protocol` flag to `afx spawn` examples
 - Verified AGENTS.md/CLAUDE.md remain byte-identical
 
 ### Phase 2: Update README Version References
 - Updated version examples from v1.6.0/v1.7.0 era to v2.x era
-- Replaced manual SSH tunnel Remote Access section with `af workspace start --remote`
+- Replaced manual SSH tunnel Remote Access section with `afx workspace start --remote`
 - Updated versioning strategy table
 
 ### Phase 3: Expand FAQ and Cheatsheet
@@ -33,7 +33,7 @@ Documentation-only update across 8 files to fix deprecated CLI syntax, add missi
 - Fixed stale "SP(IDE)R-SOLO" and "MCP support" references in why.md
 
 ## What Went Well
-- Systematic file-by-file audit caught all deprecated `af dash` references
+- Systematic file-by-file audit caught all deprecated `afx dash` references
 - Changes were minimal and focused — no unnecessary rewrites
 - All docs remain internally consistent
 
@@ -43,7 +43,7 @@ Documentation-only update across 8 files to fix deprecated CLI syntax, add missi
 
 ## Lessons Learned
 - Documentation-only PRs benefit from creating the PR first, then running consultations on the actual diff
-- The `af dash` → `af workspace` deprecation wasn't fully propagated through docs when the rename happened — future renames should include a doc-sweep step
+- The `afx dash` → `afx workspace` deprecation wasn't fully propagated through docs when the rename happened — future renames should include a doc-sweep step
 
 ## Methodology Notes
 - ASPIR was appropriate for this scope — no spec/plan gates needed for a documentation refresh

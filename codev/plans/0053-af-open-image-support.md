@@ -1,4 +1,4 @@
-# Plan 0053: af open Image Support
+# Plan 0053: afx open Image Support
 
 **Spec:** [codev/specs/0053-af-open-image-support.md](../specs/0053-af-open-image-support.md)
 **Status:** planned

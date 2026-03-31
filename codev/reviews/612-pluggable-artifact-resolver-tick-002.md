@@ -7,7 +7,7 @@
 
 ## Summary
 
-Extended the artifact resolver integration from porch-only to three additional subsystems: consult CLI, `af spawn`, and PTY session management.
+Extended the artifact resolver integration from porch-only to three additional subsystems: consult CLI, `afx spawn`, and PTY session management.
 
 ## Changes Made
 

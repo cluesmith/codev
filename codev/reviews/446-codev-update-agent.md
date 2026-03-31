@@ -2,7 +2,7 @@
 
 ## Summary
 
-Added `--agent` / `-a` flag to `codev update` that produces structured JSON output on stdout instead of interactive terminal output. This enables AI agents (like `af spawn`) to programmatically consume update results — file lists, conflict details, and merge instructions — without parsing human-readable output or dealing with the interactive Claude merge spawn.
+Added `--agent` / `-a` flag to `codev update` that produces structured JSON output on stdout instead of interactive terminal output. This enables AI agents (like `afx spawn`) to programmatically consume update results — file lists, conflict details, and merge instructions — without parsing human-readable output or dealing with the interactive Claude merge spawn.
 
 ## Spec Compliance
 

@@ -27,7 +27,7 @@ Porch orchestrates **build-verify cycles** where:
 ```
 Architect Claude
     │
-    └──► af kickoff -p XXXX
+    └──► afx kickoff -p XXXX
               │
               └──► Builder Claude (outer)
                         │

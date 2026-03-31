@@ -90,7 +90,7 @@ Codev ships with several protocols for different types of work:
 
 **Porch** is the protocol orchestrator. It drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine — managing phase transitions, human approval gates, and multi-agent consultations automatically.
 
-When you `af spawn` a builder, porch orchestrates its work:
+When you `afx spawn` a builder, porch orchestrates its work:
 - Enforces phase order (can't skip from Specify to Implement)
 - Runs 3-way consultations at checkpoints
 - Blocks at human gates until approved
@@ -106,7 +106,7 @@ Agent Farm adds parallel builder orchestration, a web dashboard, and automated p
 
 ## Can I access Agent Farm remotely?
 
-Yes. Register your tower with [codevos.ai](https://codevos.ai) using `af tower connect`, then access your workspace from any browser. No SSH tunnels or port forwarding needed.
+Yes. Register your tower with [codevos.ai](https://codevos.ai) using `afx tower connect`, then access your workspace from any browser. No SSH tunnels or port forwarding needed.
 
 ## More questions?
 

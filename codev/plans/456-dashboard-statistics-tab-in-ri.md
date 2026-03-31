@@ -369,7 +369,7 @@ Linear dependency chain — each phase builds on the previous.
 
 ## Notes
 - The `gh search` commands have a 1000-item limit imposed by GitHub. For repos with more than 1000 merged PRs or closed issues, the "all" range metrics are approximate.
-- `af bench` results are out of scope for this implementation per spec decision.
+- `afx bench` results are out of scope for this implementation per spec decision.
 - Verdict text (APPROVE/REQUEST_CHANGES/COMMENT) is not stored in the metrics DB and is out of scope.
 - **Cache key deviation from spec**: The spec (R6) describes caching keyed by `range`. The implementation extends this to `${workspaceRoot}:${range}` to support workspace-scoped routes where multiple workspaces may be active. This is a necessary deviation for multi-workspace correctness.
 - **Shared types**: `StatisticsResponse` is defined in the server-side `statistics.ts`. The dashboard defines a matching local interface in `api.ts` (same pattern used for `OverviewData`). No cross-package type sharing is needed.

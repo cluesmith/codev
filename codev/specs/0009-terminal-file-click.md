@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-When Claude or other tools output file paths in the terminal (e.g., `src/utils/config.ts:42`), users must manually copy the path and use `af annotate <file>` to view it. This breaks flow and adds friction.
+When Claude or other tools output file paths in the terminal (e.g., `src/utils/config.ts:42`), users must manually copy the path and use `afx annotate <file>` to view it. This breaks flow and adds friction.
 
 We want file paths in terminal output to be clickable, opening them directly in the annotation viewer tab.
 

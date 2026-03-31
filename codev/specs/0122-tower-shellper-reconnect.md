@@ -12,16 +12,16 @@ validated: [architect]
 
 ## Problem Statement
 
-When Tower restarts (via `af tower stop && af tower start`), it starts fresh with no knowledge of existing shellper sessions. The shellper processes survive the restart (they're independent processes), the PTYs survive, and the builder AI processes inside those PTYs survive. But Tower doesn't reconnect to them, so the dashboard shows no builders and `af spawn --resume` creates new terminal sessions instead of reattaching to existing ones.
+When Tower restarts (via `afx tower stop && afx tower start`), it starts fresh with no knowledge of existing shellper sessions. The shellper processes survive the restart (they're independent processes), the PTYs survive, and the builder AI processes inside those PTYs survive. But Tower doesn't reconnect to them, so the dashboard shows no builders and `afx spawn --resume` creates new terminal sessions instead of reattaching to existing ones.
 
 With tmux, sessions were fully independent and discoverable after Tower restart. Shellper was designed for the same persistence, but Tower's startup path never implemented reconnection.
 
 ## Current State
 
-1. `af tower stop` sends SIGTERM to Tower
+1. `afx tower stop` sends SIGTERM to Tower
 2. Tower's `gracefulShutdown()` calls `sessionManager.shutdown()` which disconnects from shellpers (but does not kill them)
 3. Shellper processes keep running, PTYs keep running, builder AI keeps running
-4. `af tower start` starts a fresh Tower
+4. `afx tower start` starts a fresh Tower
 5. Tower reads SQLite `terminal_sessions` table but does NOT reconnect to existing shellper sockets
 6. Dashboard shows no builders. Builders are alive but invisible/unreachable.
 
@@ -37,10 +37,10 @@ On startup, Tower should:
 
 ## Success Criteria
 
-- [ ] After `af tower stop && af tower start`, all surviving builders appear in the dashboard
+- [ ] After `afx tower stop && afx tower start`, all surviving builders appear in the dashboard
 - [ ] Tower reconnects to shellper sockets and receives PTY output
 - [ ] Dead sessions (shellper process exited) are cleaned up from SQLite
-- [ ] `af spawn --resume` works correctly with reconnected sessions
+- [ ] `afx spawn --resume` works correctly with reconnected sessions
 - [ ] No duplicate sessions created for already-reconnected shellpers
 - [ ] Reconnection happens during Tower startup, before accepting HTTP connections
 

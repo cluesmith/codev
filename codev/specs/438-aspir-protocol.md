@@ -46,7 +46,7 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 4. Uses the same prompts, templates, and consult-types
 5. **Removes** the `spec-approval` and `plan-approval` gates, allowing the builder to proceed automatically after the verify step
 6. **Keeps** the `pr` gate — the PR still requires human review before merge
-7. Is invocable via `af spawn N --protocol aspir`
+7. Is invocable via `afx spawn N --protocol aspir`
 
 ## Stakeholders
 - **Primary Users**: Architects spawning builders for trusted work
@@ -65,7 +65,7 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 - [ ] All phases, checks, and verify blocks are identical to SPIR (except gate removal)
 
 ### Runtime Behavior
-- [ ] `af spawn N --protocol aspir` spawns a builder that follows the ASPIR protocol
+- [ ] `afx spawn N --protocol aspir` spawns a builder that follows the ASPIR protocol
 - [ ] Builder proceeds from Specify → Plan without stopping at a `spec-approval` gate
 - [ ] Builder proceeds from Plan → Implement without stopping at a `plan-approval` gate
 - [ ] Builder still stops at the `pr` gate after the Review phase
@@ -216,7 +216,7 @@ Note: `codev/protocols/spir/` does not have `builder-prompt.md` or `prompts/` �
 ## Test Scenarios
 
 ### Functional Tests
-1. **Happy path**: `af spawn N --protocol aspir` succeeds and builder runs through Specify → Plan → Implement → Review without stopping at spec-approval or plan-approval gates
+1. **Happy path**: `afx spawn N --protocol aspir` succeeds and builder runs through Specify → Plan → Implement → Review without stopping at spec-approval or plan-approval gates
 2. **PR gate preserved**: Builder stops at the `pr` gate after Review phase and waits for human approval
 3. **Consultations run**: All 3-way consultations execute — one per phase: spec verification (specify), plan verification (plan), impl verification (implement), pr verification (review)
 4. **Checks enforced**: Build checks, test checks, and PR existence checks all run
@@ -258,4 +258,4 @@ Note: `codev/protocols/spir/` does not have `builder-prompt.md` or `prompts/` �
 
 - ASPIR is intentionally a "dumb copy" with minimal changes. The value is in providing the right default (no gates) for trusted work, not in adding new capabilities.
 - The name "ASPIR" follows the convention of prefixing with "A" for "Autonomous" — it's memorable and clearly signals the difference from SPIR.
-- Future work could add a `--autonomous` flag to `af spawn` that selects ASPIR automatically, but that is out of scope for this spec.
+- Future work could add a `--autonomous` flag to `afx spawn` that selects ASPIR automatically, but that is out of scope for this spec.

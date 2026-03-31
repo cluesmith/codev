@@ -43,7 +43,7 @@ Implement BATS-based end-to-end tests that verify the `@cluesmith/codev` npm pac
 - [ ] Implement tests:
   - `npm install from tarball creates binaries`
   - `codev --version returns expected version`
-  - `af --version returns expected version`
+  - `afx --version returns expected version`
   - `consult --help works`
   - `codev unknown-command fails gracefully`
 
@@ -101,7 +101,7 @@ Implement BATS-based end-to-end tests that verify the `@cluesmith/codev` npm pac
 ### Exit Criteria
 - Doctor tests pass on macOS and Linux
 
-## Phase 6: af command Tests (TC-005)
+## Phase 6: afx command Tests (TC-005)
 
 **Goal**: Verify agent-farm CLI works
 
@@ -109,12 +109,12 @@ Implement BATS-based end-to-end tests that verify the `@cluesmith/codev` npm pac
 
 - [ ] Create `tests/e2e/af.bats`
 - [ ] Implement tests:
-  - `af --help shows available commands`
-  - `af status works without running dashboard`
-  - `af --version returns version`
+  - `afx --help shows available commands`
+  - `afx status works without running dashboard`
+  - `afx --version returns version`
 
 ### Exit Criteria
-- af tests pass in clean environment
+- afx tests pass in clean environment
 
 ## Phase 7: consult Tests (TC-006)
 
@@ -184,7 +184,7 @@ Implement BATS-based end-to-end tests that verify the `@cluesmith/codev` npm pac
 Phase 1 (Infrastructure) ──> Phase 2 (Install) ──> Phase 3 (Init) ──> Phase 4 (Adopt)
                                     │                                        │
                                     v                                        v
-                             Phase 5 (Doctor) ──> Phase 6 (af) ──> Phase 7 (Consult)
+                             Phase 5 (Doctor) ──> Phase 6 (afx) ──> Phase 7 (Consult)
                                                                             │
                                                                             v
                                                               Phase 8 (CI-PR) ──> Phase 9 (CI-Release)
@@ -204,7 +204,7 @@ Phases 2-7 can be parallelized after Phase 1. Phases 8-9 can be done after any t
 | Phase 3: Init tests | 20 min |
 | Phase 4: Adopt tests | 15 min |
 | Phase 5: Doctor tests | 15 min |
-| Phase 6: af tests | 15 min |
+| Phase 6: afx tests | 15 min |
 | Phase 7: Consult tests | 10 min |
 | Phase 8: CI-PR workflow | 30 min |
 | Phase 9: CI-Release workflow | 20 min |

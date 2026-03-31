@@ -39,17 +39,17 @@ The centerpiece of v1.0.0 is a new paradigm for AI-assisted development. Read mo
 
 ```bash
 # Start the architect dashboard (one of the few commands intended for humans)
-af start
+afx start
 
-# From here, the Architect AI calls af on your behalf:
-# af spawn --project 0003
-# af spawn --project 0007
-# af status
+# From here, the Architect AI calls afx on your behalf:
+# afx spawn --project 0003
+# afx spawn --project 0007
+# afx status
 ```
 
 ### Tower Dashboard
 
-A new centralized view (`af tower`) shows all running agent-farm instances across your machine:
+A new centralized view (`afx tower`) shows all running agent-farm instances across your machine:
 
 - **At-a-glance monitoring**: See which projects have active builders
 - **Quick launch**: Start new instances with directory autocomplete
@@ -77,7 +77,7 @@ The consultant role is defined as a **collaborative partner** - not a rubber sta
 
 ### Flexible Builder Spawning
 
-The `af spawn` command now supports five modes for different workflows:
+The `afx spawn` command now supports five modes for different workflows:
 
 | Mode | Flag | Use Case |
 |------|------|----------|
@@ -95,7 +95,7 @@ Review and comment on files directly from the dashboard. Click any line to add a
 
 ### Interactive Tutorial
 
-New to Codev? Run `af tutorial` for a step-by-step introduction:
+New to Codev? Run `afx tutorial` for a step-by-step introduction:
 
 - Learn the architect-builder workflow hands-on
 - Progress tracking with skip/reset options
@@ -156,14 +156,14 @@ Or follow the [Installation Guide](https://github.com/cluesmith/codev/blob/main/
 Add to your `~/.bashrc` or `~/.zshrc`:
 
 ```bash
-alias af='./codev/bin/agent-farm'
+alias afx='./codev/bin/agent-farm'
 ```
 
 Then:
 
 ```bash
-af start           # Start architect dashboard
-af tutorial        # Learn the workflow
+afx start           # Start architect dashboard
+afx tutorial        # Learn the workflow
 ```
 
 ---

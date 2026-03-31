@@ -2,14 +2,14 @@
 
 ## Summary
 
-Implemented typing-aware message delivery for `af send`. When a user is actively typing in a terminal session, incoming messages are buffered and delivered after a 3-second idle period (or 60-second max age). This prevents message injection from corrupting the architect's in-progress input.
+Implemented typing-aware message delivery for `afx send`. When a user is actively typing in a terminal session, incoming messages are buffered and delivered after a 3-second idle period (or 60-second max age). This prevents message injection from corrupting the architect's in-progress input.
 
 ## Spec Compliance
 
 - [x] Messages are delayed when user is actively typing
 - [x] Messages are delivered promptly when user is idle (3s threshold)
 - [x] Buffered messages include a maximum age (60s) after which they deliver regardless
-- [x] `af send` returns 200 immediately with `deferred: true/false` indicator
+- [x] `afx send` returns 200 immediately with `deferred: true/false` indicator
 - [x] No messages are lost (buffer survives until delivery or max age; force flush on shutdown)
 - [x] Works correctly when multiple messages arrive while typing (delivered in order)
 - [x] Approach selection documented with rationale in plan

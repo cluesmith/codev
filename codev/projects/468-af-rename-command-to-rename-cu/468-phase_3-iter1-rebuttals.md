@@ -4,7 +4,7 @@
 
 ### 1. Empty-name handling
 **Status: FIXED**
-Added client-side validation in `rename.ts`: `if (!options.name || options.name.trim().length === 0)` with `fatal('Name is required. Usage: af rename <name>')`. This catches empty strings before hitting the server.
+Added client-side validation in `rename.ts`: `if (!options.name || options.name.trim().length === 0)` with `fatal('Name is required. Usage: afx rename <name>')`. This catches empty strings before hitting the server.
 
 ### 2. Error message phrasing
 **Status: FIXED**

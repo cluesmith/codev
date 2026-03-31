@@ -2,14 +2,14 @@
 
 ## Problem
 
-Connecting and disconnecting a Tower to Codev Cloud currently requires the CLI (`af tower register` / `af tower deregister`). Users managing Tower via the web UI have no way to set up or tear down cloud connectivity. The cloud status indicator in the header is hidden entirely when not connected, with no affordance to connect.
+Connecting and disconnecting a Tower to Codev Cloud currently requires the CLI (`afx tower register` / `afx tower deregister`). Users managing Tower via the web UI have no way to set up or tear down cloud connectivity. The cloud status indicator in the header is hidden entirely when not connected, with no affordance to connect.
 
 Additionally, the CLI terminology ("register" / "deregister") is confusing. The user mental model is "connect to cloud" / "disconnect from cloud" — the registration details are an implementation concern.
 
 ## Goals
 
 1. Add cloud connect/disconnect UI to the Tower homepage
-2. Rename CLI commands from `af tower register`/`deregister` to `af tower connect`/`disconnect`
+2. Rename CLI commands from `afx tower register`/`deregister` to `afx tower connect`/`disconnect`
 3. Unify the concept: **Connect** = OAuth + save credentials + open tunnel; **Disconnect** = close tunnel + delete credentials + deregister server-side
 4. Smart Connect: if already connected, reconnects the tunnel; if not connected, starts the full OAuth flow
 5. Retain CLI functionality (renamed commands do the same thing)
@@ -22,7 +22,7 @@ Additionally, the CLI terminology ("register" / "deregister") is confusing. The 
 
 ## Current State
 
-### CLI Flow (`af tower register`)
+### CLI Flow (`afx tower register`)
 1. Starts ephemeral HTTP server on random port for OAuth callback
 2. Opens browser to `{serverUrl}/towers/register?callback={callbackUrl}`
 3. User authenticates on codevos.ai
@@ -65,8 +65,8 @@ If credentials exist but the tunnel is down (e.g., tunnel dropped, Tower restart
 ### CLI Rename
 
 Rename the commands while keeping the same behavior:
-- `af tower register` → `af tower connect`
-- `af tower deregister` → `af tower disconnect`
+- `afx tower register` → `afx tower connect`
+- `afx tower deregister` → `afx tower disconnect`
 - Keep old names as hidden aliases for backwards compatibility (not shown in `--help`, but still functional)
 
 ### New Tower API Endpoints
@@ -155,7 +155,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 - [ ] Connected state shows device name + "Disconnect" button
 - [ ] Disconnect fully cleans up: tunnel, server-side registration (best-effort), local credentials
 - [ ] Smart connect: reconnects tunnel if credentials exist without re-doing OAuth
-- [ ] CLI commands renamed to `af tower connect` / `af tower disconnect`
+- [ ] CLI commands renamed to `afx tower connect` / `afx tower disconnect`
 - [ ] Old CLI names (`register`/`deregister`) work as hidden aliases
 - [ ] Existing tunnel connect/disconnect behavior preserved
 - [ ] Callback error pages rendered for all failure modes
@@ -170,7 +170,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 - **Disconnect**: successful full cleanup, server-side deregister failure → warning (local cleanup still proceeds), local credential deletion failure → error
 
 ### Integration/E2E Tests
-- **CLI aliases**: `af tower connect` and `af tower disconnect` execute correctly; `af tower register` and `af tower deregister` still work as hidden aliases
+- **CLI aliases**: `afx tower connect` and `afx tower disconnect` execute correctly; `afx tower register` and `afx tower deregister` still work as hidden aliases
 - **Connect dialog UI**: renders when not connected, device name defaults to hostname, service URL defaults to `https://cloud.codevos.ai`, validation errors display inline
 - **Disconnect UI**: confirmation dialog appears, connected status updates to disconnected after successful disconnect
 

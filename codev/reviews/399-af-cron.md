@@ -1,8 +1,8 @@
-# Review: af cron — Scheduled Workspace Tasks
+# Review: afx cron — Scheduled Workspace Tasks
 
 ## Summary
 
-Implemented a lightweight cron scheduler for Tower that loads task definitions from `.af-cron/*.yaml` per workspace, executes them asynchronously via `child_process.exec`, evaluates conditions against command output, and delivers notifications through the existing `af send` pipeline. Added full CLI support via `af cron` subcommands and a skeleton example for new projects.
+Implemented a lightweight cron scheduler for Tower that loads task definitions from `.af-cron/*.yaml` per workspace, executes them asynchronously via `child_process.exec`, evaluates conditions against command output, and delivers notifications through the existing `afx send` pipeline. Added full CLI support via `afx cron` subcommands and a skeleton example for new projects.
 
 ## Deliverables
 
@@ -22,7 +22,7 @@ Implemented a lightweight cron scheduler for Tower that loads task definitions f
 - 9 route handler tests
 
 ### Phase 4: CLI Commands and Skeleton Updates
-- `af cron` subcommand group with list, status, run, enable, disable
+- `afx cron` subcommand group with list, status, run, enable, disable
 - `TowerClient`-based handlers following existing CLI patterns
 - Skeleton example `.af-cron/ci-health.yaml.example`
 - 13 CLI unit tests
@@ -78,6 +78,6 @@ Implemented a lightweight cron scheduler for Tower that loads task definitions f
 ## Follow-up Items
 
 - Fix consult tooling multi-project detection in builder worktrees
-- Consider adding `af cron history` to show execution history from SQLite
+- Consider adding `afx cron history` to show execution history from SQLite
 - Consider dashboard UI panel for cron tasks (React component)
 - Add `@weekly` and `@monthly` shortcuts if requested

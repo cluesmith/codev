@@ -75,14 +75,14 @@ Bullet points for each:
 - `codev update` - Update framework
 - `codev tower` - Cross-project dashboard
 
-#### agent-farm (af)
-- `af start` - Start dashboard
-- `af stop` - Stop all processes
-- `af spawn -p <id>` - Spawn builder for project
-- `af status` - Check builder status
-- `af send <id> <msg>` - Send message to builder
-- `af cleanup -p <id>` - Clean up builder
-- `af open <file>` - Open file in dashboard
+#### agent-farm (afx)
+- `afx start` - Start dashboard
+- `afx stop` - Stop all processes
+- `afx spawn -p <id>` - Spawn builder for project
+- `afx status` - Check builder status
+- `afx send <id> <msg>` - Send message to builder
+- `afx cleanup -p <id>` - Clean up builder
+- `afx open <file>` - Open file in dashboard
 
 #### consult
 - `consult --model <model> spec <id>` - Review a spec

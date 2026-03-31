@@ -49,7 +49,7 @@ export async function overview(options: { port?: number }): Promise<void> {
 
   // Check if port available
   if (await isPortInUse(port)) {
-    console.error(`Port ${port} already in use. Try: af overview --port <other>`);
+    console.error(`Port ${port} already in use. Try: afx overview --port <other>`);
     process.exit(1);
   }
 
@@ -100,7 +100,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     return { success: false, error: 'Not a codev project (missing codev/ directory)' };
   }
 
-  // Spawn detached: cd <path> && af start
+  // Spawn detached: cd <path> && afx start
   const child = spawn('bash', ['-c', `cd "${projectPath}" && ./codev/bin/agent-farm start`], {
     detached: true,
     stdio: 'ignore'
@@ -138,9 +138,9 @@ Copy the template to skeleton for other projects.
 
 ## Testing
 
-1. `af overview` - starts on port 4100
-2. `af overview --port 4200` - starts on custom port
-3. `af overview` when 4100 in use - fails with clear error
+1. `afx overview` - starts on port 4100
+2. `afx overview --port 4200` - starts on custom port
+3. `afx overview` when 4100 in use - fails with clear error
 4. Dashboard shows running instances
 5. Dashboard shows stopped instances (from ports.json history)
 6. Click "Open" link - opens project dashboard

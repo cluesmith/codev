@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replaced `projectlist.md` as the project tracking registry with GitHub Issues. Reworked `af spawn` CLI to use positional arguments + `--protocol` flag. Added a Tower `/api/overview` endpoint that aggregates builder state from the filesystem with PR/issue data from GitHub. Built a new Dashboard "Work" view that replaces the old StatusPanel with three sections: Active Builders, Pending PRs, and Backlog & Open Bugs. Updated skeleton distribution docs to remove all projectlist references. Synced AGENTS.md to match CLAUDE.md.
+Replaced `projectlist.md` as the project tracking registry with GitHub Issues. Reworked `afx spawn` CLI to use positional arguments + `--protocol` flag. Added a Tower `/api/overview` endpoint that aggregates builder state from the filesystem with PR/issue data from GitHub. Built a new Dashboard "Work" view that replaces the old StatusPanel with three sections: Active Builders, Pending PRs, and Backlog & Open Bugs. Updated skeleton distribution docs to remove all projectlist references. Synced AGENTS.md to match CLAUDE.md.
 
 **Net diff**: ~+4,800 / -2,900 lines across 80+ files (including tests, docs, skeleton updates, and consultation artifacts).
 
@@ -32,7 +32,7 @@ Replaced `projectlist.md` as the project tracking registry with GitHub Issues. R
 | Dead code removal | Done | StatusPanel deleted, projectlist functions removed, legacy CSS cleaned |
 | Documentation updates | Done | CLAUDE.md, AGENTS.md (synced), arch.md, agent-farm.md, workflow-reference.md, cheatsheet.md |
 | Skeleton docs updated | Done | All 12+ projectlist references replaced across 8 skeleton files |
-| AGENTS.md = CLAUDE.md | Done | Build sequence, worktree protection, af open all synced |
+| AGENTS.md = CLAUDE.md | Done | Build sequence, worktree protection, afx open all synced |
 
 ## Changes Made Due to 3-Way Consultation Feedback
 
@@ -82,7 +82,7 @@ Replaced `projectlist.md` as the project tracking registry with GitHub Issues. R
 - **Fixed**: `init.test.ts` projectlist assertion flipped to `toBe(false)`
 - **Fixed**: `--soft` without `--protocol` now defaults to SPIR if spec exists, bugfix otherwise
 - **Fixed**: All 12+ skeleton doc projectlist references updated across 8 files
-- **Fixed**: AGENTS.md synced to match CLAUDE.md (build sequence, worktree protection, af open)
+- **Fixed**: AGENTS.md synced to match CLAUDE.md (build sequence, worktree protection, afx open)
 
 ## Deviations from Plan
 

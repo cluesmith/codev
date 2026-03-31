@@ -23,7 +23,7 @@ The Architect should be able to spawn builders using different AI CLI tools.
 
 ```bash
 # Only Claude Code is supported
-af spawn --project 0009
+afx spawn --project 0009
 
 # config.json only has one builder command
 {
@@ -41,13 +41,13 @@ The spawn command hardcodes Claude-specific flags:
 
 ```bash
 # Spawn with different CLIs
-af spawn --project 0009                    # Default (Claude)
-af spawn --project 0009 --cli claude       # Explicit Claude
-af spawn --project 0009 --cli gemini       # Gemini CLI
-af spawn --project 0009 --cli codex        # Codex CLI
+afx spawn --project 0009                    # Default (Claude)
+afx spawn --project 0009 --cli claude       # Explicit Claude
+afx spawn --project 0009 --cli gemini       # Gemini CLI
+afx spawn --project 0009 --cli codex        # Codex CLI
 
 # With 0014 task mode
-af spawn "Fix the bug" --cli gemini
+afx spawn "Fix the bug" --cli gemini
 
 # Override default in config.json
 {
@@ -70,8 +70,8 @@ af spawn "Fix the bug" --cli gemini
 
 ## Success Criteria
 
-- [ ] `af spawn --cli gemini` spawns a builder using Gemini CLI
-- [ ] `af spawn --cli codex` spawns a builder using Codex CLI
+- [ ] `afx spawn --cli gemini` spawns a builder using Gemini CLI
+- [ ] `afx spawn --cli codex` spawns a builder using Codex CLI
 - [ ] Default CLI is configurable in config.json
 - [ ] Role/prompt injection works correctly for each CLI
 - [ ] Builder state tracks which CLI was used
@@ -479,11 +479,11 @@ interface UserConfig {
 ## Test Scenarios
 
 ### Functional Tests
-1. `af spawn -p 0009` - Default CLI (Claude) works
-2. `af spawn -p 0009 --cli claude` - Explicit Claude works
-3. `af spawn -p 0009 --cli gemini` - Gemini spawns with correct flags
-4. `af spawn -p 0009 --cli codex` - Codex spawns with correct env vars
-5. `af spawn -p 0009 --cli unknown` - Unknown CLI returns helpful error
+1. `afx spawn -p 0009` - Default CLI (Claude) works
+2. `afx spawn -p 0009 --cli claude` - Explicit Claude works
+3. `afx spawn -p 0009 --cli gemini` - Gemini spawns with correct flags
+4. `afx spawn -p 0009 --cli codex` - Codex spawns with correct env vars
+5. `afx spawn -p 0009 --cli unknown` - Unknown CLI returns helpful error
 6. Missing CLI binary returns helpful installation instructions
 7. Builder state correctly tracks CLI type
 8. Dashboard shows CLI type for each builder

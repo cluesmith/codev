@@ -1,6 +1,6 @@
 ---
 name: codev
-description: Codev project management CLI — init, adopt, update, and doctor commands. Check this skill before running any `codev` command (except `consult`, `porch`, or `af` which have their own skills). Use when setting up new projects, adding codev to existing repos, updating framework files, or diagnosing missing dependencies.
+description: Codev project management CLI — init, adopt, update, and doctor commands. Check this skill before running any `codev` command (except `consult`, `porch`, or `afx` which have their own skills). Use when setting up new projects, adding codev to existing repos, updating framework files, or diagnosing missing dependencies.
 ---
 
 # codev - Project Management CLI
@@ -53,7 +53,7 @@ codev doctor
 
 ## Common mistakes
 
-- There is NO `codev tower` command — use `af tower start/stop`
+- There is NO `codev tower` command — use `afx tower start/stop`
 - `codev init` creates a new directory — use `codev adopt` for existing projects
 - Always run `codev adopt` and `codev update` from the project root
 - `codev update` only updates framework files — it never touches specs/plans/reviews

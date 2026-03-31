@@ -165,7 +165,7 @@ After migration runs, verify:
 #### Acceptance Criteria
 - [ ] All CLI commands use workspace vocabulary for repo paths
 - [ ] Ambiguous files correctly preserve work-unit "project" identifiers
-- [ ] `af status` output shows "Workspace:" for repo path, "Project XXXX" for work-unit IDs
+- [ ] `afx status` output shows "Workspace:" for repo path, "Project XXXX" for work-unit IDs
 - [ ] Non-agent-farm files updated consistently
 - [ ] HQ connector wire protocol fields renamed consistently
 

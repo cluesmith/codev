@@ -19,7 +19,7 @@ ARCHITECT (main repo)                    BUILDER (worktree)
   Plan ─────────┤
                 │ Human approves plan
                 │
-                └──── af spawn ────────►  Implement
+                └──── afx spawn ────────►  Implement
                                           Defend
                                           Evaluate
                                           ◄──── PR ────────
@@ -144,7 +144,7 @@ done
 
 **Minimal Architect responsibilities:**
 1. Create project entry in projectlist.md
-2. Create worktree: `af spawn --project 0071 --ralph`
+2. Create worktree: `afx spawn --project 0071 --ralph`
 3. Approve spec (via HQ dashboard or local edit)
 4. Approve plan (via HQ dashboard or local edit)
 5. Review final PR

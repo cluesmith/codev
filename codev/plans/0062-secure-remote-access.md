@@ -13,9 +13,9 @@ Implement secure remote access to Agent Farm via SSH tunneling, enabled by a rev
 **Components**:
 1. Reverse proxy in dashboard server (implemented)
 2. Dashboard UI updates (iframe URLs) (implemented)
-3. `af start --remote` flag for one-command remote access
+3. `afx start --remote` flag for one-command remote access
 
-> **Note**: Original plan included `af tunnel` command. Spec was updated to use `--remote` flag on `af start` instead, which provides a better UX (single command does everything).
+> **Note**: Original plan included `afx tunnel` command. Spec was updated to use `--remote` flag on `afx start` instead, which provides a better UX (single command does everything).
 
 ---
 
@@ -190,9 +190,9 @@ iframe.onerror = () => {
 
 ---
 
-### Phase 3: `af start --remote` Flag
+### Phase 3: `afx start --remote` Flag
 
-> **Spec Update**: Original plan was `af tunnel` command. Spec changed to `--remote` flag on `af start` for better UX.
+> **Spec Update**: Original plan was `afx tunnel` command. Spec changed to `--remote` flag on `afx start` for better UX.
 
 **Goal**: One command to start Agent Farm on remote machine with SSH tunnel.
 
@@ -220,7 +220,7 @@ async function startRemote(options: StartOptions): Promise<void> {
 
   // Build remote command
   const cdCommand = remotePath ? `cd ${remotePath}` : `cd ${projectName}`;
-  const remoteCommand = `${cdCommand} && af start --port ${localPort}`;
+  const remoteCommand = `${cdCommand} && afx start --port ${localPort}`;
 
   // Spawn SSH with port forwarding
   const ssh = spawn('ssh', [
@@ -238,7 +238,7 @@ async function startRemote(options: StartOptions): Promise<void> {
 **Tests**:
 - Unit test: `parseRemote()` parses `user@host` and `user@host:/path`
 - Unit test: `parseRemote()` throws on invalid format
-- Manual test: `af start --remote user@host` connects and opens browser
+- Manual test: `afx start --remote user@host` connects and opens browser
 
 ---
 
@@ -256,8 +256,8 @@ async function startRemote(options: StartOptions): Promise<void> {
 
 Access Agent Farm from another device (iPad, laptop, etc.) via SSH tunnel:
 
-1. Start Agent Farm: `af start`
-2. Get SSH command: `af tunnel`
+1. Start Agent Farm: `afx start`
+2. Get SSH command: `afx tunnel`
 3. Run the SSH command on your remote device
 4. Open http://localhost:4200 in your browser
 
@@ -310,7 +310,7 @@ The dashboard and all terminals work identically via the tunnel. SSH handles aut
    - Connect to `/terminal/architect` → successful upgrade
    - Connect to `/terminal/unknown` → connection closed
 
-5. **af tunnel command**:
+5. **afx tunnel command**:
    - When running → outputs SSH command with correct port
    - When not running → error message
 
@@ -318,7 +318,7 @@ The dashboard and all terminals work identically via the tunnel. SSH handles aut
 
 6. **End-to-end SSH tunnel**:
    - Start Agent Farm on machine A
-   - Run `af tunnel`, copy SSH command
+   - Run `afx tunnel`, copy SSH command
    - On machine B, run SSH command
    - Open `http://localhost:4200` on machine B
    - Interact with terminals (type, scroll, copy)
@@ -334,7 +334,7 @@ The dashboard and all terminals work identically via the tunnel. SSH handles aut
 
 From spec:
 
-**`af tunnel` Command**:
+**`afx tunnel` Command**:
 - [ ] Outputs complete SSH command with correct port
 - [ ] Detects and displays all non-loopback IPv4 addresses
 - [ ] Shows current username in SSH command

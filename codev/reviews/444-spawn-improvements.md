@@ -1,16 +1,16 @@
-# Review: af spawn Improvements
+# Review: afx spawn Improvements
 
 ## Summary
 
-Implemented two improvements to `af spawn` for SPIR/ASPIR protocols:
-1. **No-spec spawn**: `af spawn N --protocol aspir` now works without a pre-existing spec file when the protocol's `input.required` is `false`. The project name is derived from the GitHub issue title.
+Implemented two improvements to `afx spawn` for SPIR/ASPIR protocols:
+1. **No-spec spawn**: `afx spawn N --protocol aspir` now works without a pre-existing spec file when the protocol's `input.required` is `false`. The project name is derived from the GitHub issue title.
 2. **GitHub-based naming**: All protocols now prefer the GitHub issue title (via `slugify()`) for worktree/branch/porch naming, falling back to the spec filename when GitHub is unavailable.
 
 A key insight during implementation was the need to decouple project naming (worktree, branch, porch — from GitHub issue title) from file references (spec/plan paths in the builder prompt — from actual files on disk). All three reviewers caught this bug in the Phase 2 review.
 
 ## Spec Compliance
-- [x] `af spawn 444 --protocol aspir` succeeds without a spec file
-- [x] `af spawn 444 --protocol spir` succeeds without a spec file
+- [x] `afx spawn 444 --protocol aspir` succeeds without a spec file
+- [x] `afx spawn 444 --protocol spir` succeeds without a spec file
 - [x] When no spec file exists, worktree/branch/porch use GitHub issue title slug
 - [x] When spec file exists, porch behavior unchanged (spec used as pre-approved artifact)
 - [x] Naming uses GitHub issue title even when spec file exists (intentional change)

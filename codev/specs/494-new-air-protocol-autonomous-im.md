@@ -47,7 +47,7 @@ A new **AIR** (Autonomous Implement & Review) protocol that:
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria
-- [ ] `af spawn 42 --protocol air` works and creates a builder
+- [ ] `afx spawn 42 --protocol air` works and creates a builder
 - [ ] Porch drives the AIR protocol through Implement → Review phases
 - [ ] No spec/plan/review files are created in `codev/specs/`, `codev/plans/`, or `codev/reviews/`
 - [ ] Review content appears in the PR body

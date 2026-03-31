@@ -1,4 +1,4 @@
-# Plan: af spawn --branch: Allow Builders to Work on Existing PR Branches
+# Plan: afx spawn --branch: Allow Builders to Work on Existing PR Branches
 
 ## Metadata
 - **ID**: plan-609
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Add a `--branch <name>` flag to `af spawn` that creates a worktree on an existing remote branch instead of creating a new one. This enables the "hand-off" workflow where a builder picks up an existing PR.
+Add a `--branch <name>` flag to `afx spawn` that creates a worktree on an existing remote branch instead of creating a new one. This enables the "hand-off" workflow where a builder picks up an existing PR.
 
 The implementation is straightforward: add the CLI flag, add a new worktree creation function that fetches an existing branch, wire it into the spawn paths (`spawnSpec` and `spawnBugfix`), and add tests.
 
@@ -87,11 +87,11 @@ git worktree add <path> <branch>          # use existing local branch
 This avoids the `git fetch origin <branch>:<branch>` pitfall (fails on non-fast-forward if local branch exists and has diverged).
 
 #### Acceptance Criteria
-- [ ] `af spawn --help` shows `--branch` option
-- [ ] `af spawn 603 --protocol bugfix --branch "foo;rm -rf /"` rejects with validation error
-- [ ] `af spawn 603 --protocol bugfix --branch nonexistent-branch` fails with "not found on remote" error
-- [ ] `af spawn 603 --protocol bugfix --branch some-branch --resume` fails with mutual exclusion error
-- [ ] `af spawn --protocol maintain --branch some-branch` fails (no issue number)
+- [ ] `afx spawn --help` shows `--branch` option
+- [ ] `afx spawn 603 --protocol bugfix --branch "foo;rm -rf /"` rejects with validation error
+- [ ] `afx spawn 603 --protocol bugfix --branch nonexistent-branch` fails with "not found on remote" error
+- [ ] `afx spawn 603 --protocol bugfix --branch some-branch --resume` fails with mutual exclusion error
+- [ ] `afx spawn --protocol maintain --branch some-branch` fails (no issue number)
 - [ ] `createWorktreeFromBranch()` fetches remote branch and creates worktree correctly
 - [ ] All unit tests pass
 
@@ -127,11 +127,11 @@ This avoids the `git fetch origin <branch>:<branch>` pitfall (fails on non-fast-
 
 #### Worktree naming examples:
 ```
-af spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-string-
+afx spawn 603 --protocol bugfix --branch builder/bugfix-603-propagate-opaque-string-
 → worktree: .builders/bugfix-603-branch-builder-bugfix-603-propagate
 → branch: builder/bugfix-603-propagate-opaque-string- (the actual remote branch)
 
-af spawn 315 --protocol spir --branch builder/spir-315-some-feature
+afx spawn 315 --protocol spir --branch builder/spir-315-some-feature
 → worktree: .builders/spir-315-branch-builder-spir-315-some-featur
 → branch: builder/spir-315-some-feature (the actual remote branch)
 ```
@@ -142,7 +142,7 @@ This pattern ensures:
 - Porch detects project ID from the `<id>-` segment in the path
 
 #### Acceptance Criteria
-- [ ] `af spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree at `.builders/bugfix-603-branch-builder-bugfix-603-slug`
+- [ ] `afx spawn 603 --protocol bugfix --branch builder/bugfix-603-slug` creates worktree at `.builders/bugfix-603-branch-builder-bugfix-603-slug`
 - [ ] The builder's prompt mentions continuing work on the branch
 - [ ] The builder state records the correct (user-specified) branch name
 - [ ] `inferProtocolFromWorktree()` still works for `--branch`-created worktrees
@@ -162,4 +162,4 @@ This pattern ensures:
 
 ## Validation Checkpoints
 1. **After Phase 1**: `createWorktreeFromBranch()` works standalone with a real git repo; unit tests pass
-2. **After Phase 2**: Full `af spawn --branch` flow works end-to-end; E2E test passes; no regressions
+2. **After Phase 2**: Full `afx spawn --branch` flow works end-to-end; E2E test passes; no regressions

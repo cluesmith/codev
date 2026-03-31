@@ -9,10 +9,10 @@
 ## Prerequisites
 
 **Clean Worktree Before Spawning Builders**:
-- All specs, plans, and local changes **MUST be committed** before `af spawn`
+- All specs, plans, and local changes **MUST be committed** before `afx spawn`
 - Builders work in git worktrees branched from HEAD — uncommitted files are invisible
 - This includes `codev update` results, spec drafts, and plan approvals
-- The `af spawn` command enforces this (use `--force` to override)
+- The `afx spawn` command enforces this (use `--force` to override)
 
 **Required for Multi-Agent Consultation**:
 - The `consult` CLI must be available (installed with `npm install -g @cluesmith/codev`)

@@ -7,11 +7,11 @@
 
 ## Summary
 
-Refactor `af spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
+Refactor `afx spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
 
 ## Problem Statement
 
-Currently, specific protocols are deeply baked into `af spawn`:
+Currently, specific protocols are deeply baked into `afx spawn`:
 - `spawnBugfix()` hardcodes BUGFIX protocol path, collision checks, and issue commenting
 - `spawnSpec()` defaults to SPIR with protocol-specific prompts
 - Adding a new protocol requires modifying spawn.ts

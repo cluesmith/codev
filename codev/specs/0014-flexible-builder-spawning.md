@@ -9,7 +9,7 @@
 
 ## Problem Statement
 
-Currently, `af spawn` is tightly coupled to project specs. It requires `--project XXXX` and expects a spec file at `codev/specs/XXXX-*.md`. This limits flexibility in several ways:
+Currently, `afx spawn` is tightly coupled to project specs. It requires `--project XXXX` and expects a spec file at `codev/specs/XXXX-*.md`. This limits flexibility in several ways:
 <!-- REVIEW(@architect): this is a test. -->
 
 1. **Ad-hoc tasks**: Users can't spawn a builder for quick tasks without first creating a spec file
@@ -22,12 +22,12 @@ The Architect should be able to delegate any work to a Builder, not just spec-de
 
 ```bash
 # This works (spec-based)
-af spawn --project 0009
+afx spawn --project 0009
 
 # These don't work
-af spawn "Fix the bug in auth.ts"           # Natural language task
-af spawn --protocol cleanup                  # Protocol invocation
-af spawn                                     # Blank session
+afx spawn "Fix the bug in auth.ts"           # Natural language task
+afx spawn --protocol cleanup                  # Protocol invocation
+afx spawn                                     # Blank session
 ```
 
 The current spawn implementation:
@@ -39,22 +39,22 @@ The current spawn implementation:
 
 ## Desired State
 
-The `af spawn` command becomes flexible, supporting multiple invocation modes with explicit flags (no positional arguments):
+The `afx spawn` command becomes flexible, supporting multiple invocation modes with explicit flags (no positional arguments):
 
 ```bash
 # Mode 1: Spec-based (existing behavior)
-af spawn --project 0009                      # Spawn builder for spec
-af spawn -p 0009                             # Short form
+afx spawn --project 0009                      # Spawn builder for spec
+afx spawn -p 0009                             # Short form
 
 # Mode 2: Natural language task
-af spawn --task "Fix the authentication bug"
-af spawn --task "Fix auth bug" --files src/auth.ts,src/login.ts  # With context
+afx spawn --task "Fix the authentication bug"
+afx spawn --task "Fix auth bug" --files src/auth.ts,src/login.ts  # With context
 
 # Mode 3: Protocol invocation
-af spawn --protocol cleanup                  # Run cleanup protocol
+afx spawn --protocol cleanup                  # Run cleanup protocol
 
 # Mode 4: Shell session (not a builder - just a Claude shell)
-af spawn --shell                             # Just a Claude session, no prompt
+afx spawn --shell                             # Just a Claude session, no prompt
 ```
 
 ## Stakeholders
@@ -65,16 +65,16 @@ af spawn --shell                             # Just a Claude session, no prompt
 
 ## Success Criteria
 
-- [ ] `af spawn --task "task"` starts a builder with the task as initial prompt
-- [ ] `af spawn --task "task" --files a.ts,b.ts` provides file context to the builder
-- [ ] `af spawn --protocol NAME` starts a builder with protocol role loaded
-- [ ] `af spawn --shell` starts a bare Claude session (not a builder)
-- [ ] `af spawn --project XXXX` continues to work as before (backward compatible)
+- [ ] `afx spawn --task "task"` starts a builder with the task as initial prompt
+- [ ] `afx spawn --task "task" --files a.ts,b.ts` provides file context to the builder
+- [ ] `afx spawn --protocol NAME` starts a builder with protocol role loaded
+- [ ] `afx spawn --shell` starts a bare Claude session (not a builder)
+- [ ] `afx spawn --project XXXX` continues to work as before (backward compatible)
 - [ ] All modes create proper worktrees and tmux sessions
 - [ ] IDs are short (4-char alphanumeric) and unique
 - [ ] Builder state includes `type` field for UI grouping
 - [ ] Dashboard correctly displays and groups all builder types
-- [ ] `af spawn --help` documents all modes with examples
+- [ ] `afx spawn --help` documents all modes with examples
 - [ ] Tests pass for all spawn modes
 - [ ] CLI validates mutually exclusive flags and provides clear error messages
 
@@ -273,23 +273,23 @@ interface Builder {
 ## Test Scenarios
 
 ### Functional Tests
-1. `af spawn -p 0009` - Existing spec-based spawn works (backward compat)
-2. `af spawn --task "Fix bug"` - Task mode creates builder with prompt
-3. `af spawn --task "Fix bug" --files src/auth.ts` - Task mode with file context
-4. `af spawn --protocol cleanup` - Protocol mode loads protocol
-5. `af spawn --shell` - Shell mode creates bare session (no worktree)
-6. Mutual exclusivity: `af spawn -p 0009 --shell` returns error
-7. Mutual exclusivity: `af spawn --task "x" --protocol y` returns error
+1. `afx spawn -p 0009` - Existing spec-based spawn works (backward compat)
+2. `afx spawn --task "Fix bug"` - Task mode creates builder with prompt
+3. `afx spawn --task "Fix bug" --files src/auth.ts` - Task mode with file context
+4. `afx spawn --protocol cleanup` - Protocol mode loads protocol
+5. `afx spawn --shell` - Shell mode creates bare session (no worktree)
+6. Mutual exclusivity: `afx spawn -p 0009 --shell` returns error
+7. Mutual exclusivity: `afx spawn --task "x" --protocol y` returns error
 8. ID uniqueness: spawn same task twice, get different IDs (e.g., task-x9k2, task-b4c1)
 9. Protocol role loading: creates role file at `protocols/cleanup/role.md`, verify it's loaded
-10. Missing protocol: `af spawn --protocol nonexistent` shows helpful error
-11. No mode flag: `af spawn` shows error with available modes
+10. Missing protocol: `afx spawn --protocol nonexistent` shows helpful error
+11. No mode flag: `afx spawn` shows error with available modes
 
 ### Non-Functional Tests
 1. Spawn completes in < 5 seconds
 2. Multiple concurrent spawns don't cause port conflicts
 3. Dashboard displays all builder types with correct grouping
-4. `af spawn --help` shows all modes with examples
+4. `afx spawn --help` shows all modes with examples
 
 ## Dependencies
 - **Internal Systems**: Existing spawn infrastructure, tmux, ttyd
@@ -305,7 +305,7 @@ interface Builder {
 |------|------------|--------|-------------------|
 | Breaking existing `--project` mode | Low | High | Comprehensive test coverage |
 | Confusing UX with multiple modes | Medium | Medium | Clear help text and examples |
-| Branch/worktree proliferation | High | Medium | Document cleanup procedures, consider `af prune` command |
+| Branch/worktree proliferation | High | Medium | Document cleanup procedures, consider `afx prune` command |
 | Port allocation race conditions | Low | Medium | Verify port still free after allocation |
 | Dashboard incompatibility with new ID formats | Medium | Medium | Update dashboard UI to handle all builder types |
 | Protocol file not found | Medium | Low | Clear error message with available protocols |

@@ -15,7 +15,7 @@ Systematic cleanup of post-migration debt across the Tower codebase, addressing 
 - [x] AC7: All existing tests pass; new tests for file tab persistence and session naming (Phase 4 + Phase 5)
 - [x] AC8: Builder/UtilTerminal types no longer carry `port`/`pid` fields (Phase 1)
 - [x] AC9: `getGateStatusForProject()` reads porch status from filesystem (Phase 3)
-- [x] AC10: `--remote` flag removed from `af start` (Phase 1)
+- [x] AC10: `--remote` flag removed from `afx start` (Phase 1)
 - [x] AC11: Tower error responses are structured JSON with `console.error` logging (Phase 5)
 
 ## Deviations from Plan
@@ -43,7 +43,7 @@ Systematic cleanup of post-migration debt across the Tower codebase, addressing 
 
 ### Challenges Encountered
 - **Codex test expectations**: Codex repeatedly requested that tests import and call actual production functions rather than duplicating SQL queries. This required extracting gate-status and file-tab helpers into separate modules with dependency injection. The resulting code is better, but it added 2 extra iterations to Phases 3 and 4.
-- **Naming ambiguity**: The spec referenced "shell.ts error handling" which could mean either `utils/shell.ts` (the shell exec utility) or `commands/shell.ts` (the `af shell` CLI command). The plan clarified this refers to `commands/shell.ts`, but it was initially confusing.
+- **Naming ambiguity**: The spec referenced "shell.ts error handling" which could mean either `utils/shell.ts` (the shell exec utility) or `commands/shell.ts` (the `afx shell` CLI command). The plan clarified this refers to `commands/shell.ts`, but it was initially confusing.
 
 ### What Would Be Done Differently
 - **Extract testable modules upfront**: When writing functions that wrap global singletons (like `getGlobalDb()`), immediately extract the core logic with parameter injection for testability. This would have avoided iteration 2 rework in Phases 3 and 4.
@@ -110,7 +110,7 @@ The builder operated across **3 context windows** (context expired once during P
 | Specify | 1 | Codex | Missing SQLite schema/migration details |
 | Plan | 1 | Codex, Claude | `shell.ts` omitted from Phase 3; no migration plan for `port`/`pid` column removal |
 | Phase 1 | 2 | Codex, Gemini | Missing Tower terminal cleanup in `cleanup.ts`; `annotations` table UNIQUE constraint on `port` would break with hardcoded `0` — needed DB migration |
-| Phase 2 | 4 | All three (iter 1); Codex (iters 2–3) | Incomplete naming sweep — reviewers kept finding more `af dash start` literals in `status.ts`, `hq-connector.ts`, and remote `start.ts` code paths |
+| Phase 2 | 4 | All three (iter 1); Codex (iters 2–3) | Incomplete naming sweep — reviewers kept finding more `afx dash start` literals in `status.ts`, `hq-connector.ts`, and remote `start.ts` code paths |
 | Phase 3 | 2 | Codex | Gate-status tests duplicated parsing logic instead of calling the production function |
 | Phase 4 | 3 | Codex (iters 1–2) | Iter 1: file tabs not rehydrated from SQLite on startup. Iter 2: tests still exercised raw SQL instead of exported functions |
 | Phase 5 | 2 | All three | `shell.ts` treated all errors as "Tower not running"; global error handler returned `text/plain` instead of JSON |
@@ -126,7 +126,7 @@ The builder operated across **3 context windows** (context expired once during P
 
 Issues that Claude Code should have caught without needing reviewer feedback:
 
-1. **Run exhaustive grep before claiming "all instances fixed"**. Phase 2 took 4 iterations because each round found more `af dash start` literals. A builder prompt should include: *"After any rename/terminology change, run `rg` across the entire codebase for the old term and verify zero hits before committing."*
+1. **Run exhaustive grep before claiming "all instances fixed"**. Phase 2 took 4 iterations because each round found more `afx dash start` literals. A builder prompt should include: *"After any rename/terminology change, run `rg` across the entire codebase for the old term and verify zero hits before committing."*
 
 2. **Always use `path.sep` in path security checks**. The `startsWith(projectPath)` vulnerability is a well-known pattern. A builder prompt should include: *"When writing path containment checks, always use `startsWith(base + path.sep)` or `path.relative()` — never bare `startsWith(base)`."*
 

@@ -17,16 +17,16 @@ Major stabilization release with project management rework, shellper reliability
 - **GitHub Issues as source of truth** (Spec 0126): Projects tracked via GitHub Issues instead of `projectlist.md`
 - **Unified Work view**: Dashboard overview, builder status, and backlog in a single view
 - **Shellper multi-client connections** (Spec 0118): Multiple clients can connect to the same session
-- **`af attach` terminal mode**: Direct shellper socket connection
+- **`afx attach` terminal mode**: Direct shellper socket connection
 - **Codex SDK integration** (Spec 0120): Replaces CLI subprocess with OpenAI SDK
 - **Rebuttal-based review** (Spec 0121): Consultation reviews support iterative rebuttals
 - **Consultation metrics** (Spec 0115): SQLite-backed MetricsDB with `consult stats` subcommand
-- **Messaging infrastructure** (Spec 0110): `af send` command with WebSocket message bus
+- **Messaging infrastructure** (Spec 0110): `afx send` command with WebSocket message bus
 - **Shellper debug logging** (Spec 0113): Stderr capture bridge and session event logging
 - **Tower async handlers** (Spec 0127): Workspace creation/adoption and git status converted to async
 
 ### Changed
-- **`af spawn` CLI reworked**: Positional arg + `--protocol` flag replaces old `-p`/`--issue` syntax
+- **`afx spawn` CLI reworked**: Positional arg + `--protocol` flag replaces old `-p`/`--issue` syntax
 
 ### Fixed
 - Shellper resource leakage with periodic cleanup (Spec 0116)
@@ -42,7 +42,7 @@ Major stabilization release with project management rework, shellper reliability
 ## [2.0.3] - 2026-02-15 "Hagia Sophia"
 
 ### Added
-- **Porch gate notifications** (Spec 0108): Push-based `af send` from porch replaces poll-based gate watcher
+- **Porch gate notifications** (Spec 0108): Push-based `afx send` from porch replaces poll-based gate watcher
 - **Tunnel keepalive** (Spec 0109): WebSocket ping/pong heartbeat for silent connection drop recovery
 
 ### Changed
@@ -93,9 +93,9 @@ Complete rearchitecture: custom terminal manager, Tower decomposition, cloud con
 ## [1.6.0] - 2026-01-07 "Gothic"
 
 ### Added
-- **BUGFIX protocol**: GitHub issue-driven bug fixes with `af spawn --issue 42`
+- **BUGFIX protocol**: GitHub issue-driven bug fixes with `afx spawn --issue 42`
 - **Release candidate workflow**: RC tags published to `@next` npm tag
-- **Tower subcommands**: `af tower start/stop/status`
+- **Tower subcommands**: `afx tower start/stop/status`
 - **Create File button** in dashboard with path traversal protection
 
 ### Changed
@@ -131,14 +131,14 @@ Complete rearchitecture: custom terminal manager, Tower decomposition, cloud con
 ## [1.5.2] - 2025-12-28 "Florence"
 
 ### Added
-- **Secure remote access** via SSH tunneling with `af start --remote user@host`
+- **Secure remote access** via SSH tunneling with `afx start --remote user@host`
 - Reverse proxy for terminal traffic routing
 
 ### Changed
-- `af stop` detects and kills orphaned processes
+- `afx stop` detects and kills orphaned processes
 
 ### Deprecated
-- `--allow-insecure-remote` flag (use `af start --remote` instead)
+- `--allow-insecure-remote` flag (use `afx start --remote` instead)
 
 ## [1.4.3] - 2025-12-17
 
@@ -165,11 +165,11 @@ Complete rearchitecture: custom terminal manager, Tower decomposition, cloud con
 ### Added
 - `codev generate-image` command for AI image generation
 - **File browser** in dashboard with tree navigation
-- Image/video viewing support in `af open`
+- Image/video viewing support in `afx open`
 - **RELEASE protocol** for standardized release process
 
 ### Removed
-- `af tower` command (use `codev tower` instead; later reversed in v1.6.0)
+- `afx tower` command (use `codev tower` instead; later reversed in v1.6.0)
 - Legacy `agent-farm/` directory
 
 ## [1.2.0] - 2025-12-11 "Cordoba"
@@ -189,7 +189,7 @@ Complete rearchitecture: custom terminal manager, Tower decomposition, cloud con
 ## [1.1.0] - 2025-12-08 "Bauhaus"
 
 ### Added
-- **Unified CLI package** (`@cluesmith/codev`) with three commands: `codev`, `af`, `consult`
+- **Unified CLI package** (`@cluesmith/codev`) with three commands: `codev`, `afx`, `consult`
 - New `codev` subcommands: `init`, `adopt`, `doctor`, `update`, `tower`
 - **TICK protocol**: Amendment workflow for lightweight spec modifications
 - Architect-mediated PR reviews with improved consultation efficiency
@@ -202,14 +202,14 @@ Complete rearchitecture: custom terminal manager, Tower decomposition, cloud con
 First stable release with full architect-builder workflow.
 
 ### Added
-- **Tower Dashboard** (`af tower`): Centralized view of all agent-farm instances
+- **Tower Dashboard** (`afx tower`): Centralized view of all agent-farm instances
 - **Consult Tool**: Unified CLI for multi-agent consultation (Gemini, Codex, Claude)
-- **Flexible builder spawning** (`af spawn`): Five spawn modes
-- **Send instructions to builder** (`af send`): Architect-to-builder communication
+- **Flexible builder spawning** (`afx spawn`): Five spawn modes
+- **Send instructions to builder** (`afx send`): Architect-to-builder communication
 - **Annotation editor**: Edit files inline from dashboard
 - **Tab bar status indicators**: Color dots showing working/idle/error states
 - **Multi-instance support**: Directory-aware dashboard titles
-- **Tutorial mode** (`af tutorial`): Interactive onboarding
+- **Tutorial mode** (`afx tutorial`): Interactive onboarding
 - **Cleanup protocol**: Four phases (AUDIT → PRUNE → VALIDATE → SYNC)
 
 ### Changed

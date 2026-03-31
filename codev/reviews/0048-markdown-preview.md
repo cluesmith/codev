@@ -1,4 +1,4 @@
-# Review: Markdown Preview for af open
+# Review: Markdown Preview for afx open
 
 ## Metadata
 - **ID**: 0048
@@ -9,7 +9,7 @@
 
 ## Summary
 
-This review documents the implementation of markdown preview functionality for the `af open` command. The feature adds a toggle button that allows users to switch between the annotated line-by-line view and a rendered markdown preview for `.md` files.
+This review documents the implementation of markdown preview functionality for the `afx open` command. The feature adds a toggle button that allows users to switch between the annotated line-by-line view and a rendered markdown preview for `.md` files.
 
 ## Implementation Overview
 

@@ -47,7 +47,7 @@ npm pack
 npm install -g ./cluesmith-codev-*.tgz
 
 # 3. Restart (only this step needs downtime)
-af tower stop && af tower start
+afx tower stop && afx tower start
 ```
 
 - Install while Tower is running — it doesn't affect the running process
@@ -261,8 +261,8 @@ When the user says **"cmap the PR"** or **"cmap spec 42"**, this means:
 
 ## CLI Command Reference
 
-**IMPORTANT: Never guess CLI commands.** Use the `/af` skill to check the quick reference before running agent farm commands. Common mistakes to avoid:
-- There is NO `codev tower` command — use `af tower start` / `af tower stop`
+**IMPORTANT: Never guess CLI commands.** Use the `/afx` skill to check the quick reference before running agent farm commands. Common mistakes to avoid:
+- There is NO `codev tower` command — use `afx tower start` / `afx tower stop`
 - There is NO `restart` subcommand — stop then start
 - When unsure about syntax, check the docs below first
 
@@ -270,7 +270,7 @@ Codev provides five CLI tools. For complete reference documentation, see:
 
 - **[Overview](codev/resources/commands/overview.md)** - Quick start and summary of all tools
 - **[codev](codev/resources/commands/codev.md)** - Project management (init, adopt, doctor, update, tower)
-- **[af](codev/resources/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
+- **[afx](codev/resources/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
 - **[porch](codev/resources/commands/overview.md#porch---protocol-orchestrator)** - Protocol orchestrator (status, run, approve, pending)
 - **[consult](codev/resources/commands/consult.md)** - AI consultation (general, protocol, stats)
 - **[team](codev/resources/commands/team.md)** - Team coordination (list, message, update, add)
@@ -289,46 +289,46 @@ For detailed commands, configuration, and architecture, see:
 ### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
 
 **When a worktree already exists for a project:**
-1. Use `af spawn XXXX --resume`
+1. Use `afx spawn XXXX --resume`
 2. If `--resume` fails → **ASK THE USER**
 3. Only destroy if the user explicitly says to
 
 **NEVER run without EXPLICIT user request:**
 - `git worktree remove` (with or without --force)
 - `git branch -D` on builder branches
-- `af cleanup` followed by fresh spawn
+- `afx cleanup` followed by fresh spawn
 
 **You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
 
 ### 🚨 ALWAYS Operate From the Main Workspace Root 🚨
 
-**ALL `af` commands (`af spawn`, `af send`, `af status`, `af workspace`, `af cleanup`) MUST be run from the repository root on the `main` branch.**
+**ALL `afx` commands (`afx spawn`, `afx send`, `afx status`, `afx workspace`, `afx cleanup`) MUST be run from the repository root on the `main` branch.**
 
-- **NEVER** run `af spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
-- **NEVER** run `af workspace start` from a worktree — there is no separate workspace per worktree
-- **NEVER** `cd` into a worktree to run af commands
+- **NEVER** run `afx spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
+- **NEVER** run `afx workspace start` from a worktree — there is no separate workspace per worktree
+- **NEVER** `cd` into a worktree to run afx commands
 - The **only exception** is `porch` commands that need worktree context (e.g. `porch approve` from a builder's worktree)
 
-**What happened**: On 2026-02-21, `af spawn` was run from inside a builder's worktree. All new builders were nested inside that worktree, `af send` couldn't find them, and `af status` showed "not active in tower". Multiple builders had to be killed and respawned.
+**What happened**: On 2026-02-21, `afx spawn` was run from inside a builder's worktree. All new builders were nested inside that worktree, `afx send` couldn't find them, and `afx status` showed "not active in tower". Multiple builders had to be killed and respawned.
 
 ### Pre-Spawn Rule
 
-**Commit all local changes before `af spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).
+**Commit all local changes before `afx spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).
 
 ### Key Commands
 
 ```bash
-af workspace start                   # Start the workspace
-af spawn 42 --protocol spir          # Spawn builder for SPIR project
-af spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
-af spawn 42 --protocol bugfix        # Spawn builder for a bugfix
-af spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
-af status                            # Check all builders
-af cleanup --project 0042            # Clean up after merge
-af open file.ts            # Open file in annotation viewer (NOT system open)
+afx workspace start                   # Start the workspace
+afx spawn 42 --protocol spir          # Spawn builder for SPIR project
+afx spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
+afx spawn 42 --protocol bugfix        # Spawn builder for a bugfix
+afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+afx status                            # Check all builders
+afx cleanup --project 0042            # Clean up after merge
+afx open file.ts            # Open file in annotation viewer (NOT system open)
 ```
 
-**IMPORTANT:** When the user says `af open`, always run the `af open` command — do NOT substitute the system `open` command.
+**IMPORTANT:** When the user says `afx open`, always run the `afx open` command — do NOT substitute the system `open` command.
 
 ### Configuration
 

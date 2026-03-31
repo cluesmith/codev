@@ -27,7 +27,7 @@ Show the 4-step usage flow with concrete commands:
 ## How It Works
 
 1. **Write a spec** — Describe what you want. The architect helps refine it.
-2. **Spawn a builder** — `af spawn 42` kicks off an autonomous agent in an isolated worktree.
+2. **Spawn a builder** — `afx spawn 42` kicks off an autonomous agent in an isolated worktree.
 3. **Review the plan** — The builder writes an implementation plan. You approve or annotate.
 4. **Walk away** — The builder implements, tests, and opens a PR. You review and merge.
 ```
@@ -38,7 +38,7 @@ Replace the vague "tell your AI agent" line with a concrete next step, e.g.:
 
 ```
 Then open a GitHub Issue describing what you want to build, and run:
-af spawn <issue-number>
+afx spawn <issue-number>
 ```
 
 ### 3. Reframe the one-liner

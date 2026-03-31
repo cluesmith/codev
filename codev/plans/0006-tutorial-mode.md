@@ -13,7 +13,7 @@ Add an interactive terminal-based tutorial command to agent-farm CLI that walks 
 
 ### Terminal-Based (Not Web-Based)
 The spec left this open. Terminal-based is better because:
-- Aligns with existing CLI patterns (`af start`, `af spawn`)
+- Aligns with existing CLI patterns (`afx start`, `afx spawn`)
 - No additional HTTP server infrastructure needed
 - Works in headless environments (CI/CD, SSH)
 - Users stay in their natural development environment
@@ -176,12 +176,12 @@ Each step file implements `StepFunction`:
 
 **Module 5: Implementation Demo** (`implementation.ts`)
 - Explain TICK vs SPIR choice
-- Show how to use `af spawn`
+- Show how to use `afx spawn`
 - Demonstrate basic workflow
 - Point to documentation for more
 
 **Module 6: Review & Next Steps** (`review.ts`)
-- Show annotation viewer (`af annotate`)
+- Show annotation viewer (`afx annotate`)
 - Explain review process
 - Point to resources for deeper learning
 - Mark tutorial complete
@@ -218,13 +218,13 @@ export function content(text: string): void
 
 ## Testing Checklist
 
-- [ ] `af tutorial` starts tutorial for new user
+- [ ] `afx tutorial` starts tutorial for new user
 - [ ] Tutorial detects git repo (shows warning if not)
 - [ ] Tutorial detects project type (Node.js, Python, Other)
 - [ ] Progress persists across sessions
-- [ ] `af tutorial --reset` clears progress
-- [ ] `af tutorial --skip` advances to next step
-- [ ] `af tutorial --status` shows current progress
+- [ ] `afx tutorial --reset` clears progress
+- [ ] `afx tutorial --skip` advances to next step
+- [ ] `afx tutorial --status` shows current progress
 - [ ] Ctrl+C exits gracefully with saved progress
 - [ ] Tutorial creates real `codev/specs/0001-*.md` file
 - [ ] Tutorial creates real `codev/plans/0001-*.md` file

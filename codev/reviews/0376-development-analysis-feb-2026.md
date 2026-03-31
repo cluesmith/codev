@@ -41,7 +41,7 @@ Created a comprehensive two-week development analysis document at `codev/resourc
 ### What Would Be Done Differently
 
 - **Pre-check `consult` compatibility**: For documentation-only specs, the plan should explicitly note that impl-review will produce "No PR found" and plan for manual approval files.
-- **Commit `status.yaml` before cleanup**: Most projects' `status.yaml` files were deleted by `af cleanup` after PR merge. If these were committed to a `codev/projects/archive/` directory before cleanup, future analyses would have full timing data for all projects.
+- **Commit `status.yaml` before cleanup**: Most projects' `status.yaml` files were deleted by `afx cleanup` after PR merge. If these were committed to a `codev/projects/archive/` directory before cleanup, future analyses would have full timing data for all projects.
 
 ### Methodology Improvements
 

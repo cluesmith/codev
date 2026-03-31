@@ -15,13 +15,13 @@ Display a rotating "Tip of the Day" banner in the dashboard Work view, positione
 1. Tips are stored as a static array in the dashboard source code (no backend changes needed)
 2. Each tip is a short string (one sentence, max ~120 chars) with inline code formatting
 3. Ship with at least 48 tips covering:
-   - `af` CLI shortcuts (`af spawn --task`, `af status`, `af send`)
+   - `afx` CLI shortcuts (`afx spawn --task`, `afx status`, `afx send`)
    - `porch` commands (`porch pending`, `porch status`)
    - `consult` usage (3-way reviews, `--type integration-review`)
    - Workflow best practices (commit before spawn, `--resume` for existing worktrees)
    - Dashboard features (file panel, refresh, opening builders)
 4. Tips rotate daily — selection is deterministic based on the date in local time (not random), so all users see the same tip on the same day
-5. Tips use backtick-delimited code spans (e.g., `` Use `af status` to check builders ``) which the component parses and renders as `<code>` elements
+5. Tips use backtick-delimited code spans (e.g., `` Use `afx status` to check builders ``) which the component parses and renders as `<code>` elements
 
 ### UI
 

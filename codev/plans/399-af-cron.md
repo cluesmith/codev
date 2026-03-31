@@ -1,4 +1,4 @@
-# Plan: af cron — Scheduled Workspace Tasks
+# Plan: afx cron — Scheduled Workspace Tasks
 
 ## Metadata
 - **Specification**: codev/specs/399-af-cron.md
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Implement a lightweight cron scheduler for Tower that loads task definitions from `.af-cron/*.yaml` per workspace, executes them asynchronously on schedule, and delivers notifications via the existing `af send` mechanism. Uses async `child_process.exec` (not `execSync`) to keep the event loop responsive. Split into four phases: database schema + cron parser, core scheduler module, Tower integration + API routes, and CLI commands.
+Implement a lightweight cron scheduler for Tower that loads task definitions from `.af-cron/*.yaml` per workspace, executes them asynchronously on schedule, and delivers notifications via the existing `afx send` mechanism. Uses async `child_process.exec` (not `execSync`) to keep the event loop responsive. Split into four phases: database schema + cron parser, core scheduler module, Tower integration + API routes, and CLI commands.
 
 ## Success Metrics
 - [ ] All specification acceptance criteria met
@@ -257,16 +257,16 @@ Key functions:
 **Dependencies**: Phase 3
 
 #### Objectives
-- Add `af cron` CLI subcommand group with list, status, run, enable, disable commands
+- Add `afx cron` CLI subcommand group with list, status, run, enable, disable commands
 - Add example `.af-cron/` task files to skeleton
 
 #### Deliverables
-- [ ] `af cron list` command — shows configured tasks for current workspace
-- [ ] `af cron list --all` — shows tasks across all workspaces
-- [ ] `af cron status` — shows last run times and results
-- [ ] `af cron run <name>` — triggers immediate task execution
-- [ ] `af cron enable <name>` — enables a disabled task
-- [ ] `af cron disable <name>` — disables a task without deleting
+- [ ] `afx cron list` command — shows configured tasks for current workspace
+- [ ] `afx cron list --all` — shows tasks across all workspaces
+- [ ] `afx cron status` — shows last run times and results
+- [ ] `afx cron run <name>` — triggers immediate task execution
+- [ ] `afx cron enable <name>` — enables a disabled task
+- [ ] `afx cron disable <name>` — disables a task without deleting
 - [ ] Example `.af-cron/` task files in skeleton
 
 #### Implementation Details
@@ -286,18 +286,18 @@ Key functions:
 - Note: `codev-skeleton/.gitignore` doesn't exist — skip; workspaces manage their own `.gitignore`
 
 #### Acceptance Criteria
-- [ ] `af cron list` displays tasks for current workspace in table format
-- [ ] `af cron list --all` displays tasks across all workspaces
-- [ ] `af cron status` shows last run, result, and enabled state per task
-- [ ] `af cron run <name>` triggers and returns result
-- [ ] `af cron enable/disable <name>` toggles task state
+- [ ] `afx cron list` displays tasks for current workspace in table format
+- [ ] `afx cron list --all` displays tasks across all workspaces
+- [ ] `afx cron status` shows last run, result, and enabled state per task
+- [ ] `afx cron run <name>` triggers and returns result
+- [ ] `afx cron enable/disable <name>` toggles task state
 - [ ] Disabled tasks show as disabled in list/status output
 - [ ] Skeleton has example task file
 
 #### Test Plan
 - **Unit Tests**: CLI handler functions with mocked TowerClient
 - **Integration Tests**: CLI → Tower API round-trip for each command
-- **Manual Testing**: Create `.af-cron/` task files, run `af cron list`, `af cron status`, `af cron run`
+- **Manual Testing**: Create `.af-cron/` task files, run `afx cron list`, `afx cron status`, `afx cron run`
 
 #### Risks
 - **Risk**: Tower not running when CLI commands are called

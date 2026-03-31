@@ -261,7 +261,7 @@ No sparklines or charts in v1 — keep it to simple numbers. Charts can be added
 - **Export/download**: No CSV or JSON export of statistics.
 - **Custom date ranges**: Only the three preset time ranges (7d, 30d, all).
 - **Verdict text tracking**: The metrics DB does not store verdict strings (APPROVE/REQUEST_CHANGES/COMMENT). Adding a verdict column is a separate spec.
-- **`af bench` results**: Bench results are standalone timing files in `codev/resources/bench-results/` and are not in the metrics DB. Integrating bench data is a separate enhancement.
+- **`afx bench` results**: Bench results are standalone timing files in `codev/resources/bench-results/` and are not in the metrics DB. Integrating bench data is a separate enhancement.
 
 ## Success Criteria
 

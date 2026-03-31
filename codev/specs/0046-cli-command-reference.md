@@ -9,7 +9,7 @@
 
 ## Problem Statement
 
-Codev provides three CLI tools (`codev`, `af`, `consult`) but lacks comprehensive user-facing documentation. Users must read source code or CLAUDE.md to understand available commands and options.
+Codev provides three CLI tools (`codev`, `afx`, `consult`) but lacks comprehensive user-facing documentation. Users must read source code or CLAUDE.md to understand available commands and options.
 
 ---
 
@@ -19,7 +19,7 @@ Create reference documentation in `codev/docs/commands/`:
 
 1. **overview.md** - Brief descriptions of all 3 tools with quick examples
 2. **codev.md** - In-depth reference for the `codev` command (init, adopt, doctor, update, tower)
-3. **agent-farm.md** - In-depth reference for the `af` command (start, stop, spawn, status, cleanup, send, open, util)
+3. **agent-farm.md** - In-depth reference for the `afx` command (start, stop, spawn, status, cleanup, send, open, util)
 4. **consult.md** - In-depth reference for the `consult` command (pr, spec, plan, general subcommands)
 
 ---
@@ -38,7 +38,7 @@ Document actual CLI behavior by examining:
 
 - [ ] `codev/docs/commands/overview.md` exists with brief descriptions
 - [ ] `codev/docs/commands/codev.md` documents all codev subcommands
-- [ ] `codev/docs/commands/agent-farm.md` documents all af subcommands
+- [ ] `codev/docs/commands/agent-farm.md` documents all afx subcommands
 - [ ] `codev/docs/commands/consult.md` documents all consult subcommands
 - [ ] Each command includes: synopsis, description, options, examples
 - [ ] Documentation matches actual CLI behavior

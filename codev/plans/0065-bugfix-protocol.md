@@ -21,7 +21,7 @@ Create `codev/protocols/bugfix/protocol.md` with:
 
 **Status**: Complete (already created)
 
-### Phase 2: CLI - `af spawn --issue`
+### Phase 2: CLI - `afx spawn --issue`
 
 **File**: `packages/codev/src/commands/af/spawn.ts`
 
@@ -41,7 +41,7 @@ async function spawnForIssue(issueNumber: number, options: SpawnOptions) {
   // 1. Check for existing worktree (collision detection)
   if (fs.existsSync(worktreePath)) {
     console.error(`Error: Worktree already exists at ${worktreePath}`);
-    console.error(`Run: af cleanup --issue ${issueNumber}`);
+    console.error(`Run: afx cleanup --issue ${issueNumber}`);
     process.exit(1);
   }
 
@@ -139,7 +139,7 @@ async function spawnForIssue(issueNumber: number, options: SpawnOptions) {
 - Worktree: `.builders/bugfix-<N>/`
 - Builder ID: `bugfix-<N>`
 
-### Phase 3: CLI - `af cleanup --issue`
+### Phase 3: CLI - `afx cleanup --issue`
 
 **File**: `packages/codev/src/commands/af/cleanup.ts`
 
@@ -330,11 +330,11 @@ describe('Collision Detection', () => {
 **BATS E2E test** (`tests/e2e/bugfix.bats`):
 
 ```bash
-@test "af spawn --issue creates worktree and branch" {
+@test "afx spawn --issue creates worktree and branch" {
   # Uses test repo with sample issues
 }
 
-@test "af cleanup --issue removes worktree and remote branch" {
+@test "afx cleanup --issue removes worktree and remote branch" {
   # Cleanup after spawn
 }
 ```

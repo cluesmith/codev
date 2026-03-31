@@ -5,7 +5,7 @@ Codev provides five CLI tools for AI-assisted software development:
 | Tool | Description |
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
-| `af` | Agent Farm - multi-agent orchestration for development |
+| `afx` | Agent Farm - multi-agent orchestration for development |
 | `porch` | Protocol orchestrator - drives SPIR/ASPIR/TICK/BUGFIX state machines |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
 | `team` | Team coordination - manage members and messages |
@@ -23,7 +23,7 @@ codev adopt
 codev doctor
 
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Consult an AI model about a spec
 consult -m gemini --protocol spir --type spec
@@ -35,7 +35,7 @@ consult -m gemini --protocol spir --type spec
 npm install -g @cluesmith/codev
 ```
 
-This installs all five commands globally: `codev`, `af`, `porch`, `consult`, and `team`.
+This installs all five commands globally: `codev`, `afx`, `porch`, `consult`, and `team`.
 
 ## Command Summaries
 
@@ -51,19 +51,19 @@ This installs all five commands globally: `codev`, `af`, `porch`, `consult`, and
 
 See [codev.md](codev.md) for full documentation.
 
-### af - Agent Farm
+### afx - Agent Farm
 
 | Command | Description |
 |---------|-------------|
-| `af workspace start` | Start the workspace |
-| `af workspace stop` | Stop all agent farm processes |
-| `af spawn` | Spawn a new builder |
-| `af status` | Show status of all agents |
-| `af cleanup` | Clean up a builder worktree |
-| `af send` | Send instructions to a builder |
-| `af open` | Open file annotation viewer |
-| `af shell` | Spawn a utility shell |
-| `af tower` | Cross-project dashboard |
+| `afx workspace start` | Start the workspace |
+| `afx workspace stop` | Stop all agent farm processes |
+| `afx spawn` | Spawn a new builder |
+| `afx status` | Show status of all agents |
+| `afx cleanup` | Clean up a builder worktree |
+| `afx send` | Send instructions to a builder |
+| `afx open` | Open file annotation viewer |
+| `afx shell` | Spawn a utility shell |
+| `afx tower` | Cross-project dashboard |
 
 See [agent-farm.md](agent-farm.md) for full documentation.
 
@@ -76,7 +76,7 @@ See [agent-farm.md](agent-farm.md) for full documentation.
 | `porch approve <id> <gate>` | Approve a human gate |
 | `porch pending` | List all pending gates across projects |
 
-Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's used automatically by `af spawn` (strict mode) or manually by builders (soft mode).
+Porch drives SPIR, ASPIR, TICK, and BUGFIX protocols via a state machine. It's used automatically by `afx spawn` (strict mode) or manually by builders (soft mode).
 
 ### consult - AI Consultation
 
@@ -99,7 +99,7 @@ See [consult.md](consult.md) for full documentation.
 
 See [team.md](team.md) for full documentation.
 
-> **Note**: `af team` commands still work but are deprecated. Use `team` directly.
+> **Note**: `afx team` commands still work but are deprecated. Use `team` directly.
 
 ## Global Options
 

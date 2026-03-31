@@ -7,11 +7,11 @@ validated: [claude]
 
 ## Problem
 
-`af send` works but is limited in three ways:
+`afx send` works but is limited in three ways:
 
 1. **No observability**: Messages are injected directly into terminal PTYs. There's no way to see a history of messages, subscribe to them, or display them in the dashboard.
 2. **Inconsistent agent naming**: Builders are named ad-hoc — `0109`, `bugfix-269`, `task-784H`. There's no consistent convention that encodes protocol and identity.
-3. **No cross-project messaging**: `af send` resolves targets within the current project (by CWD). You can't send a message from one project's agent to another project's agent, even though Tower manages all of them.
+3. **No cross-project messaging**: `afx send` resolves targets within the current project (by CWD). You can't send a message from one project's agent to another project's agent, even though Tower manages all of them.
 
 ## Solution
 
@@ -35,10 +35,10 @@ Every agent in Tower gets a canonical name following this convention:
 - `{id}` is the spec number, issue number, or task ID depending on protocol
 - Agent names are **case-insensitive** for matching but stored lowercase
 
-**Migration**: The `builder_id` field in `af send` currently accepts raw IDs like `0109` or `bugfix-269`. After this change:
+**Migration**: The `builder_id` field in `afx send` currently accepts raw IDs like `0109` or `bugfix-269`. After this change:
 - New format: `builder-spir-0109`, `builder-bugfix-269`
 - **Backwards compatibility**: Bare IDs (`0109`, `bugfix-269`) still resolve by prefix match. `architect` and `arch` still work.
-- Display names in `af status` and the dashboard use the new format
+- Display names in `afx status` and the dashboard use the new format
 
 **Where names are set**:
 - `spawn.ts` — assigns `builderId` when creating builders
@@ -48,10 +48,10 @@ Every agent in Tower gets a canonical name following this convention:
 
 ### 2. Addressing Format: `[project:]agent`
 
-`af send` gets a new addressing format:
+`afx send` gets a new addressing format:
 
 ```
-af send <target> "message"
+afx send <target> "message"
 ```
 
 Where `<target>` is:
@@ -65,7 +65,7 @@ Where `<target>` is:
 2. If no `:`, resolve agent within the current project (detected from CWD).
 3. Agent name match: exact match first, then prefix match for backwards compat (`0109` matches `builder-spir-0109`).
 
-**Cross-project resolution**: Tower already indexes all projects. The `af send` command queries Tower's API with the full `project:agent` address. Tower resolves the project path and terminal ID.
+**Cross-project resolution**: Tower already indexes all projects. The `afx send` command queries Tower's API with the full `project:agent` address. Tower resolves the project path and terminal ID.
 
 ### 3. Message Bus (WebSocket Subscribe API)
 
@@ -103,11 +103,11 @@ ws://localhost:4100/ws/messages
 **Implementation**:
 - Tower already has `handleWebSocket()` in `tower-websocket.ts`. Add a new path handler for `/ws/messages`.
 - Maintain a `Set<WebSocket>` of subscribed message clients.
-- When `af send` writes to a terminal via the API (`POST /api/terminals/:id/write` or equivalent), Tower also broadcasts the structured message to all message subscribers.
+- When `afx send` writes to a terminal via the API (`POST /api/terminals/:id/write` or equivalent), Tower also broadcasts the structured message to all message subscribers.
 - Messages are **not persisted** — the bus is live-only. Dashboard connects on load, sees messages from that point forward.
 
 **Tower-side changes**:
-- `tower-routes.ts`: When handling `af send`'s write request, also emit to message bus
+- `tower-routes.ts`: When handling `afx send`'s write request, also emit to message bus
 - `tower-websocket.ts`: Add `/ws/messages` handler, manage subscriber set
 - New file `tower-messages.ts`: Message bus logic (subscriber management, broadcast, filtering)
 
@@ -128,7 +128,7 @@ A new panel in the Tower dashboard that displays messages from the bus:
 ### Message Flow
 
 ```
-af send codev-public:architect "GATE: ..."
+afx send codev-public:architect "GATE: ..."
   │
   ▼
 Tower API (POST /api/send)  ◄── NEW: structured send endpoint
@@ -142,7 +142,7 @@ Tower API (POST /api/send)  ◄── NEW: structured send endpoint
 
 ### New Tower API Endpoint
 
-Replace the current approach (af send resolves terminal ID locally, then calls `writeTerminal`) with a structured endpoint:
+Replace the current approach (afx send resolves terminal ID locally, then calls `writeTerminal`) with a structured endpoint:
 
 ```
 POST /api/send
@@ -162,7 +162,7 @@ Content-Type: application/json
 
 Tower resolves the `to` address, writes to the terminal, and broadcasts to the message bus. This keeps all routing logic in Tower (single source of truth) rather than in the CLI.
 
-**Backwards compatibility**: The existing `writeTerminal` API continues to work. The new `/api/send` endpoint is preferred for `af send` but old clients still function.
+**Backwards compatibility**: The existing `writeTerminal` API continues to work. The new `/api/send` endpoint is preferred for `afx send` but old clients still function.
 
 ### Agent Name Changes in Spawn
 
@@ -184,11 +184,11 @@ const builderId = `builder-bugfix-${issueNumber}`;  // "builder-bugfix-269"
 
 ### Phase 1 (this spec)
 - Standardize agent naming in `spawn.ts` (all builder types)
-- Update `af send` to support `[project:]agent` addressing
+- Update `afx send` to support `[project:]agent` addressing
 - Add `POST /api/send` endpoint to Tower
 - Add `/ws/messages` WebSocket endpoint to Tower
 - Broadcast messages to subscribers on send
-- Update `af status` display to use new names
+- Update `afx status` display to use new names
 - Backwards compatibility for bare IDs
 - Unit tests for name resolution, cross-project routing, message bus
 
@@ -200,18 +200,18 @@ const builderId = `builder-bugfix-${issueNumber}`;  // "builder-bugfix-269"
 
 ## Acceptance Criteria
 
-1. `af send architect "msg"` still works (backward compat)
-2. `af send builder-spir-0109 "msg"` works with new naming
-3. `af send codev-public:architect "msg"` delivers to codev-public's architect from any project
-4. `af status` shows agents with new naming convention
-5. `/ws/messages` WebSocket broadcasts all `af send` messages in structured JSON
-6. `af spawn -p 0109` creates a builder named `builder-spir-0109` (not `0109`)
+1. `afx send architect "msg"` still works (backward compat)
+2. `afx send builder-spir-0109 "msg"` works with new naming
+3. `afx send codev-public:architect "msg"` delivers to codev-public's architect from any project
+4. `afx status` shows agents with new naming convention
+5. `/ws/messages` WebSocket broadcasts all `afx send` messages in structured JSON
+6. `afx spawn -p 0109` creates a builder named `builder-spir-0109` (not `0109`)
 7. Bare ID `0109` still resolves to `builder-spir-0109` via prefix match
 8. Messages include sender, recipient, timestamp, and content
 
 ## Dependencies
 
-- **Spec 0108** (Porch gate notifications): Porch calls `af send` — uses the new addressing format
+- **Spec 0108** (Porch gate notifications): Porch calls `afx send` — uses the new addressing format
 - **Spec 0109** (Tunnel keepalive): Independent, no dependency
 
 ## Testing

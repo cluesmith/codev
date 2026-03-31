@@ -29,7 +29,7 @@ This document analyzes the pros, cons, and strategic implications.
 @cluesmith/codev (npm)
 ├── bin/
 │   ├── codev.js      # codev init, adopt, doctor, update
-│   ├── af.js         # af start, spawn, status, cleanup
+│   ├── af.js         # afx start, spawn, status, cleanup
 │   ├── consult.js    # consult --model gemini spec 42
 │   └── porch.js      # porch init, run, status, approve
 ├── src/
@@ -40,7 +40,7 @@ This document analyzes the pros, cons, and strategic implications.
 ```
 
 **Install**: `npm install -g @cluesmith/codev`
-**Result**: Gets everything - codev, af, consult, porch
+**Result**: Gets everything - codev, afx, consult, porch
 
 ---
 
@@ -226,7 +226,7 @@ Some code is shared:
 ### 6. User Confusion
 
 "Do I need agentfarm or porch or both?"
-"I installed codev but `af` command doesn't work"
+"I installed codev but `afx` command doesn't work"
 "Which package has the bug?"
 
 **Mitigation**: Clear docs, error messages that suggest missing packages
@@ -426,7 +426,7 @@ But: Protocols alone don't sell → Need tools to demonstrate value
 1. **Migration Strategy Missing** - How do existing users transition?
 2. **Monorepo Tooling Undecided** - Turborepo vs nx vs pnpm workspaces
 3. **TypeScript Types Sharing** - Where do shared types live?
-4. **CLI Entry Point Strategy** - What happens to `af` shim?
+4. **CLI Entry Point Strategy** - What happens to `afx` shim?
 5. **Build/Publish Workflow** - Coordinated releases across packages?
 
 ### Additional Risks Identified

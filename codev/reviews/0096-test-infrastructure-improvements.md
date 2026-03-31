@@ -29,7 +29,7 @@ Transformed Codev's test infrastructure from a fragmented multi-framework setup 
 - Coverage enforced in CI via `--coverage` flag
 
 ### Phase 4: Migrate BATS to Vitest
-- Created 6 CLI test files (62 tests total): install, init, adopt, doctor, af, consult
+- Created 6 CLI test files (62 tests total): install, init, adopt, doctor, afx, consult
 - Shared `helpers.ts` module with XDG-sandboxed test environment isolation
 - Dedicated `vitest.cli.config.ts` for CLI test suite (30s timeout, 15s hooks)
 - Created `scripts/verify-install.mjs` for post-release verification

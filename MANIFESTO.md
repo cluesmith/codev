@@ -49,7 +49,7 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 
 | Tool | Purpose |
 |------|---------|
-| **Agent Farm (`af`)** | Orchestrates parallel builders. Manages git worktrees, spawns agents, tracks status, provides a dashboard. |
+| **Agent Farm (`afx`)** | Orchestrates parallel builders. Manages git worktrees, spawns agents, tracks status, provides a dashboard. |
 | **Consult** | Multi-model consultation. Query Gemini, Codex, and Claude for review and validation. |
 
 #### Agent Farm
@@ -57,10 +57,10 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 Enables the Architect-Builder pattern with isolated execution environments:
 
 ```bash
-af workspace start    # Launch the architect workspace
-af spawn 3 --protocol spir  # Create a builder for project 3
-af status             # See what everyone is doing
-af cleanup -p 3       # Clean up when done
+afx workspace start    # Launch the architect workspace
+afx spawn 3 --protocol spir  # Create a builder for project 3
+afx status             # See what everyone is doing
+afx cleanup -p 3       # Clean up when done
 ```
 
 #### Consult

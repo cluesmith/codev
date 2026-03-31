@@ -1,4 +1,4 @@
-# Spec 0053: af open Image Support
+# Spec 0053: afx open Image Support
 
 **Status:** specified
 **Protocol:** SPIR
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Extend `af open` to display images (PNG, JPG, GIF, WebP, SVG) in the dashboard viewer instead of showing binary garbage or errors.
+Extend `afx open` to display images (PNG, JPG, GIF, WebP, SVG) in the dashboard viewer instead of showing binary garbage or errors.
 
 ---
 
@@ -29,7 +29,7 @@ When an image file is opened:
 
 ### 3. Integration
 
-- Works with existing `af open <filepath>` command
+- Works with existing `afx open <filepath>` command
 - Opens in dashboard tab like other files
 - Annotations not supported for images (line-based system doesn't apply; coordinate-based annotations may be added in future spec)
 
@@ -56,7 +56,7 @@ When an image file is opened:
 
 ## Success Criteria
 
-- [ ] `af open screenshot.png` displays the image
+- [ ] `afx open screenshot.png` displays the image
 - [ ] Zoom controls work (fit, 100%, +/-)
 - [ ] Image dimensions shown in header
 - [ ] SVG renders correctly

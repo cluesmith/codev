@@ -110,22 +110,22 @@ Project management commands. Typically used by **humans** to set up and maintain
 | `codev update` | Update Codev framework |
 | `codev import` | Import specs from another project |
 
-### agent-farm (af)
+### agent-farm (afx)
 
 Architect-Builder orchestration. Used by both **humans and agents**—agents use it more frequently.
 
 | Command | Description |
 |---------|-------------|
-| `af workspace start` | Start workspace (port 4200, 4300, etc.) |
-| `af workspace stop` | Stop all processes |
-| `af spawn <id> --protocol <name>` | Spawn a builder for project |
-| `af status` | Check status of all builders |
-| `af send <target> <msg>` | Send message (builder↔architect) |
-| `af cleanup -p <id>` | Clean up a builder worktree |
-| `af shell` | Spawn a utility shell |
-| `af open <file>` | Open file in workspace viewer |
-| `af tower start` | Start cross-project tower |
-| `af tower connect` | Connect tower to codevos.ai for cloud access |
+| `afx workspace start` | Start workspace (port 4200, 4300, etc.) |
+| `afx workspace stop` | Stop all processes |
+| `afx spawn <id> --protocol <name>` | Spawn a builder for project |
+| `afx status` | Check status of all builders |
+| `afx send <target> <msg>` | Send message (builder↔architect) |
+| `afx cleanup -p <id>` | Clean up a builder worktree |
+| `afx shell` | Spawn a utility shell |
+| `afx open <file>` | Open file in workspace viewer |
+| `afx tower start` | Start cross-project tower |
+| `afx tower connect` | Connect tower to codevos.ai for cloud access |
 
 ### porch
 

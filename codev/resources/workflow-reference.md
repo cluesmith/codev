@@ -26,7 +26,7 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                               IMPLEMENTATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 4. IMPLEMENTING                                                                  │
-│         Architect spawns builder: af spawn XXXX --protocol spir                  │
+│         Architect spawns builder: afx spawn XXXX --protocol spir                  │
 │         Builder reads spec and plan                                                 │
 │         For each phase: Implement → Defend → Evaluate                               │
 │         Builder commits after each phase                                            │
@@ -77,38 +77,38 @@ AI agents must stop and wait for human action at these gates.
 
 ```bash
 # Start the workspace
-af workspace start
+afx workspace start
 
 # Spawn a builder for a project
-af spawn 44 --protocol spir
+afx spawn 44 --protocol spir
 
 # Check all builder statuses
-af status
+afx status
 
 # Send message to builder
-af send 44 "Check PR comments and address feedback"
+afx send 44 "Check PR comments and address feedback"
 
 # Open a file for review
-af open codev/specs/44-name.md
+afx open codev/specs/44-name.md
 
 # Clean up after merge
-af cleanup -p 44
+afx cleanup -p 44
 
 # Stop everything
-af workspace stop
+afx workspace stop
 ```
 
 ### Builder Commands
 
 ```bash
 # Check your own status
-af status
+afx status
 
 # Send message to architect
-af send architect "Question about the spec..."
+afx send architect "Question about the spec..."
 
 # Open a file in the annotation viewer
-af open src/path/to/file.ts
+afx open src/path/to/file.ts
 ```
 
 ### Protocol Import
@@ -205,25 +205,25 @@ gh pr merge N --merge --delete-branch
 ### Post-Merge Cleanup (Architect)
 ```bash
 git pull                    # Get merged changes
-af cleanup -p XXXX          # Clean up builder worktree
+afx cleanup -p XXXX          # Clean up builder worktree
 ```
 
 ## Troubleshooting
 
 ### Spawn Failures
 
-Common `af spawn` errors and how to recover:
+Common `afx spawn` errors and how to recover:
 
 | Error | Cause | Recovery |
 |-------|-------|----------|
 | "Missing required flag: --protocol" | Forgot `--protocol` | Re-run with `--protocol spir` (or bugfix, tick, etc.) |
 | "Dirty worktree" / uncommitted changes | Pending changes in git | `git status` → commit changes → retry spawn |
-| "Builder already exists" | Worktree collision | Use `af spawn N --resume` to resume existing builder |
+| "Builder already exists" | Worktree collision | Use `afx spawn N --resume` to resume existing builder |
 
 **Recovery flow:**
 ```bash
 # 1. Spawn fails
-af spawn 42 --protocol spir
+afx spawn 42 --protocol spir
 # Error: dirty worktree
 
 # 2. Check what's uncommitted
@@ -234,7 +234,7 @@ git add codev/specs/42-feature.md
 git commit -m "[Spec 42] Initial specification"
 
 # 4. Retry
-af spawn 42 --protocol spir
+afx spawn 42 --protocol spir
 ```
 
 > **Tip:** Do NOT run `git pull` after a spawn failure unless you specifically need to sync with remote. The most common cause is uncommitted local changes, not a stale branch.
@@ -243,7 +243,7 @@ af spawn 42 --protocol spir
 
 1. Check builder terminal for blocker message
 2. Review any `// REVIEW(@architect):` comments in code
-3. Provide guidance via `af send XXXX "guidance here"`
+3. Provide guidance via `afx send XXXX "guidance here"`
 4. Builder will resume work after receiving help
 
 ### PR Has Conflicts
@@ -260,7 +260,7 @@ af spawn 42 --protocol spir
 git worktree list
 
 # Force cleanup (only if work is committed/pushed)
-af cleanup -p XXXX --force
+afx cleanup -p XXXX --force
 ```
 
 ## Related Documentation

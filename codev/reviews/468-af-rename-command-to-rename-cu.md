@@ -1,12 +1,12 @@
-# Review: af rename Command
+# Review: afx rename Command
 
 ## Summary
 
-Implemented `af rename <name>` — a CLI command that renames the current utility shell session's dashboard tab. The feature spans three layers: SQLite persistence (migration v11 adds `label` column), Tower API (PATCH `/api/terminals/:id/rename` endpoint), and CLI (`af rename` command). Labels persist across Tower restarts via reconciliation and are scoped to utility shells only (architect/builder terminals cannot be renamed). Duplicate names are auto-deduplicated with a `-N` suffix.
+Implemented `afx rename <name>` — a CLI command that renames the current utility shell session's dashboard tab. The feature spans three layers: SQLite persistence (migration v11 adds `label` column), Tower API (PATCH `/api/terminals/:id/rename` endpoint), and CLI (`afx rename` command). Labels persist across Tower restarts via reconciliation and are scoped to utility shells only (architect/builder terminals cannot be renamed). Duplicate names are auto-deduplicated with a `-N` suffix.
 
 ## Spec Compliance
 
-- [x] `af rename "name"` works inside shellper sessions
+- [x] `afx rename "name"` works inside shellper sessions
 - [x] `SHELLPER_SESSION_ID` and `TOWER_PORT` injected into shell environment at creation
 - [x] PATCH API endpoint with name validation (1-100 chars), control char stripping
 - [x] Session type check: only shell type allowed (403 for architect/builder)
@@ -138,5 +138,5 @@ No flaky tests encountered.
 
 ## Follow-up Items
 
-- `af shell --name` bug: The `--name` parameter is ignored during shell creation. Related but out of scope for this spec. Trivial fix in `handleWorkspaceShellCreate`.
+- `afx shell --name` bug: The `--name` parameter is ignored during shell creation. Related but out of scope for this spec. Trivial fix in `handleWorkspaceShellCreate`.
 - Integration test infrastructure for Tower endpoints would improve confidence in HTTP handler tests.

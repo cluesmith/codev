@@ -38,20 +38,20 @@ Follow the AIR protocol: `codev/protocols/air/protocol.md`
 2. Implement the feature (< 300 LOC)
 3. Write tests for the feature
 4. Create PR with review in the PR body (NOT as a separate file)
-5. Notify architect via `af send architect "PR #N ready for review (implements #{{issue.number}})"`
+5. Notify architect via `afx send architect "PR #N ready for review (implements #{{issue.number}})"`
 
 **IMPORTANT**: AIR produces NO spec, plan, or review files. The review goes in the PR body.
 
 If the feature is too complex (> 300 LOC or architectural changes), notify the Architect via:
 ```bash
-af send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to ASPIR."
+afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to ASPIR."
 ```
 
 ## Notifications
-Always use `af send architect "..."` to notify the architect at key moments:
-- **PR ready**: `af send architect "PR #N ready for review (implements #{{issue.number}})"`
-- **PR merged**: `af send architect "PR #N merged for issue #{{issue.number}}. Ready for cleanup."`
-- **Blocked**: `af send architect "Blocked on issue #{{issue.number}}: [reason]"`
+Always use `afx send architect "..."` to notify the architect at key moments:
+- **PR ready**: `afx send architect "PR #N ready for review (implements #{{issue.number}})"`
+- **PR merged**: `afx send architect "PR #N merged for issue #{{issue.number}}. Ready for cleanup."`
+- **Blocked**: `afx send architect "Blocked on issue #{{issue.number}}: [reason]"`
 {{/if}}
 
 ## Handling Flaky Tests

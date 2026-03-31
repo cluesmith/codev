@@ -298,7 +298,7 @@ Same tunnel approach - expose tower instead of single AF:
 
 ```bash
 # Start tower with web access
-af tower --web
+afx tower --web
 
 # Output:
 # Tower: http://localhost:4100
@@ -358,7 +358,7 @@ Notification triggers:
 codev web keygen
 
 # Setup tunnel
-af tunnel setup cloudflare
+afx tunnel setup cloudflare
 
 # Optional: Push notifications
 export CODEV_PUSH_URL="https://ntfy.sh/my-codev-topic"
@@ -367,10 +367,10 @@ export CODEV_PUSH_URL="https://ntfy.sh/my-codev-topic"
 ### Daily Use
 ```bash
 # Start tower with web access
-af tower --web
+afx tower --web
 
 # Or start from any project (tower mode auto-detects)
-af start --tower --web
+afx start --tower --web
 ```
 
 ### Mobile Access
@@ -388,13 +388,13 @@ af start --tower --web
 ## Migration Path
 
 ### From Electron Tower
-1. `codev tower start` → deprecated, shows message to use `af tower`
+1. `codev tower start` → deprecated, shows message to use `afx tower`
 2. Project registration stays in `~/.config/codev/projects.json`
 3. Same project discovery logic, just web-served
 
 ### From Single-Project AF
-- `af start` unchanged for single-project use
-- `af tower` for multi-project view
+- `afx start` unchanged for single-project use
+- `afx tower` for multi-project view
 - `--web` flag works on both
 
 ## Implementation Phases
@@ -423,12 +423,12 @@ The tower dashboard lists all available terminals per project and generates thes
 
 ### Phase 3: Tunnel Integration (~80 lines)
 **Files:** `tower-server.ts`, new `tunnel.ts` util
-- `af tower --web` flag to start tunnel alongside server
+- `afx tower --web` flag to start tunnel alongside server
 - **`--web` MUST refuse to start if `CODEV_WEB_KEY` not set**
 - Support Cloudflare Tunnel only (ngrok out of scope)
 - Config storage in `~/.config/codev/tunnel.json`
 
-**`af tunnel setup cloudflare` wizard flow:**
+**`afx tunnel setup cloudflare` wizard flow:**
 1. Check if `cloudflared` is installed; if not, show install instructions and exit
 2. Prompt for tunnel name (default: `codev-tower`)
 3. Run `cloudflared tunnel create <name>` if tunnel doesn't exist
@@ -457,7 +457,7 @@ The tower dashboard lists all available terminals per project and generates thes
 ## Success Criteria
 
 **MUST have**:
-1. [ ] `af tower` shows all registered projects
+1. [ ] `afx tower` shows all registered projects
 2. [ ] Can drill into any project's terminals via proxy
 3. [ ] Full terminal interaction from mobile browser
 4. [ ] When `CODEV_WEB_KEY` set, ALL requests require auth (tunnel-safe)
@@ -470,7 +470,7 @@ The tower dashboard lists all available terminals per project and generates thes
 9. [ ] Login page shown for unauthenticated browser requests
 10. [ ] Logout button in dashboard header (clears localStorage token, redirects to login)
 11. [ ] Gate-pending visual indicator in dashboard
-12. [ ] `af tunnel setup cloudflare` wizard configures Cloudflare tunnel
+12. [ ] `afx tunnel setup cloudflare` wizard configures Cloudflare tunnel
 
 ## Testing Requirements
 
@@ -583,7 +583,7 @@ For closed-source hosted version:
 1. Path encoding mismatch between spec (Base64) and plan (encodeURIComponent)
 2. Terminal port resolution unclear
 3. `--web` flag without `CODEV_WEB_KEY` should be refused - security risk
-4. `af tunnel setup` wizard promised but not defined
+4. `afx tunnel setup` wizard promised but not defined
 5. Need end-to-end test covering full remote flow
 
 **Changes made**: Updated spec with Base64URL encoding, timing-safe comparison, protocol stripping, `--web` security constraint.
@@ -633,7 +633,7 @@ For closed-source hosted version:
 **Minor spec improvements from Claude (addressed)**:
 1. ✅ Added "Specification Authority" section explicitly stating spec is authoritative over plan
 2. ✅ Clarified terminal port routing mechanism (base_port + offset scheme)
-3. ✅ Added `af tunnel setup cloudflare` wizard flow details
+3. ✅ Added `afx tunnel setup cloudflare` wizard flow details
 4. ✅ Clarified logout button behavior (clears localStorage, redirects)
 5. ✅ Added edge cases for tunnel failures (cloudflared missing, disconnect handling)
 6. ✅ Expanded test coverage for auth failure modes and proxy errors

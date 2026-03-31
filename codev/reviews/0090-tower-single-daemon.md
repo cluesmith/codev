@@ -13,7 +13,7 @@
 Successfully refactored Agent Farm so that tower is the single daemon managing all projects:
 
 1. **Tower owns all terminals**: `projectTerminals` registry tracks architect/builder/shell terminals per project
-2. **`af dash` is now an API client**: Calls tower's `/api/projects/:path/activate` and `/api/projects/:path/deactivate`
+2. **`afx dash` is now an API client**: Calls tower's `/api/projects/:path/activate` and `/api/projects/:path/deactivate`
 3. **dashboard-server.ts deleted**: Tower handles everything directly
 4. **Project API handlers**: Tower serves `/project/:path/api/state`, `/project/:path/api/tabs/*`
 
@@ -34,9 +34,9 @@ Successfully refactored Agent Farm so that tower is the single daemon managing a
 - **641 tests passed** across 46 test files
 - All tower baseline tests updated and passing
 - Manual E2E testing verified:
-  - `af tower start` / `af tower stop`
-  - `af dash start` / `af dash stop`
-  - `af status`
+  - `afx tower start` / `afx tower stop`
+  - `afx dash start` / `afx dash stop`
+  - `afx status`
 
 ## Consultation Feedback
 
@@ -68,4 +68,4 @@ Successfully refactored Agent Farm so that tower is the single daemon managing a
 1. **Test-first approach was valuable**: Phase 0 baseline tests caught regressions early
 2. **Incremental migration worked**: Each phase was independently verifiable
 3. **Single daemon simplifies operations**: No more stale state between dashboard processes
-4. **API client pattern is cleaner**: `af dash` calling tower API is more maintainable than spawning processes
+4. **API client pattern is cleaner**: `afx dash` calling tower API is more maintainable than spawning processes

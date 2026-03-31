@@ -37,7 +37,7 @@ A **CLEANUP protocol** with defined phases:
 - [ ] CLEANUP protocol defined in `codev/protocols/cleanup/protocol.md`
 - [ ] Phase definitions with entry/exit criteria
 - [ ] Integration with existing subagents (architecture-documenter)
-- [ ] Can be invoked via `af spawn --protocol cleanup` (requires 0014)
+- [ ] Can be invoked via `afx spawn --protocol cleanup` (requires 0014)
 
 ## Protocol Design
 

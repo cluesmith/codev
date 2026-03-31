@@ -50,7 +50,7 @@ Commit messages format:
 Codev provides three CLI tools:
 
 - **codev**: Project management (init, adopt, update, doctor)
-- **af**: Agent Farm orchestration (start, spawn, status, cleanup)
+- **afx**: Agent Farm orchestration (start, spawn, status, cleanup)
 - **consult**: AI consultation for reviews (general, protocol, stats)
 
 For complete reference, see `codev/resources/commands/`:

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Moved the Tower cloud registration flow from CLI-only (`af tower register`) to both web UI and CLI. The implementation adds a connect dialog to the Tower homepage with device name input, service URL, and OAuth initiation. Disconnect confirmation with full cleanup (tunnel + server-side + credentials) is also supported. CLI commands were renamed from `register`/`deregister` to `connect`/`disconnect` with hidden backward-compatible aliases.
+Moved the Tower cloud registration flow from CLI-only (`afx tower register`) to both web UI and CLI. The implementation adds a connect dialog to the Tower homepage with device name input, service URL, and OAuth initiation. Disconnect confirmation with full cleanup (tunnel + server-side + credentials) is also supported. CLI commands were renamed from `register`/`deregister` to `connect`/`disconnect` with hidden backward-compatible aliases.
 
 ## Spec Compliance
 
@@ -12,7 +12,7 @@ Moved the Tower cloud registration flow from CLI-only (`af tower register`) to b
 - [x] Connected state shows device name + "Disconnect" button
 - [x] Disconnect fully cleans up: tunnel, server-side registration (best-effort), local credentials
 - [x] Smart connect: reconnects tunnel if credentials exist without re-doing OAuth
-- [x] CLI commands renamed to `af tower connect` / `af tower disconnect`
+- [x] CLI commands renamed to `afx tower connect` / `afx tower disconnect`
 - [x] Old CLI names (`register`/`deregister`) work as hidden aliases
 - [x] Existing tunnel connect/disconnect behavior preserved
 - [x] Callback error pages rendered for all failure modes
@@ -38,8 +38,8 @@ Moved the Tower cloud registration flow from CLI-only (`af tower register`) to b
 - Cloud status area shows "Codev Cloud" + "Connect" button when not registered
 
 ### Phase 4: CLI Rename & Aliases
-- `af tower register` → `af tower connect` with hidden `register` alias
-- `af tower deregister` → `af tower disconnect` with hidden `deregister` alias
+- `afx tower register` → `afx tower connect` with hidden `register` alias
+- `afx tower deregister` → `afx tower disconnect` with hidden `deregister` alias
 - All user-facing messages updated across 5 files
 - Help text shows only new names; old names still functional
 

@@ -17,7 +17,7 @@ The existing `FileTree.tsx` component provides hierarchical browsing but lacks:
 - A "recently modified" view for quick access to active files
 - Git status integration (modified/staged/untracked indicators)
 
-**Port Proliferation**: The current `af open` command spawns a separate `open-server.js` process on ports 4250-4269 for each file viewed. This violates the Tower Single Daemon architecture (Spec 0090) and creates complexity. File viewing should be served through the Tower like everything else.
+**Port Proliferation**: The current `afx open` command spawns a separate `open-server.js` process on ports 4250-4269 for each file viewed. This violates the Tower Single Daemon architecture (Spec 0090) and creates complexity. File viewing should be served through the Tower like everything else.
 
 ## Requirements
 
@@ -35,7 +35,7 @@ The existing `FileTree.tsx` component provides hierarchical browsing but lacks:
    - **Validation**: Verify file exists before making clickable; skip non-existent paths
 
 3. **Click Handling**: Custom handler for `@xterm/addon-web-links`
-   - Open in annotation viewer tab (same as `af open`)
+   - Open in annotation viewer tab (same as `afx open`)
    - If line number present, scroll to that line
    - If file already open, switch to that tab
 
@@ -84,7 +84,7 @@ The existing `FileTree.tsx` component provides hierarchical browsing but lacks:
 11. **Remove `open-server.ts`**: Eliminate separate file annotation servers
     - Delete `src/agent-farm/servers/open-server.ts`
     - Remove `openPortRange` from config (4250-4269 no longer needed)
-    - Update `af open` to only use Tower API (no fallback)
+    - Update `afx open` to only use Tower API (no fallback)
 
 12. **Dashboard File Viewer**: Render file content in dashboard tab
     - Reuse existing annotation viewer HTML/CSS from `templates/open.html`
@@ -256,7 +256,7 @@ Tree:
 ### Phase 1: Port Consolidation (Prerequisite)
 1. [ ] `POST /project/:enc/api/tabs/file` creates file tab in Tower
 2. [ ] File content served through Tower (no separate ports)
-3. [ ] `af open` works without spawning open-server.js
+3. [ ] `afx open` works without spawning open-server.js
 4. [ ] `openPortRange` config removed (4250-4269 freed)
 5. [ ] `open-server.ts` deleted
 
@@ -278,7 +278,7 @@ Tree:
 ## Testing Strategy
 
 ### Phase 1: Port Consolidation Tests
-- `af open file.txt` creates tab via Tower API (no new process spawned)
+- `afx open file.txt` creates tab via Tower API (no new process spawned)
 - File tab displays content correctly (text, images, video)
 - Multiple file tabs work simultaneously
 - No processes listening on 4250-4269 range

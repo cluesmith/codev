@@ -91,7 +91,7 @@ rm -rf codev-skeleton/templates/
 cd agent-farm && npm run build && cd ..
 ./codev/bin/agent-farm start
 # Test: Open dashboard in browser
-# Test: af annotate codev/specs/0032-consolidate-templates.md
+# Test: afx annotate codev/specs/0032-consolidate-templates.md
 ```
 
 ## File Summary
@@ -113,7 +113,7 @@ cd agent-farm && npm run build && cd ..
 
 - [ ] `npm run build` passes in agent-farm
 - [ ] Dashboard loads at http://localhost:4200
-- [ ] Annotation viewer works (`af annotate <file>`)
+- [ ] Annotation viewer works (`afx annotate <file>`)
 - [ ] No 404 errors in browser console
 - [ ] `codev/templates/` no longer exists
 - [ ] `codev-skeleton/templates/` no longer exists

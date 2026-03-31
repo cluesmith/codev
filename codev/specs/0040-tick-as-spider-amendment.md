@@ -439,7 +439,7 @@ All future TICKs MUST use the amendment workflow. The standalone TICK protocol w
 ### CLI Changes Required
 
 - **`codev tick list <spec-id>`**: New command to list all TICKs for a spec
-- Other CLI tools (consult, af) may need minor updates - to be determined in planning phase
+- Other CLI tools (consult, afx) may need minor updates - to be determined in planning phase
 
 ### Design Rationale
 

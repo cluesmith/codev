@@ -196,5 +196,5 @@ consult stats --days 7 --json
 ## See Also
 
 - [codev](codev.md) - Project management commands
-- [af](agent-farm.md) - Agent Farm commands
+- [afx](agent-farm.md) - Agent Farm commands
 - [overview](overview.md) - CLI overview

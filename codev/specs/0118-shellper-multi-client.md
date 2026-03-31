@@ -14,7 +14,7 @@ validated: [gemini, codex, claude]
 
 Shellper accepts exactly one connection at a time. A new connection replaces the old one (`currentConnection` in `shellper-process.ts`). This means:
 
-1. `af attach` cannot connect to a builder terminal without kicking Tower off
+1. `afx attach` cannot connect to a builder terminal without kicking Tower off
 2. You can't view a session from both the dashboard and a terminal simultaneously
 3. Multiple local tools cannot observe the same session (e.g., Tower dashboard + CLI attach)
 
@@ -51,9 +51,9 @@ Shellper supports multiple simultaneous connections:
 ```
 Tower ──────────┐
                 ├──→ Shellper ──→ PTY
-af attach ──────┘        │
+afx attach ──────┘        │
                          ├──→ Tower (broadcast)
-                         └──→ af attach (broadcast)
+                         └──→ afx attach (broadcast)
 ```
 
 ## Implementation
@@ -81,7 +81,7 @@ private connections: Map<string, net.Socket> = new Map();
 - SPAWN from Tower connections only → respawn PTY
 - SIGNAL/SPAWN from terminal connections → silently ignored
 
-### Phase 2: `af attach` command
+### Phase 2: `afx attach` command
 
 **attach.ts** — add terminal mode (no `-b` flag):
 
@@ -91,7 +91,7 @@ private connections: Map<string, net.Socket> = new Map();
 - Stream DATA frames to stdout, pipe stdin as DATA frames to shellper
 - Handle terminal raw mode (disable line buffering, echo)
 - SIGWINCH → send RESIZE frame
-- Ctrl-C passthrough (don't kill `af attach`, send to shellper)
+- Ctrl-C passthrough (don't kill `afx attach`, send to shellper)
 - Detach key (e.g., Ctrl-\) to cleanly disconnect
 
 Socket discovery: read the shellper socket path from Tower's SQLite database (`terminal_sessions` table, `shellper_socket` column). This avoids requiring Tower to be running and gives direct access to the persistent record. Falls back to scanning `~/.codev/run/shellper-*.sock` if DB is unavailable.
@@ -102,8 +102,8 @@ Socket discovery: read the shellper socket path from Tower's SQLite database (`t
 - [ ] All connections receive PTY output
 - [ ] Any connection can send input
 - [ ] Disconnecting one connection doesn't affect others
-- [ ] `af attach -p 0116` opens a live terminal view in the current terminal
-- [ ] Tower + `af attach` can be connected to the same session simultaneously
+- [ ] `afx attach -p 0116` opens a live terminal view in the current terminal
+- [ ] Tower + `afx attach` can be connected to the same session simultaneously
 - [ ] Existing tests pass (backward compatible — single connection still works)
 - [ ] REPLAY buffer sent to each new connection independently
 
@@ -112,15 +112,15 @@ Socket discovery: read the shellper socket path from Tower's SQLite database (`t
 - Shellper process is detached — no shared memory with Tower
 - Unix socket is the only communication channel
 - Must preserve session persistence across Tower restarts
-- Must not break the "new connection replaces old" behavior for Tower restarts — Tower should identify itself and trigger replacement of previous Tower connection only, not kick off `af attach` clients
+- Must not break the "new connection replaces old" behavior for Tower restarts — Tower should identify itself and trigger replacement of previous Tower connection only, not kick off `afx attach` clients
 
 ## Resolved Questions (from 3-way consultation)
 
 - [x] **Client types**: HELLO includes `clientType: 'tower' | 'terminal'`. Required. Tower connections replace previous Tower connections; terminal connections always coexist.
 - [x] **Max connections**: No limit initially. Backpressure removes dead clients automatically.
-- [x] **Read-only attach**: No. `af attach` can send DATA and RESIZE (write input). SIGNAL and SPAWN are restricted to Tower connections only for safety.
+- [x] **Read-only attach**: No. `afx attach` can send DATA and RESIZE (write input). SIGNAL and SPAWN are restricted to Tower connections only for safety.
 - [x] **EXIT broadcast**: EXIT frame is broadcast to all connected clients, not just the last one.
-- [x] **Socket discovery**: SQLite is the source of truth for `af attach` socket lookup. Scan `~/.codev/run/` as fallback.
+- [x] **Socket discovery**: SQLite is the source of truth for `afx attach` socket lookup. Scan `~/.codev/run/` as fallback.
 - [x] **Cross-machine access**: Out of scope. Unix sockets are local-only. Remote access would require a separate tunneling mechanism.
 
 ## Dependencies

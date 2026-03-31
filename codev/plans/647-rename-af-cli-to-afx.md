@@ -1,4 +1,4 @@
-# Plan: Rename af CLI to afx
+# Plan: Rename afx CLI to afx
 
 ## Metadata
 - **ID**: plan-647
@@ -8,11 +8,11 @@
 
 ## Executive Summary
 
-Rename the `af` CLI command to `afx` using Approach 1 (Rename with Deprecated Alias) from the spec. The work is split into three phases: (1) core CLI rename to make `afx` functional with `af` as a deprecated alias, (2) source code reference updates, skill directory rename, and test updates, (3) bulk documentation updates across ~197 markdown files.
+Rename the `afx` CLI command to `afx` using Approach 1 (Rename with Deprecated Alias) from the spec. The work is split into three phases: (1) core CLI rename to make `afx` functional with `afx` as a deprecated alias, (2) source code reference updates, skill directory rename, and test updates, (3) bulk documentation updates across ~197 markdown files.
 
 ## Success Metrics
-- [ ] `afx` command works identically to current `af`
-- [ ] `af` prints deprecation warning to stderr then works
+- [ ] `afx` command works identically to current `afx`
+- [ ] `afx` prints deprecation warning to stderr then works
 - [ ] All source code references updated to `afx`
 - [ ] `.claude/skills/af/` renamed to `.claude/skills/afx/`
 - [ ] All ~197 documentation files updated
@@ -38,15 +38,15 @@ Rename the `af` CLI command to `afx` using Approach 1 (Rename with Deprecated Al
 
 #### Objectives
 - Make `afx` the primary CLI command
-- Keep `af` working as a deprecated alias with stderr warning
-- Update all programmatic invocations of `af`
+- Keep `afx` working as a deprecated alias with stderr warning
+- Update all programmatic invocations of `afx`
 
 #### Deliverables
 - [ ] New `bin/afx.js` shim (primary entry point)
 - [ ] `bin/af.js` converted to deprecated wrapper
 - [ ] `package.json` bin field updated with both entries
 - [ ] CLI parser updated (`.name('afx')`, parseAsync args)
-- [ ] `codev` CLI alias updated (`af` → `afx`, keep `af` as deprecated)
+- [ ] `codev` CLI alias updated (`afx` → `afx`, keep `afx` as deprecated)
 - [ ] Programmatic calls updated (`spawn`, `commandExists`)
 
 #### Implementation Details
@@ -65,7 +65,7 @@ run(['agent-farm', ...args]);
 #!/usr/bin/env node
 // af - DEPRECATED: use afx instead
 import { run } from '../dist/cli.js';
-console.warn('⚠ `af` is deprecated. Use `afx` instead.');
+console.warn('⚠ `afx` is deprecated. Use `afx` instead.');
 const args = process.argv.slice(2);
 run(['agent-farm', ...args]);
 ```
@@ -82,7 +82,7 @@ run(['agent-farm', ...args]);
 
 **`packages/codev/src/cli.ts`**:
 - `.alias('af')` → `.alias('afx')` (primary)
-- Keep `af` as additional deprecated alias
+- Keep `afx` as additional deprecated alias
 - `args[0] === 'af'` → also match `'afx'`, and add `console.warn` deprecation when `args[0] === 'af'`
 
 **`packages/codev/src/commands/porch/index.ts`**:
@@ -95,14 +95,14 @@ run(['agent-farm', ...args]);
 #### Acceptance Criteria
 - [ ] `afx status` works
 - [ ] `afx spawn --help` works
-- [ ] `af status` prints deprecation warning to stderr, then works
+- [ ] `afx status` prints deprecation warning to stderr, then works
 - [ ] `codev afx` works as alias
 - [ ] Doctor check finds `afx` binary
 
 #### Test Plan
 - **Unit Tests**: Verify CLI parser sets name to `afx`
-- **Integration Tests**: Verify deprecated `af` wrapper emits warning to stderr
-- **Manual Testing**: Run `afx status` and `af status`, verify output
+- **Integration Tests**: Verify deprecated `afx` wrapper emits warning to stderr
+- **Manual Testing**: Run `afx status` and `afx status`, verify output
 
 #### Rollback Strategy
 Revert the bin shim changes, restore original `af.js`, and revert package.json.
@@ -113,7 +113,7 @@ Revert the bin shim changes, restore original `af.js`, and revert package.json.
 **Dependencies**: Phase 1
 
 #### Objectives
-- Update all hardcoded `af` references in TypeScript source files
+- Update all hardcoded `afx` references in TypeScript source files
 - Rename `.claude/skills/af/` to `.claude/skills/afx/`
 - Update test files to reference `afx`
 
@@ -126,33 +126,33 @@ Revert the bin shim changes, restore original `af.js`, and revert package.json.
 
 #### Implementation Details
 
-**Source files to update** — the list below is a starting point, NOT exhaustive. The builder MUST grep for all `af ` patterns in `packages/codev/src/` and update every user-facing reference found:
+**Source files to update** — the list below is a starting point, NOT exhaustive. The builder MUST grep for all `afx ` patterns in `packages/codev/src/` and update every user-facing reference found:
 
-Known files with user-facing `af` references:
-- `packages/codev/src/agent-farm/cli.ts` — deprecation messages (`af dash`, `af team`)
+Known files with user-facing `afx` references:
+- `packages/codev/src/agent-farm/cli.ts` — deprecation messages (`afx dash`, `afx team`)
 - `packages/codev/src/agent-farm/commands/spawn.ts` — help text
 - `packages/codev/src/agent-farm/commands/db.ts` — help text
 - `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — help text
 - `packages/codev/src/agent-farm/commands/status.ts` — help text (3 instances)
 - `packages/codev/src/agent-farm/commands/send.ts` — error messages (3 instances)
 - `packages/codev/src/agent-farm/commands/rename.ts` — usage text
-- `packages/codev/src/agent-farm/commands/tower-cloud.ts` — `af tower connect` references
-- `packages/codev/src/agent-farm/commands/attach.ts` — `af` references
-- `packages/codev/src/agent-farm/commands/team-update.ts` — `af team update` reference
-- `packages/codev/src/agent-farm/commands/open.ts` — `af open` references
-- `packages/codev/src/agent-farm/commands/shell.ts` — `af` references
+- `packages/codev/src/agent-farm/commands/tower-cloud.ts` — `afx tower connect` references
+- `packages/codev/src/agent-farm/commands/attach.ts` — `afx` references
+- `packages/codev/src/agent-farm/commands/team-update.ts` — `afx team update` reference
+- `packages/codev/src/agent-farm/commands/open.ts` — `afx open` references
+- `packages/codev/src/agent-farm/commands/shell.ts` — `afx` references
 - `packages/codev/src/agent-farm/lib/tunnel-client.ts` — error message
 - `packages/codev/src/agent-farm/lib/cloud-config.ts` — error messages (2 instances)
-- `packages/codev/src/agent-farm/servers/tower-tunnel.ts` — `af tower connect` references
+- `packages/codev/src/agent-farm/servers/tower-tunnel.ts` — `afx tower connect` references
 
-Source code comments referencing `af` commands (e.g., in `send-buffer.ts`, `tower-terminals.ts`, `tower-cron.ts`) should also be updated for consistency.
+Source code comments referencing `afx` commands (e.g., in `send-buffer.ts`, `tower-terminals.ts`, `tower-cron.ts`) should also be updated for consistency.
 
 **Skill directory rename**:
 - `git mv .claude/skills/af .claude/skills/afx`
 - `git mv codev-skeleton/.claude/skills/af codev-skeleton/.claude/skills/afx`
 - Update content in `SKILL.md` to reference `afx` commands
 
-**Test files to update** — same as source: grep for all `af` patterns, not just the list below:
+**Test files to update** — same as source: grep for all `afx` patterns, not just the list below:
 
 Known test files:
 - `packages/codev/src/agent-farm/__tests__/tower-cloud-cli.test.ts` — assertions
@@ -160,11 +160,11 @@ Known test files:
 - `packages/codev/src/agent-farm/__tests__/status-naming.test.ts` — describe block
 - `packages/codev/src/agent-farm/__tests__/bench.test.ts` — describe block
 - `packages/codev/src/agent-farm/__tests__/spawn.test.ts` — test data
-- `packages/codev/src/__tests__/team-cli.test.ts` — `af team` references
-- Any e2e tests and bugfix tests referencing `af` commands
+- `packages/codev/src/__tests__/team-cli.test.ts` — `afx team` references
+- Any e2e tests and bugfix tests referencing `afx` commands
 
 #### Acceptance Criteria
-- [ ] No source files contain `af ` in user-facing messages (except deprecation text in `bin/af.js`)
+- [ ] No source files contain `afx ` in user-facing messages (except deprecation text in `bin/af.js`)
 - [ ] `/afx` skill discovered correctly
 - [ ] All existing tests pass with updated references
 
@@ -181,7 +181,7 @@ Revert source file changes, rename skill directories back.
 **Dependencies**: Phase 2
 
 #### Objectives
-- Update all ~197 markdown files referencing `af` commands
+- Update all ~197 markdown files referencing `afx` commands
 - Update skeleton files deployed to user projects
 
 #### Deliverables
@@ -193,10 +193,10 @@ Revert source file changes, rename skill directories back.
 #### Implementation Details
 
 **Search-replace strategy**: Target patterns that specifically reference the CLI command:
-- `` `af `` → `` `afx `` (backtick-prefixed command)
-- `` `af` `` → `` `afx` `` (backtick-wrapped standalone)
-- `"af ` → `"af ` (quoted command references)
-- `af spawn`, `af status`, `af send`, `af open`, `af cleanup`, `af tower`, `af workspace`, `af dash`, `af team`, `af bench` → `afx` equivalents
+- `` `afx `` → `` `afx `` (backtick-prefixed command)
+- `` `afx` `` → `` `afx` `` (backtick-wrapped standalone)
+- `"afx ` → `"afx ` (quoted command references)
+- `afx spawn`, `afx status`, `afx send`, `afx open`, `afx cleanup`, `afx tower`, `afx workspace`, `afx dash`, `afx team`, `afx bench` → `afx` equivalents
 
 **Key files** (highest priority):
 - `CLAUDE.md` and `AGENTS.md` (root-level)
@@ -224,7 +224,7 @@ Revert source file changes, rename skill directories back.
 - [ ] All markdown renders correctly (no broken formatting)
 
 #### Test Plan
-- **Automated**: Grep for remaining `af` command patterns
+- **Automated**: Grep for remaining `afx` command patterns
 - **Manual**: Spot-check 10-15 files for correct replacement
 
 #### Rollback Strategy
@@ -242,10 +242,10 @@ Phase 1 (Core CLI) ──→ Phase 2 (Source & Tests) ──→ Phase 3 (Documen
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | False positive replacements in docs | Medium | Medium | Use targeted patterns, avoid broad regex |
-| Missed programmatic `af` reference | Low | Medium | Grep for all `af` patterns after Phase 2 |
+| Missed programmatic `afx` reference | Low | Medium | Grep for all `afx` patterns after Phase 2 |
 | Skill discovery breaks after rename | Low | Medium | Test `/afx` skill before committing |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `afx status` works, `af status` shows deprecation warning
+1. **After Phase 1**: `afx status` works, `afx status` shows deprecation warning
 2. **After Phase 2**: Full test suite passes, `/afx` skill works
-3. **After Phase 3**: No remaining `af` CLI references in documentation
+3. **After Phase 3**: No remaining `afx` CLI references in documentation

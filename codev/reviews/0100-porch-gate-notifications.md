@@ -2,7 +2,7 @@
 
 ## Summary
 
-Implemented four integration points for gate notification visibility: (1) backend data plumbing adding `gateStatus` to `/api/state`, (2) a `GateBanner` React component in the dashboard, (3) a `GateWatcher` module in the Tower that sends `af send` notifications to the architect on gate transitions, and (4) enhanced `af status` CLI output with wait time and approval commands.
+Implemented four integration points for gate notification visibility: (1) backend data plumbing adding `gateStatus` to `/api/state`, (2) a `GateBanner` React component in the dashboard, (3) a `GateWatcher` module in the Tower that sends `afx send` notifications to the architect on gate transitions, and (4) enhanced `afx status` CLI output with wait time and approval commands.
 
 ## Spec Compliance
 
@@ -12,11 +12,11 @@ Implemented four integration points for gate notification visibility: (1) backen
 - [x] Banner disappears within one poll cycle after gate approval
 - [x] Architect terminal receives a message when a gate transitions to pending
 - [x] Message is sent exactly once per gate transition (not on every poll)
-- [x] Existing `af send` protocol is used (no new message transport)
+- [x] Existing `afx send` protocol is used (no new message transport)
 - [x] Works for all gate types: spec-approval, plan-approval, pr-ready, merge-approval
-- [x] `af status` output includes wait time and approval command for blocked builders
+- [x] `afx status` output includes wait time and approval command for blocked builders
 - [x] No notification when Tower runs without any active builders
-- [x] `af send` failures are logged at warn level and do not break the poll loop
+- [x] `afx send` failures are logged at warn level and do not break the poll loop
 - [x] Existing tests pass; new tests cover notification behavior
 
 ## Deviations from Plan

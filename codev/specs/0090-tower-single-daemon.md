@@ -20,7 +20,7 @@ This leads to several issues:
 **Make tower the single daemon that owns everything:**
 
 1. **Tower is the only long-running server** - starts on port 4100 (or configured port)
-2. **`af dash` becomes an API client** - tells tower to start/manage a project, doesn't spawn its own server
+2. **`afx dash` becomes an API client** - tells tower to start/manage a project, doesn't spawn its own server
 3. **Single SQLite database** - tower owns global.db which tracks ALL state (projects, architects, builders, terminals)
 4. **Tower manages all PTY sessions** - PtyManager lives in tower, not per-project dashboards
 5. **Web UI served from tower** - React dashboard is served by tower with project routing
@@ -60,24 +60,24 @@ This leads to several issues:
 
 ## API Changes
 
-### `af tower start`
+### `afx tower start`
 - Starts the single daemon (unchanged)
 - Now also initializes PtyManagers for known projects
 
-### `af tower stop`
+### `afx tower stop`
 - Stops the single daemon and all managed terminals
 
-### `af dash start` (CHANGED)
+### `afx dash start` (CHANGED)
 - No longer spawns a separate server
 - Sends API request to tower: `POST /api/projects/:projectPath/activate`
 - Tower creates PtyManager for project, starts architect if configured
 - Opens browser to `http://localhost:4100/project/<encoded-path>/`
 
-### `af dash stop` (CHANGED)
+### `afx dash stop` (CHANGED)
 - Sends API request to tower: `POST /api/projects/:projectPath/deactivate`
 - Tower cleans up terminals for that project
 
-### `af status` (CHANGED)
+### `afx status` (CHANGED)
 - Queries tower API instead of reading local state.db
 - `GET /api/projects/:projectPath/status`
 
@@ -154,14 +154,14 @@ The React app uses `getApiBase()` to determine API prefix based on URL path.
 
 1. **Phase 1: Tower API + Dashboard serving**
    - Tower serves React dashboard and exposes project APIs
-   - `af dash start` calls tower API (no more dashboard-server spawning)
+   - `afx dash start` calls tower API (no more dashboard-server spawning)
 
 2. **Phase 2: PtyManager in tower**
    - Tower owns all terminal sessions
    - Single WebSocket endpoint for all terminals
 
 3. **Phase 3: CLI commands via tower**
-   - All `af` commands communicate via tower API
+   - All `afx` commands communicate via tower API
    - Delete dashboard-server.ts
 
 4. **Phase 4: Cleanup**
@@ -182,19 +182,19 @@ The React app uses `getApiBase()` to determine API prefix based on URL path.
 |------|------------|
 | Tower crash affects all projects | Add process supervision, auto-restart |
 | Higher memory usage in tower | Lazy-load PtyManagers, only active projects |
-| Breaking existing workflows | Keep `af dash start` command semantics (just calls tower instead of spawning) |
+| Breaking existing workflows | Keep `afx dash start` command semantics (just calls tower instead of spawning) |
 
 ## Success Criteria
 
-1. `af tower start` is the only daemon needed
-2. `af dash start/stop` work via tower API
+1. `afx tower start` is the only daemon needed
+2. `afx dash start/stop` work via tower API
 3. No more "No terminal session" errors from stale state
 4. All terminals accessible through single port (4100)
-5. Clean shutdown with `af tower stop` kills all terminals
+5. Clean shutdown with `afx tower stop` kills all terminals
 
 ## CLI Behavior Changes
 
-### `af dash start` Blocking Behavior
+### `afx dash start` Blocking Behavior
 
 **Current**: Spawns dashboard-server, opens browser, returns immediately.
 
@@ -202,28 +202,28 @@ The React app uses `getApiBase()` to determine API prefix based on URL path.
 
 The command remains non-blocking. If the user wants to see logs:
 ```bash
-af tower log  # Follow tower logs
+afx tower log  # Follow tower logs
 ```
 
-### `af dash start --remote` (Remote Workflows)
+### `afx dash start --remote` (Remote Workflows)
 
 Remote access continues to work through tower:
 ```bash
 # On remote machine
-af tower start
+afx tower start
 
 # On local machine
 ssh -L 4100:localhost:4100 user@remote
 # Then open http://localhost:4100
 ```
 
-The `--remote` flag on `af dash` becomes a convenience wrapper:
+The `--remote` flag on `afx dash` becomes a convenience wrapper:
 ```bash
-af dash start --remote user@host
-# Equivalent to: ssh user@host 'cd <project> && af tower start' + tunnel setup
+afx dash start --remote user@host
+# Equivalent to: ssh user@host 'cd <project> && afx tower start' + tunnel setup
 ```
 
-### `af status` Output
+### `afx status` Output
 
 Changes from reading local state.db to querying tower:
 ```bash
@@ -270,7 +270,7 @@ Migration runs on tower startup:
 ### Tower Unreachable from CLI
 
 ```bash
-af dash start  # Tower not running
+afx dash start  # Tower not running
 # Output: "Tower not running. Starting tower..."
 # Automatically starts tower, then activates project
 ```
@@ -367,7 +367,7 @@ Even without external supervision, tower has basic crash recovery:
 - `AF_USE_TOWER` environment variable
 - Dual mode where both work
 
-Tower is THE daemon. `af dash` is just an API client. Period.
+Tower is THE daemon. `afx dash` is just an API client. Period.
 
 ## Authentication Clarification
 

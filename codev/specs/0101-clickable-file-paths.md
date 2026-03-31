@@ -2,11 +2,11 @@
 
 ## Summary
 
-File paths displayed in xterm.js terminal output (e.g., `src/lib/foo.ts:42:15`) should be visually indicated as clickable (dotted underline) and open in the dashboard's file viewer (`af open`) when clicked. Must work in both architect terminals and builder terminals (which run in worktrees with different cwd).
+File paths displayed in xterm.js terminal output (e.g., `src/lib/foo.ts:42:15`) should be visually indicated as clickable (dotted underline) and open in the dashboard's file viewer (`afx open`) when clicked. Must work in both architect terminals and builder terminals (which run in worktrees with different cwd).
 
 ## Problem
 
-When Claude or build tools output file paths in the terminal (error messages, diffs, test results, linter output), the user must manually copy the path and run `af open <path>` or navigate the Files panel. This breaks flow — especially during iterative debugging where you're constantly jumping between terminal output and source files.
+When Claude or build tools output file paths in the terminal (error messages, diffs, test results, linter output), the user must manually copy the path and run `afx open <path>` or navigate the Files panel. This breaks flow — especially during iterative debugging where you're constantly jumping between terminal output and source files.
 
 The infrastructure for this already exists but isn't connected:
 

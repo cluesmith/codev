@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Implement gate notifications across four integration points: (1) extend `getGateStatusForProject()` to return `requestedAt`, (2) include `gateStatus` in the Tower's `/api/state` response so the dashboard can render it, (3) build a `GateBanner` React component above the terminal split, (4) add Tower-side gate transition detection to send `af send` notifications, and (5) enhance `af status` output with wait time and approval command.
+Implement gate notifications across four integration points: (1) extend `getGateStatusForProject()` to return `requestedAt`, (2) include `gateStatus` in the Tower's `/api/state` response so the dashboard can render it, (3) build a `GateBanner` React component above the terminal split, (4) add Tower-side gate transition detection to send `afx send` notifications, and (5) enhance `afx status` output with wait time and approval command.
 
 The work decomposes naturally into four phases: backend data plumbing, dashboard UI, architect notifications, and CLI enhancement.
 
@@ -17,8 +17,8 @@ The work decomposes naturally into four phases: backend data plumbing, dashboard
 - [ ] Existing tests pass; new tests cover notification behavior
 - [ ] Gate banner appears within one poll cycle of a gate firing
 - [ ] Banner disappears within one poll cycle of gate approval
-- [ ] `af send` fires exactly once per gate transition
-- [ ] `af status` shows wait time and approval command
+- [ ] `afx send` fires exactly once per gate transition
+- [ ] `afx status` shows wait time and approval command
 
 ## Phases (Machine Readable)
 
@@ -27,8 +27,8 @@ The work decomposes naturally into four phases: backend data plumbing, dashboard
   "phases": [
     {"id": "phase_1", "title": "Backend: Gate Status Data Plumbing"},
     {"id": "phase_2", "title": "Dashboard: GateBanner Component"},
-    {"id": "phase_3", "title": "Tower: Gate Watcher and af send Notifications"},
-    {"id": "phase_4", "title": "CLI: Enhanced af status Output"}
+    {"id": "phase_3", "title": "Tower: Gate Watcher and afx send Notifications"},
+    {"id": "phase_4", "title": "CLI: Enhanced afx status Output"}
   ]
 }
 ```
@@ -58,7 +58,7 @@ The work decomposes naturally into four phases: backend data plumbing, dashboard
 - Change `GateStatus.timestamp?: number` to `GateStatus.requestedAt?: string`
 - In the parsing loop, after finding a pending gate, also extract `requested_at` from the YAML. The format is `requested_at: 'ISO-8601-string'` indented at 4 spaces under the gate name
 - Return `requestedAt` as the raw ISO 8601 string (let consumers format it)
-- **No sanitization here** — `getGateStatusForProject()` returns raw data. Sanitization for `af send` is handled in the `GateWatcher` (Phase 3). The dashboard uses React JSX which auto-escapes strings, so no sanitization needed for display. This keeps the data source truthful — a pending gate always shows in the dashboard even if the gate name has unusual characters.
+- **No sanitization here** — `getGateStatusForProject()` returns raw data. Sanitization for `afx send` is handled in the `GateWatcher` (Phase 3). The dashboard uses React JSX which auto-escapes strings, so no sanitization needed for display. This keeps the data source truthful — a pending gate always shows in the dashboard even if the gate name has unusual characters.
 
 **File: `packages/codev/src/agent-farm/servers/tower-server.ts` (around line 2366)**
 - Import `getGateStatusForProject`
@@ -169,14 +169,14 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
 
 ---
 
-### Phase 3: Tower — Gate Watcher and af send Notifications
+### Phase 3: Tower — Gate Watcher and afx send Notifications
 **Dependencies**: Phase 1
 
 #### Objectives
 - Detect gate transitions in the Tower's poll loop
-- Send `af send architect "..."` notification on new gate transitions
+- Send `afx send architect "..."` notification on new gate transitions
 - Deduplicate: only notify once per gate appearance
-- Handle `af send` failures gracefully (log warn, continue)
+- Handle `afx send` failures gracefully (log warn, continue)
 
 #### Deliverables
 - [ ] Gate watcher module in `packages/codev/src/agent-farm/utils/gate-watcher.ts` (new file)
@@ -196,8 +196,8 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
     3. If key already in `notified`: skip (already notified)
     4. Clear previous keys for this project (gate changed) and add new key
     5. Sanitize `gateName` and `builderId` (strip ANSI, reject tmux control chars)
-    6. If sanitization fails: log warn, skip `af send`, return
-    7. Execute `af send architect "..."` via `child_process.execFile` with the message
+    6. If sanitization fails: log warn, skip `afx send`, return
+    7. Execute `afx send architect "..."` via `child_process.execFile` with the message
     8. On failure: log at warn level, continue
   - `reset()`: clear both maps (useful for testing)
 
@@ -224,14 +224,14 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
 - Test: Different builders with same gate type → 2 notifications
 - Test: Gate cleared → key removed from map → new appearance triggers notification again
 - Test: Sanitization rejects semicolons, logs warning
-- Test: `af send` failure is logged at warn and swallowed
+- Test: `afx send` failure is logged at warn and swallowed
 
 #### Acceptance Criteria
-- [ ] `af send` fires exactly once when a gate transitions to pending
+- [ ] `afx send` fires exactly once when a gate transitions to pending
 - [ ] Duplicate polls don't re-send
 - [ ] Two builders with same gate type each get their own notification
 - [ ] Gate clear + re-appear triggers a new notification
-- [ ] `af send` failures are logged warn and don't break the Tower
+- [ ] `afx send` failures are logged warn and don't break the Tower
 - [ ] All new tests pass
 
 #### Test Plan
@@ -242,16 +242,16 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
 Remove `gate-watcher.ts`, revert tower-server.ts integration point.
 
 #### Risks
-- **Risk**: `af send` is a CLI command; calling from within the Tower process may have path issues
-  - **Mitigation**: Use absolute path to `af` binary or resolve via `process.argv[0]`. Test in integration.
+- **Risk**: `afx send` is a CLI command; calling from within the Tower process may have path issues
+  - **Mitigation**: Use absolute path to `afx` binary or resolve via `process.argv[0]`. Test in integration.
 
 ---
 
-### Phase 4: CLI — Enhanced af status Output
+### Phase 4: CLI — Enhanced afx status Output
 **Dependencies**: Phase 1
 
 #### Objectives
-- Enhance `af status` gate warning to include wait time and approval command
+- Enhance `afx status` gate warning to include wait time and approval command
 - Format matches the spec example output
 
 #### Deliverables
@@ -288,14 +288,14 @@ Remove `gate-watcher.ts`, revert tower-server.ts integration point.
 - Test: No gate shows no gate warning
 
 #### Acceptance Criteria
-- [ ] `af status` output includes wait time and approval command for blocked builders
+- [ ] `afx status` output includes wait time and approval command for blocked builders
 - [ ] Missing `requestedAt` omits wait time (no error)
 - [ ] Format matches spec example
 - [ ] All tests pass
 
 #### Test Plan
 - **Unit Tests**: Mock `TowerClient.getProjectStatus` return value, capture logger output
-- **Manual Testing**: Run `af status` with active tower and blocked builder
+- **Manual Testing**: Run `afx status` with active tower and blocked builder
 
 #### Rollback Strategy
 Revert status.ts and tower-client.ts changes.
@@ -321,7 +321,7 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| `af send` fails from Tower process context | Medium | Low | Dashboard is primary channel; log warn and swallow |
+| `afx send` fails from Tower process context | Medium | Low | Dashboard is primary channel; log warn and swallow |
 | CSS banner breaks existing layout | Low | Medium | Scoped class names; test in Playwright E2E |
 | `timestamp` field removal breaks consumers | Low | High | Search confirms field is never populated or read |
 | Three parallel `GateStatus` type definitions drift | Low | Medium | gate-status.ts is source of truth; tower-client.ts and dashboard api.ts must match. Document in code comments. |
@@ -330,7 +330,7 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 1. **After Phase 1**: `curl /api/state` returns `gateStatus` with `requestedAt`
 2. **After Phase 2**: Dashboard shows/hides banner on gate state changes
 3. **After Phase 3**: Architect tmux gets notification on gate fire
-4. **After Phase 4**: `af status` shows enhanced gate info
+4. **After Phase 4**: `afx status` shows enhanced gate info
 
 ## Documentation Updates Required
 - [ ] `codev/resources/arch.md` with new modules (gate-watcher)
@@ -346,8 +346,8 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 - Three parallel `GateStatus` type definitions need synchronization. Response: added as a risk with mitigation.
 
 **Codex**: REQUEST_CHANGES (MEDIUM confidence). Three issues:
-1. Sanitization in `getGateStatusForProject` suppresses gate data system-wide — spec only requires suppressing `af send`. **Fixed**: moved sanitization to `GateWatcher` only. Data layer returns raw values; React JSX auto-escapes for dashboard.
-2. Architect notifications depend on dashboard polling — if dashboard is closed, `af send` never fires. **Fixed**: added background `setInterval` (10s) in Tower that polls gate status independently of dashboard requests.
+1. Sanitization in `getGateStatusForProject` suppresses gate data system-wide — spec only requires suppressing `afx send`. **Fixed**: moved sanitization to `GateWatcher` only. Data layer returns raw values; React JSX auto-escapes for dashboard.
+2. Architect notifications depend on dashboard polling — if dashboard is closed, `afx send` never fires. **Fixed**: added background `setInterval` (10s) in Tower that polls gate status independently of dashboard requests.
 3. Playwright testing required for UI changes but absent from plan. **Fixed**: added explicit Playwright E2E tests in Phase 2 test plan.
 
 ### Iteration 2 (2026-02-12)

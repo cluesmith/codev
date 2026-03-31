@@ -1,11 +1,11 @@
-# af - Agent Farm CLI
+# afx - Agent Farm CLI
 
-The `af` (agent-farm) command manages multi-agent orchestration for software development. It spawns and manages builders in isolated git worktrees.
+The `afx` (agent-farm) command manages multi-agent orchestration for software development. It spawns and manages builders in isolated git worktrees.
 
 ## Synopsis
 
 ```
-af <command> [options]
+afx <command> [options]
 ```
 
 ## Global Options
@@ -18,18 +18,18 @@ af <command> [options]
 
 ## Commands
 
-### af workspace
+### afx workspace
 
 Workspace commands - start/stop the workspace for this project.
 
-> **Deprecation note:** `af dash` is a deprecated alias for `af workspace`. It still works but prints a deprecation warning.
+> **Deprecation note:** `afx dash` is a deprecated alias for `afx workspace`. It still works but prints a deprecation warning.
 
-#### af workspace start
+#### afx workspace start
 
 Start the workspace.
 
 ```bash
-af workspace start [options]
+afx workspace start [options]
 ```
 
 **Options:**
@@ -53,16 +53,16 @@ The workspace overview is accessible via browser at `http://localhost:<port>`.
 
 ```bash
 # Start with defaults
-af workspace start
+afx workspace start
 
 # Start with custom port
-af workspace start -p 4300
+afx workspace start -p 4300
 
 # Start with specific command
-af workspace start -c "claude --model opus"
+afx workspace start -c "claude --model opus"
 
 # Start on remote machine
-af workspace start --remote user@host
+afx workspace start --remote user@host
 ```
 
 #### Remote Access
@@ -71,13 +71,13 @@ Start Agent Farm on a remote machine and access it from your local workstation w
 
 ```bash
 # On your local machine - one command does everything:
-af workspace start --remote user@remote-host
+afx workspace start --remote user@remote-host
 
 # Or with explicit project path:
-af workspace start --remote user@remote-host:/path/to/project
+afx workspace start --remote user@remote-host:/path/to/project
 
 # With custom port:
-af workspace start --remote user@remote-host --port 4300
+afx workspace start --remote user@remote-host --port 4300
 ```
 
 This single command:
@@ -92,16 +92,16 @@ The workspace and all terminals work identically to local development. Press Ctr
 
 **Port Selection:**
 
-The port is determined by the global port registry (`af ports list`). Each project gets a consistent 100-port block (e.g., 4200-4299, 4600-4699). The same port is used on both local and remote ends for the SSH tunnel.
+The port is determined by the global port registry (`afx ports list`). Each project gets a consistent 100-port block (e.g., 4200-4299, 4600-4699). The same port is used on both local and remote ends for the SSH tunnel.
 
 ```bash
 # Check your project's port allocation
-af ports list
+afx ports list
 ```
 
 **Prerequisites:**
 - SSH server must be running on the remote machine
-- Agent Farm (`af`) must be installed on the remote machine
+- Agent Farm (`afx`) must be installed on the remote machine
 - **Passwordless SSH required** - set up with `ssh-copy-id user@host`
 - Same version of codev on both machines (warnings shown if mismatched)
 
@@ -112,23 +112,23 @@ If the remote can't find `claude` or other commands, ensure they're in your PATH
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-**Limitation**: File annotation tabs (`af open`) use separate ports and won't work through the tunnel. Use terminals for file viewing, or forward additional ports manually.
+**Limitation**: File annotation tabs (`afx open`) use separate ports and won't work through the tunnel. Use terminals for file viewing, or forward additional ports manually.
 
 **Legacy mode** (deprecated):
 
 ```bash
 # DEPRECATED: Exposes workspace without authentication
-af workspace start --allow-insecure-remote
+afx workspace start --allow-insecure-remote
 ```
 
 The `--allow-insecure-remote` flag binds to `0.0.0.0` with no authentication. Use `--remote` instead for secure access via SSH.
 
-#### af workspace stop
+#### afx workspace stop
 
 Stop all agent farm processes for this project.
 
 ```bash
-af workspace stop
+afx workspace stop
 ```
 
 **Description:**
@@ -137,16 +137,16 @@ Stops all running agent-farm processes including:
 - Terminal sessions (Shellper processes)
 - Workspace servers
 
-Does NOT clean up worktrees - use `af cleanup` for that.
+Does NOT clean up worktrees - use `afx cleanup` for that.
 
 ---
 
-### af spawn
+### afx spawn
 
 Spawn a new builder.
 
 ```bash
-af spawn [number] --protocol <name> [options]
+afx spawn [number] --protocol <name> [options]
 ```
 
 **Arguments:**
@@ -186,25 +186,25 @@ Creates a new builder in an isolated git worktree. The builder gets:
 
 ```bash
 # Spawn builder for SPIR project (issue #42) — --protocol is REQUIRED
-af spawn 42 --protocol spir
+afx spawn 42 --protocol spir
 
 # Spawn builder for a bugfix
-af spawn 42 --protocol bugfix
+afx spawn 42 --protocol bugfix
 
 # Spawn TICK amendment to spec 30
-af spawn 42 --protocol tick --amends 30
+afx spawn 42 --protocol tick --amends 30
 
 # Spawn with task description (no --protocol needed)
-af spawn --task "Fix login bug in auth module"
+afx spawn --task "Fix login bug in auth module"
 
 # Spawn bare Claude session (no --protocol needed)
-af spawn --shell
+afx spawn --shell
 
 # Spawn with context files
-af spawn 42 --protocol spir --files "src/auth.ts,tests/auth.test.ts"
+afx spawn 42 --protocol spir --files "src/auth.ts,tests/auth.test.ts"
 
 # Resume an existing builder
-af spawn 42 --resume
+afx spawn 42 --resume
 ```
 
 **Common Errors:**
@@ -213,16 +213,16 @@ af spawn 42 --resume
 |-------|-------|-----|
 | "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, tick, etc.) |
 | "Dirty worktree" | Uncommitted changes | Run `git status`, commit changes, retry |
-| "Builder already exists" | Worktree collision | Use `--resume` to resume, or `af cleanup` first |
+| "Builder already exists" | Worktree collision | Use `--resume` to resume, or `afx cleanup` first |
 
 ---
 
-### af status
+### afx status
 
 Show status of all agents.
 
 ```bash
-af status
+afx status
 ```
 
 **Description:**
@@ -248,12 +248,12 @@ Status values:
 
 ---
 
-### af cleanup
+### afx cleanup
 
 Clean up a builder worktree and branch.
 
 ```bash
-af cleanup -p <id> [options]
+afx cleanup -p <id> [options]
 ```
 
 **Options:**
@@ -268,20 +268,20 @@ Removes a builder's worktree and associated resources. By default, refuses to de
 
 ```bash
 # Clean up completed builder
-af cleanup -p 0042
+afx cleanup -p 0042
 
 # Force cleanup (may lose work)
-af cleanup -p 0042 --force
+afx cleanup -p 0042 --force
 ```
 
 ---
 
-### af send
+### afx send
 
 Send instructions to a running builder.
 
 ```bash
-af send [builder] [message] [options]
+afx send [builder] [message] [options]
 ```
 
 **Arguments:**
@@ -310,32 +310,32 @@ Sends text to a builder's terminal. Useful for:
 
 ```bash
 # Send message to builder in current workspace
-af send 0042 "Focus on the auth module first"
+afx send 0042 "Focus on the auth module first"
 
 # Send to architect in current workspace
-af send architect "PR #42 has been merged"
+afx send architect "PR #42 has been merged"
 
 # Send to another workspace's architect (cross-workspace)
-af send marketmaker:architect "R4 report updated with cost analysis"
+afx send marketmaker:architect "R4 report updated with cost analysis"
 
 # Interrupt and send new instructions
-af send 0042 --interrupt "Stop that. Try a different approach."
+afx send 0042 --interrupt "Stop that. Try a different approach."
 
 # Send to all builders
-af send --all "Time to wrap up, create PRs"
+afx send --all "Time to wrap up, create PRs"
 
 # Include file content
-af send 0042 --file src/api.ts "Review this implementation"
+afx send 0042 --file src/api.ts "Review this implementation"
 ```
 
 ---
 
-### af open
+### afx open
 
 Open file annotation viewer.
 
 ```bash
-af open <file>
+afx open <file>
 ```
 
 **Arguments:**
@@ -348,17 +348,17 @@ Opens a web-based viewer for annotating files with review comments. Comments use
 **Example:**
 
 ```bash
-af open src/auth/login.ts
+afx open src/auth/login.ts
 ```
 
 ---
 
-### af shell
+### afx shell
 
 Spawn a utility shell terminal.
 
 ```bash
-af shell [options]
+afx shell [options]
 ```
 
 **Options:**
@@ -375,20 +375,20 @@ Opens a general-purpose shell terminal in the workspace overview. Useful for:
 
 ```bash
 # Open utility shell
-af shell
+afx shell
 
 # Open with custom name
-af shell -n "test-runner"
+afx shell -n "test-runner"
 ```
 
 ---
 
-### af rename
+### afx rename
 
 Rename the current shell session (Spec 468).
 
 ```bash
-af rename <name>
+afx rename <name>
 ```
 
 **Arguments:**
@@ -396,7 +396,7 @@ af rename <name>
 
 **Description:**
 
-Renames the current utility shell session. Must be run from inside a shell created by `af shell`. The new name appears in the dashboard tab and persists across Tower restarts.
+Renames the current utility shell session. Must be run from inside a shell created by `afx shell`. The new name appears in the dashboard tab and persists across Tower restarts.
 
 - Only utility shell sessions can be renamed (not architect or builder terminals)
 - Duplicate names are auto-deduplicated with a `-N` suffix
@@ -406,24 +406,24 @@ Renames the current utility shell session. Must be run from inside a shell creat
 
 ```bash
 # Rename current shell
-af rename "monitoring"
+afx rename "monitoring"
 
 # Name will be deduped if it conflicts
-af rename "testing"   # → "testing-1" if "testing" already exists
+afx rename "testing"   # → "testing-1" if "testing" already exists
 ```
 
 ---
 
-### af ports
+### afx ports
 
 Manage global port registry.
 
-#### af ports list
+#### afx ports list
 
 List all port allocations.
 
 ```bash
-af ports list
+afx ports list
 ```
 
 Shows port blocks allocated to different projects:
@@ -433,50 +433,50 @@ Port Allocations
 4300-4399: /Users/me/project-b
 ```
 
-#### af ports cleanup
+#### afx ports cleanup
 
 Remove stale port allocations.
 
 ```bash
-af ports cleanup
+afx ports cleanup
 ```
 
 Removes entries for projects that no longer exist.
 
 ---
 
-### af tower
+### afx tower
 
 Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects and provides cloud connectivity via codevos.ai.
 
-#### af tower start
+#### afx tower start
 
 Start the tower dashboard.
 
 ```bash
-af tower start [options]
+afx tower start [options]
 ```
 
 **Options:**
 - `-p, --port <port>` - Port to run on (default: 4100)
 
-#### af tower stop
+#### afx tower stop
 
 Stop the tower dashboard.
 
 ```bash
-af tower stop [options]
+afx tower stop [options]
 ```
 
 **Options:**
 - `-p, --port <port>` - Port to stop (default: 4100)
 
-#### af tower register
+#### afx tower register
 
 Register this tower with codevos.ai for remote access.
 
 ```bash
-af tower register [options]
+afx tower register [options]
 ```
 
 **Options:**
@@ -491,21 +491,21 @@ Opens a browser to codevos.ai for authentication, then exchanges the token for a
 
 ```bash
 # Register tower
-af tower register
+afx tower register
 
 # Re-authenticate existing registration
-af tower register --reauth
+afx tower register --reauth
 
 # Register and signal tower on custom port
-af tower register -p 4300
+afx tower register -p 4300
 ```
 
-#### af tower deregister
+#### afx tower deregister
 
 Remove this tower's registration from codevos.ai.
 
 ```bash
-af tower deregister [options]
+afx tower deregister [options]
 ```
 
 **Options:**
@@ -515,12 +515,12 @@ af tower deregister [options]
 
 Calls the codevos.ai API to delete the tower, removes local credentials from `~/.agent-farm/cloud-config.json`, and signals the tower daemon to disconnect.
 
-#### af tower status
+#### afx tower status
 
 Show tower status including cloud connection info.
 
 ```bash
-af tower status [options]
+afx tower status [options]
 ```
 
 **Options:**
@@ -535,27 +535,27 @@ Displays local tower status plus cloud registration details: tower name, ID, con
 
 ---
 
-### af db
+### afx db
 
 Database debugging and maintenance commands.
 
-#### af db dump
+#### afx db dump
 
 Export all tables to JSON.
 
 ```bash
-af db dump [options]
+afx db dump [options]
 ```
 
 **Options:**
 - `--global` - Dump global.db instead of project db
 
-#### af db query
+#### afx db query
 
 Run a SELECT query.
 
 ```bash
-af db query <sql> [options]
+afx db query <sql> [options]
 ```
 
 **Options:**
@@ -564,27 +564,27 @@ af db query <sql> [options]
 **Example:**
 
 ```bash
-af db query "SELECT * FROM builders WHERE status = 'implementing'"
+afx db query "SELECT * FROM builders WHERE status = 'implementing'"
 ```
 
-#### af db reset
+#### afx db reset
 
 Delete database and start fresh.
 
 ```bash
-af db reset [options]
+afx db reset [options]
 ```
 
 **Options:**
 - `--global` - Reset global.db
 - `--force` - Skip confirmation
 
-#### af db stats
+#### afx db stats
 
 Show database statistics.
 
 ```bash
-af db stats [options]
+afx db stats [options]
 ```
 
 **Options:**
@@ -685,8 +685,8 @@ Go:
 Or override via CLI flags:
 
 ```bash
-af workspace start --architect-cmd "claude --model opus"
-af spawn 42 --protocol spir --builder-cmd "claude --model haiku"
+afx workspace start --architect-cmd "claude --model opus"
+afx spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 ```
 
 ---

@@ -2,16 +2,16 @@
 
 ## Summary
 
-Implemented standardized agent naming, cross-project messaging, WebSocket message bus, and a structured `POST /api/send` endpoint for Tower. The CLI `af send` command was refactored from local terminal resolution to delegating all routing to Tower. Four implementation phases were completed across 16 files, adding ~2,350 lines (net +2,116 after removing old code).
+Implemented standardized agent naming, cross-project messaging, WebSocket message bus, and a structured `POST /api/send` endpoint for Tower. The CLI `afx send` command was refactored from local terminal resolution to delegating all routing to Tower. Four implementation phases were completed across 16 files, adding ~2,350 lines (net +2,116 after removing old code).
 
 ## Spec Compliance
 
-- [x] AC1: `af send architect "msg"` still works (backward compat)
-- [x] AC2: `af send builder-spir-0109 "msg"` works with new naming
-- [x] AC3: `af send codev-public:architect "msg"` delivers cross-project
-- [x] AC4: `af status` shows agents with new naming convention
-- [x] AC5: `/ws/messages` WebSocket broadcasts all `af send` messages in structured JSON
-- [x] AC6: `af spawn -p 0109` creates builder named `builder-spir-0109`
+- [x] AC1: `afx send architect "msg"` still works (backward compat)
+- [x] AC2: `afx send builder-spir-0109 "msg"` works with new naming
+- [x] AC3: `afx send codev-public:architect "msg"` delivers cross-project
+- [x] AC4: `afx status` shows agents with new naming convention
+- [x] AC5: `/ws/messages` WebSocket broadcasts all `afx send` messages in structured JSON
+- [x] AC6: `afx spawn -p 0109` creates builder named `builder-spir-0109`
 - [x] AC7: Bare ID `0109` resolves to `builder-spir-0109` via tail match
 - [x] AC8: Messages include sender, recipient, timestamp, and content
 
@@ -48,7 +48,7 @@ Implemented standardized agent naming, cross-project messaging, WebSocket messag
 
 - **Spec Phase 2**: Dashboard message panel UI (spec lines 114-124)
 - **Message history**: Optional SQLite persistence for message replay
-- **`af send --all` via Tower**: Consider a Tower-side broadcast endpoint
+- **`afx send --all` via Tower**: Consider a Tower-side broadcast endpoint
 - **Porch integration**: Spec 0108 (gate notifications) can use the new `POST /api/send` endpoint
 
 ## Test Summary

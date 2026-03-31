@@ -34,7 +34,7 @@ BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Is
 │  1. Identify issue #N                                                       │
 │        │                                                                    │
 │        ▼                                                                    │
-│  2. af spawn --task "Fix #N"  ──────►  3. Comment "On it..."               │
+│  2. afx spawn --task "Fix #N"  ──────►  3. Comment "On it..."               │
 │        │                                      │                             │
 │        │                                      ▼                             │
 │        │                               4. Investigate & Fix                 │
@@ -43,29 +43,29 @@ BUGFIX is a streamlined protocol for addressing minor bugs reported as GitHub Is
 │        │                              │               │                     │
 │        │                        Too Complex?    Simple Fix                  │
 │        │                              │               │                     │
-│        │◄─── af send "Complex" ◄──────┘               │                     │
+│        │◄─── afx send "Complex" ◄──────┘               │                     │
 │        │                                              ▼                     │
 │        │                               5. Create PR + CMAP review           │
 │        │                                      │                             │
-│        │◄─────────────────── af send "PR #M ready" ◄──┘                     │
+│        │◄─────────────────── afx send "PR #M ready" ◄──┘                     │
 │        │                                                                    │
 │        ▼                                                                    │
 │  6. Review PR + CMAP integration                                            │
 │        │                                                                    │
 │        ├───── gh pr comment (feedback) ─────►  7. Address feedback          │
 │        │                                              │                     │
-│        │◄─────────────────── af send "Fixed" ◄────────┘                     │
+│        │◄─────────────────── afx send "Fixed" ◄────────┘                     │
 │        │                                                                    │
 │        ▼                                                                    │
-│  8. af send "Merge it"  ──────────────────────►  9. gh pr merge --merge     │
+│  8. afx send "Merge it"  ──────────────────────►  9. gh pr merge --merge     │
 │        │                                              │                     │
-│        │◄─────────────────── af send "Merged" ◄───────┘                     │
+│        │◄─────────────────── afx send "Merged" ◄───────┘                     │
 │        │                                                                    │
 │        ▼                                                                    │
 │  10. git pull && verify                                                     │
 │        │                                                                    │
 │        ▼                                                                    │
-│  11. af cleanup && close issue                                              │
+│  11. afx cleanup && close issue                                              │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -94,9 +94,9 @@ gh issue view 42
 **Architect Actions**:
 1. Spawn a builder for the issue:
    ```bash
-   af spawn --issue 42
+   afx spawn --issue 42
    # or
-   af spawn -i 42
+   afx spawn -i 42
    ```
 2. **Continue working immediately** - Do NOT wait for the builder. The spawn is non-blocking. Move on to other work.
 
@@ -107,7 +107,7 @@ gh issue view 42
    - Comments "On it!" on the issue (unless `--no-comment`)
    - Spawns builder with issue context
 
-**Key Principle**: Spawn and forget. The builder will notify you via `af send` when the PR is ready. Don't poll, don't watch, don't block.
+**Key Principle**: Spawn and forget. The builder will notify you via `afx send` when the PR is ready. Don't poll, don't watch, don't block.
 
 **Branch Naming**: `builder/bugfix-<issue-number>-<slug>`
 
@@ -135,7 +135,7 @@ The `builder/` prefix maintains consistency with Agent Farm tooling.
 **Complexity Check**:
 If during investigation the builder determines the fix is too complex:
 ```bash
-af send architect "Issue #N is more complex than expected. [Reason]. Recommend escalating to SPIR/TICK."
+afx send architect "Issue #N is more complex than expected. [Reason]. Recommend escalating to SPIR/TICK."
 ```
 
 The Architect will then decide whether to:
@@ -196,7 +196,7 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 6. Notify Architect:
    ```bash
-   af send architect "PR #<M> ready for review (fixes issue #<N>)"
+   afx send architect "PR #<M> ready for review (fixes issue #<N>)"
    ```
 
 ### Phase 6: Integration Review (Architect)
@@ -235,13 +235,13 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 4. Notify builder:
    ```bash
-   af send <builder-id> "Check PR #<M> comments"
+   afx send <builder-id> "Check PR #<M> comments"
    ```
 
 5. Once satisfied, approve and instruct merge:
    ```bash
    gh pr review <M> --approve
-   af send <builder-id> "LGTM. Merge it."
+   afx send <builder-id> "LGTM. Merge it."
    ```
 
 ### Phase 7: Address Feedback (Builder, if needed)
@@ -252,7 +252,7 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 3. Push updates to the same branch
 4. Notify Architect:
    ```bash
-   af send architect "Fixed feedback on PR #<M>"
+   afx send architect "Fixed feedback on PR #<M>"
    ```
 
 ### Phase 8: Merge (Builder)
@@ -267,7 +267,7 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 2. Notify Architect:
    ```bash
-   af send architect "PR #<M> merged. Ready for cleanup."
+   afx send architect "PR #<M> merged. Ready for cleanup."
    ```
 
 ### Phase 9: Cleanup (Architect)
@@ -285,7 +285,7 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 3. Clean up the builder's worktree and remote branch:
    ```bash
-   af cleanup --issue 42
+   afx cleanup --issue 42
    ```
    This removes the worktree at `.builders/bugfix-42/` and deletes the remote branch.
 
@@ -299,9 +299,9 @@ git commit -m "[Bugfix #N] Test: Add regression test"
 
 | From | To | Method | Example |
 |------|-----|--------|---------|
-| Architect | Builder | `af spawn` | `af spawn --task "Fix #42"` |
-| Architect | Builder | `af send` | `af send builder "Check PR comments"` |
-| Builder | Architect | `af send` | `af send architect "PR #50 ready"` |
+| Architect | Builder | `afx spawn` | `afx spawn --task "Fix #42"` |
+| Architect | Builder | `afx send` | `afx send builder "Check PR comments"` |
+| Builder | Architect | `afx send` | `afx send architect "PR #50 ready"` |
 | Builder | Issue | `gh issue comment` | `gh issue comment 42 --body "On it"` |
 | Architect | PR | `gh pr comment` | `gh pr comment 50 --body "LGTM"` |
 
@@ -337,7 +337,7 @@ git diff --stat main | tail -1
 
 | Scenario | Builder Action |
 |----------|----------------|
-| Cannot reproduce bug | Document reproduction attempts in issue comment, ask reporter for more details, notify Architect via `af send` |
+| Cannot reproduce bug | Document reproduction attempts in issue comment, ask reporter for more details, notify Architect via `afx send` |
 | Issue already closed | Check with Architect before starting work (may be duplicate or already fixed) |
 | Fix too complex (> 300 LOC) | Notify Architect with complexity details, recommend escalation to SPIR |
 | Architectural changes needed | Notify Architect immediately, do not proceed with BUGFIX |
@@ -417,14 +417,14 @@ gh issue view 42
 # → Clear bug report, simple fix expected → BUGFIX appropriate
 
 # 2. Architect spawns builder (NON-BLOCKING - architect continues other work)
-af spawn --issue 42
+afx spawn --issue 42
 # → Creates .builders/bugfix-42/
 # → Creates branch builder/bugfix-42-login-fails-when-userna
 # → Comments "On it!" on issue #42
 # → Spawns builder with issue context
 #
 # Architect immediately moves on to other tasks. Does NOT wait.
-# Will be notified via "af send" when PR is ready.
+# Will be notified via "afx send" when PR is ready.
 
 # ─────────────────────────────────────────────────────────────────
 # Meanwhile, in the builder's worktree (.builders/bugfix-42):
@@ -462,7 +462,7 @@ wait
 # → All APPROVE
 
 # 7. Builder notifies Architect
-af send architect "PR #50 ready (fixes issue #42)"
+afx send architect "PR #50 ready (fixes issue #42)"
 
 # 8. Architect reviews + CMAP integration review
 consult -m gemini --type integration &
@@ -472,16 +472,16 @@ wait
 
 # 9. Architect approves
 gh pr review 50 --approve
-af send bugfix-42 "LGTM. Merge it."
+afx send bugfix-42 "LGTM. Merge it."
 
 # 10. Builder merges (no --delete-branch due to worktree)
 gh pr merge 50 --merge
-af send architect "Merged. Ready for cleanup."
+afx send architect "Merged. Ready for cleanup."
 
 # 11. Architect cleans up
 git pull
 git log --oneline -3  # Verify fix is on main
-af cleanup --issue 42
+afx cleanup --issue 42
 # → Removes .builders/bugfix-42/
 # → Deletes origin/builder/bugfix-42-login-fails-when-userna
 

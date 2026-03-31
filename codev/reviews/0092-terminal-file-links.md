@@ -14,7 +14,7 @@ Spec 0092 adds three capabilities to the Agent Farm dashboard:
 
 - Tower endpoints: `POST /api/tabs/file`, `GET /api/file/:id`, `GET /api/file/:id/raw`, `POST /api/file/:id/save`
 - `FileViewer.tsx` component with text (line numbers + editing), image, and video support
-- `af open` updated to use Tower API exclusively (no open-server fallback)
+- `afx open` updated to use Tower API exclusively (no open-server fallback)
 - `openPortRange` removed from config, types, and port-registry
 - `open-server.ts` deleted
 
@@ -75,7 +75,7 @@ Spec 0092 adds three capabilities to the Agent Farm dashboard:
 ### Phase 1: Port Consolidation
 - [x] File tab endpoints in Tower
 - [x] File content served through Tower
-- [x] `af open` works without open-server.js
+- [x] `afx open` works without open-server.js
 - [x] `openPortRange` removed
 - [x] `open-server.ts` deleted
 

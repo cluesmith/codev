@@ -1,4 +1,4 @@
-# Plan: af rename Command
+# Plan: afx rename Command
 
 ## Metadata
 - **ID**: plan-2026-02-21-af-rename
@@ -8,10 +8,10 @@
 
 ## Executive Summary
 
-Implement `af rename "name"` using Environment Variable + Tower API (Approach 1 from spec). The work breaks into three phases: (1) database and environment plumbing, (2) Tower API endpoint + dashboard state fix, (3) CLI command. Each phase builds on the previous and is independently testable.
+Implement `afx rename "name"` using Environment Variable + Tower API (Approach 1 from spec). The work breaks into three phases: (1) database and environment plumbing, (2) Tower API endpoint + dashboard state fix, (3) CLI command. Each phase builds on the previous and is independently testable.
 
 ## Success Metrics
-- [ ] `af rename "name"` works inside utility shell sessions
+- [ ] `afx rename "name"` works inside utility shell sessions
 - [ ] Error handling for non-shell sessions, missing env var, stale sessions
 - [ ] Duplicate name auto-dedup with `-N` suffix
 - [ ] Labels persist across Tower restarts via SQLite
@@ -176,7 +176,7 @@ Remove the route handler. No data changes needed — labels in DB are additive.
 **Dependencies**: Phase 2
 
 #### Objectives
-- Add `af rename <name>` CLI command
+- Add `afx rename <name>` CLI command
 - Read `SHELLPER_SESSION_ID` and `TOWER_PORT` from environment
 - Call Tower API rename endpoint
 - Display result (actual name applied, including dedup info)
@@ -224,17 +224,17 @@ Remove the route handler. No data changes needed — labels in DB are additive.
    - Return `{ ok: boolean; status: number; data?: { id: string; name: string }; error?: string }`
 
 #### Acceptance Criteria
-- [ ] `af rename "test"` works inside a shellper session
-- [ ] `af rename "test"` outside shellper prints "Not running inside a shellper session" and exits 1
-- [ ] `af rename ""` prints usage error
-- [ ] `af rename` with no args prints usage
+- [ ] `afx rename "test"` works inside a shellper session
+- [ ] `afx rename "test"` outside shellper prints "Not running inside a shellper session" and exits 1
+- [ ] `afx rename ""` prints usage error
+- [ ] `afx rename` with no args prints usage
 - [ ] CLI displays actual name (including dedup suffix if applied)
 - [ ] Error messages match spec phrasing
 
 #### Test Plan
 - **Unit Tests**: Env var detection, TowerClient method, error message formatting
 - **Integration Tests**: Full CLI → Tower API → DB round-trip
-- **Manual Testing**: Open shell in dashboard, run `af rename "monitoring"`, verify tab updates within ~2.5s
+- **Manual Testing**: Open shell in dashboard, run `afx rename "monitoring"`, verify tab updates within ~2.5s
 
 #### Rollback Strategy
 Remove command file and registration. No data impact.
@@ -270,7 +270,7 @@ Phase 1 (DB + Env Vars + State Fix) ──→ Phase 2 (API Endpoint) ──→ P
 ## Validation Checkpoints
 1. **After Phase 1**: Run migration, verify column; create shell, verify env vars; restart Tower, verify labels persist; verify dashboard state uses session.label
 2. **After Phase 2**: curl PATCH endpoint, verify DB + in-memory update + dashboard tab name
-3. **After Phase 3**: Full `af rename` flow from inside a shell session, end-to-end
+3. **After Phase 3**: Full `afx rename` flow from inside a shell session, end-to-end
 
 ## Documentation Updates Required
 - [ ] CLI command reference (`codev/resources/commands/agent-farm.md`)
@@ -302,4 +302,4 @@ Phase 1 (DB + Env Vars + State Fix) ──→ Phase 2 (API Endpoint) ──→ P
 
 ## Notes
 
-The `af shell --name` bug (name parameter ignored during creation) is a related issue but out of scope for this plan. It can be fixed as a trivial bonus during Phase 1 since `handleWorkspaceShellCreate` is being modified there anyway, but is not a requirement.
+The `afx shell --name` bug (name parameter ignored during creation) is a related issue but out of scope for this plan. It can be fixed as a trivial bonus during Phase 1 since `handleWorkspaceShellCreate` is being modified there anyway, but is not a requirement.

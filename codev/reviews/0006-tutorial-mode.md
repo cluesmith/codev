@@ -23,7 +23,7 @@ Implemented a terminal-based interactive tutorial for new Codev/Agent Farm users
 2. **Setup** - Creates `codev/` directory structure
 3. **First Spec** - Guides writing a specification
 4. **Planning** - Explains plans and TICK vs SPIR
-5. **Implementation** - Shows af commands and Architect/Builder pattern
+5. **Implementation** - Shows afx commands and Architect/Builder pattern
 6. **Review** - Covers annotation viewer and resources
 
 ## What Went Well
@@ -54,7 +54,7 @@ Implemented a terminal-based interactive tutorial for new Codev/Agent Farm users
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Entry point `af tutorial` | ✅ | Implemented |
+| Entry point `afx tutorial` | ✅ | Implemented |
 | Detect git repo | ✅ | Uses `git rev-parse` |
 | Detect project type | ✅ | Node.js, Python, Other |
 | Persist progress | ✅ | `.agent-farm/tutorial.json` |

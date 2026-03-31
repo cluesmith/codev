@@ -214,7 +214,7 @@ if args.type:
 4. Manual verification:
    - [ ] `consult --type spec-review spec 44` works with all 3 models
    - [ ] Workflow doc renders correctly
-   - [ ] `af --help` doesn't reference SPIR-SOLO
+   - [ ] `afx --help` doesn't reference SPIR-SOLO
 
 ### Exit Criteria
 - All greps clean

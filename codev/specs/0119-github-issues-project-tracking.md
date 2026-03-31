@@ -55,7 +55,7 @@ GitHub Issues already handles all of this natively: auto-incrementing IDs, label
 
 ### What does NOT read projectlist.md
 
-- `af spawn -p XXXX` — uses filesystem glob on `codev/specs/`
+- `afx spawn -p XXXX` — uses filesystem glob on `codev/specs/`
 - Porch state — uses `codev/projects/<id>/status.yaml`
 - Spec/plan/review discovery — filename-based
 
@@ -118,7 +118,7 @@ Spec files use the GitHub Issue number:
 - `codev/plans/298-github-issues-tracking.md`
 - `codev/reviews/298-github-issues-tracking.md`
 
-This means `af spawn -p 298` finds `codev/specs/298-*.md` — same filesystem glob, just with issue numbers instead of manual IDs.
+This means `afx spawn -p 298` finds `codev/specs/298-*.md` — same filesystem glob, just with issue numbers instead of manual IDs.
 
 ### Workflow changes
 
@@ -134,18 +134,18 @@ This means `af spawn -p 298` finds `codev/specs/298-*.md` — same filesystem gl
 
 **Spawning a builder (before):**
 ```bash
-af spawn -p 0116     # looks for codev/specs/0116-*.md
+afx spawn -p 0116     # looks for codev/specs/0116-*.md
 ```
 
 **Spawning a builder (after):**
 ```bash
-af spawn -p 298      # looks for codev/specs/298-*.md
-af spawn --issue 298 # same thing (unify project and bugfix spawning)
+afx spawn -p 298      # looks for codev/specs/298-*.md
+afx spawn --issue 298 # same thing (unify project and bugfix spawning)
 ```
 
 **Status transitions:**
 ```bash
-# Automated by porch/af commands:
+# Automated by porch/afx commands:
 gh issue edit 298 --remove-label "status:conceived" --add-label "status:specified"
 
 # Or manual:
@@ -157,10 +157,10 @@ gh issue edit 298 --remove-label "status:implementing" --add-label "status:commi
 ### Phase 1: Label setup and CLI changes
 
 1. Create label set via `gh label create` (idempotent script)
-2. Modify `af spawn -p` to accept issue numbers and unify with `--issue` flag
+2. Modify `afx spawn -p` to accept issue numbers and unify with `--issue` flag
 3. Modify `getProjectSummary()` in `porch/prompts.ts` to read from `gh issue view`
-4. Modify `af spawn` to auto-update issue label to `status:implementing` on spawn
-5. Modify `af cleanup` to auto-update issue label to `status:committed` on PR merge
+4. Modify `afx spawn` to auto-update issue label to `status:implementing` on spawn
+5. Modify `afx cleanup` to auto-update issue label to `status:committed` on PR merge
 
 ### Phase 2: Remove projectlist.md dependency
 
@@ -185,10 +185,10 @@ gh issue edit 298 --remove-label "status:implementing" --add-label "status:commi
 
 ## Success Criteria
 
-- [ ] `af spawn -p <issue#>` finds spec by issue number
-- [ ] `af spawn --issue <num>` works for both projects and bugs (unified)
+- [ ] `afx spawn -p <issue#>` finds spec by issue number
+- [ ] `afx spawn --issue <num>` works for both projects and bugs (unified)
 - [ ] Porch can read project summary from GitHub Issue
-- [ ] Status labels are auto-updated by `af spawn`, `af cleanup`, and porch
+- [ ] Status labels are auto-updated by `afx spawn`, `afx cleanup`, and porch
 - [ ] No code references projectlist.md
 - [ ] Dashboard shows projects from GitHub Issues
 - [ ] `codev init` no longer creates projectlist.md
@@ -196,7 +196,7 @@ gh issue edit 298 --remove-label "status:implementing" --add-label "status:commi
 ## Constraints
 
 - Must work offline (cache issue data, degrade gracefully)
-- Must not break existing `af spawn -p` for numbered specs already on disk
+- Must not break existing `afx spawn -p` for numbered specs already on disk
 - GitHub API rate limits: 5000/hr authenticated — sufficient for our usage
 - `gh` CLI must be installed (already a dependency via bugfix protocol)
 

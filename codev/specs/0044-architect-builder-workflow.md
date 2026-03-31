@@ -67,7 +67,7 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
 │  → 3. PLANNED                                                           │
 │                                                                         │
 │         Human instructs: "spawn builder"                                │
-│         Architect spawns builder: `af spawn -p XXXX`                    │
+│         Architect spawns builder: `afx spawn -p XXXX`                    │
 │  → 4. IMPLEMENTING                                                      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        BUILDER DOMAIN                                    │
@@ -105,7 +105,7 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
   1. Architect adds project to `projectlist.md` with `status: conceived`
   2. Architect writes spec in `codev/specs/XXXX-name.md`
   3. Architect does 3-way review on spec
-  4. Architect presents spec to human via `af open`
+  4. Architect presents spec to human via `afx open`
 - **Exit**: Human approves spec
 - **Artifacts**: Entry in projectlist.md, spec file (awaiting approval)
 - **Note**: AI must stop at `conceived` after writing spec. Only human can transition to `specified`.
@@ -114,7 +114,7 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
 - **Actor**: Human + Architect AI
 - **Entry**: Human approves spec
 - **Actions**:
-  1. Human reviews spec via `af open codev/specs/XXXX-name.md`
+  1. Human reviews spec via `afx open codev/specs/XXXX-name.md`
   2. Human and architect iterate until satisfied
   3. Human changes status to `specified`
   4. Architect writes plan in `codev/plans/XXXX-name.md`
@@ -135,7 +135,7 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
 - **Actor**: Architect AI (spawn) + Builder AI (work)
 - **Entry**: Human instructs architect to spawn builder
 - **Actions**:
-  1. Architect spawns builder: `af spawn -p XXXX`
+  1. Architect spawns builder: `afx spawn -p XXXX`
   2. Builder reads spec and plan
   3. For each phase in plan:
      - **Implement**: Write code per phase requirements
@@ -162,14 +162,14 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
 - **Actions**:
   1. Architect does 3-way "integration" review (focus: does this fit the system?)
   2. Architect posts findings as PR comments
-  3. Architect notifies builder: `af send XXXX "Check PR comments"`
+  3. Architect notifies builder: `afx send XXXX "Check PR comments"`
   4. Builder addresses feedback, pushes updates
   5. Repeat until architect satisfied
   6. Architect tells builder: "Ready to merge"
   7. Builder merges PR (uses `gh pr merge N --merge`, NOT `--delete-branch`)
   8. Builder notifies architect: "Merged"
   9. Architect pulls main: `git pull`
-  10. Architect cleans up builder: `af cleanup -p XXXX`
+  10. Architect cleans up builder: `afx cleanup -p XXXX`
 - **Exit**: PR merged, builder cleaned up
 - **Artifacts**: PR merged, projectlist status = `committed`
 
@@ -205,11 +205,11 @@ A redundant protocol that's just SPIR without 3-way consultation. Should be dele
 ### Communication Protocol
 
 **Architect → Builder**:
-- Use `af send XXXX "short message"` for notifications
+- Use `afx send XXXX "short message"` for notifications
 - Use PR comments for detailed feedback (large messages corrupt in tmux)
 
 **Builder → Architect**:
-- Use `af send architect "short message"` for notifications
+- Use `afx send architect "short message"` for notifications
 - Create PR with summary when ready
 
 ### 3-Way Review Definition
@@ -247,13 +247,13 @@ Each consultant returns a verdict: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
 
 #### Builder Crash Recovery
 If a builder crashes mid-implementation:
-1. Check `af status` to see builder state
-2. If worktree intact: `af spawn -p XXXX` respawns in existing worktree
-3. If worktree corrupted: `af cleanup -p XXXX --force` then respawn fresh
+1. Check `afx status` to see builder state
+2. If worktree intact: `afx spawn -p XXXX` respawns in existing worktree
+3. If worktree corrupted: `afx cleanup -p XXXX --force` then respawn fresh
 
 #### Aborting a Project
 To abandon a project from any stage:
-1. If builder spawned: `af cleanup -p XXXX`
+1. If builder spawned: `afx cleanup -p XXXX`
 2. Update projectlist.md: `status: abandoned`
 3. Add note explaining why
 
@@ -377,14 +377,14 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 ### Manual Verification
 
 1. **Full workflow walkthrough**: Create a test project (0999), walk through all 9 stages
-2. **Error recovery**: Test builder crash recovery with `af spawn` on existing worktree
+2. **Error recovery**: Test builder crash recovery with `afx spawn` on existing worktree
 3. **Abort path**: Test abandoning a project mid-implementation
 
 ### Documentation Verification
 
 1. **Cross-references**: All links in workflow doc resolve
 2. **State consistency**: All projectlist.md examples use valid states
-3. **CLI help**: `af --help` doesn't reference SPIR-SOLO
+3. **CLI help**: `afx --help` doesn't reference SPIR-SOLO
 
 ### Acceptance Criteria
 
@@ -392,7 +392,7 @@ The 7-stage workflow uses the same states as before, with simplified definitions
 - [ ] `grep -ri "zen.*mcp\|mcp.*zen"` returns no hits (verifies old ZEN MCP server consultation references are removed - we now use the `consult` CLI tool instead)
 - [ ] All existing tests pass: `./tests/run_tests.sh`
 - [ ] Manual workflow walkthrough succeeds
-- [ ] `af status` shows correct builder states
+- [ ] `afx status` shows correct builder states
 - [ ] Projectlist states match documented states
 - [ ] `consult --type <type>` works with all 5 review types
 - [ ] Review type prompts exist in `codev/roles/review-types/`

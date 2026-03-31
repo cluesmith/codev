@@ -45,7 +45,7 @@ This contrasts with the consultation system (`runConsult`), which already has 3 
 4. **AWAITING_INPUT**: When the worker's output contains `<signal>BLOCKED:` or `<signal>AWAITING_INPUT</signal>`, porch detects this by scanning `buildWithSDK` output, writes `AWAITING_INPUT` to porch state (`status.yaml`), prints a message to stderr (`[PORCH] Worker needs human input — check output file`), and returns with exit code 3. The calling builder (or `--single-phase` caller) is responsible for surfacing this to the human. On next `porch run`, if state is AWAITING_INPUT, porch resumes from the same phase/iteration.
 
 ## Stakeholders
-- **Primary Users**: Builders running porch in strict mode (`af spawn -p`)
+- **Primary Users**: Builders running porch in strict mode (`afx spawn -p`)
 - **Secondary Users**: Human architects monitoring builder progress
 - **Technical Team**: Codev maintainers
 

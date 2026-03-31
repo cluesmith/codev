@@ -8,7 +8,7 @@
 
 ## Overview
 
-Implement `af send` CLI command to send messages to running builders via tmux buffer paste.
+Implement `afx send` CLI command to send messages to running builders via tmux buffer paste.
 
 ## Implementation Phases
 
@@ -58,7 +58,7 @@ Implement `af send` CLI command to send messages to running builders via tmux bu
    - Check size limit (48KB)
    - Append to message
 
-3. Implement stdin support (`af send 0009 -`):
+3. Implement stdin support (`afx send 0009 -`):
    - Detect `-` as message
    - Read from stdin
 
@@ -84,17 +84,17 @@ Implement `af send` CLI command to send messages to running builders via tmux bu
 ### Phase 4: Error Handling (10 min)
 
 1. Builder not found → clear error message
-2. tmux session dead → suggest `af status` to check
+2. tmux session dead → suggest `afx status` to check
 3. File not found/too large → helpful error
 4. No message provided → show usage
 
 ### Phase 5: Testing (15 min)
 
-1. Manual test: `af send 0022 "Test message"`
-2. Test multi-line: `af send 0022 "Line 1\nLine 2"`
-3. Test broadcast: `af send --all "Hello all"`
-4. Test file: `af send 0022 "Review:" --file /tmp/test.md`
-5. Test interrupt: `af send 0022 --interrupt "Wake up"`
+1. Manual test: `afx send 0022 "Test message"`
+2. Test multi-line: `afx send 0022 "Line 1\nLine 2"`
+3. Test broadcast: `afx send --all "Hello all"`
+4. Test file: `afx send 0022 "Review:" --file /tmp/test.md`
+5. Test interrupt: `afx send 0022 --interrupt "Wake up"`
 6. Test error cases: non-existent builder, dead session
 
 ## Files to Create/Modify
@@ -113,10 +113,10 @@ Implement `af send` CLI command to send messages to running builders via tmux bu
 
 ## Success Criteria
 
-- [ ] `af send 0022 "message"` delivers to builder terminal
-- [ ] `af send --all "message"` broadcasts to all builders
-- [ ] `af send 0022 --file comments.md "Review this:"` includes file
-- [ ] `af send 9999 "test"` shows clear error for non-existent builder
+- [ ] `afx send 0022 "message"` delivers to builder terminal
+- [ ] `afx send --all "message"` broadcasts to all builders
+- [ ] `afx send 0022 --file comments.md "Review this:"` includes file
+- [ ] `afx send 9999 "test"` shows clear error for non-existent builder
 - [ ] Multi-line and special characters handled correctly
 
 ## Notes

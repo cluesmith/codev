@@ -14,7 +14,7 @@ This plan implements Porch as a standalone CLI that orchestrates development pro
 2. Implement the new project structure (`codev/projects/<id>/` and `worktrees/`)
 3. Add phased IDE loop (implement → defend → evaluate per plan phase)
 4. Add multi-agent consultation with approval loop
-5. Update `af` to use `kickoff` command and integrate with porch
+5. Update `afx` to use `kickoff` command and integrate with porch
 
 ## Success Metrics
 
@@ -25,7 +25,7 @@ This plan implements Porch as a standalone CLI that orchestrates development pro
 - [ ] IDE phases loop over plan phases correctly
 - [ ] Multi-agent consultation loops until all approve or max rounds
 - [ ] Human gates block and notify
-- [ ] `af kickoff` creates worktree and runs porch
+- [ ] `afx kickoff` creates worktree and runs porch
 - [ ] State survives porch restart
 
 ### Testing
@@ -37,7 +37,7 @@ This plan implements Porch as a standalone CLI that orchestrates development pro
 - [ ] Tests run in reasonable time (<30s unit, <2m E2E)
 
 ### Documentation
-- [ ] CLAUDE.md updated with porch and af kickoff
+- [ ] CLAUDE.md updated with porch and afx kickoff
 - [ ] Command reference complete (codev/resources/commands/porch.md)
 - [ ] Test fixtures documented for contributors
 
@@ -386,13 +386,13 @@ export async function runChecks(phase: Phase, projectRoot: string): Promise<Chec
 **Dependencies**: Phase 1, Phase 2
 
 #### Objectives
-- Rename `af spawn` to `af kickoff`
+- Rename `afx spawn` to `afx kickoff`
 - Create worktrees at `worktrees/<protocol>_<id>_<name>/`
 - Start porch in worktree
 - Implement architect notification system
 
 #### Deliverables
-- [ ] `af kickoff` command
+- [ ] `afx kickoff` command
 - [ ] Worktree creation in `worktrees/`
 - [ ] Porch process management
 - [ ] Architect notification (file-based polling)
@@ -403,12 +403,12 @@ export async function runChecks(phase: Phase, projectRoot: string): Promise<Chec
 
 **Command changes:**
 ```bash
-af kickoff 0073              # Create worktree + start porch
-af status                    # Show all projects
-af status 0073               # Show specific project
-af stop 0073                 # Stop porch (worktree persists)
-af resume 0073               # Resume porch in existing worktree
-af cleanup 0073              # Remove worktree (after complete/abandoned)
+afx kickoff 0073              # Create worktree + start porch
+afx status                    # Show all projects
+afx status 0073               # Show specific project
+afx stop 0073                 # Stop porch (worktree persists)
+afx resume 0073               # Resume porch in existing worktree
+afx cleanup 0073              # Remove worktree (after complete/abandoned)
 ```
 
 **Worktree naming (extensible for any protocol):**
@@ -433,7 +433,7 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
 
 1. **File-based polling** (status.yaml already has gate status):
    ```typescript
-   // In af status command
+   // In afx status command
    function getPendingGates(): PendingGate[] {
      const projects = glob('codev/projects/*/status.yaml');
      const executions = glob('codev/executions/*/status.yaml');
@@ -446,7 +446,7 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
 
 2. **Dashboard display**:
    ```
-   af status --pending
+   afx status --pending
 
    PENDING GATES:
    0073 user-auth     specify_approval    "Spec ready for review"
@@ -467,13 +467,13 @@ af cleanup 0073              # Remove worktree (after complete/abandoned)
    ```
 
 #### Acceptance Criteria
-- [ ] `af kickoff` creates worktree in correct location
-- [ ] `af kickoff` starts porch process
-- [ ] `af status 0073` shows project state
-- [ ] `af status --pending` shows only pending gates
+- [ ] `afx kickoff` creates worktree in correct location
+- [ ] `afx kickoff` starts porch process
+- [ ] `afx status 0073` shows project state
+- [ ] `afx status --pending` shows only pending gates
 - [ ] Dashboard shows pending gates prominently
 - [ ] Sample hook included in skeleton
-- [ ] Legacy `af spawn` still works (deprecated warning)
+- [ ] Legacy `afx spawn` still works (deprecated warning)
 
 #### Test Plan
 - **Unit Tests**: Worktree path generation, pending gate detection
@@ -655,7 +655,7 @@ codev-skeleton/protocols/
 - Add migration guide
 
 #### Deliverables
-- [ ] Updated CLAUDE.md with porch and af kickoff docs
+- [ ] Updated CLAUDE.md with porch and afx kickoff docs
 - [ ] Updated codev/resources/commands/*.md
 - [ ] Migration guide in CLAUDE.md
 
@@ -663,7 +663,7 @@ codev-skeleton/protocols/
 
 **Key documentation updates:**
 - CLI reference for `porch` command
-- Updated `af` command reference (kickoff, status with ID)
+- Updated `afx` command reference (kickoff, status with ID)
 - Three-level architecture explanation
 - Migration instructions for Claude
 
@@ -899,7 +899,7 @@ Testing runs in parallel with development:
 
 ### Development Resources
 - TypeScript/Node.js expertise
-- Understanding of existing codev/af architecture
+- Understanding of existing codev/afx architecture
 
 ### Infrastructure
 - No new infrastructure required
@@ -917,9 +917,9 @@ Testing runs in parallel with development:
   - Fallback: Mock consult for testing
 
 ### Internal Systems
-- **af (Agent Farm)**: Worktree and process management
+- **afx (Agent Farm)**: Worktree and process management
   - Phase: 5
-  - Integration: af kickoff calls porch
+  - Integration: afx kickoff calls porch
 
 ## Risk Analysis
 
@@ -950,7 +950,7 @@ Testing runs in parallel with development:
    - E2E test with 3-phase plan completes all phases
 4. **After Phase 4**: 3-way consultation loops correctly
    - Mock consultation test with REQUEST_CHANGES triggers revision
-5. **After Phase 5**: `af kickoff` creates worktree and starts porch
+5. **After Phase 5**: `afx kickoff` creates worktree and starts porch
    - Integration test: kickoff → stop → resume cycle
 6. **After Phase 8**: Full test suite passes
    - >80% coverage on core modules

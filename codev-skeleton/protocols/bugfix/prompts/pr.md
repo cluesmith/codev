@@ -74,7 +74,7 @@ You must have three concrete verdicts (e.g., "gemini: APPROVE, codex: APPROVE, c
 Send a **single** notification that includes the PR link and each model's verdict:
 
 ```bash
-af send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"
+afx send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"
 ```
 
 **This is the only notification you send.** After this, your work is done — the architect

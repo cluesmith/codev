@@ -45,7 +45,7 @@ The plan's line numbers were approximate. Actual locations varied slightly but t
 
 ### Verification Command
 ```bash
-# After starting af, check session status
+# After starting afx, check session status
 tmux show-options -t "af-architect-XXXX" status
 # Expected output: status off
 ```

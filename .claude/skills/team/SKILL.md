@@ -1,6 +1,6 @@
 ---
 name: team
-description: Team CLI — manage team members, post messages, and run activity updates. ALWAYS check this skill before running any `team` command. Use when listing members, adding members, posting messages, or running team activity updates. Note - `af team` is deprecated; use `team` directly.
+description: Team CLI — manage team members, post messages, and run activity updates. ALWAYS check this skill before running any `team` command. Use when listing members, adding members, posting messages, or running team activity updates. Note - `afx team` is deprecated; use `team` directly.
 ---
 
 # team - Team Coordination CLI
@@ -112,10 +112,10 @@ Messages are append-only. Each entry has an author, UTC timestamp, and body text
 
 ## Deprecation Note
 
-`af team` commands still work but print a deprecation warning. Use `team` directly:
-- `af team list` → `team list`
-- `af team message` → `team message`
-- `af team update` → `team update`
+`afx team` commands still work but print a deprecation warning. Use `team` directly:
+- `afx team list` → `team list`
+- `afx team message` → `team message`
+- `afx team update` → `team update`
 
 ## Setup
 

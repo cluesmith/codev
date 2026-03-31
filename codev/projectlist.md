@@ -166,7 +166,7 @@ Projects currently in development (conceived through committed), sorted by prior
 
   - id: "0062"
     title: "Secure Remote Access"
-    summary: "SSH tunnel + reverse proxy: af tunnel outputs SSH command, one port for everything"
+    summary: "SSH tunnel + reverse proxy: afx tunnel outputs SSH command, one port for everything"
     status: planned
     priority: medium
     release: null
@@ -184,7 +184,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Imported from ../codev. Reverse proxy consolidates all ttyd instances behind one port. af tunnel outputs SSH command."
+    notes: "Imported from ../codev. Reverse proxy consolidates all ttyd instances behind one port. afx tunnel outputs SSH command."
 
 
   - id: "0023"

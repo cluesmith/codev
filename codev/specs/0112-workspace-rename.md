@@ -11,7 +11,7 @@ The word "project" is used for two different things in the codebase:
 
 1. **Repository/codebase** (Tower, dashboard, CLI): `projectPath`, `projectTerminals`, `known_projects`, `getProjectUrl()` — refers to a git repository managed by Tower (e.g., `codev-public`, `todo-app`)
 
-2. **Work-unit** (porch, projectlist, specs): `projectId`, `af spawn -p 0108`, `projectlist.md` — refers to a tracked unit of work with a spec/plan/review lifecycle
+2. **Work-unit** (porch, projectlist, specs): `projectId`, `afx spawn -p 0108`, `projectlist.md` — refers to a tracked unit of work with a spec/plan/review lifecycle
 
 This causes real confusion. An architect spent 20 minutes in the wrong file because "project" was ambiguous. The upcoming Spec 0110 (Messaging Infrastructure) introduces a `project:agent` addressing format that makes the collision even worse.
 
@@ -202,7 +202,7 @@ These files use BOTH meanings. Only rename the repo-meaning uses:
 - **`projectId`** in porch — this is a work-unit ID (correct usage)
 - **`projectlist.md`** — this tracks work-unit projects (correct usage)
 - **`codev/projects/`** directory — porch runtime state for work-unit projects (correct usage)
-- **`-p` / `--project` CLI flag** in `af spawn` — refers to work-unit (correct usage)
+- **`-p` / `--project` CLI flag** in `afx spawn` — refers to work-unit (correct usage)
 - **User-facing dashboard text** saying "Projects" group label — keep for work-unit list. But "Project: codev-public" in header → "Workspace: codev-public"
 
 ### Tests
@@ -223,7 +223,7 @@ These locations use BOTH meanings of "project" in close proximity. The builder m
 
 5. **`tower-routes.ts` handleTerminalCreate**: `body.projectPath` from the API request means repo path (→ rename in handler). But the terminal might be spawned for a builder working on a "project" (work-unit). Only the path variable changes.
 
-6. **`status.ts` CLI output**: Currently prints `Project: /path/to/repo`. Should print `Workspace: /path/to/repo`. But `af status` also shows builder IDs which are work-unit project IDs — those stay as "Project 0108".
+6. **`status.ts` CLI output**: Currently prints `Project: /path/to/repo`. Should print `Workspace: /path/to/repo`. But `afx status` also shows builder IDs which are work-unit project IDs — those stay as "Project 0108".
 
 7. **Dashboard `StatusPanel.tsx`**: The "Projects" group header refers to work-unit projects listed in `projectlist.md` — keep as "Projects". But `projectName` in the header bar refers to the repo name — rename to `workspaceName`.
 

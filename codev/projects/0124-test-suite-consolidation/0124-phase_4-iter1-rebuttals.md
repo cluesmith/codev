@@ -23,7 +23,7 @@ The plan used "merge if overlapping" — the audit found no overlap, so no merge
 
 **Acknowledge but maintain.** The deleted tests verify string template formatting (header wrapping, timestamp inclusion, raw mode bypass). These are:
 - Stable code that hasn't changed since Spec 0110
-- Implicitly tested by any integration test that sends messages through `af send`
+- Implicitly tested by any integration test that sends messages through `afx send`
 - Pure string concatenation with no branching logic beyond the `raw` flag
 
 The spec categorizes "string operations" as a removal target. These qualify. If coverage gaps emerge, the tests can be restored from git history.

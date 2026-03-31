@@ -1,8 +1,8 @@
-# Implementation Plan: Porch Gate Notifications via `af send`
+# Implementation Plan: Porch Gate Notifications via `afx send`
 
 ## Overview
 
-Replace the polling-based gate watcher with direct `af send` calls from porch when gates transition to pending. This is a two-phase change: (1) add a `notifyArchitect()` function to porch and call it from the two gate-transition paths in `next.ts`, then (2) remove the now-dead gate watcher polling infrastructure (but keep `gate-status.ts` which the dashboard API still uses).
+Replace the polling-based gate watcher with direct `afx send` calls from porch when gates transition to pending. This is a two-phase change: (1) add a `notifyArchitect()` function to porch and call it from the two gate-transition paths in `next.ts`, then (2) remove the now-dead gate watcher polling infrastructure (but keep `gate-status.ts` which the dashboard API still uses).
 
 ## Phases (Machine Readable)
 
@@ -21,7 +21,7 @@ Replace the polling-based gate watcher with direct `af send` calls from porch wh
 **Dependencies**: None
 
 #### Objectives
-- Create a `notifyArchitect()` function that calls `af send architect` via `execFile`
+- Create a `notifyArchitect()` function that calls `afx send architect` via `execFile`
 - Call it from the two gate-transition paths in `next.ts` (where gate status is set to pending)
 - Write unit tests verifying notification is sent and failures are swallowed
 
@@ -78,7 +78,7 @@ export function notifyArchitect(projectId: string, gateName: string, worktreeDir
 **Key design decisions**:
 - Fire-and-forget: `execFile` callback logs errors but never throws
 - Message format matches existing gate watcher format and spec acceptance criteria (#5)
-- `projectRoot` is passed as `cwd` — this is the worktree directory, so `af send` resolves correctly
+- `projectRoot` is passed as `cwd` — this is the worktree directory, so `afx send` resolves correctly
 - `notifyArchitect` is exported from a separate module for testability
 - No input sanitization needed: `execFile` doesn't use a shell (no injection risk), and values come from porch's own state
 
@@ -91,7 +91,7 @@ export function notifyArchitect(projectId: string, gateName: string, worktreeDir
 
 #### Test Plan
 - **Unit Tests** (in `notify.test.ts`):
-  - Mock `execFile`, verify `notifyArchitect()` calls it with correct args (process.execPath, af binary path, send, architect, message, --raw, --no-enter)
+  - Mock `execFile`, verify `notifyArchitect()` calls it with correct args (process.execPath, afx binary path, send, architect, message, --raw, --no-enter)
   - Verify correct message format: `GATE: {gateName} (Builder {projectId})`
   - Verify `cwd` is set to worktreeDir
   - Verify timeout is 10_000
@@ -100,7 +100,7 @@ export function notifyArchitect(projectId: string, gateName: string, worktreeDir
 #### Acceptance Criteria
 - [ ] `notifyArchitect()` is called at the two gate-transition paths (lines ~496 and ~624)
 - [ ] NOT called at the re-request path (line ~284)
-- [ ] If `af send` fails, porch continues normally
+- [ ] If `afx send` fails, porch continues normally
 - [ ] Message format: `GATE: {gateName} (Builder {projectId})`
 - [ ] All tests pass
 
@@ -171,7 +171,7 @@ export function notifyArchitect(projectId: string, gateName: string, worktreeDir
 
 ## Risk Assessment
 
-- **Low risk — `af send` binary resolution**: The `resolveAfBinary()` approach is proven in `gate-watcher.ts`. We're copying the same pattern.
+- **Low risk — `afx send` binary resolution**: The `resolveAfBinary()` approach is proven in `gate-watcher.ts`. We're copying the same pattern.
 - **Low risk — fire-and-forget semantics**: `execFile` with callback is well-understood. Errors are logged but cannot crash porch.
 - **Low risk — gate watcher removal**: Only the active poller (`gate-watcher.ts`) is deleted. The passive reader (`gate-status.ts`) is preserved for dashboard use. The poller's only consumers are tower-terminals and tower-server.
 

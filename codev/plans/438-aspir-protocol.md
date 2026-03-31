@@ -14,7 +14,7 @@ This follows Approach 1 (Full Copy with Gate Removal) from the spec — self-con
 
 ## Success Metrics
 - [ ] All specification criteria met (see spec for full list)
-- [ ] `af spawn N --protocol aspir` discovers the protocol
+- [ ] `afx spawn N --protocol aspir` discovers the protocol
 - [ ] No changes to any SPIR files
 - [ ] No changes to porch source code
 - [ ] Documentation updated in all required locations

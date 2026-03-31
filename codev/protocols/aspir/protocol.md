@@ -61,7 +61,7 @@ Final review, PR preparation, and 3-way review. **PR gate preserved** — builde
 
 ```bash
 # Spawn a builder using ASPIR
-af spawn 42 --protocol aspir
+afx spawn 42 --protocol aspir
 
 # The builder runs autonomously through Specify → Plan → Implement
 # and stops only at the PR gate in the Review phase

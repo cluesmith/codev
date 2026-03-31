@@ -3,17 +3,17 @@ approved: 2026-02-17
 validated: [architect]
 ---
 
-# Spec 403: af send Typing Awareness
+# Spec 403: afx send Typing Awareness
 
 ## Problem
 
-When a builder sends a message via `af send` while the architect is mid-sentence typing a prompt to Claude Code, the injected text corrupts their input. The message appears inline with whatever they're typing, mangling both the message and their work.
+When a builder sends a message via `afx send` while the architect is mid-sentence typing a prompt to Claude Code, the injected text corrupts their input. The message appears inline with whatever they're typing, mangling both the message and their work.
 
 This is disruptive enough that architects learn to dread builder notifications.
 
 ## Solution
 
-Make `af send` aware of user typing activity and delay message delivery until the user is idle.
+Make `afx send` aware of user typing activity and delay message delivery until the user is idle.
 
 ### Two Approaches to Evaluate
 
@@ -21,7 +21,7 @@ The builder should evaluate both approaches and recommend one based on implement
 
 #### Approach 1: Idle Detection
 
-Track the timestamp of the last user input on each terminal session. When `af send` targets a session, check if the user has typed recently. If so, buffer the message and deliver after an idle threshold.
+Track the timestamp of the last user input on each terminal session. When `afx send` targets a session, check if the user has typed recently. If so, buffer the message and deliver after an idle threshold.
 
 **How it works**:
 
@@ -90,7 +90,7 @@ interface BufferedMessage {
 
 **Where to flush**: A periodic check (500ms interval) in TerminalManager, or event-driven flush when state transitions to `idle`.
 
-**Response to caller**: `af send` should still return 200 immediately (message accepted), even if delivery is deferred. Add a `deferred: true` field to the response so the caller knows.
+**Response to caller**: `afx send` should still return 200 immediately (message accepted), even if delivery is deferred. Add a `deferred: true` field to the response so the caller knows.
 
 **Maximum buffer age**: Messages older than 60 seconds are delivered regardless of typing state. Stale messages are worse than interrupted typing.
 
@@ -99,7 +99,7 @@ interface BufferedMessage {
 - Add input tracking to PtySession
 - Add message buffering to handleSend
 - Add flush mechanism (timer-based or event-driven)
-- No changes to the `af send` CLI itself (transparent to callers)
+- No changes to the `afx send` CLI itself (transparent to callers)
 - No changes to the dashboard
 - No changes to builder behavior
 
@@ -108,7 +108,7 @@ interface BufferedMessage {
 - [ ] Messages are delayed when user is actively typing
 - [ ] Messages are delivered promptly when user is idle
 - [ ] Buffered messages include a maximum age (60s) after which they deliver regardless
-- [ ] `af send` returns 200 immediately with `deferred: true/false` indicator
+- [ ] `afx send` returns 200 immediately with `deferred: true/false` indicator
 - [ ] No messages are lost (buffer survives until delivery or max age)
 - [ ] Works correctly when multiple messages arrive while user is typing (delivered in order)
 - [ ] Approach selection is documented with rationale in the plan

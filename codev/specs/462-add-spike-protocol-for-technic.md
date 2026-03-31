@@ -42,7 +42,7 @@ None of these are ideal. The architect needs a way to say "spend an hour figurin
 ## Desired State
 
 A lightweight `spike` protocol that:
-- Can be spawned with `af spawn --task "Can we do X?" --protocol spike`
+- Can be spawned with `afx spawn --task "Can we do X?" --protocol spike`
 - Runs autonomously (no gates, no human approval needed)
 - Produces a structured findings document
 - Emphasizes time-boxing (stay focused, stop when the question is answered)
@@ -58,7 +58,7 @@ A lightweight `spike` protocol that:
 - [ ] `codev-skeleton/protocols/spike/protocol.md` documents the protocol clearly
 - [ ] `codev-skeleton/protocols/spike/builder-prompt.md` provides effective builder instructions
 - [ ] `codev-skeleton/protocols/spike/templates/findings.md` provides a useful findings template
-- [ ] Protocol can be referenced by `af spawn --protocol spike`
+- [ ] Protocol can be referenced by `afx spawn --protocol spike`
 - [ ] Soft mode only — porch treats it as a no-orchestration protocol
 - [ ] No gates defined in protocol.json
 - [ ] Consultation disabled by default in protocol.json
@@ -70,7 +70,7 @@ A lightweight `spike` protocol that:
 
 ### Technical Constraints
 - Must conform to `codev-skeleton/protocols/protocol-schema.json`
-- Must work with the existing `af spawn` and porch infrastructure
+- Must work with the existing `afx spawn` and porch infrastructure
 - Soft mode only — porch should not attempt to orchestrate spike projects
 - Must use existing protocol directory conventions
 
@@ -80,14 +80,14 @@ A lightweight `spike` protocol that:
 
 ## Assumptions
 - The protocol-schema.json supports a protocol with no gates (confirmed: bugfix has no gates; experiment has one informational gate but no approval gates)
-- `af spawn --protocol spike` will work once the protocol directory exists in codev-skeleton
+- `afx spawn --protocol spike` will work once the protocol directory exists in codev-skeleton
 - Soft mode builders can follow protocol.md directly without porch orchestration
 - The `input` field supports type `task` (established by convention across existing protocols and defined in protocol-schema.json's `protocolInput` definition) with `required: false`
 
 ## Solution Approaches
 
 ### Approach 1: Three-Phase Linear Protocol (Recommended)
-**Description**: Define spike with a minimal protocol.json (single "spike" phase for schema compliance) and a 3-step recommended workflow (research → iterate → findings) documented in protocol.md as guidance. No gates, no consultation, no porch orchestration. Input type is `task` (task description comes from `af spawn --task "..." --protocol spike`). Output goes to `codev/spikes/` directory. The builder follows the guidance phases at their discretion — they can skip iterate if the answer is clear from research alone.
+**Description**: Define spike with a minimal protocol.json (single "spike" phase for schema compliance) and a 3-step recommended workflow (research → iterate → findings) documented in protocol.md as guidance. No gates, no consultation, no porch orchestration. Input type is `task` (task description comes from `afx spawn --task "..." --protocol spike`). Output goes to `codev/spikes/` directory. The builder follows the guidance phases at their discretion — they can skip iterate if the answer is clear from research alone.
 
 **Pros**:
 - Matches the issue description exactly (Research, Iterate, Findings)
@@ -141,7 +141,7 @@ A lightweight `spike` protocol that:
 
 ### Important (Affects Design)
 - [x] Should `codev init` / `codev adopt` create the `codev/spikes/` directory? Or create it on first spike? — Already handled. `codev-skeleton/spikes/` already exists with a `.gitkeep`, so projects using `codev init`/`codev adopt` will already have the directory. No additional work needed.
-- [x] What input type to use in protocol.json? — Use `task` (not `none`). The `task` type is in the protocol schema enum and matches the spawn pattern `af spawn --task "Can we do X?" --protocol spike`. Unlike experiments, spikes are specifically driven by a task/question.
+- [x] What input type to use in protocol.json? — Use `task` (not `none`). The `task` type is in the protocol schema enum and matches the spawn pattern `afx spawn --task "Can we do X?" --protocol spike`. Unlike experiments, spikes are specifically driven by a task/question.
 
 ### Nice-to-Know (Optimization)
 - [x] Should the findings template include a "Recommended Next Steps" section linking to SPIR? — Yes. The primary output of a spike is a feasibility verdict that informs whether to start a SPIR project. A "Next Steps" section explicitly bridges spike → SPIR.
@@ -156,14 +156,14 @@ A lightweight `spike` protocol that:
 
 ### Functional Tests
 1. protocol.json validates against protocol-schema.json
-2. `af spawn --task "test spike" --protocol spike` creates a working builder (manual verification)
+2. `afx spawn --task "test spike" --protocol spike` creates a working builder (manual verification)
 3. Builder in soft mode can follow the protocol and produce a findings document
 
 ### Non-Functional Tests
 1. Protocol documentation is clear enough for a builder to follow without ambiguity
 
 ## Dependencies
-- **Internal Systems**: Protocol schema (`protocol-schema.json`), af spawn infrastructure, porch (must not break)
+- **Internal Systems**: Protocol schema (`protocol-schema.json`), afx spawn infrastructure, porch (must not break)
 - **Libraries/Frameworks**: None — this is documentation and JSON configuration
 
 ## Risks and Mitigation
@@ -228,7 +228,7 @@ The following 3-step workflow is documented in protocol.md and builder-prompt.md
 - **Mode**: `soft` (default and only mode — no strict/porch orchestration)
 - **Consultation**: Disabled by default
 - **Gates**: None
-- **Input**: Type `task` — task description provided via `af spawn --task "..." --protocol spike`
+- **Input**: Type `task` — task description provided via `afx spawn --task "..." --protocol spike`
 - **Hooks**: None
 - **Signals**: `PHASE_COMPLETE`, `BLOCKED` (for convention, though not porch-tracked)
 
@@ -265,13 +265,13 @@ POC code from the iterate phase should be committed to the branch alongside the 
 - **Not Feasible**: Write findings documenting why it's not feasible, what was tried, and what alternatives exist. This is still a valuable output — it prevents future teams from wasting time on the same investigation.
 - **Feasible with Caveats**: Write findings with conditions, risks, and trade-offs. Include what would need to change for full feasibility.
 
-In all cases, the builder commits the findings document and notifies the architect via `af send architect "Spike 462 complete. Verdict: [feasible/not feasible/caveats]"`.
+In all cases, the builder commits the findings document and notifies the architect via `afx send architect "Spike 462 complete. Verdict: [feasible/not feasible/caveats]"`.
 
 ### Builder Prompt Conventions
 The builder-prompt.md uses Handlebars templating (consistent with all other protocols):
 - `{{protocol_name}}` — protocol identifier
 - `{{#if mode_soft}}` / `{{#if mode_strict}}` — mode conditionals
-- `{{task_text}}` — the task description from `af spawn --task "..."`
+- `{{task_text}}` — the task description from `afx spawn --task "..."`
 - `{{spec_path}}`, `{{plan_path}}` — artifact paths (not used for spike since no spec/plan)
 
 ### Builder Prompt Emphasis

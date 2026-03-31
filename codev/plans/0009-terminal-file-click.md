@@ -111,7 +111,7 @@ function openAnnotationTab(filePath, lineNumber) {
 
 ## Testing
 
-1. Start dashboard with `af start`
+1. Start dashboard with `afx start`
 2. In terminal, output a file path (e.g., `echo "Error in src/index.ts:42"`)
 3. Verify path is underlined/highlighted
 4. Click path, verify annotation viewer opens with file

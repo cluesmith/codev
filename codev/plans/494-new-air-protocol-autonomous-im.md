@@ -11,7 +11,7 @@
 Create the AIR protocol as a minimal two-phase protocol (Implement → Review) modeled after BUGFIX but designed for small features instead of bugs. The protocol lives in `codev-skeleton/protocols/air/` and consists of a protocol.json, protocol.md, builder-prompt.md, phase prompts, and consult-types. Source code changes are limited to updating help text strings in three files. Documentation updates cover CLAUDE.md, AGENTS.md, and the cheatsheet.
 
 ## Success Metrics
-- [ ] `af spawn 42 --protocol air` creates a builder that runs the AIR protocol
+- [ ] `afx spawn 42 --protocol air` creates a builder that runs the AIR protocol
 - [ ] Protocol validates against `protocol-schema.json`
 - [ ] No spec/plan/review files created during protocol execution
 - [ ] Build passes, unit tests pass
@@ -119,7 +119,7 @@ Create the AIR protocol as a minimal two-phase protocol (Implement → Review) m
 - [ ] `npm run build` passes in packages/codev/
 - [ ] All unit tests pass
 - [ ] CLAUDE.md and AGENTS.md are in sync
-- [ ] `af spawn --protocol air` shows in help text
+- [ ] `afx spawn --protocol air` shows in help text
 
 ## Dependency Map
 ```

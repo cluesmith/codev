@@ -1,4 +1,4 @@
-# Specification: `af bench` — Consultation Benchmarking CLI Command
+# Specification: `afx bench` — Consultation Benchmarking CLI Command
 
 ## Metadata
 - **ID**: spec-2026-02-19-af-bench-command
@@ -7,8 +7,8 @@
 
 ## Clarifying Questions Asked
 
-1. **Q: Should `af bench` replace `bench.sh` or coexist?**
-   A: Replace — wrap all functionality into the `af` CLI. The shell script serves as the reference implementation.
+1. **Q: Should `afx bench` replace `bench.sh` or coexist?**
+   A: Replace — wrap all functionality into the `afx` CLI. The shell script serves as the reference implementation.
 
 2. **Q: Should results go in a project-relative or global directory?**
    A: Project-relative, under `codev/resources/bench-results/` (same as the existing script).
@@ -21,7 +21,7 @@
 
 ## Problem Statement
 
-Benchmarking consultation engine performance currently requires running a standalone shell script (`codev/resources/bench.sh`). This script is undiscoverable, not integrated with the `af` CLI, and lacks statistical reporting (avg/min/max/stddev). Users who want to compare engine latencies must know the script exists and interpret raw output manually.
+Benchmarking consultation engine performance currently requires running a standalone shell script (`codev/resources/bench.sh`). This script is undiscoverable, not integrated with the `afx` CLI, and lacks statistical reporting (avg/min/max/stddev). Users who want to compare engine latencies must know the script exists and interpret raw output manually.
 
 ## Current State
 
@@ -31,11 +31,11 @@ Benchmarking consultation engine performance currently requires running a standa
 - Saves results to timestamped text files in `codev/resources/bench-results/`
 - Detects host info (CPU, RAM, hostname) via platform-specific commands
 - No summary statistics — just raw times per iteration
-- Not integrated into the `af` CLI — must be invoked directly
+- Not integrated into the `afx` CLI — must be invoked directly
 
 ## Desired State
 
-A first-class `af bench` subcommand that:
+A first-class `afx bench` subcommand that:
 
 1. Runs consultation benchmarks with configurable iterations
 2. Supports parallel (default) and sequential execution modes
@@ -43,7 +43,7 @@ A first-class `af bench` subcommand that:
 4. Computes and displays summary statistics (avg/min/max/stddev) across iterations
 5. Saves results to timestamped files for historical comparison
 6. Auto-detects host information for reproducibility context
-7. Is discoverable via `af --help` and `af bench --help`
+7. Is discoverable via `afx --help` and `afx bench --help`
 
 ## Stakeholders
 - **Primary Users**: Codev developers benchmarking engine performance
@@ -51,23 +51,23 @@ A first-class `af bench` subcommand that:
 - **Technical Team**: Codev maintainers (self-hosted project)
 
 ## Success Criteria
-- [ ] `af bench` runs all 3 engines in parallel and reports timing
-- [ ] `af bench --sequential` runs engines one at a time
-- [ ] `af bench --iterations N` runs N iterations with summary stats
-- [ ] `af bench --prompt "custom"` accepts a custom prompt
+- [ ] `afx bench` runs all 3 engines in parallel and reports timing
+- [ ] `afx bench --sequential` runs engines one at a time
+- [ ] `afx bench --iterations N` runs N iterations with summary stats
+- [ ] `afx bench --prompt "custom"` accepts a custom prompt
 - [ ] Per-engine timing displayed in formatted table output
 - [ ] Summary stats (avg/min/max/stddev) shown when iterations > 1
 - [ ] Results saved to timestamped file in `codev/resources/bench-results/`
 - [ ] Host info (hostname, CPU, RAM) included in output
-- [ ] `af bench --help` shows usage information
+- [ ] `afx bench --help` shows usage information
 - [ ] All tests pass with >90% coverage of the new `bench.ts` module
-- [ ] Existing `af` CLI commands unaffected
+- [ ] Existing `afx` CLI commands unaffected
 
 ## Constraints
 
 ### Technical Constraints
 - Must use the existing `consult` CLI binary (spawn as subprocess, not import)
-- Must follow the `af` CLI command pattern: Commander.js registration, dynamic import, logger utilities
+- Must follow the `afx` CLI command pattern: Commander.js registration, dynamic import, logger utilities
 - TypeScript implementation in `packages/codev/src/agent-farm/commands/bench.ts`
 - Must work on macOS; Linux host detection as best-effort
 - `consult` command must be available on PATH
@@ -83,10 +83,10 @@ A first-class `af bench` subcommand that:
 ## Solution Approaches
 
 ### Approach 1: TypeScript CLI Command (Selected)
-**Description**: Implement `af bench` as a TypeScript command module following the existing `af` command pattern. Spawns `consult` as child processes, collects timing data, computes stats, formats output.
+**Description**: Implement `afx bench` as a TypeScript command module following the existing `afx` command pattern. Spawns `consult` as child processes, collects timing data, computes stats, formats output.
 
 **Pros**:
-- Consistent with all other `af` commands
+- Consistent with all other `afx` commands
 - Type-safe, testable, maintainable
 - Can use logger utilities for clean output
 - Can compute stats natively (no dependency on Python like bench.sh)
@@ -99,7 +99,7 @@ A first-class `af bench` subcommand that:
 **Risk Level**: Low
 
 ### Approach 2: Shell Script Wrapper
-**Description**: Keep bench.sh and add a thin `af bench` wrapper that delegates to it.
+**Description**: Keep bench.sh and add a thin `afx bench` wrapper that delegates to it.
 
 **Pros**:
 - Minimal code change
@@ -109,7 +109,7 @@ A first-class `af bench` subcommand that:
 - Two implementations to maintain
 - Can't easily add stats/table formatting
 - Shell scripts are harder to test
-- Inconsistent with other `af` commands (all TypeScript)
+- Inconsistent with other `afx` commands (all TypeScript)
 
 **Estimated Complexity**: Low
 **Risk Level**: Medium (maintenance burden)
@@ -117,7 +117,7 @@ A first-class `af bench` subcommand that:
 ## CLI Interface
 
 ```
-af bench [options]
+afx bench [options]
 
 Options:
   -i, --iterations <n>    Number of benchmark iterations (default: 1)
@@ -250,7 +250,7 @@ Individual engine outputs saved to: `{engine}-run{iteration}-{timestamp}.txt`
 ## References
 - Existing shell script: `codev/resources/bench.sh`
 - GitHub Issue: #440
-- `af` CLI entry point: `packages/codev/src/agent-farm/cli.ts`
+- `afx` CLI entry point: `packages/codev/src/agent-farm/cli.ts`
 - Logger utilities: `packages/codev/src/agent-farm/utils/logger.ts`
 
 ## Risks and Mitigation

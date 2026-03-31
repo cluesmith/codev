@@ -2,16 +2,16 @@
 
 ## Overview
 
-This plan implements the messaging infrastructure specified in Spec 0110. The work breaks down into four phases: (1) standardize agent naming in spawn, (2) add the `POST /api/send` endpoint and address resolution in Tower, (3) add the `/ws/messages` WebSocket message bus, and (4) update the CLI `af send` to use the new endpoint and addressing format. Each phase is independently testable and builds on the previous one.
+This plan implements the messaging infrastructure specified in Spec 0110. The work breaks down into four phases: (1) standardize agent naming in spawn, (2) add the `POST /api/send` endpoint and address resolution in Tower, (3) add the `/ws/messages` WebSocket message bus, and (4) update the CLI `afx send` to use the new endpoint and addressing format. Each phase is independently testable and builds on the previous one.
 
 ## Success Metrics
 
 - [ ] All 8 acceptance criteria from the spec pass
 - [ ] Backwards compatibility: bare IDs and `architect`/`arch` still resolve
 - [ ] Cross-project messaging works via `project:agent` addressing
-- [ ] WebSocket message bus broadcasts structured JSON for every `af send`
+- [ ] WebSocket message bus broadcasts structured JSON for every `afx send`
 - [ ] Unit test coverage for name generation, address parsing, message bus
-- [ ] `af status` displays new agent naming convention
+- [ ] `afx status` displays new agent naming convention
 
 ## Phases (Machine Readable)
 
@@ -86,12 +86,12 @@ Update `upsertBuilder()` calls at each spawn site to use the new `builderId`, `w
 - `detectCurrentBuilderId()` extracts the worktree directory name (e.g., `spir-109-messaging-infra`). Update the regex to parse the new worktree path format and look up the canonical `builderId` from state.db.
 - `sendToAll()` iterates `state.builders` directly and uses `builder.id` — this works unchanged since it uses canonical IDs from state.db.
 
-This is a **minimal, essential change** in Phase 1 to keep `af send` functional. The full refactor to `POST /api/send` happens in Phase 4.
+This is a **minimal, essential change** in Phase 1 to keep `afx send` functional. The full refactor to `POST /api/send` happens in Phase 4.
 
 #### Acceptance Criteria
-- [ ] `af spawn -p 0109` creates builder with ID `builder-spir-109` (leading zeros stripped)
-- [ ] `af spawn --issue 42` creates builder with ID `builder-bugfix-42`
-- [ ] `af spawn --task "..."` creates builder with ID `builder-task-XXXX`
+- [ ] `afx spawn -p 0109` creates builder with ID `builder-spir-109` (leading zeros stripped)
+- [ ] `afx spawn --issue 42` creates builder with ID `builder-bugfix-42`
+- [ ] `afx spawn --task "..."` creates builder with ID `builder-task-XXXX`
 - [ ] Worktree path for spec 109: `.builders/spir-109-messaging-infra/` (consistent with builder ID, drops `builder-` prefix, appends slug)
 - [ ] Branch name matches worktree: `builder/spir-109-messaging-infra`
 - [ ] Case-insensitive resolution: `BUILDER-SPIR-109` resolves to `builder-spir-109`
@@ -255,9 +255,9 @@ interface MessageFrame {
 **Dependencies**: Phases 1, 2, 3
 
 #### Objectives
-- Refactor `af send` CLI command to use the new `POST /api/send` endpoint instead of resolving terminal IDs locally
+- Refactor `afx send` CLI command to use the new `POST /api/send` endpoint instead of resolving terminal IDs locally
 - Support `[project:]agent` addressing format in CLI
-- Update `af status` display to show new agent naming convention
+- Update `afx status` display to show new agent naming convention
 
 #### Deliverables
 - [ ] Refactored `commands/send.ts` to use `TowerClient.sendMessage()` instead of local resolution
@@ -280,17 +280,17 @@ interface MessageFrame {
 - In the Tower display: terminal labels use new naming from spawn
 
 #### Acceptance Criteria
-- [ ] `af send architect "msg"` works (backwards compat)
-- [ ] `af send builder-spir-109 "msg"` works (new naming)
-- [ ] `af send 0109 "msg"` works (tail match backwards compat)
-- [ ] `af send codev-public:architect "msg"` works (cross-project)
-- [ ] `af status` shows agents with new naming convention
+- [ ] `afx send architect "msg"` works (backwards compat)
+- [ ] `afx send builder-spir-109 "msg"` works (new naming)
+- [ ] `afx send 0109 "msg"` works (tail match backwards compat)
+- [ ] `afx send codev-public:architect "msg"` works (cross-project)
+- [ ] `afx status` shows agents with new naming convention
 - [ ] `--all` flag still broadcasts to all builders
 - [ ] `--raw`, `--no-enter`, `--interrupt`, `--file` flags still work
 
 #### Test Plan
 - **Unit Tests**: End-to-end send flow with mocked TowerClient — backward compat sends, new-format sends, `--all` broadcasts, `--file` flag, `--raw`/`--no-enter`/`--interrupt` flags
-- **Integration Tests**: Verify `af send` CLI uses `POST /api/send` and message appears on `/ws/messages`
+- **Integration Tests**: Verify `afx send` CLI uses `POST /api/send` and message appears on `/ws/messages`
 - **Integration Tests**: Cross-project scenario — register two workspaces in Tower, send from workspace A to `workspaceB:architect`, verify: (a) message arrives at correct terminal, (b) broadcast `from.project` is workspace A's name (not B's), (c) broadcast `to.project` is workspace B's name
 
 #### Risks
@@ -320,7 +320,7 @@ Phase 1 (Naming) ──→ Phase 2 (Tower Send) ──→ Phase 3 (Message Bus) 
 1. **After Phase 1**: Spawn a builder, verify ID format is `builder-spir-XXXX`
 2. **After Phase 2**: `curl -X POST /api/send` resolves addresses correctly
 3. **After Phase 3**: WebSocket client receives broadcast messages
-4. **After Phase 4**: Full `af send` workflow works end-to-end
+4. **After Phase 4**: Full `afx send` workflow works end-to-end
 
 ## Notes
 

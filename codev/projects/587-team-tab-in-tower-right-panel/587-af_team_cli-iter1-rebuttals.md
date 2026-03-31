@@ -8,7 +8,7 @@ No issues. Proceeding.
 
 **Issue 1**: Missing integration tests for CLI wiring.
 
-**Resolution**: NO CHANGE. CLI wiring integration tests (spawning the actual `af` process) are not done anywhere else in this codebase — the project tests command logic via direct function calls. Adding process-spawning integration tests would be a project-first requiring additional infrastructure. The unit tests verify the actual command logic; Commander.js wiring is trivial and well-tested by Commander itself.
+**Resolution**: NO CHANGE. CLI wiring integration tests (spawning the actual `afx` process) are not done anywhere else in this codebase — the project tests command logic via direct function calls. Adding process-spawning integration tests would be a project-first requiring additional infrastructure. The unit tests verify the actual command logic; Commander.js wiring is trivial and well-tested by Commander itself.
 
 **Issue 2**: Missing author auto-detection tests.
 

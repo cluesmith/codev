@@ -77,7 +77,7 @@ Low-risk test fix. Corrects assertion in foo.test.ts.
 ---
 Architect review"
 
-af send 0042 "PR approved, please merge"
+afx send 0042 "PR approved, please merge"
 ```
 
 ### Medium Risk: New Feature (180 lines, 3 files, commands/)

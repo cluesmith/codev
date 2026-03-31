@@ -324,7 +324,7 @@ packages/codev/src/agent-farm/utils/shell.ts     # Remove ttyd spawn logic (behi
 ### Session-to-Builder Mapping
 
 ```typescript
-// When af spawn creates a builder:
+// When afx spawn creates a builder:
 // 1. POST /api/terminals { label: "builder-0085", command: "claude", cwd: worktree }
 // 2. Store terminal ID in builder state (SQLite)
 // 3. Dashboard connects to ws://localhost:4200/ws/terminal/<id>
@@ -335,16 +335,16 @@ packages/codev/src/agent-farm/utils/shell.ts     # Remove ttyd spawn logic (behi
 
 ### Exit Criteria
 
-- [ ] `af spawn` creates PTY via API (when backend=node-pty)
-- [ ] `af shell` creates PTY via API (when backend=node-pty)
+- [ ] `afx spawn` creates PTY via API (when backend=node-pty)
+- [ ] `afx shell` creates PTY via API (when backend=node-pty)
 - [ ] Dashboard connects to terminals via single-port WebSocket
 - [ ] No ttyd processes spawned when backend=node-pty
 - [ ] Port allocation simplified (only 4200 needed per project)
 - [ ] Reconnection works after browser refresh
-- [ ] All existing `af` commands work with new backend
+- [ ] All existing `afx` commands work with new backend
 - [ ] Dual-backend regression: Run full test suite with both `ttyd` and `node-pty` configs
 - [ ] Telemetry: Log terminal creation/destruction events to `.agent-farm/metrics.log`
-- [ ] Documentation: Update `af spawn`/`af shell` docs to note single-port behavior when backend=node-pty
+- [ ] Documentation: Update `afx spawn`/`afx shell` docs to note single-port behavior when backend=node-pty
 
 ---
 

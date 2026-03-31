@@ -75,7 +75,7 @@ The Enforcer (porch) replaces `claude --print` subprocess with Agent SDK `query(
 ### Key Decision: Streaming to Output File
 
 Even though we remove the REPL, we still write output to a file. This allows:
-- Dashboard to show live output via `af open`
+- Dashboard to show live output via `afx open`
 - Debugging via `tail -f` from any terminal
 - Post-mortem analysis of what Claude did
 

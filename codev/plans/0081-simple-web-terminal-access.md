@@ -568,7 +568,7 @@ Expose tower via Cloudflare Tunnel (ngrok explicitly out of scope per spec)
 ### CLI Flag Propagation Path
 
 ```
-User runs: af tower --web
+User runs: afx tower --web
     ↓
 packages/codev/src/agent-farm/commands/tower.ts
   → towerStart({ web: true })
@@ -652,7 +652,7 @@ export async function startTunnel(port: number): Promise<string | null> {
 
   const config = loadTunnelConfig();
   if (!config) {
-    console.error('No tunnel configured. Run: af tunnel setup cloudflare');
+    console.error('No tunnel configured. Run: afx tunnel setup cloudflare');
     return null;
   }
 
@@ -739,7 +739,7 @@ if (opts.web) {
 }
 ```
 
-#### 3.4 Implement `af tunnel setup cloudflare` Wizard
+#### 3.4 Implement `afx tunnel setup cloudflare` Wizard
 
 **File:** New `packages/codev/src/agent-farm/commands/tunnel.ts`
 
@@ -839,11 +839,11 @@ export async function tunnelSetup(provider: string): Promise<void> {
     console.log(`    cloudflared tunnel route dns ${tunnelName} ${domain}`);
   }
   console.log('');
-  console.log('Start tower with: af tower --web');
+  console.log('Start tower with: afx tower --web');
 }
 ```
 
-**Register in CLI** (`packages/codev/src/cli.ts` or `af` entry point):
+**Register in CLI** (`packages/codev/src/cli.ts` or `afx` entry point):
 
 ```typescript
 // NOTE: Must capture the parent command before chaining subcommands
@@ -868,11 +868,11 @@ tunnelCmd
 - [ ] Tunnel reconnects with exponential backoff on disconnect (up to 5 retries)
 - [ ] Tunnel stops on server shutdown
 - [ ] Missing cloudflared shows install instructions and continues locally
-- [ ] `af tunnel setup cloudflare` wizard: checks cloudflared installed
-- [ ] `af tunnel setup cloudflare` wizard: prompts for login if needed
-- [ ] `af tunnel setup cloudflare` wizard: creates tunnel or reuses existing
-- [ ] `af tunnel setup cloudflare` wizard: saves config to ~/.config/codev/tunnel.json
-- [ ] `af tunnel setup <other>` exits with error (only cloudflare supported)
+- [ ] `afx tunnel setup cloudflare` wizard: checks cloudflared installed
+- [ ] `afx tunnel setup cloudflare` wizard: prompts for login if needed
+- [ ] `afx tunnel setup cloudflare` wizard: creates tunnel or reuses existing
+- [ ] `afx tunnel setup cloudflare` wizard: saves config to ~/.config/codev/tunnel.json
+- [ ] `afx tunnel setup <other>` exits with error (only cloudflare supported)
 
 ---
 
@@ -1331,13 +1331,13 @@ Each phase is independently valuable and can be released separately.
 This test validates the complete remote access workflow as specified in the spec's "Testing Requirements" section.
 
 **Prerequisites:**
-1. Cloudflare tunnel configured (`af tunnel setup cloudflare`)
+1. Cloudflare tunnel configured (`afx tunnel setup cloudflare`)
 2. `CODEV_WEB_KEY` environment variable set
 3. `CODEV_PUSH_URL` configured (e.g., `https://ntfy.sh/my-topic`)
 4. At least one project registered with tower
 
 **Test Steps:**
-1. **Start tower**: `af tower --web` (with CODEV_WEB_KEY set)
+1. **Start tower**: `afx tower --web` (with CODEV_WEB_KEY set)
 2. **Verify tunnel connects**: Output shows public URL (e.g., `Web access: https://myagents.example.com`)
 3. **Access from external device**: Open public URL on phone/tablet (NOT localhost)
 4. **Login**: Enter API key on login page

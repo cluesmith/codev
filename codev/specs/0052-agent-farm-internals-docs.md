@@ -8,7 +8,7 @@
 
 ## Overview
 
-Add comprehensive documentation to `codev/resources/arch.md` explaining how agent-farm (af) works internally. This is the most complex part of Codev and needs thorough "How It Works" documentation.
+Add comprehensive documentation to `codev/resources/arch.md` explaining how agent-farm (afx) works internally. This is the most complex part of Codev and needs thorough "How It Works" documentation.
 
 ---
 

@@ -2,11 +2,11 @@
 
 ## Summary
 
-Implemented `af bench` as a first-class CLI subcommand that benchmarks consultation performance across gemini, codex, and claude engines. The command replaces the shell script `codev/resources/bench.sh` with a TypeScript implementation supporting configurable iterations, parallel/sequential execution, per-engine timeouts, statistics computation (avg/min/max/sample stddev), and result file persistence.
+Implemented `afx bench` as a first-class CLI subcommand that benchmarks consultation performance across gemini, codex, and claude engines. The command replaces the shell script `codev/resources/bench.sh` with a TypeScript implementation supporting configurable iterations, parallel/sequential execution, per-engine timeouts, statistics computation (avg/min/max/sample stddev), and result file persistence.
 
 ## Spec Compliance
 
-- [x] `af bench` command registered in CLI with `--iterations`, `--sequential`, `--prompt`, `--timeout` flags
+- [x] `afx bench` command registered in CLI with `--iterations`, `--sequential`, `--prompt`, `--timeout` flags
 - [x] Spawns `consult -m <engine> --prompt <prompt>` for gemini, codex, claude
 - [x] Parallel mode (default): all 3 engines run concurrently, wall time reported
 - [x] Sequential mode (`--sequential`): engines run one at a time, no wall time
@@ -50,8 +50,8 @@ Implemented `af bench` as a first-class CLI subcommand that benchmarks consultat
 - Consider a heuristic for plan phase count: if total new code is <500 LOC, two phases (implement + test) may be better than three
 
 ## Technical Debt
-- `bench.sh` shell script still exists at `codev/resources/bench.sh` — can be removed in a follow-up cleanup once `af bench` is validated in production
-- CLI documentation at `codev/resources/commands/agent-farm.md` should be updated to include `af bench`
+- `bench.sh` shell script still exists at `codev/resources/bench.sh` — can be removed in a follow-up cleanup once `afx bench` is validated in production
+- CLI documentation at `codev/resources/commands/agent-farm.md` should be updated to include `afx bench`
 - Validation exists in both `cli.ts` (Commander parseInt) and `bench.ts` (iterations < 1 check) — defense in depth, not a problem, but noted
 
 ## Consultation Feedback
@@ -124,7 +124,7 @@ Implemented `af bench` as a first-class CLI subcommand that benchmarks consultat
 
 ## Architecture Updates
 
-Added `bench.ts` to the commands directory listing in `codev/resources/arch.md` under the agent-farm commands section. No new subsystems or data flows introduced — bench is a self-contained command module following the existing af CLI pattern.
+Added `bench.ts` to the commands directory listing in `codev/resources/arch.md` under the agent-farm commands section. No new subsystems or data flows introduced — bench is a self-contained command module following the existing afx CLI pattern.
 
 ## Lessons Learned Updates
 
@@ -134,5 +134,5 @@ No lessons learned updates needed. The patterns observed (mock stream compatibil
 No flaky tests encountered.
 
 ## Follow-up Items
-- Remove `codev/resources/bench.sh` after `af bench` is validated
-- Update `codev/resources/commands/agent-farm.md` with `af bench` documentation
+- Remove `codev/resources/bench.sh` after `afx bench` is validated
+- Update `codev/resources/commands/agent-farm.md` with `afx bench` documentation

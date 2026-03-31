@@ -1,4 +1,4 @@
-# Specification: af rename Command
+# Specification: afx rename Command
 
 ## Metadata
 - **ID**: spec-2026-02-21-af-rename
@@ -7,7 +7,7 @@
 
 ## Clarifying Questions Asked
 
-1. **Q: Should `af rename` only work for utility shells, or also for builder/architect terminals?**
+1. **Q: Should `afx rename` only work for utility shells, or also for builder/architect terminals?**
    A: **Utility shells only.** Builder and architect terminals have consistent naming that other functionality depends on. The API endpoint should reject rename requests for non-shell sessions with a clear error.
 
 2. **Q: Should the rename persist across Tower restarts?**
@@ -31,18 +31,18 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 - The `terminal_sessions` SQLite table has no `label` column — labels exist only in the PtySession object
 - There is no API endpoint to update a terminal's label after creation
 - There is no `SHELLPER_SESSION_ID` environment variable set inside shell sessions, so a shell cannot identify itself
-- The `af shell --name` flag is accepted but the name is ignored — `handleWorkspaceShellCreate` hardcodes `Shell N`
+- The `afx shell --name` flag is accepted but the name is ignored — `handleWorkspaceShellCreate` hardcodes `Shell N`
 - The only way to know which shell is which is by remembering the order they were opened
 
 ## Desired State
 
-- Users can run `af rename "descriptive name"` from inside a utility shell session
+- Users can run `afx rename "descriptive name"` from inside a utility shell session
 - The command detects which session it's running in via `SHELLPER_SESSION_ID` environment variable
 - Tower also injects `TOWER_PORT` so the CLI knows which Tower instance to contact
 - The name updates in Tower's in-memory state and in SQLite (source of truth)
 - Both `label` and `name` fields are updated to keep them in sync
 - The dashboard tab title reflects the new name on next poll cycle (~2.5s)
-- Running `af rename` outside a shellper session produces a clear error message
+- Running `afx rename` outside a shellper session produces a clear error message
 - Labels persist across Tower restarts via SQLite storage
 - Existing sessions created before the migration work correctly (null label treated as current default)
 - Duplicate names are auto-deduplicated (e.g., `monitoring` → `monitoring-1`)
@@ -54,14 +54,14 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 - **Technical Team**: Codev maintainers
 
 ## Success Criteria
-- [ ] `af rename "name"` updates the current shell's name when run inside a utility shell session
-- [ ] `af rename` in a builder/architect terminal produces error: "Cannot rename builder/architect terminals"
+- [ ] `afx rename "name"` updates the current shell's name when run inside a utility shell session
+- [ ] `afx rename` in a builder/architect terminal produces error: "Cannot rename builder/architect terminals"
 - [ ] Duplicate names are auto-deduplicated with `-N` suffix and CLI shows the actual name applied
-- [ ] Running `af rename` outside a shellper session produces a clear error: "Not running inside a shellper session"
+- [ ] Running `afx rename` outside a shellper session produces a clear error: "Not running inside a shellper session"
 - [ ] `SHELLPER_SESSION_ID` and `TOWER_PORT` environment variables are set in all new shellper sessions
 - [ ] The dashboard tab title updates to show the new name
 - [ ] Labels persist in SQLite and survive Tower restarts
-- [ ] `af rename` with no argument or empty string produces a usage error
+- [ ] `afx rename` with no argument or empty string produces a usage error
 - [ ] Names exceeding 100 characters are rejected with an error
 - [ ] Control characters in names are stripped
 - [ ] Stale/closed session IDs return a clear "Session not found" error
@@ -70,7 +70,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 ## Constraints
 
 ### Technical Constraints
-- Must work within the existing Commander.js CLI pattern used by all af commands
+- Must work within the existing Commander.js CLI pattern used by all afx commands
 - Must use the Tower HTTP API for communication (CLI → Tower)
 - PTY session label is currently readonly — must be made mutable or use a separate storage mechanism
 - Environment variables must be set during session creation in shellper/Tower code
@@ -89,7 +89,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 ### Approach 1: Environment Variable + Tower API (Approved)
 
-**Description**: Set `SHELLPER_SESSION_ID` and `TOWER_PORT` in the shell environment at session creation. The `af rename` command reads these variables, calls a new Tower API endpoint (`PATCH /api/terminals/:id/rename`), which updates both in-memory state and SQLite.
+**Description**: Set `SHELLPER_SESSION_ID` and `TOWER_PORT` in the shell environment at session creation. The `afx rename` command reads these variables, calls a new Tower API endpoint (`PATCH /api/terminals/:id/rename`), which updates both in-memory state and SQLite.
 
 **API Contract**:
 - **Request**: `PATCH /api/terminals/:sessionId/rename`
@@ -107,7 +107,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 **Pros**:
 - Clean, simple detection mechanism
-- Follows existing af command patterns (CLI → Tower API)
+- Follows existing afx command patterns (CLI → Tower API)
 - Label stored in SQLite for persistence
 - Dashboard gets updated data via existing polling
 - `TOWER_PORT` handles custom port configurations
@@ -149,7 +149,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 ### Nice-to-Know (Optimization)
 - [ ] Should we also support renaming from the dashboard UI? → Out of scope for this spec; can be added later
-- [ ] Should `af shell --name` bug be fixed? → Related but separate; note it as a bonus fix if trivial
+- [ ] Should `afx shell --name` bug be fixed? → Related but separate; note it as a bonus fix if trivial
 
 ## Performance Requirements
 - **Response Time**: < 500ms for the rename command round-trip
@@ -157,23 +157,23 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 
 ## Security Considerations
 - The Tower API endpoint must require the existing `codev-web-key` authentication header
-- The `af rename` command uses the existing TowerClient which handles auth automatically
+- The `afx rename` command uses the existing TowerClient which handles auth automatically
 - No new attack surface — reuses existing authenticated API pattern
 - Input validation strips control characters (newlines, tabs, etc.) to prevent UI rendering issues
 
 ## Test Scenarios
 
 ### Functional Tests
-1. **Happy path**: Run `af rename "build testing"` inside a shellper session → name updates in Tower and SQLite
-2. **Not in shellper**: Run `af rename "test"` outside shellper → error message "Not running inside a shellper session", exit code 1
-3. **Empty name**: Run `af rename ""` → usage error
-4. **No argument**: Run `af rename` → usage error
-5. **Long name**: Run `af rename` with 101+ char name → rejected with error "Name must be 1-100 characters"
-6. **Special characters**: Run `af rename "debug (prod) — monitoring"` → works correctly
-7. **Control characters**: Run `af rename "test\ninjection"` → control chars stripped, name stored as "testinjection"
+1. **Happy path**: Run `afx rename "build testing"` inside a shellper session → name updates in Tower and SQLite
+2. **Not in shellper**: Run `afx rename "test"` outside shellper → error message "Not running inside a shellper session", exit code 1
+3. **Empty name**: Run `afx rename ""` → usage error
+4. **No argument**: Run `afx rename` → usage error
+5. **Long name**: Run `afx rename` with 101+ char name → rejected with error "Name must be 1-100 characters"
+6. **Special characters**: Run `afx rename "debug (prod) — monitoring"` → works correctly
+7. **Control characters**: Run `afx rename "test\ninjection"` → control chars stripped, name stored as "testinjection"
 8. **Stale session**: Rename with a `SHELLPER_SESSION_ID` that doesn't exist in Tower → "Session not found" error
 9. **Multiple renames**: Rename same session twice → second name overwrites first
-10. **Builder/architect terminal**: Run `af rename "test"` in builder terminal → error "Cannot rename builder/architect terminals"
+10. **Builder/architect terminal**: Run `afx rename "test"` in builder terminal → error "Cannot rename builder/architect terminals"
 11. **Duplicate name**: Rename to a name already used by another session → auto-dedup to `name-1`, CLI shows "Renamed to: name-1"
 
 ### Non-Functional Tests
@@ -203,7 +203,7 @@ All shellper-managed shell sessions default to generic names like "Shell 1", "Sh
 **Date**: 2026-02-21
 **Models Consulted**: Gemini Pro, GPT-5.2 Codex, Claude
 **Sections Updated**:
-- **Current State**: Added `label` vs `name` dual-field issue and `af shell --name` bug (Claude, Gemini)
+- **Current State**: Added `label` vs `name` dual-field issue and `afx shell --name` bug (Claude, Gemini)
 - **Desired State**: Added `TOWER_PORT` env var, `label`/`name` sync, migration handling (Gemini, Claude)
 - **Solution Approaches**: Added full API contract, source of truth clarification, concurrency policy (Codex)
 - **Constraints**: Added ID mapping clarification — stable UUID vs ephemeral PtySession ID (Gemini)

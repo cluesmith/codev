@@ -8,12 +8,12 @@ Builders run in one of two modes, determined by how they were spawned:
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| **Strict** (default) | `af spawn XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn XXXX --soft` | AI follows protocol - architect verifies compliance |
+| **Strict** (default) | `afx spawn XXXX` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `afx spawn XXXX --soft` | AI follows protocol - architect verifies compliance |
 
 ## Strict Mode (Default)
 
-Spawned with: `af spawn XXXX`
+Spawned with: `afx spawn XXXX`
 
 In strict mode, porch orchestrates your work and drives the protocol to completion autonomously. Your job is simple: **run porch until the project completes**.
 
@@ -68,7 +68,7 @@ You must:
 
 ## Soft Mode
 
-Spawned with: `af spawn XXXX --soft` or `af spawn --task "..."`
+Spawned with: `afx spawn XXXX --soft` or `afx spawn --task "..."`
 
 In soft mode, you follow the protocol document yourself. The architect monitors your work and verifies you're adhering to the protocol correctly.
 
@@ -129,27 +129,27 @@ wait
 
 If you're blocked or need help:
 ```bash
-af send architect "Question about the spec..."
+afx send architect "Question about the spec..."
 ```
 
 ### Checking Status
 
 ```bash
 porch status      # (strict mode) Your project status
-af status         # All builders
+afx status         # All builders
 ```
 
 ## Notifications
 
-**ALWAYS notify the architect** via `af send` at these key moments:
+**ALWAYS notify the architect** via `afx send` at these key moments:
 
 | When | What to send |
 |------|-------------|
-| **Gate reached** | `af send architect "Project XXXX: <gate-name> ready for approval"` |
-| **PR ready** | `af send architect "PR #N ready for review"` |
-| **PR merged** | `af send architect "Project XXXX complete. PR merged. Ready for cleanup."` |
-| **Blocked/stuck** | `af send architect "Blocked on X — need guidance"` |
-| **Escalation needed** | `af send architect "Issue too complex — recommend escalating to SPIR/TICK"` |
+| **Gate reached** | `afx send architect "Project XXXX: <gate-name> ready for approval"` |
+| **PR ready** | `afx send architect "PR #N ready for review"` |
+| **PR merged** | `afx send architect "Project XXXX complete. PR merged. Ready for cleanup."` |
+| **Blocked/stuck** | `afx send architect "Blocked on X — need guidance"` |
+| **Escalation needed** | `afx send architect "Issue too complex — recommend escalating to SPIR/TICK"` |
 
 The architect may be working on other tasks and won't know you need attention unless you send a message. **Don't assume they're watching** — always notify explicitly.
 
@@ -158,7 +158,7 @@ The architect may be working on other tasks and won't know you need attention un
 If you encounter issues you can't resolve:
 
 1. **Output a clear blocker message** describing the problem and options
-2. **Use `af send architect "..."` to notify the Architect**
+2. **Use `afx send architect "..."` to notify the Architect**
 3. **Wait for guidance** before proceeding
 
 Example:

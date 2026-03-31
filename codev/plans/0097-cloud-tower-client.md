@@ -14,12 +14,12 @@ All tunnel logic uses Node.js built-in modules only (`node:http2`, `node:net`, `
 
 ## Success Metrics
 - [ ] All specification criteria met
-- [ ] `af tower register` successfully registers with codevos.ai
+- [ ] `afx tower register` successfully registers with codevos.ai
 - [ ] Tower auto-connects to codevos.ai on startup when registered
 - [ ] HTTP requests proxied through tunnel reach localhost:4100
 - [ ] Reconnection works after network disruption
 - [ ] Circuit breaker stops retries on auth failures
-- [ ] `af tower deregister` removes registration
+- [ ] `afx tower deregister` removes registration
 - [ ] cloudflared code fully removed
 - [ ] Tower works normally without registration (local-only mode)
 - [ ] All existing tests pass; new tests cover tunnel client
@@ -121,12 +121,12 @@ Functions:
 - Line 800: `stopTunnel()` call in `gracefulShutdown()`
 
 **Remove deprecated documentation:**
-- Delete `codev/resources/tunnel-setup.md` (references `af web keygen` and cloudflared setup)
-- Grep for any remaining references to `af web keygen`, `cloudflared`, or `tunnel-setup.md` across the codebase and remove them
+- Delete `codev/resources/tunnel-setup.md` (references `afx web keygen` and cloudflared setup)
+- Grep for any remaining references to `afx web keygen`, `cloudflared`, or `tunnel-setup.md` across the codebase and remove them
 
 **Note**: The `/api/tunnel/*` path namespace will be reused in Phase 4 for the new tunnel management endpoints (`/api/tunnel/connect`, `/api/tunnel/disconnect`, `/api/tunnel/status`).
 
-**Note**: `af web keygen` does not exist as a CLI command in the current codebase (it was planned in Spec 0081 but never implemented). Only documentation references need removal. QR code generation code does not exist in the codebase either — only documentation references.
+**Note**: `afx web keygen` does not exist as a CLI command in the current codebase (it was planned in Spec 0081 but never implemented). Only documentation references need removal. QR code generation code does not exist in the codebase either — only documentation references.
 
 **Check for any tower-client.ts references** to tunnel endpoints and update if needed.
 
@@ -134,13 +134,13 @@ Functions:
 - [ ] No cloudflared references remain in tower-server.ts
 - [ ] Graceful shutdown no longer calls `stopTunnel()`
 - [ ] `tunnel-setup.md` deleted
-- [ ] No remaining references to `af web keygen` or `cloudflared` in documentation
+- [ ] No remaining references to `afx web keygen` or `cloudflared` in documentation
 - [ ] All existing tests pass (tower-baseline, tower-api, tower-terminals, tower-proxy)
 - [ ] Tower starts and serves local requests normally
 
 #### Test Plan
 - **Unit Tests**: Existing test suite passes
-- **Manual Testing**: `af tower start` works, local dashboard accessible
+- **Manual Testing**: `afx tower start` works, local dashboard accessible
 
 #### Rollback Strategy
 Revert the single commit touching tower-server.ts
@@ -215,7 +215,7 @@ Metadata delivery uses two complementary mechanisms to ensure codevos.ai always 
 
 **Reconnection:**
 - `calculateBackoff(attempt: number): number` — Exponential with jitter: `min(1000 * 2^attempt + random(0, 1000), 60000)`. Jitter is a random value between 0 and 1000ms added to the base delay. After 10 consecutive failures: 300000ms (5 min).
-- Circuit breaker: On `auth_error` with reason `invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'af tower register --reauth' to update credentials."`
+- Circuit breaker: On `auth_error` with reason `invalid_api_key`, set state to `auth_failed`, stop retrying, log: `"Cloud connection failed: API key is invalid or revoked. Run 'afx tower register --reauth' to update credentials."`
 - On transient failure (`rate_limited`, `internal_error`, WebSocket close, timeout): schedule reconnect with backoff.
 
 **Hop-by-hop headers to filter:**
@@ -319,8 +319,8 @@ Created in this phase to enable integration testing alongside the client. Lightw
 **Dependencies**: Phase 1 (cloud config), Phase 4 (tunnel endpoints exist)
 
 #### Objectives
-- Implement `af tower register`, `af tower register --reauth`, `af tower deregister`
-- Extend `af tower status` with cloud connection info
+- Implement `afx tower register`, `afx tower register --reauth`, `afx tower deregister`
+- Extend `afx tower status` with cloud connection info
 - Handle browser-based and manual token entry registration flows
 
 #### Deliverables
@@ -351,10 +351,10 @@ Created in this phase to enable integration testing alongside the client. Lightw
 5. If tower daemon running, signal: `POST localhost:4100/api/tunnel/disconnect`.
 6. Print: `"Tower deregistered successfully."`.
 
-**`af tower status` extension:**
+**`afx tower status` extension:**
 - After existing output (daemon status, projects, terminals), add cloud section.
 - If registered: show registration status, tower name, tower ID, connection state (via `GET /api/tunnel/status`), uptime, access URL.
-- If not registered: `"Cloud Registration: not registered. Run 'af tower register' to connect to codevos.ai."`.
+- If not registered: `"Cloud Registration: not registered. Run 'afx tower register' to connect to codevos.ai."`.
 
 **CLI registration in `cli.ts`:**
 - Add `towerCmd.command('register')` with `--reauth` option
@@ -362,11 +362,11 @@ Created in this phase to enable integration testing alongside the client. Lightw
 - Add `towerCmd.command('status')` — new subcommand that shows daemon info + cloud connection status, matching the spec's output format exactly
 
 #### Acceptance Criteria
-- [ ] `af tower register` opens browser and completes registration
-- [ ] `af tower register --reauth` updates API key without changing tower ID/name
-- [ ] `af tower deregister` removes registration after confirmation
-- [ ] `af tower status` shows cloud info when registered
-- [ ] `af tower status` shows "not registered" message when not registered
+- [ ] `afx tower register` opens browser and completes registration
+- [ ] `afx tower register --reauth` updates API key without changing tower ID/name
+- [ ] `afx tower deregister` removes registration after confirmation
+- [ ] `afx tower status` shows cloud info when registered
+- [ ] `afx tower status` shows "not registered" message when not registered
 - [ ] Manual token paste works when browser callback fails
 - [ ] Already-registered prompt works correctly
 
@@ -567,7 +567,7 @@ Phase 1 and Phase 2 can be done in parallel. Phase 3 depends on Phase 1. Phase 4
 - [ ] Update tower server documentation with cloud registration info
 
 ## Notes
-- `af web keygen` was planned in Spec 0081 but never implemented as a CLI command — only documentation references exist (cleaned up in Phase 2)
+- `afx web keygen` was planned in Spec 0081 but never implemented as a CLI command — only documentation references exist (cleaned up in Phase 2)
 - QR code generation was never implemented in the codebase — only documentation references exist (cleaned up in Phase 2)
 - The `codev-web-key` local auth header (in `tower-client.ts`) is unrelated to cloud auth and stays unchanged
 - The mock tunnel server (Phase 3) uses plain TCP for test simplicity; production always uses TLS

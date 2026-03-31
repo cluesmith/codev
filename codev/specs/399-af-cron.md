@@ -3,7 +3,7 @@ approved: 2026-02-17
 validated: [architect]
 ---
 
-# Spec 399: af cron — Scheduled Workspace Tasks
+# Spec 399: afx cron — Scheduled Workspace Tasks
 
 ## Problem
 
@@ -11,13 +11,13 @@ Automated monitoring tasks that should run periodically (CI health checks, build
 
 ## Solution
 
-Add a lightweight cron scheduler to Tower that runs workspace-defined tasks on a schedule and delivers results via `af send` to the architect.
+Add a lightweight cron scheduler to Tower that runs workspace-defined tasks on a schedule and delivers results via `afx send` to the architect.
 
 ### Design Decision: Tower-Resident Scheduler
 
 **Why not system cron?** We evaluated wrapping system crontab but rejected it:
 - **Environment**: System cron runs with minimal env — no user PATH, no `GITHUB_TOKEN`, no `gh` in PATH. Tasks would fail silently.
-- **Sync friction**: Every YAML add/edit/remove requires `af cron install`. Forgotten syncs = stale/broken crontab entries.
+- **Sync friction**: Every YAML add/edit/remove requires `afx cron install`. Forgotten syncs = stale/broken crontab entries.
 - **Lifecycle mismatch**: System cron keeps firing when Tower is down, producing zombie executions that can't deliver.
 
 **Why Tower-resident**: Tower already runs interval-based patterns (rate limit cleanup, shellper cleanup). The scheduler follows the same pattern — zero setup, inherits Tower's full environment, auto-detects YAML changes, and stops when Tower stops. The "reimplementing cron" concern is minimal: the isDue check is ~20 lines, not a general-purpose scheduler.
@@ -30,7 +30,7 @@ Tower Server
 └── CronScheduler (new)
     ├── loads task definitions from .af-cron/ per workspace
     ├── tracks last-run timestamps in SQLite
-    └── executes tasks async → sends results via af send to architect
+    └── executes tasks async → sends results via afx send to architect
 ```
 
 ### Task Definition Format
@@ -45,7 +45,7 @@ enabled: true
 command: gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length'
 condition: "output != '0'"  # only notify if failures found
 message: "CI Alert: ${output} recent failures. Run `gh run list --limit 5` to investigate."
-target: architect           # who gets the af send
+target: architect           # who gets the afx send
 ```
 
 ```yaml
@@ -112,12 +112,12 @@ CREATE TABLE cron_tasks (
 ### CLI Commands
 
 ```bash
-af cron list                    # List all cron tasks for current workspace
-af cron list --all              # List across all workspaces
-af cron status                  # Show last run times and results
-af cron run <task-name>         # Manually trigger a task now
-af cron enable <task-name>      # Enable a disabled task
-af cron disable <task-name>     # Disable without deleting
+afx cron list                    # List all cron tasks for current workspace
+afx cron list --all              # List across all workspaces
+afx cron status                  # Show last run times and results
+afx cron run <task-name>         # Manually trigger a task now
+afx cron enable <task-name>      # Enable a disabled task
+afx cron disable <task-name>     # Disable without deleting
 ```
 
 ### Tower API Routes
@@ -146,12 +146,12 @@ This is optional and can be a follow-up.
 3. **Tower server**: Start scheduler in listen callback, stop in gracefulShutdown
 4. **Tower routes**: Add `/api/cron/*` routes
 5. **SQLite migrations**: Add `cron_tasks` table
-6. **AF CLI**: Add `af cron` subcommand
+6. **AF CLI**: Add `afx cron` subcommand
 7. **Skeleton**: Add example `.af-cron/` task files
 
 ## What Stays The Same
 
-- `af send` mechanism (reused via shared send utility)
+- `afx send` mechanism (reused via shared send utility)
 - Workspace detection
 - Tower startup/shutdown lifecycle (just adds one more interval)
 - No changes to builder or architect roles
@@ -166,12 +166,12 @@ This is optional and can be a follow-up.
 ## Acceptance Criteria
 
 - [ ] `.af-cron/*.yaml` files are loaded per workspace
-- [ ] Tasks execute on schedule and deliver messages via `af send`
+- [ ] Tasks execute on schedule and deliver messages via `afx send`
 - [ ] Task execution is non-blocking (async `exec`, not `execSync`)
 - [ ] Conditional notifications work (only alert when condition is true)
-- [ ] `af cron list` shows configured tasks
-- [ ] `af cron status` shows last run times and results
-- [ ] `af cron run <name>` triggers immediate execution
+- [ ] `afx cron list` shows configured tasks
+- [ ] `afx cron status` shows last run times and results
+- [ ] `afx cron run <name>` triggers immediate execution
 - [ ] Task state persists across Tower restarts (SQLite)
 - [ ] Disabled tasks are skipped
 - [ ] Command timeouts work (don't hang Tower)

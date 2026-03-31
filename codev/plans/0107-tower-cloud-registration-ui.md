@@ -138,7 +138,7 @@ else if (req.method === 'POST' && tunnelSub === 'connect') { ... }
    - Return `{ success: true }` with optional `warning` field if server-side deregister failed
    - If `deleteCloudConfig()` fails: return `{ success: false, error: "..." }`
 
-4. **Update error message** on line 278: `"Not registered. Run 'af tower register' first."` → `"Not registered. Run 'af tower connect' or use the Connect button in the Tower UI."`
+4. **Update error message** on line 278: `"Not registered. Run 'afx tower register' first."` → `"Not registered. Run 'afx tower connect' or use the Connect button in the Tower UI."`
 
 5. **Add `hostname` to `/api/tunnel/status` response**: Add `hostname: os.hostname()` to the status response JSON so the UI can use it as the device name default. This avoids the UI needing a separate endpoint.
 
@@ -260,7 +260,7 @@ Revert the HTML changes. Pure UI — no server-side impact.
 **Dependencies**: None (can be done in parallel with Phase 2-3, but sequenced for commit clarity)
 
 #### Objectives
-- Rename `af tower register` → `af tower connect` and `af tower deregister` → `af tower disconnect`
+- Rename `afx tower register` → `afx tower connect` and `afx tower deregister` → `afx tower disconnect`
 - Keep old names as hidden aliases for backward compatibility
 - Update help text and related messages
 
@@ -285,21 +285,21 @@ Revert the HTML changes. Pure UI — no server-side impact.
 - Update `CODEVOS_URL` fallback if not already done in Phase 1
 
 #### Acceptance Criteria
-- [ ] `af tower connect` works (equivalent to old `register`)
-- [ ] `af tower disconnect` works (equivalent to old `deregister`)
-- [ ] `af tower register` still works (hidden alias)
-- [ ] `af tower deregister` still works (hidden alias)
-- [ ] `af tower --help` shows `connect`/`disconnect`, not `register`/`deregister`
+- [ ] `afx tower connect` works (equivalent to old `register`)
+- [ ] `afx tower disconnect` works (equivalent to old `deregister`)
+- [ ] `afx tower register` still works (hidden alias)
+- [ ] `afx tower deregister` still works (hidden alias)
+- [ ] `afx tower --help` shows `connect`/`disconnect`, not `register`/`deregister`
 
 #### Test Plan
 - **Unit Tests** (`__tests__/tower-cloud-cli.test.ts`): Verify both new names and old aliases resolve to the same handlers
-- **Manual Testing**: Run `af tower connect --help` and `af tower register --help`
+- **Manual Testing**: Run `afx tower connect --help` and `afx tower register --help`
 
 #### Rollback Strategy
 Revert CLI changes. Command behavior is unchanged, only names differ.
 
 #### Risks
-- **Risk**: Other code or docs reference `af tower register` by string
+- **Risk**: Other code or docs reference `afx tower register` by string
   - **Mitigation**: Grep codebase for all references; update docs, but aliases ensure nothing breaks
 
 ---

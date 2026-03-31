@@ -27,7 +27,7 @@ Systematic audit and update of all public-facing and developer-facing markdown d
 
 **Release notes scope: stable tags only.** Release notes will be created for stable release tags (v2.0.1, v2.0.2, v2.0.6), NOT for release candidate tags (v2.0.0-rc.XX). This is consistent with the existing pattern in `docs/releases/`.
 
-**CLI syntax source of truth.** All CLI examples will be verified against the v2.0.7 codebase's actual `--help` output for `af`, `codev`, and `consult` commands. No guessing.
+**CLI syntax source of truth.** All CLI examples will be verified against the v2.0.7 codebase's actual `--help` output for `afx`, `codev`, and `consult` commands. No guessing.
 
 ## Success Metrics
 - [ ] All spec acceptance criteria met
@@ -120,7 +120,7 @@ Systematic audit and update of all public-facing and developer-facing markdown d
 - `codev/resources/workflow-reference.md` — audit stage-by-stage workflow
 - `codev/resources/commands/overview.md` — audit CLI quick start
 - `codev/resources/commands/codev.md` — audit codev CLI reference (confirmed stale hits)
-- `codev/resources/commands/agent-farm.md` — audit af CLI reference (confirmed stale hits)
+- `codev/resources/commands/agent-farm.md` — audit afx CLI reference (confirmed stale hits)
 - `codev/resources/commands/consult.md` — audit consult CLI reference
 - `codev/resources/testing-guide.md` — audit Playwright and testing docs
 - `codev/resources/test-infrastructure.md` — audit test infrastructure doc (confirmed stale hits: tmux)
@@ -136,7 +136,7 @@ Systematic audit and update of all public-facing and developer-facing markdown d
 
 #### Acceptance Criteria
 - [ ] Zero stale references in any Tier 2 instructional file
-- [ ] All CLI examples use current syntax (af tower, consult --prompt, etc.)
+- [ ] All CLI examples use current syntax (afx tower, consult --prompt, etc.)
 - [ ] Architecture description matches v2.0.7 (Shellper, Porch, Tower single daemon)
 - [ ] Each file verified and committed
 - [ ] Point-in-time analysis docs (claude_vs_codev_task.md, cloud-instances.md) either updated or flagged for obsolete report
@@ -170,7 +170,7 @@ Systematic audit and update of all public-facing and developer-facing markdown d
 - `codev-skeleton/templates/lifecycle.md` — audit lifecycle template
 - `codev-skeleton/templates/pr-overview.md` — audit PR overview template
 - `codev-skeleton/resources/commands/overview.md` — audit CLI overview
-- `codev-skeleton/resources/commands/agent-farm.md` — audit af reference (confirmed stale hits)
+- `codev-skeleton/resources/commands/agent-farm.md` — audit afx reference (confirmed stale hits)
 - `codev-skeleton/resources/commands/codev.md` — audit codev reference (confirmed stale hits)
 - `codev-skeleton/resources/commands/consult.md` — audit consult reference
 - `codev-skeleton/resources/workflow-reference.md` — audit workflow reference

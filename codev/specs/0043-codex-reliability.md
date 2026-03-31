@@ -166,7 +166,7 @@ Performance measurements on PR #33 review (932-line diff, 8 files):
 | Tokens Used | 51,223 | 38,556 | **-24.7%** |
 | Reasoning Effort | medium | low | Reduced |
 
-**Quality**: After implementation, Codex found a valid issue (missing `af spawn` integration) that the baseline review missed, suggesting quality is maintained or improved.
+**Quality**: After implementation, Codex found a valid issue (missing `afx spawn` integration) that the baseline review missed, suggesting quality is maintained or improved.
 
 ## References
 

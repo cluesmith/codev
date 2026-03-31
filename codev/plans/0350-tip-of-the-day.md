@@ -44,7 +44,7 @@ Implement a "Tip of the Day" banner in the dashboard Work view. This is a fronte
 
 #### Implementation Details
 
-**`tips.ts`** — Data file exporting a `tips: string[]` array. Each tip is a plain string with backtick-delimited code spans (e.g., `` Use `af status` to check all builder statuses ``). At least 48 tips covering: `af` commands, `porch` commands, `consult` usage, workflow best practices, and dashboard features.
+**`tips.ts`** — Data file exporting a `tips: string[]` array. Each tip is a plain string with backtick-delimited code spans (e.g., `` Use `afx status` to check all builder statuses ``). At least 48 tips covering: `afx` commands, `porch` commands, `consult` usage, workflow best practices, and dashboard features.
 
 **`TipBanner.tsx`** — Functional component:
 - Props: none (self-contained, reads localStorage directly)

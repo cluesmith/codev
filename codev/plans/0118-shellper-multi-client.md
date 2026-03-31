@@ -8,15 +8,15 @@
 
 ## Executive Summary
 
-Replace shellper's single-connection model with a multi-client `Map<string, net.Socket>`, add `clientType` to the HELLO protocol, implement Tower-replacement semantics and terminal access control, then build `af attach` as a direct Unix-socket terminal client. Two phases: core multi-client support, then the attach command.
+Replace shellper's single-connection model with a multi-client `Map<string, net.Socket>`, add `clientType` to the HELLO protocol, implement Tower-replacement semantics and terminal access control, then build `afx attach` as a direct Unix-socket terminal client. Two phases: core multi-client support, then the attach command.
 
 ## Success Metrics
 - [ ] Multiple connections to same shellper session work simultaneously
 - [ ] All connections receive PTY output (broadcast)
 - [ ] Any connection can send input (DATA, RESIZE)
 - [ ] Disconnecting one connection doesn't affect others
-- [ ] `af attach -p 0116` opens a live terminal view in the current terminal
-- [ ] Tower + `af attach` connected simultaneously
+- [ ] `afx attach -p 0116` opens a live terminal view in the current terminal
+- [ ] Tower + `afx attach` connected simultaneously
 - [ ] Existing tests pass (backward compatible)
 - [ ] REPLAY buffer sent to each new connection independently
 - [ ] SIGNAL/SPAWN from terminal clients silently ignored
@@ -29,7 +29,7 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 {
   "phases": [
     {"id": "phase_1", "title": "Protocol Extension & Multi-Client Core"},
-    {"id": "phase_2", "title": "af attach Terminal Mode"}
+    {"id": "phase_2", "title": "afx attach Terminal Mode"}
   ]
 }
 ```
@@ -138,17 +138,17 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 
 ---
 
-### Phase 2: af attach Terminal Mode
+### Phase 2: afx attach Terminal Mode
 **Dependencies**: Phase 1
 
 #### Objectives
-- Implement `af attach` as a direct Unix-socket terminal client
+- Implement `afx attach` as a direct Unix-socket terminal client
 - Raw terminal mode with proper stdin/stdout handling
 - Socket discovery via SQLite database
 - Detach key and signal handling
 
 #### Deliverables
-- [ ] `af attach -p <id>` connects to shellper Unix socket directly
+- [ ] `afx attach -p <id>` connects to shellper Unix socket directly
 - [ ] Raw terminal mode (no line buffering, no echo)
 - [ ] PTY output streams to stdout, stdin pipes to shellper as DATA frames
 - [ ] SIGWINCH sends RESIZE frame
@@ -203,14 +203,14 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 - Global DB access for SQLite query
 
 #### Acceptance Criteria
-- [ ] `af attach -p 0116` connects and shows live terminal output
+- [ ] `afx attach -p 0116` connects and shows live terminal output
 - [ ] Keyboard input passes through to remote shell
 - [ ] Ctrl-\ detaches cleanly, restoring terminal state
-- [ ] Ctrl-C passes through (doesn't kill af attach)
+- [ ] Ctrl-C passes through (doesn't kill afx attach)
 - [ ] Terminal resizing sends RESIZE frame
 - [ ] Works alongside Tower (both receive output)
 - [ ] Socket not found → clear error message
-- [ ] `af attach -p 0116 --browser` still opens dashboard in browser
+- [ ] `afx attach -p 0116 --browser` still opens dashboard in browser
 - [ ] Terminal state restored on disconnect (raw mode disabled)
 
 #### Test Plan
@@ -226,10 +226,10 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
   - `attachTerminal()` with mock socket: verify EXIT frame triggers cleanup and exit
   - `attachTerminal()` cleanup: verify raw mode restored on disconnect (mock process.stdin.setRawMode)
 - **Manual Testing**:
-  - Start Tower + builder, `af attach -p <id>`, verify dual-view
-  - Disconnect af attach, verify Tower still works
-  - Restart Tower, verify af attach still connected
-  - Kill af attach process (Ctrl-\), verify terminal state restored
+  - Start Tower + builder, `afx attach -p <id>`, verify dual-view
+  - Disconnect afx attach, verify Tower still works
+  - Restart Tower, verify afx attach still connected
+  - Kill afx attach process (Ctrl-\), verify terminal state restored
 
 #### Risks
 - **Risk**: Raw mode not properly restored on crash
@@ -239,7 +239,7 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 
 ## Dependency Map
 ```
-Phase 1 (Protocol & Multi-Client) ──→ Phase 2 (af attach)
+Phase 1 (Protocol & Multi-Client) ──→ Phase 2 (afx attach)
 ```
 
 ## Integration Points
@@ -247,7 +247,7 @@ Phase 1 (Protocol & Multi-Client) ──→ Phase 2 (af attach)
 - **ShellperClient** (Tower): Updated to send `clientType: 'tower'` in HELLO
 - **PtySession**: No changes needed — it delegates to ShellperClient
 - **SessionManager**: No changes needed — socket paths already stored
-- **Global SQLite DB**: Read-only access from `af attach` for socket discovery
+- **Global SQLite DB**: Read-only access from `afx attach` for socket discovery
 
 ## Risk Analysis
 ### Technical Risks
@@ -278,5 +278,5 @@ Phase 1 (Protocol & Multi-Client) ──→ Phase 2 (af attach)
 
 ## Validation Checkpoints
 1. **After Phase 1**: Multiple test clients can connect to shellper simultaneously, both receive data, tower replacement works, access control works
-2. **After Phase 2**: `af attach` works end-to-end with live builder session
-3. **Before PR**: All existing tests pass, new tests pass, manual verification with Tower + af attach simultaneously
+2. **After Phase 2**: `afx attach` works end-to-end with live builder session
+3. **Before PR**: All existing tests pass, new tests pass, manual verification with Tower + afx attach simultaneously

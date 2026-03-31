@@ -19,7 +19,7 @@ Key changes:
 4. Handled Z-up to Y-up coordinate conversion (3MF uses Z-up, Three.js uses Y-up)
 
 ## Success Criteria Status
-- [x] `af open path/to/model.3mf` opens 3D viewer in dashboard tab
+- [x] `afx open path/to/model.3mf` opens 3D viewer in dashboard tab
 - [x] Single-color 3MF files render with their assigned color
 - [x] Multi-color 3MF files render with correct per-object/per-triangle colors
 - [x] Multi-object 3MF files show all objects

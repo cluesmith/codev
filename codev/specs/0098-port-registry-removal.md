@@ -17,7 +17,7 @@ After the Tower Single Daemon migration (Spec 0090), every project still gets a 
 2. **`consult.ts` is broken** - hits `localhost:${dashboardPort}` (e.g., 4200) which is a dead port
 3. **Builder roles get wrong port** - `spawn.ts` injects `{PORT}` → `dashboardPort` into role templates, potentially directing builders to dead ports instead of Tower at 4100
 4. **Port registry is unnecessary complexity** - 220 lines of SQLite-backed port allocation code managing ports nothing uses
-5. **`af status` shows misleading port numbers** - displays per-project ports that suggest per-project servers exist
+5. **`afx status` shows misleading port numbers** - displays per-project ports that suggest per-project servers exist
 
 ## Solution
 
@@ -39,7 +39,7 @@ Replace all per-project port references with Tower port (4100):
    - `types.ts` - type definitions
    - `servers/tower-server.ts` - project instance interface and API responses
 3. **Remove `port_allocations` table** from SQLite schema (`db/migrate.ts`)
-4. **Remove `basePort` from `af status` output** (`commands/status.ts`)
+4. **Remove `basePort` from `afx status` output** (`commands/status.ts`)
 5. **Remove `basePort` from Tower API `/api/projects` response**
 
 ### Phase 3: Update tests
@@ -62,9 +62,9 @@ Replace all per-project port references with Tower port (4100):
 
 ## Acceptance criteria
 
-1. `af consult` works (routes to Tower, not dead port)
+1. `afx consult` works (routes to Tower, not dead port)
 2. Builder role `{PORT}` resolves to 4100
 3. `port-registry.ts` deleted
 4. No code references `dashboardPort`, `architectPort`, `builderPortRange`, or `utilPortRange`
 5. All existing tests pass (with port-related assertions updated/removed)
-6. `af status` no longer shows per-project port numbers
+6. `afx status` no longer shows per-project port numbers

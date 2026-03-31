@@ -120,18 +120,18 @@ Message body text here.
 
 All errors exit with code 1.
 
-## Deprecation of af team
+## Deprecation of afx team
 
-`af team` commands still work but print a deprecation warning on stderr:
+`afx team` commands still work but print a deprecation warning on stderr:
 
 ```
-⚠ `af team` is deprecated. Use `team list` instead.
+⚠ `afx team` is deprecated. Use `team list` instead.
 ```
 
 Migrate to `team` directly:
-- `af team list` → `team list`
-- `af team message` → `team message`
-- `af team update` → `team update`
+- `afx team list` → `team list`
+- `afx team message` → `team message`
+- `afx team update` → `team update`
 
 ## Cron Integration
 
@@ -148,5 +148,5 @@ timeout: 30
 ## Related
 
 - [Overview](overview.md) — All CLI tools
-- [Agent Farm](agent-farm.md) — `af` commands (deprecated `af team`)
+- [Agent Farm](agent-farm.md) — `afx` commands (deprecated `afx team`)
 - [Architecture](../arch.md) — Team Tab architecture

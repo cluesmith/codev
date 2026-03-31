@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Extract the `af team` subcommands into a standalone `team` CLI binary, following the same routing pattern as `consult.js`. The work is split into three phases: (1) core CLI extraction with `team add`, (2) deprecation of `af team`, and (3) documentation and reference updates. Library code stays in place — only CLI wiring changes.
+Extract the `afx team` subcommands into a standalone `team` CLI binary, following the same routing pattern as `consult.js`. The work is split into three phases: (1) core CLI extraction with `team add`, (2) deprecation of `afx team`, and (3) documentation and reference updates. Library code stays in place — only CLI wiring changes.
 
 ## Success Metrics
 - [ ] All specification success criteria met
@@ -22,7 +22,7 @@ Extract the `af team` subcommands into a standalone `team` CLI binary, following
 {
   "phases": [
     {"id": "cli-extraction", "title": "CLI Extraction and team add"},
-    {"id": "deprecation", "title": "af team Deprecation Wrapper"},
+    {"id": "deprecation", "title": "afx team Deprecation Wrapper"},
     {"id": "docs-and-refs", "title": "Documentation and Reference Updates"}
   ]
 }
@@ -55,7 +55,7 @@ Extract the `af team` subcommands into a standalone `team` CLI binary, following
 - Invalid handle: `Error: Invalid GitHub handle '<handle>'` (exit code 1)
 
 #### Acceptance Criteria
-- [ ] `team list` produces identical output to `af team list`
+- [ ] `team list` produces identical output to `afx team list`
 - [ ] `team message "test"` posts to messages.md
 - [ ] `team update` runs hourly summary
 - [ ] `team add validhandle` creates member file with correct frontmatter
@@ -74,35 +74,35 @@ Remove `team` from `src/cli.ts` command registration and `package.json` bin entr
 
 ---
 
-### Phase 2: af team Deprecation Wrapper
+### Phase 2: afx team Deprecation Wrapper
 **Dependencies**: Phase 1
 
 #### Objectives
-- Modify existing `af team` subcommands to print deprecation warning on stderr before executing
-- Update `.af-cron/team-update.yaml` to use `team update` instead of `af team update`
+- Modify existing `afx team` subcommands to print deprecation warning on stderr before executing
+- Update `.af-cron/team-update.yaml` to use `team update` instead of `afx team update`
 
 #### Deliverables
-- [ ] `src/agent-farm/cli.ts` — add stderr deprecation warning to each `af team` subcommand action
+- [ ] `src/agent-farm/cli.ts` — add stderr deprecation warning to each `afx team` subcommand action
 - [ ] `.af-cron/team-update.yaml` — update command to `team update`
 - [ ] Tests for deprecation warning output
 
 #### Implementation Details
-- In `src/agent-farm/cli.ts`, wrap each `af team` action to print a per-subcommand deprecation warning:
-  - `af team list` → `⚠ \`af team\` is deprecated. Use \`team list\` instead.`
-  - `af team message` → `⚠ \`af team\` is deprecated. Use \`team message\` instead.`
-  - `af team update` → `⚠ \`af team\` is deprecated. Use \`team update\` instead.`
+- In `src/agent-farm/cli.ts`, wrap each `afx team` action to print a per-subcommand deprecation warning:
+  - `afx team list` → `⚠ \`afx team\` is deprecated. Use \`team list\` instead.`
+  - `afx team message` → `⚠ \`afx team\` is deprecated. Use \`team message\` instead.`
+  - `afx team update` → `⚠ \`afx team\` is deprecated. Use \`team update\` instead.`
 - The warning goes to stderr so it doesn't interfere with piped output
 - Cron config change is a single-line edit: `command: "team update"`
 
 #### Acceptance Criteria
-- [ ] `af team list` prints deprecation warning on stderr then lists members normally
-- [ ] `af team message "test"` prints warning then posts message
+- [ ] `afx team list` prints deprecation warning on stderr then lists members normally
+- [ ] `afx team message "test"` prints warning then posts message
 - [ ] `.af-cron/team-update.yaml` references `team update`
 - [ ] Warning does not appear when using `team list` directly
 
 #### Test Plan
-- **Unit Tests**: Verify deprecation warning is emitted on stderr for each `af team` subcommand
-- **Integration Tests**: Verify existing `af team` tests still pass (output unchanged, warning on stderr only)
+- **Unit Tests**: Verify deprecation warning is emitted on stderr for each `afx team` subcommand
+- **Integration Tests**: Verify existing `afx team` tests still pass (output unchanged, warning on stderr only)
 
 #### Rollback Strategy
 Remove deprecation warning wrappers from `src/agent-farm/cli.ts`. Revert cron config.
@@ -128,7 +128,7 @@ Remove deprecation warning wrappers from `src/agent-farm/cli.ts`. Revert cron co
 - Skill doc covers: CLI commands, team file format (frontmatter + body), message format, setup instructions
 - Command reference follows the pattern of `agent-farm.md` and `consult.md`
 - CLAUDE.md/AGENTS.md updates: add `team` to the "CLI Command Reference" section and the "Available Protocols" or tools list
-- arch.md: add `team` as a top-level CLI alongside `codev`, `af`, `consult`, `porch`
+- arch.md: add `team` as a top-level CLI alongside `codev`, `afx`, `consult`, `porch`
 
 #### Acceptance Criteria
 - [ ] Skill triggers when AI agent needs team management
@@ -138,7 +138,7 @@ Remove deprecation warning wrappers from `src/agent-farm/cli.ts`. Revert cron co
 
 #### Test Plan
 - **Manual Testing**: Verify skill renders correctly in Claude Code
-- **Grep Validation**: Verify all `af team` references in docs point to `team` or note deprecation
+- **Grep Validation**: Verify all `afx team` references in docs point to `team` or note deprecation
 
 #### Rollback Strategy
 Remove new doc files and revert edits to existing docs.
@@ -151,11 +151,11 @@ Phase 1 (CLI Extraction) ──→ Phase 2 (Deprecation) ──→ Phase 3 (Docs
 ## Risk Analysis
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| `af team` breaks during extraction | Low | Medium | Keep `af team` working throughout — only add deprecation wrapper |
+| `afx team` breaks during extraction | Low | Medium | Keep `afx team` working throughout — only add deprecation wrapper |
 | Cron job fails with new binary name | Low | Low | Test `team update` before updating cron config |
 | Missing import paths after wiring | Low | Low | Reuse existing library imports; no code moves |
 
 ## Validation Checkpoints
 1. **After Phase 1**: `team list`, `team add`, `team message`, `team update` all work from CLI
-2. **After Phase 2**: `af team *` shows deprecation warning, cron uses new command
+2. **After Phase 2**: `afx team *` shows deprecation warning, cron uses new command
 3. **Before PR**: All docs updated, all tests pass, `npm run build` succeeds

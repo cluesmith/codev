@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implemented the Team tab feature across 5 phases: team directory infrastructure, backend API with GitHub integration, frontend Team tab, `af team` CLI commands, and automatic hourly updates via cron. The feature adds team visibility to the Tower dashboard — team member cards with GitHub activity data, a message log for team communication, and automatic activity summaries.
+Implemented the Team tab feature across 5 phases: team directory infrastructure, backend API with GitHub integration, frontend Team tab, `afx team` CLI commands, and automatic hourly updates via cron. The feature adds team visibility to the Tower dashboard — team member cards with GitHub activity data, a message log for team communication, and automatic activity summaries.
 
 **Total diff**: ~2,100 LOC across 17 files (11 new, 6 modified)
 **Tests added**: 76 (38 team core + 16 GitHub + 8 CLI + 10 auto-updates + 4 E2E)
@@ -23,8 +23,8 @@ All success criteria from spec-587 are met:
 - [x] Tab loads and displays parsed frontmatter (name, role, GitHub handle)
 - [x] Per-member GitHub data (assigned issues, open PRs, recent activity)
 - [x] `codev/team/messages.md` parsed and displayed in Team tab
-- [x] `af team message` CLI command appends timestamped messages
-- [x] `af team list` CLI command displays team members
+- [x] `afx team message` CLI command appends timestamped messages
+- [x] `afx team list` CLI command displays team members
 - [x] Communication channel abstraction (`MessageChannel` interface, `FileMessageChannel`)
 - [x] Automatic hourly team updates via cron
 - [x] Manual refresh button works
@@ -75,7 +75,7 @@ Clean implementation. Suggestions for `--json` flag and `--channel` option defer
 |--------|----------|---------|
 | `team.ts` | `packages/codev/src/lib/team.ts` | Team directory parsing, message log, `MessageChannel` interface |
 | `team-github.ts` | `packages/codev/src/lib/team-github.ts` | Batched GraphQL for per-member GitHub data |
-| `team.ts` (CLI) | `packages/codev/src/agent-farm/commands/team.ts` | `af team list` and `af team message` commands |
+| `team.ts` (CLI) | `packages/codev/src/agent-farm/commands/team.ts` | `afx team list` and `afx team message` commands |
 | `team-update.ts` | `packages/codev/src/agent-farm/commands/team-update.ts` | Hourly activity collection and summary |
 | `TeamView.tsx` | `packages/codev/dashboard/src/components/TeamView.tsx` | Team tab UI component |
 | `useTeam.ts` | `packages/codev/dashboard/src/hooks/useTeam.ts` | Fetch-on-activation hook for team data |
@@ -86,7 +86,7 @@ Clean implementation. Suggestions for `--json` flag and `--channel` option defer
 - `TabBar.tsx`: Added team icon
 - `App.tsx`: Added TeamView rendering
 - `api.ts`: Added team types and `fetchTeam()`
-- `cli.ts`: Added `af team` command group with list/message/update subcommands
+- `cli.ts`: Added `afx team` command group with list/message/update subcommands
 
 ### New data flow
 ```
@@ -125,6 +125,6 @@ None. All 76 new tests are deterministic. The 4 E2E tests use filesystem-based t
 
 1. **Skeleton update**: Add `codev/team/` directory convention to `codev-skeleton/` template so new projects get the structure
 2. **Keyboard shortcuts**: Add keyboard shortcut to switch to Team tab (suggested by Codex)
-3. **`--json` output**: Add `--json` flag to `af team list` for machine-readable output
-4. **`--channel` option**: Add channel selector to `af team message` when additional channels are implemented
+3. **`--json` output**: Add `--json` flag to `afx team list` for machine-readable output
+4. **`--channel` option**: Add channel selector to `afx team message` when additional channels are implemented
 5. **Server-side caching**: Cache GitHub data to reduce API calls for large teams (deferred from spec)

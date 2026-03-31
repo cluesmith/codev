@@ -31,7 +31,7 @@ The plan's acceptance criterion is: "grep -r 'projectlist' packages/codev/src/ r
 **Rebutted.** Same reasoning as Codex rebuttal above. These tests are excluded from the test suite. All 1426 included tests pass.
 
 ### 3. CLAUDE.md ≠ AGENTS.md invariant violation
-**Rebutted.** The CLAUDE.md and AGENTS.md files were already divergent BEFORE this project started. The divergence predates Spec 0126 and includes differences in the "Local Build Testing" section, worktree warning placement, and `af open` instructions. Phase 6's scope is: "Remove all references to projectlist.md, update spawn syntax, document new workflow." Reconciling the full CLAUDE.md/AGENTS.md invariant is a separate maintenance task (MAINTAIN protocol) that should not be conflated with this cleanup phase. Both files were updated identically for the sections this phase touches (project tracking, spawn syntax, directory structure).
+**Rebutted.** The CLAUDE.md and AGENTS.md files were already divergent BEFORE this project started. The divergence predates Spec 0126 and includes differences in the "Local Build Testing" section, worktree warning placement, and `afx open` instructions. Phase 6's scope is: "Remove all references to projectlist.md, update spawn syntax, document new workflow." Reconciling the full CLAUDE.md/AGENTS.md invariant is a separate maintenance task (MAINTAIN protocol) that should not be conflated with this cleanup phase. Both files were updated identically for the sections this phase touches (project tracking, spawn syntax, directory structure).
 
 ### 4. Skeleton projectlist references
 **Rebutted.** Same reasoning as Codex rebuttal above. Skeleton is out of scope for Phase 6.

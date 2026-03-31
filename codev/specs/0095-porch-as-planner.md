@@ -378,7 +378,7 @@ For each protocol (SPIR, MAINTAIN, TICK), maintain golden JSON files of expected
 |------|------------|--------|-------------------|
 | Task descriptions not detailed enough for Claude to execute | Medium | High | Include full prompt content in task descriptions, test with real protocols |
 | Session dies mid-iteration, tasks lost | Medium | Low | status.yaml tracks iteration + history; `porch next` regenerates tasks |
-| `porch run` removal breaks scripts | Low | Low | No known external users; `porch run` was only used by builders spawned via `af spawn` |
+| `porch run` removal breaks scripts | Low | Low | No known external users; `porch run` was only used by builders spawned via `afx spawn` |
 | Gate approval timing — user approves in one session, builder in another | Low | Medium | status.yaml gates persist; `porch next` checks gate status on each call |
 
 ## Notes

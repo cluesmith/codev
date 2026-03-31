@@ -111,7 +111,7 @@ The Librarian can be:
 - [ ] Librarian responsibilities are clearly delineated from Architect/Builder
 - [ ] Architecture-documenter agent can be deprecated (superseded by Librarian)
 - [ ] CLAUDE.md updated with Librarian role and when to use it
-- [ ] Librarian can be spawned via `af spawn` (if applicable) or invoked in main conversation
+- [ ] Librarian can be spawned via `afx spawn` (if applicable) or invoked in main conversation
 - [ ] Documentation of "documentation debt" tracking approach
 - [ ] At least one successful Librarian invocation demonstrated
 
@@ -172,7 +172,7 @@ codev/roles/
 
 ### Approach 2: Spawnable Librarian (Like Builder)
 
-**Description**: Librarian can be spawned in a worktree via `af spawn --librarian` for large documentation efforts.
+**Description**: Librarian can be spawned in a worktree via `afx spawn --librarian` for large documentation efforts.
 
 **Pros**:
 - Isolation for major documentation overhauls

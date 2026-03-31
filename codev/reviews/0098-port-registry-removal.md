@@ -8,12 +8,12 @@ Removed the vestigial per-project port allocation system from the Codev codebase
 
 ## Spec Compliance
 
-- [x] `af consult` works (routes to Tower at 4100, not dead per-project port)
+- [x] `afx consult` works (routes to Tower at 4100, not dead per-project port)
 - [x] Builder role `{PORT}` resolves to 4100 (Tower port)
 - [x] `port-registry.ts` deleted (220 lines)
 - [x] No code references `dashboardPort`, `architectPort`, `builderPortRange`, or `utilPortRange`
 - [x] All existing tests pass (594 tests, 43 test files)
-- [x] `af status` no longer shows per-project port numbers
+- [x] `afx status` no longer shows per-project port numbers
 
 ## Deviations from Plan
 
@@ -26,7 +26,7 @@ The 3-way consultation process surfaced several issues the plan didn't anticipat
 | Fix | Source | Description |
 |-----|--------|-------------|
 | Tower HTML stop/restart buttons | Codex iter 2 | `tower.html` still passed `basePort` to stop/restart functions; updated to use `projectPath` |
-| SSH tunnel port conflict | Codex iter 3 | Remote `af dash start --remote` hardcoded local tunnel port to 4100, conflicting with local Tower; added `isPortAvailable()` auto-detection |
+| SSH tunnel port conflict | Codex iter 3 | Remote `afx dash start --remote` hardcoded local tunnel port to 4100, conflicting with local Tower; added `isPortAvailable()` auto-detection |
 | `types.test.ts` compilation | Claude iter 1 | Config test fixture still had removed port fields; would break TypeScript compilation |
 | Schema JSDoc staleness | Claude iter 1 | Global schema JSDoc still said "Stores port allocations"; updated to "Stores terminal sessions and migrations" |
 

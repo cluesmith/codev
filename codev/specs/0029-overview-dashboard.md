@@ -45,19 +45,19 @@ Run a lightweight server (separate from per-project dashboards) that:
 1. **Reads global port registry**: Parse `~/.agent-farm/ports.json`
 2. **Checks port status**: For each registered port, check if it's actually listening
 3. **Renders dashboard**: Show all projects with their ports and status
-4. **Launch capability**: Directory picker, then `cd <path> && af start`
+4. **Launch capability**: Directory picker, then `cd <path> && afx start`
 
 ### CLI Integration
 
 ```bash
 # Start overview dashboard on port 4100
-af overview
+afx overview
 
 # Or with custom port
-af overview --port 4100
+afx overview --port 4100
 ```
 
-If port 4100 is in use, exit with error: "Port 4100 already in use. Try: af overview --port <other>"
+If port 4100 is in use, exit with error: "Port 4100 already in use. Try: afx overview --port <other>"
 
 ### UI Layout
 
@@ -84,7 +84,7 @@ If port 4100 is in use, exit with error: "Port 4100 already in use. Try: af over
 
 1. User clicks directory picker (`<input type="file" webkitdirectory>`)
 2. Browser sends selected path to server
-3. Server runs: `cd <path> && af start` (detached)
+3. Server runs: `cd <path> && afx start` (detached)
 4. Dashboard refreshes to show new instance
 
 ### Port Status Detection

@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Implement the Team tab feature using the file-based team directory approach (Approach 1 from the spec). Work is divided into 5 phases: team directory infrastructure, backend API, frontend Team tab, `af team` CLI commands, and automatic hourly updates via cron.
+Implement the Team tab feature using the file-based team directory approach (Approach 1 from the spec). Work is divided into 5 phases: team directory infrastructure, backend API, frontend Team tab, `afx team` CLI commands, and automatic hourly updates via cron.
 
 ## Success Metrics
 - [ ] All specification success criteria met
@@ -24,7 +24,7 @@ Implement the Team tab feature using the file-based team directory approach (App
     {"id": "team_directory", "title": "Team Directory Infrastructure"},
     {"id": "backend_api", "title": "Backend API and GitHub Integration"},
     {"id": "frontend_tab", "title": "Frontend Team Tab"},
-    {"id": "af_team_cli", "title": "af team CLI Commands"},
+    {"id": "af_team_cli", "title": "afx team CLI Commands"},
     {"id": "auto_updates", "title": "Automatic Hourly Team Updates"}
   ]
 }
@@ -258,16 +258,16 @@ Revert changes to `useTabs.ts`, `TabBar.tsx`, `App.tsx`, remove new files.
 
 ---
 
-### Phase 4: af team CLI Commands
+### Phase 4: afx team CLI Commands
 **Dependencies**: Phase 1
 
 #### Objectives
-- Add `af team list` and `af team message` subcommands
+- Add `afx team list` and `afx team message` subcommands
 - Follow existing Commander.js command registration pattern
 
 #### Deliverables
-- [ ] `af team list` command showing team members
-- [ ] `af team message "text"` command appending to `messages.md`
+- [ ] `afx team list` command showing team members
+- [ ] `afx team message "text"` command appending to `messages.md`
 - [ ] Command registered in `cli.ts` following existing pattern
 - [ ] Unit tests for command logic
 
@@ -308,15 +308,15 @@ teamCmd.command('message <text>')...
 - Export `teamList` and `teamMessage` from `team.ts`
 
 #### Acceptance Criteria
-- [ ] `af team list` displays members from `codev/team/people/`
-- [ ] `af team message "hello"` appends correctly formatted entry to `messages.md`
-- [ ] `af team message` creates `messages.md` with header if file doesn't exist
+- [ ] `afx team list` displays members from `codev/team/people/`
+- [ ] `afx team message "hello"` appends correctly formatted entry to `messages.md`
+- [ ] `afx team message` creates `messages.md` with header if file doesn't exist
 - [ ] Author detected from `gh` CLI or git config
 - [ ] All tests pass
 
 #### Test Plan
 - **Unit Tests**: Message formatting, file creation, append logic, author detection
-- **Integration Tests**: End-to-end `af team list` and `af team message` with temp directory
+- **Integration Tests**: End-to-end `afx team list` and `afx team message` with temp directory
 
 #### Rollback Strategy
 Remove command from `cli.ts`, revert new file.
@@ -333,7 +333,7 @@ Remove command from `cli.ts`, revert new file.
 #### Deliverables
 - [ ] Cron task YAML file (`.af-cron/team-update.yaml`)
 - [ ] Activity collector script/module that gathers events from the last hour
-- [ ] Integration with `af team message` for appending summaries
+- [ ] Integration with `afx team message` for appending summaries
 - [ ] Unit tests for event collection and summary formatting
 
 #### Implementation Details
@@ -362,19 +362,19 @@ Cron tasks are discovered per-workspace by `tower-cron.ts` via `loadWorkspaceTas
 name: team-update
 schedule: "0 * * * *"
 enabled: true
-command: "af team update"
+command: "afx team update"
 timeout: 30
 ```
 
 **Modified file**: `packages/codev/src/agent-farm/cli.ts`
-- Add `af team update` subcommand (called by cron, can also be run manually)
+- Add `afx team update` subcommand (called by cron, can also be run manually)
 
 #### Acceptance Criteria
 - [ ] Cron task runs hourly and collects events from the last hour
 - [ ] Summary appended to `messages.md` only when notable events exist
 - [ ] No message posted when no events occurred
 - [ ] Summary includes correct event types (spawn, gate, merge, review)
-- [ ] Manual invocation via `af team update` works
+- [ ] Manual invocation via `afx team update` works
 - [ ] All tests pass
 
 #### Test Plan
@@ -390,7 +390,7 @@ Remove cron YAML file, remove `team-update.ts`, revert CLI changes.
 ```
 Phase 1 (Team Directory) ──→ Phase 2 (Backend API) ──→ Phase 3 (Frontend Tab)
          │
-         ├──→ Phase 4 (af team CLI)
+         ├──→ Phase 4 (afx team CLI)
          │
          └──→ Phase 5 (Auto Updates) ←── Phase 4
 ```
@@ -409,7 +409,7 @@ Phase 4 can run in parallel with Phases 2-3 since it only depends on Phase 1.
   - Phase: 2
 - **Dashboard React App**: New tab, hook, and component
   - Phase: 3
-- **af CLI**: New `team` command group
+- **afx CLI**: New `team` command group
   - Phase: 4
 - **Tower Cron**: New scheduled task
   - Phase: 5
@@ -435,5 +435,5 @@ Phase 4 can run in parallel with Phases 2-3 since it only depends on Phase 1.
 
 ## Documentation Updates Required
 - [ ] Architecture docs (`codev/resources/arch.md`) — new team module
-- [ ] CLI reference for `af team` commands
+- [ ] CLI reference for `afx team` commands
 - [ ] README update for `codev/team/` directory convention

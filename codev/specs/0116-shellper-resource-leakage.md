@@ -12,7 +12,7 @@ validated: [architect]
 
 ## Clarifying Questions Asked
 
-1. **Q: What triggered the investigation?** A: Tower crashed with `posix_spawnp failed` on 2026-02-15. Logs showed repeated shellper creation failures, with 5 stale sockets cleaned on the next startup. The `af` binary disappeared from PATH (corrupted npm install during the chaos).
+1. **Q: What triggered the investigation?** A: Tower crashed with `posix_spawnp failed` on 2026-02-15. Logs showed repeated shellper creation failures, with 5 stale sockets cleaned on the next startup. The `afx` binary disappeared from PATH (corrupted npm install during the chaos).
 
 2. **Q: What makes it worse?** A: Testing. E2E tests spawn Tower, create terminals (architect, builder, shell), but never deactivate workspaces or clean up shellper sockets between tests. Each test run accumulates orphaned shellper processes and socket files.
 
@@ -134,7 +134,7 @@ This is especially acute during testing, where dozens of shellper sessions are c
 
 ### Important (Affects Design)
 - [x] Should the periodic cleanup interval be configurable, or is 60s a good default? (Answer: 60s hardcoded default. Don't make it configurable in v1 — if someone needs to tune it, that's a signal something else is wrong. Keep the code simple.)
-- [ ] Should `af tower stop` have a `--kill-sessions` flag for when you want a clean slate? (Deferred: nice-to-have, out of scope for this spec)
+- [ ] Should `afx tower stop` have a `--kill-sessions` flag for when you want a clean slate? (Deferred: nice-to-have, out of scope for this spec)
 
 ### Nice-to-Know (Optimization)
 - [x] Would a health endpoint (`/api/health` with session/socket counts) be worth adding in this spec or a follow-up? (Answer: Follow-up. This spec focuses on prevention and cleanup, not observability.)
@@ -176,7 +176,7 @@ This is especially acute during testing, where dozens of shellper sessions are c
 
 ## Notes
 
-The 2026-02-15 crash sequence: `posix_spawnp failed` (17:24) → Tower restart attempts (17:25, 17:25) → continued failures → eventual SIGTERM (18:27) → `af` binary missing (corrupted npm install). PTY device pool exhaustion (`kern.tty.ptmx_max = 511`) was the root cause; everything else cascaded from it.
+The 2026-02-15 crash sequence: `posix_spawnp failed` (17:24) → Tower restart attempts (17:25, 17:25) → continued failures → eventual SIGTERM (18:27) → `afx` binary missing (corrupted npm install). PTY device pool exhaustion (`kern.tty.ptmx_max = 511`) was the root cause; everything else cascaded from it.
 
 **Root cause detail**: The "posix_spawnp failed" error is misleading. The actual failure is `posix_openpt(O_RDWR)` returning -1 inside `node-pty`'s `pty_posix_spawn()` (`node_modules/node-pty/src/unix/pty.cc`). The function returns early without setting `*err` to an errno value (it stays at -1), so the caller throws the generic "posix_spawnp failed." message. Each shellper session holds a PTY master/slave pair. With concurrent builders, architects across multiple workspaces, and 3 consultation sub-processes per review iteration, PTY count climbs toward the 511 limit.
 

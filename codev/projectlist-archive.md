@@ -264,8 +264,8 @@ Projects that have been completed and validated in production.
       integrated_at: "2025-12-05T13:58:34-08:00"
     notes: "TICK protocol. Color dots with accessibility (shapes/tooltips for colorblind). Consulted GPT-5 and Gemini Pro."
   - id: "0053"
-    title: "af open Image Support"
-    summary: "Extend af open to display images (PNG, JPG, GIF, WebP, SVG) with zoom controls"
+    title: "afx open Image Support"
+    summary: "Extend afx open to display images (PNG, JPG, GIF, WebP, SVG) with zoom controls"
     status: integrated
     priority: medium
     release: "v1.3.0"
@@ -286,7 +286,7 @@ Projects that have been completed and validated in production.
     notes: "PR #103 merged 2025-12-13. Image support validated."
   - id: "0052"
     title: "Agent Farm Internals Documentation"
-    summary: "Comprehensive arch.md section on af internals: ports, tmux, state, worktrees, dashboard"
+    summary: "Comprehensive arch.md section on afx internals: ports, tmux, state, worktrees, dashboard"
     status: integrated
     priority: medium
     release: "v1.2.0"
@@ -472,7 +472,7 @@ Projects that have been completed and validated in production.
       implemented_at: null
       committed_at: null
       integrated_at: "2025-12-06T06:57:59-08:00"
-    notes: "TICK protocol. af tower command. PR 41 merged 2025-12-05."
+    notes: "TICK protocol. afx tower command. PR 41 merged 2025-12-05."
   - id: "0030"
     title: "Markdown Syntax Highlighting in Annotator"
     summary: "Enable syntax highlighting for markdown files in the annotation viewer"
@@ -538,7 +538,7 @@ Projects that have been completed and validated in production.
     notes: "TICK protocol. PR 46 merged 2025-12-06."
   - id: "0033"
     title: "Rename Command"
-    summary: "Add af rename command to rename builders and utility terminals"
+    summary: "Add afx rename command to rename builders and utility terminals"
     status: integrated
     priority: low
     release: "v1.1.0"
@@ -605,7 +605,7 @@ Projects that are paused or canceled.
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Abandoned 2025-12-13. Manual notification via af send is sufficient."
+    notes: "Abandoned 2025-12-13. Manual notification via afx send is sufficient."
   - id: "0017"
     title: "Platform Portability Layer"
     summary: "Implement transpilation from .codev/ source to platform-specific configs (CLAUDE.md, GEMINI.md, AGENTS.md)"

@@ -2,13 +2,13 @@
 
 ## Summary
 
-Extracted the `af team` subcommands (`list`, `message`, `update`) into a standalone `team` CLI binary, added a new `team add` command for scaffolding team member files, added deprecation warnings to `af team`, and created comprehensive documentation (skill doc, command reference, architecture updates).
+Extracted the `afx team` subcommands (`list`, `message`, `update`) into a standalone `team` CLI binary, added a new `team add` command for scaffolding team member files, added deprecation warnings to `afx team`, and created comprehensive documentation (skill doc, command reference, architecture updates).
 
 ## Spec Compliance
 
 - [x] R1: New `team` CLI binary — `bin/team.js` registered in `package.json`, routes through `dist/cli.js run(['team', ...args])`
 - [x] R2: `team add <github-handle>` — creates member files with YAML frontmatter, validates handles, normalizes to lowercase, prevents duplicates
-- [x] R3: `af team` deprecation — per-subcommand warnings on stderr, then delegates to same underlying functions
+- [x] R3: `afx team` deprecation — per-subcommand warnings on stderr, then delegates to same underlying functions
 - [x] R4: Skill documentation — `.claude/skills/team/SKILL.md` covering all 4 commands, file format, setup, deprecation
 - [x] R5: Command reference — `codev/resources/commands/team.md` following existing doc patterns
 - [x] R6: Reference updates — cron config, CLAUDE.md/AGENTS.md, arch.md all updated
@@ -48,7 +48,7 @@ All success criteria met as specified. No deviations from requirements.
 ## Technical Debt
 
 - `findWorkspaceRoot()` returning cwd as fallback (rather than throwing) forces callers to do their own `codev/` directory check. Multiple CLI entry points now need this pattern. A future improvement could add a `requireWorkspaceRoot()` variant that throws.
-- `af team` deprecation warnings will need to be removed eventually (tracked implicitly — no new issue needed since the deprecation itself is the communication mechanism).
+- `afx team` deprecation warnings will need to be removed eventually (tracked implicitly — no new issue needed since the deprecation itself is the communication mechanism).
 
 ## Consultation Feedback
 
@@ -142,4 +142,4 @@ No flaky tests encountered. All 2049+ tests passed consistently across all phase
 ## Follow-up Items
 
 - Consider adding `requireWorkspaceRoot()` to `src/lib/skeleton.ts` as a throwing variant of `findWorkspaceRoot()` to eliminate the repeated `codev/` directory check pattern.
-- Eventually remove `af team` deprecation warnings (no timeline — let them serve as migration reminders).
+- Eventually remove `afx team` deprecation warnings (no timeline — let them serve as migration reminders).

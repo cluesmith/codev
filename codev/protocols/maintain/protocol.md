@@ -25,7 +25,7 @@ Any builder can update these files during development, but MAINTAIN ensures they
 MAINTAIN is orchestrated by porch with 4 sequential phases:
 
 ```
-af spawn --protocol maintain
+afx spawn --protocol maintain
     ↓
 1. AUDIT: Scan for dead code, unused deps, stale docs
     ↓ (3-way review)

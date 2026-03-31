@@ -2,7 +2,7 @@
 
 ## Codex REQUEST_CHANGES
 
-### 1. "af rename breaks after Tower restart"
+### 1. "afx rename breaks after Tower restart"
 **Status: REBUTTED (no change needed)**
 
 Codex claims that after Tower restart, `shellperSessionId` is set to the old PTY id instead of the original shellper session id, causing 404 on rename.

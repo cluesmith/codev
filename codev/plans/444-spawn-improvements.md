@@ -1,4 +1,4 @@
-# Plan: af spawn Improvements
+# Plan: afx spawn Improvements
 
 ## Metadata
 - **ID**: plan-2026-02-19-spawn-improvements
@@ -16,8 +16,8 @@ Modify `spawnSpec()` in `spawn.ts` to:
 This is a low-risk change. All building blocks exist (`slugify()`, `fetchGitHubIssue`, `loadProtocol`). The primary modification is in `spawnSpec()` with supporting changes to handle the no-spec code path.
 
 ## Success Metrics
-- [ ] `af spawn N --protocol aspir` works without a spec file
-- [ ] `af spawn N --protocol spir` works without a spec file
+- [ ] `afx spawn N --protocol aspir` works without a spec file
+- [ ] `afx spawn N --protocol spir` works without a spec file
 - [ ] TICK still requires spec file (via `options.amends` path)
 - [ ] Naming uses GitHub issue title when available
 - [ ] `--resume` works for no-spec spawns
@@ -92,8 +92,8 @@ AFTER:
 - Template context: set `spec_missing: true` to signal the builder prompt template
 
 #### Acceptance Criteria
-- [ ] `af spawn 444 --protocol aspir` succeeds without a spec file
-- [ ] `af spawn 444 --protocol tick --amends 30` still fails without the amends spec file
+- [ ] `afx spawn 444 --protocol aspir` succeeds without a spec file
+- [ ] `afx spawn 444 --protocol tick --amends 30` still fails without the amends spec file
 - [ ] Worktree is named correctly from GitHub issue title
 - [ ] Porch is initialized with the correct project name
 
@@ -190,7 +190,7 @@ New test cases:
 
 #### Test Plan
 - **Unit Tests**: As described above
-- **Manual Testing**: Run `af spawn` with and without spec files in a test environment
+- **Manual Testing**: Run `afx spawn` with and without spec files in a test environment
 
 ## Dependency Map
 ```
@@ -206,6 +206,6 @@ Phase 1 (no-spec-spawn) ──→ Phase 2 (github-naming) ──→ Phase 3 (tes
 | Existing tests break from naming change | Medium | Medium | Run full test suite after each phase |
 
 ## Validation Checkpoints
-1. **After Phase 1**: `af spawn` works without spec file for ASPIR/SPIR
+1. **After Phase 1**: `afx spawn` works without spec file for ASPIR/SPIR
 2. **After Phase 2**: Naming uses GitHub issue title consistently
 3. **After Phase 3**: Full test suite green, build succeeds
