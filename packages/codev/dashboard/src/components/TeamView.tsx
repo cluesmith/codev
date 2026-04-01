@@ -91,7 +91,7 @@ function MessageItem({ message }: { message: TeamApiMessage }) {
   );
 }
 
-interface ActivityEntry {
+export interface ActivityEntry {
   type: 'merged' | 'closed';
   number: number;
   title: string;
@@ -100,7 +100,7 @@ interface ActivityEntry {
   author: string;
 }
 
-function relativeDate(isoString: string): string {
+export function relativeDate(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const hours = Math.floor(diff / (1000 * 60 * 60));
   if (hours < 1) return 'just now';
@@ -109,7 +109,7 @@ function relativeDate(isoString: string): string {
   return `${days}d ago`;
 }
 
-function buildActivityFeed(members: TeamApiMember[]): ActivityEntry[] {
+export function buildActivityFeed(members: TeamApiMember[]): ActivityEntry[] {
   const entries: ActivityEntry[] = [];
   for (const member of members) {
     const gh = member.github_data;
