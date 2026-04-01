@@ -23,8 +23,8 @@ export interface TeamMemberGitHubData {
   assignedIssues: { number: number; title: string; url: string }[];
   openPRs: { number: number; title: string; url: string }[];
   recentActivity: {
-    mergedPRs: { number: number; title: string; mergedAt: string }[];
-    closedIssues: { number: number; title: string; closedAt: string }[];
+    mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
+    closedIssues: { number: number; title: string; url: string; closedAt: string }[];
   };
 }
 
@@ -92,10 +92,10 @@ export function buildTeamGraphQLQuery(members: TeamMember[], owner: string, name
       nodes { ... on PullRequest { number title url } }
     }
     ${alias}_merged: search(query: "repo:${repo} author:${m.github} is:pr is:merged merged:>=${since}", type: ISSUE, first: 20) {
-      nodes { ... on PullRequest { number title mergedAt } }
+      nodes { ... on PullRequest { number title url mergedAt } }
     }
     ${alias}_closed: search(query: "repo:${repo} assignee:${m.github} is:issue is:closed closed:>=${since}", type: ISSUE, first: 20) {
-      nodes { ... on Issue { number title closedAt } }
+      nodes { ... on Issue { number title url closedAt } }
     }`;
     })
     .join('\n');
@@ -120,15 +120,15 @@ export function parseTeamGraphQLResponse(
     const alias = toAlias(member.github);
     const assigned = data[`${alias}_assigned`] as { nodes?: Array<{ number: number; title: string; url: string }> } | undefined;
     const prs = data[`${alias}_prs`] as { nodes?: Array<{ number: number; title: string; url: string }> } | undefined;
-    const merged = data[`${alias}_merged`] as { nodes?: Array<{ number: number; title: string; mergedAt: string }> } | undefined;
-    const closed = data[`${alias}_closed`] as { nodes?: Array<{ number: number; title: string; closedAt: string }> } | undefined;
+    const merged = data[`${alias}_merged`] as { nodes?: Array<{ number: number; title: string; url: string; mergedAt: string }> } | undefined;
+    const closed = data[`${alias}_closed`] as { nodes?: Array<{ number: number; title: string; url: string; closedAt: string }> } | undefined;
 
     result.set(member.github, {
       assignedIssues: (assigned?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url })),
       openPRs: (prs?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url })),
       recentActivity: {
-        mergedPRs: (merged?.nodes ?? []).map(n => ({ number: n.number, title: n.title, mergedAt: n.mergedAt })),
-        closedIssues: (closed?.nodes ?? []).map(n => ({ number: n.number, title: n.title, closedAt: n.closedAt })),
+        mergedPRs: (merged?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, mergedAt: n.mergedAt })),
+        closedIssues: (closed?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, closedAt: n.closedAt })),
       },
     });
   }

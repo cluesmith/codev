@@ -7,8 +7,6 @@ interface TeamViewProps {
 
 function MemberCard({ member }: { member: TeamApiMember }) {
   const gh = member.github_data;
-  const issueCount = gh?.assignedIssues.length ?? 0;
-  const prCount = gh?.openPRs.length ?? 0;
   const mergedCount = gh?.recentActivity.mergedPRs.length ?? 0;
   const closedCount = gh?.recentActivity.closedIssues.length ?? 0;
 
@@ -26,10 +24,50 @@ function MemberCard({ member }: { member: TeamApiMember }) {
       >
         @{member.github}
       </a>
-      <div className="team-member-stats">
-        <span title="Assigned issues">{issueCount} issues</span>
-        <span title="Open PRs">{prCount} PRs</span>
-      </div>
+      {gh && (
+        <>
+          <div className="team-member-section">
+            <span className="team-section-label">Working on</span>
+            {gh.assignedIssues.length > 0 ? (
+              <div className="team-item-list">
+                {gh.assignedIssues.map(issue => (
+                  <a
+                    key={issue.number}
+                    className="team-item-link"
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    #{issue.number} {issue.title}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <span className="team-item-empty">No assigned issues</span>
+            )}
+          </div>
+          <div className="team-member-section">
+            <span className="team-section-label">Open PRs</span>
+            {gh.openPRs.length > 0 ? (
+              <div className="team-item-list">
+                {gh.openPRs.map(pr => (
+                  <a
+                    key={pr.number}
+                    className="team-item-link"
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    #{pr.number} {pr.title}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <span className="team-item-empty">No open PRs</span>
+            )}
+          </div>
+        </>
+      )}
       {(mergedCount > 0 || closedCount > 0) && (
         <div className="team-member-activity">
           {mergedCount > 0 && <span>{mergedCount} merged</span>}
@@ -49,6 +87,68 @@ function MessageItem({ message }: { message: TeamApiMessage }) {
         <span className="team-message-time">{message.timestamp}</span>
       </div>
       <div className="team-message-body">{message.body}</div>
+    </div>
+  );
+}
+
+export interface ActivityEntry {
+  type: 'merged' | 'closed';
+  number: number;
+  title: string;
+  url: string;
+  timestamp: string;
+  author: string;
+}
+
+export function relativeDate(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  if (hours < 1) return 'just now';
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+export function buildActivityFeed(members: TeamApiMember[]): ActivityEntry[] {
+  const entries: ActivityEntry[] = [];
+  for (const member of members) {
+    const gh = member.github_data;
+    if (!gh) continue;
+    for (const pr of gh.recentActivity.mergedPRs) {
+      entries.push({ type: 'merged', number: pr.number, title: pr.title, url: pr.url, timestamp: pr.mergedAt, author: member.github });
+    }
+    for (const issue of gh.recentActivity.closedIssues) {
+      entries.push({ type: 'closed', number: issue.number, title: issue.title, url: issue.url, timestamp: issue.closedAt, author: member.github });
+    }
+  }
+  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return entries;
+}
+
+function ActivityFeed({ members }: { members: TeamApiMember[] }) {
+  const entries = buildActivityFeed(members);
+
+  if (entries.length === 0) {
+    return <div className="team-no-messages">No recent activity</div>;
+  }
+
+  return (
+    <div className="team-activity-feed">
+      {entries.map((entry, i) => (
+        <a
+          key={`${entry.type}-${entry.number}-${i}`}
+          className="team-activity-entry"
+          href={entry.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span className="team-activity-date">{relativeDate(entry.timestamp)}</span>
+          <span className="team-activity-author">@{entry.author}</span>
+          <span className="team-activity-action">{entry.type}</span>
+          <span className="team-activity-ref">#{entry.number}</span>
+          <span className="team-activity-title">{entry.title}</span>
+        </a>
+      ))}
     </div>
   );
 }
@@ -107,6 +207,11 @@ export function TeamView({ isActive }: TeamViewProps) {
               {reversedMessages.map((msg, i) => <MessageItem key={i} message={msg} />)}
             </div>
           )}
+        </div>
+
+        <div className="team-section">
+          <h3 className="team-section-title">Recent Activity</h3>
+          <ActivityFeed members={members} />
         </div>
       </div>
     </div>

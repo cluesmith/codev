@@ -57,8 +57,8 @@ export interface TeamMemberGitHubData {
   assignedIssues: { number: number; title: string; url: string }[];
   openPRs: { number: number; title: string; url: string }[];
   recentActivity: {
-    mergedPRs: { number: number; title: string; mergedAt: string }[];
-    closedIssues: { number: number; title: string; closedAt: string }[];
+    mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
+    closedIssues: { number: number; title: string; url: string; closedAt: string }[];
   };
 }
 
