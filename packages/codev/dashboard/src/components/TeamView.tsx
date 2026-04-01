@@ -91,6 +91,68 @@ function MessageItem({ message }: { message: TeamApiMessage }) {
   );
 }
 
+interface ActivityEntry {
+  type: 'merged' | 'closed';
+  number: number;
+  title: string;
+  url: string;
+  timestamp: string;
+  author: string;
+}
+
+function relativeDate(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  if (hours < 1) return 'just now';
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function buildActivityFeed(members: TeamApiMember[]): ActivityEntry[] {
+  const entries: ActivityEntry[] = [];
+  for (const member of members) {
+    const gh = member.github_data;
+    if (!gh) continue;
+    for (const pr of gh.recentActivity.mergedPRs) {
+      entries.push({ type: 'merged', number: pr.number, title: pr.title, url: pr.url, timestamp: pr.mergedAt, author: member.github });
+    }
+    for (const issue of gh.recentActivity.closedIssues) {
+      entries.push({ type: 'closed', number: issue.number, title: issue.title, url: issue.url, timestamp: issue.closedAt, author: member.github });
+    }
+  }
+  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return entries;
+}
+
+function ActivityFeed({ members }: { members: TeamApiMember[] }) {
+  const entries = buildActivityFeed(members);
+
+  if (entries.length === 0) {
+    return <div className="team-no-messages">No recent activity</div>;
+  }
+
+  return (
+    <div className="team-activity-feed">
+      {entries.map((entry, i) => (
+        <a
+          key={`${entry.type}-${entry.number}-${i}`}
+          className="team-activity-entry"
+          href={entry.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span className="team-activity-date">{relativeDate(entry.timestamp)}</span>
+          <span className="team-activity-author">@{entry.author}</span>
+          <span className="team-activity-action">{entry.type}</span>
+          <span className="team-activity-ref">#{entry.number}</span>
+          <span className="team-activity-title">{entry.title}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function TeamView({ isActive }: TeamViewProps) {
   const { data, error, loading, refresh } = useTeam(isActive);
 
@@ -145,6 +207,11 @@ export function TeamView({ isActive }: TeamViewProps) {
               {reversedMessages.map((msg, i) => <MessageItem key={i} message={msg} />)}
             </div>
           )}
+        </div>
+
+        <div className="team-section">
+          <h3 className="team-section-title">Recent Activity</h3>
+          <ActivityFeed members={members} />
         </div>
       </div>
     </div>

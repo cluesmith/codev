@@ -1968,6 +1968,57 @@ a.attention-row {
   padding: 8px 0;
 }
 
+.team-activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.team-activity-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+.team-activity-entry:hover {
+  background: var(--bg-secondary);
+}
+
+.team-activity-date {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 50px;
+  flex-shrink: 0;
+}
+
+.team-activity-author {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.team-activity-action {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.team-activity-ref {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.team-activity-title {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 /* Open Files & Shells (Spec 467) */
 .ofs-rows {
   display: flex;
