@@ -1871,11 +1871,44 @@ a.attention-row {
   text-decoration: underline;
 }
 
-.team-member-stats {
+.team-member-section {
+  margin-top: 6px;
+}
+
+.team-section-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.team-item-list {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+}
+
+.team-item-link {
+  display: block;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.team-item-link:hover {
+  text-decoration: underline;
+}
+
+.team-item-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .team-member-activity {

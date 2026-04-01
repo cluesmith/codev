@@ -7,8 +7,6 @@ interface TeamViewProps {
 
 function MemberCard({ member }: { member: TeamApiMember }) {
   const gh = member.github_data;
-  const issueCount = gh?.assignedIssues.length ?? 0;
-  const prCount = gh?.openPRs.length ?? 0;
   const mergedCount = gh?.recentActivity.mergedPRs.length ?? 0;
   const closedCount = gh?.recentActivity.closedIssues.length ?? 0;
 
@@ -26,10 +24,50 @@ function MemberCard({ member }: { member: TeamApiMember }) {
       >
         @{member.github}
       </a>
-      <div className="team-member-stats">
-        <span title="Assigned issues">{issueCount} issues</span>
-        <span title="Open PRs">{prCount} PRs</span>
-      </div>
+      {gh && (
+        <>
+          <div className="team-member-section">
+            <span className="team-section-label">Working on</span>
+            {gh.assignedIssues.length > 0 ? (
+              <div className="team-item-list">
+                {gh.assignedIssues.map(issue => (
+                  <a
+                    key={issue.number}
+                    className="team-item-link"
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    #{issue.number} {issue.title}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <span className="team-item-empty">No assigned issues</span>
+            )}
+          </div>
+          <div className="team-member-section">
+            <span className="team-section-label">Open PRs</span>
+            {gh.openPRs.length > 0 ? (
+              <div className="team-item-list">
+                {gh.openPRs.map(pr => (
+                  <a
+                    key={pr.number}
+                    className="team-item-link"
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    #{pr.number} {pr.title}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <span className="team-item-empty">No open PRs</span>
+            )}
+          </div>
+        </>
+      )}
       {(mergedCount > 0 || closedCount > 0) && (
         <div className="team-member-activity">
           {mergedCount > 0 && <span>{mergedCount} merged</span>}
