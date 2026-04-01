@@ -645,7 +645,8 @@ packages/codev/dashboard/
 **Team View** (Spec 587):
 - Conditional tab — only appears when `codev/team/people/` has 2+ valid member files
 - `teamEnabled` boolean in `DashboardState` controls tab visibility (set by `hasTeam()` in `/api/state`)
-- Member cards: name, role badge, GitHub handle link, assigned issues, open PRs, recent activity (last 7 days)
+- Member cards: name, role badge, GitHub handle link, clickable issue/PR title lists, recent activity counts (last 7 days)
+- Combined activity feed: unified reverse-chronological timeline of merged PRs and closed issues across all members
 - Message log from `codev/team/messages.md` displayed in reverse chronological order
 - Data from `/api/team` endpoint — members enriched with batched GraphQL GitHub data
 - Fetch-on-activation pattern (like Statistics), manual refresh button, no polling
