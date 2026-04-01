@@ -36,6 +36,9 @@ describe('buildTeamGraphQLQuery', () => {
     expect(query).toContain('u_alice_prs: search(');
     expect(query).toContain('u_alice_merged: search(');
     expect(query).toContain('u_alice_closed: search(');
+    // Verify merged/closed fragments request url
+    expect(query).toMatch(/on PullRequest \{[^}]*url[^}]*mergedAt/);
+    expect(query).toMatch(/on Issue \{[^}]*url[^}]*closedAt/);
     expect(query).toContain('u_bob_assigned: search(');
     expect(query).toContain('u_bob_prs: search(');
   });
@@ -116,7 +119,9 @@ describe('parseTeamGraphQLResponse', () => {
     expect(alice.assignedIssues[0]).toEqual({ number: 1, title: 'Bug fix', url: 'https://github.com/org/repo/issues/1' });
     expect(alice.openPRs).toHaveLength(1);
     expect(alice.recentActivity.mergedPRs).toHaveLength(1);
+    expect(alice.recentActivity.mergedPRs[0]).toEqual({ number: 5, title: 'Old PR', url: 'https://github.com/org/repo/pull/5', mergedAt: '2026-03-07T10:00:00Z' });
     expect(alice.recentActivity.closedIssues).toHaveLength(1);
+    expect(alice.recentActivity.closedIssues[0]).toEqual({ number: 2, title: 'Done issue', url: 'https://github.com/org/repo/issues/2', closedAt: '2026-03-06T15:00:00Z' });
   });
 
   it('handles missing data keys gracefully (empty arrays)', () => {
