@@ -101,10 +101,10 @@ describe('parseTeamGraphQLResponse', () => {
         nodes: [{ number: 10, title: 'Feature PR', url: 'https://github.com/org/repo/pull/10' }],
       },
       u_alice_merged: {
-        nodes: [{ number: 5, title: 'Old PR', mergedAt: '2026-03-07T10:00:00Z' }],
+        nodes: [{ number: 5, title: 'Old PR', url: 'https://github.com/org/repo/pull/5', mergedAt: '2026-03-07T10:00:00Z' }],
       },
       u_alice_closed: {
-        nodes: [{ number: 2, title: 'Done issue', closedAt: '2026-03-06T15:00:00Z' }],
+        nodes: [{ number: 2, title: 'Done issue', url: 'https://github.com/org/repo/issues/2', closedAt: '2026-03-06T15:00:00Z' }],
       },
     };
 
