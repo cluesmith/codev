@@ -84,13 +84,15 @@ interface HarnessProvider {
    * For bash script generation.
    * Returns a shell fragment to append to the base command.
    * roleFilePath: path to the role file.
-   * Returns: { fragment: string; envExport: string | null }
+   * roleContent: the raw role text (for ${ROLE_CONTENT} expansion in custom harnesses).
+   * roleFilePath: path to the role file.
+   * Returns: { fragment: string; env: Record<string, string> }
    *   fragment: args to append to the command line (e.g., --append-system-prompt "$(cat '...')")
-   *   envExport: an export line to prepend to the script, or null
+   *   env: env vars to export before the command (caller generates export lines)
    */
-  buildScriptRoleInjection(roleFilePath: string): {
+  buildScriptRoleInjection(roleContent: string, roleFilePath: string): {
     fragment: string;
-    envExport: string | null;
+    env: Record<string, string>;
   };
 }
 ```
@@ -104,9 +106,9 @@ interface HarnessProvider {
     args: ['--append-system-prompt', content],
     env: {},
   }),
-  buildScriptRoleInjection: (filePath) => ({
+  buildScriptRoleInjection: (content, filePath) => ({
     fragment: `--append-system-prompt "$(cat '${filePath}')"`,
-    envExport: null,
+    env: {},
   }),
 }
 ```
@@ -118,9 +120,9 @@ interface HarnessProvider {
     args: ['-c', `model_instructions_file=${filePath}`],
     env: {},
   }),
-  buildScriptRoleInjection: (filePath) => ({
+  buildScriptRoleInjection: (content, filePath) => ({
     fragment: `-c model_instructions_file='${filePath}'`,
-    envExport: null,
+    env: {},
   }),
 }
 ```
@@ -132,9 +134,9 @@ interface HarnessProvider {
     args: [],
     env: { GEMINI_SYSTEM_MD: filePath },
   }),
-  buildScriptRoleInjection: (filePath) => ({
+  buildScriptRoleInjection: (content, filePath) => ({
     fragment: '',
-    envExport: `export GEMINI_SYSTEM_MD='${filePath}'`,
+    env: { GEMINI_SYSTEM_MD: filePath },
   }),
 }
 ```
@@ -171,7 +173,7 @@ Users can define custom harness providers in `.codev/config.json` for agent harn
       "roleArgs": ["--system", "${ROLE_FILE}"],
       "roleEnv": {},
       "roleScriptFragment": "--system '${ROLE_FILE}'",
-      "roleScriptEnvExport": null
+      "roleScriptEnv": {}
     }
   }
 }
@@ -186,11 +188,11 @@ Users can define custom harness providers in `.codev/config.json` for agent harn
 | `roleArgs` | `string[]` | Yes | — | CLI args for Node `spawn()` call sites. Template variables expanded. |
 | `roleEnv` | `Record<string, string>` | No | `{}` | Env vars to set. Template variables expanded in values. |
 | `roleScriptFragment` | `string` | Yes | — | Shell fragment appended after base command in bash scripts. |
-| `roleScriptEnvExport` | `string \| null` | No | `null` | Export line prepended to bash scripts. |
+| `roleScriptEnv` | `Record<string, string>` | No | `{}` | Env vars to export before the command in bash scripts. Caller generates export lines. |
 
 `roleArgs` and `roleScriptFragment` are required because they cover the two distinct integration patterns (Node spawn vs bash script). Missing required fields produce a descriptive error at config load time.
 
-**Trust model:** Custom harness definitions in `.codev/config.json` are **trusted code** — the project owner controls them. `roleScriptFragment` and `roleScriptEnvExport` are interpolated into bash scripts without sanitization. This is the same trust model as forge concept command overrides and the existing `shell.architect`/`shell.builder` command strings, which are also executed as-is.
+**Trust model:** Custom harness definitions in `.codev/config.json` are **trusted code** — the project owner controls them. `roleScriptFragment` is interpolated into bash scripts without sanitization. Env vars from `roleScriptEnv` are exported by the caller using safe quoting. This is the same trust model as forge concept command overrides and the existing `shell.architect`/`shell.builder` command strings, which are also executed as-is.
 
 The `architectHarness: "my-agent"` config routes to this custom definition.
 
@@ -219,14 +221,14 @@ Unknown harness names fail at **launch time** (when `afx workspace start` or `af
 #### 1. `startBuilderSession()` (spawn-worktree.ts:568)
 Currently generates bash script with hardcoded `--append-system-prompt "$(cat '${roleFile}')"`.
 
-**Change:** Resolve the harness provider for the builder command. Call `provider.buildScriptRoleInjection(roleFile)`. Insert the returned `fragment` after `${baseCmd}` and prepend `envExport` (if any) before the command line.
+**Change:** Resolve the harness provider for the builder command. Call `provider.buildScriptRoleInjection(roleContent, roleFile)`. Insert the returned `fragment` after `${baseCmd}`. For any env vars in the returned `env`, generate `export KEY='VALUE'` lines before the command.
 
 Also change "Claude exited" restart message to "Agent exited."
 
 #### 2. `buildWorktreeLaunchScript()` (spawn-worktree.ts:655)
 Same pattern as #1.
 
-**Change:** Same approach via `buildScriptRoleInjection()`.
+**Change:** Same approach via `buildScriptRoleInjection()`. Generate export lines from returned `env`.
 
 #### 3. `architect()` (architect.ts:29)
 Currently: `args.push('--append-system-prompt', role.content)`.
@@ -236,7 +238,10 @@ Currently: `args.push('--append-system-prompt', role.content)`.
 #### 4. `buildArchitectArgs()` (tower-utils.ts:175)
 Currently writes role to `.architect-role.md` then appends `'--append-system-prompt', role.content`.
 
-**Change:** Resolve harness provider. Call `provider.buildRoleInjection()`. Return both args and env. The return type changes from `string[]` to `{ args: string[]; env: Record<string, string> }`, and the caller must forward env vars.
+**Change:** Resolve harness provider. Call `provider.buildRoleInjection()`. Return both args and env. The return type changes from `string[]` to `{ args: string[]; env: Record<string, string> }`. Three callers must be updated to handle the new return type and merge env vars:
+- `tower-terminals.ts:536` — architect session creation
+- `tower-terminals.ts:725` — architect session resume
+- `tower-instances.ts:377` — workspace architect launch
 
 #### 5. Tests
 Update existing tests. Add parameterized tests for each built-in harness provider.
@@ -290,7 +295,7 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 
 1. **Claude harness (regression):** `buildRoleInjection()` returns `--append-system-prompt` with content. `buildScriptRoleInjection()` returns `--append-system-prompt "$(cat '...')"`.
 2. **Codex harness:** `buildRoleInjection()` returns `-c model_instructions_file=<path>`. `buildScriptRoleInjection()` returns `-c model_instructions_file='<path>'`.
-3. **Gemini harness:** `buildRoleInjection()` returns env `{ GEMINI_SYSTEM_MD: '<path>' }`. Script returns env export line with empty fragment.
+3. **Gemini harness:** `buildRoleInjection()` returns env `{ GEMINI_SYSTEM_MD: '<path>' }`. Script returns `env: { GEMINI_SYSTEM_MD: '<path>' }` with empty fragment; caller generates export lines.
 4. **Unknown harness name:** Fails with clear error (e.g., `builderHarness: "nonexistent"` → error, not silent degradation).
 5. **Custom harness:** Config-defined harness with `roleArgs: ["--system", "${ROLE_FILE}"]` correctly expands template variables and produces expected args.
 6. **Default behavior:** No `architectHarness`/`builderHarness` set → defaults to `claude` provider (backward compatible).
