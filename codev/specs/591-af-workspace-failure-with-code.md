@@ -177,15 +177,42 @@ Users can define custom harness providers in `.codev/config.json` for agent harn
 }
 ```
 
-**Template variables:** `${ROLE_FILE}` is replaced with the path to the role file, `${ROLE_CONTENT}` with the raw role text. This allows both file-based and inline injection strategies.
+**Template variables:** `${ROLE_FILE}` is replaced with the absolute path to the role file, `${ROLE_CONTENT}` with the raw role text. Unknown `${...}` variables are left unexpanded (not stripped) — this makes typos visible.
 
-**Field definitions:**
-- `roleArgs`: Array of CLI args for Node `spawn()` call sites. Template variables are expanded.
-- `roleEnv`: Object of env vars to set. Template variables are expanded in values.
-- `roleScriptFragment`: Shell fragment appended after the base command in bash scripts.
-- `roleScriptEnvExport`: An `export` line prepended to bash scripts, or `null`.
+**Field schema:**
 
-The `architectHarness: "my-agent"` config routes to this custom definition. If any required field is missing, fail with a descriptive error.
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `roleArgs` | `string[]` | Yes | — | CLI args for Node `spawn()` call sites. Template variables expanded. |
+| `roleEnv` | `Record<string, string>` | No | `{}` | Env vars to set. Template variables expanded in values. |
+| `roleScriptFragment` | `string` | Yes | — | Shell fragment appended after base command in bash scripts. |
+| `roleScriptEnvExport` | `string \| null` | No | `null` | Export line prepended to bash scripts. |
+
+`roleArgs` and `roleScriptFragment` are required because they cover the two distinct integration patterns (Node spawn vs bash script). Missing required fields produce a descriptive error at config load time.
+
+**Trust model:** Custom harness definitions in `.codev/config.json` are **trusted code** — the project owner controls them. `roleScriptFragment` and `roleScriptEnvExport` are interpolated into bash scripts without sanitization. This is the same trust model as forge concept command overrides and the existing `shell.architect`/`shell.builder` command strings, which are also executed as-is.
+
+The `architectHarness: "my-agent"` config routes to this custom definition.
+
+### Role File Location
+
+All call sites write the role content to a file before invoking the harness. The canonical locations are:
+- **Builder role:** `<worktreePath>/.builder-role.md` (already used by `spawn-worktree.ts`)
+- **Architect role:** `<workspaceRoot>/.architect-role.md` (already used by `tower-utils.ts`; `architect.ts` must be updated to use this same path)
+
+These files are overwritten on each launch. They are gitignored (or in a gitignored directory).
+
+### No-Role Behavior
+
+When no role is configured (role is `null`), harness injection is skipped entirely — no args, no env vars, no script fragments. The agent launches with just the base command and prompt (if any). This is the same behavior as today's code paths that check `if (roleContent)` before injecting.
+
+### Env Var Merge Semantics
+
+When `buildRoleInjection()` returns env vars (e.g., Gemini's `GEMINI_SYSTEM_MD`), callers merge them with `process.env` via spread: `{ ...process.env, ...harnessEnv }`. Harness env vars take precedence. If a user has already set the same env var, the harness value wins — this is intentional since the harness is injecting the role for this specific session.
+
+### Failure Timing
+
+Unknown harness names fail at **launch time** (when `afx workspace start` or `afx spawn` tries to resolve the harness), not at config load. This avoids failing on unrelated commands that don't need harness resolution.
 
 ### Integration Points
 
@@ -246,7 +273,7 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 2. `afx spawn` does not crash when `builder: "codex"`
 3. Existing Claude-based workflows remain unchanged (no regression)
 4. All existing tests pass (updated as needed)
-5. Harness auto-detection correctly handles full paths, commands with flags, and known CLI names
+5. Explicit `architectHarness`/`builderHarness` config correctly resolves to built-in or custom providers
 
 ### SHOULD
 
