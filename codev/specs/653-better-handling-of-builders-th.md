@@ -94,62 +94,93 @@ When a builder resumes (context reconnect), it should validate its state against
 
 ## Success Criteria
 
-- [ ] `porch next` during implement phase detects if a PR already exists and warns the builder
-- [ ] `porch done` during non-review phases fails if a PR exists unexpectedly
-- [ ] Builder prompts (implement.md, builder-prompt.md) include explicit warnings against premature PR creation
-- [ ] `porch next` provides recovery instructions when premature PR is detected (e.g., "close the PR and continue")
-- [ ] Resume sessions validate state consistency (PR existence vs expected phase)
-- [ ] Unit tests cover all detection and recovery scenarios
-- [ ] Documentation updated (arch.md, protocol.md as needed)
+- [ ] `porch next` in any phase before the PR-allowed phase detects open PRs and warns the builder (advisory, alongside normal tasks)
+- [ ] `porch done` in any phase before the PR-allowed phase blocks advancement if an open PR exists
+- [ ] PR-allowed phase is derived from protocol definition (first phase with `pr_exists` check or `pr` gate), not hardcoded
+- [ ] `pr-exists` forge scripts tightened to exclude CLOSED-not-merged PRs (only OPEN or MERGED satisfy the check)
+- [ ] Recovery guidance tells builder to close the premature PR and explicitly states branch/commits are preserved
+- [ ] Builder prompts across all protocols (SPIR, ASPIR, AIR, TICK, BUGFIX) include explicit warnings against premature PR creation
+- [ ] Detection uses forge concept layer (`executeForgeCommand`), not raw `gh` CLI calls
+- [ ] Unit tests cover all detection, recovery, and cross-protocol scenarios
+- [ ] Documentation updated (arch.md as needed)
 
 ## Constraints
 
 ### Technical Constraints
-- Must work with existing `gh` CLI for PR detection (already used in `pr_exists` check)
+- Must use the existing **forge concept layer** for PR detection (`executeForgeCommand`), not raw `gh` calls — the codebase already abstracts forge interactions to support GitHub, GitLab, and Gitea
 - Must not break existing valid workflows (e.g., pre-approved specs/plans that auto-advance)
-- Detection must be fast — `porch next` is called frequently and must remain responsive
-- Must work across all protocols that use porch (SPIR, ASPIR, TICK, BUGFIX, AIR)
+- Detection must be responsive — a single forge concept call per `porch next`/`porch done` is acceptable (< 2s typical), but no caching (porch is a per-invocation CLI, not a long-lived process)
+- Must work across all protocols that use porch (SPIR, ASPIR, TICK, BUGFIX, AIR) — each protocol has a different phase structure for PR creation
 
 ### Design Constraints
 - Recovery should be non-destructive — never auto-close a PR or auto-delete builder work
-- Detection should be advisory in implement phase (warn, don't block forward progress)
-- Detection should be blocking in `porch done` for non-review phases (prevent silent state divergence)
+- Detection should be advisory in `porch next` (warn, still emit normal task list alongside)
+- Detection should be blocking in `porch done` for non-PR phases (prevent silent state divergence)
 - Must maintain backward compatibility with existing status.yaml format
+- The "PR-allowed phase" must be derived from protocol definition, not hardcoded as "review"
 
 ## Assumptions
-- `gh pr list --state all --head <branch>` is the reliable way to detect PRs on the current branch
+- The forge concept layer (`executeForgeCommand`) is the correct abstraction for forge-agnostic PR detection
 - Builders can read and follow warnings in prompts (if sufficiently prominent)
 - The `porch next` → `porch done` loop is the primary control path for strict-mode builders
-- PR creation is always via `gh pr create` (builders don't use GitHub UI)
+- PR creation is always via forge tooling (builders don't use GitHub UI directly)
+
+## Cross-Protocol PR Phase Model
+
+Different protocols allow PR creation at different phases. The detection logic must derive the "PR-allowed phase" from the protocol definition rather than assuming it's always `review`.
+
+| Protocol | Phases | PR-Allowed Phase | How to Identify |
+|----------|--------|------------------|-----------------|
+| SPIR     | specify → plan → implement → review | review | Has `pr_exists` check + `pr` gate |
+| ASPIR    | specify → plan → implement → review | review | Has `pr_exists` check + `pr` gate |
+| AIR      | implement → pr | pr | Has `pr_exists` check + `pr` gate |
+| TICK     | identify → amend_spec → amend_plan → implement → defend → evaluate → review | review | Has `pr` gate |
+| BUGFIX   | investigate → fix → pr | pr | Terminal phase (no phases after it) |
+
+**Rule**: The PR-allowed phase is the **first phase** that has either a `pr_exists` check in its `checks` definition OR a gate named `pr`. Any open PR detected in a phase before this is premature.
 
 ## Solution Approaches
 
-### Approach 1: Proactive Detection in Porch State Machine (Recommended)
+### Approach 1: Proactive Detection in Porch + Tightened PR Validation (Recommended)
 
-**Description**: Add PR existence detection to `porch next` and `porch done` for non-review phases. When a premature PR is detected, emit advisory warnings (in `porch next`) and blocking errors (in `porch done`). Add recovery guidance to the warning messages.
+**Description**: Three coordinated changes that work together:
 
-**Components**:
-1. **Detection function**: `hasPrematurePR(workspaceRoot)` — runs `gh pr list --state open --head <branch>` and returns PR info if found
-2. **Warning in `porch next`**: When premature PR detected during non-review phase, prepend a warning task telling builder to close the PR and continue normally
-3. **Blocking in `porch done`**: When premature PR detected during non-review phase, refuse to advance and tell builder to close the PR first
-4. **Recovery guidance**: Clear instructions in the warning about what to do (close PR with `gh pr close`, then continue)
+**Component A — Tighten `pr-exists` forge concept**: Change the `pr-exists` forge scripts (`github/pr-exists.sh`, `gitlab/pr-exists.sh`, `gitea/pr-exists.sh`) to only return `true` for OPEN or MERGED PRs. Currently they use `--state all` which includes CLOSED PRs. A CLOSED-but-not-merged PR should not satisfy `pr_exists` — it's either abandoned or was prematurely closed as part of recovery.
+
+This directly fixes the stale-closed-PR bug: if a builder creates a premature PR, closes it after warning, then reaches the review phase, the `pr_exists` check will correctly fail because the closed PR no longer counts. The builder must create a proper new PR during review.
+
+**Component B — Premature PR detection in porch**: Add a `detectPrematurePR()` function to porch that:
+1. Determines the PR-allowed phase from the protocol definition (first phase with `pr_exists` check or `pr` gate)
+2. Compares the current phase to the PR-allowed phase
+3. If the current phase is before the PR-allowed phase, calls the `pr-exists` forge concept to check for open PRs
+4. Returns PR info (number, URL) if a premature PR is detected
+
+Integrate into:
+- **`porch next`**: Prepend an advisory warning task alongside the normal task list. The builder can see the warning AND still get their regular tasks. Warning includes recovery instructions.
+- **`porch done`**: Block advancement if an open premature PR exists. Fail with clear error message and recovery instructions.
+
+**Component C — Builder prompt guardrails**: Add explicit warnings to builder prompts across all protocols that use PR creation:
+- Add "NEVER create a PR until porch tells you to" to the ABSOLUTE RESTRICTIONS section of `builder-prompt.md` templates for SPIR, ASPIR, AIR, TICK, and BUGFIX protocols
+- Add "Don't create a PR — PRs are created in the review phase" to the "What NOT to Do" sections of `implement.md` prompts
+- Update both `codev/` and `codev-skeleton/` copies to stay in sync
 
 **Pros**:
-- Catches the problem at the source (porch state machine)
-- Works for all protocols without protocol-specific changes
-- Detection is automatic — doesn't rely on builder compliance
-- Warnings are advisory in `porch next` (doesn't break flow), blocking in `porch done` (prevents silent divergence)
+- Detection uses forge abstraction (works with GitHub, GitLab, Gitea)
+- Tightened `pr-exists` fixes the closed-PR correctness hole
+- No caching needed — one forge call per porch invocation is acceptable
+- Protocol-agnostic detection (derives PR-allowed phase from protocol definition)
+- Defense-in-depth: detection catches failures, prompts reduce their frequency
 
 **Cons**:
-- Adds a `gh pr list` call to `porch next` (latency concern, but can be cached or made optional)
-- Requires careful handling of edge cases (merged PRs, draft PRs, multiple PRs on same branch)
+- Tightening `pr-exists` changes existing behavior (CLOSED PRs no longer satisfy it) — low risk since CLOSED-not-merged PRs are almost always abandoned
+- One additional forge API call per `porch next`/`porch done` in non-PR phases
 
 **Estimated Complexity**: Medium
 **Risk Level**: Low
 
 ### Approach 2: Prompt-Only Prevention
 
-**Description**: Add explicit, prominent warnings to builder prompts about not creating PRs before the review phase. No code changes to porch.
+**Description**: Add explicit, prominent warnings to builder prompts about not creating PRs before the PR-allowed phase. No code changes to porch.
 
 **Pros**:
 - Simple to implement (text changes only)
@@ -159,53 +190,53 @@ When a builder resumes (context reconnect), it should validate its state against
 - Relies entirely on builder compliance (builders with context limits may forget)
 - No detection or recovery — the failure mode still exists, just made less likely
 - Doesn't address the fundamental gap in porch's state machine
+- Doesn't fix the stale-closed-PR correctness hole
 
 **Estimated Complexity**: Low
 **Risk Level**: Low (but doesn't solve the problem)
 
 ### Approach 3: Protocol-Level PR Phase Check
 
-**Description**: Add a `no_open_pr` check to the implement phase in protocol.json. This check fails if any open PR exists on the current branch. Porch would run this as part of `porch done` for the implement phase.
+**Description**: Add a `no_open_pr` check to non-PR phases in protocol.json. This check fails if any open PR exists on the current branch.
 
 **Pros**:
 - Uses existing check infrastructure (no new code paths)
 - Protocol-level solution means it's declarative and auditable
 
 **Cons**:
-- Only catches premature PRs at `porch done` time, not proactively
-- Requires protocol.json changes for every protocol
+- Only catches premature PRs at `porch done` time, not proactively in `porch next`
+- Requires protocol.json changes for every protocol (and new protocols must remember to add it)
 - Doesn't provide recovery guidance
+- Doesn't fix the stale-closed-PR correctness hole
 
 **Estimated Complexity**: Low
 **Risk Level**: Low
 
-### Recommended: Combination of Approach 1 + Approach 2
+### Recommended: Approach 1
 
-Use Approach 1 (proactive detection in porch) as the primary mechanism, plus Approach 2 (prompt improvements) as defense-in-depth. This provides both detection/recovery (for when things go wrong) and prevention (to make things go wrong less often).
+Approach 1 is the recommended approach because it addresses all three layers (detection, prevention, recovery) and fixes the stale-closed-PR correctness hole. The forge abstraction ensures it works across all forge providers, and the protocol-derived PR-allowed phase makes it work across all protocols without per-protocol configuration.
 
 ## Traps to Avoid
 
 1. **Don't auto-close PRs**: Recovery must be builder-initiated. Auto-closing could destroy legitimate work.
-2. **Don't add latency to every `porch next` call**: The PR check involves a `gh` API call. Consider caching or only checking when in non-review phases.
-3. **Don't block `porch next` on PR detection**: Advisory warnings only. The blocking happens at `porch done` to prevent phase advancement with diverged state.
-4. **Don't add a new status.yaml field for PR state**: Keep detection filesystem/API-based so it works even when status.yaml is out of sync.
-5. **Don't make this SPIR-specific**: The detection logic should work for any protocol that has a review phase with `pr_exists` check.
+2. **Don't use in-memory or file-based caching**: Porch is a per-invocation CLI process. In-memory TTL caches don't survive across invocations. File-based caches create race conditions and stale state (e.g., builder closes PR but cache still reports it as open, trapping builder in a warning loop). Just make a live forge call each time — it's fast enough.
+3. **Don't block `porch next` on PR detection**: Advisory warnings only (prepend to normal task list). The blocking happens at `porch done` to prevent phase advancement with diverged state.
+4. **Don't add a new status.yaml field for PR state**: Keep detection forge-API-based so it works even when status.yaml is out of sync.
+5. **Don't hardcode "review" as the PR-allowed phase**: Derive it from the protocol definition. Different protocols (BUGFIX, AIR, TICK) have different PR phase structures.
+6. **Don't hardcode `gh` CLI calls**: Use the forge concept layer (`executeForgeCommand`) for all PR detection. This ensures compatibility with GitHub, GitLab, and Gitea.
+7. **Don't forget to preserve branch/commits during recovery**: When recovery guidance says "close the premature PR," it must explicitly state that the branch and commits are preserved — a confused builder might try to reset the branch too.
 
-## Open Questions
+## Design Decisions
 
-### Critical (Blocks Progress)
-- [x] Should detection be in `porch next`, `porch done`, or both? — **Both**: advisory in `porch next`, blocking in `porch done`
-
-### Important (Affects Design)
-- [x] Should the `gh pr list` call be cached to avoid latency on every `porch next`? — **Yes, use a simple TTL cache (e.g., 60 seconds)** to avoid hammering the API
-- [x] How should multiple PRs on the same branch be handled? — **Detect any open PR as premature; if all PRs are closed/merged, no warning**
-
-### Nice-to-Know (Optimization)
-- [ ] Should we track PR creation timing in status.yaml for analytics? — Defer to follow-up
+1. **Detection in both `porch next` and `porch done`**: Advisory in `porch next` (builder sees warning alongside normal tasks), blocking in `porch done` (hard stop on phase advancement).
+2. **No caching**: Live forge concept call per invocation. `porch next` is called once per task cycle (not in a tight loop). Typical latency < 1-2 seconds, acceptable trade-off for correctness.
+3. **PR-allowed phase derived from protocol**: First phase with `pr_exists` check or `pr` gate. Works across SPIR, ASPIR, AIR, TICK, BUGFIX.
+4. **CLOSED PRs don't satisfy `pr_exists`**: Tightening `pr-exists.sh` to only count OPEN or MERGED PRs. This is correct — a CLOSED-not-merged PR is abandoned. This fixes both the premature recovery path and the general correctness hole identified in bugfix #568's follow-on.
+5. **Recovery = "close premature PR + continue"**: Builder closes the PR with forge tooling (e.g., `gh pr close`). Since tightened `pr-exists` excludes CLOSED PRs, the recovery cleanly removes the premature PR from detection. The builder must create a fresh PR during the proper PR-allowed phase.
 
 ## Performance Requirements
-- PR detection check should add < 2 seconds to `porch next` when cached
-- No impact when in the review phase (check skipped)
+- PR detection check should add < 2 seconds to `porch next` (live forge call, no cache)
+- No impact when in the PR-allowed phase or later (check skipped)
 
 ## Security Considerations
 - PR detection uses `gh` CLI which respects GitHub auth tokens already configured
@@ -213,34 +244,82 @@ Use Approach 1 (proactive detection in porch) as the primary mechanism, plus App
 
 ## Test Scenarios
 
-### Functional Tests
+### Functional Tests — Detection
 1. **Happy path**: Builder completes all phases normally without premature PR — no warnings, no blocks
-2. **Premature PR during implement**: Builder creates PR during implement phase — `porch next` warns, `porch done` blocks
-3. **Premature PR closed before `porch done`**: Builder closes premature PR after warning — `porch done` succeeds normally
-4. **PR in review phase**: Builder creates PR during review phase — no warning (this is expected behavior)
-5. **Resumed builder with premature PR**: Builder resumes, `porch next` detects existing PR in non-review phase and warns
-6. **Multiple protocols**: Detection works for SPIR, ASPIR, TICK (any protocol with review phase)
-7. **Draft PRs**: Draft PRs are also detected as premature in non-review phases
+2. **Premature PR during implement (SPIR)**: Builder creates open PR during implement phase — `porch next` warns, `porch done` blocks
+3. **Premature PR during specify (SPIR)**: Detection works in early phases, not just implement
+4. **Premature PR during plan (SPIR)**: Same — confirms detection works in all pre-PR phases
+5. **Premature PR during implement (AIR)**: Detection works for AIR protocol where PR phase is `pr`, not `review`
+6. **BUGFIX pr phase not blocked**: Builder creating PR during BUGFIX `pr` phase is NOT flagged (this is the PR-allowed phase)
+7. **TICK review phase not blocked**: Builder creating PR during TICK `review` phase is NOT flagged
+8. **Draft PRs detected**: Draft PRs are also detected as premature in non-PR phases
+9. **PR on different branch**: An open PR on a different branch does NOT trigger false positive
+
+### Functional Tests — Recovery
+10. **Premature PR closed before `porch done`**: Builder closes premature PR after warning — `porch done` succeeds normally
+11. **Closed premature PR doesn't satisfy `pr_exists`**: Builder closes premature PR, reaches review phase, `pr_exists` check correctly fails (must create new PR)
+12. **Merged premature PR still satisfies `pr_exists`**: Edge case — if a premature PR was merged before detection, `pr_exists` passes. (This is intentionally accepted — a merged PR is a delivered artifact regardless of timing.)
+13. **Multiple open PRs on same branch**: Multiple premature PRs — detection warns about all of them, recovery requires closing all
+
+### Functional Tests — Tightened `pr-exists`
+14. **OPEN PR satisfies `pr-exists`**: Existing behavior preserved
+15. **MERGED PR satisfies `pr-exists`**: Existing behavior preserved (bugfix #568 scenario)
+16. **CLOSED PR does NOT satisfy `pr-exists`**: New behavior — CLOSED-not-merged PRs are excluded
+
+### Functional Tests — Prompts
+17. **SPIR implement.md**: Contains "Don't create a PR" in What NOT to Do
+18. **SPIR builder-prompt.md**: Contains PR timing in ABSOLUTE RESTRICTIONS
+19. **All protocol builder-prompt.md files**: ASPIR, AIR, TICK, BUGFIX builder prompts updated
 
 ### Non-Functional Tests
-1. **Latency**: `porch next` with PR check cached completes in < 2s additional overhead
-2. **No `gh` CLI**: Detection gracefully degrades if `gh` is not available (skip check, don't error)
+20. **Latency**: `porch next` with live forge call completes in < 2s additional overhead
+21. **No forge available**: Detection gracefully degrades if forge concept fails (skip check, don't error)
+22. **PR-allowed phase derivation**: Unit test that extracts PR-allowed phase correctly from each protocol definition (SPIR, ASPIR, AIR, TICK, BUGFIX)
 
 ## Dependencies
-- **GitHub CLI (`gh`)**: Required for PR detection (already a dependency)
-- **Porch state machine** (`packages/codev/src/commands/porch/next.ts`): Primary modification target
-- **Porch done command** (`packages/codev/src/commands/porch/index.ts`): Secondary modification target
-- **Builder prompts** (`codev-skeleton/protocols/spir/prompts/implement.md`, `builder-prompt.md`): Text changes
+- **Forge concept layer** (`packages/codev/src/lib/forge.ts`): Used for PR detection via `executeForgeCommand`
+- **Forge PR scripts** (`packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh`): Tightening to exclude CLOSED PRs
+- **Porch state machine** (`packages/codev/src/commands/porch/next.ts`): Primary modification target for premature PR detection
+- **Porch done command** (`packages/codev/src/commands/porch/index.ts`): Secondary modification target for blocking check
+- **Protocol loader** (`packages/codev/src/commands/porch/protocol.ts`): For deriving PR-allowed phase from protocol definition
+- **Builder prompts** (all protocols in both `codev/protocols/` and `codev-skeleton/protocols/`):
+  - `spir/builder-prompt.md`, `spir/prompts/implement.md`
+  - `aspir/builder-prompt.md`, `aspir/prompts/implement.md`
+  - `air/builder-prompt.md`, `air/prompts/implement.md`
+  - `tick/builder-prompt.md`, `tick/prompts/implement.md`
+  - `bugfix/builder-prompt.md`, `bugfix/prompts/fix.md`
+- **Builder role** (`codev/roles/builder.md`, `codev-skeleton/roles/builder.md`): Update Constraints section
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
-| `gh pr list` adds latency | Medium | Low | TTL cache (60s), skip in review phase |
-| False positive (PR exists for valid reason) | Low | Medium | Only check for open PRs on current branch; skip in review phase |
-| Builder ignores warnings | Medium | Low | Blocking check in `porch done` is the hard stop |
-| Breaking existing workflows | Low | High | Unit tests for all detection scenarios; only check non-review phases |
+| Forge call adds latency | Medium | Low | Live call is < 1-2s typical; skip in PR-allowed phase and later |
+| False positive (PR exists for valid reason) | Low | Medium | Only check for OPEN PRs on current branch; skip in PR-allowed phase |
+| Builder ignores advisory warning | Medium | Low | Blocking check in `porch done` is the hard stop |
+| Tightened `pr-exists` breaks legitimate workflow | Low | Medium | Only excludes CLOSED-not-merged PRs; OPEN and MERGED preserved. No known workflow depends on CLOSED PRs satisfying `pr_exists` |
+| New protocol doesn't have standard PR phase | Low | Low | Falls back gracefully — if no `pr_exists` check or `pr` gate found, skip premature detection |
 
 ## Notes
 
-This spec focuses on the **detection + prevention + recovery** triad. Detection catches the problem, prevention reduces its frequency, and recovery provides clean resolution. The combination of porch-level detection (Approach 1) and prompt-level prevention (Approach 2) provides defense-in-depth.
+This spec focuses on the **detection + prevention + recovery** triad. Detection catches the problem, prevention reduces its frequency, and recovery provides clean resolution.
+
+The tightened `pr-exists` check (excluding CLOSED PRs) is a correctness fix that benefits the codebase independently of the premature PR detection feature. It closes a subtle bug where a prematurely-created-then-closed PR could accidentally satisfy the review phase's `pr_exists` check.
+
+## Consultation Log
+
+### Round 1
+
+**Claude** (APPROVE): Confirmed all codebase claims are accurate. Suggested clarifying whether `porch next` should emit normal tasks alongside warnings (yes — addressed in Design Decisions), how to generically identify the PR phase (addressed in Cross-Protocol PR Phase Model), and that recovery guidance should state branch/commits are preserved (addressed in Traps to Avoid #7).
+
+**Codex** (REQUEST_CHANGES): Five issues raised:
+1. Cross-protocol phase model mismatch — **Addressed**: Added "Cross-Protocol PR Phase Model" section with per-protocol analysis and generic derivation rule.
+2. Closed premature PRs bypass `pr_exists` — **Addressed**: Component A of recommended approach tightens `pr-exists` to exclude CLOSED PRs.
+3. Raw `gh` calls bypass forge abstraction — **Addressed**: All detection now uses `executeForgeCommand` via forge concept layer.
+4. TTL cache not implementable for per-invocation CLI — **Addressed**: Dropped caching entirely. Live forge call per invocation is acceptable.
+5. Prompt coverage incomplete (only SPIR mentioned) — **Addressed**: Dependencies now lists all protocol prompt files across SPIR, ASPIR, AIR, TICK, BUGFIX.
+
+**Gemini** (REQUEST_CHANGES): Three issues raised (overlapping with Codex):
+1. Closed premature PRs satisfy `--state all` — **Addressed**: Same as Codex #2 above.
+2. TTL cache creates infinite loop — **Addressed**: Same as Codex #4 above.
+3. Breaks forge abstraction — **Addressed**: Same as Codex #3 above.
