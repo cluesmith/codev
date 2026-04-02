@@ -141,47 +141,51 @@ interface HarnessProvider {
 
 ### Harness Resolution
 
-The harness provider is resolved in this order:
+The harness provider is resolved from explicit configuration only — no auto-detection:
 
-1. **Explicit config** (first priority): New optional fields in `.codev/config.json`:
-   ```json
-   {
-     "shell": {
-       "architect": "/opt/custom/my-agent --flags",
-       "architectHarness": "codex",
-       "builder": "codex",
-       "builderHarness": "codex"
-     }
-   }
-   ```
-   This handles wrappers, custom paths, aliases, and any case where auto-detection fails.
+1. **Built-in harness name**: If `architectHarness` or `builderHarness` matches a built-in provider (`claude`, `codex`, `gemini`), use that provider.
 
-2. **Auto-detection** (fallback): Extract the basename of the first token of the command string and match:
-   - Basename contains `claude` → `claude`
-   - Basename contains `codex` → `codex`
-   - Basename contains `gemini` → `gemini`
-   - Otherwise → no harness (warn and skip role injection)
+2. **Custom harness definition**: If the name matches a key in the `harness` config section (see below), use the custom definition.
 
-   Examples: `claude --dangerously-skip-permissions` → `claude`, `/opt/homebrew/bin/codex` → `codex`, `my-wrapper` → none.
+3. **No harness configured**: If no `architectHarness`/`builderHarness` is set, default to `claude` (preserving current behavior). If a harness name is set but doesn't match any built-in or custom definition, **fail with a clear error** — role injection is critical and must not silently degrade.
 
-3. **No match**: Log a warning that role injection is not supported for the configured shell, but do not crash. The agent launches without role content injected.
+```json
+{
+  "shell": {
+    "architect": "/opt/custom/my-agent --flags",
+    "architectHarness": "codex",
+    "builder": "codex",
+    "builderHarness": "codex"
+  }
+}
+```
 
-### Future Extensibility: Custom Harness Providers
+### Custom Harness Providers
 
-While not in scope for this spec, the design supports a future `harness` section in `.codev/config.json` for defining custom harness providers:
+Users can define custom harness providers in `.codev/config.json` for agent harnesses beyond the built-ins. This follows the same extensibility pattern as forge (concept command overrides) and consult (model configs).
 
 ```json
 {
   "harness": {
     "my-agent": {
-      "role-inject-args": ["--system", "${ROLE_FILE}"],
-      "role-inject-env": {}
+      "roleArgs": ["--system", "${ROLE_FILE}"],
+      "roleEnv": {},
+      "roleScriptFragment": "--system '${ROLE_FILE}'",
+      "roleScriptEnvExport": null
     }
   }
 }
 ```
 
-This mirrors how forge allows custom concept command overrides. The `architectHarness: "my-agent"` config would then route to the custom definition.
+**Template variables:** `${ROLE_FILE}` is replaced with the path to the role file, `${ROLE_CONTENT}` with the raw role text. This allows both file-based and inline injection strategies.
+
+**Field definitions:**
+- `roleArgs`: Array of CLI args for Node `spawn()` call sites. Template variables are expanded.
+- `roleEnv`: Object of env vars to set. Template variables are expanded in values.
+- `roleScriptFragment`: Shell fragment appended after the base command in bash scripts.
+- `roleScriptEnvExport`: An `export` line prepended to bash scripts, or `null`.
+
+The `architectHarness: "my-agent"` config routes to this custom definition. If any required field is missing, fail with a descriptive error.
 
 ### Integration Points
 
@@ -218,8 +222,9 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 
 ### In Scope
 
-- Harness provider module (`harness.ts`) with `claude`, `codex`, `gemini` providers
-- Harness resolution: explicit config (`architectHarness`/`builderHarness`) → auto-detection → graceful fallback
+- Harness provider module (`harness.ts`) with `claude`, `codex`, `gemini` built-in providers
+- Custom harness provider definitions in `.codev/config.json` `harness` section
+- Harness resolution: explicit config (`architectHarness`/`builderHarness`) → default `claude` → fail if unknown
 - Refactor all 5 `--append-system-prompt` locations to use harness providers
 - Update `buildArchitectArgs()` return type to include env vars
 - Update `architect.ts` to write role to file before calling harness
@@ -229,7 +234,6 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 
 ### Out of Scope
 
-- Custom harness definitions in config (future extensibility — the design supports it but we don't implement config parsing for it now)
 - Changes to how the `consult` SDK handles Codex — already works correctly
 - Full interactive parity for Codex/Gemini as architect shells
 - A standalone `harness` CLI command (may be useful later for testing harness configs)
@@ -248,8 +252,8 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 
 6. `afx workspace start` works with `architect: "gemini"` — role injected via `GEMINI_SYSTEM_MD` env var
 7. `afx spawn` works with `builder: "gemini"`
-8. Unknown harnesses produce a clear warning but do not crash
-9. Explicit `architectHarness` / `builderHarness` config overrides auto-detection
+8. Custom harness definitions in config work correctly with template variable expansion
+9. Unknown harness names produce a clear error and fail to launch
 
 ### COULD
 
@@ -260,15 +264,9 @@ The `consult` command's `runCodexConsultation()` at `consult/index.ts:383` uses 
 1. **Claude harness (regression):** `buildRoleInjection()` returns `--append-system-prompt` with content. `buildScriptRoleInjection()` returns `--append-system-prompt "$(cat '...')"`.
 2. **Codex harness:** `buildRoleInjection()` returns `-c model_instructions_file=<path>`. `buildScriptRoleInjection()` returns `-c model_instructions_file='<path>'`.
 3. **Gemini harness:** `buildRoleInjection()` returns env `{ GEMINI_SYSTEM_MD: '<path>' }`. Script returns env export line with empty fragment.
-4. **Unknown harness:** No role injection, warning logged, agent launches without role.
-5. **Harness detection:**
-   - `claude` → `claude`
-   - `claude --dangerously-skip-permissions` → `claude`
-   - `/opt/homebrew/bin/codex` → `codex`
-   - `codex exec --full-auto` → `codex`
-   - `gemini` → `gemini`
-   - `my-custom-agent` → none (warning)
-6. **Config override:** `builderHarness: "codex"` returns `codex` provider regardless of command string
+4. **Unknown harness name:** Fails with clear error (e.g., `builderHarness: "nonexistent"` → error, not silent degradation).
+5. **Custom harness:** Config-defined harness with `roleArgs: ["--system", "${ROLE_FILE}"]` correctly expands template variables and produces expected args.
+6. **Default behavior:** No `architectHarness`/`builderHarness` set → defaults to `claude` provider (backward compatible).
 7. **No role provided:** All harnesses work correctly when no role is configured
 8. **Call-site integration:** Tests verify that `architect()`, `buildArchitectArgs()`, `startBuilderSession()`, and `buildWorktreeLaunchScript()` produce correct commands for each harness
 
@@ -287,8 +285,14 @@ All three reviewers gave **REQUEST_CHANGES**.
 - **`architect.ts` doesn't write role to disk** (Gemini reviewer) — spec requires writing role to `.architect-role.md` before calling harness.
 - **`buildArchitectArgs()` return type** (Codex reviewer) — returns `{ args, env }` for Gemini env-var injection.
 
-### User Feedback
+### User Feedback (Iteration 1)
 
-- **Extensibility requirement** — must support arbitrary agent harnesses, not just hardcoded tools. Addressed via the harness provider pattern (matching forge's concept-command pattern), explicit harness config, auto-detection, and graceful fallback for unknown harnesses.
+- **Extensibility requirement** — must support arbitrary agent harnesses, not just hardcoded tools. Addressed via the harness provider pattern (matching forge's concept-command pattern).
 - **Terminology** — "shell adapter" → "agent harness" to match established terminology.
-- **Forge pattern** — design follows the same provider-based extensibility pattern as forge (built-in providers + config overrides).
+- **Forge/consult pattern** — design follows the same provider-based extensibility pattern as forge and consult.
+
+### Architect Review Comments (Iteration 2)
+
+- **"Don't like auto-detection. Let's keep it simple."** — Removed auto-detection entirely. Harness is resolved from explicit config only. Default is `claude` for backward compatibility.
+- **"Role injection is critical. It should fail cleanly."** — Changed from warn-and-skip to fail-with-error when a configured harness name doesn't match any built-in or custom definition.
+- **"Custom harness providers are in scope."** — Moved custom harness config parsing from "future extensibility" to in-scope. Users can define custom providers in `.codev/config.json` `harness` section with template variables (`${ROLE_FILE}`, `${ROLE_CONTENT}`).
