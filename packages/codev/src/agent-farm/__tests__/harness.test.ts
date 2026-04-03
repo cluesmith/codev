@@ -172,6 +172,22 @@ describe('harness', () => {
         roleEnv: 'not-an-object',
       })).toThrow('"roleEnv" must be an object');
     });
+
+    it('rejects non-string roleEnv values', () => {
+      expect(() => validateCustomHarnessConfig('test', {
+        roleArgs: [],
+        roleScriptFragment: '',
+        roleEnv: { GOOD: 'ok', BAD: 123 },
+      })).toThrow('"roleEnv.BAD" must be a string');
+    });
+
+    it('rejects non-string roleScriptEnv values', () => {
+      expect(() => validateCustomHarnessConfig('test', {
+        roleArgs: [],
+        roleScriptFragment: '',
+        roleScriptEnv: { KEY: true },
+      })).toThrow('"roleScriptEnv.KEY" must be a string');
+    });
   });
 
   // ===========================================================================

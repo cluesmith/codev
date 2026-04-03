@@ -158,12 +158,26 @@ export function validateCustomHarnessConfig(name: string, config: unknown): Cust
     throw new Error(`Harness "${name}": missing required field "roleScriptFragment" (must be a string)`);
   }
 
-  if (obj.roleEnv !== undefined && (typeof obj.roleEnv !== 'object' || obj.roleEnv === null)) {
-    throw new Error(`Harness "${name}": "roleEnv" must be an object if provided`);
+  if (obj.roleEnv !== undefined) {
+    if (typeof obj.roleEnv !== 'object' || obj.roleEnv === null) {
+      throw new Error(`Harness "${name}": "roleEnv" must be an object if provided`);
+    }
+    for (const [k, v] of Object.entries(obj.roleEnv as Record<string, unknown>)) {
+      if (typeof v !== 'string') {
+        throw new Error(`Harness "${name}": "roleEnv.${k}" must be a string, got ${typeof v}`);
+      }
+    }
   }
 
-  if (obj.roleScriptEnv !== undefined && (typeof obj.roleScriptEnv !== 'object' || obj.roleScriptEnv === null)) {
-    throw new Error(`Harness "${name}": "roleScriptEnv" must be an object if provided`);
+  if (obj.roleScriptEnv !== undefined) {
+    if (typeof obj.roleScriptEnv !== 'object' || obj.roleScriptEnv === null) {
+      throw new Error(`Harness "${name}": "roleScriptEnv" must be an object if provided`);
+    }
+    for (const [k, v] of Object.entries(obj.roleScriptEnv as Record<string, unknown>)) {
+      if (typeof v !== 'string') {
+        throw new Error(`Harness "${name}": "roleScriptEnv.${k}" must be a string, got ${typeof v}`);
+      }
+    }
   }
 
   return obj as unknown as CustomHarnessConfig;
