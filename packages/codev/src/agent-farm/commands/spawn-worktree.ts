@@ -12,6 +12,7 @@ import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSy
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness } from '../utils/config.js';
+import { shellEscapeSingleQuote } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
@@ -597,7 +598,7 @@ export async function startBuilderSession(
     const harness = getBuilderHarness(config.workspaceRoot);
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${v}'`)
+      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
 
@@ -678,7 +679,7 @@ export function buildWorktreeLaunchScript(
     const harness = getBuilderHarness(workspaceRoot);
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
-      .map(([k, v]) => `export ${k}='${v}'`)
+      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
 

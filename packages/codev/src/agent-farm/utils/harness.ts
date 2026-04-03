@@ -55,7 +55,7 @@ export const CLAUDE_HARNESS: HarnessProvider = {
     env: {},
   }),
   buildScriptRoleInjection: (_content, filePath) => ({
-    fragment: `--append-system-prompt "$(cat '${filePath}')"`,
+    fragment: `--append-system-prompt "$(cat '${shellEscapeSingleQuote(filePath)}')"`,
     env: {},
   }),
 };
@@ -66,7 +66,7 @@ export const CODEX_HARNESS: HarnessProvider = {
     env: {},
   }),
   buildScriptRoleInjection: (_content, filePath) => ({
-    fragment: `-c model_instructions_file='${filePath}'`,
+    fragment: `-c model_instructions_file='${shellEscapeSingleQuote(filePath)}'`,
     env: {},
   }),
 };
@@ -101,6 +101,14 @@ function expandTemplateVars(template: string, roleContent: string, roleFilePath:
   return template
     .replace(/\$\{ROLE_FILE\}/g, roleFilePath)
     .replace(/\$\{ROLE_CONTENT\}/g, roleContent);
+}
+
+/**
+ * Escape a string for safe inclusion inside single quotes in bash.
+ * Replaces ' with '\'' (end quote, escaped quote, start quote).
+ */
+export function shellEscapeSingleQuote(value: string): string {
+  return value.replace(/'/g, "'\\''");
 }
 
 // =============================================================================
