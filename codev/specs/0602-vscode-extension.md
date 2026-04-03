@@ -247,8 +247,30 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 **Opening a terminal:**
 1. User triggers "Open Architect Terminal" or "Open Builder #42 Terminal" via Command Palette or TreeView
 2. Extension calls `GET /api/terminals` to find the terminal ID
-3. Creates WebSocket to `/ws/terminal/:id`
+3. Creates WebSocket to `/workspace/:base64path/ws/terminal/:id`
 4. Creates `vscode.window.createTerminal({ name: "Architect" | "Builder #42 [implement]", pty })`
+
+**Architect terminal layout (editor split):**
+The architect terminal is a native `Pseudoterminal` that opens as a **side editor** for full vertical height — not in the bottom panel. On "Open Architect Terminal":
+1. Create the terminal as above
+2. Move it into the editor area via `workbench.action.terminal.moveIntoEditor`
+3. Split the editor group vertically so architect is on the left, code files on the right
+
+```
+┌──────────┬───────────────┬──────────────┐
+│ Work View│  Architect    │              │
+│ TreeView │  (native      │  Code Editor │
+│          │   terminal)   │              │
+│          │               │              │
+│          ├───────────────┴──────────────┤
+│          │  Builder terminals (bottom)   │
+└──────────┴──────────────────────────────┘
+```
+
+This mirrors the browser dashboard's split-pane layout (architect left, content right) while using native VS Code terminals with full keyboard handling. The user can resize or rearrange freely. Builder and shell terminals remain in the bottom panel.
+
+**Builder/shell terminals:**
+Builders and shells open in the standard bottom terminal panel. Named `Builder #42 [implement]`, `Shell #1`, etc.
 
 **Binary protocol adapter:**
 - **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode()` → `onDidWrite.fire(string)`
@@ -626,6 +648,173 @@ Spec 0066 was written against a fundamentally different architecture (tmux + tty
 
 **Relationship to browser dashboard:**
 This extension is additive. The browser dashboard continues to work. Both UIs consume the same Tower API. No server-side changes are required for the initial version. Future Tower API enhancements (e.g., a multi-topic WebSocket for state + terminals on one connection) would benefit both clients.
+
+## UX Walkthrough: Browser Dashboard vs VS Code Extension
+
+### Starting Up
+
+**Browser today:**
+1. Run `afx tower start`
+2. Open browser to `localhost:4100`
+3. See the full dashboard — architect terminal on the left, work view on the right
+
+**VS Code:**
+1. Run `afx tower start` (same)
+2. Open your project in VS Code — extension auto-activates when it detects `codev/` directory
+3. Status bar at the bottom shows `$(server) 3 builders · 1 blocked`
+4. Sidebar has a "Codev Agent Farm" panel with your Work View TreeView
+5. Open the architect terminal — it splits the editor vertically (architect left, code right)
+6. No browser needed
+
+```
+┌──────────┬───────────────┬──────────────┐
+│ Work View│  Architect    │              │
+│ TreeView │  (native      │  Code Editor │
+│          │   terminal)   │              │
+│          │               │              │
+│          ├───────────────┴──────────────┤
+│          │  Builder terminals (bottom)   │
+└──────────┴──────────────────────────────┘
+```
+
+### Monitoring Builders
+
+**Browser today:**
+- Work View tab on the right panel — builder cards showing status, phase, progress
+- Click a builder card to switch to its terminal tab
+- Needs Attention section at the top highlights blocked gates
+
+**VS Code:**
+- TreeView sidebar always visible alongside your code — no tab switching
+- Expand "Builders" to see `#42 password-hashing [implement] ● running`
+- "Needs Attention" node at the top: `#44 api-refactor — blocked on plan-approval (12m)`
+- Status bar gives you the count at a glance without even looking at the sidebar
+
+**Key difference:** In the browser, monitoring builders means you're *in the dashboard*. In VS Code, you see builder state *while editing code* — it's peripheral information, not a separate context.
+
+### Opening a Builder Terminal
+
+**Browser today:**
+- Click the builder's tab in the tab bar (e.g., "Builder #42")
+- xterm.js renders the terminal in the right panel
+- You can see the architect terminal simultaneously in the left panel (split pane)
+
+**VS Code:**
+- Right-click builder in TreeView → "Open Terminal", or `Cmd+Shift+P` → "Codev: Open Builder Terminal"
+- Terminal opens in VS Code's bottom terminal panel
+- Architect stays in the left editor split, code on the right, builders at the bottom
+- You can see architect + code + builder simultaneously
+
+**Key difference:** Both give you a split layout. The browser's is purpose-built (architect left, content right). VS Code's uses native editor splits and terminal panel — the architect is a side editor at full vertical height, builders are in the bottom panel, and your code is always visible.
+
+### Sending a Message to a Builder
+
+**Browser today:**
+- Switch to architect terminal tab
+- Type `afx send 42 "implement the password hashing function"`
+- Or use the inline send UI
+
+**VS Code:**
+- Option A: Type `afx send 42 "..."` in any VS Code terminal (identical to today)
+- Option B: `Cmd+Shift+P` → "Codev: Send Message" → pick builder from dropdown → type message in input box → done
+- Option C: Right-click builder #42 in TreeView → "Send Message"
+
+**Key difference:** The Command Palette flow is faster than switching to the architect terminal. You can send a message without leaving the file you're editing.
+
+### Clicking a File Path in Terminal Output
+
+**Browser today:**
+- Builder terminal shows `/src/auth/hash.ts:42`
+- Click it → opens in the browser's built-in file viewer (Shiki highlighting, line numbers)
+- It's a read-only viewer — you can't edit there
+
+**VS Code:**
+- Builder terminal shows `/src/auth/hash.ts:42`
+- Click it → opens in VS Code's editor at line 42
+- You're immediately in a full editor — syntax highlighting, IntelliSense, go-to-definition, edit in place
+
+**Key difference:** This is the single biggest UX improvement. Today, file clicks dead-end in a read-only viewer. In VS Code, they land you exactly where you need to be to take action.
+
+### Approving a Gate
+
+**Browser today:**
+- See "Needs Attention" in Work View
+- Switch to your terminal
+- Run `porch approve 44 plan-approval`
+
+**VS Code:**
+- Status bar shows `$(bell) Gate: plan-approval #44`
+- Click it → approval prompt appears
+- Or `Cmd+Shift+P` → "Codev: Approve Gate" → pick from list
+- Or right-click the blocked builder in TreeView → "Approve Gate"
+
+**Key difference:** Three clicks vs switching context to a terminal and typing a command.
+
+### Spawning a New Builder
+
+**Browser today:**
+- Switch to architect terminal
+- Type `afx spawn 190 --protocol spir`
+
+**VS Code:**
+- `Cmd+Shift+P` → "Codev: Spawn Builder"
+- Quick-pick: enter issue number → pick protocol → optionally enter branch name
+- Builder spawns, appears in TreeView, terminal becomes available
+
+**Key difference:** Guided flow vs remembering CLI syntax. Also supports `--branch` for continuing on existing PR branches.
+
+### Reviewing Code (Annotations)
+
+**Browser today:**
+- `afx open file.ts` → opens in browser annotation viewer
+- Click the "+" gutter button → type a `REVIEW(@architect)` comment
+- Comment is written directly into the file
+
+**VS Code:**
+- Open the file normally in your editor
+- Click the native "+" gutter icon (same as GitHub PR inline comments)
+- Type your review comment → it inserts `// REVIEW(@architect): text` into the file
+- Same file format — interoperable with the browser dashboard
+
+**Key difference:** Uses VS Code's native Comments API instead of a custom web UI. Feels like doing a PR review inline.
+
+### Team & Analytics
+
+**Browser today:**
+- Team tab shows member cards, activity feed, messages
+- Analytics tab shows Recharts charts (merged PR metrics, wall-clock hours)
+
+**VS Code:**
+- `Cmd+Shift+P` → "Codev: View Team" or "Codev: View Analytics"
+- Opens as a Webview panel (essentially the same React components embedded in VS Code)
+- Data proxied securely through the extension host
+
+**Key difference:** Minimal — these are Webview panels, so the experience is similar. The benefit is not having to switch to a browser to see them.
+
+### What VS Code Loses
+
+| Feature | Why |
+|---------|-----|
+| **Curated split pane** | Browser's layout is automatic. VS Code requires a one-time "Open Architect Terminal" action to set up the split, but then mirrors the same layout. |
+| **Mobile layout** | Browser dashboard has a mobile-responsive view. VS Code is desktop-only. |
+| **Rich file viewer** | Browser handles images, video, PDF, 3D models inline. VS Code handles most natively except 3D. |
+| **Multi-workspace overview** | Browser dashboard shows all workspaces at once. VS Code scopes to the open workspace by default. |
+| **Remote access** | Browser works through cloud tunnel for remote collaboration. VS Code extension is local-only (unless using VS Code Remote SSH). |
+
+### What VS Code Gains
+
+| Feature | Why |
+|---------|-----|
+| **Zero context switching** | Never leave the IDE |
+| **Native file editing** | File clicks → real editor, not a viewer |
+| **Command Palette** | All operations keyboard-accessible |
+| **Peripheral monitoring** | Builder state visible while coding |
+| **Native review comments** | Gutter "+" feels like PR reviews |
+| **IDE integration** | IntelliSense, go-to-definition, git, extensions all available alongside |
+
+### Summary
+
+The browser dashboard is a **dedicated control center** — best for monitoring multiple builders, remote access, and the curated split-pane experience. The VS Code extension is for **staying in flow** — you see builder state, send messages, approve gates, and click into files without ever leaving your editor.
 
 **Dashboard features deliberately excluded from the extension:**
 - **File tree browser** — VS Code's native Explorer is superior; no need to replicate
