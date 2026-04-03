@@ -531,11 +531,12 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
+      const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), workspacePath);
       restartOptions = {
         command: cmdParts[0],
-        args: buildArchitectArgs(cmdParts.slice(1), workspacePath),
+        args: architectArgs,
         cwd: workspacePath,
-        env: cleanEnv,
+        env: { ...cleanEnv, ...harnessEnv },
         restartDelay: 2000,
         maxRestarts: 50,
       };
@@ -720,11 +721,12 @@ export async function getTerminalsForWorkspace(
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];
+          const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path);
           restartOptions = {
             command: cmdParts[0],
-            args: buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path),
+            args: architectArgs,
             cwd: dbSession.workspace_path,
-            env: cleanEnv,
+            env: { ...cleanEnv, ...harnessEnv },
             restartDelay: 2000,
             maxRestarts: 50,
           };

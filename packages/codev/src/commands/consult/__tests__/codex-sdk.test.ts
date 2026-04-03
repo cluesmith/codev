@@ -255,12 +255,12 @@ describe('runCodexConsultation() with mocked SDK', () => {
 
     await runCodexConsultation('test query', 'You are a reviewer', tmpDir);
 
-    // Verify constructor receives experimental_instructions_file in config
+    // Verify constructor receives model_instructions_file in config
     expect(mockConstructorArgs).toBeDefined();
     expect((mockConstructorArgs as Record<string, unknown>).config).toBeDefined();
     const config = (mockConstructorArgs as Record<string, Record<string, unknown>>).config;
-    expect(config.experimental_instructions_file).toBeDefined();
-    expect(typeof config.experimental_instructions_file).toBe('string');
+    expect(config.model_instructions_file).toBeDefined();
+    expect(typeof config.model_instructions_file).toBe('string');
 
     // Verify startThread receives model, sandboxMode, and workingDirectory
     expect(mockStartThreadArgs).toBeDefined();

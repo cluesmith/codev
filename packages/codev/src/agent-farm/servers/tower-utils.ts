@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import type { ServerResponse } from 'node:http';
 import type { RateLimitEntry } from './tower-types.js';
 import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
+import { getArchitectHarness } from '../utils/config.js';
 
 // ============================================================================
 // Rate Limiting
@@ -167,23 +168,29 @@ export const MIME_TYPES: Record<string, string> = {
 // ============================================================================
 
 /**
- * Build architect command args with role prompt injected.
- * Writes the role to .architect-role.md in the workspace dir and adds
- * --append-system-prompt to the args (matching how builders receive theirs).
- * Returns the modified args array.
+ * Build architect command args with role prompt injected via harness provider.
+ * Writes the role to .architect-role.md in the workspace dir and uses the
+ * configured harness to determine the correct CLI args and env vars.
+ * Returns args and env for the caller to merge into session creation.
  */
-export function buildArchitectArgs(baseArgs: string[], workspacePath: string): string[] {
+export function buildArchitectArgs(baseArgs: string[], workspacePath: string): { args: string[]; env: Record<string, string> } {
   const codevDir = path.join(workspacePath, 'codev');
   const bundledRolesDir = path.resolve(import.meta.dirname, '../../../skeleton/roles');
   const config: RoleConfig = { codevDir, bundledRolesDir, workspaceRoot: workspacePath };
 
   const role = loadRolePrompt(config, 'architect');
-  if (!role) return baseArgs;
+  if (!role) return { args: baseArgs, env: {} };
 
   const roleFile = path.join(workspacePath, '.architect-role.md');
   fs.writeFileSync(roleFile, role.content);
 
-  return [...baseArgs, '--append-system-prompt', role.content];
+  const harness = getArchitectHarness(workspacePath);
+  const injection = harness.buildRoleInjection(role.content, roleFile);
+
+  return {
+    args: [...baseArgs, ...injection.args],
+    env: injection.env,
+  };
 }
 
 /**

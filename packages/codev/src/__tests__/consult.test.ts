@@ -81,7 +81,7 @@ describe('consult command', () => {
     });
 
     it('should have correct CLI configuration for each model', () => {
-      // Note: Codex now uses experimental_instructions_file config flag (not env var)
+      // Note: Codex now uses model_instructions_file config flag
       // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
       // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
       // Bugfix #370: --yolo removed from MODEL_CONFIGS; added conditionally in
@@ -96,14 +96,13 @@ describe('consult command', () => {
       expect(configs.codex.args).toContain('--full-auto');
     });
 
-    it('should use experimental_instructions_file for codex (not env var)', () => {
-      // Spec 0043/0039 amendment: Codex should use experimental_instructions_file config flag
-      // This is the official approach per https://github.com/openai/codex/discussions/3896
-      // Instead of the undocumented CODEX_SYSTEM_MESSAGE env var
+    it('should use model_instructions_file for codex (not env var)', () => {
+      // Spec 591: Codex's experimental_instructions_file is deprecated.
+      // The current flag is model_instructions_file.
       // The actual command building happens in runConsultation, tested via dry-run e2e tests
       // This test documents the expected behavior
-      const codexApproach = 'experimental_instructions_file';
-      expect(codexApproach).toBe('experimental_instructions_file');
+      const codexApproach = 'model_instructions_file';
+      expect(codexApproach).toBe('model_instructions_file');
     });
 
     it('should use model_reasoning_effort=low for codex', () => {

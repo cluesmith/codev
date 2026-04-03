@@ -382,7 +382,7 @@ export async function runCodexConsultation(
   try {
     const codex = new Codex({
       config: {
-        experimental_instructions_file: tempFile,
+        model_instructions_file: tempFile,
       },
     });
 
