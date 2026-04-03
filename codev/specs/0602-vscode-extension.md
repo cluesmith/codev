@@ -119,10 +119,10 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 - No native stdout capture — but irrelevant since Tower/shellper handle observation
 
 **WebSocket Binary Protocol Translation:**
-- Incoming `0x01` frames: strip first byte, decode `Uint8Array` → UTF-8 string via `TextDecoder`, fire to `onDidWrite`
+- Incoming `0x01` frames: strip first byte, decode `Uint8Array` → UTF-8 string via `TextDecoder('utf-8', { stream: true })` (streaming mode required to handle multi-byte Unicode split across frames), fire to `onDidWrite`
 - Outgoing input: encode string → `Uint8Array`, prepend `0x01`, send over WebSocket
 - Control frames (`0x00`): handle resize, ping/pong, sequence numbers for replay
-- Backpressure: VS Code extension host can lock up if terminal output exceeds ~50KB/s — implement chunked delivery with debouncing
+- Backpressure: VS Code extension host can lock up if terminal output exceeds ~50KB/s — implement chunked delivery with `setImmediate` between chunks (not `setTimeout(0)` — Node.js event loop semantics differ from browser)
 
 **VS Code Webview Limitations:**
 - Webview state lost when hidden (use `retainContextWhenHidden` selectively for analytics only)
@@ -226,8 +226,9 @@ Singleton service managing all communication with Tower:
 - **SSE client**: Subscribes to `/api/events`, routes events to TreeView/Status Bar refresh. Handles 30s heartbeat events without triggering state refreshes.
 - **REST client**: Authenticated calls to all `/api/*` endpoints
 - **WebSocket pool**: One WebSocket per open terminal, managed lifecycle
-- **Auth**: Reads `~/.agent-farm/local-key`, sends as `codev-web-key` header (HTTP) or query param (WebSocket)
-- **Health check**: Pings `/api/health` on activation and after SSE drops
+- **Auth**: Reads `~/.agent-farm/local-key`, sends as `codev-web-key` header (HTTP). For WebSocket, send auth via a `0x00` control message after connection (not query param — query params leak into logs and process lists). Store key in VS Code `SecretStorage` for persistence, but **re-read from disk on 401** to handle key rotation.
+- **Health check**: Pings `/api/health` on activation and after SSE drops. Health response should include a protocol version for compatibility checking.
+- **Output Channel**: Register `Codev` Output Channel for structured diagnostic logging (connection events, errors, reconnections). Essential for debugging.
 - **Reconnection**: Exponential backoff (1s → 2s → 4s → 8s → max 30s)
 - **Config**: Reads `.codev/config.json` for Tower port override and project-level settings
 
@@ -236,7 +237,7 @@ Tower has two route layers. The extension must use the correct one:
 - **Global routes** (no prefix): `/api/overview`, `/api/send`, `/api/events`, `/api/health`, `/api/analytics`, `/api/cron/*`, `/api/workspaces`
 - **Workspace-scoped routes** (prefixed): `/workspace/:base64urlPath/api/state`, `/workspace/:base64urlPath/api/team`, `/workspace/:base64urlPath/api/tabs/shell`, `/workspace/:base64urlPath/ws/terminal/:id`
 
-The Connection Manager encodes the active workspace path as base64url and prefixes all workspace-scoped requests. The workspace path is determined by matching VS Code's workspace folder against Tower's known workspaces (via `GET /api/workspaces`).
+The Connection Manager encodes the active workspace path as base64url and prefixes all workspace-scoped requests. The workspace path is determined by traversing up from VS Code's workspace folder to find the `.codev/config.json` root, then matching that path against Tower's known workspaces (via `GET /api/workspaces`). This handles cases where the user opens a subdirectory (e.g., `~/project/src`) rather than the project root.
 
 All consumers (TreeView, Status Bar, Terminals, Commands) go through this singleton. When Tower goes offline, a single state change propagates to all UI surfaces.
 
@@ -250,11 +251,14 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 3. Creates WebSocket to `/workspace/:base64path/ws/terminal/:id`
 4. Creates `vscode.window.createTerminal({ name: "Architect" | "Builder #42 [implement]", pty })`
 
-**Architect terminal layout (editor split):**
-The architect terminal is a native `Pseudoterminal` that opens as a **side editor** for full vertical height — not in the bottom panel. On "Open Architect Terminal":
-1. Create the terminal as above
-2. Move it into the editor area via `workbench.action.terminal.moveIntoEditor`
-3. Split the editor group vertically so architect is on the left, code files on the right
+**Architect terminal layout:**
+Controlled by setting `codev.architectTerminalPosition` (`"editor"` | `"panel"`, default: `"panel"`).
+
+- **`"panel"` (default)**: Architect opens in the standard bottom terminal panel alongside builders. Safe, no layout manipulation.
+- **`"editor"`**: Architect opens as a side editor for full vertical height. On "Open Architect Terminal":
+  1. Create the terminal as above
+  2. Move it into the editor area via `workbench.action.terminal.moveIntoEditor`
+  3. Split the editor group vertically so architect is on the left, code files on the right
 
 ```
 ┌──────────┬───────────────┬──────────────┐
@@ -267,13 +271,13 @@ The architect terminal is a native `Pseudoterminal` that opens as a **side edito
 └──────────┴──────────────────────────────┘
 ```
 
-This mirrors the browser dashboard's split-pane layout (architect left, content right) while using native VS Code terminals with full keyboard handling. The user can resize or rearrange freely. Builder and shell terminals remain in the bottom panel.
+**Fallback**: `workbench.action.terminal.moveIntoEditor` is an undocumented internal VS Code command that may change between versions. If it fails, the extension falls back to opening the architect in the standard panel and logs a warning to the Output Channel. The editor-split is a best-effort layout enhancement, not a hard requirement.
 
 **Builder/shell terminals:**
 Builders and shells open in the standard bottom terminal panel. Named `Builder #42 [implement]`, `Shell #1`, etc.
 
 **Binary protocol adapter:**
-- **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode()` → `onDidWrite.fire(string)`
+- **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode(bytes, { stream: true })` → `onDidWrite.fire(string)`
 - **Inbound** (`0x00` control): Parse JSON, handle ping/pong/seq
 - **Outbound** (user types): `TextEncoder.encode(input)` → prepend `0x01` → `ws.send()`
 - **Resize**: `setDimensions(cols, rows)` → `0x00` control frame with dimensions
@@ -291,7 +295,8 @@ WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, D
 On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
 
 **Backpressure:**
-- Chunk large `onDidWrite` calls (> 16KB) with `setTimeout(0)` between chunks
+- Chunk large `onDidWrite` calls (> 16KB) with `setImmediate` between chunks to yield to the Node.js event loop
+- **Never drop PTY frames** — dropping intermediate data corrupts ANSI state (colors, cursor position) permanently. Instead, if queued data exceeds 1MB, close the WebSocket, let the UI drain, then reconnect. Tower's ring buffer with sequence numbers ensures clean replay on reconnect without data loss.
 - Prevents extension host CPU spikes and "Extension causes high CPU" warnings
 
 **Image paste:**
@@ -385,21 +390,22 @@ The browser dashboard's `open.html` provides a custom gutter "+" button that ins
 - Users click "+" on any line, type a comment, and submit — identical UX to PR reviews
 
 **Comment persistence (file-based, shared with browser dashboard):**
-- On submit: insert `// REVIEW(@architect): comment text` into the file at the target line using language-appropriate comment syntax
-- Save via `POST /api/annotate/{tabId}/save` (same endpoint the browser dashboard uses)
+- On submit: insert `// REVIEW(@architect): comment text` into the file at the target line using `vscode.workspace.applyEdit()` (`WorkspaceEdit`). This respects VS Code's undo stack, dirty buffer state, and avoids overwriting unsaved edits. **Do NOT use `POST /api/annotate/{tabId}/save`** — that endpoint calls `fs.writeFileSync` which would overwrite any unsaved VS Code buffer changes.
 - On file open: scan for existing `REVIEW(...)` patterns using the same regex patterns from `open.html` (`COMMENT_PATTERNS`) and render them as `CommentThread` instances
+- Re-scan on `TextDocumentChangeEvent` to update thread positions when lines shift
 
 **Comment syntax by language:**
-- JS/TS: `// REVIEW(@author): text`
-- Python/Bash/YAML: `# REVIEW(@author): text`
+- JS/TS/Go/Rust/Java/Swift/Kotlin/C/C++: `// REVIEW(@author): text`
+- Python/Ruby/Bash/YAML: `# REVIEW(@author): text`
 - HTML/Markdown: `<!-- REVIEW(@author): text -->`
 - CSS: `/* REVIEW(@author): text */`
+- Files with no comment syntax (JSON, binary): disable the comment gutter "+" button
 
-**Interop guarantee:** Both the browser dashboard and VS Code extension read/write the same in-file comment format. A comment added in VS Code appears in the browser dashboard's annotations panel, and vice versa.
+**Interop guarantee:** Both the browser dashboard and VS Code extension read/write the same in-file comment format. A comment added in VS Code appears in the browser dashboard's annotations panel, and vice versa. Concurrent modification from both clients on the same file is not supported — last writer wins.
 
 **Actions on comment threads:**
-- Edit: modify the comment line in-place, re-save
-- Delete: remove the comment line from the file, re-save
+- Edit: modify the comment line in-place via `WorkspaceEdit`
+- Delete: remove the comment line from the file via `WorkspaceEdit`
 - Resolve: delete the comment (review comments are transient — resolved means addressed)
 
 ### 8. Shell Terminals
@@ -457,14 +463,20 @@ Single Webview panel embedding the existing Recharts analytics page:
 
 - Build a separate Vite entry point (`analytics-embed.html`) that renders only the analytics components
 - Load via `webview.html` using `asWebviewUri` for asset paths
+- **Theme integration**: Inject CSS that maps VS Code theme variables (`var(--vscode-editor-background)`, `var(--vscode-editor-foreground)`) to the dashboard's custom CSS variables. Without this, the hardcoded dark-mode styles will clash with VS Code light themes.
 - Data fetching proxied through extension host via `postMessage` (never expose local-key to Webview context)
 - Use `retainContextWhenHidden` to preserve chart state when panel is hidden
 
 ## Prerequisite: Shared Package Extraction
 
-Before building the extension, extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension.
+Extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension. **Phased approach** — do not block V1 on extracting everything.
 
-### `@cluesmith/codev-types` (Required)
+**Phase 1 (before V1)**: Extract `@cluesmith/codev-types` only. Low risk, high value.
+**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-api-client` once patterns stabilize across two real consumers (dashboard + extension).
+
+**Monorepo prerequisite**: Add a root `package.json` with `"workspaces": ["packages/*"]` before extracting. Currently no workspace manager exists. Without this, `file:` dependencies will break `vsce` packaging.
+
+### `@cluesmith/codev-types` (Required, Phase 1)
 
 Zero-dependency package with shared TypeScript interfaces currently duplicated between `packages/codev/src/agent-farm/types.ts` (server) and `packages/codev/dashboard/src/lib/api.ts` (dashboard):
 
@@ -475,7 +487,7 @@ Zero-dependency package with shared TypeScript interfaces currently duplicated b
 
 Without this package, the extension becomes a third independent copy of these types, making protocol drift inevitable.
 
-### `@cluesmith/codev-api-client` (Recommended)
+### `@cluesmith/codev-api-client` (Recommended, Phase 2 — after V1)
 
 Environment-agnostic Tower API client shared between dashboard and extension:
 
@@ -501,6 +513,27 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 - **UI components** — React (browser) vs Extension API share nothing
 - **Dashboard package** — already semi-independent with its own `package.json`; extraction not needed yet
 
+## Extension Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `codev.towerHost` | string | `localhost` | Tower server host |
+| `codev.towerPort` | number | `4100` | Tower server port (overridden by `.codev/config.json`) |
+| `codev.workspacePath` | string | auto-detect | Override workspace path for Tower matching |
+| `codev.architectTerminalPosition` | `"editor"` \| `"panel"` | `"panel"` | Where to open the architect terminal |
+| `codev.autoConnect` | boolean | `true` | Connect to Tower on activation |
+| `codev.telemetry` | boolean | `false` | No telemetry collected. Extension respects VS Code's global telemetry setting. |
+
+## Default Keyboard Shortcuts
+
+| Shortcut | Command |
+|----------|---------|
+| `Ctrl+Shift+A` / `Cmd+Shift+A` | Codev: Open Architect Terminal |
+| `Ctrl+Shift+M` / `Cmd+Shift+M` | Codev: Send Message |
+| `Ctrl+Shift+G` / `Cmd+Shift+G` | Codev: Approve Gate |
+
+Additional commands available via Command Palette but without default keybindings to avoid conflicts.
+
 ## Multi-Workspace Handling
 
 - **Default**: Scope to current VS Code workspace folder. Match against Tower's known workspaces by path.
@@ -524,8 +557,10 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 ### Critical (Blocks Progress)
 - [x] Should the extension be in this monorepo or a separate repo? **RESOLVED: Monorepo.** Extension lives in this repo (e.g., `packages/codev-vscode/`), sharing types and build infrastructure.
 
+### Critical (Blocks Progress)
+- [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach? This is a core architectural decision — URI scheme works cross-process, filesystem watcher is fundamentally different.
+
 ### Important (Affects Design)
-- [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach?
 - [ ] Should the extension auto-start Tower if it's not running, or always require manual start?
 - [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
 
@@ -533,20 +568,30 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 - [ ] Can the extension leverage VS Code's Git extension API for worktree visualization?
 - [ ] Should the TreeView support drag-and-drop for reordering backlog?
 
+## Error Handling UX
+
+All errors surface through a consistent pattern:
+- **Command failures** (spawn, send, approve): VS Code error notification with message. Logged to Output Channel.
+- **Connection errors**: Status bar turns red, TreeView shows "Tower Offline" state. No repeated toast notifications.
+- **Terminal errors**: Inline ANSI banner in the terminal (e.g., `[Codev: Connection lost, reconnecting...]`).
+- **Webview errors**: Inline error message within the Webview panel, with "Retry" and "Open in Browser" actions.
+- **Auth failures**: Re-read `local-key` from disk. If still failing, prompt user with "Tower authentication failed — check `~/.agent-farm/local-key`".
+
 ## Performance Requirements
-- **Activation time**: < 500ms
-- **TreeView refresh**: < 200ms after SSE event
+- **Activation time**: < 500ms for UI shell (status bar, commands registered). Tower connection and TreeView population happen async after activation — not blocking.
+- **TreeView refresh**: < 200ms from initiating refresh to UI update (excludes `/api/overview` response time). Rate-limit SSE-triggered refreshes to max 1 per second to prevent storms.
 - **Terminal latency**: < 50ms input-to-echo (WebSocket round trip)
 - **Status bar update**: < 100ms after state change
 - **Memory**: < 50MB for analytics Webview, < 10MB for extension host
 - **WebSocket backpressure**: No CPU warning at sustained 50KB/s terminal output
+- **WebSocket ceiling**: Max 10 concurrent terminal WebSockets. Beyond this, show "Too many terminals — close unused terminals" warning.
 
 ## Security Considerations
-- **Auth**: Read `~/.agent-farm/local-key`, send as `codev-web-key` header. Store in VS Code's `SecretStorage` after first read.
-- **Webview isolation**: Analytics Webview must NOT have direct access to local-key. All authenticated API calls proxied through extension host via `postMessage`.
-- **Origin validation**: Only connect to localhost (or user-configured host). Warn if non-localhost target without HTTPS.
-- **No logging of secrets**: Never log headers or URLs containing the local-key.
-- **CSP**: Webviews use `webview.cspSource`, no `eval`, no inline scripts.
+- **Auth**: Read `~/.agent-farm/local-key`, send as `codev-web-key` header for HTTP. For WebSocket, send auth via `0x00` control message after connection — not query param (leaks into logs). Store in VS Code `SecretStorage`, but re-read from disk on 401 to handle key rotation.
+- **Webview isolation**: Analytics/Team Webviews must NOT have direct access to local-key. All authenticated API calls proxied through extension host via `postMessage`. Strict CSP with `webview.cspSource`, no `eval`, no inline scripts, no dynamic HTML insertion.
+- **Origin validation**: Only connect to `localhost` or `127.0.0.1` by default. Require explicit user confirmation for non-localhost targets, even with HTTPS.
+- **No logging of secrets**: Never log headers or URLs containing the local-key. Output Channel logs connection events but redacts auth tokens.
+- **Terminal input**: Messages sent via `POST /api/send` are written raw to PTY. The extension does not sanitize input (same as CLI behavior). Document this as a known characteristic.
 
 ## Test Scenarios
 
@@ -595,14 +640,17 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|---------------------|
-| Extension host CPU spikes from high-volume terminal output | Medium | High | Chunk `onDidWrite` calls, debounce at 16KB threshold |
-| Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types |
-| WebSocket backpressure causing frozen terminals | Low | High | Flow control with buffering, drop frames if > 1MB queued |
-| Multi-workspace confusion (actions against wrong workspace) | Medium | Medium | Scope all actions to active workspace, confirm cross-workspace operations |
-| Webview CSP breaks analytics rendering | Low | Low | Test Recharts bundle in VS Code Webview during development, fallback to "open in browser" |
+| Extension host CPU spikes from high-volume terminal output | Medium | High | Chunk `onDidWrite` calls with `setImmediate`, 16KB threshold |
+| Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types, version in `/api/health` |
+| WebSocket backpressure causing frozen terminals | Low | High | Never drop frames — disconnect and reconnect via ring buffer replay if > 1MB queued |
+| `moveIntoEditor` API instability | Medium | Medium | Opt-in via setting, default to panel, graceful fallback on failure |
+| Multi-workspace confusion (actions against wrong workspace) | Medium | Medium | Scope all actions to active workspace, traverse up to `.codev/config.json` root |
+| Comment thread line-drift after edits | Medium | Medium | Re-scan on `TextDocumentChangeEvent`, update thread positions |
+| Concurrent annotation edits (browser + VS Code) | Low | Medium | Document as unsupported — last writer wins |
+| Analytics Webview theme mismatch | Medium | Low | Map VS Code theme variables to dashboard CSS variables |
+| Shared package extraction delays V1 | Medium | High | Extract types only (Phase 1), defer API client to Phase 2, establish monorepo workspace first |
 | Tower not running on extension activation | High | Low | Graceful degraded state, clear messaging, offer to start Tower |
-| Type duplication across server/dashboard/extension | High | High | Extract `@cluesmith/codev-types` shared package before building extension |
-| API client behind corporate proxy fails | Medium | Medium | Make `@cluesmith/codev-api-client` accept custom HTTP agent, integrate with VS Code proxy settings |
+| API client behind corporate proxy fails | Medium | Medium | Accept custom HTTP agent, integrate with VS Code proxy settings |
 
 ## Expert Consultation
 
@@ -634,6 +682,37 @@ All consultation feedback has been incorporated into the relevant sections above
 - Recommended against toast notifications for Needs Attention — use TreeView + status bar only
 - Suggested deferring Team View to post-V1 (admin feature, not editor-context), but included as conditional Webview
 - Warned about corporate proxy compatibility for API client — must accept custom HTTP agent
+
+**Second Consultation (2026-04-03) — Post user feedback:**
+**Models Consulted**: Gemini 3 Pro, GPT-5.4 Codex, Claude (via `consult` CLI)
+
+**Gemini 3 Pro — Critical findings:**
+- **File corruption risk**: `POST /api/annotate/{tabId}/save` uses `fs.writeFileSync` which overwrites unsaved VS Code buffers. Must use `vscode.workspace.applyEdit()` instead. → **Fixed in spec.**
+- **Never drop PTY frames**: Dropping frames garbles ANSI state permanently. Disconnect and reconnect with ring buffer replay instead. → **Fixed in spec.**
+- **`TextDecoder` must use `{ stream: true }`**: Multi-byte Unicode split across frames produces `\uFFFD` corruption. → **Fixed in spec.**
+- **Editor-split is brittle**: `moveIntoEditor` is undocumented, context-dependent. → **Made opt-in with panel fallback.**
+- **Analytics theme mismatch**: Hardcoded dark CSS ignores VS Code themes. → **Added theme variable mapping.**
+- **Workspace path matching**: Exact string match fails when user opens subdirectory. → **Added `.codev/config.json` root traversal.**
+- **No monorepo workspace config**: `vsce` fails with unmanaged `file:` dependencies. → **Added monorepo prerequisite.**
+
+**GPT-5.4 Codex — Key findings:**
+- **Protocol versioning missing**: No handshake or version header. Extension breaks silently as Tower evolves. → **Added version in `/api/health` requirement.**
+- **Error UX unspecified**: No error presentation for command failures. → **Added Error Handling UX section.**
+- **WebSocket auth via query param**: Key leaks into logs. → **Changed to `0x00` control message post-connection.**
+- **SSE refresh storms**: Burst of SSE events can overload extension. → **Added rate limiting (max 1/second).**
+- **Comment `tabId` mapping unclear**: Dashboard tab concept doesn't translate to VS Code. → **Removed Tower endpoint dependency, use `WorkspaceEdit` only.**
+- **Phased extraction**: Ship types first, defer API client until patterns stabilize. → **Added phased approach.**
+
+**Claude — Key findings:**
+- **Editor-split fragile**: Three sequential layout commands with no ordering guarantees. → **Made opt-in with setting.**
+- **Auth key invalidation missing**: Stale `SecretStorage` after key rotation. → **Added re-read on 401.**
+- **Missing Output Channel**: No diagnostic logging for debugging. → **Added Output Channel requirement.**
+- **Missing settings schema**: Only `workspacePath` defined. → **Added full settings table.**
+- **Missing keyboard shortcuts**: 14+ commands, zero keybindings. → **Added default shortcuts for critical commands.**
+- **`afx open` URI scheme is critical**: Load-bearing decision, not "nice to know." → **Promoted to Critical open question.**
+- **V1 scope too large**: 13 features. Recommended cutting Team View, Analytics, Cron, Cloud Tunnel from V1. → **Noted but kept full scope; plan phase will define V1 cut line.**
+
+All findings incorporated into the relevant sections above.
 
 ## Approval
 - [ ] Technical Lead Review
