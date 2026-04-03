@@ -1,11 +1,12 @@
 /**
  * Tests for afx architect command
  *
- * Bugfix #393: afx architect starts a Claude session with the architect role
+ * Bugfix #393: afx architect starts an agent session with the architect role
  * in the current terminal. No Tower dependency.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { CLAUDE_HARNESS } from '../utils/harness.js';
 
 // Mock child_process.spawn
 const mockSpawn = vi.fn();
@@ -13,7 +14,12 @@ vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
 }));
 
-// Mock config
+// Mock fs.writeFileSync
+vi.mock('node:fs', () => ({
+  writeFileSync: vi.fn(),
+}));
+
+// Mock config — include getArchitectHarness
 vi.mock('../utils/index.js', () => ({
   getConfig: () => ({
     workspaceRoot: '/test/workspace',
@@ -25,6 +31,7 @@ vi.mock('../utils/index.js', () => ({
     builder: 'claude',
     shell: 'bash',
   }),
+  getArchitectHarness: () => CLAUDE_HARNESS,
 }));
 
 // Mock role loading
@@ -55,11 +62,19 @@ describe('afx architect command', () => {
 
     await architect();
 
+    // shell: false — command is split, args passed as array
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       ['--append-system-prompt', '# Architect Role\n\nYou are an architect.'],
-      { stdio: 'inherit', cwd: '/test/workspace', shell: true }
+      expect.objectContaining({
+        stdio: 'inherit',
+        cwd: '/test/workspace',
+        env: expect.any(Object),
+      })
     );
+    // Verify shell: false (no shell key means Node default = false)
+    const spawnOpts = mockSpawn.mock.calls[0][2];
+    expect(spawnOpts.shell).toBeUndefined();
   });
 
   it('should pass through additional args', async () => {
@@ -80,7 +95,10 @@ describe('afx architect command', () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       ['--resume', '--append-system-prompt', '# Architect Role\n\nYou are an architect.'],
-      { stdio: 'inherit', cwd: '/test/workspace', shell: true }
+      expect.objectContaining({
+        stdio: 'inherit',
+        cwd: '/test/workspace',
+      })
     );
   });
 

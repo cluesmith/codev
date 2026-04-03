@@ -50,6 +50,12 @@ vi.mock('../../lib/forge.js', () => ({
   executeForgeCommand: (...args: unknown[]) => executeForgeCommandMock(...args),
 }));
 
+// Mock the harness resolution to return claude harness by default
+import { CLAUDE_HARNESS } from '../utils/harness.js';
+vi.mock('../utils/config.js', () => ({
+  getBuilderHarness: () => CLAUDE_HARNESS,
+}));
+
 describe('spawn-worktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,16 +166,18 @@ describe('spawn-worktree', () => {
       expect(script).not.toContain('--append-system-prompt');
     });
 
-    it('generates script with role and port injection', () => {
+    it('generates script with role via harness (claude default)', () => {
       const role = { content: 'Tower at {PORT}', source: 'codev' };
       const script = buildWorktreeLaunchScript('/tmp/worktree', 'claude', role);
+      // Claude harness uses --append-system-prompt
       expect(script).toContain('--append-system-prompt');
       expect(script).toContain('.builder-role.md');
     });
 
-    it('includes restart loop', () => {
+    it('includes restart loop with agent message', () => {
       const script = buildWorktreeLaunchScript('/tmp/worktree', 'claude', null);
       expect(script).toContain('while true');
+      expect(script).toContain('Agent exited');
       expect(script).toContain('Restarting in 2 seconds');
     });
   });

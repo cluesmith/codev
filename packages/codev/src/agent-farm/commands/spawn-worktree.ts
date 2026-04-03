@@ -11,6 +11,8 @@ import { resolve } from 'node:path';
 import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
+import { getBuilderHarness } from '../utils/config.js';
+import { shellEscapeSingleQuote } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
@@ -585,18 +587,27 @@ export async function startBuilderSession(
   let scriptContent: string;
 
   if (roleContent) {
-    // Write role to a file and use $(cat) to avoid shell escaping issues
+    // Write role to a file for harness-based injection
     const roleFile = resolve(worktreePath, '.builder-role.md');
     // Inject the actual dashboard port into the role prompt
     const roleWithPort = roleContent.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${roleSource})`);
+
+    // Resolve harness provider for role injection
+    const harness = getBuilderHarness(config.workspaceRoot);
+    const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
+    const envExports = Object.entries(env)
+      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
+      .join('\n');
+    const envBlock = envExports ? `${envExports}\n` : '';
+
     scriptContent = `#!/bin/bash
 cd "${worktreePath}"
-while true; do
-  ${baseCmd} --append-system-prompt "$(cat '${roleFile}')" "$(cat '${promptFile}')"
+${envBlock}while true; do
+  ${baseCmd} ${fragment} "$(cat '${promptFile}')"
   echo ""
-  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2
 done
 `;
@@ -606,7 +617,7 @@ cd "${worktreePath}"
 while true; do
   ${baseCmd} "$(cat '${promptFile}')"
   echo ""
-  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2
 done
 `;
@@ -656,18 +667,28 @@ export function buildWorktreeLaunchScript(
   worktreePath: string,
   baseCmd: string,
   role: { content: string; source: string } | null,
+  workspaceRoot?: string,
 ): string {
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     const roleWithPort = role.content.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
+
+    // Resolve harness provider for role injection
+    const harness = getBuilderHarness(workspaceRoot);
+    const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
+    const envExports = Object.entries(env)
+      .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
+      .join('\n');
+    const envBlock = envExports ? `${envExports}\n` : '';
+
     return `#!/bin/bash
 cd "${worktreePath}"
-while true; do
-  ${baseCmd} --append-system-prompt "$(cat '${roleFile}')"
+${envBlock}while true; do
+  ${baseCmd} ${fragment}
   echo ""
-  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2
 done
 `;
@@ -677,7 +698,7 @@ cd "${worktreePath}"
 while true; do
   ${baseCmd}
   echo ""
-  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2
 done
 `;

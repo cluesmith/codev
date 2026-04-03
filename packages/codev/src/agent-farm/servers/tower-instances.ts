@@ -374,11 +374,11 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         // Parse command string to separate command and args, inject role prompt
         const cmdParts = architectCmd.split(/\s+/);
         const cmd = cmdParts[0];
-        const cmdArgs = buildArchitectArgs(cmdParts.slice(1), workspacePath);
+        const { args: cmdArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), workspacePath);
 
         // Build env with CLAUDECODE removed so spawned Claude processes
-        // don't detect a nested session
-        const cleanEnv = { ...process.env } as Record<string, string>;
+        // don't detect a nested session, and merge harness env vars
+        const cleanEnv = { ...process.env, ...harnessEnv } as Record<string, string>;
         delete cleanEnv['CLAUDECODE'];
 
         // Try shellper first for persistent session with auto-restart

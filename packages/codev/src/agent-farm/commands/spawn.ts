@@ -619,7 +619,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   const commands = getResolvedCommands();
 
   logger.info('Creating terminal session...');
-  const scriptContent = buildWorktreeLaunchScript(worktreePath, commands.builder, role);
+  const scriptContent = buildWorktreeLaunchScript(worktreePath, commands.builder, role, config.workspaceRoot);
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
   writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
 

@@ -10,6 +10,7 @@ import type { Config, UserConfig, ResolvedCommands } from '../types.js';
 import { getSkeletonDir } from '../../lib/skeleton.js';
 import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
+import { resolveHarness, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -236,6 +237,36 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
     shell: cliOverrides.shell ||
            resolveCommand(userConfig?.shell?.shell, DEFAULT_COMMANDS.shell),
   };
+}
+
+/**
+ * Get the resolved harness provider for the architect shell.
+ * Resolution: explicit architectHarness → auto-detect from architect command → default claude.
+ */
+export function getArchitectHarness(workspaceRoot?: string): HarnessProvider {
+  const root = workspaceRoot || findWorkspaceRoot();
+  const userConfig = loadUserConfig(root);
+  const architectCmd = resolveCommand(userConfig?.shell?.architect, DEFAULT_COMMANDS.architect);
+  return resolveHarness(
+    userConfig?.shell?.architectHarness,
+    userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
+    architectCmd,
+  );
+}
+
+/**
+ * Get the resolved harness provider for the builder shell.
+ * Resolution: explicit builderHarness → auto-detect from builder command → default claude.
+ */
+export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
+  const root = workspaceRoot || findWorkspaceRoot();
+  const userConfig = loadUserConfig(root);
+  const builderCmd = resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder);
+  return resolveHarness(
+    userConfig?.shell?.builderHarness,
+    userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
+    builderCmd,
+  );
 }
 
 /**
