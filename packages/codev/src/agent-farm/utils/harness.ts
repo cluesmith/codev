@@ -98,9 +98,10 @@ const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
  * Unknown ${...} variables are left unexpanded (makes typos visible).
  */
 function expandTemplateVars(template: string, roleContent: string, roleFilePath: string): string {
+  // Use replacer functions to avoid $& / $' / $` interpretation in replacement strings
   return template
-    .replace(/\$\{ROLE_FILE\}/g, roleFilePath)
-    .replace(/\$\{ROLE_CONTENT\}/g, roleContent);
+    .replace(/\$\{ROLE_FILE\}/g, () => roleFilePath)
+    .replace(/\$\{ROLE_CONTENT\}/g, () => roleContent);
 }
 
 /**
@@ -192,41 +193,75 @@ export function validateCustomHarnessConfig(name: string, config: unknown): Cust
 }
 
 // =============================================================================
+// Auto-detection
+// =============================================================================
+
+/**
+ * Detect harness type from a command string by extracting the basename of the
+ * first token and matching against known CLI names.
+ * Returns undefined if no match (caller decides what to do).
+ */
+export function detectHarnessFromCommand(command: string): string | undefined {
+  const firstToken = command.trim().split(/\s+/)[0];
+  if (!firstToken) return undefined;
+
+  // Extract basename (handles full paths like /opt/homebrew/bin/codex)
+  const basename = firstToken.split('/').pop() || firstToken;
+
+  if (basename.includes('claude')) return 'claude';
+  if (basename.includes('codex')) return 'codex';
+  if (basename.includes('gemini')) return 'gemini';
+
+  return undefined;
+}
+
+// =============================================================================
 // Resolution
 // =============================================================================
 
 /**
  * Resolve a harness name to a HarnessProvider.
  *
- * - undefined → defaults to claude (backward compatible)
- * - built-in name → returns built-in provider
- * - custom name → looks up in customHarnesses, builds provider
- * - unknown → throws descriptive error
+ * Resolution order:
+ * 1. Explicit harnessName → built-in or custom provider
+ * 2. Auto-detect from command string basename (if command provided)
+ * 3. Default to claude (backward compatible)
+ *
+ * Throws if harnessName is set but doesn't match any known provider.
  */
 export function resolveHarness(
   harnessName: string | undefined,
   customHarnesses?: Record<string, CustomHarnessConfig>,
+  command?: string,
 ): HarnessProvider {
-  if (!harnessName) {
-    return CLAUDE_HARNESS;
+  // Explicit harness name takes priority
+  if (harnessName) {
+    const builtin = BUILTIN_HARNESSES[harnessName];
+    if (builtin) return builtin;
+
+    if (customHarnesses && harnessName in customHarnesses) {
+      return buildCustomHarnessProvider(customHarnesses[harnessName]);
+    }
+
+    const knownNames = Object.keys(BUILTIN_HARNESSES);
+    const customNames = customHarnesses ? Object.keys(customHarnesses) : [];
+    const allNames = [...knownNames, ...customNames];
+
+    throw new Error(
+      `Unknown harness "${harnessName}". ` +
+      `Available harnesses: ${allNames.join(', ') || '(none)'}. ` +
+      `Configure a custom harness in .codev/config.json under the "harness" section.`,
+    );
   }
 
-  const builtin = BUILTIN_HARNESSES[harnessName];
-  if (builtin) {
-    return builtin;
+  // Auto-detect from command basename
+  if (command) {
+    const detected = detectHarnessFromCommand(command);
+    if (detected) {
+      return BUILTIN_HARNESSES[detected];
+    }
   }
 
-  if (customHarnesses && harnessName in customHarnesses) {
-    return buildCustomHarnessProvider(customHarnesses[harnessName]);
-  }
-
-  const knownNames = Object.keys(BUILTIN_HARNESSES);
-  const customNames = customHarnesses ? Object.keys(customHarnesses) : [];
-  const allNames = [...knownNames, ...customNames];
-
-  throw new Error(
-    `Unknown harness "${harnessName}". ` +
-    `Available harnesses: ${allNames.join(', ') || '(none)'}. ` +
-    `Configure a custom harness in .codev/config.json under the "harness" section.`,
-  );
+  // Default to claude
+  return CLAUDE_HARNESS;
 }

@@ -241,27 +241,31 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
 
 /**
  * Get the resolved harness provider for the architect shell.
- * Reads architectHarness from config, defaults to claude.
+ * Resolution: explicit architectHarness → auto-detect from architect command → default claude.
  */
 export function getArchitectHarness(workspaceRoot?: string): HarnessProvider {
   const root = workspaceRoot || findWorkspaceRoot();
   const userConfig = loadUserConfig(root);
+  const architectCmd = resolveCommand(userConfig?.shell?.architect, DEFAULT_COMMANDS.architect);
   return resolveHarness(
     userConfig?.shell?.architectHarness,
     userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
+    architectCmd,
   );
 }
 
 /**
  * Get the resolved harness provider for the builder shell.
- * Reads builderHarness from config, defaults to claude.
+ * Resolution: explicit builderHarness → auto-detect from builder command → default claude.
  */
 export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
   const root = workspaceRoot || findWorkspaceRoot();
   const userConfig = loadUserConfig(root);
+  const builderCmd = resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder);
   return resolveHarness(
     userConfig?.shell?.builderHarness,
     userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
+    builderCmd,
   );
 }
 

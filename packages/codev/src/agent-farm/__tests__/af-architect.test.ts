@@ -62,16 +62,19 @@ describe('afx architect command', () => {
 
     await architect();
 
+    // shell: false — command is split, args passed as array
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       ['--append-system-prompt', '# Architect Role\n\nYou are an architect.'],
       expect.objectContaining({
         stdio: 'inherit',
         cwd: '/test/workspace',
-        shell: true,
         env: expect.any(Object),
       })
     );
+    // Verify shell: false (no shell key means Node default = false)
+    const spawnOpts = mockSpawn.mock.calls[0][2];
+    expect(spawnOpts.shell).toBeUndefined();
   });
 
   it('should pass through additional args', async () => {
@@ -95,7 +98,6 @@ describe('afx architect command', () => {
       expect.objectContaining({
         stdio: 'inherit',
         cwd: '/test/workspace',
-        shell: true,
       })
     );
   });

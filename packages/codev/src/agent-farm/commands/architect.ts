@@ -38,13 +38,15 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
     env = injection.env;
   }
 
-  const cmd = commands.architect;
+  // Split command string into executable + initial args (supports e.g. "claude --dangerously-skip-permissions")
+  const cmdParts = commands.architect.split(/\s+/);
+  const cmd = cmdParts[0];
+  const allArgs = [...cmdParts.slice(1), ...args];
 
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawn(cmd, allArgs, {
       stdio: 'inherit',
       cwd: config.workspaceRoot,
-      shell: true,
       env: { ...process.env, ...env },
     });
 
@@ -60,7 +62,7 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
       if (code === 0 || code === null) {
         resolve();
       } else {
-        reject(new Error(`${cmd} exited with code ${code}`));
+        reject(new Error(`${commands.architect} exited with code ${code}`));
       }
     });
   });

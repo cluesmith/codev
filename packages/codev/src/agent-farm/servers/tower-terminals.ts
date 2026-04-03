@@ -531,15 +531,28 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
-      const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), workspacePath);
-      restartOptions = {
-        command: cmdParts[0],
-        args: architectArgs,
-        cwd: workspacePath,
-        env: { ...cleanEnv, ...harnessEnv },
-        restartDelay: 2000,
-        maxRestarts: 50,
-      };
+      try {
+        const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), workspacePath);
+        restartOptions = {
+          command: cmdParts[0],
+          args: architectArgs,
+          cwd: workspacePath,
+          env: { ...cleanEnv, ...harnessEnv },
+          restartDelay: 2000,
+          maxRestarts: 50,
+        };
+      } catch (err) {
+        _deps.log('WARN', `Harness resolution failed for workspace ${workspacePath}: ${err instanceof Error ? err.message : err}`);
+        // Fall back to plain command without role injection so the session can still reconnect
+        restartOptions = {
+          command: cmdParts[0],
+          args: cmdParts.slice(1),
+          cwd: workspacePath,
+          env: cleanEnv,
+          restartDelay: 2000,
+          maxRestarts: 50,
+        };
+      }
     }
 
     probeTasks.push({ dbSession, restartOptions });
@@ -721,15 +734,27 @@ export async function getTerminalsForWorkspace(
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];
-          const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path);
-          restartOptions = {
-            command: cmdParts[0],
-            args: architectArgs,
-            cwd: dbSession.workspace_path,
-            env: { ...cleanEnv, ...harnessEnv },
-            restartDelay: 2000,
-            maxRestarts: 50,
-          };
+          try {
+            const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path);
+            restartOptions = {
+              command: cmdParts[0],
+              args: architectArgs,
+              cwd: dbSession.workspace_path,
+              env: { ...cleanEnv, ...harnessEnv },
+              restartDelay: 2000,
+              maxRestarts: 50,
+            };
+          } catch (err) {
+            _deps.log('WARN', `Harness resolution failed for workspace ${dbSession.workspace_path}: ${err instanceof Error ? err.message : err}`);
+            restartOptions = {
+              command: cmdParts[0],
+              args: cmdParts.slice(1),
+              cwd: dbSession.workspace_path,
+              env: cleanEnv,
+              restartDelay: 2000,
+              maxRestarts: 50,
+            };
+          }
         }
 
         _deps.log('INFO', `On-the-fly shellper reconnect for ${dbSession.id}`);

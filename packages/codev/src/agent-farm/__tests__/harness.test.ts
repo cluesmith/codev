@@ -6,6 +6,7 @@ import {
   buildCustomHarnessProvider,
   validateCustomHarnessConfig,
   resolveHarness,
+  detectHarnessFromCommand,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
@@ -239,6 +240,65 @@ describe('harness', () => {
         },
       };
       expect(() => resolveHarness('bad', customHarnesses)).toThrow('my-agent');
+    });
+
+    it('auto-detects codex from command string', () => {
+      const provider = resolveHarness(undefined, undefined, 'codex');
+      expect(provider).toBe(CODEX_HARNESS);
+    });
+
+    it('auto-detects gemini from full path', () => {
+      const provider = resolveHarness(undefined, undefined, '/opt/homebrew/bin/gemini');
+      expect(provider).toBe(GEMINI_HARNESS);
+    });
+
+    it('auto-detects claude from command with flags', () => {
+      const provider = resolveHarness(undefined, undefined, 'claude --dangerously-skip-permissions');
+      expect(provider).toBe(CLAUDE_HARNESS);
+    });
+
+    it('explicit harnessName takes priority over auto-detection', () => {
+      const provider = resolveHarness('gemini', undefined, 'codex');
+      expect(provider).toBe(GEMINI_HARNESS);
+    });
+
+    it('falls back to claude for unknown command', () => {
+      const provider = resolveHarness(undefined, undefined, 'my-custom-agent');
+      expect(provider).toBe(CLAUDE_HARNESS);
+    });
+  });
+
+  // ===========================================================================
+  // Auto-detection
+  // ===========================================================================
+
+  describe('detectHarnessFromCommand', () => {
+    it('detects claude', () => {
+      expect(detectHarnessFromCommand('claude')).toBe('claude');
+    });
+
+    it('detects codex', () => {
+      expect(detectHarnessFromCommand('codex')).toBe('codex');
+    });
+
+    it('detects gemini', () => {
+      expect(detectHarnessFromCommand('gemini')).toBe('gemini');
+    });
+
+    it('detects from full path', () => {
+      expect(detectHarnessFromCommand('/opt/homebrew/bin/codex')).toBe('codex');
+    });
+
+    it('detects from command with flags', () => {
+      expect(detectHarnessFromCommand('codex exec --full-auto')).toBe('codex');
+    });
+
+    it('returns undefined for unknown command', () => {
+      expect(detectHarnessFromCommand('my-custom-agent')).toBeUndefined();
+    });
+
+    it('returns undefined for empty string', () => {
+      expect(detectHarnessFromCommand('')).toBeUndefined();
     });
   });
 });
