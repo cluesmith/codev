@@ -31,6 +31,7 @@ Implement an extensible agent harness system that replaces hardcoded Claude-spec
 #### Deliverables
 - `packages/codev/src/agent-farm/utils/harness.ts` — new file
 - `packages/codev/src/agent-farm/types.ts` — updated UserConfig
+- `packages/codev/src/lib/config.ts` — updated CodevConfig + custom harness validation at load time
 - `packages/codev/src/agent-farm/__tests__/harness.test.ts` — new test file
 
 #### Implementation Details
@@ -64,6 +65,24 @@ harness?: Record<string, {       // NEW
 }>;
 ```
 
+**`lib/config.ts`** — Add same fields to `CodevConfig`:
+```typescript
+shell?: {
+  architect?: string | string[];
+  architectHarness?: string;    // NEW
+  builder?: string | string[];
+  builderHarness?: string;      // NEW
+  shell?: string | string[];
+};
+harness?: Record<string, { ... }>;  // NEW — same shape as UserConfig
+```
+
+Add a `validateHarnessConfig()` function called during `loadConfig()` that checks:
+- Each custom harness entry has required fields (`roleArgs`, `roleScriptFragment`)
+- `roleArgs` is an array of strings
+- `roleScriptFragment` is a string
+If validation fails, throw a descriptive error at config load time (per spec: "missing required fields produce a descriptive error at config load time").
+
 #### Acceptance Criteria
 - `resolveHarness('claude')` returns claude provider
 - `resolveHarness('codex')` returns codex provider with `-c model_instructions_file=<path>` args
@@ -96,6 +115,7 @@ harness?: Record<string, {       // NEW
 - `packages/codev/src/agent-farm/utils/config.ts` — add harness resolution helpers
 - `packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts` — updated
 - `packages/codev/src/agent-farm/__tests__/af-architect.test.ts` — updated
+- `packages/codev/src/commands/consult/__tests__/codex-sdk.test.ts` — updated (`experimental_instructions_file` → `model_instructions_file`)
 
 #### Implementation Details
 
@@ -114,7 +134,7 @@ harness?: Record<string, {       // NEW
 - `tower-terminals.ts:725` — same pattern for resume
 - `tower-instances.ts:377` — same pattern for workspace launch
 
-**Config helpers** — Add `getArchitectHarness()` and `getBuilderHarness()` to `config.ts` that read `architectHarness`/`builderHarness` from UserConfig and call `resolveHarness()`.
+**Config helpers** — Add `getArchitectHarness()` and `getBuilderHarness()` to `agent-farm/utils/config.ts` that read `architectHarness`/`builderHarness` from UserConfig and call `resolveHarness()`. These helpers are the single point where harness resolution happens — callers (`startBuilderSession()`, `buildWorktreeLaunchScript()`, `architect()`, `buildArchitectArgs()`) call the helper rather than resolving inline, avoiding duplication.
 
 **Consult side fix** — `consult/index.ts:383`: Change `experimental_instructions_file` to `model_instructions_file` in the Codex SDK config.
 
