@@ -5,7 +5,7 @@
 - **Status**: draft
 - **Created**: 2026-03-11
 - **Protocol**: SPIR
-- **Supersedes**: Spec 0066 (VSCode Companion Extension — outdated, pre-shellper architecture)
+- **Related**: Spec 0066
 
 ## Clarifying Questions Asked
 
@@ -16,7 +16,7 @@ A1: No. The extension coexists with the browser dashboard. Users choose their pr
 A2: Yes. VS Code's `createTerminal({ pty })` with a custom `Pseudoterminal` can proxy I/O over WebSocket to Tower's PTY sessions. Unlike the old spec (0066), tmux is no longer in the stack — shellper handles persistence natively.
 
 **Q3: How does architect-builder communication work?**
-A3: `af send` posts to `POST /api/send` on Tower. Tower resolves the target builder's PTY session, checks idle state (3s threshold), formats the message with `### [ARCHITECT INSTRUCTION | timestamp] ###` framing, and writes it to the PTY via shellper. The VS Code extension doesn't change this — it's a different viewport onto the same Tower infrastructure.
+A3: `afx send` posts to `POST /api/send` on Tower. Tower resolves the target builder's PTY session, checks idle state (3s threshold), formats the message with `### [ARCHITECT INSTRUCTION | timestamp] ###` framing, and writes it to the PTY via shellper. The VS Code extension doesn't change this — it's a different viewport onto the same Tower infrastructure.
 
 **Q4: What about the old spec 0066?**
 A4: Spec 0066 was written 2026-01-12 against the old tmux/ttyd architecture. The stack has since moved to shellper + node-pty + custom WebSocket protocol. This spec starts fresh with the current architecture.
@@ -32,23 +32,29 @@ Codev's Agent Farm operates through a browser-based dashboard served by the Towe
 
 ## Current State
 
-**Tower Architecture (v1.x, March 2026):**
+**Tower Architecture (v3.x, April 2026):**
 - Node.js HTTP/WebSocket server on localhost:4100
 - Shellper daemon for PTY persistence (survives Tower restarts)
 - React 19 + xterm.js 5.5 dashboard served at `/`
 - SQLite state (local state.db per workspace + global.db system-wide)
 - Binary WebSocket protocol: `0x00` = control frames (JSON), `0x01` = data frames (raw PTY bytes)
-- SSE at `/api/events` for real-time push notifications
-- REST API: 30+ HTTP endpoints for state, terminals, overview, analytics, file browsing
-- `af send` for architect↔builder messaging via `POST /api/send`
+- SSE at `/api/events` for real-time push notifications (30s heartbeat)
+- REST API: 30+ HTTP endpoints — global routes (`/api/overview`, `/api/send`) and workspace-scoped routes (`/workspace/:base64path/api/state`, `/workspace/:base64path/api/team`)
+- `afx send` for architect↔builder messaging via `POST /api/send`
 - Send buffer with typing-aware delivery (3s idle threshold, 60s max buffer age)
+- Layered config system: `.codev/config.json` (project) → `~/.codev/config.json` (global) → framework defaults
+- Forge abstraction layer: provider-agnostic issue/PR operations (GitHub, GitLab, Gitea) via concept commands
+- `afx spawn --branch` for continuing work on existing PR branches
 
 **What works well:**
 - Shellper persistence — terminals survive Tower restarts and browser refreshes
 - Binary WebSocket protocol — efficient, supports resize/reconnect/replay via sequence numbers
 - Ring buffer — 1000-line scrollback with sequence-number-based resume
-- Overview API — consolidated view of builders, PRs, backlog
-- SSE — real-time push for state changes
+- EscapeBuffer — buffers incomplete ANSI escape sequences split across WebSocket frames (Bugfix #630)
+- ScrollController — unified scroll state machine with phase-aware resize deferral (Spec 627, Bugfix #625)
+- Overview API — consolidated view of builders, PRs, backlog (with author attribution, Spec 637)
+- Forge system — provider-agnostic issue/PR data; extension never needs to know which forge is configured
+- SSE — real-time push for state changes (30s heartbeat, Bugfix #580)
 
 **What doesn't translate to VS Code:**
 - xterm.js in-browser rendering (replaced by VS Code's native terminal)
@@ -62,9 +68,9 @@ A VS Code extension (`codev-vscode`) that provides:
 1. **Native terminals** — Architect and builder PTY sessions rendered in VS Code's terminal panel, connected to Tower via WebSocket
 2. **Work View sidebar** — TreeView showing builders (status, phase, blocked gates), PRs, and backlog
 3. **Status bar** — Builder count, active phase, blocked gate notifications
-4. **Command Palette** — All `af` and `porch` commands accessible without leaving the IDE
-5. **Native file opening** — `af open file.ts:42` opens in VS Code's editor at line 42, not the browser
-6. **Message sending** — `af send` from Command Palette with builder picker and message input
+4. **Command Palette** — All `afx` and `porch` commands accessible without leaving the IDE
+5. **Native file opening** — `afx open file.ts:42` opens in VS Code's editor at line 42, not the browser
+6. **Message sending** — `afx send` from Command Palette with builder picker and message input
 7. **Review comments** — Native Comments API gutter "+" for adding `REVIEW(@author)` comments, interoperable with browser dashboard annotations
 8. **Shell terminals** — Ad-hoc shell sessions via Tower, with shellper persistence (survives restarts)
 9. **Needs Attention** — TreeView section + status bar for PRs needing review and builders blocked on approval gates
@@ -86,8 +92,8 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 - [ ] Builder terminals open in VS Code terminal panel with correct naming (`Builder #42 [implement]`)
 - [ ] Work View TreeView shows builders, PRs, and backlog from `/api/overview`
 - [ ] Status bar shows builder count and blocked gate count
-- [ ] `af spawn`, `af send`, `af cleanup`, `porch approve` available via Command Palette
-- [ ] `af open file.ts:42` opens file in VS Code editor at correct line
+- [ ] `afx spawn`, `afx send`, `afx cleanup`, `porch approve` available via Command Palette
+- [ ] `afx open file.ts:42` opens file in VS Code editor at correct line
 - [ ] Review comments via Comments API gutter "+" — interoperable with browser dashboard annotations
 - [ ] Shell terminals created via Command Palette, connected to Tower with shellper persistence
 - [ ] Needs Attention section in TreeView shows blocked builders and PRs needing review
@@ -126,13 +132,15 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 ### Business Constraints
 - Must not break existing browser dashboard users
 - Minimal additional maintenance burden — share API layer, not UI code
-- Extension must work with Tower running independently (`af tower start` still required)
+- Extension must work with Tower running independently (`afx tower start` still required)
 
 ## Assumptions
-- Tower server is running on localhost:4100 (or user-configured port)
+- Tower server is running on localhost:4100 (or port from `.codev/config.json`)
 - VS Code has access to the same filesystem as Tower
 - `~/.agent-farm/local-key` exists for authentication
+- `.codev/config.json` exists at project root (v3.0.0+ config system with layered merging)
 - Node.js available in extension host environment (standard for VS Code extensions)
+- Forge provider is configured and operational (extension is provider-agnostic)
 
 ## Solution Approaches
 
@@ -148,7 +156,7 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │ Command       │  │ Status Bar   │  │ Work View     │  │
 │  │ Palette       │  │ (builders,   │  │ TreeView      │  │
-│  │ (af/porch)    │  │  gates)      │  │ (sidebar)     │  │
+│  │ (afx/porch)   │  │  gates)      │  │ (sidebar)     │  │
 │  └──────────────┘  └──────────────┘  └───────────────┘  │
 │                                                          │
 │  ┌──────────────────────────┐  ┌──────────────────────┐  │
@@ -215,12 +223,20 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 Singleton service managing all communication with Tower:
 
 - **State machine**: `DISCONNECTED` → `CONNECTING` → `CONNECTED` → `RECONNECTING`
-- **SSE client**: Subscribes to `/api/events`, routes events to TreeView/Status Bar refresh
+- **SSE client**: Subscribes to `/api/events`, routes events to TreeView/Status Bar refresh. Handles 30s heartbeat events without triggering state refreshes.
 - **REST client**: Authenticated calls to all `/api/*` endpoints
 - **WebSocket pool**: One WebSocket per open terminal, managed lifecycle
 - **Auth**: Reads `~/.agent-farm/local-key`, sends as `codev-web-key` header (HTTP) or query param (WebSocket)
 - **Health check**: Pings `/api/health` on activation and after SSE drops
 - **Reconnection**: Exponential backoff (1s → 2s → 4s → 8s → max 30s)
+- **Config**: Reads `.codev/config.json` for Tower port override and project-level settings
+
+**Workspace-scoped routing:**
+Tower has two route layers. The extension must use the correct one:
+- **Global routes** (no prefix): `/api/overview`, `/api/send`, `/api/events`, `/api/health`, `/api/analytics`, `/api/cron/*`, `/api/workspaces`
+- **Workspace-scoped routes** (prefixed): `/workspace/:base64urlPath/api/state`, `/workspace/:base64urlPath/api/team`, `/workspace/:base64urlPath/api/tabs/shell`, `/workspace/:base64urlPath/ws/terminal/:id`
+
+The Connection Manager encodes the active workspace path as base64url and prefixes all workspace-scoped requests. The workspace path is determined by matching VS Code's workspace folder against Tower's known workspaces (via `GET /api/workspaces`).
 
 All consumers (TreeView, Status Bar, Terminals, Commands) go through this singleton. When Tower goes offline, a single state change propagates to all UI surfaces.
 
@@ -246,6 +262,12 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 - On reconnect, send last-seen sequence number for ring buffer replay
 - Terminal scrollback is preserved via shellper — no data loss
 
+**Escape sequence buffering:**
+WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-api-client` as a shared utility.
+
+**Resize deferral during replay:**
+On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
+
 **Backpressure:**
 - Chunk large `onDidWrite` calls (> 16KB) with `setTimeout(0)` between chunks
 - Prevents extension host CPU spikes and "Extension causes high CPU" warnings
@@ -269,16 +291,20 @@ CODEV AGENT FARM
 │   ├── #43 dashboard-polish [review] ● running
 │   └── #44 api-refactor [plan-approval] ⏸ blocked
 ├── 📋 Pull Requests (2)
-│   ├── #187 feat: password hashing (ready)
-│   └── #188 fix: dashboard layout (draft)
+│   ├── #187 feat: password hashing @alice (ready)
+│   └── #188 fix: dashboard layout @bob (draft)
 ├── 📥 Backlog (5)
-│   ├── #190 Add rate limiting
-│   ├── #191 Improve error messages
+│   ├── #190 Add rate limiting @alice
+│   ├── #191 Improve error messages @bob
 │   └── ... (2 more)
 └── ✓ Recently Closed (3)
     ├── #185 feat: password reset (merged)
     └── ... (2 more)
 ```
+
+**Author attribution**: Backlog and PR items show `@username` when the forge provides author data (Spec 637). Gracefully omitted when the author field is absent (e.g., some non-GitHub forges).
+
+**Forge-agnostic**: All issue/PR data comes through Tower's overview API, which dispatches to the configured forge provider (GitHub, GitLab, Gitea). The extension never calls `gh` or any forge CLI directly. "Open in Browser" actions use URLs from the API response, not hardcoded GitHub URLs.
 
 **Data source**: `GET /api/overview` (same as browser dashboard Work View)
 **Refresh**: On SSE events + manual refresh button
@@ -305,7 +331,7 @@ Commands registered under `Codev:` prefix:
 
 | Command | Action |
 |---------|--------|
-| `Codev: Spawn Builder` | Quick-pick for issue number + protocol → `af spawn` |
+| `Codev: Spawn Builder` | Quick-pick for issue number + protocol + optional branch → `afx spawn` |
 | `Codev: Send Message` | Quick-pick builder → input box for message → `POST /api/send` |
 | `Codev: Open Architect Terminal` | Opens/focuses architect terminal |
 | `Codev: Open Builder Terminal` | Quick-pick builder → opens terminal |
@@ -314,7 +340,7 @@ Commands registered under `Codev:` prefix:
 | `Codev: Refresh Overview` | `POST /api/overview/refresh` |
 | `Codev: View Analytics` | Opens analytics Webview panel |
 | `Codev: View Team` | Opens team Webview panel (when teamEnabled) |
-| `Codev: Cleanup Builder` | Quick-pick builder → `af cleanup` |
+| `Codev: Cleanup Builder` | Quick-pick builder → `afx cleanup` |
 | `Codev: Builder Status` | Quick-pick builder → shows status in notification |
 | `Codev: Connect Tunnel` | Connect cloud tunnel → `POST /api/tunnel/connect` |
 | `Codev: Disconnect Tunnel` | Disconnect cloud tunnel → `POST /api/tunnel/disconnect` |
@@ -323,7 +349,7 @@ Commands registered under `Codev:` prefix:
 
 ### 6. File Link Handling
 
-**Intercept `af open`**: Register a URI handler so `af open file.ts:42` triggers VS Code to open the file at line 42 using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`.
+**Intercept `afx open`**: Register a URI handler so `afx open file.ts:42` triggers VS Code to open the file at line 42 using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`.
 
 **Terminal file path detection**: The browser dashboard uses `FilePathDecorationManager` to make file paths clickable in xterm.js. In VS Code, this is handled natively by the terminal's link provider. Register a `TerminalLinkProvider` that detects file paths and opens them in the editor on click.
 
@@ -432,8 +458,10 @@ Without this package, the extension becomes a third independent copy of these ty
 Environment-agnostic Tower API client shared between dashboard and extension:
 
 - REST client with authenticated fetch (local-key header)
-- SSE client with reconnection logic
+- SSE client with reconnection logic and heartbeat handling
 - WebSocket binary protocol adapter (encode/decode `0x00`/`0x01` frames)
+- EscapeBuffer (from `dashboard/src/lib/escapeBuffer.ts`) for incomplete ANSI sequence handling
+- Workspace path encoding (base64url) for workspace-scoped routes
 - Connection state machine (`DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`)
 - Must accept a custom HTTP agent — VS Code extensions run behind corporate proxies and need to integrate with `vscode.workspace.getConfiguration('http').get('proxy')`
 
@@ -463,7 +491,7 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 | State | Behavior |
 |-------|----------|
 | **Activation** | On `codev.*` command or workspace contains `codev/` directory. Lazy — no heavy init until needed. |
-| **Tower not running** | Status bar shows offline. Commands show "Tower is not running — start with `af tower start`". TreeView shows empty state. |
+| **Tower not running** | Status bar shows offline. Commands show "Tower is not running — start with `afx tower start`". TreeView shows empty state. |
 | **Tower starts** | Health check succeeds → SSE connects → TreeView populates → status bar updates |
 | **Tower restarts** | SSE drops → reconnection with backoff → terminals print reconnecting banner → WebSockets reattach → ring buffer replay |
 | **VS Code reload** | Extension re-activates → reconnects to Tower → re-creates terminal Pseudoterminals → reattaches to existing shellper sessions |
@@ -475,7 +503,7 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 - [x] Should the extension be in this monorepo or a separate repo? **RESOLVED: Monorepo.** Extension lives in this repo (e.g., `packages/codev-vscode/`), sharing types and build infrastructure.
 
 ### Important (Affects Design)
-- [ ] Should `af open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach?
+- [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach?
 - [ ] Should the extension auto-start Tower if it's not running, or always require manual start?
 - [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
 
@@ -503,7 +531,7 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 ### Functional Tests
 1. **Happy path**: Tower running → activate extension → TreeView shows builders → open architect terminal → type command → see output
 2. **Send message**: Command Palette → "Send Message" → pick builder #42 → type message → message appears in builder terminal
-3. **File opening**: `af open src/index.ts:42` → VS Code editor opens file at line 42
+3. **File opening**: `afx open src/index.ts:42` → VS Code editor opens file at line 42
 4. **Gate approval**: Status bar shows blocked gate → click → approve → builder resumes
 5. **Tower offline**: Stop Tower → status bar turns red → TreeView greys out → restart Tower → everything recovers
 6. **Shell terminal**: Command Palette → "New Shell" → shell opens in terminal panel → persists across Tower restart
@@ -526,12 +554,20 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 - **Build**: `@vscode/vsce` for packaging and Marketplace publishing
 
 ## References
-- Spec 0066 (superseded): `codev/specs/0066-vscode-companion-extension.md`
-- Tower server architecture: `codev/specs/0105-tower-server-decomposition.md`
+- Spec 0066 (prior VS Code spec): `codev/specs/0066-vscode-companion-extension.md`
+- Spec 0105 (Tower decomposition): `codev/specs/0105-tower-server-decomposition.md`
+- Spec 0618 (v3.0.0 config overhaul): `codev/specs/0618-*`
+- Spec 0627 (ScrollController): `codev/specs/0627-*`
+- Spec 0637 (author in views): `codev/specs/0637-*`
+- Spec 0647 (CLI rename af → afx): `codev/specs/0647-*`
 - Architecture docs: `codev/resources/arch.md`
 - WebSocket protocol: `packages/codev/src/terminal/ws-protocol.ts`
+- EscapeBuffer: `packages/codev/dashboard/src/lib/escapeBuffer.ts`
+- ScrollController: `packages/codev/dashboard/src/lib/scrollController.ts`
 - Send buffer: `packages/codev/src/agent-farm/servers/send-buffer.ts`
 - Tower routes: `packages/codev/src/agent-farm/servers/tower-routes.ts`
+- Config loader: `packages/codev/src/lib/config.ts`
+- Forge system: `packages/codev/src/lib/forge.ts`, `packages/codev/src/lib/forge-contracts.ts`
 
 ## Risks and Mitigation
 
