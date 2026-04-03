@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
+import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,9 +23,18 @@ import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
 export interface CodevConfig {
   shell?: {
     architect?: string | string[];
+    architectHarness?: string;
     builder?: string | string[];
+    builderHarness?: string;
     shell?: string | string[];
   };
+  /** Custom harness provider definitions. Keys are harness names, values define role injection. */
+  harness?: Record<string, {
+    roleArgs: string[];
+    roleEnv?: Record<string, string>;
+    roleScriptFragment: string;
+    roleScriptEnv?: Record<string, string>;
+  }>;
   porch?: {
     checks?: Record<string, CheckOverride>;
     consultation?: {
@@ -219,6 +229,13 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
     const projectConfig = readJsonFile(projectPath);
     if (projectConfig) {
       merged = deepMerge(merged as unknown as Record<string, unknown>, projectConfig) as CodevConfig;
+    }
+  }
+
+  // Validate custom harness definitions at load time
+  if (merged.harness) {
+    for (const [name, def] of Object.entries(merged.harness)) {
+      validateCustomHarnessConfig(name, def);
     }
   }
 

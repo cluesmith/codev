@@ -159,9 +159,18 @@ export interface SendOptions {
 export interface UserConfig {
   shell?: {
     architect?: string | string[];
+    architectHarness?: string;
     builder?: string | string[];
+    builderHarness?: string;
     shell?: string | string[];
   };
+  /** Custom harness provider definitions. Keys are harness names, values define role injection. */
+  harness?: Record<string, {
+    roleArgs: string[];
+    roleEnv?: Record<string, string>;
+    roleScriptFragment: string;
+    roleScriptEnv?: Record<string, string>;
+  }>;
   templates?: {
     dir?: string;
   };
