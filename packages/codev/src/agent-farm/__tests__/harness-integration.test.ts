@@ -46,6 +46,20 @@ vi.mock('../../lib/forge.js', () => ({
   executeForgeCommand: vi.fn().mockResolvedValue(null),
 }));
 
+// Mock harness resolution — default to Claude, tests can override via mockReturnValue
+const mockGetBuilderHarness = vi.fn().mockReturnValue(CLAUDE_HARNESS);
+const mockGetArchitectHarness = vi.fn().mockReturnValue(CLAUDE_HARNESS);
+vi.mock('../utils/config.js', () => ({
+  getBuilderHarness: (...args: unknown[]) => mockGetBuilderHarness(...args),
+  getArchitectHarness: (...args: unknown[]) => mockGetArchitectHarness(...args),
+}));
+
+// Mock roles for buildArchitectArgs
+const mockLoadRolePrompt = vi.fn();
+vi.mock('../utils/roles.js', () => ({
+  loadRolePrompt: (...args: unknown[]) => mockLoadRolePrompt(...args),
+}));
+
 const ROLE_CONTENT = '# Builder Role\n\nYou are a builder.';
 const ROLE_FILE = '/tmp/workspace/.builder-role.md';
 const WORKSPACE = '/tmp/workspace';
@@ -179,50 +193,60 @@ describe('harness integration', () => {
   });
 
   // ===========================================================================
-  // Spec Test Scenario 7: No role provided
+  // Spec Test Scenario 7: No role provided — call-site integration
   // ===========================================================================
 
   describe('no role provided', () => {
-    it('all harnesses work correctly — callers skip injection when role is null', () => {
-      // This tests the pattern used by all call sites:
-      // if (role) { harness.buildRoleInjection(...) } else { skip }
-      // The harness is never called when role is null
-      const role: { content: string; source: string } | null = null;
-      expect(role).toBeNull();
-      // No harness call needed — callers check for null first
+    it('buildWorktreeLaunchScript produces script without role injection when role is null', async () => {
+      const { buildWorktreeLaunchScript } = await import('../commands/spawn-worktree.js');
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'codex', null);
+      expect(script).toContain('codex');
+      expect(script).not.toContain('--append-system-prompt');
+      expect(script).not.toContain('model_instructions_file');
+      expect(script).not.toContain('GEMINI_SYSTEM_MD');
+    });
+
+    it('buildArchitectArgs returns base args only when no role is loaded', async () => {
+      mockLoadRolePrompt.mockReturnValue(null);
+      const { buildArchitectArgs } = await import('../servers/tower-utils.js');
+      const result = buildArchitectArgs(['--resume'], '/tmp/workspace');
+      expect(result).toEqual({ args: ['--resume'], env: {} });
     });
   });
 
   // ===========================================================================
-  // Spec Test Scenario 8: Call-site integration (buildWorktreeLaunchScript)
+  // Spec Test Scenario 8: Call-site integration — real functions
   // ===========================================================================
 
-  describe('buildWorktreeLaunchScript integration', () => {
-    // Use the harness directly to verify what the script would contain
-    const harnesses = [
-      { name: 'claude', harness: CLAUDE_HARNESS, expectInFragment: '--append-system-prompt' },
-      { name: 'codex', harness: CODEX_HARNESS, expectInFragment: 'model_instructions_file=' },
-      { name: 'gemini', harness: GEMINI_HARNESS, expectInFragment: '' },
-    ];
+  describe('call-site integration: buildWorktreeLaunchScript', () => {
+    it('claude harness: script contains --append-system-prompt', async () => {
+      mockGetBuilderHarness.mockReturnValue(CLAUDE_HARNESS);
+      const { buildWorktreeLaunchScript } = await import('../commands/spawn-worktree.js');
+      const role = { content: 'You are a builder at {PORT}', source: 'test' };
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'claude', role, '/tmp/workspace');
+      expect(script).toContain('--append-system-prompt');
+      expect(script).toContain('.builder-role.md');
+      expect(script).toContain('Agent exited');
+      expect(script).not.toContain('Claude exited');
+    });
 
-    for (const { name, harness, expectInFragment } of harnesses) {
-      it(`${name} harness produces correct script fragment`, () => {
-        const { fragment, env } = harness.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
+    it('codex harness: script contains model_instructions_file', async () => {
+      mockGetBuilderHarness.mockReturnValue(CODEX_HARNESS);
+      const { buildWorktreeLaunchScript } = await import('../commands/spawn-worktree.js');
+      const role = { content: 'You are a builder', source: 'test' };
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'codex', role, '/tmp/workspace');
+      expect(script).toContain('model_instructions_file=');
+      expect(script).not.toContain('--append-system-prompt');
+    });
 
-        if (expectInFragment) {
-          expect(fragment).toContain(expectInFragment);
-        } else {
-          expect(fragment).toBe('');
-        }
-
-        // Verify env is consistent with provider contract
-        if (name === 'gemini') {
-          expect(env).toHaveProperty('GEMINI_SYSTEM_MD');
-        } else {
-          expect(Object.keys(env)).toHaveLength(0);
-        }
-      });
-    }
+    it('gemini harness: script contains GEMINI_SYSTEM_MD export', async () => {
+      mockGetBuilderHarness.mockReturnValue(GEMINI_HARNESS);
+      const { buildWorktreeLaunchScript } = await import('../commands/spawn-worktree.js');
+      const role = { content: 'You are a builder', source: 'test' };
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'gemini', role, '/tmp/workspace');
+      expect(script).toContain("export GEMINI_SYSTEM_MD='");
+      expect(script).not.toContain('--append-system-prompt');
+    });
   });
 
   // ===========================================================================
