@@ -25,7 +25,8 @@ export interface BufferedMessage {
 }
 
 export type GetSessionFn = (id: string) => PtySession | undefined;
-export type DeliverFn = (session: PtySession, msg: BufferedMessage) => void;
+/** Deliver function returns ms timestamp when all writes complete (for serialization). */
+export type DeliverFn = (session: PtySession, msg: BufferedMessage, delayOffset?: number) => number;
 export type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
 
 const DEFAULT_IDLE_THRESHOLD_MS = 3000;
@@ -99,9 +100,12 @@ export class SendBuffer {
       // Bugfix #492: removed composing check — it gets stuck true after non-Enter
       // keystrokes (Ctrl+C, arrows, Tab), causing messages to wait 60s max age.
       if (forceAll || isIdle || maxAgeExceeded) {
-        // Deliver all messages in order
+        // Deliver all messages in order, serializing paced writes (Bugfix #584).
+        // Each delivery returns the ms when its writes complete; the next message
+        // starts after that to prevent interleaved lines.
+        let offset = 0;
         for (const msg of messages) {
-          this.deliver(session, msg);
+          offset = this.deliver(session, msg, offset);
           if (this.log && msg.logMessage) {
             this.log('INFO', msg.logMessage);
           }

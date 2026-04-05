@@ -59,7 +59,7 @@ describe('SendBuffer', () => {
 
   it('delivers messages when session is idle', () => {
     const session = makeSession(true);
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(() => session, deliver, log);
@@ -76,7 +76,7 @@ describe('SendBuffer', () => {
 
   it('does NOT deliver messages when session is actively typing', () => {
     const session = makeSession(false); // not idle
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(() => session, deliver, log);
@@ -90,7 +90,7 @@ describe('SendBuffer', () => {
 
   it('delivers when max buffer age is exceeded even if user is typing', () => {
     const session = makeSession(false); // not idle
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(() => session, deliver, log);
@@ -109,8 +109,9 @@ describe('SendBuffer', () => {
   it('delivers all messages in order within a session', () => {
     const session = makeSession(true);
     const deliveredMsgs: string[] = [];
-    const deliver = (_s: PtySession, msg: BufferedMessage) => {
+    const deliver = (_s: PtySession, msg: BufferedMessage): number => {
       deliveredMsgs.push(msg.formattedMessage);
+      return 0;
     };
     const log = vi.fn();
 
@@ -126,7 +127,7 @@ describe('SendBuffer', () => {
   });
 
   it('discards messages for dead sessions with warning', () => {
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(() => undefined, deliver, log); // session gone
@@ -141,7 +142,7 @@ describe('SendBuffer', () => {
 
   it('stop() delivers all remaining messages (force flush)', () => {
     const session = makeSession(false); // not idle — normally wouldn't deliver
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(() => session, deliver, log);
@@ -158,7 +159,7 @@ describe('SendBuffer', () => {
   it('handles multiple sessions independently', () => {
     const idleSession = makeSession(true);
     const typingSession = makeSession(false);
-    const deliver = vi.fn();
+    const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
 
     buf.start(
@@ -196,7 +197,7 @@ describe('SendBuffer', () => {
       // Bugfix #492: composing gets stuck true after non-Enter keystrokes (Ctrl+C,
       // arrows, Tab). Idle threshold alone is sufficient for delivery.
       const session = makeSession(true, true); // idle=true, composing=true
-      const deliver = vi.fn();
+      const deliver = vi.fn().mockReturnValue(0);
       const log = vi.fn();
 
       buf.start(() => session, deliver, log);
@@ -210,7 +211,7 @@ describe('SendBuffer', () => {
 
     it('delivers when session is idle and NOT composing', () => {
       const session = makeSession(true, false); // idle=true, composing=false
-      const deliver = vi.fn();
+      const deliver = vi.fn().mockReturnValue(0);
       const log = vi.fn();
 
       buf.start(() => session, deliver, log);
@@ -224,7 +225,7 @@ describe('SendBuffer', () => {
 
     it('delivers when composing but max buffer age exceeded', () => {
       const session = makeSession(false, true); // not idle, composing
-      const deliver = vi.fn();
+      const deliver = vi.fn().mockReturnValue(0);
       const log = vi.fn();
 
       buf.start(() => session, deliver, log);

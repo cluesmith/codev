@@ -45,6 +45,7 @@ import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-f
 import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
+import { writeMessageToSession } from './message-write.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -86,14 +87,12 @@ const overviewCache = new OverviewCache();
 // Singleton send buffer for typing-aware message delivery (Spec 403)
 const sendBuffer = new SendBuffer();
 
-/** Deliver a buffered message to a session (write + broadcast + log). */
-function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
-  // Write message, then Enter after delay — see handleSend for rationale (Bugfix #492)
-  session.write(msg.formattedMessage);
-  if (!msg.noEnter) {
-    setTimeout(() => session.write('\r'), 50);
-  }
+/** Deliver a buffered message to a session (write + broadcast + log).
+ *  Returns the ms timestamp when all writes complete (for serialization). */
+function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
+  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, delayOffset);
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
+  return endTime;
 }
 
 /** Start the send buffer flush timer (called from tower-server during init). */
@@ -917,14 +916,8 @@ async function handleSend(
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
   } else {
     // User is idle (or interrupt) — deliver immediately.
-    // Write message first, then Enter separately after a short delay.
-    // Multi-line formatted messages contain embedded \n which the PTY processes
-    // as line breaks. A trailing \r in the same write submits an empty line after
-    // the footer, not the message. Delayed \r lets the PTY process the paste first.
-    session.write(formattedMessage);
-    if (!noEnter) {
-      setTimeout(() => session.write('\r'), 50);
-    }
+    // Bugfix #584: paces multi-line output to avoid paste detection.
+    writeMessageToSession(session, formattedMessage, noEnter);
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }
