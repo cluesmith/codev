@@ -132,7 +132,7 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 ### Business Constraints
 - Must not break existing browser dashboard users
 - Minimal additional maintenance burden — share API layer, not UI code
-- Extension must work with Tower running independently (`afx tower start` still required)
+- Extension auto-starts Tower if not running (detached daemon, never auto-stopped)
 
 ## Assumptions
 - Tower server is running on localhost:4100 (or port from `.codev/config.json`)
@@ -522,6 +522,7 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 | `codev.workspacePath` | string | auto-detect | Override workspace path for Tower matching |
 | `codev.architectTerminalPosition` | `"editor"` \| `"panel"` | `"panel"` | Where to open the architect terminal |
 | `codev.autoConnect` | boolean | `true` | Connect to Tower on activation |
+| `codev.autoStartTower` | boolean | `true` | Auto-start Tower if not running on activation |
 | `codev.telemetry` | boolean | `false` | No telemetry collected. Extension respects VS Code's global telemetry setting. |
 
 ## Default Keyboard Shortcuts
@@ -546,7 +547,8 @@ Additional commands available via Command Palette but without default keybinding
 | State | Behavior |
 |-------|----------|
 | **Activation** | On `codev.*` command or workspace contains `codev/` directory. Lazy — no heavy init until needed. |
-| **Tower not running** | Status bar shows offline. Commands show "Tower is not running — start with `afx tower start`". TreeView shows empty state. |
+| **Tower not running** | If `codev.autoStartTower` is true: run `afx tower start` as a detached process, then connect. If false or start fails: status bar shows offline, commands prompt to start manually. **Never auto-stop Tower** — it's a daemon that outlives VS Code so builders keep running. |
+| **Tower already running** | Health check succeeds on activation → connect immediately. Handles the case where another VS Code window or manual `afx tower start` already launched it. |
 | **Tower starts** | Health check succeeds → SSE connects → TreeView populates → status bar updates |
 | **Tower restarts** | SSE drops → reconnection with backoff → terminals print reconnecting banner → WebSockets reattach → ring buffer replay |
 | **VS Code reload** | Extension re-activates → reconnects to Tower → re-creates terminal Pseudoterminals → reattaches to existing shellper sessions |
@@ -561,7 +563,7 @@ Additional commands available via Command Palette but without default keybinding
 - [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach? This is a core architectural decision — URI scheme works cross-process, filesystem watcher is fundamentally different.
 
 ### Important (Affects Design)
-- [ ] Should the extension auto-start Tower if it's not running, or always require manual start?
+- [x] Should the extension auto-start Tower if it's not running? **RESOLVED: Yes.** Auto-start as detached process, never auto-stop. Setting `codev.autoStartTower` (default: true) for manual control.
 - [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
 
 ### Nice-to-Know (Optimization)
