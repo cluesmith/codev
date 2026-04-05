@@ -86,13 +86,56 @@ const overviewCache = new OverviewCache();
 // Singleton send buffer for typing-aware message delivery (Spec 403)
 const sendBuffer = new SendBuffer();
 
+// Bugfix #584: Multi-line message pacing constants.
+// Messages longer than this threshold are written line-by-line with delays
+// to prevent the receiving terminal from classifying the input as a paste
+// and swallowing the final Enter.
+const PACED_WRITE_LINE_THRESHOLD = 4;
+const INTER_LINE_DELAY_MS = 10;
+const PACED_ENTER_DELAY_MS = 80;
+const SIMPLE_ENTER_DELAY_MS = 50;
+
+/**
+ * Write a message to a PTY session, pacing multi-line output to prevent
+ * the terminal from treating it as a paste (Bugfix #584).
+ *
+ * Short messages (≤3 lines): single write + 50ms delayed Enter.
+ * Long messages (>3 lines): line-by-line writes with 10ms gaps, then Enter
+ * after all lines are delivered.
+ */
+export function writeMessageToSession(session: PtySession, message: string, noEnter: boolean): void {
+  const lines = message.split('\n');
+
+  if (lines.length < PACED_WRITE_LINE_THRESHOLD) {
+    // Short messages: single write (existing behavior, works fine)
+    session.write(message);
+    if (!noEnter) {
+      setTimeout(() => session.write('\r'), SIMPLE_ENTER_DELAY_MS);
+    }
+    return;
+  }
+
+  // Multi-line: pace output line-by-line to avoid paste detection.
+  // Writing all lines in a single write() causes the terminal to treat it
+  // as a paste, swallowing the final Enter.
+  for (let i = 0; i < lines.length; i++) {
+    const text = i < lines.length - 1 ? lines[i] + '\n' : lines[i];
+    if (i === 0) {
+      session.write(text);
+    } else {
+      setTimeout(() => session.write(text), i * INTER_LINE_DELAY_MS);
+    }
+  }
+
+  if (!noEnter) {
+    const totalPacingMs = (lines.length - 1) * INTER_LINE_DELAY_MS;
+    setTimeout(() => session.write('\r'), totalPacingMs + PACED_ENTER_DELAY_MS);
+  }
+}
+
 /** Deliver a buffered message to a session (write + broadcast + log). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
-  // Write message, then Enter after delay — see handleSend for rationale (Bugfix #492)
-  session.write(msg.formattedMessage);
-  if (!msg.noEnter) {
-    setTimeout(() => session.write('\r'), 50);
-  }
+  writeMessageToSession(session, msg.formattedMessage, msg.noEnter);
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
 }
 
@@ -917,14 +960,8 @@ async function handleSend(
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
   } else {
     // User is idle (or interrupt) — deliver immediately.
-    // Write message first, then Enter separately after a short delay.
-    // Multi-line formatted messages contain embedded \n which the PTY processes
-    // as line breaks. A trailing \r in the same write submits an empty line after
-    // the footer, not the message. Delayed \r lets the PTY process the paste first.
-    session.write(formattedMessage);
-    if (!noEnter) {
-      setTimeout(() => session.write('\r'), 50);
-    }
+    // Bugfix #584: paces multi-line output to avoid paste detection.
+    writeMessageToSession(session, formattedMessage, noEnter);
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }
