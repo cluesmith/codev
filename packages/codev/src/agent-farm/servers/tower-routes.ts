@@ -99,20 +99,31 @@ const SIMPLE_ENTER_DELAY_MS = 50;
  * Write a message to a PTY session, pacing multi-line output to prevent
  * the terminal from treating it as a paste (Bugfix #584).
  *
- * Short messages (≤3 lines): single write + 50ms delayed Enter.
+ * Short messages (≤3 lines): single write + delayed Enter.
  * Long messages (>3 lines): line-by-line writes with 10ms gaps, then Enter
  * after all lines are delivered.
+ *
+ * @param delayOffset  ms offset for all scheduled writes (used to serialize
+ *                     multiple messages to the same session without interleaving)
+ * @returns            ms timestamp (from call time) when all writes complete
  */
-export function writeMessageToSession(session: PtySession, message: string, noEnter: boolean): void {
+export function writeMessageToSession(
+  session: PtySession, message: string, noEnter: boolean, delayOffset = 0,
+): number {
   const lines = message.split('\n');
 
   if (lines.length < PACED_WRITE_LINE_THRESHOLD) {
     // Short messages: single write (existing behavior, works fine)
-    session.write(message);
-    if (!noEnter) {
-      setTimeout(() => session.write('\r'), SIMPLE_ENTER_DELAY_MS);
+    if (delayOffset === 0) {
+      session.write(message);
+    } else {
+      setTimeout(() => session.write(message), delayOffset);
     }
-    return;
+    const enterTime = delayOffset + SIMPLE_ENTER_DELAY_MS;
+    if (!noEnter) {
+      setTimeout(() => session.write('\r'), enterTime);
+    }
+    return enterTime;
   }
 
   // Multi-line: pace output line-by-line to avoid paste detection.
@@ -120,23 +131,29 @@ export function writeMessageToSession(session: PtySession, message: string, noEn
   // as a paste, swallowing the final Enter.
   for (let i = 0; i < lines.length; i++) {
     const text = i < lines.length - 1 ? lines[i] + '\n' : lines[i];
-    if (i === 0) {
+    const lineDelay = delayOffset + i * INTER_LINE_DELAY_MS;
+    if (lineDelay === 0) {
       session.write(text);
     } else {
-      setTimeout(() => session.write(text), i * INTER_LINE_DELAY_MS);
+      setTimeout(() => session.write(text), lineDelay);
     }
   }
 
+  const lastLineTime = delayOffset + (lines.length - 1) * INTER_LINE_DELAY_MS;
   if (!noEnter) {
-    const totalPacingMs = (lines.length - 1) * INTER_LINE_DELAY_MS;
-    setTimeout(() => session.write('\r'), totalPacingMs + PACED_ENTER_DELAY_MS);
+    const enterTime = lastLineTime + PACED_ENTER_DELAY_MS;
+    setTimeout(() => session.write('\r'), enterTime);
+    return enterTime;
   }
+  return lastLineTime;
 }
 
-/** Deliver a buffered message to a session (write + broadcast + log). */
-function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
-  writeMessageToSession(session, msg.formattedMessage, msg.noEnter);
+/** Deliver a buffered message to a session (write + broadcast + log).
+ *  Returns the ms timestamp when all writes complete (for serialization). */
+function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
+  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, delayOffset);
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
+  return endTime;
 }
 
 /** Start the send buffer flush timer (called from tower-server during init). */
