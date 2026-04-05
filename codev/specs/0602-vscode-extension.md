@@ -385,33 +385,34 @@ Commands registered under `Codev:` prefix:
 
 **Terminal file path detection**: The browser dashboard uses `FilePathDecorationManager` to make file paths clickable in xterm.js. In VS Code, this is handled natively by the terminal's link provider. Register a `TerminalLinkProvider` that detects file paths and opens them in the editor on click.
 
-### 7. Review Comments (Annotations)
+### 7. Review Comments
 
-The browser dashboard's `open.html` provides a custom gutter "+" button that inserts `// REVIEW(@author): comment text` lines directly into files. The VS Code extension replaces this with the native Comments API — the same mechanism used for GitHub PR inline comments.
+Review comments use the existing `// REVIEW(@author): text` plain-text format, interoperable with the browser dashboard's annotations.
 
-**CommentController registration:**
-- Register a `CommentController` with `id: 'codev-review'` and `label: 'Codev Review'`
-- Enable the native gutter "+" button on all files via `commentingRangeProvider`
-- Users click "+" on any line, type a comment, and submit — identical UX to PR reviews
+**V1: Snippet + Command Palette + Decorations**
 
-**Comment persistence (file-based, shared with browser dashboard):**
-- On submit: insert `// REVIEW(@architect): comment text` into the file at the target line using `vscode.workspace.applyEdit()` (`WorkspaceEdit`). This respects VS Code's undo stack, dirty buffer state, and avoids overwriting unsaved edits. **Do NOT use `POST /api/annotate/{tabId}/save`** — that endpoint calls `fs.writeFileSync` which would overwrite any unsaved VS Code buffer changes.
-- On file open: scan for existing `REVIEW(...)` patterns using the same regex patterns from `open.html` (`COMMENT_PATTERNS`) and render them as `CommentThread` instances
+Simple, no custom UI:
+- **Command**: `Codev: Add Review Comment` — inserts a review comment at the current cursor line using the correct comment syntax for the file type
+- **Snippet**: `rev` + Tab expands to the same pattern
+- **Decorations**: On file open, scan for existing `REVIEW(...)` patterns and highlight them with a colored background and gutter icon using the Decorations API. Makes review comments visually distinct from normal code comments — zero interaction complexity, just visual awareness.
+- Comment syntax by language:
+  - JS/TS/Go/Rust/Java/Swift/Kotlin/C/C++: `// REVIEW(@architect): |cursor|`
+  - Python/Ruby/Bash/YAML: `# REVIEW(@architect): |cursor|`
+  - HTML/Markdown: `<!-- REVIEW(@architect): |cursor| -->`
+  - CSS: `/* REVIEW(@architect): |cursor| */`
+  - Files with no comment syntax (JSON, binary): command shows warning
+
+**Post-V1: Comments API integration**
+
+Full native experience using VS Code's Comments API:
+- `CommentController` with gutter "+" button on all files via `commentingRangeProvider`
+- On submit: insert comment via `vscode.workspace.applyEdit()` (`WorkspaceEdit`) — respects undo stack and dirty buffers. **Do NOT use `POST /api/annotate/{tabId}/save`** — that endpoint uses `fs.writeFileSync` which overwrites unsaved VS Code buffer changes.
+- On file open: scan for existing `REVIEW(...)` patterns and render as `CommentThread` instances
 - Re-scan on `TextDocumentChangeEvent` to update thread positions when lines shift
+- Actions: edit (modify in-place), delete (remove line), resolve (delete — review comments are transient)
+- Concurrent modification from both clients on the same file is not supported — last writer wins
 
-**Comment syntax by language:**
-- JS/TS/Go/Rust/Java/Swift/Kotlin/C/C++: `// REVIEW(@author): text`
-- Python/Ruby/Bash/YAML: `# REVIEW(@author): text`
-- HTML/Markdown: `<!-- REVIEW(@author): text -->`
-- CSS: `/* REVIEW(@author): text */`
-- Files with no comment syntax (JSON, binary): disable the comment gutter "+" button
-
-**Interop guarantee:** Both the browser dashboard and VS Code extension read/write the same in-file comment format. A comment added in VS Code appears in the browser dashboard's annotations panel, and vice versa. Concurrent modification from both clients on the same file is not supported — last writer wins.
-
-**Actions on comment threads:**
-- Edit: modify the comment line in-place via `WorkspaceEdit`
-- Delete: remove the comment line from the file via `WorkspaceEdit`
-- Resolve: delete the comment (review comments are transient — resolved means addressed)
+**Interop**: Same plain-text format in both phases. Comments added in VS Code are visible in the browser dashboard's annotations panel, and vice versa.
 
 ### 8. Shell Terminals
 
