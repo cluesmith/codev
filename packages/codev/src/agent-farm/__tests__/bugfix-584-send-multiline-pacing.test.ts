@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeMessageToSession } from '../servers/tower-routes.js';
+import { writeMessageToSession } from '../servers/message-write.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 
 function makeSession(): PtySession & { writeCalls: string[] } {

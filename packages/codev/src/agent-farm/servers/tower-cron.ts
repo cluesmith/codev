@@ -13,6 +13,7 @@ import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
 import { broadcastMessage } from './tower-messages.js';
+import { writeMessageToSession } from './message-write.js';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================
@@ -318,10 +319,8 @@ function deliverMessage(task: CronTask, message: string): void {
   }
 
   const formatted = formatBuilderMessage('af-cron', message);
-  // Write message, then Enter separately after delay so PTY processes the
-  // multi-line paste before receiving the submission keystroke (Bugfix #492)
-  session.write(formatted);
-  setTimeout(() => session.write('\r'), 50);
+  // Bugfix #584: pace multi-line output to avoid paste detection.
+  writeMessageToSession(session, formatted, false);
 
   broadcastMessage({
     type: 'message',
