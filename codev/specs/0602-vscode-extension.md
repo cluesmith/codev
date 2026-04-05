@@ -571,6 +571,61 @@ Additional commands available via Command Palette but without default keybinding
 - [x] Should the extension auto-start Tower if it's not running? **RESOLVED: Yes.** Auto-start as detached process, never auto-stop. Setting `codev.autoStartTower` (default: true) for manual control.
 - [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
 
+### Important (Affects Design)
+- [ ] **Unified Codev Sidebar vs Separate Panels**: The current spec spreads Codev features across multiple UI surfaces — Work View as a sidebar TreeView, Team View as a Webview panel in the editor area, Analytics as another Webview panel, tunnel/cron status only in status bar and Command Palette. This means users have to know where each feature lives and navigate to it.
+
+  The alternative: consolidate into a **single Codev sidebar container** with collapsible sections — the same pattern VS Code's Explorer uses (Open Editors, Folders, Outline, Timeline are all sections in one pane):
+
+  ```
+  ┌──────────────────┬────────────────────────────────┬────────────────────────────────┐
+  │ CODEV            │ Architect                      │ [#42] [#43] [sh]               │
+  │                  │                                │ Builder #42                    │
+  │ > Needs Attn (2) │ $ claude                       │                                │
+  │   - #44 (12m)    │                                │ $ claude                       │
+  │   - PR #187 (3h) │ > I'll implement the password  │                                │
+  │ > Builders (3)   │   hashing module using bcrypt. │ > Working on the bcrypt        │
+  │   - #42 [impl]   │   Here's my approach:          │   integration for spec #42.    │
+  │   - #43 [review] │                                │                                │
+  │   - #44 [blocked]│ > Plan:                        │ > Created file:                │
+  │ > PRs (2)        │   1. Add bcrypt dependency     │   src/auth/hash.ts             │
+  │   - #187 @alice  │   2. Create hash() utility     │                                │
+  │   - #188 @bob    │   3. Add unit tests            │ > Running tests...             │
+  │ > Backlog (5)    │   4. Update auth middleware    │   PASS hash.test.ts            │
+  │   - #190 @alice  │                                │   PASS auth.test.ts            │
+  │   - #191 @bob    │ > Starting implementation...   │                                │
+  │ > Recently Closed│                                │ > All tests passing.           │
+  │                  │                                │   Committing changes...        │
+  │ > Team (3)       │                                │                                │
+  │   > @alice       │                                │                                │
+  │     Working: #42 │                                │                                │
+  │     7d: 3m, 2c   │                                │                                │
+  │   > @bob         │                                │                                │
+  │     Working: #43 │                                │                                │
+  │                  │                                │                                │
+  │ > Status         │ Left editor group              │ Right editor group             │
+  │   Tower: online  │ (1 tab: architect)             │ (N tabs: builders + shells)    │
+  │   Tunnel: off    │                                │                                │
+  │   Cron: 2 tasks  │                                │                                │
+  └──────────────────┴────────────────────────────────┴────────────────────────────────┘
+  ```
+
+  **Use case**: A developer opens VS Code, clicks the Codev icon in the Activity Bar, and sees everything in one place — blocked gates, builder status, team members, tunnel state. No hunting across Webview panels, status bar items, and Command Palette commands.
+
+  **Pros**:
+  - Single place to find all Codev features — discoverable and consistent
+  - Native VS Code feel (TreeView sections with collapsible headers)
+  - Keyboard navigable, supports context menus on every item
+  - Lighter than Webview panels — no React/Vite bundle for Team View
+  - Team members, cron tasks, and tunnel status become visible without running commands
+
+  **Cons**:
+  - TreeView is text-only — no rich cards, progress bars, or charts. Team member cards with avatars and activity stats would be plain text nodes instead.
+  - Analytics (Recharts) cannot be a TreeView section — charts need a Webview panel regardless
+  - More TreeView providers to implement and maintain (Work View + Team + Status vs just Work View)
+  - Team section would be a simpler representation than the browser dashboard's member cards with activity feeds
+
+  Analytics stays as a Webview panel (charts don't fit in a TreeView), opened via command or sidebar link. **Needs team input.**
+
 ### Nice-to-Know (Optimization)
 - [ ] Can the extension leverage VS Code's Git extension API for worktree visualization?
 - [ ] Should the TreeView support drag-and-drop for reordering backlog?
