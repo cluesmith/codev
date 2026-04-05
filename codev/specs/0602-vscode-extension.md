@@ -251,30 +251,35 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 3. Creates WebSocket to `/workspace/:base64path/ws/terminal/:id`
 4. Creates `vscode.window.createTerminal({ name: "Architect" | "Builder #42 [implement]", pty })`
 
-**Architect terminal layout:**
-Controlled by setting `codev.architectTerminalPosition` (`"editor"` | `"panel"`, default: `"panel"`).
+**Terminal layout (editor area, not bottom panel):**
+All Codev terminals (architect, builders, shells) open in the **editor area** as terminal-in-editor views — not the bottom panel. This provides full vertical height and mirrors the browser dashboard's layout.
 
-- **`"panel"` (default)**: Architect opens in the standard bottom terminal panel alongside builders. Safe, no layout manipulation.
-- **`"editor"`**: Architect opens as a side editor for full vertical height. On "Open Architect Terminal":
-  1. Create the terminal as above
-  2. Move it into the editor area via `workbench.action.terminal.moveIntoEditor`
-  3. Split the editor group vertically so architect is on the left, code files on the right
+On first terminal open, the extension arranges two editor groups:
+1. Move terminals into the editor area via `workbench.action.terminal.moveIntoEditor`
+2. **Left editor group**: Architect terminal (single tab, always visible)
+3. **Right editor group**: Builder terminals (one tab per builder) + shell terminals
 
 ```
-┌──────────┬───────────────┬──────────────┐
-│ Work View│  Architect    │              │
-│ TreeView │  (native      │  Code Editor │
-│          │   terminal)   │              │
-│          │               │              │
-│          ├───────────────┴──────────────┤
-│          │  Builder terminals (bottom)   │
-└──────────┴──────────────────────────────┘
+┌──────────────┬────────────────┬────────────────┐
+│ Work View    │ Architect      │ [#42][#43][sh] │
+│ (sidebar     │                │ Builder #42    │
+│  pane)       │                │ (terminal)     │
+│              │                │                │
+│ - Attention  │ Left editor    │ Right editor   │
+│ - Builders   │ group          │ group          │
+│ - PRs        │ (1 tab:        │ (N tabs:       │
+│ - Backlog    │  architect)    │  builders +    │
+│              │                │  shells)       │
+└──────────────┴────────────────┴────────────────┘
 ```
 
-**Fallback**: `workbench.action.terminal.moveIntoEditor` is an undocumented internal VS Code command that may change between versions. If it fails, the extension falls back to opening the architect in the standard panel and logs a warning to the Output Channel. The editor-split is a best-effort layout enhancement, not a hard requirement.
+This mirrors the browser dashboard exactly: architect on the left, builders on the right, Work View in the sidebar pane. The right editor group hosts one tab per builder plus shell terminals — click tabs to switch between them.
 
-**Builder/shell terminals:**
-Builders and shells open in the standard bottom terminal panel. Named `Builder #42 [implement]`, `Shell #1`, etc.
+**Multiple builders**: Each builder is a tab in the right editor group. Click a tab to switch, or open from TreeView. All builders remain accessible — no closing/reopening.
+
+**Shell terminals**: Open as additional tabs in the right editor group alongside builders.
+
+**Fallback**: `workbench.action.terminal.moveIntoEditor` is an undocumented internal VS Code command that may change between versions. If it fails, the extension falls back to the standard bottom panel and logs a warning to the Output Channel.
 
 **Binary protocol adapter:**
 - **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode(bytes, { stream: true })` → `onDidWrite.fire(string)`
@@ -306,7 +311,7 @@ On reconnect, the ring buffer replays potentially large scrollback. Sending a re
 
 ### 3. Work View TreeView
 
-Sidebar panel showing operational state:
+VS Code sidebar pane (like Explorer or Source Control) — not a window or Webview inside the editor. Shows operational state:
 
 ```
 CODEV AGENT FARM
@@ -520,7 +525,7 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 | `codev.towerHost` | string | `localhost` | Tower server host |
 | `codev.towerPort` | number | `4100` | Tower server port (overridden by `.codev/config.json`) |
 | `codev.workspacePath` | string | auto-detect | Override workspace path for Tower matching |
-| `codev.architectTerminalPosition` | `"editor"` \| `"panel"` | `"panel"` | Where to open the architect terminal |
+| `codev.terminalPosition` | `"editor"` \| `"panel"` | `"editor"` | Where to open Codev terminals (editor area or bottom panel) |
 | `codev.autoConnect` | boolean | `true` | Connect to Tower on activation |
 | `codev.autoStartTower` | boolean | `true` | Auto-start Tower if not running on activation |
 | `codev.telemetry` | boolean | `false` | No telemetry collected. Extension respects VS Code's global telemetry setting. |
@@ -645,7 +650,7 @@ All errors surface through a consistent pattern:
 | Extension host CPU spikes from high-volume terminal output | Medium | High | Chunk `onDidWrite` calls with `setImmediate`, 16KB threshold |
 | Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types, version in `/api/health` |
 | WebSocket backpressure causing frozen terminals | Low | High | Never drop frames — disconnect and reconnect via ring buffer replay if > 1MB queued |
-| `moveIntoEditor` API instability | Medium | Medium | Opt-in via setting, default to panel, graceful fallback on failure |
+| `moveIntoEditor` API instability | Medium | Medium | Fallback to bottom panel on failure, log warning to Output Channel |
 | Multi-workspace confusion (actions against wrong workspace) | Medium | Medium | Scope all actions to active workspace, traverse up to `.codev/config.json` root |
 | Comment thread line-drift after edits | Medium | Medium | Re-scan on `TextDocumentChangeEvent`, update thread positions |
 | Concurrent annotation edits (browser + VS Code) | Low | Medium | Document as unsupported — last writer wins |
@@ -748,14 +753,16 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 6. No browser needed
 
 ```
-┌──────────┬───────────────┬──────────────┐
-│ Work View│  Architect    │              │
-│ TreeView │  (native      │  Code Editor │
-│          │   terminal)   │              │
-│          │               │              │
-│          ├───────────────┴──────────────┤
-│          │  Builder terminals (bottom)   │
-└──────────┴──────────────────────────────┘
+┌──────────────┬────────────────┬────────────────┐
+│ Work View    │ Architect      │ [#42] [#43]    │
+│ (sidebar     │ (terminal)     │ Builder #42    │
+│  pane)       │                │ (terminal)     │
+│              │                │                │
+│ - Attention  │                │                │
+│ - Builders   │ Left editor    │ Right editor   │
+│ - PRs        │ group          │ group          │
+│ - Backlog    │                │                │
+└──────────────┴────────────────┴────────────────┘
 ```
 
 ### Monitoring Builders
@@ -782,11 +789,11 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 
 **VS Code:**
 - Right-click builder in TreeView → "Open Terminal", or `Cmd+Shift+P` → "Codev: Open Builder Terminal"
-- Terminal opens in VS Code's bottom terminal panel
-- Architect stays in the left editor split, code on the right, builders at the bottom
-- You can see architect + code + builder simultaneously
+- Builder terminal opens in the right editor group
+- Architect stays on the left, builder on the right — same layout as the browser dashboard
+- Switching builders swaps the right side, like switching tabs
 
-**Key difference:** Both give you a split layout. The browser's is purpose-built (architect left, content right). VS Code's uses native editor splits and terminal panel — the architect is a side editor at full vertical height, builders are in the bottom panel, and your code is always visible.
+**Key difference:** Nearly identical layout. The browser's is purpose-built; VS Code's uses native editor splits with terminal-in-editor views. Both give architect left, builder right, with full vertical height.
 
 ### Sending a Message to a Builder
 
@@ -876,7 +883,7 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 
 | Feature | Why |
 |---------|-----|
-| **Curated split pane** | Browser's layout is automatic. VS Code requires a one-time "Open Architect Terminal" action to set up the split, but then mirrors the same layout. |
+| **Curated split pane** | Browser's layout is automatic. VS Code mirrors the same architect-left/builder-right layout using terminal-in-editor views, set up on first terminal open. |
 | **Mobile layout** | Browser dashboard has a mobile-responsive view. VS Code is desktop-only. |
 | **Rich file viewer** | Browser handles images, video, PDF, 3D models inline. VS Code handles most natively except 3D. |
 | **Multi-workspace overview** | Browser dashboard shows all workspaces at once. VS Code scopes to the open workspace by default. |
