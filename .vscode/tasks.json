@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build-extension",
+			"type": "npm",
+			"script": "compile",
+			"path": "packages/codev-vscode",
+			"group": "build",
+			"problemMatcher": "$esbuild-watch"
+		}
+	]
+}

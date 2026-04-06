@@ -1,0 +1,13 @@
+{
+    "files.exclude": {
+        "packages/codev-vscode/out": true,
+        "packages/codev-vscode/dist": true,
+        "packages/codev/dist": true
+    },
+    "search.exclude": {
+        "packages/codev-vscode/out": true,
+        "packages/codev-vscode/dist": true,
+        "packages/codev/dist": true
+    },
+    "typescript.tsc.autoDetect": "off"
+}
