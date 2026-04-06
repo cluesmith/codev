@@ -65,19 +65,17 @@ Codev's Agent Farm operates through a browser-based dashboard served by the Towe
 
 A VS Code extension (`codev-vscode`) that provides:
 
-1. **Native terminals** — Architect and builder PTY sessions rendered in VS Code's terminal panel, connected to Tower via WebSocket
-2. **Work View sidebar** — TreeView showing builders (status, phase, blocked gates), PRs, and backlog
+1. **Native terminals** — Architect and builder PTY sessions in VS Code's editor area (terminal-in-editor), connected to Tower via WebSocket
+2. **Unified Codev sidebar** — Single sidebar pane with collapsible sections: Needs Attention, Builders, PRs, Backlog, Recently Closed, Team, and Status
 3. **Status bar** — Builder count, active phase, blocked gate notifications
 4. **Command Palette** — All `afx` and `porch` commands accessible without leaving the IDE
 5. **Native file opening** — `afx open file.ts:42` opens in VS Code's editor at line 42, not the browser
 6. **Message sending** — `afx send` from Command Palette with builder picker and message input
-7. **Review comments** — Native Comments API gutter "+" for adding `REVIEW(@author)` comments, interoperable with browser dashboard annotations
+7. **Review comments** — Snippet/command + Decorations API for V1, full Comments API post-V1
 8. **Shell terminals** — Ad-hoc shell sessions via Tower, with shellper persistence (survives restarts)
-9. **Needs Attention** — TreeView section + status bar for PRs needing review and builders blocked on approval gates
-10. **Cloud tunnel status** — Connection state, tower name, uptime in status bar; connect/disconnect commands
-11. **Team View** — Webview panel showing team members, activity, and messages (conditional on `teamEnabled`)
-12. **Analytics** — Webview panel embedding the existing Recharts analytics dashboard
-13. **Connection resilience** — Graceful handling of Tower offline/restart, shellper reconnection
+9. **Cloud tunnel status** — Connection state in sidebar Status section; connect/disconnect commands
+10. **Analytics** — Webview panel embedding the existing Recharts analytics dashboard (charts don't fit in TreeView)
+11. **Connection resilience** — Graceful handling of Tower offline/restart, shellper reconnection
 
 Users can use the browser dashboard, the VS Code extension, or both simultaneously. Both consume the same Tower API.
 
@@ -88,20 +86,21 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 - **Business Owners**: Project owner
 
 ## Success Criteria
-- [ ] Architect terminal opens in VS Code terminal panel, connected to Tower PTY via WebSocket
-- [ ] Builder terminals open in VS Code terminal panel with correct naming (`Builder #42 [implement]`)
-- [ ] Work View TreeView shows builders, PRs, and backlog from `/api/overview`
+- [ ] Architect terminal opens in left editor group, connected to Tower PTY via WebSocket
+- [ ] Builder terminals open in right editor group as tabs with correct naming (`Builder #42 [implement]`)
+- [ ] Unified Codev sidebar shows Needs Attention, Builders, PRs, Backlog, Recently Closed, Team, and Status sections
 - [ ] Status bar shows builder count and blocked gate count
 - [ ] `afx spawn`, `afx send`, `afx cleanup`, `porch approve` available via Command Palette
 - [ ] `afx open file.ts:42` opens file in VS Code editor at correct line
-- [ ] Review comments via Comments API gutter "+" — interoperable with browser dashboard annotations
+- [ ] Review comments via snippet/command + Decorations API highlighting (V1)
 - [ ] Shell terminals created via Command Palette, connected to Tower with shellper persistence
-- [ ] Needs Attention section in TreeView shows blocked builders and PRs needing review
-- [ ] Cloud tunnel status visible in status bar with connect/disconnect commands
-- [ ] Team View Webview panel shows members, activity, messages (when teamEnabled)
+- [ ] Needs Attention section in sidebar shows blocked builders and PRs needing review
+- [ ] Cloud tunnel status visible in sidebar Status section with connect/disconnect commands
+- [ ] Team section in sidebar shows members, activity (when teamEnabled)
 - [ ] Analytics Webview panel renders existing Recharts dashboard
-- [ ] Cron tasks manageable via Command Palette (run, enable, disable)
+- [ ] Cron tasks manageable via Command Palette and sidebar Status section
 - [ ] Image paste in terminal uploads via `POST /api/paste-image`
+- [ ] Tower auto-starts on extension activation if not running
 - [ ] Extension detects Tower offline and shows degraded state (grey UI, reconnection banner)
 - [ ] Terminal sessions survive VS Code reload (reconnect to shellper via Tower)
 - [ ] Extension activates in < 500ms
@@ -249,7 +248,7 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 1. User triggers "Open Architect Terminal" or "Open Builder #42 Terminal" via Command Palette or TreeView
 2. Extension calls `GET /api/terminals` to find the terminal ID
 3. Creates WebSocket to `/workspace/:base64path/ws/terminal/:id`
-4. Creates `vscode.window.createTerminal({ name: "Architect" | "Builder #42 [implement]", pty })`
+4. Creates `vscode.window.createTerminal({ name: "Codev: Architect" | "Codev: #42 password-hashing [implement]", pty })`
 
 **Terminal layout (editor area, not bottom panel):**
 All Codev terminals (architect, builders, shells) open in the **editor area** as terminal-in-editor views — not the bottom panel. This provides full vertical height and mirrors the browser dashboard's layout.
@@ -309,43 +308,76 @@ On reconnect, the ring buffer replays potentially large scrollback. Sending a re
 - Upload via `POST /api/paste-image` (same as browser dashboard's `uploadPasteImage()`)
 - Insert resulting file path into terminal input
 
-### 3. Work View TreeView
+### 3. Unified Codev Sidebar
 
-VS Code sidebar pane (like Explorer or Source Control) — not a window or Webview inside the editor. Shows operational state:
+Single VS Code sidebar pane (like Explorer or Source Control) with collapsible sections. Registered as a View Container with its own Activity Bar icon. All Codev features in one place — no separate Webview panels for Team or Status.
 
 ```
-CODEV AGENT FARM
-├── ⚠ Needs Attention (2)
-│   ├── #44 api-refactor — blocked on plan-approval (12m)
-│   └── PR #187 — ready for review (3h)
-├── 🔨 Builders (3)
-│   ├── #42 password-hashing [implement] ● running
-│   ├── #43 dashboard-polish [review] ● running
-│   └── #44 api-refactor [plan-approval] ⏸ blocked
-├── 📋 Pull Requests (2)
-│   ├── #187 feat: password hashing @alice (ready)
-│   └── #188 fix: dashboard layout @bob (draft)
-├── 📥 Backlog (5)
-│   ├── #190 Add rate limiting @alice
-│   ├── #191 Improve error messages @bob
-│   └── ... (2 more)
-└── ✓ Recently Closed (3)
-    ├── #185 feat: password reset (merged)
-    └── ... (2 more)
+┌────────────────────────────────────────────┐
+│ CODEV                                      │
+│                                            │
+│ > Needs Attention (2)                      │
+│   - #44 api-refactor blocked (12m)         │
+│   - PR #187 ready for review (3h)          │
+│ > Builders (3)                             │
+│   - #42 password-hashing [implement]       │
+│   - #43 dashboard-polish [review]          │
+│   - #44 api-refactor [plan-approval]       │
+│ > Pull Requests (2)                        │
+│   - #187 feat: password hashing @alice     │
+│   - #188 fix: dashboard layout @bob        │
+│ > Backlog (5)                              │
+│   - #190 Add rate limiting @alice          │
+│   - #191 Improve error messages @bob       │
+│ > Recently Closed (3)                      │
+│   - #185 feat: password reset (merged)     │
+│                                            │
+│ > Team (3 members)                         │
+│   > @alice (Senior Engineer)               │
+│     - Working on: #42 password-hashing     │
+│     - Open PRs: #187                       │
+│     - Last 7d: 3 merged, 2 closed          │
+│   > @bob (Engineer)                        │
+│     - Working on: #43 dashboard-polish     │
+│     - Open PRs: #188                       │
+│     - Last 7d: 1 merged, 1 closed          │
+│   > @carol (Engineer)                      │
+│     - Working on: none                     │
+│     - Last 7d: 0 merged, 0 closed          │
+│                                            │
+│ > Status                                   │
+│   Tower: online (localhost:4100)            │
+│   Tunnel: disconnected                     │
+│   Cron: 2 tasks (1 running)                │
+└────────────────────────────────────────────┘
 ```
+
+**Sections** (each is a separate `TreeView` registered in the same View Container):
+
+| Section | Data Source | Refresh |
+|---------|-----------|---------|
+| Needs Attention | `GET /api/overview` | SSE events |
+| Builders | `GET /api/overview` | SSE events |
+| Pull Requests | `GET /api/overview` | SSE events |
+| Backlog | `GET /api/overview` | SSE events |
+| Recently Closed | `GET /api/overview` | SSE events |
+| Team | `GET /workspace/:path/api/team` | On activation + manual refresh |
+| Status | `/api/health`, `/api/tunnel/*`, `/api/cron/tasks` | SSE events + polling |
+
+**Team section**: Conditional on `teamEnabled` — hidden when fewer than 2 team members configured. Shows member name, role, current work, open PRs, and 7-day activity summary. Context menu: "View on GitHub", "View Activity". Team messages accessible via `Codev: View Team Messages` command.
 
 **Author attribution**: Backlog and PR items show `@username` when the forge provides author data (Spec 637). Gracefully omitted when the author field is absent (e.g., some non-GitHub forges).
 
 **Forge-agnostic**: All issue/PR data comes through Tower's overview API, which dispatches to the configured forge provider (GitHub, GitLab, Gitea). The extension never calls `gh` or any forge CLI directly. "Open in Browser" actions use URLs from the API response, not hardcoded GitHub URLs.
 
-**Data source**: `GET /api/overview` (same as browser dashboard Work View)
-**Refresh**: On SSE events + manual refresh button
 **Actions (context menu):**
 - Needs Attention: Approve Gate, Open PR in Browser
 - Builder: Open Terminal, Send Message, View Status
 - PR: Open in Browser, View Diff
 - Backlog: Spawn Builder
 - Recently Closed: Open PR, View Artifacts
+- Team member: View on GitHub, View Activity
+- Status: Connect/Disconnect Tunnel, Run Cron Task
 
 ### 4. Status Bar
 
@@ -381,7 +413,7 @@ Commands registered under `Codev:` prefix:
 
 ### 6. File Link Handling
 
-**Intercept `afx open`**: Register a URI handler so `afx open file.ts:42` triggers VS Code to open the file at line 42 using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`.
+**Intercept `afx open` via URI scheme**: Register a `UriHandler` for the `vscode://codev/open` scheme. When the user runs `afx open file.ts:42`, the CLI detects VS Code and emits `vscode://codev/open?file=file.ts&line=42`. The extension's URI handler opens the file using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`. Requires a corresponding change to the `afx open` CLI to support URI output when VS Code is detected.
 
 **Terminal file path detection**: The browser dashboard uses `FilePathDecorationManager` to make file paths clickable in xterm.js. In VS Code, this is handled natively by the terminal's link provider. Register a `TerminalLinkProvider` that detects file paths and opens them in the editor on click.
 
@@ -426,33 +458,14 @@ The browser dashboard has a "+ Shell" button that creates ad-hoc shell terminals
 
 ### 9. Needs Attention
 
-The browser dashboard's `NeedsAttentionList` component aggregates items requiring immediate action. The extension surfaces these prominently:
+Aggregates items requiring immediate action. Surfaced in two places:
 
-- **TreeView**: Top-level "Needs Attention" node (always visible when non-empty)
+- **Sidebar**: Top-level "Needs Attention" section in the unified Codev sidebar (always visible when non-empty)
 - **Status bar**: Blocked gate count shown with bell icon — click to approve
-- **No toast notifications** — avoid interrupting flow; use TreeView and status bar only
+- **No toast notifications** — avoid interrupting flow; use sidebar and status bar only
 - Items: builders blocked on approval gates (with time-waiting), PRs needing review
 
-### 10. Cloud Tunnel Status
-
-The browser dashboard's `CloudStatus` component shows tunnel connection state for remote access:
-
-- **Status bar item**: Shows tunnel state (connected with tower name + uptime, disconnected, auth failed)
-- **Commands**: `Codev: Connect Tunnel` (`POST /api/tunnel/connect`), `Codev: Disconnect Tunnel` (`POST /api/tunnel/disconnect`)
-- **Auto-hide**: Hidden when running on codevos.ai (cloud-hosted, same behavior as dashboard)
-- **States**: not registered (grey), connecting (yellow), connected (green + tower name), disconnected (grey), auth failed (red)
-
-### 11. Team View
-
-The browser dashboard's `TeamView` shows team members, activity, and messages when `teamEnabled` is true:
-
-- **Webview panel**: Rendered only when `GET /api/team` returns `enabled: true`
-- Member cards: name, GitHub handle, role, assigned issues, open PRs, recent activity (7-day window)
-- Messages section: reverse chronological, author + timestamp + body
-- Data proxied through extension host via `postMessage` (same pattern as Analytics Webview)
-- **Command**: `Codev: View Team` opens the panel
-
-### 12. Cron Task Management
+### 10. Cron Task Management
 
 Tower has a full cron API (`GET /api/cron/tasks`, `POST run/enable/disable`) that the dashboard doesn't expose. The extension surfaces this via commands:
 
@@ -463,7 +476,7 @@ Tower has a full cron API (`GET /api/cron/tasks`, `POST run/enable/disable`) tha
 | `Codev: Enable Cron Task` | Quick-pick task → `POST /api/cron/tasks/:name/enable` |
 | `Codev: Disable Cron Task` | Quick-pick task → `POST /api/cron/tasks/:name/disable` |
 
-### 13. Analytics Webview
+### 11. Analytics Webview
 
 Single Webview panel embedding the existing Recharts analytics page:
 
@@ -566,14 +579,14 @@ Additional commands available via Command Palette but without default keybinding
 - [x] Should the extension be in this monorepo or a separate repo? **RESOLVED: Monorepo.** Extension lives in this repo (e.g., `packages/codev-vscode/`), sharing types and build infrastructure.
 
 ### Critical (Blocks Progress)
-- [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach? This is a core architectural decision — URI scheme works cross-process, filesystem watcher is fundamentally different.
+- [x] Should `afx open` use a VS Code URI scheme? **RESOLVED: Yes.** Register a custom URI handler (`vscode://codev/open?file=file.ts&line=42`). The `afx open` CLI emits this URI when VS Code is detected. Same cross-process pattern GitHub uses (`vscode://vscode.git/clone`). Requires modifying `afx open` to support URI output.
 
 ### Important (Affects Design)
 - [x] Should the extension auto-start Tower if it's not running? **RESOLVED: Yes.** Auto-start as detached process, never auto-stop. Setting `codev.autoStartTower` (default: true) for manual control.
-- [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
+- [x] Terminal naming convention: **RESOLVED.** `Codev: Architect` for the architect. `Codev: #42 password-hashing [implement]` for builders — includes spec/project title and current phase. `Codev: Shell #1` for shells.
 
 ### Important (Affects Design)
-- [ ] **Unified Codev Sidebar vs Separate Panels**: The current spec spreads Codev features across multiple UI surfaces — Work View as a sidebar TreeView, Team View as a Webview panel in the editor area, Analytics as another Webview panel, tunnel/cron status only in status bar and Command Palette. This means users have to know where each feature lives and navigate to it.
+- [x] **Unified Codev Sidebar vs Separate Panels**: **RESOLVED: Unified sidebar.** Team approved. The current spec spreads Codev features across multiple UI surfaces — Work View as a sidebar TreeView, Team View as a Webview panel in the editor area, Analytics as another Webview panel, tunnel/cron status only in status bar and Command Palette. This means users have to know where each feature lives and navigate to it.
 
   The alternative: consolidate into a **single Codev sidebar container** with collapsible sections — the same pattern VS Code's Explorer uses (Open Editors, Folders, Outline, Timeline are all sections in one pane):
 
@@ -810,14 +823,15 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 
 ```
 ┌──────────────┬────────────────┬────────────────┐
-│ Work View    │ Architect      │ [#42] [#43]    │
-│ (sidebar     │ (terminal)     │ Builder #42    │
-│  pane)       │                │ (terminal)     │
-│              │                │                │
+│ Codev        │ Architect      │ [#42] [#43]    │
+│ (sidebar)    │ (terminal)     │ Builder #42    │
+│              │                │ (terminal)     │
 │ - Attention  │                │                │
 │ - Builders   │ Left editor    │ Right editor   │
 │ - PRs        │ group          │ group          │
 │ - Backlog    │                │                │
+│ - Team       │                │                │
+│ - Status     │                │                │
 └──────────────┴────────────────┴────────────────┘
 ```
 
@@ -829,9 +843,10 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 - Needs Attention section at the top highlights blocked gates
 
 **VS Code:**
-- TreeView sidebar always visible alongside your code — no tab switching
+- Unified Codev sidebar always visible alongside your code — no tab switching
 - Expand "Builders" to see `#42 password-hashing [implement] ● running`
-- "Needs Attention" node at the top: `#44 api-refactor — blocked on plan-approval (12m)`
+- "Needs Attention" at the top: `#44 api-refactor — blocked on plan-approval (12m)`
+- Team and Status sections below for quick reference
 - Status bar gives you the count at a glance without even looking at the sidebar
 
 **Key difference:** In the browser, monitoring builders means you're *in the dashboard*. In VS Code, you see builder state *while editing code* — it's peripheral information, not a separate context.

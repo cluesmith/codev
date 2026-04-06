@@ -1,0 +1,7 @@
+{
+  "name": "cluesmith-codev",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

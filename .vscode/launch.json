@@ -1,0 +1,17 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run Codev Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/codev-vscode"
+			],
+			"outFiles": [
+				"${workspaceFolder}/packages/codev-vscode/dist/**/*.js"
+			],
+			"preLaunchTask": "build-extension"
+		}
+	]
+}
