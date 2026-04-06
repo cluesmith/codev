@@ -248,7 +248,7 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 1. User triggers "Open Architect Terminal" or "Open Builder #42 Terminal" via Command Palette or TreeView
 2. Extension calls `GET /api/terminals` to find the terminal ID
 3. Creates WebSocket to `/workspace/:base64path/ws/terminal/:id`
-4. Creates `vscode.window.createTerminal({ name: "Architect" | "Builder #42 [implement]", pty })`
+4. Creates `vscode.window.createTerminal({ name: "Codev: Architect" | "Codev: #42 password-hashing [implement]", pty })`
 
 **Terminal layout (editor area, not bottom panel):**
 All Codev terminals (architect, builders, shells) open in the **editor area** as terminal-in-editor views — not the bottom panel. This provides full vertical height and mirrors the browser dashboard's layout.
@@ -413,7 +413,7 @@ Commands registered under `Codev:` prefix:
 
 ### 6. File Link Handling
 
-**Intercept `afx open`**: Register a URI handler so `afx open file.ts:42` triggers VS Code to open the file at line 42 using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`.
+**Intercept `afx open` via URI scheme**: Register a `UriHandler` for the `vscode://codev/open` scheme. When the user runs `afx open file.ts:42`, the CLI detects VS Code and emits `vscode://codev/open?file=file.ts&line=42`. The extension's URI handler opens the file using `vscode.workspace.openTextDocument` + `vscode.window.showTextDocument` with `vscode.Selection`. Requires a corresponding change to the `afx open` CLI to support URI output when VS Code is detected.
 
 **Terminal file path detection**: The browser dashboard uses `FilePathDecorationManager` to make file paths clickable in xterm.js. In VS Code, this is handled natively by the terminal's link provider. Register a `TerminalLinkProvider` that detects file paths and opens them in the editor on click.
 
@@ -579,11 +579,11 @@ Additional commands available via Command Palette but without default keybinding
 - [x] Should the extension be in this monorepo or a separate repo? **RESOLVED: Monorepo.** Extension lives in this repo (e.g., `packages/codev-vscode/`), sharing types and build infrastructure.
 
 ### Critical (Blocks Progress)
-- [ ] Should `afx open` use a VS Code URI scheme (`vscode://codev/open?file=...`) or a filesystem watcher approach? This is a core architectural decision — URI scheme works cross-process, filesystem watcher is fundamentally different.
+- [x] Should `afx open` use a VS Code URI scheme? **RESOLVED: Yes.** Register a custom URI handler (`vscode://codev/open?file=file.ts&line=42`). The `afx open` CLI emits this URI when VS Code is detected. Same cross-process pattern GitHub uses (`vscode://vscode.git/clone`). Requires modifying `afx open` to support URI output.
 
 ### Important (Affects Design)
 - [x] Should the extension auto-start Tower if it's not running? **RESOLVED: Yes.** Auto-start as detached process, never auto-stop. Setting `codev.autoStartTower` (default: true) for manual control.
-- [ ] Terminal naming convention: `Architect` / `Builder #42 [implement]` or something else?
+- [x] Terminal naming convention: **RESOLVED.** `Codev: Architect` for the architect. `Codev: #42 password-hashing [implement]` for builders — includes spec/project title and current phase. `Codev: Shell #1` for shells.
 
 ### Important (Affects Design)
 - [x] **Unified Codev Sidebar vs Separate Panels**: **RESOLVED: Unified sidebar.** Team approved. The current spec spreads Codev features across multiple UI surfaces — Work View as a sidebar TreeView, Team View as a Webview panel in the editor area, Analytics as another Webview panel, tunnel/cron status only in status bar and Command Palette. This means users have to know where each feature lives and navigate to it.
