@@ -8,9 +8,9 @@
 
 ## Executive Summary
 
-Implement the VS Code extension as a thin client over Tower's existing API, following the approved specification. The plan is structured into 8 phases, each independently shippable. Phases 1-5 form the V1 cut line — the minimum viable extension that delivers the core value proposition (terminals + sidebar + commands). Phases 6-8 add polish features (analytics, review comments, URI scheme).
+Implement the VS Code extension as a thin client over Tower's existing API, following the approved specification. The plan is structured into 9 phases, each independently shippable. Phases 1-7 form the V1 cut line — the minimum viable extension that delivers the core value proposition (terminals + sidebar + commands + review comments). Phases 8-9 add post-V1 enhancements (analytics Webview, file link URI scheme).
 
-The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a prerequisite, since every subsequent phase depends on it.
+The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a prerequisite, since every subsequent phase depends on it. Review comments (Phase 7) have no Tower dependency and can be built in parallel from Day 1.
 
 ## Success Metrics
 - [ ] All specification success criteria met
@@ -30,13 +30,15 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
 {
   "phases": [
     {"id": "shared_types", "title": "Phase 1: Shared Types Package"},
-    {"id": "connection_manager", "title": "Phase 2: Connection Manager + Tower Auto-Start"},
+    {"id": "connection_core", "title": "Phase 2a: Connection Manager + Auth"},
+    {"id": "connection_reactive", "title": "Phase 2b: SSE + Tower Auto-Start"},
     {"id": "terminal_integration", "title": "Phase 3: Terminal Integration"},
     {"id": "sidebar", "title": "Phase 4: Unified Codev Sidebar"},
     {"id": "commands", "title": "Phase 5: Command Palette + Status Bar + Keyboard Shortcuts"},
-    {"id": "analytics", "title": "Phase 6: Analytics Webview"},
-    {"id": "review_comments", "title": "Phase 7: Review Comments (Snippet + Decorations)"},
-    {"id": "file_links", "title": "Phase 8: File Link Handling (URI Scheme + TerminalLinkProvider)"}
+    {"id": "review_comments", "title": "Phase 6: Review Comments (Snippet + Decorations)"},
+    {"id": "commands_v1", "title": "Phase 7: V1 Polish + Packaging"},
+    {"id": "analytics", "title": "Phase 8: Analytics Webview"},
+    {"id": "file_links", "title": "Phase 9: File Link Handling (URI Scheme + TerminalLinkProvider)"}
   ]
 }
 ```
@@ -83,6 +85,7 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
 - [ ] `npm install` from root resolves all three workspace members
 - [ ] `npm run build` in `packages/codev` passes with shared type imports
 - [ ] `npm run check-types` in `packages/codev-vscode` passes with shared type imports
+- [ ] `vsce package` produces a valid `.vsix` (workspace symlinks correctly resolved by esbuild at bundle time)
 - [ ] Existing 2422 unit tests still pass
 
 #### Test Plan
@@ -99,73 +102,145 @@ Revert the extraction — types go back to local definitions. No runtime behavio
 
 ---
 
-### Phase 2: Connection Manager + Tower Auto-Start
+### Phase 2a: Connection Manager + Auth
 **Dependencies**: Phase 1
 
 #### Objectives
 - Implement the singleton Connection Manager with state machine
-- Auto-start Tower on activation
+- REST client with auth and proxy support
 - Register Output Channel for diagnostics
-- Read auth from `~/.agent-farm/local-key`
+- Workspace path detection and config reading
 
 #### Deliverables
 - [ ] `src/connection-manager.ts` — singleton with state machine (DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING)
 - [ ] REST client with authenticated fetch (`codev-web-key` header)
-- [ ] SSE client subscribing to `/api/events` with heartbeat handling and rate-limited refresh (max 1/second)
-- [ ] Health check against `/api/health`
+- [ ] HTTP proxy support via `vscode.workspace.getConfiguration('http').get('proxy')` with `https-proxy-agent`
+- [ ] Health check against `/api/health` with protocol version compatibility check
 - [ ] Workspace path detection (traverse up to `.codev/config.json` root)
 - [ ] Base64url encoding for workspace-scoped routes
-- [ ] Tower auto-start (`afx tower start` as detached process)
-- [ ] `Codev` Output Channel for diagnostic logging
+- [ ] `Codev` Output Channel for diagnostic logging (redacts auth tokens)
 - [ ] Auth via `SecretStorage` with re-read from disk on 401
-- [ ] Extension settings registration (`codev.towerHost`, `codev.towerPort`, `codev.workspacePath`, `codev.autoConnect`, `codev.autoStartTower`)
+- [ ] Extension settings registration: `codev.towerHost`, `codev.towerPort`, `codev.workspacePath`, `codev.terminalPosition`, `codev.autoConnect`, `codev.autoStartTower`, `codev.telemetry`
+- [ ] Activation events: `onCommand:codev.*` and `workspaceContains:codev/`
+- [ ] Proper `deactivate()` — close all connections, dispose resources
 - [ ] `src/extension.ts` updated to initialize Connection Manager on activation
 
 #### Implementation Details
 
 **Files to create:**
-- `src/connection-manager.ts` — core class with state machine, REST/SSE clients
+- `src/connection-manager.ts` — core class with state machine, REST client
 - `src/auth.ts` — local-key reading, SecretStorage caching, 401 re-read
 - `src/config.ts` — `.codev/config.json` reader, workspace path detection
-- `src/tower-starter.ts` — auto-start Tower as detached process
 
 **Files to modify:**
-- `src/extension.ts` — activate initializes Connection Manager
-- `package.json` — add `contributes.configuration` for settings, add `ws` and `eventsource` dependencies
+- `src/extension.ts` — activate initializes Connection Manager, deactivate cleans up
+- `package.json` — add `contributes.configuration` for all 7 settings, add activation events, add `https-proxy-agent` dependency
+
+**Note on `ws` dependency**: The `ws` package has optional native bindings (`bufferutil`, `utf-8-validate`) that don't bundle with esbuild. Mark these as external in `esbuild.js` or use the pure-JS fallback (ws works without them, just slower). Add to `esbuild.js`:
+```javascript
+external: ['vscode', 'bufferutil', 'utf-8-validate'],
+```
 
 **State machine:**
 ```
-DISCONNECTED → (health check) → CONNECTING → (SSE connected) → CONNECTED
-CONNECTED → (SSE drops) → RECONNECTING → (backoff retry) → CONNECTING
+DISCONNECTED → (health check) → CONNECTING → (connected) → CONNECTED
+CONNECTED → (connection drops) → RECONNECTING → (backoff retry) → CONNECTING
 RECONNECTING → (max retries) → DISCONNECTED
 ```
 
 **Workspace detection:** Walk up from `vscode.workspace.workspaceFolders[0]` looking for `.codev/config.json`. Read Tower port from config. Match against `GET /api/workspaces`.
 
+**Activation:** Register `activationEvents` in `package.json`:
+```json
+"activationEvents": [
+  "workspaceContains:codev/"
+]
+```
+Commands activate implicitly via `onCommand:`.
+
 #### Acceptance Criteria
-- [ ] Extension activates and connects to running Tower
-- [ ] Extension auto-starts Tower if not running (when setting enabled)
-- [ ] Status bar shows connection state (connected/offline)
-- [ ] Output Channel logs connection events
-- [ ] SSE events received and logged
+- [ ] Extension activates on `codev.*` command or workspace with `codev/` directory
+- [ ] Extension connects to running Tower via REST
+- [ ] Health check validates protocol version
+- [ ] Output Channel logs connection events (auth tokens redacted)
 - [ ] Auth works with local-key, re-reads on 401
+- [ ] `deactivate()` cleans up all connections
+- [ ] Extension works behind HTTP proxy
 
 #### Test Plan
-- **Unit Tests**: State machine transitions, config parsing, auth key reading
-- **Integration Tests**: Connect to running Tower, verify SSE stream
-- **Manual Testing**: F5 with Tower running, F5 without Tower (auto-start), kill Tower (reconnection)
+- **Unit Tests**: State machine transitions, config parsing, auth key reading, workspace path traversal
+- **Integration Tests**: Connect to running Tower, verify health check
+- **Manual Testing**: F5 with Tower running, F5 without Tower
 
 #### Rollback Strategy
-Remove Connection Manager, revert extension.ts to hello-world scaffold.
+Remove Connection Manager, revert extension.ts to scaffold.
+
+#### Risks
+- **Risk**: `ws` native bindings break esbuild bundle
+  - **Mitigation**: Mark `bufferutil`, `utf-8-validate` as external. ws works without them.
+- **Risk**: Workspace path detection fails for nested subdirectories
+  - **Mitigation**: Walk up to filesystem root, log detected path to Output Channel
+
+---
+
+### Phase 2b: SSE + Tower Auto-Start
+**Dependencies**: Phase 2a
+
+#### Objectives
+- Add SSE client for real-time state updates
+- Auto-start Tower on activation
+- Complete the reactive connection layer
+
+#### Deliverables
+- [ ] SSE client subscribing to `/api/events` with heartbeat handling (30s heartbeats don't trigger refresh)
+- [ ] Rate-limited SSE-triggered refreshes (max 1/second to prevent storms)
+- [ ] Tower auto-start (`afx tower start` as detached process)
+- [ ] Exponential backoff reconnection (1s → 2s → 4s → 8s → max 30s)
+- [ ] SSE reconnection: disable native `EventSource` auto-reconnect, use Connection Manager state machine instead to avoid double-retry
+
+#### Implementation Details
+
+**Files to create:**
+- `src/sse-client.ts` — SSE subscription with heartbeat filtering and rate limiting
+- `src/tower-starter.ts` — auto-start Tower as detached process, resolve full `afx` path
+
+**Files to modify:**
+- `src/connection-manager.ts` — integrate SSE client, add reconnection logic
+- `src/extension.ts` — activate triggers Tower auto-start if `codev.autoStartTower` is true
+
+**SSE heartbeat handling:** Filter events where `event.type === 'heartbeat'`. Only trigger TreeView/StatusBar refresh for actual state change events (`overview-changed`, `notification`).
+
+**Tower auto-start:** Check `/api/health`. If no response and `codev.autoStartTower` is true:
+1. Resolve `afx` path from `node_modules/.bin/afx` or global `which afx`
+2. Spawn `afx tower start` as detached process
+3. Poll `/api/health` with backoff until Tower responds (max 10 attempts)
+4. If start fails, show "Tower is not running" in status bar, log error to Output Channel
+
+#### Acceptance Criteria
+- [ ] SSE events received and routed to consumers
+- [ ] Heartbeats don't trigger unnecessary refreshes
+- [ ] SSE bursts rate-limited to 1 refresh/second
+- [ ] Tower auto-starts when not running (setting enabled)
+- [ ] Clean reconnection after Tower restart
+
+#### Test Plan
+- **Unit Tests**: SSE heartbeat filtering, rate limiting logic
+- **Integration Tests**: Connect SSE to Tower, kill Tower (verify reconnection), auto-start
+- **Manual Testing**: F5 without Tower (auto-start), kill Tower mid-session (reconnection)
+
+#### Rollback Strategy
+Remove SSE client and Tower starter. REST connection still works for manual refreshes.
 
 #### Risks
 - **Risk**: Tower auto-start fails due to PATH issues
-  - **Mitigation**: Resolve full `afx` path from project's node_modules/.bin or global install. Log failure to Output Channel.
+  - **Mitigation**: Resolve full `afx` path, try `node_modules/.bin/afx` first, then global. Log to Output Channel.
+- **Risk**: Double-retry from native EventSource + custom backoff
+  - **Mitigation**: Disable native EventSource reconnection, handle manually in state machine
 
 ---
 
 ### Phase 3: Terminal Integration
-**Dependencies**: Phase 2
+**Dependencies**: Phase 2a
 
 #### Objectives
 - Connect to Tower PTY sessions via WebSocket
@@ -182,8 +257,11 @@ Remove Connection Manager, revert extension.ts to hello-world scaffold.
 - [ ] Backpressure: chunk `onDidWrite` at 16KB with `setImmediate`, disconnect at 1MB
 - [ ] Editor layout: architect in left group, builders as tabs in right group
 - [ ] Terminal naming: `Codev: Architect`, `Codev: #42 password-hashing [implement]`, `Codev: Shell #1`
+- [ ] WebSocket auth via `0x00` control message after connection (not query param)
+- [ ] Respect `codev.terminalPosition` setting — only attempt `moveIntoEditor` when set to `"editor"`
 - [ ] Fallback to bottom panel if `moveIntoEditor` fails
 - [ ] WebSocket pool management (max 10 concurrent)
+- [ ] Image paste: intercept clipboard paste in terminal, upload via `POST /api/paste-image` (note: VS Code Pseudoterminal only delivers text input — investigate clipboard API feasibility, defer if not possible)
 
 #### Implementation Details
 
@@ -253,7 +331,7 @@ Remove terminal adapter, revert to scaffold. Connection Manager stays functional
 ---
 
 ### Phase 4: Unified Codev Sidebar
-**Dependencies**: Phase 2
+**Dependencies**: Phase 2b
 
 #### Objectives
 - Register Codev View Container with Activity Bar icon
@@ -269,9 +347,11 @@ Remove terminal adapter, revert to scaffold. Connection Manager stays functional
 - [ ] `src/views/recently-closed.ts` — TreeDataProvider for recently closed items
 - [ ] `src/views/team.ts` — TreeDataProvider for team members with activity (conditional on `teamEnabled`)
 - [ ] `src/views/status.ts` — TreeDataProvider for Tower/tunnel/cron status
-- [ ] Context menu actions on all tree items
+- [ ] Context menu actions on all tree items (actions that depend on Phase 3/5 registered as no-ops with "Coming soon" message until those phases complete)
+- [ ] "Other Workspaces" collapsible node showing workspaces from other projects (read-only, show builder count)
 - [ ] SSE-triggered refresh (rate-limited to 1/second)
 - [ ] Manual refresh button
+- [ ] Handle initial load failure gracefully (show "Unable to connect" state)
 
 #### Implementation Details
 
@@ -315,7 +395,7 @@ Remove view registrations from package.json, delete views/ directory. Extension 
 ---
 
 ### Phase 5: Command Palette + Status Bar + Keyboard Shortcuts
-**Dependencies**: Phase 2, Phase 3, Phase 4
+**Dependencies**: Phase 2b (most commands), Phase 3 (terminal commands), Phase 4 (sidebar wiring)
 
 #### Objectives
 - Register all 15 Command Palette commands
@@ -328,7 +408,7 @@ Remove view registrations from package.json, delete views/ directory. Extension 
 - [ ] Status bar: builder count + blocked gates (left-aligned)
 - [ ] Status bar click → quick-pick of pending actions
 - [ ] Keyboard shortcuts: `Cmd+Shift+A` (architect), `Cmd+Shift+M` (send), `Cmd+Shift+G` (approve)
-- [ ] Image paste handling in terminal (`POST /api/paste-image`)
+- [ ] Wire up Phase 4 context menu no-ops with real handlers (Open Terminal → Phase 3, Approve Gate → Phase 5)
 
 #### Implementation Details
 
@@ -377,13 +457,85 @@ Remove command registrations. Sidebar and terminals continue to work.
 
 ---
 
-### V1 CUT LINE
-**Phases 1-5 constitute V1** — a complete, functional extension with terminals, sidebar, commands, and status bar. Phases 6-8 are post-V1 enhancements.
+### Phase 6: Review Comments (Snippet + Decorations)
+**Dependencies**: None (VS Code Snippets and Decorations API don't require Tower connection)
+
+#### Objectives
+- Add review comment insertion via snippet and Command Palette
+- Highlight existing review comments with Decorations API
+- Can be built in parallel with all other phases from Day 1
+
+#### Deliverables
+- [ ] `Codev: Add Review Comment` command — inserts comment at cursor with language-appropriate syntax
+- [ ] `rev` snippet contributing via `contributes.snippets`
+- [ ] `src/review-decorations.ts` — scans for `REVIEW(...)` patterns, applies colored background + gutter icon
+- [ ] Decoration refresh on file open and text change
+- [ ] Language-to-comment-syntax mapping (JS/TS/Go/Rust/Java/Python/Ruby/Bash/YAML/HTML/CSS)
+- [ ] Warning for non-commentable files (JSON, binary)
+
+#### Implementation Details
+
+**Files to create:**
+- `src/commands/review.ts` — insert review comment with language detection
+- `src/review-decorations.ts` — decoration provider scanning for `REVIEW(...)` patterns
+- `snippets/review.json` — `rev` snippet definition
+
+**Files to modify:**
+- `package.json` — add command, snippet contribution
+
+**Language detection:** Map `vscode.TextDocument.languageId` to comment syntax. Comprehensive mapping covering all common languages.
+
+#### Acceptance Criteria
+- [ ] `rev` + Tab inserts correct comment syntax for file type
+- [ ] Command inserts comment at cursor line
+- [ ] Existing REVIEW comments highlighted with colored background
+- [ ] Decorations update when file changes
+
+#### Test Plan
+- **Unit Tests**: Language-to-comment-syntax mapping
+- **Manual Testing**: Insert comments in JS, Python, HTML, CSS, Go files. Verify decorations render.
+
+#### Rollback Strategy
+Remove snippet and decoration provider. No impact on any other phase.
 
 ---
 
-### Phase 6: Analytics Webview
-**Dependencies**: Phase 2
+### Phase 7: V1 Polish + Packaging
+**Dependencies**: Phases 2a, 2b, 3, 4, 5, 6
+
+#### Objectives
+- Final integration testing across all V1 phases
+- `vsce package` verification
+- Marketplace readiness
+
+#### Deliverables
+- [ ] `vsce package` produces a valid `.vsix` file
+- [ ] Workspace symlinks (`@cluesmith/codev-types`) correctly bundled by esbuild (not left as `file:` references)
+- [ ] Extension README for Marketplace listing
+- [ ] All V1 success criteria verified end-to-end
+- [ ] Extension size audit (Marketplace has size constraints)
+
+#### Acceptance Criteria
+- [ ] `.vsix` installs cleanly in a fresh VS Code instance
+- [ ] Extension activates, connects, shows sidebar, opens terminals
+- [ ] No console errors, no missing dependencies at runtime
+
+#### Test Plan
+- **Manual Testing**: Install `.vsix` in clean VS Code, run full workflow
+- **Packaging**: `vsce package` succeeds without warnings
+
+#### Rollback Strategy
+Not applicable — this is a validation phase.
+
+---
+
+### V1 CUT LINE
+**Phases 1-7 constitute V1** — a complete, functional extension with shared types, connection management, terminals, sidebar, commands, review comments, and verified packaging. Phases 8-9 are post-V1 enhancements.
+
+---
+
+### Phase 8: Analytics Webview
+**Dependencies**: Phase 2a
 
 #### Objectives
 - Embed Recharts analytics dashboard in a Webview panel
@@ -429,47 +581,7 @@ Remove analytics command and panel. No impact on core functionality.
 
 ---
 
-### Phase 7: Review Comments (Snippet + Decorations)
-**Dependencies**: Phase 2
-
-#### Objectives
-- Add review comment insertion via snippet and Command Palette
-- Highlight existing review comments with Decorations API
-
-#### Deliverables
-- [ ] `Codev: Add Review Comment` command — inserts comment at cursor with language-appropriate syntax
-- [ ] `rev` snippet contributing via `contributes.snippets`
-- [ ] `src/review-decorations.ts` — scans for `REVIEW(...)` patterns, applies colored background + gutter icon
-- [ ] Decoration refresh on file open and text change
-
-#### Implementation Details
-
-**Files to create:**
-- `src/commands/review.ts` — insert review comment with language detection
-- `src/review-decorations.ts` — decoration provider
-- `snippets/review.json` — `rev` snippet definition
-
-**Files to modify:**
-- `package.json` — add command, snippet contribution
-
-**Language detection:** Map `vscode.TextDocument.languageId` to comment syntax.
-
-#### Acceptance Criteria
-- [ ] `rev` + Tab inserts correct comment syntax for file type
-- [ ] Command inserts comment at cursor line
-- [ ] Existing REVIEW comments highlighted with colored background
-- [ ] Decorations update when file changes
-
-#### Test Plan
-- **Unit Tests**: Language-to-comment-syntax mapping
-- **Manual Testing**: Insert comments in JS, Python, HTML, CSS files. Verify decorations render.
-
-#### Rollback Strategy
-Remove snippet and decoration provider. No impact on core functionality.
-
----
-
-### Phase 8: File Link Handling (URI Scheme + TerminalLinkProvider)
+### Phase 9: File Link Handling (URI Scheme + TerminalLinkProvider)
 **Dependencies**: Phase 3
 
 #### Objectives
@@ -492,11 +604,15 @@ Remove snippet and decoration provider. No impact on core functionality.
 - `src/extension.ts` — register URI handler and TerminalLinkProvider
 - `packages/codev/src/agent-farm/commands/open.ts` — detect VS Code (check `TERM_PROGRAM` or `VSCODE_PID` env var), emit `open vscode://codev/open?file=...&line=...` instead of Tower API call
 
-**VS Code detection in CLI:**
+**VS Code detection in CLI (cross-platform):**
 ```typescript
 const isVSCode = process.env.TERM_PROGRAM === 'vscode' || process.env.VSCODE_PID;
 if (isVSCode) {
-  exec(`open "vscode://codev/open?file=${encodeURIComponent(file)}&line=${line}"`);
+  const uri = `vscode://codev/open?file=${encodeURIComponent(file)}&line=${line}`;
+  // Cross-platform URI open
+  if (process.platform === 'darwin') exec(`open "${uri}"`);
+  else if (process.platform === 'win32') exec(`start "" "${uri}"`);
+  else exec(`xdg-open "${uri}"`);
 } else {
   // existing Tower API call
 }
@@ -519,15 +635,19 @@ Remove URI handler and link provider. `afx open` continues to work via Tower API
 
 ## Dependency Map
 ```
-Phase 1 (types) ──→ Phase 2 (connection) ──→ Phase 3 (terminals)
-                                          ──→ Phase 4 (sidebar)
-                                          ──→ Phase 5 (commands) ← Phase 3, Phase 4
-                                          ──→ Phase 6 (analytics)
-                                          ──→ Phase 7 (review comments)
-                    Phase 3 ──────────────→ Phase 8 (file links)
+Phase 1 (types) ──→ Phase 2a (connection) ──→ Phase 2b (SSE + auto-start)
+                                           ──→ Phase 3 (terminals)
+                                Phase 2b ──→ Phase 4 (sidebar)
+                         Phase 3 + 4 + 5 ──→ Phase 5 (commands)
+                                           ──→ Phase 8 (analytics, post-V1)
+                         Phase 3 ─────────→ Phase 9 (file links, post-V1)
+
+Phase 6 (review comments) ── NO DEPENDENCIES ── can run in parallel from Day 1
+
+All V1 phases ──→ Phase 7 (V1 polish + packaging)
 ```
 
-Phases 3, 4, 6, and 7 can run in parallel after Phase 2.
+Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero dependencies and can start immediately.
 
 ## Integration Points
 
@@ -546,12 +666,19 @@ Phases 3, 4, 6, and 7 can run in parallel after Phase 2.
 | Risk | Probability | Impact | Mitigation | Phase |
 |------|------------|--------|------------|-------|
 | Type extraction scope creep | Medium | Medium | Limit to protocol + API types only | 1 |
-| Tower auto-start PATH issues | Medium | Low | Resolve full afx path, log errors | 2 |
-| `moveIntoEditor` API instability | Medium | Medium | Try/catch with panel fallback | 3 |
-| EscapeBuffer divergence | Low | High | Port dashboard tests alongside code | 3 |
+| `ws` native bindings break esbuild | High | High | Mark `bufferutil`, `utf-8-validate` as external | 2a |
+| `vsce package` fails with workspace symlinks | Medium | High | esbuild resolves at bundle time; add packaging test to Phase 1 | 1, 7 |
+| Tower auto-start PATH issues | Medium | Low | Resolve full afx path, log errors | 2b |
+| SSE double-retry (native + custom backoff) | Medium | Medium | Disable native EventSource reconnection | 2b |
+| HTTP proxy not configured in enterprise | Medium | Medium | Integrate with VS Code proxy settings, `https-proxy-agent` | 2a |
+| `moveIntoEditor` API instability | Medium | Medium | Check `terminalPosition` setting first, try/catch with panel fallback | 3 |
+| EscapeBuffer divergence (third copy) | Low | High | Port dashboard tests alongside code, extract to shared package post-V1 | 3 |
+| Image paste infeasible via Pseudoterminal | High | Low | Investigate clipboard API, defer if not possible | 3 |
 | 7 TreeView providers cause excessive API calls | Low | Medium | Single cached overview call | 4 |
+| Phase 4 context menu actions depend on later phases | Medium | Low | Register as no-ops, wire up in Phase 5 | 4 |
 | Keyboard shortcut conflicts | Medium | Low | Test defaults, allow rebinding | 5 |
-| Analytics theme mismatch | Medium | Low | Inject VS Code CSS variables | 6 |
+| `afx open` URI is macOS-only | High | Medium | Cross-platform: `open` / `start` / `xdg-open` | 9 |
+| Analytics theme mismatch | Medium | Low | Inject VS Code CSS variables | 8 |
 
 ## Validation Checkpoints
 1. **After Phase 2**: Extension connects to Tower, auto-starts it, shows connection state
@@ -571,19 +698,33 @@ Phases 3, 4, 6, and 7 can run in parallel after Phase 2.
 - [ ] Marketplace publishing setup (publisher account, CI pipeline)
 - [ ] User acceptance testing with team
 
+## Expert Review
+
+**Date**: 2026-04-06
+**Models Consulted**: Gemini 3 Pro, GPT-5.4 Codex, Claude (via `consult` CLI)
+
+**Key Feedback (incorporated):**
+- **Gemini**: V1 cut line violates spec (review comments are V1). Phase 7 dependency on Phase 2 is wrong. Image paste belongs in Phase 3. HTTP proxy support missing. Missing settings and protocol version check. → All fixed.
+- **Codex**: WebSocket auth control message missing. Shell terminal command flow missing. `afx open` is macOS-only. Activation time target not addressed. → All fixed.
+- **Claude**: Phase 2 too large (5 subsystems) — split into 2a/2b. `ws` native bindings break esbuild. Phase 4 context menu actions create circular dependency. Missing activation events. `vsce package` needs testing with workspace symlinks. → All fixed.
+
 ## Approval
 - [ ] Technical Lead Review
 - [ ] Engineering Manager Approval
 - [ ] Resource Allocation Confirmed
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete
 
 ## Notes
 
-**V1 cut line**: Phases 1-5 are the minimum viable extension. Ship these first, then iterate with phases 6-8. This follows the consultation recommendation to not let scope block V1.
+**V1 cut line**: Phases 1-7 are V1. Review comments (Phase 6) are explicitly V1 per the spec. The V1 Polish phase (7) ensures packaging works before Marketplace publishing.
 
-**Parallel execution**: Phases 3, 4, 6, and 7 can be built in parallel by different builders after Phase 2 completes. Phase 5 depends on 3 and 4 (needs terminals and sidebar to wire up commands).
+**Parallel execution**: Phase 6 (review comments) has zero dependencies and can start Day 1. Phases 3 and 4 can run in parallel after Phase 2b. Most Phase 5 commands only need Phase 2b (not 3 or 4).
 
 **Monorepo prerequisite**: Already done — npm workspaces set up with root `package.json`, extension scaffold at `packages/codev-vscode/`, cross-package imports verified.
+
+**Tech debt acknowledged**: Phase 3 creates a third copy of EscapeBuffer (server, dashboard, extension). This is pragmatic for V1 — extraction into `@cluesmith/codev-api-client` happens post-V1 when patterns stabilize across two consumers.
+
+**Consultation feedback incorporated**: Phase 2 split into 2a/2b per Claude recommendation. Review comments moved into V1 per Gemini/Codex. Image paste feasibility flagged per Codex. Cross-platform `afx open` per Codex. `ws` bundling risk per Claude. All missing settings/activation events added.
 
 ---
 
