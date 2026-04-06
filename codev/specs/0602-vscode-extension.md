@@ -1,9 +1,15 @@
+---
+approved: 2026-04-06
+validated: [gemini, codex, claude]
+---
+
 # Specification: VS Code Extension for Codev Agent Farm
 
 ## Metadata
 - **ID**: 0602
-- **Status**: draft
+- **Status**: approved
 - **Created**: 2026-03-11
+- **Approved**: 2026-04-06
 - **Protocol**: SPIR
 - **Related**: Spec 0066
 
