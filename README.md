@@ -2,6 +2,10 @@
 
 [![npm version](https://img.shields.io/npm/v/@cluesmith/codev.svg)](https://www.npmjs.com/package/@cluesmith/codev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/mJ92DhDa6n)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Follow-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/company/codev-os/)
+[![Website](https://img.shields.io/badge/Website-codevos.ai-blue)](https://codevos.ai)
+[![Newsletter](https://img.shields.io/badge/Newsletter-Subscribe-green)](https://marketmaker.cluesmith.com/subscribe/codev)
 
 ![Agent Farm Dashboard](docs/assets/agent-farm-hero.png)
 
