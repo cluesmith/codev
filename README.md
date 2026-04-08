@@ -1,4 +1,4 @@
-# Codev: A Human-Agent Software Development Operating System
+# Codev: A Human-Agent Software Development OS
 
 [![npm version](https://img.shields.io/npm/v/@cluesmith/codev.svg)](https://www.npmjs.com/package/@cluesmith/codev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
