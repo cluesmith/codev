@@ -29,6 +29,11 @@ jobs:
       - name: Run unit tests with coverage
         working-directory: packages/codev
         run: |
+          # Enable pipefail so a vitest failure is not masked by tee's exit code.
+          # (GitHub Actions' default Linux shell is `bash -e {0}` without pipefail,
+          # so without this line the pipeline exits with tee's status — always 0 —
+          # and failing tests silently pass CI.)
+          set -o pipefail
           # Vitest forks pool has a known issue where the worker process crashes
           # during cleanup after all tests pass (native module teardown).
           # Capture the output and check if all test files passed.
