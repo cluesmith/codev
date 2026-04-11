@@ -177,7 +177,8 @@ The difference matters: a project can be `committed` but not `integrated` if the
 ## Success Criteria
 
 ### Checkpoint PRs and Feedback Flow
-- [ ] Porch prompts builder to create a checkpoint PR when a gate becomes pending
+- [ ] Gate-pending output mentions that checkpoint PRs are available via `porch checkpoint`, but `porch next` emits **no** PR-creation task on gate-pending alone
+- [ ] After `porch checkpoint <id>` is explicitly invoked, the next `porch next` emits a PR-creation task to the builder (opt-in)
 - [ ] Checkpoint PR is created with appropriate title/body indicating it's a checkpoint for review
 - [ ] Gate state model supports `external_review` and `feedback_received` sub-states
 - [ ] `porch feedback <id> "text"` command passes external feedback into porch state
@@ -215,7 +216,10 @@ The difference matters: a project can be `committed` but not `integrated` if the
 ### Technical Constraints
 - Must use the existing **forge concept layer** for PR operations (`executeForgeCommand`), not raw `gh` calls — this applies to both checkpoint PR creation and verify-phase PR comment posting
 - Must maintain backward compatibility — gates without external review should work exactly as before, and existing in-flight projects at the `review`/`pr` gate must not break on upgrade
-- Must work across all protocols with gates (SPIR, ASPIR, TICK for checkpoint PRs; SPIR and ASPIR for the Verify phase; BUGFIX/AIR stay terminal at `pr`)
+- Protocol applicability (be specific — not every protocol has spec/plan gates):
+  - **Checkpoint PRs**: apply to protocols that have spec-approval or plan-approval gates. Today: **SPIR and TICK**. ASPIR intentionally has *no* spec/plan approval gates (its only human gate is `pr`), so ASPIR gains no checkpoint PRs. BUGFIX and AIR have no applicable gates either.
+  - **Verify phase**: applies to protocols that end with a merged PR and benefit from post-merge verification. Today: **SPIR, ASPIR, and TICK**. BUGFIX and AIR stay terminal at `pr` (single-issue, lightweight workflows where environmental verification is overkill).
+  - A future spec can extend verify to BUGFIX/AIR if post-merge regressions prove common enough to justify it; this is out of scope here.
 - Porch is a per-invocation CLI — no in-memory state between invocations; all state in status.yaml
 - The `verify-approval` gate must use the same human-only guard as `spec-approval` and `plan-approval` — no AI-driven auto-approval path under any circumstance
 
@@ -263,6 +267,8 @@ If a PR already exists on the branch when `porch checkpoint` is run, creation is
 
 **Naming note**: The command is `porch checkpoint`, not `porch review`. The name `review` is already used for the implementation-review phase, so reusing it as a command name is confusing. `porch checkpoint` makes the opt-in-for-external-review semantics explicit.
 
+**State semantics**: `external_review` means "external review **requested**", not "checkpoint PR exists." The state is set the moment `porch checkpoint` is run, even though the PR may not be created until the next `porch next` task batch executes. The `checkpoint_pr` field distinguishes the two sub-conditions: if `gate.status == 'external_review'` and `gate.checkpoint_pr` is undefined, the PR is still pending creation; if the field is set, the PR exists and any remote feedback should target it.
+
 Extend `GateStatus` in `types.ts`:
 
 ```typescript
@@ -294,23 +300,36 @@ New porch commands (command surface):
   - **Resets `build_complete = false` and increments `iteration`** — this is what wakes the build→verify cycle, not `porch done`.
   - Builder must be signalled separately via `afx send <builder-id> "feedback available, run porch next"` (explicit wake-up; porch is a CLI, it cannot push to a running builder).
 - `porch feedback <id> --from-pr` — Pulls feedback from PR comments automatically (via forge concept `pr-comments`). Same state transition as above.
+  - **Security bounds (v1)**: status.yaml is plaintext and committed to git, so PR-comment ingestion must be bounded:
+    - **Size limit per comment**: 50 KB; oversized comments are truncated and annotated `[truncated: N KB omitted]`
+    - **Total budget**: 100 KB across all comments; additional comments beyond the budget are dropped and the command prints a warning with the count
+    - **Max comment count**: 20 per invocation
+    - **Secret heuristic**: before storing, scan for high-entropy tokens (GitHub PATs, AWS keys, JWT patterns) and print a warning listing flagged substrings for the architect to redact manually
+    - **Interactive confirmation**: `--from-pr` prints a summary (`N comments, K KB total, M flagged as possibly sensitive`) and requires `y` to proceed. `--from-pr --yes` bypasses the prompt for automation use (still respects the other bounds).
+  - This keeps the convenience of automated ingestion without letting bot comments or accidentally-leaked secrets land in committed state.
 
 ### Component 3: Revision Flow
 
 Triggered when gate is in `feedback_received` state and `build_complete == false`:
 
 1. Architect runs `porch feedback <id> "..."` (or `--from-pr`) → gate is `feedback_received`, `build_complete=false`, `iteration` incremented.
-2. Architect sends `afx send <builder-id> "feedback stored, run porch next"` to wake the builder.
-3. Builder runs `porch next` → porch detects `feedback_received` + `!build_complete` and emits revision tasks. Revision tasks carry the current `feedback` text as prompt context.
-4. Builder revises the artifact (spec or plan) in-place.
-5. Builder runs `porch done` → sets `build_complete=true` (standard semantics — this step **does not** reset anything).
-6. Builder runs `porch next` → porch detects `build_complete=true` with no prior verify at the new iteration → emits 3-way consultation tasks for the revised artifact.
-7. Consultation results land. If unanimous APPROVE → porch transitions gate back to `pending`. If any REQUEST_CHANGES → porch re-emits a further build iteration (standard build→verify loop).
-8. Architect either runs `porch approve <id> <gate>` to approve, or runs `porch checkpoint <id>` again (with no `--pr`, since the checkpoint PR is already recorded) to request another round of external review — which re-transitions to `external_review` without creating a new PR.
+2. `porch feedback` **prints the exact `afx send` command to copy-paste** for waking the builder — not a hint, the literal command with the correct builder ID resolved:
+   ```
+   Feedback stored (iteration 2). To wake the builder:
+     afx send spir-653-better-handling-of-builders-th "feedback stored, run porch next"
+   ```
+   This removes the two-step error mode where the architect forgets to send the message. The builder ID comes from the worktree's `.builder-id` or `status.yaml`. (Architects who script their workflow can `porch feedback ... | tail -1 | sh` or similar.)
+3. Architect runs the printed command → builder wakes.
+4. Builder runs `porch next` → porch detects `feedback_received` + `!build_complete` and emits revision tasks. Revision tasks carry the current `feedback` text as prompt context.
+5. Builder revises the artifact (spec or plan) in-place.
+6. Builder runs `porch done` → sets `build_complete=true` (standard semantics — this step **does not** reset anything).
+7. Builder runs `porch next` → porch detects `build_complete=true` with no prior verify at the new iteration → emits 3-way consultation tasks for the revised artifact.
+8. Consultation results land. If unanimous APPROVE → porch transitions gate back to `pending`. If any REQUEST_CHANGES → porch re-emits a further build iteration (standard build→verify loop).
+9. Architect either runs `porch approve <id> <gate>` to approve, or runs `porch checkpoint <id>` again (with no `--pr`, since the checkpoint PR is already recorded) to request another round of external review — which re-transitions to `external_review` without creating a new PR.
 
 This reuses the existing build→verify cycle unchanged. The only new mechanics are: (a) `porch feedback` resets `build_complete` and increments iteration (the wake-up trigger), and (b) gate sub-states gate-keep which tasks `porch next` emits. No parallel pipeline.
 
-**Note on `max_iterations=1`**: The current SPIR spec/plan phases set `max_iterations: 1`. This is a hard limit on the *initial* build→verify loop. Feedback-driven revisions happen *after* the gate is approved once, so they run as fresh iterations against the same limit — each `porch feedback` call starts a new 1-iteration loop. The implementation plan (Phase 2 of this spec) will need to confirm this is how porch's iteration counter behaves; if not, the plan must raise or rename `max_iterations` for feedback-driven revisions.
+**Note on `max_iterations=1`** — *confirmed feasible*: Iter3 consultation (Gemini) verified against `next.ts` that porch does not enforce `max_iterations` as a hard stop after a gate has been approved once. Bumping `iteration` to N+1 and resetting `build_complete=false` native-cleanly starts a new verification cycle — `findReviewFiles` scopes by exact iteration number, so there are no review-file collisions. The proposed revision flow maps directly onto the existing machinery. No runtime change is needed to raise or rename `max_iterations`.
 
 ### Component 4: Tighten `pr-exists` Check
 
@@ -354,7 +373,7 @@ In `codev-skeleton/protocols/spir/protocol.json` and `codev-skeleton/protocols/a
   "checks": {
     "verify_note_exists": "test -f codev/verifications/${PROJECT_TITLE}.md",
     "verify_note_has_pass": "grep -qE '^Final verdict:.*PASS' codev/verifications/${PROJECT_TITLE}.md || grep -qE '^- \\*\\*Result\\*\\*:.*PASS' codev/verifications/${PROJECT_TITLE}.md",
-    "pr_is_merged": "forge pr-is-merged ${CHECKPOINT_PR}"
+    "pr_is_merged": "(intercepted by name in checks.ts — see Check Interception below)"
   },
   "gate": "verify-approval",
   "next": null
@@ -363,13 +382,23 @@ In `codev-skeleton/protocols/spir/protocol.json` and `codev-skeleton/protocols/a
 
 Review phase's `next` field changes from `null` to `"verify"`, and its `gate` stays as `"pr"`.
 
-**New phase type**: `once` is a new phase type that does not exist in the current porch runtime. Today porch supports `build_verify` and `per_plan_phase`. This spec introduces `once` for phases that emit a single batch of tasks, run checks, hit a gate, and terminate — no build→verify loop, no 3-way consultation. The implementation plan must include the runtime support (`packages/codev/src/commands/porch/next.ts`) for handling `type: 'once'` phases. This is an explicit new-infrastructure item, not a re-use of existing machinery.
+**Phase type reuse**: `once` already exists in the porch runtime — `handleOncePhase` in `packages/codev/src/commands/porch/next.ts:741` currently powers TICK and BUGFIX. The verify phase reuses this machinery: a single task batch → checks → gate → terminate, with no build→verify loop and no 3-way consultation. The implementation plan may need to extend `handleOncePhase` to handle verify-specific concerns (e.g. the verification PR handoff), but this is an extension of existing infrastructure, not new infrastructure.
 
 Verify is `once`-type (not `build_verify`) — it does **not** run 3-way consultation. Environmental verification is experiential, not analytical; asking Gemini/Codex/Claude whether Tower restarts cleanly is a category error. The artifact's quality is validated by check scripts and human sign-off, not LLM review.
 
 **Check strengthening**: The `verify_note_has_pass` check looks for either an overall `Final verdict: PASS` in the sign-off block or at least one verifier entry with `Result: PASS`. A section-header-only check (`^## Sign-off`) is too weak — it would pass on an unfilled template. The plan phase must confirm the exact regex works against the rendered template.
 
-**Forge invocation**: The `pr_is_merged` check uses `forge pr-is-merged <pr>` — this is a new forge concept (see Component 6d below). Raw `gh pr view` is forbidden.
+**Check Interception (how `pr_is_merged` actually runs)**: Porch today does *not* expose a `forge` CLI on `$PATH`. Checks that need forge access are intercepted **by name** inside `packages/codev/src/commands/porch/checks.ts` — see the existing `pr_exists` interception at `checks.ts:262` as the exact pattern to follow. The new `pr_is_merged` check is intercepted the same way:
+
+1. Checks runner sees a check named `pr_is_merged`
+2. Reads the checkpoint PR number from `state.gates['pr'].checkpoint_pr` (or falls back to `pr-current-branch` forge concept if missing)
+3. Calls `executeForgeCommand('pr-is-merged', { args: { pr: prNumber }, ... })`
+4. Returns pass/fail based on the forge concept's exit code
+
+The check *definition* in protocol.json exists only as a marker so the runner knows to invoke the check; the shell-command field is effectively documentation (shown as `(intercepted by name in checks.ts)`). The same interception pattern applies to any future check that needs to talk to the forge. The implementation plan must:
+- Extend `checks.ts` with a `pr_is_merged` branch mirroring the `pr_exists` branch
+- Expose a new forge concept `pr-is-merged` (shell script per forge family) returning exit 0 if the PR state is `MERGED`
+- **Not** introduce a system-wide `forge` CLI — the interception approach keeps porch's check machinery self-contained
 
 #### 6b. Verify Note Artifact
 
@@ -440,8 +469,16 @@ New command surface on porch:
 
 - `porch done <id>` — as today, signals the builder's scaffold-creation step is complete. Transitions the phase to "awaiting verification" (the gate-pending state for `verify-approval`).
 - `porch approve <id> verify-approval` — **human-only**, guarded by the same mechanism that protects `spec-approval` and `plan-approval`. Marks the project as `integrated`. After approval, porch emits the closing PR comment (see 6d). This is the project's true terminal state.
-- `porch verify <id> --fail "reason"` — records a failed verification. Appends a `Result: FAIL` Verifier entry with the reason (if the human hasn't already), keeps project in `committed` state, sets a `verify_failed` flag. Halts any running AI builder for this project. Emits a directive in the `porch next` output: *"Verification failed. A human must file a bugfix or TICK amendment. AI builder: stop."* — this is a directive **for the human**, not an auto-executable task.
-- `porch verify <id> --skip "reason"` — records a **waiver** for projects where environmental verification is not applicable (e.g. doc-only PRs, internal refactors with no observable surface). Appends a `Result: N/A` entry with the reason, transitions directly to `integrated`. Still human-only. This was previously buried in the risk table and is now a first-class command.
+- `porch verify <id> --fail "reason"` — records a failed verification.
+  - **Verify note**: If a verify note exists on main (verification PR was already merged before failure was noticed), appends a new `Result: FAIL` verifier entry with the reason via the same verification-PR flow (a follow-up edit PR against the existing note). If no verify note exists yet, `--fail` is only usable *after* at least the scaffold PR has been merged — there is no "silent failure" path.
+  - **PR comment**: Posts a closing-but-negative comment on the original checkpoint PR: *"❌ Verification FAILED: \<reason\>. See verify note for details. Project remains in `committed` state pending a followup fix."*
+  - **State**: Keeps project in `committed`, sets `verify_failed: true` in status.yaml. Halts any running AI builder for this project.
+  - **Next steps**: Emits a directive in the `porch next` output: *"Verification failed. A human must file a bugfix or TICK amendment. AI builder: stop."* — this is a directive **for the human**, not an auto-executable task. The AI builder reading this output must exit, not spawn a follow-up project.
+- `porch verify <id> --skip "reason"` — records a **waiver** for projects where environmental verification is not applicable (e.g. doc-only PRs, internal refactors with no observable surface).
+  - **Verify note**: Still committed to main via a small waiver PR — same verification PR flow, but the template is pre-filled with a single verifier entry `Result: N/A` and `Final verdict: WAIVED` plus the reason. This preserves the audit trail even for skipped projects.
+  - **PR comment**: Posts a closing comment on the original checkpoint PR: *"⏭ Verification SKIPPED: \<reason\>. Recorded waiver in `codev/verifications/<title>.md`."*
+  - **State**: Transitions directly to `integrated`. Still human-only — the skip is a deliberate human decision, not an AI opt-out.
+  - This was previously buried in the risk table and is now a first-class command.
 
 State model additions:
 - `ProjectState.lifecycle_state` (new, optional): `'in_progress' | 'committed' | 'integrated'`. Derived lazily from phase+gates so existing status.yaml files still parse. Consumers (`afx status`, workspace views) read this derived state.
@@ -467,7 +504,7 @@ Environment(s): <one-line summary>
 See the verify note for the full checklist and observations.
 ```
 
-PR comment posting uses the **forge concept layer** — a new forge script `pr-comment.sh` per-forge (github/gitlab/gitea), exposed as the `pr-comment` concept. This joins the required new forge concepts inventoried in Component 6g below. Under no circumstance should porch or the builder call `gh pr comment` directly.
+PR comment posting uses the **forge concept layer** — a new forge script `pr-comment.sh` per-forge (github/gitlab/gitea), exposed as the `pr-comment` concept. This joins the required new forge concepts inventoried in Component 6h below. Under no circumstance should porch or the builder call `gh pr comment` directly.
 
 #### 6e. Failure Path
 
@@ -484,7 +521,28 @@ If verification fails, the project must not silently close. The failure path is:
 
 `afx status` and the workspace Work view gain a new badge/column distinguishing `committed` from `integrated`. Projects in `committed` state are called out so the team can see what's waiting on verification. The existing `Active Builders / PRs / Backlog` bucketing is preserved; a new `Awaiting Verification` bucket is added.
 
-#### 6g. Required New Forge Concepts
+#### 6g. Worktree & status.yaml Lifecycle Across the Merge Boundary
+
+The verify phase spans the PR merge boundary, so the builder's worktree must survive the merge rather than being cleaned up. The flow:
+
+1. **Pre-merge (review phase)**: Builder's worktree lives at `.builders/spir-<id>-<title>/`, tracks branch `builder/spir-<id>-<title>`. `status.yaml` (at `codev/projects/<id>-<title>/status.yaml`) is committed to the worktree's branch with each porch transition. The checkpoint PR reflects the worktree's branch HEAD.
+2. **Human merges the checkpoint PR**: `main` now contains everything the worktree branch had, including the latest `status.yaml` with `pr` gate approved. The worktree branch is not automatically deleted — `afx cleanup` is deferred until after `verify-approval`.
+3. **Builder resumes in verify phase**: The architect runs `afx spawn <id> --resume` (or the worktree is still up from before). The builder's first action in the verify phase is to sync from `main`:
+   ```bash
+   git fetch origin
+   git merge --ff-only origin/main || (echo "Non-ff merge state; investigate" && exit 1)
+   ```
+   If the worktree cannot fast-forward (human committed to main in between), porch emits a task explaining what to do; it does not silently force-update.
+4. **Builder creates the verification PR** from a new branch `verify/<id>-<title>` forked from `main` (not from the builder branch). This is a small, separate PR with just the verify note scaffold.
+5. **Human fills in the verify note via the verification PR and merges it** → `main` now contains the verify note.
+6. **Human runs `porch approve <id> verify-approval`**: can be run from the builder's worktree *or* from the main repo. Porch locates `status.yaml` by searching for `codev/projects/<id>-*/status.yaml` relative to the current directory walking upward until it finds `.git` or a `.codev/` marker. In the worktree case, status.yaml is still the worktree's copy; in the main-repo case, it's main's copy. Both copies must be in sync before approval (see local-pull check below).
+7. **Post-approval cleanup**: `porch approve verify-approval` succeeds → porch updates the local status.yaml to `integrated`, posts the closing PR comment on the *original* checkpoint PR (via `pr-comment`), and then the human runs `afx cleanup --project <id>` to remove the worktree. Only then is the builder branch safe to delete.
+
+**Local pull-before-approve guard**: Before transitioning `verify-approval` from `pending` to `approved`, porch runs the `verify_note_exists` check against the local filesystem. If the verification PR was merged on the forge but the human hasn't pulled locally, `test -f codev/verifications/<title>.md` will fail and porch must emit a helpful message: *"Verification PR appears merged remotely but the local worktree is behind. Run `git fetch && git merge --ff-only origin/main` and retry."* This is not a silent auto-pull — the human stays in control of the merge.
+
+**Deferred cleanup invariant**: `afx cleanup --project <id>` refuses to run while the project is in `committed` state (verify-approval not yet approved). This prevents accidentally destroying the worktree mid-verify. The check is in `afx cleanup`, not porch.
+
+#### 6h. Required New Forge Concepts
 
 Inventory of forge concepts introduced by this spec. Each requires a script per forge family (`github`, `gitlab`, `gitea`) under `packages/codev/scripts/forge/<family>/`:
 
@@ -539,11 +597,11 @@ If any slice proves too large in planning, it can be sub-sliced further — but 
 4. **Don't model feedback as a simple string (indefinitely)**: For v1, a string is fine — don't over-engineer. But `feedback_history` is an array so future iterations can add structured fields without breaking the schema.
 5. **Don't skip consultation on revisions**: Revised artifacts must go through the build→verify cycle. This is the whole point of porch's discipline.
 6. **Don't break gates that don't use external review**: The new sub-states (`external_review`, `feedback_received`) are opt-in via `porch checkpoint`. A gate that goes directly from `pending` → `approved` must work exactly as before.
-7. **Don't hardcode `gh` CLI calls**: Use the forge concept layer for PR creation, detection, and comment posting. Inventory in Component 6g.
+7. **Don't hardcode `gh` CLI calls**: Use the forge concept layer for PR creation, detection, and comment posting. Inventory in Component 6h.
 8. **Don't run 3-way consultation on the verify note**: Environmental verification is experiential, not analytical. LLMs cannot judge whether a CLI actually runs on a user's machine. The verify phase is a `once`-type phase, not `build_verify`.
 9. **Don't collapse `committed` and `integrated`**: These are intentionally separate states. A project that is merged but broken must still be visible and reachable — not archived as "done."
 10. **Don't lose the verify note on failure**: A failed verification is more valuable than a successful one — it is the record of what broke. Never delete a verify note; on re-verification, append a new verifier entry and update the Sign-off block in place.
-11. **Don't advance to Verify on an unmerged PR**: The `pr` gate being approved doesn't mean the PR was merged. Porch must guard the review→verify transition with `forge pr-is-merged` and stay put if the PR is still open.
+11. **Don't advance to Verify on an unmerged PR**: The `pr` gate being approved doesn't mean the PR was merged. Porch must guard the review→verify transition with the `pr_is_merged` check (intercepted in `checks.ts` and dispatched to forge concept `pr-is-merged`) and stay put if the PR is still open.
 12. **Don't conflate `porch review` with the review phase**: The opt-in command is `porch checkpoint`, not `porch review`. Reusing the name `review` for both a phase and a command is confusing and was explicitly flagged in consultation.
 13. **Don't reset `build_complete` inside `porch done`**: `porch done` always sets `build_complete=true`. The reset on feedback happens inside `porch feedback`, which also increments `iteration`. This is the semantic that wakes the build→verify loop for a revision pass.
 
@@ -611,7 +669,7 @@ If any slice proves too large in planning, it can be sub-sliced further — but 
 21. **CLOSED PR does NOT satisfy `pr-exists`**: New behavior — abandoned PRs excluded
 
 ### Functional Tests — Post-Merge Verify Phase
-22. **Verify phase follows review only after merge**: After the `pr` gate is approved **and** `forge pr-is-merged` returns true, `porch next` advances to the `verify` phase. If the PR is approved-but-not-merged, porch stays in review and emits a "merge the PR first" task.
+22. **Verify phase follows review only after merge**: After the `pr` gate is approved **and** the `pr_is_merged` check (intercepted in `checks.ts`, dispatched to forge concept `pr-is-merged`) passes, `porch next` advances to the `verify` phase. If the PR is approved-but-not-merged, porch stays in review and emits a "merge the PR first" task.
 23. **AI builder emits scaffolding only**: `porch next` in verify phase emits tasks to (a) copy template, (b) fill metadata from status.yaml, (c) create verification PR via `pr-create`, (d) `afx send` architect, (e) exit. Tasks must NOT instruct the AI to fill verifier entries or run the checklist.
 24. **Verify.md prompt explicit constraint**: The verify prompt contains an explicit, bold directive: "You are an AI. You cannot verify deployed software. Do not fill verifier entries. Do not sign off. Create scaffolding, notify architect, and exit."
 25. **Verify note template copy**: The template from `codev-skeleton/protocols/spir/templates/verify-note.md` is copied into `codev/verifications/${PROJECT_TITLE}.md` on first entry into the verify phase with metadata fields pre-filled
@@ -656,13 +714,15 @@ If any slice proves too large in planning, it can be sub-sliced further — but 
 - **Verify prompt**: New `codev-skeleton/protocols/spir/prompts/verify.md` (and aspir equivalent)
 - **Verify note template**: New `codev-skeleton/protocols/spir/templates/verify-note.md`
 - **Porch state types** (`packages/codev/src/commands/porch/types.ts`): Add optional `lifecycle_state` derivation; no breaking schema changes
-- **Porch commands** (`packages/codev/src/commands/porch/index.ts`): New `verify` subcommand with `--fail` flag
-- **Porch next** (`packages/codev/src/commands/porch/next.ts`): Handle the verify phase (emit tasks, check gate, transition to `integrated`)
-- **Forge PR comment script**: New `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-comment.sh` to post comments on a merged PR via forge concept
-- **Forge concept layer** (`packages/codev/src/lib/forge.ts`): Expose `postPrComment(prNumber, body)` wrapper
-- **Gate guards** (`packages/codev/src/commands/porch/approve.ts` or equivalent): Ensure `verify-approval` is human-only, same guard used for `spec-approval` and `plan-approval`
+- **Porch commands** (`packages/codev/src/commands/porch/index.ts`): New `verify` subcommand with `--fail`, `--skip`, and `--reset` flags
+- **Porch next** (`packages/codev/src/commands/porch/next.ts`): Extend existing `handleOncePhase` at `next.ts:741` with verify-specific handoff logic (emit scaffolding tasks, invoke pre-merge guard, transition to `integrated` on gate approval)
+- **Porch checks** (`packages/codev/src/commands/porch/checks.ts`): Add a `pr_is_merged` interception branch mirroring the existing `pr_exists` branch at `checks.ts:262`. Reads `state.gates['pr'].checkpoint_pr` for the PR number and dispatches to `executeForgeCommand('pr-is-merged', ...)`.
+- **Forge PR scripts**: New `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-comment.sh`, `pr-is-merged.sh`, `pr-create.sh`, `pr-comments.sh`, `pr-current-branch.sh` — one per forge family, following the same shape as the existing `pr-exists.sh`
+- **Forge concept layer** (`packages/codev/src/lib/forge.ts`): Register the five new concepts; thin wrappers around `executeForgeCommand` if callers outside the check runner need ergonomic access
+- **Gate guards** (`packages/codev/src/commands/porch/approve.ts` or equivalent): Ensure `verify-approval` is human-only, same guard used for `spec-approval` and `plan-approval` (look for the existing `--a-human-explicitly-approved-this` flag handling)
+- **afx cleanup** (`packages/codev/src/commands/afx/cleanup.ts` or equivalent): Refuse to run while project is in `committed` state (deferred cleanup invariant)
 - **afx status / workspace views**: Add `Awaiting Verification` bucket and `committed` vs `integrated` distinction
-- **Builder prompts and role**: Document the verify phase as a legitimate, required workflow for SPIR/ASPIR projects
+- **Builder prompts and role**: Document the verify phase as a legitimate, required workflow for SPIR/ASPIR/TICK projects; the verify.md prompt must include the bold AI-cannot-sign-off directive
 
 ## Risks and Mitigation
 
