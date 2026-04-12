@@ -157,6 +157,7 @@ Required documentation content:
 ### Important (Affects Design)
 - [x] Should the harness append role content to the worktree's AGENTS.md rather than using a separate mechanism? **RESOLVED: No.** Use `opencode.json` `instructions` field instead. This avoids modifying AGENTS.md (which is a tracked file) and uses OpenCode's documented configuration mechanism.
 - [ ] Does `opencode run` support reading the prompt from stdin or only as a CLI argument? This matters for very long prompts that might hit shell argument length limits. Not blocking -- the current approach (command-line arg) works for typical prompt sizes.
+<!-- REVIEW(@architect): Not much of an issue. We can always put the prompt in a file and then tell opencode to read from the file. -->
 
 ### Nice-to-Know (Optimization)
 - [ ] Does OpenCode's `acp` (Agent Client Protocol) mode offer better integration than the PTY-based approach? (Future enhancement, not in scope)

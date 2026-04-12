@@ -353,9 +353,43 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 - **Automatic prompting** - builders start with instructions to implement their assigned spec
 
 **Current limitations:**
-- Currently optimized for **Claude Code** (uses `--append-system-prompt`, `--dangerously-skip-permissions`, etc.)
 - Uses **shellper processes** for persistent terminal sessions (node-pty handles terminal I/O)
 - macOS-focused (should work on Linux but less tested)
+
+### Alternative Agent Shells
+
+Agent Farm supports multiple AI coding agents as shells. Configure in `.codev/config.json`:
+
+**Claude Code** (default):
+```json
+{
+  "shell": {
+    "architect": "claude --dangerously-skip-permissions",
+    "builder": "claude --dangerously-skip-permissions"
+  }
+}
+```
+
+**OpenCode** (builder only):
+```json
+{
+  "shell": {
+    "architect": "claude --dangerously-skip-permissions",
+    "builder": "opencode run"
+  }
+}
+```
+
+OpenCode supports 75+ LLM providers (OpenAI, Anthropic, Google, Ollama, etc.). When using OpenCode as a builder:
+- Include `run` in the command (plain `opencode` launches the TUI, which hangs in a PTY session)
+- Configure tool permissions for unattended execution in `~/.config/opencode/opencode.json` or your project's `opencode.json`:
+  ```json
+  { "permissions": { "edit": "allow", "bash": "allow" } }
+  ```
+- OpenCode reads `AGENTS.md` for project instructions (already present in Codev projects)
+- OpenCode is only supported as a **builder** shell, not as an architect shell
+
+Other shells (Codex, Gemini) are also supported via the harness system. See `packages/codev/src/agent-farm/utils/harness.ts` for details, or define a custom harness in `.codev/config.json`.
 
 ## Architect-Builder Pattern
 
