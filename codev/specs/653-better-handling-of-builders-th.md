@@ -43,18 +43,12 @@ This is how the architect already thinks about the work. Codev needs to catch up
 - The builder can open a PR, wait for merge, pull `main`, cut a new branch, and open another PR — all within the same worktree.
 - `afx cleanup` does **not** run automatically on PR merge. Cleanup is explicit and architect-driven.
 
-### 2. Single state model: porch's phase + gate status is the canonical project state
+### 2. status.yaml committed at every transition
 
-**Design principle**: protocol definitions in `protocol.json` define phases. These ARE the project states. `status.yaml`'s `phase` field IS the project's current state. All consumers — `afx status`, the dashboard, reporting, CLAUDE.md tracking, GitHub issue labels — read `status.yaml` directly. No parallel state vocabulary exists. No translation layer, no derived states, no lossy compression.
+- `status.yaml` is committed at every phase transition to `codev/projects/<id>/status.yaml`. When a PR merges, status.yaml lands on `main`. This is a **hard requirement** — it's what keeps project state persistent across the multi-PR lifecycle.
+- If the builder terminal is gone and the project needs to continue, use `afx spawn <id> --resume` to bring it back. The worktree is still there; the builder picks up where it left off.
 
-If someone asks "what state is project 653 in?" the answer is `phase: review, gate pr: pending` — not "committed" or "implementing" or any other translated term. The mapping between phase names and human-readable meaning is 1:1.
-
-A project that has no `status.yaml` simply doesn't exist in porch yet.
-
-Concrete requirements:
-- `status.yaml` is committed at every phase transition to `codev/projects/<id>/status.yaml`. When a PR merges, status.yaml lands on `main`. This is a **hard requirement**.
-- Porch can read `status.yaml` from either the worktree's local copy or from `main`.
-- **Cold-start fallback**: if the builder's shell is gone for a long time, porch can resume by reading `status.yaml` from `main`. Cold-start without a worktree is scoped to **verify and read-only phases**. Code-writing phases (`implement`) need a worktree and fail with a "worktree required" error directing the user to `afx spawn <id> --resume`.
+**Future work**: making porch's `phase` + gate status the single canonical project state for all consumers (afx status, dashboard, reporting) is a follow-up spec — not part of this one.
 
 ### 3. Optional verify phase
 
@@ -78,9 +72,7 @@ Porch runs in the **builder's** context throughout the entire lifecycle, **inclu
 - *"Spec looks good, let's merge it and start on the plan"* → builder merges, pulls main, cuts a new branch for the plan phase
 - *"PR merged, verify it"* → builder pulls main into its worktree, runs the verify phase, and waits for the architect to approve `verify-approval`
 
-The builder **stays alive through verify** by default. After the final PR merges, the builder pulls `main`, enters the verify phase, and drives it. The `ci-channel` delivers merge events so the builder knows when to proceed.
-
-**Fallback — cold-start resume**: if the builder has been gone for a long time (terminal closed, context lost), the architect can resume the project from a cold start by reading `status.yaml` from `main`. This is the fallback, not the default. In this mode, the architect (or anyone) runs `porch next <id>` from the repo root to see verify tasks, and `porch approve <id> verify-approval` (or `porch verify <id> --skip`) to close the project.
+The builder **stays alive through verify**. After the final PR merges, the builder pulls `main`, enters the verify phase, and drives it. The `ci-channel` delivers merge events so the builder knows when to proceed. If the builder terminal is gone, use `afx spawn <id> --resume` to bring it back.
 
 ## Solution Approach
 
@@ -93,7 +85,6 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 1. **Worktree path**: normalize to `.builders/<protocol>-<id>/` — no title suffix. #662 is a **prerequisite** for this; if #662 hasn't shipped yet, Slice B either waits or implements the path change as part of its own work.
 2. **Cut-and-merge loop support**: the loop is **builder-driven** — the builder handles the git mechanics (create branch, open PR, wait for merge via `ci-channel`, pull `main`, cut next branch). Branch naming is up to the builder (e.g. `spir/653/specify`, `spir/653/implement-phase-1`); porch does not enforce it. However, **porch records PR history**: when a PR is created or merged, the builder tells porch (via status.yaml writes) the PR number, branch name, and merged status. status.yaml is the project's history. The exact schema for per-stage PR records is a plan-phase detail. `afx cleanup` must not run automatically on merge.
 3. **status.yaml committed at every phase transition**: this is a **hard requirement**. Every phase transition, gate request, gate approval, and verify skip must commit and push `status.yaml` to the current branch. When the branch merges, status.yaml lands on `main` naturally. The plan must enumerate which `writeState` calls currently commit/push and fill any gaps — there must be zero gaps.
-4. **Cold-start resume**: porch's lookup for `status.yaml` walks up from CWD; if not found locally (no worktree present), it falls back to reading `main:codev/projects/<id>/status.yaml`. `porch next <id>` run from the repo root works for verify and read-only phases; code-writing phases fail with a clear "worktree required" error.
 
 ### Component C — Optional verify phase
 
@@ -104,6 +95,16 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 5. **Opt-out**: `porch verify <id> --skip "reason"` transitions directly to `verified`. The reason is **required** (not optional) and recorded in `status.yaml` for audit.
 6. **Backward compatibility**: porch detects pre-upgrade projects by checking whether `status.yaml` has a `verify-approval` entry in its `gates` map. If the loaded protocol definition includes a `verify` phase but `gates` has no `verify-approval` key and the project's `phase` is already `complete`, porch auto-transitions to `verified` on load. No protocol-version field is needed.
 
+### Component D — Remove TICK protocol
+
+TICK (amendment workflow for existing specs) was a workaround for the 1-builder-1-PR constraint — when you needed to amend a shipped spec, TICK gave you a way to go back. Under multi-PR worktrees, amendments are just another PR from the same worktree. TICK is dead.
+
+1. **Delete TICK protocol definition** from `codev/protocols/tick/` and `codev-skeleton/protocols/tick/`.
+2. **Remove TICK references** from CLAUDE.md/AGENTS.md protocol selection guides, `porch init` protocol list, `afx spawn --protocol` validation, and any other entry points.
+3. **Migration**: existing in-flight TICK projects (if any) should be migrated to SPIR or closed. The plan phase should check whether any TICK projects exist in the current `codev/projects/` directory.
+
+Protocol list after this ships: **SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT**.
+
 ## Success Criteria
 
 - [ ] `pr-exists` forge scripts exclude `CLOSED`-not-merged PRs
@@ -111,35 +112,34 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 - [ ] A builder can open PR #1, wait for merge, pull main, cut stage-2, and open PR #2 without `afx cleanup` running
 - [ ] `status.yaml` is committed and pushed at every phase transition, gate request, and gate approval — zero gaps
 - [ ] `status.yaml` records PR numbers per stage (PR number, branch name, merged status). Exact schema is plan-phase detail.
-- [ ] Single state model: porch's `phase` + gate status is the canonical project state. `afx status`, dashboard, reporting, and all consumers read `status.yaml` directly. No parallel vocabulary, no translation layer.
-- [ ] Porch can resume a project from a cold start (verify + read-only phases) by reading `status.yaml` from main
 - [ ] SPIR and ASPIR gain an optional `verify` phase after `review`
-- [ ] The builder stays alive through verify by default; cold-start is the fallback
+- [ ] The builder stays alive through verify by default; if the terminal is gone, `afx spawn --resume` brings it back
 - [ ] `verify-approval` is a human-only gate
 - [ ] Terminal state is named `verified` (renamed from `complete`; existing `phase: 'complete'` values must be migrated)
 - [ ] `porch verify <id> --skip "reason"` transitions directly to `verified`
 - [ ] `afx status` and the workspace view show `verified` as the terminal state
+- [ ] TICK protocol removed from codebase (protocol definition, skeleton, references). Protocol list: SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT.
 - [ ] One new porch subcommand (`porch verify`). Zero new gate sub-states.
-- [ ] Unit tests cover: the decoupled cut-and-merge flow, cold-start resume, the verify phase transition, and the `--skip` path
+- [ ] Unit tests cover: the decoupled cut-and-merge flow, the verify phase transition, and the `--skip` path
 
 ## Implementation Ordering
 
-Three shippable slices, in order:
+Four shippable slices, in order:
 
 - **Slice A — `pr-exists` tightening**: standalone correctness fix. Ships first.
-- **Slice B — Worktree/branch/PR decoupling**: the core insight. Coordinates with #662 on worktree path. Largest of the three.
-- **Slice C — Optional verify phase**: depends on Slice B's cold-start resume. Ships last.
+- **Slice B — Worktree/branch/PR decoupling**: the core insight. Coordinates with #662 on worktree path. Largest slice.
+- **Slice C — Optional verify phase**: depends on Slice B (worktree persists through verify).
+- **Slice D — Remove TICK protocol**: can ship with Slice C or independently. Cleanup work.
 
-Each slice is one PR. The three pieces together close the original issue.
+Each slice is one PR. The four pieces together close the original issue.
 
 ## Constraints
 
-- The builder drives the entire lifecycle including verify. Cold-start (architect runs porch directly) is the fallback only.
+- The builder drives the entire lifecycle including verify. If the terminal is gone, `afx spawn --resume` brings it back.
 - One new porch subcommand: `porch verify` (with `--skip`). Zero new gate machinery, zero new gate sub-states.
 - `verify-approval` uses the existing human-only gate guard. No new guard machinery.
 - The verify phase reuses `handleOncePhase` at `next.ts:741`. Not reinvented.
 - No `forge` CLI — if a PR-state check is needed anywhere, intercept it by name in `checks.ts` like `pr_exists` at `:262`.
-- **Single state model**: porch's `phase` + gate status is the canonical project state for the entire system. No parallel vocabulary. All consumers read `status.yaml`.
 
 ## Out of Scope
 
@@ -152,11 +152,10 @@ Items deleted from earlier drafts (not deferred — not needed under the multi-P
 - One-builder-equals-one-PR assumption
 - Separate project-tracking vocabulary (`conceived`, `specified`, `committed`, etc.)
 
-**TICK protocol deprecation**: TICK (amendment workflow for existing specs) becomes redundant once multi-PR worktrees land — amendments during verify are just another PR from the same worktree. TICK was a workaround for the 1-builder-1-PR constraint. Actually deprecating/removing TICK from the codebase is a follow-up, not part of this spec. Protocol list after this ships: SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT.
+**Note**: TICK protocol removal is **in scope** (see Component D in Solution Approach). Protocol list after this ships: SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT.
 
 ## Open Questions
 
-- [x] When porch resumes from a cold start without a worktree, can every phase run from the repo root? — **No.** Code-writing phases (`implement`) need a worktree. Cold-start resume is scoped to verify and read-only phases. Resolved in Desired State section 2.
 - [x] Should `porch verify --skip` require a `--reason`? — **Yes, required.** Resolved in Component C item 5.
 - [ ] Does the verify phase need its own prompt file, or is the one-line task content inline in `protocol.json`? Minor — plan phase decides.
 
