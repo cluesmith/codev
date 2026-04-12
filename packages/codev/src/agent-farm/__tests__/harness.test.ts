@@ -3,6 +3,7 @@ import {
   CLAUDE_HARNESS,
   CODEX_HARNESS,
   GEMINI_HARNESS,
+  OPENCODE_HARNESS,
   buildCustomHarnessProvider,
   validateCustomHarnessConfig,
   resolveHarness,
@@ -59,6 +60,41 @@ describe('harness', () => {
       const result = GEMINI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
       expect(result.fragment).toBe('');
       expect(result.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+    });
+  });
+
+  describe('OPENCODE_HARNESS', () => {
+    it('buildRoleInjection throws (architect use unsupported)', () => {
+      expect(() => OPENCODE_HARNESS.buildRoleInjection(ROLE_CONTENT, ROLE_FILE))
+        .toThrow('OpenCode is only supported as a builder shell');
+    });
+
+    it('buildScriptRoleInjection returns empty fragment and env', () => {
+      const result = OPENCODE_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(result.fragment).toBe('');
+      expect(result.env).toEqual({});
+    });
+
+    it('getWorktreeFiles returns opencode.json with instructions', () => {
+      const files = OPENCODE_HARNESS.getWorktreeFiles!(ROLE_CONTENT, ROLE_FILE);
+      expect(files).toHaveLength(1);
+      expect(files[0].relativePath).toBe('opencode.json');
+      const parsed = JSON.parse(files[0].content);
+      expect(parsed).toEqual({ instructions: ['.builder-role.md'] });
+    });
+  });
+
+  describe('getWorktreeFiles backward compatibility', () => {
+    it('CLAUDE_HARNESS does not have getWorktreeFiles', () => {
+      expect(CLAUDE_HARNESS.getWorktreeFiles).toBeUndefined();
+    });
+
+    it('CODEX_HARNESS does not have getWorktreeFiles', () => {
+      expect(CODEX_HARNESS.getWorktreeFiles).toBeUndefined();
+    });
+
+    it('GEMINI_HARNESS does not have getWorktreeFiles', () => {
+      expect(GEMINI_HARNESS.getWorktreeFiles).toBeUndefined();
     });
   });
 
@@ -216,6 +252,11 @@ describe('harness', () => {
       expect(provider).toBe(GEMINI_HARNESS);
     });
 
+    it('resolves built-in opencode', () => {
+      const provider = resolveHarness('opencode');
+      expect(provider).toBe(OPENCODE_HARNESS);
+    });
+
     it('resolves custom harness from config', () => {
       const customHarnesses: Record<string, CustomHarnessConfig> = {
         'my-agent': {
@@ -257,6 +298,11 @@ describe('harness', () => {
       expect(provider).toBe(CLAUDE_HARNESS);
     });
 
+    it('auto-detects opencode from command', () => {
+      const provider = resolveHarness(undefined, undefined, 'opencode run');
+      expect(provider).toBe(OPENCODE_HARNESS);
+    });
+
     it('explicit harnessName takes priority over auto-detection', () => {
       const provider = resolveHarness('gemini', undefined, 'codex');
       expect(provider).toBe(GEMINI_HARNESS);
@@ -283,6 +329,22 @@ describe('harness', () => {
 
     it('detects gemini', () => {
       expect(detectHarnessFromCommand('gemini')).toBe('gemini');
+    });
+
+    it('detects opencode', () => {
+      expect(detectHarnessFromCommand('opencode')).toBe('opencode');
+    });
+
+    it('detects opencode with run subcommand', () => {
+      expect(detectHarnessFromCommand('opencode run')).toBe('opencode');
+    });
+
+    it('detects opencode from full path', () => {
+      expect(detectHarnessFromCommand('/usr/local/bin/opencode')).toBe('opencode');
+    });
+
+    it('detects opencode with model flags', () => {
+      expect(detectHarnessFromCommand('opencode run --model anthropic/claude-sonnet')).toBe('opencode');
     });
 
     it('detects from full path', () => {

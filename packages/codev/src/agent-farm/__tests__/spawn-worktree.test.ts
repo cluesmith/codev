@@ -23,11 +23,20 @@ vi.mock('node:fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => '{}'),
     writeFileSync: vi.fn(),
     chmodSync: vi.fn(),
     symlinkSync: vi.fn(),
     mkdirSync: vi.fn(),
     readdirSync: vi.fn(() => []),
+  };
+});
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: vi.fn(),
   };
 });
 
@@ -51,9 +60,10 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 vi.mock('../utils/config.js', () => ({
-  getBuilderHarness: () => CLAUDE_HARNESS,
+  getBuilderHarness: (...args: unknown[]) => getBuilderHarnessMock(...args),
 }));
 
 describe('spawn-worktree', () => {
@@ -179,6 +189,96 @@ describe('spawn-worktree', () => {
       expect(script).toContain('while true');
       expect(script).toContain('Agent exited');
       expect(script).toContain('Restarting in 2 seconds');
+    });
+  });
+
+  // =========================================================================
+  // buildWorktreeLaunchScript — OpenCode harness (Spec 178)
+  // =========================================================================
+
+  describe('buildWorktreeLaunchScript (opencode harness)', () => {
+    it('generates script with empty fragment for opencode', () => {
+      getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
+      const role = { content: 'You are a builder', source: 'codev' };
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'opencode run', role);
+      expect(script).toContain('opencode run');
+      expect(script).not.toContain('--append-system-prompt');
+      expect(script).toContain('while true');
+    });
+
+    it('writes opencode.json via getWorktreeFiles', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
+      const { writeFileSync } = await import('node:fs');
+      const role = { content: 'You are a builder', source: 'codev' };
+      buildWorktreeLaunchScript('/tmp/worktree', 'opencode run', role);
+      // Should write .builder-role.md and opencode.json
+      const writeCalls = vi.mocked(writeFileSync).mock.calls;
+      const opencodeCall = writeCalls.find(
+        call => typeof call[0] === 'string' && call[0].endsWith('opencode.json'),
+      );
+      expect(opencodeCall).toBeDefined();
+      const content = JSON.parse(opencodeCall![1] as string);
+      expect(content.instructions).toContain('.builder-role.md');
+    });
+
+    it('merges with existing opencode.json preserving permission config', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
+      const { existsSync, writeFileSync } = await import('node:fs');
+      const { readFileSync } = await import('node:fs');
+      // Mock: opencode.json already exists with permission (singular, per OpenCode docs)
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (typeof p === 'string' && p.endsWith('opencode.json')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValueOnce(JSON.stringify({
+        permission: { edit: 'allow', bash: 'allow' },
+        instructions: ['existing.md'],
+      }));
+      const role = { content: 'You are a builder', source: 'codev' };
+      buildWorktreeLaunchScript('/tmp/worktree', 'opencode run', role);
+      const writeCalls = vi.mocked(writeFileSync).mock.calls;
+      const opencodeCall = writeCalls.find(
+        call => typeof call[0] === 'string' && call[0].endsWith('opencode.json'),
+      );
+      expect(opencodeCall).toBeDefined();
+      const merged = JSON.parse(opencodeCall![1] as string);
+      expect(merged.permission).toEqual({ edit: 'allow', bash: 'allow' });
+      expect(merged.instructions).toContain('existing.md');
+      expect(merged.instructions).toContain('.builder-role.md');
+    });
+
+    it('warns and skips when existing opencode.json is JSONC (not valid JSON)', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(OPENCODE_HARNESS);
+      const { existsSync, writeFileSync } = await import('node:fs');
+      const { readFileSync } = await import('node:fs');
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (typeof p === 'string' && p.endsWith('opencode.json')) return true;
+        return false;
+      });
+      // JSONC with comments — JSON.parse will fail
+      vi.mocked(readFileSync).mockReturnValueOnce('{ // this is a comment\n  "permission": { "bash": "allow" }\n}');
+      const role = { content: 'You are a builder', source: 'codev' };
+      buildWorktreeLaunchScript('/tmp/worktree', 'opencode run', role);
+      const { logger } = await import('../utils/logger.js');
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Cannot merge opencode.json'));
+      // Should NOT have written opencode.json (skipped to preserve user config)
+      const writeCalls = vi.mocked(writeFileSync).mock.calls;
+      const opencodeCall = writeCalls.find(
+        call => typeof call[0] === 'string' && call[0].endsWith('opencode.json'),
+      );
+      expect(opencodeCall).toBeUndefined();
+    });
+
+    it('does not write worktree files for claude harness', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(CLAUDE_HARNESS);
+      const { writeFileSync } = await import('node:fs');
+      const role = { content: 'You are a builder', source: 'codev' };
+      buildWorktreeLaunchScript('/tmp/worktree', 'claude', role);
+      const writeCalls = vi.mocked(writeFileSync).mock.calls;
+      const opencodeCall = writeCalls.find(
+        call => typeof call[0] === 'string' && call[0].endsWith('opencode.json'),
+      );
+      expect(opencodeCall).toBeUndefined();
     });
   });
 

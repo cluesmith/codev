@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
+import { detectHarnessFromCommand } from '../agent-farm/utils/harness.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -170,6 +171,17 @@ const AI_DEPENDENCIES: Dependency[] = [
       linux: 'npm i -g @openai/codex',
     },
   },
+  {
+    name: 'OpenCode',
+    command: 'opencode',
+    versionArg: '--version',
+    versionExtract: () => 'working',
+    required: false,
+    installHint: {
+      macos: 'npm install -g opencode-ai',
+      linux: 'npm install -g opencode-ai',
+    },
+  },
 ];
 
 /**
@@ -240,6 +252,14 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     timeout: 10000,
     successCheck: (r) => r.status === 0,
     authHint: 'Run "codex login status" in this directory and confirm it works without codev first',
+  },
+  // OpenCode: multi-provider, so we just verify the CLI works (no auth check)
+  'OpenCode': {
+    command: 'opencode',
+    args: ['--version'],
+    timeout: 10000,
+    successCheck: (r) => r.status === 0,
+    authHint: 'Run "opencode --version" to verify installation',
   },
   // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below
   'Gemini': {
@@ -568,6 +588,37 @@ export async function doctor(): Promise<number> {
     console.log('');
     console.log(chalk.red('  ✗') + ' No AI model operational! Check API keys and authentication.');
     errors++;
+  }
+
+  // Warn if OpenCode is configured as architect shell (unsupported)
+  try {
+    const { loadConfig } = await import('../lib/config.js');
+    const root = findWorkspaceRoot();
+    if (root) {
+      const config = loadConfig(root) as Record<string, unknown>;
+      const shell = config?.shell as Record<string, unknown> | undefined;
+      // Check explicit architectHarness or auto-detect from architect command
+      const architectHarness = shell?.architectHarness as string | undefined;
+      const architectCmd = Array.isArray(shell?.architect)
+        ? (shell.architect as string[]).join(' ')
+        : (shell?.architect as string ?? '');
+      const isOpencode = architectHarness === 'opencode' ||
+        (architectCmd && detectHarnessFromCommand(architectCmd) === 'opencode');
+      if (isOpencode) {
+        console.log('');
+        console.log(chalk.yellow('  ⚠') + ' OpenCode is configured as architect shell — this is unsupported.');
+        console.log(chalk.yellow('    ') + 'OpenCode uses file-based role injection that requires an ephemeral worktree.');
+        console.log(chalk.yellow('    ') + 'Use a different shell for the architect (e.g., "claude --dangerously-skip-permissions").');
+        warnings++;
+        warningDetails.push({
+          name: 'Shell config',
+          issue: 'OpenCode configured as architect shell (unsupported)',
+          recommendation: 'Set shell.architect to "claude --dangerously-skip-permissions" in .codev/config.json',
+        });
+      }
+    }
+  } catch {
+    // Config loading may fail in non-project contexts — skip warning
   }
 
   console.log('');

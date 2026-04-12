@@ -8,7 +8,8 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness } from '../utils/config.js';
@@ -565,6 +566,49 @@ export async function createPtySession(
 }
 
 /**
+ * Write harness-provided files to the worktree, merging with existing JSON files.
+ * For JSON files: reads existing file, shallow-merges properties, and deduplicates
+ * the 'instructions' array. If existing JSON can't be parsed (e.g., JSONC with
+ * comments), warns and skips to avoid destroying user config.
+ * After writing, marks files with git skip-worktree to prevent accidental commits.
+ */
+function writeWorktreeFiles(
+  files: Array<{ relativePath: string; content: string }>,
+  worktreePath: string,
+): void {
+  for (const file of files) {
+    const targetPath = resolve(worktreePath, file.relativePath);
+    if (file.relativePath.endsWith('.json') && existsSync(targetPath)) {
+      try {
+        const existing = JSON.parse(readFileSync(targetPath, 'utf-8'));
+        const incoming = JSON.parse(file.content);
+        const merged = { ...existing, ...incoming };
+        if (Array.isArray(existing.instructions) && Array.isArray(incoming.instructions)) {
+          merged.instructions = [...new Set([...existing.instructions, ...incoming.instructions])];
+        }
+        writeFileSync(targetPath, JSON.stringify(merged, null, 2) + '\n');
+      } catch {
+        // Existing file is not valid JSON (likely JSONC with comments/trailing commas).
+        // Do NOT overwrite — that would destroy user config. Warn and skip.
+        logger.warn(`Cannot merge ${file.relativePath}: existing file is not valid JSON. Skipping to preserve user config.`);
+        continue;
+      }
+    } else {
+      writeFileSync(targetPath, file.content);
+    }
+    // Prevent generated files from being accidentally committed back to the repo
+    try {
+      execSync(`git update-index --skip-worktree "${file.relativePath}"`, {
+        cwd: worktreePath,
+        stdio: 'pipe',
+      });
+    } catch {
+      // Non-fatal: file may not be tracked by git yet (new file in worktree)
+    }
+  }
+}
+
+/**
  * Start a terminal session for a builder
  */
 export async function startBuilderSession(
@@ -601,6 +645,11 @@ export async function startBuilderSession(
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
+
+    // Write any harness-specific worktree files (e.g., opencode.json for OpenCode)
+    if (harness.getWorktreeFiles) {
+      writeWorktreeFiles(harness.getWorktreeFiles(roleWithPort, roleFile), worktreePath);
+    }
 
     scriptContent = `#!/bin/bash
 cd "${worktreePath}"
@@ -682,6 +731,11 @@ export function buildWorktreeLaunchScript(
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
+
+    // Write any harness-specific worktree files (e.g., opencode.json for OpenCode)
+    if (harness.getWorktreeFiles) {
+      writeWorktreeFiles(harness.getWorktreeFiles(roleWithPort, roleFile), worktreePath);
+    }
 
     return `#!/bin/bash
 cd "${worktreePath}"
