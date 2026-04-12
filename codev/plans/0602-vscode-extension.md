@@ -735,7 +735,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 
 **Monorepo prerequisite**: Already done — npm workspaces set up with root `package.json`, extension scaffold at `packages/codev-vscode/`, cross-package imports verified.
 
-**Tech debt acknowledged**: Phase 3 creates a third copy of EscapeBuffer (server, dashboard, extension). This is pragmatic for V1 — extraction into `@cluesmith/codev-api-client` happens post-V1 when patterns stabilize across two consumers.
+**Tech debt acknowledged**: Phase 3 creates a third copy of EscapeBuffer (server, dashboard, extension). This is pragmatic for V1 — extraction into `@cluesmith/codev-shared` happens post-V1 when patterns stabilize across two consumers.
 
 **Consultation feedback incorporated**: Phase 2 split into 2a/2b per Claude recommendation. Review comments moved into V1 per Gemini/Codex. Image paste feasibility flagged per Codex. Cross-platform `afx open` per Codex. `ws` bundling risk per Claude. All missing settings/activation events added.
 

@@ -303,7 +303,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 - Terminal scrollback is preserved via shellper — no data loss
 
 **Escape sequence buffering:**
-WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-api-client` as a shared utility.
+WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-shared` as a shared utility.
 
 **Resize deferral during replay:**
 On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
@@ -501,7 +501,7 @@ Single Webview panel embedding the existing Recharts analytics page:
 Extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension. **Phased approach** — do not block V1 on extracting everything.
 
 **Phase 1 (before V1)**: Extract `@cluesmith/codev-types` only. Low risk, high value.
-**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-api-client` once patterns stabilize across two real consumers (dashboard + extension).
+**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-shared` once patterns stabilize across two real consumers (dashboard + extension).
 
 **Monorepo prerequisite**: Add a root `package.json` with `"workspaces": ["packages/*"]` before extracting. Currently no workspace manager exists. Without this, `file:` dependencies will break `vsce` packaging.
 
@@ -516,9 +516,9 @@ Zero-dependency package with shared TypeScript interfaces currently duplicated b
 
 Without this package, the extension becomes a third independent copy of these types, making protocol drift inevitable.
 
-### `@cluesmith/codev-api-client` (Recommended, Phase 2 — after V1)
+### `@cluesmith/codev-shared` (Recommended, Phase 2 — after V1)
 
-Environment-agnostic Tower API client shared between dashboard and extension:
+Shared runtime utilities and API client logic used by dashboard and extension:
 
 - REST client with authenticated fetch (local-key header)
 - SSE client with reconnection logic and heartbeat handling
@@ -704,7 +704,7 @@ All errors surface through a consistent pattern:
 ## Dependencies
 - **External Services**: None (localhost only)
 - **Internal Systems**: Tower server (existing), shellper (existing), all existing REST/WebSocket/SSE APIs
-- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-api-client` (shared Tower client)
+- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-shared` (shared runtime utilities + API client, post-V1)
 - **Libraries/Frameworks**: VS Code Extension API, `ws` (WebSocket client), `eventsource` (SSE client), React + Vite (analytics + team Webviews)
 - **Build**: `@vscode/vsce` for packaging and Marketplace publishing
 
