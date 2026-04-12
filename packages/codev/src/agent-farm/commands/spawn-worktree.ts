@@ -8,7 +8,7 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness } from '../utils/config.js';
@@ -565,6 +565,35 @@ export async function createPtySession(
 }
 
 /**
+ * Write harness-provided files to the worktree, merging with existing JSON files.
+ * For JSON files: reads existing file, shallow-merges properties, and deduplicates
+ * the 'instructions' array. For non-JSON files: writes directly.
+ */
+function writeWorktreeFiles(
+  files: Array<{ relativePath: string; content: string }>,
+  worktreePath: string,
+): void {
+  for (const file of files) {
+    const targetPath = resolve(worktreePath, file.relativePath);
+    if (file.relativePath.endsWith('.json') && existsSync(targetPath)) {
+      try {
+        const existing = JSON.parse(readFileSync(targetPath, 'utf-8'));
+        const incoming = JSON.parse(file.content);
+        const merged = { ...existing, ...incoming };
+        if (Array.isArray(existing.instructions) && Array.isArray(incoming.instructions)) {
+          merged.instructions = [...new Set([...existing.instructions, ...incoming.instructions])];
+        }
+        writeFileSync(targetPath, JSON.stringify(merged, null, 2) + '\n');
+      } catch {
+        writeFileSync(targetPath, file.content);
+      }
+    } else {
+      writeFileSync(targetPath, file.content);
+    }
+  }
+}
+
+/**
  * Start a terminal session for a builder
  */
 export async function startBuilderSession(
@@ -601,6 +630,11 @@ export async function startBuilderSession(
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
+
+    // Write any harness-specific worktree files (e.g., opencode.json for OpenCode)
+    if (harness.getWorktreeFiles) {
+      writeWorktreeFiles(harness.getWorktreeFiles(roleWithPort, roleFile), worktreePath);
+    }
 
     scriptContent = `#!/bin/bash
 cd "${worktreePath}"
@@ -682,6 +716,11 @@ export function buildWorktreeLaunchScript(
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
     const envBlock = envExports ? `${envExports}\n` : '';
+
+    // Write any harness-specific worktree files (e.g., opencode.json for OpenCode)
+    if (harness.getWorktreeFiles) {
+      writeWorktreeFiles(harness.getWorktreeFiles(roleWithPort, roleFile), worktreePath);
+    }
 
     return `#!/bin/bash
 cd "${worktreePath}"
