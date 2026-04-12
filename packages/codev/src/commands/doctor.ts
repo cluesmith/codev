@@ -178,8 +178,8 @@ const AI_DEPENDENCIES: Dependency[] = [
     versionExtract: () => 'working',
     required: false,
     installHint: {
-      macos: 'npm install -g opencode',
-      linux: 'npm install -g opencode',
+      macos: 'npm install -g opencode-ai',
+      linux: 'npm install -g opencode-ai',
     },
   },
 ];
@@ -595,11 +595,16 @@ export async function doctor(): Promise<number> {
     const { loadConfig } = await import('../lib/config.js');
     const root = findWorkspaceRoot();
     if (root) {
-      const config = loadConfig(root);
-      const architectCmd = (config as Record<string, unknown>)?.shell
-        ? ((config as Record<string, Record<string, string>>).shell?.architect ?? '')
-        : '';
-      if (architectCmd && detectHarnessFromCommand(architectCmd) === 'opencode') {
+      const config = loadConfig(root) as Record<string, unknown>;
+      const shell = config?.shell as Record<string, unknown> | undefined;
+      // Check explicit architectHarness or auto-detect from architect command
+      const architectHarness = shell?.architectHarness as string | undefined;
+      const architectCmd = Array.isArray(shell?.architect)
+        ? (shell.architect as string[]).join(' ')
+        : (shell?.architect as string ?? '');
+      const isOpencode = architectHarness === 'opencode' ||
+        (architectCmd && detectHarnessFromCommand(architectCmd) === 'opencode');
+      if (isOpencode) {
         console.log('');
         console.log(chalk.yellow('  ⚠') + ' OpenCode is configured as architect shell — this is unsupported.');
         console.log(chalk.yellow('    ') + 'OpenCode uses file-based role injection that requires an ephemeral worktree.');

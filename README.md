@@ -384,7 +384,7 @@ OpenCode supports 75+ LLM providers (OpenAI, Anthropic, Google, Ollama, etc.). W
 - Include `run` in the command (plain `opencode` launches the TUI, which hangs in a PTY session)
 - Configure tool permissions for unattended execution in `~/.config/opencode/opencode.json` or your project's `opencode.json`:
   ```json
-  { "permissions": { "edit": "allow", "bash": "allow" } }
+  { "permission": { "edit": "allow", "bash": "allow" } }
   ```
 - OpenCode reads `AGENTS.md` for project instructions (already present in Codev projects)
 - OpenCode is only supported as a **builder** shell, not as an architect shell
