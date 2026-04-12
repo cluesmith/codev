@@ -117,13 +117,17 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 
 ### Technical Constraints
 
+**Why native Pseudoterminal, not xterm.js in a Webview:**
+Tower's WebSocket speaks a binary protocol (`0x00`/`0x01` framing). xterm.js handles this natively — it's what the browser dashboard uses. An alternative approach would embed xterm.js in a VS Code Webview, avoiding any protocol translation. However, Webview terminals have significant UX issues: keyboard shortcuts (Ctrl+C, arrows, paste) require custom passthrough, they can't appear in VS Code's native terminal panel or editor groups, they don't respect VS Code theming or focus management, and they feel like a browser embedded in an IDE. A native `Pseudoterminal` avoids all of this at the cost of a small binary adapter (~50 lines) that translates between Tower's binary protocol and VS Code's string-based API. This is a one-time implementation cost for a permanently better UX.
+
 **VS Code Pseudoterminal API:**
-- `Pseudoterminal.onDidWrite` expects UTF-8 strings, not binary — requires translation from the `0x01` data frames
-- `Pseudoterminal.handleInput` provides strings — must encode to binary `0x01` frames for Tower
+- `Pseudoterminal.onDidWrite` expects UTF-8 strings, not binary — requires a binary protocol adapter to translate from `0x01` data frames
+- `Pseudoterminal.handleInput` provides strings — adapter encodes to binary `0x01` frames for Tower
 - `Pseudoterminal.setDimensions` maps to `0x00` control frames for PTY resize
 - No native stdout capture — but irrelevant since Tower/shellper handle observation
 
-**WebSocket Binary Protocol Translation:**
+**Binary Protocol Adapter:**
+Translates between Tower's binary WebSocket protocol and VS Code's string-based Pseudoterminal API:
 - Incoming `0x01` frames: strip first byte, decode `Uint8Array` → UTF-8 string via `TextDecoder('utf-8', { stream: true })` (streaming mode required to handle multi-byte Unicode split across frames), fire to `onDidWrite`
 - Outgoing input: encode string → `Uint8Array`, prepend `0x01`, send over WebSocket
 - Control frames (`0x00`): handle resize, ping/pong, sequence numbers for replay
@@ -552,11 +556,13 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 
 ## Default Keyboard Shortcuts
 
+Chord bindings using `Cmd+K` (macOS) / `Ctrl+K` (Windows/Linux) as prefix — no conflicts with built-in VS Code shortcuts:
+
 | Shortcut | Command |
 |----------|---------|
-| `Ctrl+Shift+A` / `Cmd+Shift+A` | Codev: Open Architect Terminal |
-| `Ctrl+Shift+M` / `Cmd+Shift+M` | Codev: Send Message |
-| `Ctrl+Shift+G` / `Cmd+Shift+G` | Codev: Approve Gate |
+| `Cmd+K, A` / `Ctrl+K, A` | Codev: Open Architect Terminal |
+| `Cmd+K, M` / `Ctrl+K, M` | Codev: Send Message |
+| `Cmd+K, G` / `Ctrl+K, G` | Codev: Approve Gate |
 
 Additional commands available via Command Palette but without default keybindings to avoid conflicts.
 
@@ -801,6 +807,28 @@ All findings incorporated into the relevant sections above.
 - [ ] Product Owner Review
 - [ ] Stakeholder Sign-off
 - [x] Expert AI Consultation Complete
+
+## Extension Touch Points
+
+Summary of all VS Code surfaces the extension introduces:
+
+| Surface | What |
+|---------|------|
+| **Activity Bar** | Codev icon — opens the unified sidebar |
+| **Sidebar** | 7 collapsible TreeView sections (Needs Attention, Builders, PRs, Backlog, Recently Closed, Team, Status) |
+| **Editor Area (left group)** | Architect terminal (1 tab) |
+| **Editor Area (right group)** | Builder terminal tabs + shell tabs (N tabs) |
+| **Status Bar** | Builder count + blocked gate count, click to approve |
+| **Command Palette** | 15+ commands prefixed with `Codev:` |
+| **Keyboard Shortcuts** | 3 chord bindings (`Cmd+K, A/M/G`) |
+| **Context Menus** | Right-click actions on sidebar items |
+| **File Decorations** | Colored background + gutter icon on `REVIEW(...)` lines |
+| **Snippets** | `rev` + Tab inserts review comment |
+| **URI Handler** | `vscode://codev/open?file=...&line=...` for `afx open` |
+| **Terminal Link Provider** | Clickable file paths in terminal output |
+| **Settings** | 7 settings under `codev.*` in Settings UI |
+| **Output Channel** | `Codev` channel in Output panel for diagnostics |
+| **Webview Panel** (post-V1) | Analytics dashboard (Recharts) |
 
 ## Notes
 

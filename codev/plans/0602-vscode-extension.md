@@ -407,7 +407,7 @@ Remove view registrations from package.json, delete views/ directory. Extension 
 - [ ] Quick-pick flows for spawn (issue + protocol + branch), send (builder + message), approve (gate list)
 - [ ] Status bar: builder count + blocked gates (left-aligned)
 - [ ] Status bar click → quick-pick of pending actions
-- [ ] Keyboard shortcuts: `Cmd+Shift+A` (architect), `Cmd+Shift+M` (send), `Cmd+Shift+G` (approve)
+- [ ] Keyboard shortcuts: `Cmd+K, A` (architect), `Cmd+K, M` (send), `Cmd+K, G` (approve) — chord bindings, no conflicts with built-in VS Code shortcuts
 - [ ] Wire up Phase 4 context menu no-ops with real handlers (Open Terminal → Phase 3, Approve Gate → Phase 5)
 
 #### Implementation Details
@@ -676,7 +676,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 | Image paste infeasible via Pseudoterminal | High | Low | Investigate clipboard API, defer if not possible | 3 |
 | 7 TreeView providers cause excessive API calls | Low | Medium | Single cached overview call | 4 |
 | Phase 4 context menu actions depend on later phases | Medium | Low | Register as no-ops, wire up in Phase 5 | 4 |
-| Keyboard shortcut conflicts | Medium | Low | Test defaults, allow rebinding | 5 |
+| Keyboard shortcut conflicts | Low | Low | Chord bindings (`Cmd+K, A/M/G`) verified unassigned by default | 5 |
 | `afx open` URI is macOS-only | High | Medium | Cross-platform: `open` / `start` / `xdg-open` | 9 |
 | Analytics theme mismatch | Medium | Low | Inject VS Code CSS variables | 8 |
 
