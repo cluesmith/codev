@@ -1,8 +1,14 @@
+---
+approved: 2026-04-12
+validated: [gemini, codex, claude]
+---
+
 # Plan: VS Code Extension for Codev Agent Farm
 
 ## Metadata
 - **ID**: 0602
-- **Status**: draft
+- **Status**: approved
+- **Approved**: 2026-04-12
 - **Specification**: `codev/specs/0602-vscode-extension.md`
 - **Created**: 2026-04-06
 
@@ -36,7 +42,7 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
     {"id": "sidebar", "title": "Phase 4: Unified Codev Sidebar"},
     {"id": "commands", "title": "Phase 5: Command Palette + Status Bar + Keyboard Shortcuts"},
     {"id": "review_comments", "title": "Phase 6: Review Comments (Snippet + Decorations)"},
-    {"id": "commands_v1", "title": "Phase 7: V1 Polish + Packaging"},
+    {"id": "v1_polish", "title": "Phase 7: V1 Polish + Packaging"},
     {"id": "analytics", "title": "Phase 8: Analytics Webview"},
     {"id": "file_links", "title": "Phase 9: File Link Handling (URI Scheme + TerminalLinkProvider)"}
   ]
@@ -121,8 +127,10 @@ Revert the extraction — types go back to local definitions. No runtime behavio
 - [ ] `Codev` Output Channel for diagnostic logging (redacts auth tokens)
 - [ ] Auth via `SecretStorage` with re-read from disk on 401
 - [ ] Extension settings registration: `codev.towerHost`, `codev.towerPort`, `codev.workspacePath`, `codev.terminalPosition`, `codev.autoConnect`, `codev.autoStartTower`, `codev.telemetry`
-- [ ] Activation events: `onCommand:codev.*` and `workspaceContains:codev/`
+- [ ] Activation events: `onCommand:codev.*` (implicit via command registration) and `workspaceContains:.codev/config.json`
 - [ ] Proper `deactivate()` — close all connections, dispose resources
+- [ ] Add `ws` and `https-proxy-agent` as runtime dependencies in `package.json`
+- [ ] Update `esbuild.js` to mark `bufferutil` and `utf-8-validate` as external
 - [ ] `src/extension.ts` updated to initialize Connection Manager on activation
 
 #### Implementation Details
@@ -153,7 +161,7 @@ RECONNECTING → (max retries) → DISCONNECTED
 **Activation:** Register `activationEvents` in `package.json`:
 ```json
 "activationEvents": [
-  "workspaceContains:codev/"
+  "workspaceContains:.codev/config.json"
 ]
 ```
 Commands activate implicitly via `onCommand:`.
@@ -407,7 +415,7 @@ Remove view registrations from package.json, delete views/ directory. Extension 
 - [ ] Quick-pick flows for spawn (issue + protocol + branch), send (builder + message), approve (gate list)
 - [ ] Status bar: builder count + blocked gates (left-aligned)
 - [ ] Status bar click → quick-pick of pending actions
-- [ ] Keyboard shortcuts: `Cmd+K, A` (architect), `Cmd+K, M` (send), `Cmd+K, G` (approve) — chord bindings, no conflicts with built-in VS Code shortcuts
+- [ ] Keyboard shortcuts: `Cmd+K, A` (architect), `Cmd+K, D` (send/deliver message), `Cmd+K, G` (approve) — chord bindings, verified no conflicts with built-in VS Code shortcuts
 - [ ] Wire up Phase 4 context menu no-ops with real handlers (Open Terminal → Phase 3, Approve Gate → Phase 5)
 
 #### Implementation Details
@@ -519,6 +527,7 @@ Remove snippet and decoration provider. No impact on any other phase.
 - [ ] `.vsix` installs cleanly in a fresh VS Code instance
 - [ ] Extension activates, connects, shows sidebar, opens terminals
 - [ ] No console errors, no missing dependencies at runtime
+- [ ] Extension activation time < 500ms (spec requirement)
 
 #### Test Plan
 - **Manual Testing**: Install `.vsix` in clean VS Code, run full workflow
@@ -635,16 +644,15 @@ Remove URI handler and link provider. `afx open` continues to work via Tower API
 
 ## Dependency Map
 ```
-Phase 1 (types) ──→ Phase 2a (connection) ──→ Phase 2b (SSE + auto-start)
+Phase 1 (types) ──→ Phase 2a (connection) ──→ Phase 2b (SSE + auto-start) ──→ Phase 4 (sidebar)
                                            ──→ Phase 3 (terminals)
-                                Phase 2b ──→ Phase 4 (sidebar)
-                         Phase 3 + 4 + 5 ──→ Phase 5 (commands)
-                                           ──→ Phase 8 (analytics, post-V1)
-                         Phase 3 ─────────→ Phase 9 (file links, post-V1)
+                         Phase 2b + 3 + 4 ──→ Phase 5 (commands)
+                                Phase 2a ──→ Phase 8 (analytics, post-V1)
+                                Phase 3 ──→ Phase 9 (file links, post-V1)
 
 Phase 6 (review comments) ── NO DEPENDENCIES ── can run in parallel from Day 1
 
-All V1 phases ──→ Phase 7 (V1 polish + packaging)
+All V1 phases (1-6) ──→ Phase 7 (V1 polish + packaging)
 ```
 
 Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero dependencies and can start immediately.
@@ -658,7 +666,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 - **Workspace-scoped**: `/workspace/:base64path/api/state`, `/api/team`, `/api/tabs/shell`
 
 ### CLI (`afx open` modification)
-- Phase 8 modifies the `afx open` command to detect VS Code and emit URI
+- Phase 9 modifies the `afx open` command to detect VS Code and emit URI
 - Backwards compatible — non-VS-Code environments unchanged
 
 ## Risk Analysis
@@ -676,7 +684,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 | Image paste infeasible via Pseudoterminal | High | Low | Investigate clipboard API, defer if not possible | 3 |
 | 7 TreeView providers cause excessive API calls | Low | Medium | Single cached overview call | 4 |
 | Phase 4 context menu actions depend on later phases | Medium | Low | Register as no-ops, wire up in Phase 5 | 4 |
-| Keyboard shortcut conflicts | Low | Low | Chord bindings (`Cmd+K, A/M/G`) verified unassigned by default | 5 |
+| Keyboard shortcut conflicts | Low | Low | Chord bindings (`Cmd+K, A/D/G`) verified unassigned by default | 5 |
 | `afx open` URI is macOS-only | High | Medium | Cross-platform: `open` / `start` / `xdg-open` | 9 |
 | Analytics theme mismatch | Medium | Low | Inject VS Code CSS variables | 8 |
 
@@ -703,10 +711,15 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 **Date**: 2026-04-06
 **Models Consulted**: Gemini 3 Pro, GPT-5.4 Codex, Claude (via `consult` CLI)
 
-**Key Feedback (incorporated):**
+**First Consultation — Key Feedback (incorporated):**
 - **Gemini**: V1 cut line violates spec (review comments are V1). Phase 7 dependency on Phase 2 is wrong. Image paste belongs in Phase 3. HTTP proxy support missing. Missing settings and protocol version check. → All fixed.
 - **Codex**: WebSocket auth control message missing. Shell terminal command flow missing. `afx open` is macOS-only. Activation time target not addressed. → All fixed.
 - **Claude**: Phase 2 too large (5 subsystems) — split into 2a/2b. `ws` native bindings break esbuild. Phase 4 context menu actions create circular dependency. Missing activation events. `vsce package` needs testing with workspace symlinks. → All fixed.
+
+**Second Consultation (2026-04-12) — Validation:**
+- **Gemini**: All first-round feedback addressed. Found: activation event should use `.codev/config.json` not `codev/`, `Cmd+K, M` conflicts with Change Language Mode, UX walkthrough references post-V1 gutter "+". → All fixed.
+- **Codex**: All first-round feedback addressed. Found: Phase 7 JSON id mismatch (`commands_v1`), activation events inconsistent between deliverables and code snippet. → All fixed.
+- **Claude**: All first-round feedback addressed. Found: dependency map self-reference, Phase 8/9 CLI reference mismatch, `ws` not in Phase 2a deliverables, activation time not in Phase 7 criteria. → All fixed.
 
 ## Approval
 - [ ] Technical Lead Review

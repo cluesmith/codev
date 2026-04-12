@@ -561,7 +561,7 @@ Chord bindings using `Cmd+K` (macOS) / `Ctrl+K` (Windows/Linux) as prefix — no
 | Shortcut | Command |
 |----------|---------|
 | `Cmd+K, A` / `Ctrl+K, A` | Codev: Open Architect Terminal |
-| `Cmd+K, M` / `Ctrl+K, M` | Codev: Send Message |
+| `Cmd+K, D` / `Ctrl+K, D` | Codev: Send Message |
 | `Cmd+K, G` / `Ctrl+K, G` | Codev: Approve Gate |
 
 Additional commands available via Command Palette but without default keybindings to avoid conflicts.
@@ -963,13 +963,14 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 - Click the "+" gutter button → type a `REVIEW(@architect)` comment
 - Comment is written directly into the file
 
-**VS Code:**
+**VS Code (V1):**
 - Open the file normally in your editor
-- Click the native "+" gutter icon (same as GitHub PR inline comments)
-- Type your review comment → it inserts `// REVIEW(@architect): text` into the file
+- Type `rev` + Tab → inserts `// REVIEW(@architect): ` with cursor positioned to type
+- Or `Cmd+Shift+P` → "Codev: Add Review Comment" → inserts at current line
+- Existing review comments highlighted with colored background + gutter icon
 - Same file format — interoperable with the browser dashboard
 
-**Key difference:** Uses VS Code's native Comments API instead of a custom web UI. Feels like doing a PR review inline.
+**Key difference:** V1 uses snippet/command + visual decorations. Post-V1 adds the full Comments API with native gutter "+" buttons and threading.
 
 ### Team & Analytics
 
