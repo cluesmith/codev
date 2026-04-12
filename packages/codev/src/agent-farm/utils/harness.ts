@@ -35,6 +35,16 @@ export interface HarnessProvider {
     fragment: string;
     env: Record<string, string>;
   };
+
+  /**
+   * Optional: files to write in the worktree before launching the agent.
+   * Used by harnesses that rely on file-based configuration (e.g., OpenCode
+   * uses opencode.json's instructions field for role injection).
+   */
+  getWorktreeFiles?(roleContent: string, roleFilePath: string): Array<{
+    relativePath: string;
+    content: string;
+  }>;
 }
 
 /** Custom harness definition from .codev/config.json */
@@ -82,10 +92,27 @@ export const GEMINI_HARNESS: HarnessProvider = {
   }),
 };
 
+export const OPENCODE_HARNESS: HarnessProvider = {
+  buildRoleInjection: () => {
+    throw new Error(
+      'OpenCode is only supported as a builder shell, not as an architect shell. ' +
+      'OpenCode uses file-based role injection (opencode.json instructions field) ' +
+      'which requires an ephemeral worktree. Configure a different shell for ' +
+      'the architect (e.g., "claude --dangerously-skip-permissions").',
+    );
+  },
+  buildScriptRoleInjection: () => ({ fragment: '', env: {} }),
+  getWorktreeFiles: () => ([{
+    relativePath: 'opencode.json',
+    content: JSON.stringify({ instructions: ['.builder-role.md'] }, null, 2) + '\n',
+  }]),
+};
+
 const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
   gemini: GEMINI_HARNESS,
+  opencode: OPENCODE_HARNESS,
 };
 
 // =============================================================================
@@ -211,6 +238,7 @@ export function detectHarnessFromCommand(command: string): string | undefined {
   if (basename.includes('claude')) return 'claude';
   if (basename.includes('codex')) return 'codex';
   if (basename.includes('gemini')) return 'gemini';
+  if (basename.includes('opencode')) return 'opencode';
 
   return undefined;
 }
