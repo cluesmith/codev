@@ -40,7 +40,7 @@ The hardest part is Phase 2 (status.yaml commit infrastructure) — every `write
 - `packages/codev/scripts/forge/github/pr-exists.sh` — change `--state all` to filter: pipe through `jq` selecting only OPEN or MERGED state
 - `packages/codev/scripts/forge/gitlab/pr-exists.sh` — add state filter excluding closed MRs
 - `packages/codev/scripts/forge/gitea/pr-exists.sh` — add jq filter excluding closed PRs
-- `packages/codev/src/commands/porch/__tests__/bugfix-568-pr-exists-state-all.test.ts` — update to verify new filtering logic instead of raw `--state all` presence
+- `packages/codev/src/commands/porch/__tests__/bugfix-568-pr-exists-state-all.test.ts` — **rewrite** to target the `pr-exists.sh` scripts directly (currently the test reads `pr_exists` commands from protocol.json, not the scripts; updating scripts without updating protocol.json would leave the test checking stale data)
 
 #### Implementation Details
 
@@ -81,23 +81,32 @@ This preserves the bugfix-568 intent (don't miss merged PRs) while excluding aba
 
 New function in `state.ts`:
 ```typescript
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
+
 export async function writeStateAndCommit(
   statusPath: string,
   state: ProjectState,
   message: string,
 ): Promise<void> {
   writeState(statusPath, state);
-  // git add + commit + push
-  const dir = path.dirname(statusPath);
-  await execAsync(`git add "${statusPath}"`, { cwd: dir });
-  await execAsync(`git commit -m "${message}" --allow-empty`, { cwd: dir });
-  await execAsync(`git push`, { cwd: dir });
+  const cwd = path.dirname(path.dirname(statusPath)); // worktree root
+  // Use execFile with args array — no shell injection risk
+  await execFileAsync('git', ['add', statusPath], { cwd });
+  await execFileAsync('git', ['commit', '-m', message], { cwd });
+  // Use -u origin HEAD so new branches get upstream tracking
+  await execFileAsync('git', ['push', '-u', 'origin', 'HEAD'], { cwd });
 }
 ```
+
+**No `--allow-empty`**: if status.yaml hasn't changed, the commit should fail — that signals a logic bug (writeState should have mutated the file before calling this). Do not mask it.
 
 Commit messages follow the pattern: `chore(porch): ${state.id} ${phase} → ${event}` where event is one of: `phase-transition`, `gate-requested`, `gate-approved`, `build-complete`, `verify-skip`.
 
 **Risk**: pushing on every state change adds network overhead. Mitigation: porch operations are infrequent (minutes between transitions, not seconds). The reliability of status.yaml on main outweighs the latency cost.
+
+**Completion task overlap**: today the review phase's completion task includes "commit status.yaml." Once `writeStateAndCommit` lands, this manual completion task becomes redundant. Remove the status.yaml commit from review-phase completion tasks — it's now automatic.
 
 **Existing `writeState` calls that don't need commit** (porch init only writes to the worktree before the first push): `porch init` at index.ts:303 can use `writeStateAndCommit` with the initial commit. All other calls must commit.
 
@@ -137,10 +146,11 @@ pr_history?: Array<{
 ```
 
 **Recording mechanism**: extend `porch done` with optional flags rather than adding a new subcommand (spec constraint: "one new porch subcommand — `porch verify`"):
-- `porch done <id> --pr 42 --branch spir/653/specify` — records a PR entry in `pr_history`
-- `porch done <id> --merged 42` — marks an existing PR entry as merged
+- `porch done <id> --pr 42 --branch spir/653/specify` — **record-only**: writes a PR entry to `pr_history` in status.yaml and exits immediately. Does NOT run checks, does NOT advance the phase, does NOT mark build_complete. This is metadata recording, not a phase signal.
+- `porch done <id> --merged 42` — **record-only**: marks an existing PR entry as merged with a timestamp and exits. Same semantics — no phase advancement.
+- `porch done <id>` (no flags) — works exactly as before: sets build_complete, runs checks, advances phase.
 
-These flags are optional; `porch done` without them works as before.
+The `--pr`/`--merged` flags and the normal `porch done` flow are mutually exclusive. If flags are present, record and exit. If absent, normal flow.
 
 **Worktree path** (lines 340-351 in spawn.ts):
 ```typescript
@@ -150,7 +160,7 @@ worktreeName = `${protocol}-${strippedId}-${specSlug}`;
 worktreeName = `${protocol}-${strippedId}`;
 ```
 
-Same change for bugfix spawns at lines 670-683. The `--resume` lookup must also search by `${protocol}-${strippedId}` pattern instead of including the title slug.
+Same change for bugfix spawns at lines 670-683. Also simplify the `--branch` variant at line 345 (`${protocol}-${strippedId}-branch-${slugify(options.branch)}` → `${protocol}-${strippedId}`). The `--resume` lookup must also search by `${protocol}-${strippedId}` pattern instead of including the title slug.
 
 **Migration for existing worktrees**: `afx spawn --resume` should fall back to the old title-based pattern if the ID-only path doesn't exist. This gives a migration window — old worktrees still work, new ones use the clean path.
 
@@ -177,9 +187,11 @@ Same change for bugfix spawns at lines 670-683. The `--resume` lookup must also 
 - `codev/protocols/aspir/protocol.json` — same change
 - `codev-skeleton/protocols/spir/protocol.json` — same change
 - `codev-skeleton/protocols/aspir/protocol.json` — same change
-- `packages/codev/src/commands/porch/next.ts` — rename `'complete'` to `'verified'` at lines 246, 262, 271, 357, 724
-- `packages/codev/src/commands/porch/index.ts` — rename `'complete'` to `'verified'` at lines 127, 397, 630; add `porch verify` subcommand
-- `packages/codev/src/commands/porch/index.ts` — `porch approve` must accept `verify-approval` with the same human-only guard as `spec-approval`/`plan-approval`
+- `packages/codev/src/commands/porch/next.ts` — rename `'complete'` to `'verified'` at lines 246, 262, 271, 357, 724. **Do NOT rename** `PorchNextResponse.status: 'complete'` (that's response status, not phase) or `PlanPhaseStatus: 'complete'` (plan-phase tracking, separate concept).
+- `packages/codev/src/commands/porch/index.ts` — rename `'complete'` to `'verified'` at lines 127, 397, 630; add `porch verify` subcommand; `porch approve` must accept `verify-approval`
+- `packages/codev/src/agent-farm/servers/overview.ts` — rename `'complete'` to `'verified'` at lines 287, 299 (progress calculation)
+- `packages/codev/src/agent-farm/commands/status.ts` — rename `'complete'` to `'verified'` at line 205 (styling)
+- `packages/codev/src/agent-farm/__tests__/overview.test.ts` — update 6 assertions that check `phase: 'complete'` → 100% progress
 
 #### Implementation Details
 
@@ -197,9 +209,11 @@ Same change for bugfix spawns at lines 670-683. The `--resume` lookup must also 
 
 Review phase's `next` changes from `null` to `"verify"`.
 
-**handleOncePhase reuse**: the verify phase is `type: "once"`, so `handleOncePhase` at next.ts:741 handles it. The emitted task description is: *"The PR has been merged. Verify the change in your environment, then signal completion. If verification is not needed, run: `porch verify <id> --skip 'reason'`"*
+**handleOncePhase reuse**: the verify phase is `type: "once"`, so `handleOncePhase` at next.ts:741 handles it. The emitted task description is: *"The PR has been merged. Verify the change in your environment, then run `porch done <id>` to signal completion. Porch will then request the `verify-approval` gate — the architect approves it. If verification is not needed, run: `porch verify <id> --skip 'reason'`"*
 
-The hardcoded "When complete, run: porch done" at next.ts:757 needs a phase-aware override: for the verify phase, emit "When verified, run: porch done <id>" instead of the generic message. The gate machinery at next.ts:333-381 handles `verify-approval` the same as any other gate.
+**Verify flow (step by step)**: builder stays alive → builder runs `porch done` → porch runs checks (none for verify) → porch requests `verify-approval` gate → architect runs `porch approve <id> verify-approval`. This is the standard once-phase → gate flow. The hardcoded "When complete, run: porch done" at next.ts:757 should be overridden for verify to say "When verified, run: porch done <id>".
+
+**Convenience shortcut**: `porch approve <id> verify-approval` should auto-complete the `porch done` step if `build_complete` is false and the current phase is `verify`. This lets the architect approve in one command if the builder is gone. Implementation: in the `approve` handler, check `phase === 'verify' && !build_complete`, and if so, run the done logic before approving.
 
 **`porch verify` subcommand** (index.ts):
 ```typescript
@@ -217,9 +231,9 @@ case 'verify':
 
 **Terminal state rename**: replace all 8 occurrences of `'complete'` across next.ts and index.ts with `'verified'`.
 
-**Backward compatibility**: when porch loads a status.yaml with `phase: 'complete'` and the protocol defines a `verify` phase, auto-transition to `verified`. This is a one-time migration on load:
+**Backward compatibility**: when porch loads a status.yaml with `phase: 'complete'`, **unconditionally** rename to `'verified'` and commit. This is universal — applies to ALL protocols (SPIR, ASPIR, BUGFIX, AIR, MAINTAIN) because the terminal state rename is global, not protocol-specific. Without the universal rename, BUGFIX/MAINTAIN projects stuck at `phase: 'complete'` would be stranded in an invalid state.
 ```typescript
-if (state.phase === 'complete' && protocolHasVerifyPhase(protocol)) {
+if (state.phase === 'complete') {
   state.phase = 'verified';
   writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} migrate complete → verified`);
 }
@@ -231,9 +245,10 @@ if (state.phase === 'complete' && protocolHasVerifyPhase(protocol)) {
 - [ ] Verify phase emits a single task via `handleOncePhase`
 - [ ] `porch approve <id> verify-approval` works with the human-only guard
 - [ ] `porch verify <id> --skip "reason"` transitions to `verified` and records the reason
-- [ ] All `phase: 'complete'` references in porch source renamed to `'verified'`
-- [ ] Old projects with `phase: 'complete'` auto-migrate to `'verified'` on load
-- [ ] `afx status` shows `verified` as the terminal state badge
+- [ ] All `phase: 'complete'` references in porch source AND agent-farm consumers renamed to `'verified'` (`PorchNextResponse.status` and `PlanPhaseStatus` are NOT renamed — different concepts)
+- [ ] Old projects with `phase: 'complete'` auto-migrate to `'verified'` on load — universally, regardless of protocol
+- [ ] `afx status` shows correct progress (100%) and styling for `verified` projects
+- [ ] `overview.test.ts` assertions updated and passing
 
 ---
 
@@ -253,7 +268,7 @@ if (state.phase === 'complete' && protocolHasVerifyPhase(protocol)) {
 - `packages/codev/src/agent-farm/commands/spawn.ts` — remove `tick` from `--protocol` validation
 - `packages/codev/src/commands/porch/state.ts` — remove `tick` from worktree path regex (line ~248-251)
 - `packages/codev/src/commands/porch/__tests__/next.test.ts` — remove or update tick-related test cases
-- Any other files found by `grep -r "tick\|TICK" --include="*.ts" --include="*.md" packages/codev/src/`
+- Any other files found by a **full-repo** search: `grep -r "tick\|TICK" --include="*.ts" --include="*.md" --include="*.json" .` (not just `packages/codev/src/` — protocol docs, command docs, CLI help, resources, and skeleton can all reference TICK)
 
 #### Implementation Details
 Grep for all TICK references, delete/update each one. Check for in-flight TICK projects:
@@ -278,7 +293,7 @@ If any exist, note them in the PR description for manual migration.
 - Update CLAUDE.md/AGENTS.md for the new protocol list and workflow
 
 #### Files to Modify
-- `codev-skeleton/protocols/spir/builder-prompt.md` — add multi-PR workflow guidance (cut branch, merge, pull main, cut next branch); mention verify phase
+- `codev-skeleton/protocols/spir/builder-prompt.md` — add multi-PR workflow guidance. **Important**: git worktrees cannot `git checkout main` when main is checked out in the parent repo. Prompts must instruct: `git fetch origin main && git checkout -b <next-branch> origin/main` (branch off the remote tracking ref, not a local checkout)
 - `codev-skeleton/protocols/aspir/builder-prompt.md` — same
 - `codev/roles/builder.md` and `codev-skeleton/roles/builder.md` — document multi-PR lifecycle, verify phase, `afx spawn --resume` as recovery path
 - `CLAUDE.md` / `AGENTS.md` — update protocol list (remove TICK, add verify phase to SPIR/ASPIR descriptions), update `afx cleanup` documentation to emphasize architect-driven cleanup
@@ -307,7 +322,7 @@ Phases 1, 2, and 5 have no inter-dependencies and can develop in parallel.
 |------|------------|--------|------------|
 | `writeStateAndCommit` push fails (network, auth) | Medium | High | Catch errors, retry once, log clearly. Don't swallow — fail the porch operation. |
 | #662 worktree path change breaks `--resume` on old worktrees | Medium | High | Fallback: `--resume` tries ID-only path first, then old title-based path. Migration window. |
-| Terminal state rename breaks dashboard/reporting | Low | Medium | Grep for all `'complete'` references in the dashboard/workspace code and update them. |
+| Terminal state rename breaks dashboard/reporting | **Certain** | Medium | Concrete files: `overview.ts` (287, 299), `status.ts` (205), `overview.test.ts` (6 assertions). Already in Phase 4 file list. |
 | TICK removal breaks an in-flight project | Low | Medium | Check `codev/projects/tick-*` before deleting. Migrate or close any found. |
 
 ## Notes
