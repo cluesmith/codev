@@ -47,13 +47,13 @@ This is how the architect already thinks about the work. Codev needs to catch up
 
 - `status.yaml` is committed at every phase transition to `codev/projects/<id>/status.yaml`. When a PR merges, status.yaml naturally lands on `main`.
 - Porch can read `status.yaml` from either the worktree's local copy or from `main`.
-- Porch can resume a project in any phase even when the builder's shell is gone. The architect (or anyone) can walk up cold and run `porch next <id>` from the repo root to continue the project.
-- This is what makes post-merge verify work across long gaps: the verify phase might run hours or days after the merge, long after the builder terminal has scrolled away.
+- **Cold-start scope**: phases that write code (`implement`) fundamentally need a worktree (isolated checkout). Cold-start resume without a worktree is scoped to **verify and read-only phases** (status queries, gate approvals). If porch detects it's in a code-writing phase with no worktree, it should fail with a clear message directing the user to `afx spawn <id> --resume`.
+- This is what makes post-merge verify work across long gaps: the verify phase is human-driven and doesn't need a worktree — just `status.yaml` on `main`.
 
 ### 3. Optional verify phase
 
 - SPIR, ASPIR, and TICK gain an **optional** post-`review` phase named `verify`, powered by the existing `handleOncePhase` at `packages/codev/src/commands/porch/next.ts:741` (same mechanism TICK and BUGFIX already use).
-- The **terminal state is renamed from `integrated` to `verified`**.
+- The **terminal state is renamed from `complete` to `verified`** (the current codebase uses `phase: 'complete'` for finished projects, not `integrated`).
 - The verify phase has **no artifact, no template, no sign-off block, no checklist**. It emits one task: *"Verify the merged change in your environment, then run `porch approve <id> verify-approval` when you're satisfied."* The success criterion for verify is whatever the architect decides — porch does not model it.
 - The `verify-approval` gate uses the same human-only guard as `spec-approval` and `plan-approval`.
 - `porch verify <id> --skip "reason"` transitions directly to `verified` for projects that don't need environmental verification. One command, one flag, no note.
@@ -65,13 +65,15 @@ This is how the architect already thinks about the work. Codev needs to catch up
 
 ## Architect-Builder Interaction Model
 
-Porch runs in the **builder's** context. The architect does **not** run porch commands on behalf of the builder. The architect gives high-level instructions via `afx send`:
+**During the build loop** (specify → plan → implement → review), porch runs in the **builder's** context. The architect does not run porch commands — the architect gives high-level instructions via `afx send`, and the builder decides which porch operations to run:
 
-- *"Create a draft PR with the current spec so I can share it with the team"* → builder decides whether/how to use porch and creates the PR
+- *"Create a draft PR with the current spec so I can share it with the team"* → builder creates the PR
 - *"Team said we need X, Y, Z — revise the spec"* → builder revises and continues porch
 - *"Spec looks good, let's merge it and start on the plan"* → builder merges, pulls main, cuts a new branch for the plan phase
 
-The builder decides which porch operations to run. The architect never does. The `ci-channel` already delivers merge and CI events to the builder, so the feedback loop closes without any dedicated porch-side plumbing.
+The `ci-channel` already delivers merge and CI events to the builder, so the feedback loop closes without any dedicated porch-side plumbing.
+
+**Exception — the verify phase**: After the final PR merges, the builder terminal may be long gone. The verify phase is a **human-driven** phase: the architect (or any team member) can run `porch next <id>` from the repo root to see the verify task, and `porch approve <id> verify-approval` (or `porch verify <id> --skip`) to close the project. These are the only porch commands the architect is expected to run directly.
 
 ## Solution Approach
 
@@ -81,10 +83,10 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 
 ### Component B — Worktree/branch/PR decoupling
 
-1. **Worktree path**: normalize to `.builders/<protocol>-<id>/` — no title suffix. Coordinate with #662.
-2. **Cut-and-merge loop support**: `afx` and porch must not assume one branch per worktree. The builder opens PR #1, waits for merge (via `ci-channel` notification), pulls `main`, runs `git checkout -b stage-N+1`, and proceeds. `afx cleanup` must not run on merge.
-3. **status.yaml always landing on main**: audit porch phase transitions and ensure every one commits `status.yaml` to the current branch. When the current branch merges, status.yaml lands on main naturally.
-4. **Cold-start resume**: porch's lookup for `status.yaml` walks up from CWD; if not found locally (no worktree present), it falls back to reading `main:codev/projects/<id>/status.yaml`. `porch next <id>` run from the repo root should just work.
+1. **Worktree path**: normalize to `.builders/<protocol>-<id>/` — no title suffix. #662 is a **prerequisite** for this; if #662 hasn't shipped yet, Slice B either waits or implements the path change as part of its own work.
+2. **Cut-and-merge loop support**: the loop is **builder-driven, not porch-driven**. Porch is unaware of branches and PRs — it tracks phases, not git operations. The builder (an AI agent following prompts) handles the mechanics: create branch, open PR, wait for merge via `ci-channel`, pull `main`, `git checkout -b <next-stage>`, continue. Branch naming is up to the builder (e.g. `spir/653/specify`, `spir/653/implement-phase-1`); porch does not enforce or track it. `afx cleanup` must not run automatically on merge.
+3. **status.yaml always landing on main**: audit porch phase transitions and ensure every one commits `status.yaml` to the current branch. When the current branch merges, status.yaml lands on `main` naturally. The plan should enumerate which `writeState` calls currently commit and push, and fill any gaps.
+4. **Cold-start resume**: porch's lookup for `status.yaml` walks up from CWD; if not found locally (no worktree present), it falls back to reading `main:codev/projects/<id>/status.yaml`. `porch next <id>` run from the repo root works for verify and read-only phases; code-writing phases fail with a clear "worktree required" error.
 
 ### Component C — Optional verify phase
 
@@ -92,8 +94,8 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 2. **Gate**: `verify-approval`, human-only, using the same guard as `spec-approval`/`plan-approval`.
 3. **Task emission**: one task with a one-line description instructing the human to verify in their environment and run `porch approve <id> verify-approval` when satisfied. No other artifact.
 4. **Terminal state rename**: the state reached after `verify-approval` is named `verified`. Update `ProjectState`, `afx status`, and workspace views accordingly.
-5. **Opt-out**: `porch verify <id> --skip "reason"` transitions directly to `verified`. The reason is recorded in `status.yaml` for audit.
-6. **Backward compatibility**: projects that predate the new phase auto-transition to `verified` on load if their protocol version is older than the one that introduced verify.
+5. **Opt-out**: `porch verify <id> --skip "reason"` transitions directly to `verified`. The reason is **required** (not optional) and recorded in `status.yaml` for audit.
+6. **Backward compatibility**: porch detects pre-upgrade projects by checking whether `status.yaml` has a `verify-approval` entry in its `gates` map. If the loaded protocol definition includes a `verify` phase but `gates` has no `verify-approval` key and the project's `phase` is already `complete`, porch auto-transitions to `verified` on load. No protocol-version field is needed.
 
 ## Success Criteria
 
@@ -103,7 +105,7 @@ Update `packages/codev/scripts/forge/{github,gitlab,gitea}/pr-exists.sh` to excl
 - [ ] Porch can resume any project from a cold start by reading `status.yaml` from main
 - [ ] SPIR / ASPIR / TICK gain an optional `verify` phase after `review`
 - [ ] `verify-approval` is a human-only gate
-- [ ] Terminal state is named `verified` (not `integrated`)
+- [ ] Terminal state is named `verified` (renamed from `complete`; existing `phase: 'complete'` values must be migrated)
 - [ ] `porch verify <id> --skip "reason"` transitions directly to `verified`
 - [ ] `afx status` and the workspace view show `verified` as the terminal state
 - [ ] No new porch commands or gate sub-states are added beyond `porch verify`
@@ -121,7 +123,8 @@ Each slice is one PR. The three pieces together close the original issue.
 
 ## Constraints
 
-- No new porch commands at the architect level. Architect interacts via `afx send`; builder interacts via porch.
+- During the build loop, no new porch commands at the architect level. Architect interacts via `afx send`; builder interacts via porch. Exception: verify phase and cold-start resume are human-driven (see Interaction Model above).
+- One new porch subcommand: `porch verify` (with `--skip`). Zero new gate machinery, zero new gate sub-states.
 - `verify-approval` uses the existing human-only gate guard. No new guard machinery.
 - The verify phase reuses `handleOncePhase` at `next.ts:741`. Not reinvented.
 - No `forge` CLI — if a PR-state check is needed anywhere, intercept it by name in `checks.ts` like `pr_exists` at `:262`.
@@ -143,9 +146,9 @@ These are not "do later." They are not needed once the worktree/branch/PR decoup
 
 ## Open Questions
 
-- [ ] When porch resumes from a cold start without a worktree, can every phase run from the repo root, or do some phases (e.g. `implement`) fundamentally need a worktree? Plan phase should confirm.
+- [x] When porch resumes from a cold start without a worktree, can every phase run from the repo root? — **No.** Code-writing phases (`implement`) need a worktree. Cold-start resume is scoped to verify and read-only phases. Resolved in Desired State section 2.
+- [x] Should `porch verify --skip` require a `--reason`? — **Yes, required.** Resolved in Component C item 5.
 - [ ] Does the verify phase need its own prompt file, or is the one-line task content inline in `protocol.json`? Minor — plan phase decides.
-- [ ] Should `porch verify --skip` require a `--reason`? Default to required, but open to the plan phase overriding.
 
 ## Notes
 
