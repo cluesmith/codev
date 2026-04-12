@@ -24,6 +24,7 @@ codev/maintain/.trash/
 node_modules/
 packages/codev/dist/
 packages/codev/skeleton/
+packages/codev-types/dist/
 packages/codev-vscode/dist/
 packages/codev-vscode/out/
 *.tsbuildinfo
