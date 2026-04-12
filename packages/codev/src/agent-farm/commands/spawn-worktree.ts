@@ -8,6 +8,7 @@
  */
 
 import { resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -567,7 +568,9 @@ export async function createPtySession(
 /**
  * Write harness-provided files to the worktree, merging with existing JSON files.
  * For JSON files: reads existing file, shallow-merges properties, and deduplicates
- * the 'instructions' array. For non-JSON files: writes directly.
+ * the 'instructions' array. If existing JSON can't be parsed (e.g., JSONC with
+ * comments), warns and skips to avoid destroying user config.
+ * After writing, marks files with git skip-worktree to prevent accidental commits.
  */
 function writeWorktreeFiles(
   files: Array<{ relativePath: string; content: string }>,
@@ -585,10 +588,22 @@ function writeWorktreeFiles(
         }
         writeFileSync(targetPath, JSON.stringify(merged, null, 2) + '\n');
       } catch {
-        writeFileSync(targetPath, file.content);
+        // Existing file is not valid JSON (likely JSONC with comments/trailing commas).
+        // Do NOT overwrite — that would destroy user config. Warn and skip.
+        logger.warn(`Cannot merge ${file.relativePath}: existing file is not valid JSON. Skipping to preserve user config.`);
+        continue;
       }
     } else {
       writeFileSync(targetPath, file.content);
+    }
+    // Prevent generated files from being accidentally committed back to the repo
+    try {
+      execSync(`git update-index --skip-worktree "${file.relativePath}"`, {
+        cwd: worktreePath,
+        stdio: 'pipe',
+      });
+    } catch {
+      // Non-fatal: file may not be tracked by git yet (new file in worktree)
     }
   }
 }

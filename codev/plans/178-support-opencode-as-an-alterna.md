@@ -294,7 +294,7 @@ Add to `README.md` under a new "Alternative Agent Shells" section:
 2. **Required permissions for unattended execution** (in global `~/.config/opencode/opencode.json` OR project-level `opencode.json`):
 ```json
 {
-  "permissions": {
+  "permission": {
     "edit": "allow",
     "bash": "allow"
   }
