@@ -153,13 +153,13 @@ test.describe('Dashboard Terminals E2E', () => {
     await request.delete(`${BASE_URL}/api/tabs/${body.id}`);
   });
 
-  test('npm pack includes dashboard/dist', async () => {
+  test('npm pack includes dashboard-dist', async () => {
     const { execSync } = await import('node:child_process');
     const output = execSync('npm pack --dry-run 2>&1', {
       cwd: resolve(WORKSPACE_PATH, 'packages/codev'),
       encoding: 'utf-8',
     });
-    expect(output).toContain('dashboard/dist/index.html');
-    expect(output).toContain('dashboard/dist/assets/');
+    expect(output).toContain('dashboard-dist/index.html');
+    expect(output).toContain('dashboard-dist/assets/');
   });
 });
