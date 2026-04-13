@@ -19,6 +19,7 @@ import {
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
+import { getDb } from '../db/index.js';
 
 // =============================================================================
 // Types
@@ -692,6 +693,23 @@ export class OverviewCache {
         return roleId !== null && activeBuilderRoleIds.has(roleId);
       });
     }
+
+    // Enrich issueId from DB issue_number — protocol-agnostic (fixes #664)
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        'SELECT worktree, issue_number FROM builders WHERE issue_number IS NOT NULL',
+      ).all() as Array<{ worktree: string; issue_number: number }>;
+      for (const row of rows) {
+        const builder = builders.find(b => b.worktreePath === row.worktree);
+        if (builder) {
+          builder.issueId = String(row.issue_number);
+        }
+      }
+    } catch {
+      // DB not available (e.g., no Tower running) — keep regex-parsed issueId
+    }
+
     const activeBuilderIssues = new Set(
       builders
         .map(b => b.issueId)

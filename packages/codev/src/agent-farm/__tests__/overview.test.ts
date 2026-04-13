@@ -27,12 +27,13 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockDbPrepare } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
   mockFetchRecentlyClosed: vi.fn(),
   mockFetchMergedPRs: vi.fn(),
   mockLoadProtocol: vi.fn(),
+  mockDbPrepare: vi.fn(),
 }));
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
@@ -48,6 +49,10 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
 
 vi.mock('../../commands/porch/protocol.js', () => ({
   loadProtocol: mockLoadProtocol,
+}));
+
+vi.mock('../db/index.js', () => ({
+  getDb: () => ({ prepare: mockDbPrepare }),
 }));
 
 // ============================================================================
@@ -112,6 +117,7 @@ describe('overview', () => {
     mockFetchIssueList.mockResolvedValue([]);
     mockFetchRecentlyClosed.mockResolvedValue([]);
     mockFetchMergedPRs.mockResolvedValue([]);
+    mockDbPrepare.mockReturnValue({ all: () => [] });
   });
 
   afterEach(() => {
@@ -1723,6 +1729,63 @@ describe('overview', () => {
 
       expect(data.recentlyClosed).toHaveLength(1);
       expect(data.recentlyClosed[0].prUrl).toBeUndefined();
+    });
+
+    it('enriches issueId from DB issue_number for unknown protocols (#664)', async () => {
+      // research-533 doesn't match any protocol regex → soft mode, issueId null
+      const worktreePath = createBuilderWorktree(tmpDir, 'research-533-context-window');
+
+      // Mock DB to return issue_number for this worktree
+      mockDbPrepare.mockReturnValue({
+        all: () => [{ worktree: worktreePath, issue_number: 533 }],
+      });
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.builders).toHaveLength(1);
+      expect(data.builders[0].issueId).toBe('533');
+    });
+
+    it('DB issue_number overrides regex-parsed issueId (#664)', async () => {
+      // spir-42 matches the regex → issueId '42' from regex
+      // DB also has issue_number 42 → should still be '42'
+      const worktreePath = createBuilderWorktree(tmpDir, 'spir-42-feature', [
+        "id: '0042'",
+        'title: feature',
+        'protocol: spir',
+        'phase: implement',
+        'gates:',
+      ].join('\n'), '0042-feature');
+
+      mockDbPrepare.mockReturnValue({
+        all: () => [{ worktree: worktreePath, issue_number: 42 }],
+      });
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.builders).toHaveLength(1);
+      expect(data.builders[0].issueId).toBe('42');
+    });
+
+    it('falls back to regex-parsed issueId when DB has no issue_number (#664)', async () => {
+      createBuilderWorktree(tmpDir, 'spir-42-feature', [
+        "id: '0042'",
+        'title: feature',
+        'protocol: spir',
+        'phase: implement',
+        'gates:',
+      ].join('\n'), '0042-feature');
+
+      // DB returns no rows → regex-parsed issueId preserved
+      mockDbPrepare.mockReturnValue({ all: () => [] });
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.builders).toHaveLength(1);
+      expect(data.builders[0].issueId).toBe('42');
     });
   });
 });
