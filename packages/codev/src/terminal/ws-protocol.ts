@@ -5,14 +5,15 @@
  * - 0x00 prefix: Control frame (remainder is UTF-8 JSON)
  * - 0x01 prefix: Data frame (remainder is raw PTY bytes)
  *
- * Types and constants imported from @cluesmith/codev-types.
- * Runtime encoding/decoding functions remain here (Node.js Buffer dependency).
+ * Types imported from @cluesmith/codev-types (dev dependency, erased at compile time).
+ * Constants declared locally to avoid runtime dependency on the types package.
  */
 
-export { FRAME_CONTROL, FRAME_DATA } from '@cluesmith/codev-types';
+import type { ControlMessage } from '@cluesmith/codev-types';
 export type { ControlMessage } from '@cluesmith/codev-types';
 
-import { FRAME_CONTROL, FRAME_DATA, type ControlMessage } from '@cluesmith/codev-types';
+export const FRAME_CONTROL = 0x00;
+export const FRAME_DATA = 0x01;
 
 /** Server-side decoded frame — uses Buffer (Node.js) instead of Uint8Array. */
 export type DecodedFrame =
