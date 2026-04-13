@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@cluesmith/codev-types": "*",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.12.0",

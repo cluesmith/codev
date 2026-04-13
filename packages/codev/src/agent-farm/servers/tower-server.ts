@@ -267,7 +267,7 @@ let terminalWss: WebSocketServer | null = null;
 
 // React dashboard dist path (for serving directly from tower)
 // Phase 4 (Spec 0090): Tower serves everything directly, no dashboard-server
-const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
+const reactDashboardPath = path.resolve(__dirname, '../../../dashboard-dist');
 const hasReactDashboard = fs.existsSync(reactDashboardPath);
 if (hasReactDashboard) {
   log('INFO', `React dashboard found at: ${reactDashboardPath}`);
