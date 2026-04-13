@@ -1,49 +1,67 @@
 /**
- * Regression test for bugfix #568: pr_exists check must use --state all
+ * Regression test for pr-exists forge scripts.
  *
- * Without --state all, gh pr list defaults to --state open, which causes
- * the pr_exists check to fail when a PR has already been merged before
- * the porch gate is approved.
+ * Bugfix #568: pr-exists must include --state all to catch merged PRs.
+ * Spec #653: pr-exists must exclude CLOSED-not-merged PRs (only OPEN or MERGED count).
+ *
+ * These tests validate the forge scripts directly, not protocol.json commands.
  */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const ROOT = path.resolve(__dirname, '../../../../../..');
+const SCRIPTS_ROOT = path.resolve(__dirname, '../../../../scripts/forge');
 
-describe('bugfix #568: pr_exists check uses --state all', () => {
-  const protocolDirs = ['codev/protocols'];
+describe('pr-exists forge scripts', () => {
+  describe('github/pr-exists.sh', () => {
+    const scriptPath = path.join(SCRIPTS_ROOT, 'github', 'pr-exists.sh');
 
-  for (const protocolDir of protocolDirs) {
-    const fullDir = path.join(ROOT, protocolDir);
-    if (!fs.existsSync(fullDir)) continue;
-
-    const protocols = fs.readdirSync(fullDir).filter((name) => {
-      const jsonPath = path.join(fullDir, name, 'protocol.json');
-      return fs.existsSync(jsonPath);
+    it('exists and is readable', () => {
+      expect(fs.existsSync(scriptPath)).toBe(true);
     });
 
-    for (const proto of protocols) {
-      const jsonPath = path.join(fullDir, proto, 'protocol.json');
-      const raw = fs.readFileSync(jsonPath, 'utf-8');
-      const parsed = JSON.parse(raw);
+    it('fetches all PR states (--state all) to catch merged PRs (#568)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('--state all');
+    });
 
-      // Find all pr_exists checks across phases
-      const phases: Array<{ id: string; checks?: Record<string, unknown> }> =
-        parsed.phases ?? [];
+    it('filters to OPEN or MERGED only, excluding CLOSED (#653)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('select(.state == "OPEN" or .state == "MERGED")');
+    });
 
-      for (const phase of phases) {
-        if (!phase.checks) continue;
-        const prCheck = phase.checks['pr_exists'] as
-          | { command?: string }
-          | undefined;
-        if (!prCheck?.command) continue;
+    it('uses CODEV_BRANCH_NAME for branch filtering', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('CODEV_BRANCH_NAME');
+    });
+  });
 
-        it(`${protocolDir}/${proto} phase "${phase.id}" pr_exists includes --state all`, () => {
-          expect(prCheck.command).toContain('--state all');
-        });
-      }
-    }
-  }
+  describe('gitlab/pr-exists.sh', () => {
+    const scriptPath = path.join(SCRIPTS_ROOT, 'gitlab', 'pr-exists.sh');
+
+    it('exists and is readable', () => {
+      expect(fs.existsSync(scriptPath)).toBe(true);
+    });
+
+    it('filters to opened or merged only, excluding closed (#653)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('select(');
+      expect(content).toMatch(/opened.*merged|merged.*opened/);
+    });
+  });
+
+  describe('gitea/pr-exists.sh', () => {
+    const scriptPath = path.join(SCRIPTS_ROOT, 'gitea', 'pr-exists.sh');
+
+    it('exists and is readable', () => {
+      expect(fs.existsSync(scriptPath)).toBe(true);
+    });
+
+    it('filters out closed-not-merged PRs (#653)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      // Gitea: merged PRs have state="closed" + merged=true
+      expect(content).toContain('.merged == true');
+    });
+  });
 });
