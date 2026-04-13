@@ -13,6 +13,7 @@ import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import {
   readState,
   writeState,
+  writeStateAndCommit,
   createInitialState,
   findStatusPath,
   getProjectDir,
@@ -300,7 +301,7 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   // For build_verify phases: mark build as complete for verification
   if (isBuildVerify(protocol, state.phase) && !state.build_complete) {
     state.build_complete = true;
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} build-complete`);
     console.log('');
     console.log(chalk.green('BUILD COMPLETE. Ready for verification.'));
     console.log(`\n  Run: porch next ${state.id} (to get verification tasks)`);
@@ -387,15 +388,15 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   }
 
   // Advance to next protocol phase
-  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
+  await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
 }
 
-function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): void {
+async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): Promise<void> {
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
     state.phase = 'complete';
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     console.log('');
     console.log(chalk.green.bold('🎉 PROTOCOL COMPLETE'));
     console.log(`\n  Project ${state.id} has completed the ${state.protocol} protocol.`);
@@ -419,7 +420,7 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
     }
   }
 
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${nextPhase.id} phase-transition`);
 
   console.log('');
   console.log(chalk.green(`ADVANCING TO: ${nextPhase.id} - ${nextPhase.name}`));
@@ -484,7 +485,7 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   }
   if (!state.gates[gateName].requested_at) {
     state.gates[gateName].requested_at = new Date().toISOString();
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
   }
 
   console.log('');
@@ -589,7 +590,7 @@ export async function approve(
 
   state.gates[gateName].status = 'approved';
   state.gates[gateName].approved_at = new Date().toISOString();
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-approved`);
 
   console.log('');
   console.log(chalk.green(`Gate ${gateName} approved.`));
@@ -673,7 +674,7 @@ export async function rollback(
     state.current_plan_phase = null;
   }
 
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} rollback ${previousPhase} → ${targetPhase}`);
 
   console.log('');
   console.log(chalk.green(`ROLLED BACK: ${previousPhase} → ${targetPhase}`));
@@ -732,7 +733,7 @@ export async function init(
   }
 
   const state = createInitialState(protocol, projectId, projectName, workspaceRoot);
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} init ${protocolName}`);
 
   console.log('');
   console.log(chalk.green(`Project initialized: ${projectId}-${projectName}`));

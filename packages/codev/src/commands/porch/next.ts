@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
+import { readState, writeState, writeStateAndCommit, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import {
   loadProtocol,
@@ -321,7 +321,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.iteration = 1;
           state.build_complete = false;
           state.history = [];
-          writeState(statusPath, state);
+          await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip pre-approved ${state.phase}`);
           // Recurse to compute tasks for the new phase
           return next(workspaceRoot, projectId);
         }
@@ -355,7 +355,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       const nextPhase = getNextPhase(protocol, state.phase);
       if (!nextPhase) {
         state.phase = 'complete';
-        writeState(statusPath, state);
+        await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
         return next(workspaceRoot, projectId);
       }
 
@@ -375,7 +375,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         }
       }
 
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
       return next(workspaceRoot, projectId);
     }
   }
@@ -603,7 +603,7 @@ async function handleBuildVerify(
           reviews,
         });
       }
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} review-recorded`);
       return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
@@ -685,14 +685,14 @@ async function handleVerifyApproved(
         // All plan phases done — move to review
         state.phase = 'review';
         state.current_plan_phase = null;
-        writeState(statusPath, state);
+        await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} all plan phases complete → review`);
         return next(workspaceRoot, projectId);
       }
 
       // Next plan phase
       const newCurrent = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrent?.id || null;
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} advance plan phase → ${state.current_plan_phase}`);
       return next(workspaceRoot, projectId);
     }
   }
@@ -703,7 +703,7 @@ async function handleVerifyApproved(
     state.build_complete = false;
     state.iteration = 1;
     state.history = [];
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
 
     return {
       status: 'gate_pending',
@@ -722,7 +722,7 @@ async function handleVerifyApproved(
   const nextPhase = getNextPhase(protocol, state.phase);
   if (!nextPhase) {
     state.phase = 'complete';
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     return next(workspaceRoot, projectId);
   }
 
@@ -730,7 +730,7 @@ async function handleVerifyApproved(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
   return next(workspaceRoot, projectId);
 }
 

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import {
   readState,
   writeState,
+  writeStateAndCommit,
   createInitialState,
   findStatusPath,
   detectProjectId,
@@ -597,6 +598,38 @@ updated_at: "${state.updated_at}"
     it('should handle title without ID prefix', () => {
       const dir = getProjectDir('/root', '364', 'terminal-refresh-button');
       expect(dir).toBe('/root/codev/projects/364-terminal-refresh-button');
+    });
+  });
+
+  describe('writeStateAndCommit', () => {
+    it('writes state to disk (git operations skipped in VITEST)', async () => {
+      const projectDir = path.join(testDir, PROJECTS_DIR, '999-commit-test');
+      fs.mkdirSync(projectDir, { recursive: true });
+      const statusPath = path.join(projectDir, 'status.yaml');
+
+      const state: ProjectState = {
+        id: '999',
+        title: 'commit-test',
+        protocol: 'spir',
+        phase: 'specify',
+        plan_phases: [],
+        current_plan_phase: null,
+        gates: {},
+        iteration: 1,
+        build_complete: false,
+        history: [],
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      await writeStateAndCommit(statusPath, state, 'chore(porch): 999 test');
+
+      // Verify state was written to disk
+      const written = readState(statusPath);
+      expect(written.id).toBe('999');
+      expect(written.phase).toBe('specify');
+      // Git operations are skipped in VITEST env — state file still exists
+      expect(fs.existsSync(statusPath)).toBe(true);
     });
   });
 });

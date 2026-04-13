@@ -8,8 +8,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
+
+const execFileAsync = promisify(execFile);
 
 /** Directory for project state (relative to project root) */
 export const PROJECTS_DIR = 'codev/projects';
@@ -146,6 +150,42 @@ export function writeState(statusPath: string, state: ProjectState): void {
 
   fs.writeFileSync(tmpPath, content, 'utf-8');
   fs.renameSync(tmpPath, statusPath);
+}
+
+/**
+ * Write state and commit+push to git.
+ * Uses execFile with args array (no shell injection risk).
+ * Uses `git push -u origin HEAD` so new branches get upstream tracking.
+ *
+ * Spec 653 §B.3: every phase transition, gate request, gate approval,
+ * and verify skip must commit and push status.yaml. Zero gaps.
+ */
+export async function writeStateAndCommit(
+  statusPath: string,
+  state: ProjectState,
+  message: string,
+): Promise<void> {
+  writeState(statusPath, state);
+
+  // Find the worktree root (status path is <root>/codev/projects/<id>/status.yaml)
+  const worktreeRoot = path.resolve(path.dirname(statusPath), '..', '..', '..');
+
+  // Skip git operations in test environment (vitest sets VITEST=true).
+  // State mutation is still tested; only the git IO is skipped.
+  if (process.env.VITEST) {
+    return;
+  }
+
+  try {
+    await execFileAsync('git', ['add', statusPath], { cwd: worktreeRoot });
+    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreeRoot });
+    await execFileAsync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: worktreeRoot });
+  } catch (err: unknown) {
+    // If git commit fails because nothing changed, that's a logic bug — don't mask it.
+    // If git push fails (network, auth), surface the error clearly.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`writeStateAndCommit failed: ${msg}`);
+  }
 }
 
 /**
