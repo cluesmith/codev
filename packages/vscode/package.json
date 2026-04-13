@@ -34,6 +34,9 @@
     "lint": "eslint src",
     "test": "vscode-test"
   },
+  "dependencies": {
+    "@cluesmith/codev-types": "*"
+  },
   "devDependencies": {
     "@types/vscode": "^1.110.0",
     "@types/mocha": "^10.0.10",

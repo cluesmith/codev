@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { formatDuration, shortPath } from '../../../dashboard/src/lib/open-files-shells-utils.js';
+import { formatDuration, shortPath } from '@cluesmith/codev-dashboard/lib/open-files-shells-utils';
 
 // ============================================================================
 // formatDuration

@@ -10,8 +10,8 @@
  * - Platform-aware modifier key detection
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FILE_PATH_REGEX, parseFilePath, looksLikeFilePath } from '../../dashboard/src/lib/filePaths.js';
-import { FilePathLinkProvider, FilePathDecorationManager } from '../../dashboard/src/lib/filePathLinkProvider.js';
+import { FILE_PATH_REGEX, parseFilePath, looksLikeFilePath } from '@cluesmith/codev-dashboard/lib/filePaths';
+import { FilePathLinkProvider, FilePathDecorationManager } from '@cluesmith/codev-dashboard/lib/filePathLinkProvider';
 import type { ILink } from '@xterm/xterm';
 
 // ──────────────────────────────────────────────────────────────

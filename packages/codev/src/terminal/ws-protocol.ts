@@ -4,15 +4,21 @@
  * Hybrid protocol:
  * - 0x00 prefix: Control frame (remainder is UTF-8 JSON)
  * - 0x01 prefix: Data frame (remainder is raw PTY bytes)
+ *
+ * Types imported from @cluesmith/codev-types (dev dependency, erased at compile time).
+ * Constants declared locally to avoid runtime dependency on the types package.
  */
+
+import type { ControlMessage } from '@cluesmith/codev-types';
+export type { ControlMessage } from '@cluesmith/codev-types';
 
 export const FRAME_CONTROL = 0x00;
 export const FRAME_DATA = 0x01;
 
-export interface ControlMessage {
-  type: 'resize' | 'ping' | 'pong' | 'pause' | 'resume' | 'error' | 'seq';
-  payload: Record<string, unknown>;
-}
+/** Server-side decoded frame — uses Buffer (Node.js) instead of Uint8Array. */
+export type DecodedFrame =
+  | { type: 'control'; message: ControlMessage }
+  | { type: 'data'; data: Buffer };
 
 /** Encode a control message into a binary frame. */
 export function encodeControl(msg: ControlMessage): Buffer {
@@ -32,10 +38,6 @@ export function encodeData(data: Buffer | string): Buffer {
   dataBuf.copy(frame, 1);
   return frame;
 }
-
-export type DecodedFrame =
-  | { type: 'control'; message: ControlMessage }
-  | { type: 'data'; data: Buffer };
 
 /** Decode a received WebSocket frame. */
 export function decodeFrame(frame: Buffer): DecodedFrame {

@@ -1,9 +1,15 @@
+---
+approved: 2026-04-06
+validated: [gemini, codex, claude]
+---
+
 # Specification: VS Code Extension for Codev Agent Farm
 
 ## Metadata
 - **ID**: 0602
-- **Status**: draft
+- **Status**: approved
 - **Created**: 2026-03-11
+- **Approved**: 2026-04-06
 - **Protocol**: SPIR
 - **Related**: Spec 0066
 
@@ -111,13 +117,17 @@ Users can use the browser dashboard, the VS Code extension, or both simultaneous
 
 ### Technical Constraints
 
+**Why native Pseudoterminal, not xterm.js in a Webview:**
+Tower's WebSocket speaks a binary protocol (`0x00`/`0x01` framing). xterm.js handles this natively — it's what the browser dashboard uses. An alternative approach would embed xterm.js in a VS Code Webview, avoiding any protocol translation. However, Webview terminals have significant UX issues: keyboard shortcuts (Ctrl+C, arrows, paste) require custom passthrough, they can't appear in VS Code's native terminal panel or editor groups, they don't respect VS Code theming or focus management, and they feel like a browser embedded in an IDE. A native `Pseudoterminal` avoids all of this at the cost of a small binary adapter (~50 lines) that translates between Tower's binary protocol and VS Code's string-based API. This is a one-time implementation cost for a permanently better UX.
+
 **VS Code Pseudoterminal API:**
-- `Pseudoterminal.onDidWrite` expects UTF-8 strings, not binary — requires translation from the `0x01` data frames
-- `Pseudoterminal.handleInput` provides strings — must encode to binary `0x01` frames for Tower
+- `Pseudoterminal.onDidWrite` expects UTF-8 strings, not binary — requires a binary protocol adapter to translate from `0x01` data frames
+- `Pseudoterminal.handleInput` provides strings — adapter encodes to binary `0x01` frames for Tower
 - `Pseudoterminal.setDimensions` maps to `0x00` control frames for PTY resize
 - No native stdout capture — but irrelevant since Tower/shellper handle observation
 
-**WebSocket Binary Protocol Translation:**
+**Binary Protocol Adapter:**
+Translates between Tower's binary WebSocket protocol and VS Code's string-based Pseudoterminal API:
 - Incoming `0x01` frames: strip first byte, decode `Uint8Array` → UTF-8 string via `TextDecoder('utf-8', { stream: true })` (streaming mode required to handle multi-byte Unicode split across frames), fire to `onDidWrite`
 - Outgoing input: encode string → `Uint8Array`, prepend `0x01`, send over WebSocket
 - Control frames (`0x00`): handle resize, ping/pong, sequence numbers for replay
@@ -293,7 +303,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 - Terminal scrollback is preserved via shellper — no data loss
 
 **Escape sequence buffering:**
-WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-api-client` as a shared utility.
+WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-shared` as a shared utility.
 
 **Resize deferral during replay:**
 On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
@@ -491,7 +501,7 @@ Single Webview panel embedding the existing Recharts analytics page:
 Extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension. **Phased approach** — do not block V1 on extracting everything.
 
 **Phase 1 (before V1)**: Extract `@cluesmith/codev-types` only. Low risk, high value.
-**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-api-client` once patterns stabilize across two real consumers (dashboard + extension).
+**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-shared` once patterns stabilize across two real consumers (dashboard + extension).
 
 **Monorepo prerequisite**: Add a root `package.json` with `"workspaces": ["packages/*"]` before extracting. Currently no workspace manager exists. Without this, `file:` dependencies will break `vsce` packaging.
 
@@ -506,9 +516,9 @@ Zero-dependency package with shared TypeScript interfaces currently duplicated b
 
 Without this package, the extension becomes a third independent copy of these types, making protocol drift inevitable.
 
-### `@cluesmith/codev-api-client` (Recommended, Phase 2 — after V1)
+### `@cluesmith/codev-shared` (Recommended, Phase 2 — after V1)
 
-Environment-agnostic Tower API client shared between dashboard and extension:
+Shared runtime utilities and API client logic used by dashboard and extension:
 
 - REST client with authenticated fetch (local-key header)
 - SSE client with reconnection logic and heartbeat handling
@@ -546,11 +556,13 @@ Environment-agnostic Tower API client shared between dashboard and extension:
 
 ## Default Keyboard Shortcuts
 
+Chord bindings using `Cmd+K` (macOS) / `Ctrl+K` (Windows/Linux) as prefix — no conflicts with built-in VS Code shortcuts:
+
 | Shortcut | Command |
 |----------|---------|
-| `Ctrl+Shift+A` / `Cmd+Shift+A` | Codev: Open Architect Terminal |
-| `Ctrl+Shift+M` / `Cmd+Shift+M` | Codev: Send Message |
-| `Ctrl+Shift+G` / `Cmd+Shift+G` | Codev: Approve Gate |
+| `Cmd+K, A` / `Ctrl+K, A` | Codev: Open Architect Terminal |
+| `Cmd+K, D` / `Ctrl+K, D` | Codev: Send Message |
+| `Cmd+K, G` / `Ctrl+K, G` | Codev: Approve Gate |
 
 Additional commands available via Command Palette but without default keybindings to avoid conflicts.
 
@@ -692,7 +704,7 @@ All errors surface through a consistent pattern:
 ## Dependencies
 - **External Services**: None (localhost only)
 - **Internal Systems**: Tower server (existing), shellper (existing), all existing REST/WebSocket/SSE APIs
-- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-api-client` (shared Tower client)
+- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-shared` (shared runtime utilities + API client, post-V1)
 - **Libraries/Frameworks**: VS Code Extension API, `ws` (WebSocket client), `eventsource` (SSE client), React + Vite (analytics + team Webviews)
 - **Build**: `@vscode/vsce` for packaging and Marketplace publishing
 
@@ -795,6 +807,28 @@ All findings incorporated into the relevant sections above.
 - [ ] Product Owner Review
 - [ ] Stakeholder Sign-off
 - [x] Expert AI Consultation Complete
+
+## Extension Touch Points
+
+Summary of all VS Code surfaces the extension introduces:
+
+| Surface | What |
+|---------|------|
+| **Activity Bar** | Codev icon — opens the unified sidebar |
+| **Sidebar** | 7 collapsible TreeView sections (Needs Attention, Builders, PRs, Backlog, Recently Closed, Team, Status) |
+| **Editor Area (left group)** | Architect terminal (1 tab) |
+| **Editor Area (right group)** | Builder terminal tabs + shell tabs (N tabs) |
+| **Status Bar** | Builder count + blocked gate count, click to approve |
+| **Command Palette** | 15+ commands prefixed with `Codev:` |
+| **Keyboard Shortcuts** | 3 chord bindings (`Cmd+K, A/M/G`) |
+| **Context Menus** | Right-click actions on sidebar items |
+| **File Decorations** | Colored background + gutter icon on `REVIEW(...)` lines |
+| **Snippets** | `rev` + Tab inserts review comment |
+| **URI Handler** | `vscode://codev/open?file=...&line=...` for `afx open` |
+| **Terminal Link Provider** | Clickable file paths in terminal output |
+| **Settings** | 7 settings under `codev.*` in Settings UI |
+| **Output Channel** | `Codev` channel in Output panel for diagnostics |
+| **Webview Panel** (post-V1) | Analytics dashboard (Recharts) |
 
 ## Notes
 
@@ -929,13 +963,14 @@ This extension is additive. The browser dashboard continues to work. Both UIs co
 - Click the "+" gutter button → type a `REVIEW(@architect)` comment
 - Comment is written directly into the file
 
-**VS Code:**
+**VS Code (V1):**
 - Open the file normally in your editor
-- Click the native "+" gutter icon (same as GitHub PR inline comments)
-- Type your review comment → it inserts `// REVIEW(@architect): text` into the file
+- Type `rev` + Tab → inserts `// REVIEW(@architect): ` with cursor positioned to type
+- Or `Cmd+Shift+P` → "Codev: Add Review Comment" → inserts at current line
+- Existing review comments highlighted with colored background + gutter icon
 - Same file format — interoperable with the browser dashboard
 
-**Key difference:** Uses VS Code's native Comments API instead of a custom web UI. Feels like doing a PR review inline.
+**Key difference:** V1 uses snippet/command + visual decorations. Post-V1 adds the full Comments API with native gutter "+" buttons and threading.
 
 ### Team & Analytics
 

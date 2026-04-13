@@ -24,13 +24,15 @@ codev/maintain/.trash/
 node_modules/
 packages/codev/dist/
 packages/codev/skeleton/
-packages/codev-vscode/dist/
-packages/codev-vscode/out/
+packages/types/dist/
+packages/vscode/dist/
+packages/vscode/out/
 *.tsbuildinfo
 test-results/
 
-# Dashboard sub-package
-packages/codev/dashboard/package-lock.json
+# Dashboard build output (copied into codev for publishing)
+packages/codev/dashboard-dist/
+packages/dashboard/dist/
 
 # Checklister runtime state (per-project JSON files)
 codev/checklists/*.json

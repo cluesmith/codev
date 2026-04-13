@@ -17,13 +17,13 @@
     "bin",
     "skeleton",
     "templates",
-    "dashboard/dist",
+    "dashboard-dist",
     "scripts/forge"
   ],
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && npm run build:dashboard && npm run copy-skeleton",
-    "build:dashboard": "cd dashboard && npm install && npm run build",
+    "build:dashboard": "cd ../dashboard && npm run build && cp -r dist ../../packages/codev/dashboard-dist",
     "dev:dashboard": "cd dashboard && npm run dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
@@ -53,6 +53,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@cluesmith/codev-dashboard": "*",
+    "@cluesmith/codev-types": "*",
     "@playwright/test": "^1.58.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",

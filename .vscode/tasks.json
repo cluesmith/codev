@@ -5,7 +5,7 @@
 			"label": "build-extension",
 			"type": "npm",
 			"script": "compile",
-			"path": "packages/codev-vscode",
+			"path": "packages/vscode",
 			"group": "build",
 			"problemMatcher": "$esbuild-watch"
 		}
