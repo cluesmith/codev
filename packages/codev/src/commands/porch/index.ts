@@ -12,7 +12,6 @@ import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import {
   readState,
-  writeState,
   writeStateAndCommit,
   createInitialState,
   findStatusPath,

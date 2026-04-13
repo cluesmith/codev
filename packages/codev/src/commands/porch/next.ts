@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readState, writeState, writeStateAndCommit, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
+import { readState, writeStateAndCommit, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import {
   loadProtocol,
@@ -243,19 +243,9 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   const resolver = getResolver(workspaceRoot);
 
   // Protocol complete
+  // Note: status.yaml is already committed automatically by writeStateAndCommit
+  // at every phase transition. No manual "commit status.yaml" task needed.
   if (state.phase === 'complete' || !phaseConfig) {
-    // Build the status.yaml commit task (preserves project history for analytics)
-    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
-    const statusYamlPath = path.join(projectDir, 'status.yaml');
-    const relStatusPath = path.relative(workspaceRoot, statusYamlPath);
-
-    const commitStatusTask: PorchTask = {
-      subject: 'Commit project status for historical record',
-      activeForm: 'Committing project status',
-      description: `Commit status.yaml to your branch so project history survives cleanup:\n\ngit add "${relStatusPath}"\ngit commit -m "chore: Preserve project status for analytics"\ngit push\n\nThis ensures wall clock time, gate timestamps, and protocol data are available for analytics after cleanup.`,
-      sequential: true,
-    };
-
     // Bugfix builders are done after PR + CMAP — architect handles merge/cleanup
     if (state.protocol === 'bugfix') {
       return {
@@ -263,7 +253,6 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         phase: state.phase,
         iteration: state.iteration,
         summary: `Project ${state.id} has completed the ${state.protocol} protocol. The architect will review, merge, and clean up.`,
-        tasks: [commitStatusTask],
       };
     }
 
@@ -273,7 +262,6 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       iteration: state.iteration,
       summary: `Project ${state.id} has completed the ${state.protocol} protocol.`,
       tasks: [
-        commitStatusTask,
         {
           subject: 'Merge the pull request',
           activeForm: 'Merging pull request',
