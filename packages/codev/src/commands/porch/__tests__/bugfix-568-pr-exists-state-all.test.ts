@@ -44,6 +44,11 @@ describe('pr-exists forge scripts', () => {
       expect(fs.existsSync(scriptPath)).toBe(true);
     });
 
+    it('fetches all MR states (--all) to catch merged MRs (#568)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('--all');
+    });
+
     it('filters to opened or merged only, excluding closed (#653)', () => {
       const content = fs.readFileSync(scriptPath, 'utf-8');
       expect(content).toContain('select(');
@@ -56,6 +61,11 @@ describe('pr-exists forge scripts', () => {
 
     it('exists and is readable', () => {
       expect(fs.existsSync(scriptPath)).toBe(true);
+    });
+
+    it('fetches all pull states (--state all) to catch merged pulls (#568)', () => {
+      const content = fs.readFileSync(scriptPath, 'utf-8');
+      expect(content).toContain('--state all');
     });
 
     it('filters out closed-not-merged PRs (#653)', () => {
