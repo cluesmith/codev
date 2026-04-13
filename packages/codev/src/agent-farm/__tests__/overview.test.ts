@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import Database from 'better-sqlite3';
 import {
   OverviewCache,
   parseStatusYaml,
@@ -27,13 +28,12 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockDbPrepare } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
   mockFetchRecentlyClosed: vi.fn(),
   mockFetchMergedPRs: vi.fn(),
   mockLoadProtocol: vi.fn(),
-  mockDbPrepare: vi.fn(),
 }));
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
@@ -49,10 +49,6 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
 
 vi.mock('../../commands/porch/protocol.js', () => ({
   loadProtocol: mockLoadProtocol,
-}));
-
-vi.mock('../db/index.js', () => ({
-  getDb: () => ({ prepare: mockDbPrepare }),
 }));
 
 // ============================================================================
@@ -105,6 +101,19 @@ function issueItem(number: number, title: string, labels: Array<{ name: string }
   return { number, title, url: `https://github.com/org/repo/issues/${number}`, labels, createdAt: '2026-01-01T00:00:00Z' };
 }
 
+/** Create a state.db in the workspace's .agent-farm/ with builder issue_number rows. */
+function createStateDb(root: string, rows: Array<{ worktree: string; issue_number: number }>): void {
+  const agentFarmDir = path.join(root, '.agent-farm');
+  fs.mkdirSync(agentFarmDir, { recursive: true });
+  const db = new Database(path.join(agentFarmDir, 'state.db'));
+  db.exec('CREATE TABLE IF NOT EXISTS builders (worktree TEXT, issue_number INTEGER)');
+  const insert = db.prepare('INSERT INTO builders (worktree, issue_number) VALUES (?, ?)');
+  for (const row of rows) {
+    insert.run(row.worktree, row.issue_number);
+  }
+  db.close();
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -117,7 +126,6 @@ describe('overview', () => {
     mockFetchIssueList.mockResolvedValue([]);
     mockFetchRecentlyClosed.mockResolvedValue([]);
     mockFetchMergedPRs.mockResolvedValue([]);
-    mockDbPrepare.mockReturnValue({ all: () => [] });
   });
 
   afterEach(() => {
@@ -1735,10 +1743,8 @@ describe('overview', () => {
       // research-533 doesn't match any protocol regex → soft mode, issueId null
       const worktreePath = createBuilderWorktree(tmpDir, 'research-533-context-window');
 
-      // Mock DB to return issue_number for this worktree
-      mockDbPrepare.mockReturnValue({
-        all: () => [{ worktree: worktreePath, issue_number: 533 }],
-      });
+      // Create a real DB with issue_number for this worktree
+      createStateDb(tmpDir, [{ worktree: worktreePath, issue_number: 533 }]);
 
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
@@ -1758,9 +1764,7 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0042-feature');
 
-      mockDbPrepare.mockReturnValue({
-        all: () => [{ worktree: worktreePath, issue_number: 42 }],
-      });
+      createStateDb(tmpDir, [{ worktree: worktreePath, issue_number: 42 }]);
 
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
@@ -1778,9 +1782,7 @@ describe('overview', () => {
         'gates:',
       ].join('\n'), '0042-feature');
 
-      // DB returns no rows → regex-parsed issueId preserved
-      mockDbPrepare.mockReturnValue({ all: () => [] });
-
+      // No state.db → regex-parsed issueId preserved
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir);
 

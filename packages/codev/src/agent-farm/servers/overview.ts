@@ -19,7 +19,7 @@ import {
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
-import { getDb } from '../db/index.js';
+import Database from 'better-sqlite3';
 
 // =============================================================================
 // Types
@@ -695,19 +695,28 @@ export class OverviewCache {
     }
 
     // Enrich issueId from DB issue_number — protocol-agnostic (fixes #664)
+    // Open DB directly using workspaceRoot to avoid singleton path issues
+    // when Tower serves multiple workspaces.
     try {
-      const db = getDb();
-      const rows = db.prepare(
-        'SELECT worktree, issue_number FROM builders WHERE issue_number IS NOT NULL',
-      ).all() as Array<{ worktree: string; issue_number: number }>;
-      for (const row of rows) {
-        const builder = builders.find(b => b.worktreePath === row.worktree);
-        if (builder) {
-          builder.issueId = String(row.issue_number);
+      const dbPath = path.join(workspaceRoot, '.agent-farm', 'state.db');
+      if (fs.existsSync(dbPath)) {
+        const db = new Database(dbPath, { readonly: true });
+        try {
+          const rows = db.prepare(
+            'SELECT worktree, issue_number FROM builders WHERE issue_number IS NOT NULL',
+          ).all() as Array<{ worktree: string; issue_number: number }>;
+          for (const row of rows) {
+            const builder = builders.find(b => b.worktreePath === row.worktree);
+            if (builder) {
+              builder.issueId = String(row.issue_number);
+            }
+          }
+        } finally {
+          db.close();
         }
       }
     } catch {
-      // DB not available (e.g., no Tower running) — keep regex-parsed issueId
+      // DB not available — keep regex-parsed issueId
     }
 
     const activeBuilderIssues = new Set(
