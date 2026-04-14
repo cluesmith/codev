@@ -498,43 +498,41 @@ Single Webview panel embedding the existing Recharts analytics page:
 
 ## Prerequisite: Shared Package Extraction
 
-Extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension. **Phased approach** — do not block V1 on extracting everything.
+Extract shared code to avoid duplicating logic across server, dashboard, and extension. **Extract and reuse existing code — do not duplicate as a default approach.**
 
-**Phase 1 (before V1)**: Extract `@cluesmith/codev-types` only. Low risk, high value.
-**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-shared` once patterns stabilize across two real consumers (dashboard + extension).
+**Monorepo prerequisite**: Root `package.json` with `"workspaces": ["packages/*"]` — already done.
 
-**Monorepo prerequisite**: Add a root `package.json` with `"workspaces": ["packages/*"]` before extracting. Currently no workspace manager exists. Without this, `file:` dependencies will break `vsce` packaging.
+### `@cluesmith/codev-types` (Required — done)
 
-### `@cluesmith/codev-types` (Required, Phase 1)
+Zero-dependency package with shared TypeScript interfaces at `packages/types/`. Already extracted and in use. Contains WebSocket frame types, SSE event types, and API response shapes.
 
-Zero-dependency package with shared TypeScript interfaces currently duplicated between `packages/codev/src/agent-farm/types.ts` (server) and `packages/codev/dashboard/src/lib/api.ts` (dashboard):
+### `@cluesmith/codev-shared` (Required — before V1)
 
-- `DashboardState`, `Builder`, `Annotation`, `OverviewData`, `ArchitectState`, `UtilTerminal`
-- WebSocket frame types (`FRAME_CONTROL = 0x00`, `FRAME_DATA = 0x01`)
-- SSE event type catalog (`overview-changed`, `notification`, `connected`)
-- API request/response shapes for all Tower endpoints
+Shared runtime utilities extracted from `packages/codev/src/agent-farm/lib/tower-client.ts` and reused by both the server and the extension. This is NOT new code — it's existing logic moved to a shared location:
 
-Without this package, the extension becomes a third independent copy of these types, making protocol drift inevitable.
+**Extract from `tower-client.ts`:**
+- `getLocalKey()` — read `~/.agent-farm/local-key`, create if missing
+- `encodeWorkspacePath()` / `decodeWorkspacePath()` — base64url encoding
+- `DEFAULT_TOWER_PORT` — constant (4100)
+- `AGENT_FARM_DIR` — path constant
+- `TowerClient` class — REST client with auth, health check, workspace operations, terminal management, send message, tunnel control
+- All Tower API types (`TowerWorkspace`, `TowerHealth`, `TowerTerminal`, etc.)
 
-### `@cluesmith/codev-shared` (Recommended, Phase 2 — after V1)
+**Extract from `dashboard/src/lib/escapeBuffer.ts`:**
+- `EscapeBuffer` — buffers incomplete ANSI escape sequences across WebSocket frames
 
-Shared runtime utilities and API client logic used by dashboard and extension:
+**After extraction:**
+- `packages/codev` imports from `@cluesmith/codev-shared` instead of local `tower-client.ts`
+- `packages/vscode` imports from `@cluesmith/codev-shared` instead of duplicating
+- `packages/dashboard` imports from `@cluesmith/codev-shared` for EscapeBuffer
 
-- REST client with authenticated fetch (local-key header)
-- SSE client with reconnection logic and heartbeat handling
-- WebSocket binary protocol adapter (encode/decode `0x00`/`0x01` frames)
-- EscapeBuffer (from `dashboard/src/lib/escapeBuffer.ts`) for incomplete ANSI sequence handling
-- Workspace path encoding (base64url) for workspace-scoped routes
-- Connection state machine (`DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`)
-- Must accept a custom HTTP agent — VS Code extensions run behind corporate proxies and need to integrate with `vscode.workspace.getConfiguration('http').get('proxy')`
+**Publishing:** `@cluesmith/codev-shared` must be published to npm alongside `@cluesmith/codev` during releases, since the server has a runtime dependency on it.
 
 ### Changes to Main `@cluesmith/codev` Package
 
-1. Export types cleanly from `types.ts` for the shared types package
-2. Move protocol constants (`0x00`, `0x01`) to shared package
-3. Make auth helpers (local-key reading) importable
-4. Reference shared types in Tower route response bodies
-5. Define SSE event type catalog as shared constants
+1. Replace `src/agent-farm/lib/tower-client.ts` with imports from `@cluesmith/codev-shared`
+2. Import frame constants from shared package
+3. Reference shared types in Tower route response bodies
 
 ### What NOT to Extract
 
