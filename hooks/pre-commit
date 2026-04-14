@@ -26,11 +26,11 @@ if [[ -d "agent-farm" && -f "agent-farm/package.json" ]]; then
     # Check if node_modules exists, install if needed
     if [[ ! -d "agent-farm/node_modules" ]]; then
         echo "Installing agent-farm dependencies..."
-        (cd agent-farm && npm install --silent)
+        (cd agent-farm && pnpm install --silent)
     fi
 
     # Run TypeScript build and tests
-    if ! (cd agent-farm && npm run build --silent && npm test -- --run); then
+    if ! (cd agent-farm && pnpm build --silent && pnpm test -- --run); then
         echo "❌ agent-farm tests failed - commit aborted"
         echo ""
         echo "To skip this check (not recommended):"

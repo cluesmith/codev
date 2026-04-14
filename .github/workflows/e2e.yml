@@ -22,19 +22,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
-      - name: Install package dependencies
-        working-directory: packages/codev
-        run: npm install
+      - name: Install dependencies
+        run: pnpm install
 
       - name: Build package
         working-directory: packages/codev
-        run: npm run build
+        run: pnpm build
 
       - name: Run CLI integration tests
         working-directory: packages/codev
-        run: npx vitest run --config vitest.cli.config.ts
+        run: pnpm exec vitest run --config vitest.cli.config.ts

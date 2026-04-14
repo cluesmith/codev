@@ -57,13 +57,13 @@ bats tests/e2e/
 cd packages/codev
 
 # Bump version (choose one)
-npm version patch --no-git-tag-version  # Bug fixes only
-npm version minor --no-git-tag-version  # New features
-npm version major --no-git-tag-version  # Breaking changes
+pnpm version patch --no-git-tag-version  # Bug fixes only
+pnpm version minor --no-git-tag-version  # New features
+pnpm version major --no-git-tag-version  # Breaking changes
 
 # Commit and tag
 cd ../..
-git add packages/codev/package.json packages/codev/package-lock.json
+git add packages/codev/package.json pnpm-lock.yaml
 git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
 git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
@@ -114,7 +114,7 @@ gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX
 ### 7. Publish to npm
 
 ```bash
-cd packages/codev && npm publish
+cd packages/codev && pnpm publish
 ```
 
 ### 8. Post to Discussion Forum
@@ -189,17 +189,17 @@ Starting with v1.7.0, minor releases use a release candidate workflow for testin
 ```bash
 # Set version to RC
 cd packages/codev
-npm version 1.7.0-rc.1 --no-git-tag-version
+pnpm version 1.7.0-rc.1 --no-git-tag-version
 
 # Commit and tag
 cd ../..
-git add packages/codev/package.json packages/codev/package-lock.json
+git add packages/codev/package.json pnpm-lock.yaml
 git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"
 git push && git push origin v1.7.0-rc.1
 
 # Publish to "next" channel (NOT "latest")
-cd packages/codev && npm publish --tag next
+cd packages/codev && pnpm publish --tag next
 ```
 
 ### RC → Stable Promotion
@@ -209,7 +209,7 @@ When an RC is validated and ready for stable release:
 ```bash
 # Bump to stable version
 cd packages/codev
-npm version 1.7.0 --no-git-tag-version
+pnpm version 1.7.0 --no-git-tag-version
 
 # Follow standard release process (steps 4-9 above)
 ```
@@ -243,15 +243,15 @@ git cherry-pick <commit-hash>
 
 # Bump patch version
 cd packages/codev
-npm version patch --no-git-tag-version
+pnpm version patch --no-git-tag-version
 
 # Commit, tag, and publish
 cd ../..
-git add packages/codev/package.json packages/codev/package-lock.json
+git add packages/codev/package.json pnpm-lock.yaml
 git commit -m "v1.6.1 - Backport: <fix description>"
 git tag -a v1.6.1 -m "v1.6.1 - Backport fix"
 git push origin release/1.6.x && git push origin v1.6.1
-cd packages/codev && npm publish
+cd packages/codev && pnpm publish
 ```
 
 ### When to Use RCs

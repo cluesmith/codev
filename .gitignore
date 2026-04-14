@@ -14,6 +14,9 @@ worktrees/
 # npm package tarballs
 *.tgz
 
+# Prevent accidental npm usage from recreating lockfile
+package-lock.json
+
 # Cleanup/maintain protocol artifacts
 # .trash/ contains soft-deleted files (bulk data, not versioned)
 codev/cleanup/.trash/
