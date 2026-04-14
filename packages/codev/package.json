@@ -22,19 +22,19 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "npm run clean && tsc && npm run build:dashboard && npm run copy-skeleton",
-    "build:dashboard": "cd ../dashboard && npm run build && cp -r dist ../../packages/codev/dashboard-dist",
-    "dev:dashboard": "cd dashboard && npm run dev",
+    "build": "pnpm clean && tsc && pnpm build:dashboard && pnpm copy-skeleton",
+    "build:dashboard": "cd ../dashboard && pnpm build && cp -r dist ../../packages/codev/dashboard-dist",
+    "dev:dashboard": "cd ../dashboard && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest",
-    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "test:e2e": "pnpm build && vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
-    "test:e2e:playwright": "npx playwright test",
-    "test:e2e:cli": "npm run build && vitest run --config vitest.cli.config.ts",
+    "test:e2e:playwright": "pnpm exec playwright test",
+    "test:e2e:cli": "pnpm build && vitest run --config vitest.cli.config.ts",
     "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(require.resolve('node-pty'),'..','..','prebuilds',process.platform+'-'+process.arch,'spawn-helper'),0o755)}catch{}\"",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.41",
@@ -53,8 +53,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@cluesmith/codev-dashboard": "*",
-    "@cluesmith/codev-types": "*",
+    "@cluesmith/codev-dashboard": "workspace:*",
+    "@cluesmith/codev-types": "workspace:*",
     "@playwright/test": "^1.58.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",

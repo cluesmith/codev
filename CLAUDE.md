@@ -40,8 +40,8 @@ To test changes locally before publishing to npm:
 cd packages/codev
 
 # 1. Build and create tarball (Tower stays up during this)
-npm run build
-npm pack
+pnpm build
+pnpm pack
 
 # 2. Install (Tower stays up — running process already loaded old code)
 npm install -g ./cluesmith-codev-*.tgz
@@ -54,7 +54,7 @@ afx tower stop && afx tower start
 - Do NOT stop Tower before installing — unnecessary downtime
 - Do NOT delete the tarball — keep it for debugging if restart fails
 - Do NOT build between stop and start
-- Do NOT use `npm link` — it breaks global installs
+- Do NOT use `npm link` or `pnpm link` — it breaks global installs
 
 ### Testing
 
@@ -121,7 +121,7 @@ validated: [gemini, codex, claude]
 | Running tests | 10-300s | `run_in_background: true` |
 | Consultations (consult) | 60-250s | `run_in_background: true` |
 | E2E test suites | 60-600s | `run_in_background: true` |
-| npm install/build | 5-60s | `run_in_background: true` |
+| pnpm install/build | 5-60s | `run_in_background: true` |
 | Quick file reads/edits | <5s | Run normally |
 
 **Critical**: Using `&` at the end of the command does NOT work - you MUST set the `run_in_background` parameter.
@@ -217,7 +217,8 @@ project-root/
 ```
 
 ## Directory Map
-- npm install / npm run build / npm test → always run from `packages/codev/`
+- pnpm install → always run from the repository root (installs all workspace packages)
+- pnpm build / pnpm test → run from `packages/codev/` or use `pnpm --filter @cluesmith/codev build`
 - E2E tests → `packages/codev/tests/e2e/`
 - Unit tests → `packages/codev/tests/unit/`
 - Never run npm commands from the repository root unless explicitly told to.

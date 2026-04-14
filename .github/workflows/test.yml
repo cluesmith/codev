@@ -13,18 +13,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        working-directory: packages/codev
-        run: npm install
+        run: pnpm install
 
       - name: Copy skeleton for unit tests
         working-directory: packages/codev
-        run: npm run copy-skeleton
+        run: pnpm copy-skeleton
 
       - name: Run unit tests with coverage
         working-directory: packages/codev
@@ -37,7 +40,7 @@ jobs:
           # Vitest forks pool has a known issue where the worker process crashes
           # during cleanup after all tests pass (native module teardown).
           # Capture the output and check if all test files passed.
-          npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt; VITEST_EXIT=$?
+          pnpm exec vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt; VITEST_EXIT=$?
           if [ $VITEST_EXIT -ne 0 ]; then
             # Check if all test files actually passed despite the exit code
             if grep -q "Test Files.*passed" /tmp/vitest-output.txt && ! grep -q "failed" /tmp/vitest-output.txt; then
@@ -54,22 +57,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        working-directory: packages/codev
-        run: npm install
+        run: pnpm install
 
       - name: Build package
         working-directory: packages/codev
-        run: npm run build
+        run: pnpm build
 
       - name: Run tower integration tests
         working-directory: packages/codev
-        run: npx vitest run --config vitest.e2e.config.ts --exclude 'src/commands/porch/__tests__/e2e/**'
+        run: pnpm exec vitest run --config vitest.e2e.config.ts --exclude 'src/commands/porch/__tests__/e2e/**'
 
   cli:
     name: CLI Integration Tests
@@ -78,22 +84,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        working-directory: packages/codev
-        run: npm install
+        run: pnpm install
 
       - name: Build package
         working-directory: packages/codev
-        run: npm run build
+        run: pnpm build
 
       - name: Run CLI integration tests
         working-directory: packages/codev
-        run: npx vitest run --config vitest.cli.config.ts
+        run: pnpm exec vitest run --config vitest.cli.config.ts
 
   package:
     name: Package Install Verification
@@ -102,22 +111,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        working-directory: packages/codev
-        run: npm install
+        run: pnpm install
 
       - name: Build package
         working-directory: packages/codev
-        run: npm run build
+        run: pnpm build
 
       - name: Pack tarball
         working-directory: packages/codev
-        run: npm pack
+        run: pnpm pack
 
       - name: Verify install from tarball
         working-directory: packages/codev

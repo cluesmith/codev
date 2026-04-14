@@ -1,7 +1,5 @@
 {
   "name": "cluesmith-codev",
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ]
+  "packageManager": "pnpm@10.33.0"
 }
