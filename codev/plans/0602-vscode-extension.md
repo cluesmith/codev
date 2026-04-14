@@ -121,28 +121,29 @@ Revert the extraction — types go back to local definitions. No runtime behavio
 #### Deliverables
 - [ ] `packages/shared/package.json` with `"name": "@cluesmith/codev-shared"`
 - [ ] `packages/shared/tsconfig.json` extending `../config/tsconfig.base.json`
-- [ ] `packages/shared/src/auth.ts` — `getLocalKey()`, `AGENT_FARM_DIR`, `LOCAL_KEY_PATH` extracted from `tower-client.ts`
+- [ ] `packages/shared/src/auth.ts` — `readLocalKey()` (read-only, returns `string | null`) + `ensureLocalKey()` (creates dir + generates, CLI-only) extracted from `tower-client.ts`
 - [ ] `packages/shared/src/workspace.ts` — `encodeWorkspacePath()`, `decodeWorkspacePath()` extracted from `tower-client.ts`
-- [ ] `packages/shared/src/tower-client.ts` — `TowerClient` class and all Tower API types extracted from `tower-client.ts`
+- [ ] `packages/shared/src/tower-client.ts` — `TowerClient` class refactored with injectable auth (`getAuthKey` option), all Tower API types
 - [ ] `packages/shared/src/escape-buffer.ts` — `EscapeBuffer` class extracted from dashboard
 - [ ] `packages/shared/src/constants.ts` — `DEFAULT_TOWER_PORT` and other shared constants
-- [ ] `packages/shared/src/index.ts` — barrel export
+- [ ] Subpath exports in `package.json` (not single barrel — prevents Node builtins leaking into dashboard Vite build)
 - [ ] `packages/codev/src/agent-farm/lib/tower-client.ts` — replaced with re-exports from `@cluesmith/codev-shared`
-- [ ] `packages/codev/package.json` — add `@cluesmith/codev-shared` as dependency (runtime, must be published)
+- [ ] `packages/codev/package.json` — add `@cluesmith/codev-shared` as dependency (exact version, runtime, must be published)
 - [ ] `packages/vscode/package.json` — add `@cluesmith/codev-shared` as dependency (esbuild bundles it, no publish needed for extension)
-- [ ] `packages/dashboard/src/lib/escapeBuffer.ts` — replaced with import from `@cluesmith/codev-shared`
+- [ ] `packages/dashboard/src/lib/escapeBuffer.ts` — replaced with import from `@cluesmith/codev-shared/escape-buffer`
+- [ ] Update release protocol with two-package publish order (shared first, then codev)
 
 #### Implementation Details
 
 **Files to create:**
-- `packages/shared/package.json` — `"type": "module"`, dual exports (types → source, default → dist)
+- `packages/shared/package.json` — `"type": "module"`, subpath exports per module (tower-client, auth, workspace, constants, escape-buffer)
 - `packages/shared/tsconfig.json` — extends base config
-- `packages/shared/src/auth.ts` — extract `getLocalKey()` and path constants
+- `packages/shared/src/auth.ts` — `readLocalKey()` (read-only) + `ensureLocalKey()` (CLI-only)
 - `packages/shared/src/workspace.ts` — extract `encodeWorkspacePath()` / `decodeWorkspacePath()`
-- `packages/shared/src/tower-client.ts` — extract `TowerClient` class and all associated types
+- `packages/shared/src/tower-client.ts` — `TowerClient` with injectable auth (`{ getAuthKey?: () => string | null }`)
 - `packages/shared/src/escape-buffer.ts` — extract `EscapeBuffer` from dashboard
 - `packages/shared/src/constants.ts` — `DEFAULT_TOWER_PORT = 4100`
-- `packages/shared/src/index.ts` — barrel export all public API
+- (no barrel index.ts — subpath exports only)
 
 **Files to modify:**
 - `packages/codev/src/agent-farm/lib/tower-client.ts` — replace with re-exports from `@cluesmith/codev-shared`
@@ -329,7 +330,7 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 
 #### Deliverables
 - [ ] `src/terminal-adapter.ts` — Pseudoterminal implementation with WebSocket binary protocol
-- [ ] `src/escape-buffer.ts` — port of `dashboard/src/lib/escapeBuffer.ts`
+- [ ] Import `EscapeBuffer` from `@cluesmith/codev-shared/escape-buffer` (extracted in Phase 1b)
 - [ ] Binary protocol adapter: inbound `0x01` → `TextDecoder({ stream: true })` → `onDidWrite`, outbound → `0x01` prefix → `ws.send()`
 - [ ] Control frame handling (`0x00`): resize, ping/pong, sequence numbers
 - [ ] Reconnection with inline ANSI banner and ring buffer replay
@@ -347,7 +348,7 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 
 **Files to create:**
 - `src/terminal-adapter.ts` — `CodevPseudoterminal` class implementing `vscode.Pseudoterminal`
-- `src/escape-buffer.ts` — ANSI escape sequence buffering
+- (EscapeBuffer imported from `@cluesmith/codev-shared/escape-buffer`)
 - `src/terminal-manager.ts` — WebSocket pool, terminal lifecycle, editor layout
 
 **Files to modify:**
