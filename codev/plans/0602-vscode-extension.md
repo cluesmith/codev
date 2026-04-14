@@ -89,16 +89,16 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
 **Key decision:** Types package uses `"type": "module"` to match the codev package. The extension's `"moduleResolution": "bundler"` handles ESM imports.
 
 #### Acceptance Criteria
-- [ ] `npm install` from root resolves all three workspace members
-- [ ] `npm run build` in `packages/codev` passes with shared type imports
-- [ ] `npm run check-types` in `packages/codev-vscode` passes with shared type imports
+- [ ] `pnpm install` from root resolves all workspace members
+- [ ] `pnpm build` in `packages/codev` passes with shared type imports
+- [ ] `pnpm check-types` in `packages/vscode` passes with shared type imports
 - [ ] `vsce package` produces a valid `.vsix` (workspace symlinks correctly resolved by esbuild at bundle time)
 - [ ] Existing 2422 unit tests still pass
 
 #### Test Plan
 - **Unit Tests**: Type exports compile correctly
 - **Integration Tests**: Server build + extension type-check both pass
-- **Manual Testing**: `npm install` from root, verify symlinks
+- **Manual Testing**: `pnpm install` from root, verify symlinks
 
 #### Rollback Strategy
 Revert the extraction — types go back to local definitions. No runtime behavior change.
@@ -157,18 +157,18 @@ Revert the extraction — types go back to local definitions. No runtime behavio
 **TowerClient extraction:** The `TowerClient` class is the core API client used by all `afx` CLI commands. Moving it to the shared package means the extension gets the full Tower API client for free — no need to reimplement REST calls, auth, health checks, or workspace operations.
 
 #### Acceptance Criteria
-- [ ] `npm install` from root resolves all workspace members including shared
+- [ ] `pnpm install` from root resolves all workspace members including shared
 - [ ] `packages/codev/src/agent-farm/lib/tower-client.ts` is a thin re-export file
 - [ ] All existing consumers of `TowerClient` work without changes (re-exports preserve the API)
 - [ ] Extension can import `TowerClient` from `@cluesmith/codev-shared`
-- [ ] `npm run build` in `packages/codev` passes
+- [ ] `pnpm build` in `packages/codev` passes
 - [ ] All 2422+ unit tests pass
-- [ ] `npm pack` + `npm install -g` succeeds (codev-shared must be published first, or use devDependency pattern for local testing)
+- [ ] `pnpm pack` + `npm install -g` succeeds (codev-shared must be published first, or use devDependency pattern for local testing)
 
 #### Test Plan
 - **Unit Tests**: Existing tower-client tests continue to pass via re-exports
 - **Integration Tests**: `afx` commands work after extraction
-- **Manual Testing**: `npm install` from root, verify workspace symlinks, build all packages
+- **Manual Testing**: `pnpm install` from root, verify workspace symlinks, build all packages
 
 #### Rollback Strategy
 Revert extraction — move code back to `tower-client.ts`. No runtime behavior change.
@@ -807,7 +807,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 
 **Parallel execution**: Phase 6 (review comments) has zero dependencies and can start Day 1. Phases 3 and 4 can run in parallel after Phase 2b. Most Phase 5 commands only need Phase 2b (not 3 or 4).
 
-**Monorepo prerequisite**: Already done — npm workspaces set up with root `package.json`, extension scaffold at `packages/codev-vscode/`, cross-package imports verified.
+**Monorepo prerequisite**: Already done — pnpm workspaces set up with `pnpm-workspace.yaml`, extension scaffold at `packages/vscode/`, cross-package imports verified.
 
 **No duplication by design**: Phase 1b extracts `TowerClient`, auth, workspace encoding, and `EscapeBuffer` into `@cluesmith/codev-shared` before any extension code is written. Phase 2a wraps the shared `TowerClient` with VS Code-specific concerns (state machine, SecretStorage, Output Channel) instead of reimplementing REST calls.
 
