@@ -573,7 +573,6 @@ describe('porch next', () => {
     expect(result.tasks![0].description).toContain('0001-specify-iter1-codex.txt');
     expect(result.tasks![0].description).toContain('0001-specify-iter1-claude.txt');
     expect(result.tasks![0].description).toContain('0001-specify-iter1-hermes.txt');
-    expect(result.tasks![0].description).toContain('0001-specify-iter1-hermes.txt');
   });
 
   // --------------------------------------------------------------------------
