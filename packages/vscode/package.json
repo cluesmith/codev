@@ -20,6 +20,18 @@
       {
         "command": "codev.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "codev.openArchitectTerminal",
+        "title": "Codev: Open Architect Terminal"
+      },
+      {
+        "command": "codev.openBuilderTerminal",
+        "title": "Codev: Open Builder Terminal"
+      },
+      {
+        "command": "codev.newShell",
+        "title": "Codev: New Shell"
       }
     ],
     "configuration": {
