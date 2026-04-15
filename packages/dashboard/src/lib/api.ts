@@ -1,89 +1,17 @@
 import { getApiBase } from './constants.js';
 
-export interface Builder {
-  id: string;
-  name: string;
-  port: number;
-  pid: number;
-  status: string;
-  phase: string;
-  worktree: string;
-  branch: string;
-  type: string;
-  projectId?: string;
-  terminalId?: string;
-  persistent?: boolean;
-}
-
-export interface UtilTerminal {
-  id: string;
-  name: string;
-  port: number;
-  pid: number;
-  terminalId?: string;
-  persistent?: boolean;
-  lastDataAt?: number;
-}
-
-export interface Annotation {
-  id: string;
-  file: string;
-  port: number;
-  pid: number;
-  parent: { type: string; id?: string };
-}
-
-export interface ArchitectState {
-  port: number;
-  pid: number;
-  terminalId?: string;
-  persistent?: boolean;
-}
-
-export interface DashboardState {
-  architect: ArchitectState | null;
-  builders: Builder[];
-  utils: UtilTerminal[];
-  annotations: Annotation[];
-  workspaceName?: string;
-  version?: string;
-  hostname?: string;
-  teamEnabled?: boolean;
-}
-
-// Spec 587: Team tab types
-
-export interface TeamMemberGitHubData {
-  assignedIssues: { number: number; title: string; url: string }[];
-  openPRs: { number: number; title: string; url: string }[];
-  recentActivity: {
-    mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
-    closedIssues: { number: number; title: string; url: string; closedAt: string }[];
-  };
-}
-
-export interface TeamApiMember {
-  name: string;
-  github: string;
-  role: string;
-  filePath: string;
-  github_data: TeamMemberGitHubData | null;
-}
-
-export interface TeamApiMessage {
-  author: string;
-  timestamp: string;
-  body: string;
-  channel: string;
-}
-
-export interface TeamApiResponse {
-  enabled: boolean;
-  members?: TeamApiMember[];
-  messages?: TeamApiMessage[];
-  warnings?: string[];
-  githubError?: string;
-}
+// Shared types from @cluesmith/codev-types
+export type {
+  Builder,
+  UtilTerminal,
+  Annotation,
+  ArchitectState,
+  DashboardState,
+  TeamMemberGitHubData,
+  TeamApiMember,
+  TeamApiMessage,
+  TeamApiResponse,
+} from '@cluesmith/codev-types';
 
 export interface FileEntry {
   name: string;
@@ -112,110 +40,24 @@ export async function fetchState(): Promise<DashboardState> {
   return res.json();
 }
 
-// Spec 0126: Overview endpoint types and fetchers for Work view
+// Shared types from @cluesmith/codev-types
+export type {
+  OverviewBuilder,
+  OverviewPR,
+  OverviewBacklogItem,
+  OverviewRecentlyClosed,
+  OverviewData,
+  ProtocolStats,
+  AnalyticsResponse,
+} from '@cluesmith/codev-types';
 
-export interface OverviewBuilder {
-  id: string;
-  issueId: string | null;
-  issueTitle: string | null;
-  phase: string;
-  mode: 'strict' | 'soft';
-  gates: Record<string, string>;
-  worktreePath: string;
-  protocol: string;
-  planPhases: Array<{ id: string; title: string; status: string }>;
-  progress: number;
-  blocked: string | null;
-  blockedSince: string | null;
-  startedAt: string | null;
-  idleMs: number;
-}
-
-export interface OverviewPR {
-  id: string;
-  title: string;
-  url: string;
-  reviewStatus: string;
-  linkedIssue: string | null;
-  createdAt: string;
-  author?: string;
-}
-
-export interface OverviewBacklogItem {
-  id: string;
-  title: string;
-  url: string;
-  type: string;
-  priority: string;
-  hasSpec: boolean;
-  hasPlan: boolean;
-  hasReview: boolean;
-  hasBuilder: boolean;
-  createdAt: string;
-  author?: string;
-  specPath?: string;
-  planPath?: string;
-  reviewPath?: string;
-}
-
-export interface OverviewRecentlyClosed {
-  id: string;
-  title: string;
-  url: string;
-  type: string;
-  closedAt: string;
-  prUrl?: string;
-  specPath?: string;
-  planPath?: string;
-  reviewPath?: string;
-}
-
-export interface OverviewData {
-  builders: OverviewBuilder[];
-  pendingPRs: OverviewPR[];
-  backlog: OverviewBacklogItem[];
-  recentlyClosed: OverviewRecentlyClosed[];
-  errors?: { prs?: string; issues?: string };
-}
-
-// Spec 456: Analytics tab types and fetcher
-
-export interface ProtocolStats {
-  count: number;
-  avgWallClockHours: number | null;
-  avgAgentTimeHours: number | null;
-}
-
-export interface AnalyticsResponse {
-  timeRange: '24h' | '7d' | '30d' | 'all';
-  activity: {
-    prsMerged: number;
-    medianTimeToMergeHours: number | null;
-    issuesClosed: number;
-    medianTimeToCloseBugsHours: number | null;
-    projectsByProtocol: Record<string, ProtocolStats>;
-  };
-  consultation: {
-    totalCount: number;
-    totalCostUsd: number | null;
-    costByModel: Record<string, number>;
-    avgLatencySeconds: number | null;
-    successRate: number | null;
-    byModel: Array<{
-      model: string;
-      count: number;
-      avgLatency: number;
-      totalCost: number | null;
-      successRate: number;
-    }>;
-    byReviewType: Record<string, number>;
-    byProtocol: Record<string, number>;
-  };
-  errors?: {
-    github?: string;
-    consultation?: string;
-  };
-}
+// Re-import for use in function signatures below
+import type {
+  AnalyticsResponse,
+  TeamApiResponse,
+  OverviewData,
+  DashboardState,
+} from '@cluesmith/codev-types';
 
 export async function fetchAnalytics(range: string, refresh?: boolean): Promise<AnalyticsResponse> {
   const params = new URLSearchParams({ range });
@@ -374,16 +216,8 @@ export async function fetchRecentFiles(): Promise<RecentFile[]> {
 }
 
 // Spec 0097: Tunnel status and control APIs for cloud connection
-
-export interface TunnelStatus {
-  registered: boolean;
-  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'error';
-  uptime: number | null;
-  towerId: string | null;
-  towerName: string | null;
-  serverUrl: string | null;
-  accessUrl: string | null;
-}
+export type { TunnelStatus } from '@cluesmith/codev-types';
+import type { TunnelStatus } from '@cluesmith/codev-types';
 
 const ERROR_STATUS: TunnelStatus = {
   registered: false, state: 'error', uptime: null,

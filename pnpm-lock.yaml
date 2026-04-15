@@ -112,9 +112,6 @@ importers:
       '@cluesmith/codev-core':
         specifier: workspace:*
         version: link:../core
-      '@cluesmith/codev-types':
-        specifier: workspace:*
-        version: link:../types
       '@xterm/addon-canvas':
         specifier: ^0.7.0
         version: 0.7.0(@xterm/xterm@5.5.0)
@@ -140,6 +137,9 @@ importers:
         specifier: ^3.7.0
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react-is@19.2.5)(react@19.2.5)(redux@5.0.1)
     devDependencies:
+      '@cluesmith/codev-types':
+        specifier: workspace:*
+        version: link:../types
       '@testing-library/jest-dom':
         specifier: ^6.6.0
         version: 6.9.1
