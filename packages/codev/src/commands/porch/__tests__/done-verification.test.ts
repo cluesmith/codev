@@ -20,7 +20,7 @@ vi.mock('../../../lib/config.js', async (importOriginal) => {
   return {
     ...original,
     loadConfig: (_workspaceRoot: string) => ({
-      porch: { consultation: { models: ['gemini', 'codex', 'claude', 'hermes'] } },
+      porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
     }),
   };
 });
@@ -82,7 +82,7 @@ const spirProtocol = {
       name: 'Specify',
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
-      verify: { type: 'spec', models: ['gemini', 'codex', 'claude', 'hermes'] },
+      verify: { type: 'spec', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       gate: 'spec-approval',
     },
@@ -91,7 +91,7 @@ const spirProtocol = {
       name: 'Plan',
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
-      verify: { type: 'plan', models: ['gemini', 'codex', 'claude', 'hermes'] },
+      verify: { type: 'plan', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       gate: 'plan-approval',
     },
@@ -168,7 +168,7 @@ describe('porch done — verification enforcement', () => {
     // Create review files for all 3 models
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
-    for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
+    for (const model of ['gemini', 'codex', 'claude']) {
       fs.writeFileSync(
         path.join(projectDir, `0001-specify-iter1-${model}.txt`),
         `Review content\n\n---\nVERDICT: APPROVE\n---`

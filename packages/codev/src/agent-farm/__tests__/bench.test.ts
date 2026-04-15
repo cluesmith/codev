@@ -285,10 +285,9 @@ describe('afx bench', () => {
   });
 
   describe('runParallel', () => {
-    it('should spawn all 3 engines and return wall time', async () => {
+    it('should spawn all default engines and return wall time', async () => {
       vi.useRealTimers();
-      // Create 4 mock processes (one per engine)
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         const proc = createMockProcess(0);
         vi.mocked(spawnMock).mockReturnValueOnce(proc as any);
       }
@@ -296,12 +295,12 @@ describe('afx bench', () => {
       const result = await runParallel('test', 300, 1, '20260219-120000', '/tmp/results');
 
       expect(result.iteration).toBe(1);
-      expect(result.engines).toHaveLength(4);
+      expect(result.engines).toHaveLength(3);
       expect(result.engines[0].engine).toBe('gemini');
       expect(result.engines[1].engine).toBe('codex');
       expect(result.engines[2].engine).toBe('claude');
       expect(result.wallTime).toBeGreaterThanOrEqual(0);
-      expect(spawnMock).toHaveBeenCalledTimes(4);
+      expect(spawnMock).toHaveBeenCalledTimes(3);
     });
 
     it('should handle mixed success and failure', async () => {
@@ -309,7 +308,6 @@ describe('afx bench', () => {
       // gemini succeeds, codex fails, claude succeeds
       vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(1) as any);
-      vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
 
       const result = await runParallel('test', 300, 1, '20260219-120000', '/tmp/results');
@@ -325,14 +323,14 @@ describe('afx bench', () => {
   describe('runSequential', () => {
     it('should spawn engines one at a time with null wall time', async () => {
       vi.useRealTimers();
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
 
       const result = await runSequential('test', 300, 1, '20260219-120000', '/tmp/results');
 
       expect(result.iteration).toBe(1);
-      expect(result.engines).toHaveLength(4);
+      expect(result.engines).toHaveLength(3);
       expect(result.wallTime).toBeNull();
     });
   });
@@ -391,8 +389,7 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // Mock 4 engine processes (parallel)
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
 
@@ -423,8 +420,7 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // Mock 8 engine processes (2 iterations × 4 engines)
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 6; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
 
@@ -448,7 +444,7 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
 
@@ -470,7 +466,7 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
 
@@ -495,8 +491,7 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // 2 iterations, all engines fail
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 6; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(1) as any);
       }
 

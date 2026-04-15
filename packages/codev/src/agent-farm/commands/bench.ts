@@ -1,7 +1,7 @@
 /**
  * Bench command - run consultation benchmarks across engines.
  *
- * Spawns `consult -m <engine> --prompt <prompt>` for gemini, codex, and claude,
+ * Spawns `consult -m <engine> --prompt <prompt>` for the default consultation engines,
  * collects timing data, computes statistics, and saves results.
  */
 
@@ -12,7 +12,7 @@ import { hostname as osHostname } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { logger } from '../utils/logger.js';
 
-const ENGINES = ['gemini', 'codex', 'claude', 'hermes'] as const;
+const ENGINES = ['gemini', 'codex', 'claude'] as const;
 type Engine = (typeof ENGINES)[number];
 
 export const DEFAULT_PROMPT =
