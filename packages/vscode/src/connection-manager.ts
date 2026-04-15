@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { TowerClient } from '@cluesmith/codev-core/tower-client';
 import { AuthWrapper } from './auth-wrapper.js';
 import { detectWorkspacePath, getTowerAddress } from './workspace-detector.js';
+import { SSEClient } from './sse-client.js';
+import { autoStartTower } from './tower-starter.js';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -17,6 +19,7 @@ export class ConnectionManager {
   private auth: AuthWrapper;
   private outputChannel: vscode.OutputChannel;
   private workspacePath: string | null = null;
+  private sse: SSEClient | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private readonly maxReconnectDelay = 30000;
@@ -24,6 +27,9 @@ export class ConnectionManager {
 
   private readonly stateChangeEmitter = new vscode.EventEmitter<ConnectionState>();
   readonly onStateChange = this.stateChangeEmitter.event;
+
+  private readonly sseEventEmitter = new vscode.EventEmitter<{ type: string; data: string }>();
+  readonly onSSEEvent = this.sseEventEmitter.event;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -69,9 +75,18 @@ export class ConnectionManager {
     });
 
     // Connect if autoConnect is enabled
-    const autoConnect = vscode.workspace.getConfiguration('codev').get<boolean>('autoConnect', true);
+    const config = vscode.workspace.getConfiguration('codev');
+    const autoConnect = config.get<boolean>('autoConnect', true);
     if (autoConnect) {
+      // Try connecting; if Tower isn't running, try auto-start
       await this.connect();
+      if (this.state === 'disconnected' && config.get<boolean>('autoStartTower', true)) {
+        this.log('INFO', 'Tower not running, attempting auto-start...');
+        const started = await autoStartTower(this.client!, this.workspacePath, this.outputChannel);
+        if (started) {
+          await this.connect();
+        }
+      }
     }
   }
 
@@ -88,6 +103,7 @@ export class ConnectionManager {
         this.setState('connected');
         this.reconnectAttempt = 0;
         this.log('INFO', `Connected to Tower (status: ${health.status}, uptime: ${health.uptime}s)`);
+        this.startSSE();
       } else {
         this.log('WARN', 'Tower not responding');
         this.setState('disconnected');
@@ -125,6 +141,36 @@ export class ConnectionManager {
     }
   }
 
+  // ── SSE ───────────────────────────────────────────────────────
+
+  private startSSE(): void {
+    this.stopSSE();
+    const { host, port } = getTowerAddress();
+    this.sse = new SSEClient(
+      `http://${host}:${port}`,
+      this.outputChannel,
+      () => {
+        // SSE disconnected — trigger reconnection
+        if (!this.disposed && this.state === 'connected') {
+          this.log('WARN', 'SSE connection lost');
+          this.setState('disconnected');
+          this.scheduleReconnect();
+        }
+      },
+    );
+    this.sse.onEvent((type, data) => {
+      this.sseEventEmitter.fire({ type, data });
+    });
+    this.sse.connect();
+  }
+
+  private stopSSE(): void {
+    if (this.sse) {
+      this.sse.dispose();
+      this.sse = null;
+    }
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   private setState(newState: ConnectionState): void {
@@ -141,10 +187,12 @@ export class ConnectionManager {
 
   dispose(): void {
     this.disposed = true;
+    this.stopSSE();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
     this.stateChangeEmitter.dispose();
+    this.sseEventEmitter.dispose();
     this.log('INFO', 'Connection Manager disposed');
   }
 }
