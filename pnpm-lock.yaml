@@ -109,6 +109,9 @@ importers:
 
   packages/dashboard:
     dependencies:
+      '@cluesmith/codev-core':
+        specifier: workspace:*
+        version: link:../core
       '@cluesmith/codev-types':
         specifier: workspace:*
         version: link:../types
