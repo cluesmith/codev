@@ -41,7 +41,7 @@ describe('consultation model configuration', () => {
   describe('config loading for consultation models', () => {
     it('returns default models when no config exists', () => {
       const config = loadConfig(tmpDir);
-      expect(config.porch?.consultation?.models).toEqual(['gemini', 'codex', 'claude']);
+      expect(config.porch?.consultation?.models).toEqual(['gemini', 'codex', 'claude', 'hermes']);
     });
 
     it('overrides models with config array', () => {
