@@ -195,10 +195,11 @@ Revert extraction — move code back to `tower-client.ts`. No runtime behavior c
 - [ ] `src/workspace-detector.ts` — uses `findProjectRoot()` pattern to traverse up from `vscode.workspace.workspaceFolders[0]` to `.codev/config.json`, reads Tower port from config
 - [ ] `Codev` Output Channel for diagnostic logging (redacts auth tokens)
 - [ ] Extension settings registration: all 7 settings
-- [ ] Activation events: `workspaceContains:.codev/config.json` + implicit `onCommand:`
+- [ ] Activation events: `workspaceContains:.codev` + `workspaceContains:codev` + implicit `onCommand:`
 - [ ] Proper `deactivate()` — close all connections, dispose resources
 - [ ] Add `ws` as runtime dependency, update `esbuild.js` externals
 - [ ] `src/extension.ts` updated to initialize Connection Manager on activation
+- [ ] Workspace auto-activation: after connecting to Tower, call `client.activateWorkspace(workspacePath)` to ensure architect terminal is created
 - [ ] Status bar showing connection state
 
 #### Implementation Details

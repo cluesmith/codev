@@ -103,6 +103,7 @@ export class ConnectionManager {
         this.setState('connected');
         this.reconnectAttempt = 0;
         this.log('INFO', `Connected to Tower (status: ${health.status}, uptime: ${health.uptime}s)`);
+        await this.activateWorkspace();
         this.startSSE();
       } else {
         this.log('WARN', 'Tower not responding');
@@ -138,6 +139,22 @@ export class ConnectionManager {
       this.log('INFO', 'Auth key refreshed');
     } else {
       this.log('ERROR', 'No auth key found — check ~/.agent-farm/local-key');
+    }
+  }
+
+  // ── Workspace Activation ──────────────────────────────────────
+
+  private async activateWorkspace(): Promise<void> {
+    if (!this.client || !this.workspacePath) { return; }
+    try {
+      const result = await this.client.activateWorkspace(this.workspacePath);
+      if (result.ok) {
+        this.log('INFO', `Workspace activated: ${this.workspacePath}`);
+      } else {
+        this.log('WARN', `Workspace activation failed: ${result.error}`);
+      }
+    } catch (err) {
+      this.log('ERROR', `Workspace activation error: ${(err as Error).message}`);
     }
   }
 
