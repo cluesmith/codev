@@ -303,7 +303,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 - Terminal scrollback is preserved via shellper — no data loss
 
 **Escape sequence buffering:**
-WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-shared` as a shared utility.
+WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-core` as a shared utility.
 
 **Resize deferral during replay:**
 On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
@@ -506,16 +506,16 @@ Extract shared code to avoid duplicating logic across server, dashboard, and ext
 
 Zero-dependency package with shared TypeScript interfaces at `packages/types/`. Already extracted and in use. Contains WebSocket frame types, SSE event types, and API response shapes.
 
-### `@cluesmith/codev-shared` (Required — before V1)
+### `@cluesmith/codev-core` (Required — before V1)
 
 Shared runtime utilities extracted from existing code and reused by server, extension, and dashboard. This is NOT new code — it's existing logic moved to a shared location.
 
 **Subpath exports** (not a single barrel — prevents Node builtins leaking into browser builds):
-- `@cluesmith/codev-shared/tower-client` — `TowerClient` class + Tower API types (Node-only, uses `fs`/`os`/`crypto`)
-- `@cluesmith/codev-shared/auth` — `readLocalKey()` (read-only) + `ensureLocalKey()` (creates dir + generates, CLI-only)
-- `@cluesmith/codev-shared/workspace` — `encodeWorkspacePath()` / `decodeWorkspacePath()` (pure, universal)
-- `@cluesmith/codev-shared/constants` — `DEFAULT_TOWER_PORT`, `AGENT_FARM_DIR` (pure, universal)
-- `@cluesmith/codev-shared/escape-buffer` — `EscapeBuffer` class (pure, browser-safe)
+- `@cluesmith/codev-core/tower-client` — `TowerClient` class + Tower API types (Node-only, uses `fs`/`os`/`crypto`)
+- `@cluesmith/codev-core/auth` — `readLocalKey()` (read-only) + `ensureLocalKey()` (creates dir + generates, CLI-only)
+- `@cluesmith/codev-core/workspace` — `encodeWorkspacePath()` / `decodeWorkspacePath()` (pure, universal)
+- `@cluesmith/codev-core/constants` — `DEFAULT_TOWER_PORT`, `AGENT_FARM_DIR` (pure, universal)
+- `@cluesmith/codev-core/escape-buffer` — `EscapeBuffer` class (pure, browser-safe)
 
 **`TowerClient` auth refactoring** — current class reads auth key once in constructor (`private readonly localKey`). Must be refactored to accept injectable auth (key provider function or setter) so the extension can:
 - Use `SecretStorage` instead of `fs.readFileSync`
@@ -526,15 +526,15 @@ Shared runtime utilities extracted from existing code and reused by server, exte
 - `ensureLocalKey()` — creates `~/.agent-farm/` directory and generates key if missing. CLI-only — the extension must never auto-generate keys.
 
 **After extraction:**
-- `packages/codev` imports from `@cluesmith/codev-shared` instead of local `tower-client.ts`
-- `packages/vscode` imports from `@cluesmith/codev-shared` — wraps `TowerClient` with VS Code concerns
-- `packages/dashboard` imports `EscapeBuffer` from `@cluesmith/codev-shared/escape-buffer` (browser-safe subpath)
+- `packages/codev` imports from `@cluesmith/codev-core` instead of local `tower-client.ts`
+- `packages/vscode` imports from `@cluesmith/codev-core` — wraps `TowerClient` with VS Code concerns
+- `packages/dashboard` imports `EscapeBuffer` from `@cluesmith/codev-core/escape-buffer` (browser-safe subpath)
 
-**Publishing:** `@cluesmith/codev-shared` must be published to npm **before** `@cluesmith/codev` during releases (server has a runtime dependency). Pin exact versions (not `*` or `^`). Update release protocol with two-package publish order.
+**Publishing:** `@cluesmith/codev-core` must be published to npm **before** `@cluesmith/codev` during releases (server has a runtime dependency). Pin exact versions (not `*` or `^`). Update release protocol with two-package publish order.
 
 ### Changes to Main `@cluesmith/codev` Package
 
-1. Replace `src/agent-farm/lib/tower-client.ts` with re-exports from `@cluesmith/codev-shared`
+1. Replace `src/agent-farm/lib/tower-client.ts` with re-exports from `@cluesmith/codev-core`
 2. Import frame constants from shared package
 3. Reference shared types in Tower route response bodies
 
@@ -706,7 +706,7 @@ All errors surface through a consistent pattern:
 ## Dependencies
 - **External Services**: None (localhost only)
 - **Internal Systems**: Tower server (existing), shellper (existing), all existing REST/WebSocket/SSE APIs
-- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-shared` (shared runtime utilities + API client, post-V1)
+- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-core` (shared runtime utilities + API client, post-V1)
 - **Libraries/Frameworks**: VS Code Extension API, `ws` (WebSocket client), `eventsource` (SSE client), React + Vite (analytics + team Webviews)
 - **Build**: `@vscode/vsce` for packaging and Marketplace publishing
 
