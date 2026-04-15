@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { TerminalManager } from './terminal-manager.js';
-import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -58,20 +57,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.openArchitectTerminal', async () => {
 			const client = connectionManager?.getClient();
-			if (!client || connectionManager?.getState() !== 'connected') {
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
 				vscode.window.showErrorMessage('Codev: Not connected to Tower');
 				return;
 			}
-			// Find architect terminal from workspace state
-			const workspacePath = connectionManager?.getWorkspacePath();
-			if (!workspacePath) { return; }
 			try {
-				const encoded = encodeWorkspacePath(workspacePath);
-				const state = await client.request<{ architect: { terminalId?: string } | null }>(`/workspace/${encoded}/api/state`);
-				if (state.ok && state.data?.architect?.terminalId) {
-					await terminalManager?.openArchitect(state.data.architect.terminalId);
+				const state = await client.getWorkspaceState(workspacePath);
+				if (state?.architect?.terminalId) {
+					await terminalManager?.openArchitect(state.architect.terminalId);
 				} else {
-					vscode.window.showWarningMessage('Codev: No architect terminal found');
+					vscode.window.showWarningMessage('Codev: No architect terminal found — is the workspace activated?');
 				}
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get workspace state');
@@ -79,20 +75,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.openBuilderTerminal', async () => {
 			const client = connectionManager?.getClient();
-			if (!client || connectionManager?.getState() !== 'connected') {
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
 				vscode.window.showErrorMessage('Codev: Not connected to Tower');
 				return;
 			}
 			try {
-				const workspacePath = connectionManager?.getWorkspacePath();
-				if (!workspacePath) { return; }
-				const encoded = encodeWorkspacePath(workspacePath);
-				const state = await client.request<{ builders: Array<{ id: string; name: string; terminalId?: string }> }>(`/workspace/${encoded}/api/state`);
-				if (!state.ok || !state.data?.builders?.length) {
-					vscode.window.showWarningMessage('Codev: No builders found');
-					return;
-				}
-				const builders = state.data.builders.filter(b => b.terminalId);
+				const state = await client.getWorkspaceState(workspacePath);
+				const builders = state?.builders?.filter(b => b.terminalId) ?? [];
 				if (builders.length === 0) {
 					vscode.window.showWarningMessage('Codev: No builder terminals available');
 					return;
@@ -110,21 +100,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.newShell', async () => {
 			const client = connectionManager?.getClient();
-			if (!client || connectionManager?.getState() !== 'connected') {
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
 				vscode.window.showErrorMessage('Codev: Not connected to Tower');
 				return;
 			}
 			try {
-				const workspacePath = connectionManager?.getWorkspacePath();
-				if (!workspacePath) { return; }
-				const encoded = encodeWorkspacePath(workspacePath);
-				const result = await client.request<{ id: string; name: string; terminalId: string }>(`/workspace/${encoded}/api/tabs/shell`, {
-					method: 'POST',
-					body: JSON.stringify({}),
-				});
-				if (result.ok && result.data?.terminalId) {
+				const result = await client.createShellTab(workspacePath);
+				if (result?.terminalId) {
 					const shellNum = (terminalManager?.getTerminalCount() ?? 0) + 1;
-					await terminalManager?.openShell(result.data.terminalId, shellNum);
+					await terminalManager?.openShell(result.terminalId, shellNum);
 				}
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');

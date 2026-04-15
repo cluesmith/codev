@@ -100,6 +100,9 @@ importers:
 
   packages/core:
     devDependencies:
+      '@cluesmith/codev-types':
+        specifier: workspace:*
+        version: link:../types
       '@types/node':
         specifier: 22.x
         version: 22.19.17

@@ -19,6 +19,7 @@
     "check-types": "tsc --noEmit"
   },
   "devDependencies": {
+    "@cluesmith/codev-types": "workspace:*",
     "@types/node": "22.x",
     "typescript": "^5.7.0"
   },

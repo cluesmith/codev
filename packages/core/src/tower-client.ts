@@ -7,6 +7,7 @@
  * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
  */
 
+import type { DashboardState } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { ensureLocalKey } from './auth.js';
 
@@ -204,6 +205,21 @@ export class TowerClient {
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {
     const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<TowerWorkspaceStatus>(`/api/workspaces/${encoded}/status`);
+    return result.ok ? result.data! : null;
+  }
+
+  async getWorkspaceState(workspacePath: string): Promise<DashboardState | null> {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const result = await this.request<DashboardState>(`/workspace/${encoded}/api/state`);
+    return result.ok ? result.data! : null;
+  }
+
+  async createShellTab(workspacePath: string): Promise<{ id: string; name: string; terminalId: string } | null> {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const result = await this.request<{ id: string; name: string; terminalId: string }>(
+      `/workspace/${encoded}/api/tabs/shell`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
     return result.ok ? result.data! : null;
   }
 
