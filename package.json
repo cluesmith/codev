@@ -1,5 +1,10 @@
 {
   "name": "cluesmith-codev",
   "private": true,
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev build",
+    "test": "pnpm --filter @cluesmith/codev test",
+    "local-install": "npm install -g ./packages/core/cluesmith-codev-core-*.tgz ./packages/codev/cluesmith-codev-*.tgz"
+  }
 }
