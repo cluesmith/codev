@@ -111,15 +111,19 @@ These flags are used by porch (the protocol orchestrator) when generating consul
 
 ## Parallel Consultation (Multi-Model Reviews)
 
+Default project configuration uses a 3-model set (`gemini`, `codex`, `claude`).
+
 For thorough reviews, run multiple models in parallel:
 
 ```bash
-# 4-way spec review
+# Default 3-way spec review
 consult -m gemini --protocol spir --type spec &
 consult -m codex --protocol spir --type spec &
 consult -m claude --protocol spir --type spec &
-consult -m hermes --protocol spir --type spec &
 wait
+
+# Optional: include Hermes as a 4th reviewer
+consult -m hermes --protocol spir --type spec
 ```
 
 ## Performance
@@ -185,12 +189,14 @@ consult -m codex --protocol spir --type pr --issue 42
 # Protocol: implementation review with bugfix protocol
 consult -m claude --protocol bugfix --type impl
 
-# 4-way parallel review
+# Default 3-way parallel review
 consult -m gemini --protocol spir --type spec &
 consult -m codex --protocol spir --type spec &
 consult -m claude --protocol spir --type spec &
-consult -m hermes --protocol spir --type spec &
 wait
+
+# Optional: include Hermes as an additional reviewer
+consult -m hermes --protocol spir --type spec
 
 # Stats
 consult stats --days 7 --json
