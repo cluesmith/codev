@@ -35,10 +35,15 @@ interface ModelConfig {
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
   gemini: { cli: 'gemini', args: ['--model', 'gemini-3-pro-preview'], envVar: 'GEMINI_SYSTEM_MD' },
+  hermes: { cli: 'hermes', args: ['chat', '-q'], envVar: null },
 };
 
 // Models that use an Agent SDK instead of CLI subprocess
 const SDK_MODELS = ['claude', 'codex'];
+
+// Prevent E2BIG when passing very large prompts to CLI backends.
+// Large payloads are written to a temp file and referenced in the query.
+const CLI_PROMPT_INLINE_MAX_CHARS = 100_000;
 
 // Claude Agent SDK turn limit. Claude explores the codebase with Read/Glob/Grep
 // tools before producing its verdict, so it needs a generous turn budget.
@@ -615,6 +620,25 @@ async function runConsultation(
     // Use --output-format json to capture token usage/cost in structured output.
     // Never use --yolo — it allows Gemini to write files (#370).
     cmd = [config.cli, '--output-format', 'json', ...config.args, query];
+  } else if (model === 'hermes') {
+    // Hermes does not have a dedicated system prompt flag for single-shot mode.
+    // Include role context at the top of the prompt.
+    const hermesPrompt = `${role}\n\n---\n\n${query}`;
+
+    // Large inline CLI args can exceed OS ARG_MAX and fail with E2BIG.
+    // For very large prompts, write the full prompt to a temp file and pass
+    // an instruction that points Hermes at that file.
+    if (hermesPrompt.length > CLI_PROMPT_INLINE_MAX_CHARS) {
+      tempFile = path.join(tmpdir(), `codev-consult-prompt-${Date.now()}.md`);
+      fs.writeFileSync(tempFile, hermesPrompt);
+      const instruction = [
+        `Read the full consultation prompt from this file: ${tempFile}`,
+        'You have file access. Read files directly from disk to review code.',
+      ].join('\n\n');
+      cmd = [config.cli, ...config.args, instruction];
+    } else {
+      cmd = [config.cli, ...config.args, hermesPrompt];
+    }
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
@@ -1334,7 +1358,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   }
 
   // Add file access instruction for Gemini
-  if (model === 'gemini') {
+  if (model === 'gemini' || model === 'hermes') {
     query += '\n\nYou have file access. Read files directly from disk to review code.';
   }
 

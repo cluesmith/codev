@@ -47,7 +47,7 @@ import type {
 } from './types.js';
 
 /** Valid model backends for consultation. */
-const VALID_MODELS = ['gemini', 'codex', 'claude'];
+const VALID_MODELS = ['gemini', 'codex', 'claude', 'hermes'];
 
 /**
  * Resolve the effective consultation models for a verify step.
