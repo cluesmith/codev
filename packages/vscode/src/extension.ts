@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { TerminalManager } from './terminal-manager.js';
+import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -65,7 +66,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			const workspacePath = connectionManager?.getWorkspacePath();
 			if (!workspacePath) { return; }
 			try {
-				const state = await client.request<{ architect: { terminalId?: string } | null }>('/api/state');
+				const encoded = encodeWorkspacePath(workspacePath);
+				const state = await client.request<{ architect: { terminalId?: string } | null }>(`/workspace/${encoded}/api/state`);
 				if (state.ok && state.data?.architect?.terminalId) {
 					await terminalManager?.openArchitect(state.data.architect.terminalId);
 				} else {
@@ -82,7 +84,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			try {
-				const state = await client.request<{ builders: Array<{ id: string; name: string; terminalId?: string }> }>('/api/state');
+				const workspacePath = connectionManager?.getWorkspacePath();
+				if (!workspacePath) { return; }
+				const encoded = encodeWorkspacePath(workspacePath);
+				const state = await client.request<{ builders: Array<{ id: string; name: string; terminalId?: string }> }>(`/workspace/${encoded}/api/state`);
 				if (!state.ok || !state.data?.builders?.length) {
 					vscode.window.showWarningMessage('Codev: No builders found');
 					return;
@@ -110,7 +115,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			try {
-				const result = await client.request<{ id: string; name: string; terminalId: string }>('/api/tabs/shell', {
+				const workspacePath = connectionManager?.getWorkspacePath();
+				if (!workspacePath) { return; }
+				const encoded = encodeWorkspacePath(workspacePath);
+				const result = await client.request<{ id: string; name: string; terminalId: string }>(`/workspace/${encoded}/api/tabs/shell`, {
 					method: 'POST',
 					body: JSON.stringify({}),
 				});
