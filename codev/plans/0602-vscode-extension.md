@@ -340,8 +340,8 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 - [ ] Editor layout: architect in left group, builders as tabs in right group
 - [ ] Terminal naming: `Codev: Architect`, `Codev: #42 password-hashing [implement]`, `Codev: Shell #1`
 - [ ] WebSocket auth via `0x00` control message after connection (not query param)
-- [ ] Respect `codev.terminalPosition` setting — only attempt `moveIntoEditor` when set to `"editor"`
-- [ ] Fallback to bottom panel if `moveIntoEditor` fails
+- [ ] Use `TerminalLocation.Editor` + `ViewColumn` for editor placement (stable API, no `moveIntoEditor`)
+- [ ] Respect `codev.terminalPosition` setting — `"editor"` uses ViewColumn, `"panel"` uses TerminalLocation.Panel
 - [ ] WebSocket pool management (max 10 concurrent)
 - [ ] Image paste: intercept clipboard paste in terminal, upload via `POST /api/paste-image` (note: VS Code Pseudoterminal only delivers text input — investigate clipboard API feasibility, defer if not possible)
 
@@ -380,12 +380,12 @@ handleInput(data: string): void {
 }
 ```
 
-**Editor layout sequence:**
-1. Create terminal with `createTerminal({ name, pty })`
-2. `vscode.commands.executeCommand('workbench.action.terminal.moveIntoEditor')`
-3. For architect: move to first editor group
-4. For builders: move to second editor group (split if needed)
-5. Catch errors → fallback to bottom panel
+**Editor layout:**
+Create terminals directly in editor area via `createTerminal({ name, pty, location })`:
+- Architect: `{ viewColumn: ViewColumn.One }`
+- Builders/shells: `{ viewColumn: ViewColumn.Two }`
+- VS Code auto-creates the split when ViewColumn.Two is first used
+- Panel fallback: `TerminalLocation.Panel` when setting is `"panel"`
 
 #### Acceptance Criteria
 - [ ] Architect terminal opens in left editor group
@@ -405,8 +405,8 @@ handleInput(data: string): void {
 Remove terminal adapter, revert to scaffold. Connection Manager stays functional.
 
 #### Risks
-- **Risk**: `moveIntoEditor` fails on some VS Code versions
-  - **Mitigation**: Try/catch with panel fallback, log warning to Output Channel
+- **Risk**: Terminal editor placement not working as expected
+  - **Mitigation**: Uses stable `TerminalLocation.Editor` + `ViewColumn` API, `"panel"` setting as fallback
 - **Risk**: EscapeBuffer diverges from dashboard implementation
   - **Mitigation**: Port tests alongside code, verify against same fixtures
 
@@ -754,7 +754,7 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 | Tower auto-start PATH issues | Medium | Low | Resolve full afx path, log errors | 2b |
 | SSE double-retry (native + custom backoff) | Medium | Medium | Disable native EventSource reconnection | 2b |
 | HTTP proxy not configured in enterprise | Medium | Medium | Integrate with VS Code proxy settings, `https-proxy-agent` | 2a |
-| `moveIntoEditor` API instability | Medium | Medium | Check `terminalPosition` setting first, try/catch with panel fallback | 3 |
+| Terminal editor placement | Low | Low | Uses stable TerminalLocation.Editor + ViewColumn API | 3 |
 | `@cluesmith/codev-core` must be published to npm | Medium | High | Publish alongside codev in same release step, version together | 1b |
 | Image paste infeasible via Pseudoterminal | High | Low | Investigate clipboard API, defer if not possible | 3 |
 | 7 TreeView providers cause excessive API calls | Low | Medium | Single cached overview call | 4 |

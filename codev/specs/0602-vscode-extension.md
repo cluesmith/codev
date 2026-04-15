@@ -263,10 +263,10 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 **Terminal layout (editor area, not bottom panel):**
 All Codev terminals (architect, builders, shells) open in the **editor area** as terminal-in-editor views — not the bottom panel. This provides full vertical height and mirrors the browser dashboard's layout.
 
-On first terminal open, the extension arranges two editor groups:
-1. Move terminals into the editor area via `workbench.action.terminal.moveIntoEditor`
-2. **Left editor group**: Architect terminal (single tab, always visible)
-3. **Right editor group**: Builder terminals (one tab per builder) + shell terminals
+Terminals are created directly in the editor area using `createTerminal({ location })` with `TerminalEditorLocationOptions`:
+- **Architect**: `ViewColumn.One` (left editor group)
+- **Builders + shells**: `ViewColumn.Two` (right editor group, one tab per terminal)
+- VS Code auto-creates the split when `ViewColumn.Two` is first used
 
 ```
 ┌──────────────┬────────────────┬────────────────┐
@@ -288,7 +288,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 
 **Shell terminals**: Open as additional tabs in the right editor group alongside builders.
 
-**Fallback**: `workbench.action.terminal.moveIntoEditor` is an undocumented internal VS Code command that may change between versions. If it fails, the extension falls back to the standard bottom panel and logs a warning to the Output Channel.
+**Fallback**: When `codev.terminalPosition` is set to `"panel"`, terminals open in the standard bottom panel instead of the editor area.
 
 **Binary protocol adapter:**
 - **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode(bytes, { stream: true })` → `onDidWrite.fire(string)`
@@ -733,7 +733,7 @@ All errors surface through a consistent pattern:
 | Extension host CPU spikes from high-volume terminal output | Medium | High | Chunk `onDidWrite` calls with `setImmediate`, 16KB threshold |
 | Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types, version in `/health` |
 | WebSocket backpressure causing frozen terminals | Low | High | Never drop frames — disconnect and reconnect via ring buffer replay if > 1MB queued |
-| `moveIntoEditor` API instability | Medium | Medium | Fallback to bottom panel on failure, log warning to Output Channel |
+| Terminal position setting ignored | Low | Low | `TerminalLocation.Editor` + `ViewColumn` used via stable API, `"panel"` fallback via setting |
 | Multi-workspace confusion (actions against wrong workspace) | Medium | Medium | Scope all actions to active workspace, traverse up to `.codev/config.json` root |
 | Comment thread line-drift after edits | Medium | Medium | Re-scan on `TextDocumentChangeEvent`, update thread positions |
 | Concurrent annotation edits (browser + VS Code) | Low | Medium | Document as unsupported — last writer wins |
