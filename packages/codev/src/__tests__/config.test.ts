@@ -122,7 +122,7 @@ describe('loadConfig', () => {
     expect(config.shell?.architect).toBe('claude');
     expect(config.shell?.builder).toBe('claude');
     expect(config.shell?.shell).toBe('bash');
-    expect(config.porch?.consultation?.models).toEqual(['gemini', 'codex', 'claude']);
+    expect(config.porch?.consultation?.models).toEqual(['gemini', 'codex', 'claude', 'hermes']);
     expect(config.framework?.source).toBe('local');
   });
 

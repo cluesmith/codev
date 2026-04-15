@@ -15,7 +15,7 @@ import type { ProjectState, Protocol, PorchNextResponse } from '../types.js';
 // override consultation models (e.g., "parent") and break tests expecting 3-model defaults.
 // Use vi.hoisted mutable ref so individual tests can override consultation models.
 const { configRef } = vi.hoisted(() => ({
-  configRef: { models: ['gemini', 'codex', 'claude'] as string | string[] },
+  configRef: { models: ['gemini', 'codex', 'claude', 'hermes'] as string | string[] },
 }));
 
 vi.mock('../../../lib/config.js', async (importOriginal) => {
@@ -93,7 +93,7 @@ const spirProtocol = {
       name: 'Specify',
       type: 'build_verify',
       build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_ID}-*.md' },
-      verify: { type: 'spec', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'spec', models: ['gemini', 'codex', 'claude', 'hermes'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       gate: 'spec-approval',
@@ -103,7 +103,7 @@ const spirProtocol = {
       name: 'Plan',
       type: 'build_verify',
       build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_ID}-*.md' },
-      verify: { type: 'plan', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'plan', models: ['gemini', 'codex', 'claude', 'hermes'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       gate: 'plan-approval',
@@ -113,7 +113,7 @@ const spirProtocol = {
       name: 'Implement',
       type: 'per_plan_phase',
       build: { prompt: 'implement.md', artifact: 'src/**/*.ts' },
-      verify: { type: 'impl', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'impl', models: ['gemini', 'codex', 'claude', 'hermes'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       checks: {
@@ -126,7 +126,7 @@ const spirProtocol = {
       name: 'Review',
       type: 'build_verify',
       build: { prompt: 'review.md', artifact: 'codev/reviews/${PROJECT_ID}-*.md' },
-      verify: { type: 'pr', models: ['gemini', 'codex', 'claude'] },
+      verify: { type: 'pr', models: ['gemini', 'codex', 'claude', 'hermes'] },
       max_iterations: 1,
       on_complete: { commit: true, push: true },
       gate: 'pr',
@@ -154,7 +154,7 @@ describe('porch next', () => {
 
   afterEach(() => {
     fs.rmSync(testDir, { recursive: true, force: true });
-    configRef.models = ['gemini', 'codex', 'claude'];
+    configRef.models = ['gemini', 'codex', 'claude', 'hermes'];
   });
 
   // --------------------------------------------------------------------------
@@ -207,6 +207,7 @@ describe('porch next', () => {
     expect(result.tasks![0].description).toContain('gemini');
     expect(result.tasks![0].description).toContain('codex');
     expect(result.tasks![0].description).toContain('claude');
+    expect(result.tasks![0].description).toContain('hermes');
   });
 
   // --------------------------------------------------------------------------
@@ -220,7 +221,7 @@ describe('porch next', () => {
     // Create review files with APPROVE verdicts
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
-    for (const model of ['gemini', 'codex', 'claude']) {
+    for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
       const reviewContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\nSUMMARY: Looks good\nCONFIDENCE: HIGH\n---`;
       fs.writeFileSync(
         path.join(projectDir, `0001-specify-iter1-${model}.txt`),
@@ -254,6 +255,7 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), requestChangesContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-hermes.txt'), approveContent);
 
     const result = await next(testDir, '0001');
 
@@ -386,7 +388,7 @@ describe('porch next', () => {
     // Create review files with APPROVE
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
-    for (const model of ['gemini', 'codex', 'claude']) {
+    for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
       const content = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\nSUMMARY: Good\n---`;
       fs.writeFileSync(path.join(projectDir, `0001-phase_1-iter1-${model}.txt`), content);
     }
@@ -424,7 +426,7 @@ describe('porch next', () => {
     // Create review files for phase_2 with APPROVE
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
-    for (const model of ['gemini', 'codex', 'claude']) {
+    for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
       const content = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\nSUMMARY: Good\n---`;
       fs.writeFileSync(path.join(projectDir, `0001-phase_2-iter1-${model}.txt`), content);
     }
@@ -484,6 +486,7 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-hermes.txt'), approveContent);
 
     // Create rebuttal file
     fs.writeFileSync(
@@ -528,6 +531,7 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-claude.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-hermes.txt'), approveContent);
 
     // Create rebuttal file for phase_1
     fs.writeFileSync(
@@ -560,6 +564,7 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-hermes.txt'), rcContent);
 
     const result = await next(testDir, '0001');
 
@@ -567,6 +572,8 @@ describe('porch next', () => {
     expect(result.tasks![0].description).toContain('0001-specify-iter1-gemini.txt');
     expect(result.tasks![0].description).toContain('0001-specify-iter1-codex.txt');
     expect(result.tasks![0].description).toContain('0001-specify-iter1-claude.txt');
+    expect(result.tasks![0].description).toContain('0001-specify-iter1-hermes.txt');
+    expect(result.tasks![0].description).toContain('0001-specify-iter1-hermes.txt');
   });
 
   // --------------------------------------------------------------------------
@@ -585,6 +592,7 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-hermes.txt'), approveContent);
 
     const result1 = await next(testDir, '0001');
     const result2 = await next(testDir, '0001');
@@ -643,6 +651,7 @@ describe('porch next', () => {
           { model: 'gemini', verdict: 'REQUEST_CHANGES', file: '/tmp/fake-review.txt' },
           { model: 'codex', verdict: 'APPROVE', file: '/tmp/fake-review2.txt' },
           { model: 'claude', verdict: 'APPROVE', file: '/tmp/fake-review3.txt' },
+          { model: 'hermes', verdict: 'APPROVE', file: '/tmp/fake-review4.txt' },
         ],
       }],
     });
@@ -686,6 +695,7 @@ describe('porch next', () => {
     expect(result.status).toBe('tasks');
     expect(result.tasks![0].description).toContain('codex');
     expect(result.tasks![0].description).toContain('claude');
+    expect(result.tasks![0].description).toContain('hermes');
     // Should not mention gemini (already done)
     expect(result.tasks![0].subject).toContain('remaining');
   });
@@ -834,6 +844,7 @@ describe('porch next', () => {
     expect(desc).toContain('gemini');
     expect(desc).toContain('codex');
     expect(desc).toContain('claude');
+    expect(desc).toContain('hermes');
     // Must NOT indicate parent/none delegation
     expect(desc).not.toContain('parent');
   });

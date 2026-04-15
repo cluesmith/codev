@@ -85,7 +85,7 @@ const DEFAULT_CONFIG: CodevConfig = {
   },
   porch: {
     consultation: {
-      models: ['gemini', 'codex', 'claude'],
+      models: ['gemini', 'codex', 'claude', 'hermes'],
     },
   },
   framework: {

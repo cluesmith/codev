@@ -12,7 +12,7 @@ import { hostname as osHostname } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { logger } from '../utils/logger.js';
 
-const ENGINES = ['gemini', 'codex', 'claude'] as const;
+const ENGINES = ['gemini', 'codex', 'claude', 'hermes'] as const;
 type Engine = (typeof ENGINES)[number];
 
 export const DEFAULT_PROMPT =

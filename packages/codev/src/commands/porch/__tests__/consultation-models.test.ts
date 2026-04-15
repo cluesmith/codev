@@ -71,10 +71,10 @@ describe('consultation model configuration', () => {
   });
 
   describe('model validation (via VALID_MODELS)', () => {
-    // VALID_MODELS = ['gemini', 'codex', 'claude']
-    const VALID_MODELS = ['gemini', 'codex', 'claude'];
+// Valid models array has been updated to include hermes
+    const VALID_MODELS = ['gemini', 'codex', 'claude', 'hermes'];
 
-    it('all three registered backends are valid', () => {
+    it('all four registered backends are valid', () => {
       for (const model of VALID_MODELS) {
         expect(VALID_MODELS.includes(model)).toBe(true);
       }
