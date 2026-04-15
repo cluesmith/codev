@@ -1,0 +1,26 @@
+{
+  "name": "@cluesmith/codev-core",
+  "version": "0.0.1",
+  "description": "Core runtime utilities for Codev — Tower client, auth, workspace helpers, escape buffer",
+  "type": "module",
+  "exports": {
+    "./tower-client": { "types": "./src/tower-client.ts", "default": "./dist/tower-client.js" },
+    "./auth":          { "types": "./src/auth.ts",         "default": "./dist/auth.js" },
+    "./workspace":     { "types": "./src/workspace.ts",    "default": "./dist/workspace.js" },
+    "./constants":     { "types": "./src/constants.ts",    "default": "./dist/constants.js" },
+    "./escape-buffer": { "types": "./src/escape-buffer.ts","default": "./dist/escape-buffer.js" }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.x",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT"
+}
