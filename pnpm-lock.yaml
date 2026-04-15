@@ -176,9 +176,15 @@ importers:
 
   packages/vscode:
     dependencies:
+      '@cluesmith/codev-core':
+        specifier: workspace:*
+        version: link:../core
       '@cluesmith/codev-types':
         specifier: workspace:*
         version: link:../types
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0
     devDependencies:
       '@types/mocha':
         specifier: ^10.0.10
@@ -189,6 +195,9 @@ importers:
       '@types/vscode':
         specifier: ^1.110.0
         version: 1.115.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vscode/test-cli':
         specifier: ^0.0.12
         version: 0.0.12

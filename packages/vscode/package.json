@@ -10,7 +10,10 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.codev",
+    "workspaceContains:codev"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -18,7 +21,48 @@
         "command": "codev.helloWorld",
         "title": "Hello World"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Codev",
+      "properties": {
+        "codev.towerHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Tower server host"
+        },
+        "codev.towerPort": {
+          "type": "number",
+          "default": 4100,
+          "description": "Tower server port"
+        },
+        "codev.workspacePath": {
+          "type": "string",
+          "default": "",
+          "description": "Override workspace path for Tower matching (auto-detected if empty)"
+        },
+        "codev.terminalPosition": {
+          "type": "string",
+          "enum": ["editor", "panel"],
+          "default": "editor",
+          "description": "Where to open Codev terminals (editor area or bottom panel)"
+        },
+        "codev.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Connect to Tower on activation"
+        },
+        "codev.autoStartTower": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-start Tower if not running on activation"
+        },
+        "codev.telemetry": {
+          "type": "boolean",
+          "default": false,
+          "description": "No telemetry collected"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm package",
@@ -35,12 +79,15 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@cluesmith/codev-types": "workspace:*"
+    "@cluesmith/codev-core": "workspace:*",
+    "@cluesmith/codev-types": "workspace:*",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/vscode": "^1.110.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/ws": "^8.18.1",
     "typescript-eslint": "^8.48.1",
     "eslint": "^9.39.1",
     "esbuild": "^0.27.1",

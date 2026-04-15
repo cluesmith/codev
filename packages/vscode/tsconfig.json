@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "rootDir": "src",
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    "types": ["node", "mocha"]
   }
 }
