@@ -20,7 +20,6 @@ export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>();
   private outputChannel: vscode.OutputChannel;
   private connectionManager: ConnectionManager;
-  private architectGroupCreated = false;
 
   constructor(connectionManager: ConnectionManager, outputChannel: vscode.OutputChannel) {
     this.connectionManager = connectionManager;
@@ -88,7 +87,12 @@ export class TerminalManager {
 
     const authKey = await this.getAuthKey();
     const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel);
-    const terminal = vscode.window.createTerminal({ name, pty });
+    const position = vscode.workspace.getConfiguration('codev').get<string>('terminalPosition', 'editor');
+    const location = position === 'editor'
+      ? { viewColumn: type === 'architect' ? vscode.ViewColumn.One : vscode.ViewColumn.Two }
+      : vscode.TerminalLocation.Panel;
+
+    const terminal = vscode.window.createTerminal({ name, pty, location });
 
     const mapKey = key ?? type;
     this.terminals.set(mapKey, { terminal, pty, type, id: terminalId });
@@ -102,31 +106,7 @@ export class TerminalManager {
       }
     });
 
-    terminal.show();
-
-    // Move to editor area if setting is "editor"
-    await this.arrangeLayout(type);
-  }
-
-  private async arrangeLayout(type: 'architect' | 'builder' | 'shell'): Promise<void> {
-    const position = vscode.workspace.getConfiguration('codev').get<string>('terminalPosition', 'editor');
-    if (position !== 'editor') { return; }
-
-    try {
-      await vscode.commands.executeCommand('workbench.action.terminal.moveIntoEditor');
-
-      if (type === 'architect' && !this.architectGroupCreated) {
-        // Architect goes to left group — split to create right group for builders
-        await vscode.commands.executeCommand('workbench.action.splitEditorRight');
-        await vscode.commands.executeCommand('workbench.action.focusPreviousGroup');
-        this.architectGroupCreated = true;
-      } else if (type !== 'architect' && this.architectGroupCreated) {
-        // Builders/shells go to right group
-        await vscode.commands.executeCommand('workbench.action.focusNextGroup');
-      }
-    } catch {
-      this.log('WARN', 'moveIntoEditor failed — using bottom panel');
-    }
+    terminal.show(true);
   }
 
   private buildWsUrl(terminalId: string): string | null {
