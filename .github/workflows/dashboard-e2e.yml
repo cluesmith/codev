@@ -25,6 +25,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build core package
+        working-directory: packages/core
+        run: pnpm build
+
       - name: Build package
         working-directory: packages/codev
         run: pnpm build
