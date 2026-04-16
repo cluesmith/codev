@@ -154,10 +154,10 @@ validated: [gemini, codex, claude]
 ### Use ASPIR for (autonomous SPIR):
 - Same as SPIR but **without human approval gates** on spec and plan
 - Trusted, low-risk work where spec/plan review can be deferred to PR
-- Builder runs autonomously through Specify → Plan → Implement → Review
+- Builder runs autonomously through Specify → Plan → Implement → Review (→ Verify)
 - Human approval still required at the PR gate before merge
 
-**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. See `codev/protocols/aspir/protocol.md`.
+**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. Both include an optional verify phase after review. See `codev/protocols/aspir/protocol.md`.
 
 ### Use EXPERIMENT for:
 - Testing new approaches or techniques
@@ -180,7 +180,7 @@ validated: [gemini, codex, claude]
 
 1. **When asked to build NEW FEATURES FOR CODEV**: Start with the Specification phase
 2. **Create exactly THREE documents per feature**: spec, plan, and review (all with same filename)
-3. **Follow the SPIR phases**: Specify → Plan → Implement → Review
+3. **Follow the SPIR phases**: Specify → Plan → Implement → Review (→ Verify)
 4. **Use multi-agent consultation by default** unless user says "without consultation"
 
 ## Directory Structure
@@ -315,7 +315,7 @@ afx spawn 42 --protocol spir          # Spawn builder for SPIR project
 afx spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
 afx spawn 42 --protocol bugfix        # Spawn builder for a bugfix
 afx status                            # Check all builders
-afx cleanup --project 0042            # Clean up after merge
+afx cleanup --project 0042            # Clean up (architect-driven, not automatic)
 afx open file.ts            # Open file in annotation viewer (NOT system open)
 ```
 

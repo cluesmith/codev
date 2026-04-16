@@ -85,12 +85,13 @@ cat codev/protocols/spir/protocol.md
 # Start implementing
 ```
 
-### The SPIR Protocol (Specify → Plan → Implement → Review)
+### The SPIR Protocol (Specify → Plan → Implement → Review (→ Verify))
 
 1. **Specify**: Read or create the spec at `codev/specs/XXXX-name.md`
 2. **Plan**: Read or create the plan at `codev/plans/XXXX-name.md`
 3. **Implement**: Write code following the plan phases
 4. **Review**: Write lessons learned and create PR
+5. **Verify** (optional): After PR merge, verify the feature works in the integrated codebase
 
 ### Consultations
 
@@ -147,7 +148,7 @@ afx status         # All builders
 |------|-------------|
 | **Gate reached** | `afx send architect "Project XXXX: <gate-name> ready for approval"` |
 | **PR ready** | `afx send architect "PR #N ready for review"` |
-| **PR merged** | `afx send architect "Project XXXX PR merged. Entering verify phase."` |
+| **PR merged** | `afx send architect "Project XXXX complete. PR merged. Entering verify phase."` |
 | **Blocked/stuck** | `afx send architect "Blocked on X — need guidance"` |
 | **Escalation needed** | `afx send architect "Issue too complex — recommend escalating to SPIR"` |
 
@@ -170,6 +171,13 @@ Can't find the auth helper mentioned in spec. Options:
 3. Spec needs clarification
 Waiting for Architect guidance.
 ```
+
+## Multi-PR Workflow
+
+Builders may submit multiple sequential PRs within a single worktree session. The worktree persists across PRs -- it is not cleaned up automatically after merge. This allows builders to do follow-up work (e.g., addressing review feedback in a second PR, or splitting large features across checkpoint PRs).
+
+- **Worktree cleanup is architect-driven** -- the architect decides when to run `afx cleanup`, not the builder
+- If a builder session is interrupted, use `afx spawn XXXX --resume` to reconnect to the existing worktree
 
 ## Constraints
 
