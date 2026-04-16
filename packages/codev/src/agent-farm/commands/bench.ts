@@ -1,7 +1,7 @@
 /**
  * Bench command - run consultation benchmarks across engines.
  *
- * Spawns `consult -m <engine> --prompt <prompt>` for gemini, codex, and claude,
+ * Spawns `consult -m <engine> --prompt <prompt>` for the default consultation engines,
  * collects timing data, computes statistics, and saves results.
  */
 

@@ -84,16 +84,20 @@ describe('consult command', () => {
       // Note: Codex now uses model_instructions_file config flag
       // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
       // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
+      // Hermes is invoked via `hermes chat -q` in MODEL_CONFIGS
       // Bugfix #370: --yolo removed from MODEL_CONFIGS; added conditionally in
       // runConsultation only for protocol mode (not general mode)
       const configs: Record<string, { cli: string; args: string[] }> = {
         gemini: { cli: 'gemini', args: [] },
         codex: { cli: 'codex', args: ['exec', '--full-auto'] },
+        hermes: { cli: 'hermes', args: ['chat', '-q'] },
       };
 
       expect(configs.gemini.cli).toBe('gemini');
       expect(configs.gemini.args).toEqual([]);
       expect(configs.codex.args).toContain('--full-auto');
+      expect(configs.hermes.cli).toBe('hermes');
+      expect(configs.hermes.args).toEqual(['chat', '-q']);
     });
 
     it('should use model_instructions_file for codex (not env var)', () => {
@@ -128,6 +132,73 @@ describe('consult command', () => {
       await expect(
         consult({ model: 'unknown-model', prompt: 'test' })
       ).rejects.toThrow(/Unknown model/);
+    });
+
+    it('should accept hermes as a valid model', async () => {
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+
+      process.chdir(testBaseDir);
+
+      const { consult } = await import('../commands/consult/index.js');
+
+      await expect(
+        consult({ model: 'hermes', prompt: 'test' })
+      ).resolves.toBeUndefined();
+    });
+
+    it('should pass inline prompt to hermes for normal-sized queries', async () => {
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+
+      process.chdir(testBaseDir);
+
+      vi.resetModules();
+      const { spawn } = await import('node:child_process');
+      vi.mocked(spawn).mockClear();
+      const { consult } = await import('../commands/consult/index.js');
+
+      await consult({ model: 'hermes', prompt: 'small prompt' });
+
+      const hermesCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'hermes');
+      expect(hermesCall).toBeDefined();
+      const args = hermesCall![1] as string[];
+      expect(args[0]).toBe('chat');
+      expect(args[1]).toBe('-q');
+      expect(args[2]).toContain('small prompt');
+    });
+
+    it('should use temp-file indirection for very large hermes queries', async () => {
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+
+      process.chdir(testBaseDir);
+
+      vi.resetModules();
+      const { spawn } = await import('node:child_process');
+      vi.mocked(spawn).mockClear();
+      const { consult } = await import('../commands/consult/index.js');
+
+      const largePrompt = 'x'.repeat(150_000);
+      await consult({ model: 'hermes', prompt: largePrompt });
+
+      const hermesCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'hermes');
+      expect(hermesCall).toBeDefined();
+      const args = hermesCall![1] as string[];
+      expect(args[0]).toBe('chat');
+      expect(args[1]).toBe('-q');
+      expect(args[2]).toContain('Read the full consultation prompt from this file');
+      expect(args[2]).toContain('codev-consult-prompt-');
+      expect(args[2]).not.toContain(largePrompt.slice(0, 1024));
     });
 
     it('should throw error when no mode specified', async () => {

@@ -80,11 +80,11 @@ describe('computePersistentOutputPath', () => {
       projectDir: '/workspace/codev/projects/0073-my-feature',
     };
 
-    for (const model of ['gemini', 'codex', 'claude']) {
+    for (const model of ['gemini', 'codex', 'claude', 'hermes']) {
       const result = computePersistentOutputPath(state, model);
       const fileName = result.split('/').pop()!;
       // Must match: <id>-<phase>-iter<N>-<model>.txt
-      expect(fileName).toMatch(/^0073-phase_1-iter1-(gemini|codex|claude)\.txt$/);
+      expect(fileName).toMatch(/^0073-phase_1-iter1-(gemini|codex|claude|hermes)\.txt$/);
     }
   });
 });

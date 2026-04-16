@@ -3,6 +3,7 @@ tmp/
 .builders/
 worktrees/
 .consult/
+.hermes/
 .agent-farm/
 .env
 .update-hashes.json

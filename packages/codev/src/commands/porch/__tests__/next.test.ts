@@ -254,7 +254,6 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), requestChangesContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
-
     const result = await next(testDir, '0001');
 
     expect(result.status).toBe('tasks');
@@ -484,7 +483,6 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
-
     // Create rebuttal file
     fs.writeFileSync(
       path.join(projectDir, '0001-specify-iter1-rebuttals.md'),
@@ -528,7 +526,6 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-claude.txt'), approveContent);
-
     // Create rebuttal file for phase_1
     fs.writeFileSync(
       path.join(projectDir, '0001-phase_1-iter1-rebuttals.md'),
@@ -560,7 +557,6 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), rcContent);
-
     const result = await next(testDir, '0001');
 
     expect(result.status).toBe('tasks');
@@ -585,7 +581,6 @@ describe('porch next', () => {
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
-
     const result1 = await next(testDir, '0001');
     const result2 = await next(testDir, '0001');
 
@@ -836,6 +831,20 @@ describe('porch next', () => {
     expect(desc).toContain('claude');
     // Must NOT indicate parent/none delegation
     expect(desc).not.toContain('parent');
+  });
+
+  it('includes hermes when explicitly configured as an optional fourth backend', async () => {
+    configRef.models = ['gemini', 'codex', 'claude', 'hermes'];
+    setupState(testDir, makeState({ build_complete: true }));
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks!.length).toBe(1);
+    expect(result.tasks![0].description).toContain('gemini');
+    expect(result.tasks![0].description).toContain('codex');
+    expect(result.tasks![0].description).toContain('claude');
+    expect(result.tasks![0].description).toContain('hermes');
   });
 
   // --------------------------------------------------------------------------

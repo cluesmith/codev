@@ -1,0 +1,29 @@
+id: '671'
+title: hermes-consult-optional-backend
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Backend wiring and validation
+    status: complete
+  - id: phase_2
+    title: Docs and tests alignment
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-04-15T20:13:26.446Z'
+    approved_at: '2026-04-15T20:13:36.692Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-04-15T20:16:18.381Z'
+    approved_at: '2026-04-15T20:16:25.454Z'
+  pr:
+    status: pending
+    requested_at: '2026-04-15T21:49:59.445Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-15T16:11:54.376Z'
+updated_at: '2026-04-15T21:49:59.446Z'

@@ -170,7 +170,7 @@ program
   .command('consult')
   .description('AI consultation with external models')
   .argument('[subcommand]', 'Optional: stats')
-  .option('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
+  .option('-m, --model <model>', 'Model to use (gemini, codex, claude, hermes, or aliases: pro, gpt, opus)')
   .option('--prompt <text>', 'Inline prompt (general mode)')
   .option('--prompt-file <path>', 'Prompt file path (general mode)')
   .option('--protocol <name>', 'Protocol name: spir, aspir, air, bugfix, tick, maintain')

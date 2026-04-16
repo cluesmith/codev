@@ -285,9 +285,8 @@ describe('afx bench', () => {
   });
 
   describe('runParallel', () => {
-    it('should spawn all 3 engines and return wall time', async () => {
+    it('should spawn all default engines and return wall time', async () => {
       vi.useRealTimers();
-      // Create 3 mock processes (one per engine)
       for (let i = 0; i < 3; i++) {
         const proc = createMockProcess(0);
         vi.mocked(spawnMock).mockReturnValueOnce(proc as any);
@@ -390,7 +389,6 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // Mock 3 engine processes (parallel)
       for (let i = 0; i < 3; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
@@ -422,7 +420,6 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // Mock 6 engine processes (2 iterations × 3 engines)
       for (let i = 0; i < 6; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(0) as any);
       }
@@ -494,7 +491,6 @@ describe('afx bench', () => {
         .mockReturnValueOnce('Apple M2\n') // detectCpu
         .mockReturnValueOnce('34359738368\n'); // detectRam
 
-      // 2 iterations, all engines fail
       for (let i = 0; i < 6; i++) {
         vi.mocked(spawnMock).mockReturnValueOnce(createMockProcess(1) as any);
       }

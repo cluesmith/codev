@@ -68,13 +68,18 @@ describe('consultation model configuration', () => {
       // Arrays are replaced per deep merge semantics, not concatenated
       expect(config.porch?.consultation?.models).toEqual(['claude', 'gemini']);
     });
+
+    it('allows hermes to be opted in explicitly', () => {
+      writeConfig({ porch: { consultation: { models: ['gemini', 'codex', 'claude', 'hermes'] } } });
+      const config = loadConfig(tmpDir);
+      expect(config.porch?.consultation?.models).toEqual(['gemini', 'codex', 'claude', 'hermes']);
+    });
   });
 
   describe('model validation (via VALID_MODELS)', () => {
-    // VALID_MODELS = ['gemini', 'codex', 'claude']
-    const VALID_MODELS = ['gemini', 'codex', 'claude'];
+    const VALID_MODELS = ['gemini', 'codex', 'claude', 'hermes'];
 
-    it('all three registered backends are valid', () => {
+    it('accepts every registered backend, including hermes', () => {
       for (const model of VALID_MODELS) {
         expect(VALID_MODELS.includes(model)).toBe(true);
       }

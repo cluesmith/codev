@@ -1,6 +1,6 @@
 # consult - AI Consultation CLI
 
-The `consult` command provides a unified interface for AI consultation with external models (Gemini, Codex, Claude). It operates in three modes: general (ad-hoc prompts), protocol-based (structured reviews), and stats.
+The `consult` command provides a unified interface for AI consultation with external models (Gemini, Codex, Claude, Hermes). It operates in three modes: general (ad-hoc prompts), protocol-based (structured reviews), and stats.
 
 ## Synopsis
 
@@ -22,6 +22,7 @@ consult stats [options]
 | `gemini` | `pro` | gemini-cli | File access via --yolo, fast |
 | `codex` | `gpt` | @openai/codex | Read-only sandbox, thorough |
 | `claude` | `opus` | Claude Agent SDK | Balanced analysis with tool use |
+| `hermes` | - | hermes CLI (`hermes chat -q`) | Uses Hermes agent as consult backend |
 
 ## Modes
 
@@ -108,16 +109,21 @@ These flags are used by porch (the protocol orchestrator) when generating consul
 --project-id <id>       Project ID for metrics
 ```
 
-## Parallel Consultation (3-Way Reviews)
+## Parallel Consultation (Multi-Model Reviews)
+
+Default project configuration uses a 3-model set (`gemini`, `codex`, `claude`).
 
 For thorough reviews, run multiple models in parallel:
 
 ```bash
-# 3-way spec review
+# Default 3-way spec review
 consult -m gemini --protocol spir --type spec &
 consult -m codex --protocol spir --type spec &
 consult -m claude --protocol spir --type spec &
 wait
+
+# Optional: include Hermes as a 4th reviewer
+consult -m hermes --protocol spir --type spec
 ```
 
 ## Performance
@@ -183,11 +189,14 @@ consult -m codex --protocol spir --type pr --issue 42
 # Protocol: implementation review with bugfix protocol
 consult -m claude --protocol bugfix --type impl
 
-# 3-way parallel review
+# Default 3-way parallel review
 consult -m gemini --protocol spir --type spec &
 consult -m codex --protocol spir --type spec &
 consult -m claude --protocol spir --type spec &
 wait
+
+# Optional: include Hermes as an additional reviewer
+consult -m hermes --protocol spir --type spec
 
 # Stats
 consult stats --days 7 --json

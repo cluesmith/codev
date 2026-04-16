@@ -125,6 +125,11 @@ describe('consult command (CLI)', () => {
     expect(result.status).toBe(0);
   });
 
+  it('accepts --model hermes option', () => {
+    const result = runConsult(['--model', 'hermes', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+  });
+
   // === Input Validation ===
 
   it('--type without --model fails', () => {
