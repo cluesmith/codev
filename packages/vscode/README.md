@@ -55,6 +55,13 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 | Codev: Connect Tunnel | | Connect cloud tunnel for remote access |
 | Codev: Disconnect Tunnel | | Disconnect cloud tunnel |
 | Codev: Cron Tasks | | List, run, enable, or disable cron tasks |
+| Codev: Add Review Comment | | Insert a `REVIEW(@architect):` comment at cursor |
+
+## Review Comments
+
+- **Snippet**: Type `rev` + Tab in markdown files to insert a review comment
+- **Command**: `Cmd+Shift+P` → "Codev: Add Review Comment" inserts with correct comment syntax for any file type
+- **Highlighting**: Existing `REVIEW(...)` lines are highlighted with a colored background
 
 ## Settings
 

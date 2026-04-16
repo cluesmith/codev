@@ -70,6 +70,16 @@
       {
         "command": "codev.cronTasks",
         "title": "Codev: Cron Tasks"
+      },
+      {
+        "command": "codev.addReviewComment",
+        "title": "Codev: Add Review Comment"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./snippets/review.json"
       }
     ],
     "keybindings": [

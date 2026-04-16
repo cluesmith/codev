@@ -1,0 +1,7 @@
+{
+  "Review Comment": {
+    "prefix": "rev",
+    "body": "REVIEW(@${1:architect}): ${2:comment}",
+    "description": "Insert a Codev review comment"
+  }
+}

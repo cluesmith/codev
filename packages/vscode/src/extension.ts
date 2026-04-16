@@ -8,6 +8,8 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
+import { addReviewComment } from './commands/review.js';
+import { activateReviewDecorations } from './review-decorations.js';
 import { NeedsAttentionProvider } from './views/needs-attention.js';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
@@ -178,7 +180,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.disconnectTunnel', () => disconnectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
+		vscode.commands.registerCommand('codev.addReviewComment', () => addReviewComment()),
 	);
+
+	// Review comment decorations
+	activateReviewDecorations(context);
 
 	// Connect
 	await connectionManager.initialize();
