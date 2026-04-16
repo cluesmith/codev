@@ -149,7 +149,7 @@ afx status         # All builders
 | **PR ready** | `afx send architect "PR #N ready for review"` |
 | **PR merged** | `afx send architect "Project XXXX complete. PR merged. Ready for cleanup."` |
 | **Blocked/stuck** | `afx send architect "Blocked on X — need guidance"` |
-| **Escalation needed** | `afx send architect "Issue too complex — recommend escalating to SPIR/TICK"` |
+| **Escalation needed** | `afx send architect "Issue too complex — recommend escalating to SPIR"` |
 
 The architect may be working on other tasks and won't know you need attention unless you send a message. **Don't assume they're watching** — always notify explicitly.
 

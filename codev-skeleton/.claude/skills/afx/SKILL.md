@@ -17,11 +17,10 @@ afx spawn [number] [options]
 
 | Flag | Description |
 |------|-------------|
-| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, tick, maintain, experiment. **Required for numbered spawns.** |
+| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, maintain, experiment. **Required for numbered spawns.** |
 | `--task <text>` | Ad-hoc task (no issue number needed) |
 | `--shell` | Bare Claude session |
 | `--worktree` | Bare worktree session |
-| `--amends <number>` | Original spec number (TICK only) |
 | `--files <files>` | Context files, comma-separated. **Requires `--task`.** |
 | `--no-comment` | Skip commenting on the GitHub issue |
 | `--force` | Skip dirty-worktree and collision checks |
@@ -38,7 +37,6 @@ afx spawn 42 --protocol spir           # SPIR builder for issue #42
 afx spawn 42 --protocol aspir          # ASPIR (autonomous, no human gates)
 afx spawn 42 --protocol air            # AIR (small features)
 afx spawn 42 --protocol bugfix         # Bugfix
-afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
 afx spawn 42 --protocol spir --soft    # Soft mode
 afx spawn 42 --resume                  # Resume existing builder
 afx spawn --task "fix the flaky test"  # Ad-hoc task (no issue)

@@ -29,7 +29,7 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 1. **`git status`** — Ensure worktree is clean (no uncommitted changes)
 2. **Commit if needed** — Builders branch from HEAD; uncommitted specs/plans are invisible
-3. **`afx spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, bugfix, tick, etc.)
+3. **`afx spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, aspir, air, bugfix, etc.)
 
 The spawn command will refuse if the worktree is dirty (override with `--force`, but your builder won't see uncommitted files).
 

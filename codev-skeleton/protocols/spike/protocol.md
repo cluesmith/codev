@@ -10,7 +10,7 @@ Time-boxed technical feasibility exploration. Answer "Can we do X?" and "What wo
 
 **Use for**: Quick technical feasibility investigations, proof-of-concept explorations, "can we do X?" questions, evaluating approaches before committing to SPIR
 
-**Skip for**: Production code (use SPIR), formal hypothesis testing (use EXPERIMENT), bug fixes (use BUGFIX), well-understood implementations (use TICK)
+**Skip for**: Production code (use SPIR), formal hypothesis testing (use EXPERIMENT), bug fixes (use BUGFIX)
 
 ### Spike vs Experiment
 

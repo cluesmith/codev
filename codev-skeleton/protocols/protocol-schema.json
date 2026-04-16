@@ -8,7 +8,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "Protocol identifier (e.g., 'spir', 'tick', 'bugfix')"
+      "description": "Protocol identifier (e.g., 'spir', 'bugfix', 'air')"
     },
     "version": {
       "type": "string",

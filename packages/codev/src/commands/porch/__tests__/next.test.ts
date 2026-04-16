@@ -691,36 +691,36 @@ describe('porch next', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Once phase (TICK/BUGFIX) — emits single task
+  // Once phase (BUGFIX/verify) — emits single task
   // --------------------------------------------------------------------------
 
   it('emits single task for once-type phase', async () => {
     // Set up a simple protocol with a 'once' phase
     const onceProtocol = {
-      name: 'tick',
+      name: 'bugfix',
       version: '1.0.0',
       phases: [
         {
-          id: 'identify',
-          name: 'Identify Target',
+          id: 'investigate',
+          name: 'Investigate',
           type: 'once',
-          transition: { on_complete: 'amend_spec' },
+          transition: { on_complete: 'fix' },
         },
         {
-          id: 'amend_spec',
-          name: 'Amend Specification',
+          id: 'fix',
+          name: 'Fix',
           type: 'once',
           transition: { on_complete: null },
         },
       ],
     };
-    setupProtocol(testDir, 'tick', onceProtocol);
+    setupProtocol(testDir, 'bugfix', onceProtocol);
 
     const state: ProjectState = {
       id: '0002',
-      title: 'tick-test',
-      protocol: 'tick',
-      phase: 'identify',
+      title: 'once-test',
+      protocol: 'bugfix',
+      phase: 'investigate',
       plan_phases: [],
       current_plan_phase: null,
       gates: {},
@@ -735,9 +735,9 @@ describe('porch next', () => {
     const result = await next(testDir, '0002');
 
     expect(result.status).toBe('tasks');
-    expect(result.phase).toBe('identify');
+    expect(result.phase).toBe('investigate');
     expect(result.tasks!.length).toBe(1);
-    expect(result.tasks![0].subject).toContain('Identify Target');
+    expect(result.tasks![0].subject).toContain('Investigate');
     expect(result.tasks![0].description).toContain('porch done');
   });
 

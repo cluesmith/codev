@@ -41,7 +41,7 @@ Just like structuring a human team—clear roles, defined processes, explicit ha
 
 | Component | Purpose |
 |-----------|---------|
-| Protocols | Define HOW work happens (SPIR, TICK, etc.) |
+| Protocols | Define HOW work happens (SPIR, ASPIR, etc.) |
 | Roles | Define WHO does what (Architect, Builder, Consultant) |
 | Parallelism | Scale by running multiple builders simultaneously |
 
@@ -61,7 +61,6 @@ A **protocol** is a structured workflow that defines how work progresses from id
 | Protocol | Use For | Phases |
 |----------|---------|--------|
 | **SPIR** | New features | Specify → Plan → Implement → Review |
-| **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
 

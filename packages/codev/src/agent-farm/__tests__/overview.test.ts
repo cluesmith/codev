@@ -488,29 +488,7 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'verified' }), tmpDir)).toBe(100);
     });
 
-    it('loads tick phases from protocol.json and calculates progress', () => {
-      mockLoadProtocol.mockReturnValue({
-        name: 'tick',
-        phases: [
-          { id: 'identify' },
-          { id: 'amend_spec' },
-          { id: 'amend_plan' },
-          { id: 'implement' },
-          { id: 'defend' },
-          { id: 'evaluate' },
-          { id: 'review' },
-        ],
-      });
-
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'identify' }), tmpDir)).toBe(13);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'amend_spec' }), tmpDir)).toBe(25);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'amend_plan' }), tmpDir)).toBe(38);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'implement' }), tmpDir)).toBe(50);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'defend' }), tmpDir)).toBe(63);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'evaluate' }), tmpDir)).toBe(75);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'review' }), tmpDir)).toBe(88);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'verified' }), tmpDir)).toBe(100);
-    });
+    // TICK protocol removed (spec 653) — tick progress test deleted
 
     it('returns 0 when loadProtocol throws (protocol not found)', () => {
       mockLoadProtocol.mockImplementation(() => { throw new Error('not found'); });

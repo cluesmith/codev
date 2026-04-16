@@ -373,7 +373,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath, resolver);
   }
 
-  // Handle 'once' phases (TICK, BUGFIX)
+  // Handle 'once' phases (BUGFIX, verify)
   return await handleOncePhase(workspaceRoot, state, protocol, phaseConfig, resolver);
 }
 
@@ -723,7 +723,7 @@ async function handleVerifyApproved(
 }
 
 /**
- * Handle 'once' phases (TICK, BUGFIX).
+ * Handle 'once' phases (BUGFIX, verify).
  * These don't have build/verify config — emit a single task.
  */
 async function handleOncePhase(

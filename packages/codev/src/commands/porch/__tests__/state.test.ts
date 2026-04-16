@@ -424,8 +424,9 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/air-100-small-feature')).toBe('100');
     });
 
-    it('should detect numeric ID from tick worktree', () => {
-      expect(detectProjectIdFromCwd('/repo/.builders/tick-050-amendment')).toBe('050');
+    it('should not detect ID from removed tick protocol worktree', () => {
+      // TICK protocol was removed in spec 653; old tick worktrees should not match
+      expect(detectProjectIdFromCwd('/repo/.builders/tick-050-amendment')).toBe(null);
     });
 
     it('should detect protocol worktree ID from subdirectory', () => {
