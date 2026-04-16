@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { TerminalManager } from './terminal-manager.js';
+import { OverviewCache } from './views/overview-cache.js';
+import { NeedsAttentionProvider } from './views/needs-attention.js';
+import { BuildersProvider } from './views/builders.js';
+import { PullRequestsProvider } from './views/pull-requests.js';
+import { BacklogProvider } from './views/backlog.js';
+import { RecentlyClosedProvider } from './views/recently-closed.js';
+import { TeamProvider } from './views/team.js';
+import { StatusProvider } from './views/status.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -47,6 +55,25 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Terminal Manager
 	terminalManager = new TerminalManager(connectionManager, outputChannel);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
+
+	// Sidebar TreeViews
+	const overviewCache = new OverviewCache(connectionManager);
+	context.subscriptions.push({ dispose: () => overviewCache.dispose() });
+
+	context.subscriptions.push(
+		vscode.window.registerTreeDataProvider('codev.needsAttention', new NeedsAttentionProvider(overviewCache)),
+		vscode.window.registerTreeDataProvider('codev.builders', new BuildersProvider(overviewCache)),
+		vscode.window.registerTreeDataProvider('codev.pullRequests', new PullRequestsProvider(overviewCache)),
+		vscode.window.registerTreeDataProvider('codev.backlog', new BacklogProvider(overviewCache)),
+		vscode.window.registerTreeDataProvider('codev.recentlyClosed', new RecentlyClosedProvider(overviewCache)),
+		vscode.window.registerTreeDataProvider('codev.team', new TeamProvider(connectionManager)),
+		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
+	);
+
+	// Refresh overview on connect
+	connectionManager.onStateChange((state) => {
+		if (state === 'connected') { overviewCache.refresh(); }
+	});
 
 	// Commands
 	context.subscriptions.push(

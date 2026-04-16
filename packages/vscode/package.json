@@ -34,6 +34,26 @@
         "title": "Codev: New Shell"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codev",
+          "title": "Codev",
+          "icon": "src/icons/codev.svg"
+        }
+      ]
+    },
+    "views": {
+      "codev": [
+        { "id": "codev.needsAttention", "name": "Needs Attention" },
+        { "id": "codev.builders", "name": "Builders" },
+        { "id": "codev.pullRequests", "name": "Pull Requests" },
+        { "id": "codev.backlog", "name": "Backlog" },
+        { "id": "codev.recentlyClosed", "name": "Recently Closed" },
+        { "id": "codev.team", "name": "Team", "when": "codev.teamEnabled" },
+        { "id": "codev.status", "name": "Status" }
+      ]
+    },
     "configuration": {
       "title": "Codev",
       "properties": {
