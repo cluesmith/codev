@@ -256,6 +256,18 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       };
     }
 
+    // For protocols with a verify phase (SPIR, ASPIR), merge already happened in verify.
+    // For protocols without verify (AIR, BUGFIX, MAINTAIN), merge is still needed.
+    const hasVerifyPhase = protocol.phases.some(p => p.id === 'verify');
+    if (hasVerifyPhase) {
+      return {
+        status: 'complete',
+        phase: state.phase,
+        iteration: state.iteration,
+        summary: `Project ${state.id} has completed the ${state.protocol} protocol (verified).`,
+      };
+    }
+
     return {
       status: 'complete',
       phase: state.phase,
@@ -351,6 +363,12 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       state.iteration = 1;
       state.build_complete = false;
       state.history = [];
+
+      // Ensure gate entry exists for the new phase (needed for upgraded projects)
+      const newGate = getPhaseGate(protocol, nextPhase.id);
+      if (newGate && !state.gates[newGate]) {
+        state.gates[newGate] = { status: 'pending' as const };
+      }
 
       // If entering phased protocol, extract plan phases
       if (isPhased(protocol, nextPhase.id)) {
@@ -742,17 +760,23 @@ async function handleOncePhase(
     description += `\n\nAfter completing the work, run these checks:\n${phaseConfig.checks.map(c => `- ${c}`).join('\n')}`;
   }
 
-  // Verify phase: customize task description and make skip option prominent
+  // Verify phase: merge PR first, then verify. Skip option prominent.
   if (state.phase === 'verify') {
-    description = `The PR has been merged. Verify the change in your environment.\n\nWhen verified, run: porch done ${state.id}\nPorch will then request the verify-approval gate — the architect approves it.\n\nIf verification is not needed, skip it:\n  porch verify ${state.id} --skip "reason"`;
+    const forgeConfig = loadForgeConfig(workspaceRoot);
+    const mergeCmd = getForgeCommand('pr-merge', forgeConfig);
+    const mergeInstructions = mergeCmd
+      ? `Merge the PR using:\n\n${mergeCmd}\n\nDo NOT squash merge. Use regular merge commits to preserve development history.`
+      : `Merge the PR manually using your forge's merge mechanism. Do NOT squash merge.`;
+
+    description = `## Step 1: Merge the PR\n\n${mergeInstructions}\n\n## Step 2: Verify (optional)\n\nAfter merging, verify the change works in the target environment.\n\nWhen done, run: porch done ${state.id}\nPorch will request the verify-approval gate — the architect approves it.\n\nIf verification is not needed, skip it:\n  porch verify ${state.id} --skip "reason"`;
 
     return {
       status: 'tasks',
       phase: state.phase,
       iteration: state.iteration,
       tasks: [{
-        subject: 'Verify: Post-merge environmental verification',
-        activeForm: 'Waiting for verification',
+        subject: 'Verify: Merge PR and post-merge verification',
+        activeForm: 'Waiting for merge and verification',
         description,
         sequential: true,
       }],

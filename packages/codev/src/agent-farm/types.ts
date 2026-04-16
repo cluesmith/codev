@@ -67,15 +67,15 @@ export interface SpawnOptions {
   issueNumber?: number;   // Positional arg: `afx spawn 315`
 
   // Protocol selection (required for issue-based spawns)
-  protocol?: string;      // --protocol spir|aspir|air|bugfix|tick|maintain|experiment
+  protocol?: string;      // --protocol spir|aspir|air|bugfix|maintain|experiment
 
   // Alternative modes (no issue number needed)
   task?: string;          // Task mode: --task
   shell?: boolean;        // Shell mode: --shell (no worktree, no prompt)
   worktree?: boolean;     // Worktree mode: --worktree (worktree, no prompt)
 
-  // TICK-specific
-  amends?: number;        // --amends <original-spec-number>
+  // Legacy (TICK removed in spec 653)
+  amends?: number;        // --amends (deprecated, errors if used)
 
   // Task mode options
   files?: string[];       // Context files for task mode: --files
