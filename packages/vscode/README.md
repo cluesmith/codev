@@ -1,71 +1,60 @@
-# codev README
+# Codev for VS Code
 
-This is the README for your extension "codev". After writing up a brief description, we recommend including the following sections.
+Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, approve gates, and manage your development workflow without leaving the IDE.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- **Unified Sidebar** — Needs Attention, Builders, Pull Requests, Backlog, Team, and Status in a single pane
+- **Native Terminals** — Architect and builder terminals in the editor area with full vertical height
+- **Status Bar** — Connection state, builder count, blocked gates at a glance
+- **Command Palette** — Open terminals, send messages, approve gates via keyboard
+- **Auto-Connect** — Detects Codev workspaces and connects to Tower automatically
+- **Auto-Start Tower** — Starts Tower if not running (configurable)
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- [Codev CLI](https://github.com/cluesmith/codev) installed (`npm install -g @cluesmith/codev`)
+- Tower running (`afx tower start`) or auto-start enabled (default)
+- A Codev workspace (`.codev/` or `codev/` directory in your project)
 
-## Extension Settings
+## Getting Started
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+1. Install the extension
+2. Open a Codev project in VS Code
+3. The extension auto-detects the workspace and connects to Tower
+4. Click the Codev icon in the Activity Bar to see your builders, PRs, and backlog
 
-For example:
+## Layout
 
-This extension contributes the following settings:
+```
++------------+----------------+----------------+
+| Codev      | Architect      | [#42] [#43]    |
+| (sidebar)  | (terminal)     | Builder #42    |
+|            |                | (terminal)     |
+| - Attention|                |                |
+| - Builders | Left editor    | Right editor   |
+| - PRs      | group          | group          |
+| - Backlog  |                |                |
+| - Team     |                |                |
+| - Status   |                |                |
++------------+----------------+----------------+
+```
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Commands
 
-## Known Issues
+| Command | Description |
+|---------|-------------|
+| Codev: Open Architect Terminal | Open the architect terminal in the left editor group |
+| Codev: Open Builder Terminal | Pick a builder and open its terminal |
+| Codev: New Shell | Create a new persistent shell terminal |
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+## Settings
 
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `codev.towerHost` | `localhost` | Tower server host |
+| `codev.towerPort` | `4100` | Tower server port |
+| `codev.workspacePath` | auto-detect | Override workspace path |
+| `codev.terminalPosition` | `editor` | Terminal placement (`editor` or `panel`) |
+| `codev.autoConnect` | `true` | Connect to Tower on activation |
+| `codev.autoStartTower` | `true` | Auto-start Tower if not running |

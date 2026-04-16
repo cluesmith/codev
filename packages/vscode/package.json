@@ -3,8 +3,13 @@
   "publisher": "cluesmith",
   "displayName": "Codev",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cluesmith/codev",
+    "directory": "packages/vscode"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },
@@ -40,7 +45,7 @@
         {
           "id": "codev",
           "title": "Codev",
-          "icon": "src/icons/codev.svg"
+          "icon": "icons/codev.svg"
         }
       ]
     },
