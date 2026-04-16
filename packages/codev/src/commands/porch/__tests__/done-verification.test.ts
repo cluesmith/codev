@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { done } from '../index.js';
-import { writeState, getProjectDir, getStatusPath } from '../state.js';
+import { writeState, getProjectDir, getStatusPath, readState } from '../state.js';
 import type { ProjectState } from '../types.js';
 
 // Mock loadConfig to return defaults, preventing workspace/global config from leaking in.
@@ -319,5 +319,60 @@ describe('porch done — verification enforcement', () => {
 
     // Should NOT contain GATE REQUIRED (build_complete handled first)
     expect(output).not.toContain('GATE REQUIRED');
+  });
+
+  // ==========================================================================
+  // PR Tracking (Spec 653 Phase 3)
+  // ==========================================================================
+
+  it('records PR in pr_history via --pr flag (record-only, no phase advancement)', async () => {
+    const state = makeState({ phase: 'specify', build_complete: false });
+    setupState(testDir, state);
+    setupProtocol(testDir, 'spir', spirProtocol);
+
+    await done(testDir, '0001', undefined, { pr: 42, branch: 'spir/653/specify' });
+
+    const updated = readState(getStatusPath(testDir, '0001', 'test-feature'));
+    expect(updated.pr_history).toBeDefined();
+    expect(updated.pr_history!.length).toBe(1);
+    expect(updated.pr_history![0].pr_number).toBe(42);
+    expect(updated.pr_history![0].branch).toBe('spir/653/specify');
+    expect(updated.pr_history![0].phase).toBe('specify');
+    expect(updated.pr_history![0].created_at).toBeDefined();
+    // Record-only: build_complete should NOT be changed
+    expect(updated.build_complete).toBe(false);
+  });
+
+  it('marks PR as merged via --merged flag (record-only)', async () => {
+    const state = makeState({
+      phase: 'implement',
+      pr_history: [{ phase: 'specify', pr_number: 42, branch: 'stage-1', created_at: '2026-01-01T00:00:00Z' }],
+    });
+    setupState(testDir, state);
+    setupProtocol(testDir, 'spir', spirProtocol);
+
+    await done(testDir, '0001', undefined, { merged: 42 });
+
+    const updated = readState(getStatusPath(testDir, '0001', 'test-feature'));
+    expect(updated.pr_history![0].merged).toBe(true);
+    expect(updated.pr_history![0].merged_at).toBeDefined();
+    // Record-only: phase should NOT change
+    expect(updated.phase).toBe('implement');
+  });
+
+  it('throws when --pr is used without --branch', async () => {
+    const state = makeState();
+    setupState(testDir, state);
+    setupProtocol(testDir, 'spir', spirProtocol);
+
+    await expect(done(testDir, '0001', undefined, { pr: 42 })).rejects.toThrow('--pr requires --branch');
+  });
+
+  it('throws when --merged targets nonexistent PR', async () => {
+    const state = makeState({ pr_history: [] });
+    setupState(testDir, state);
+    setupProtocol(testDir, 'spir', spirProtocol);
+
+    await expect(done(testDir, '0001', undefined, { merged: 99 })).rejects.toThrow('PR #99 not found');
   });
 });

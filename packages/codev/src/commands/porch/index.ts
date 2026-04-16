@@ -261,7 +261,7 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
 
   // Record-only mode: --pr or --merged writes PR metadata and exits immediately.
   // Does NOT run checks, does NOT advance the phase, does NOT mark build_complete.
-  if (options?.pr) {
+  if (options?.pr !== undefined) {
     if (!options.branch) throw new Error('--pr requires --branch <name>');
     if (!state.pr_history) state.pr_history = [];
     state.pr_history.push({
@@ -274,7 +274,7 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     console.log(chalk.green(`Recorded PR #${options.pr} (branch: ${options.branch}) in pr_history.`));
     return;
   }
-  if (options?.merged) {
+  if (options?.merged !== undefined) {
     if (!state.pr_history) throw new Error(`No PR history found for project ${projectId}`);
     const entry = state.pr_history.find(e => e.pr_number === options.merged);
     if (!entry) throw new Error(`PR #${options.merged} not found in pr_history`);
@@ -867,14 +867,32 @@ export async function cli(args: string[]): Promise<void> {
 
       case 'done': {
         const doneOpts: { pr?: number; branch?: string; merged?: number } = {};
+        // Extract positional arg (project ID) — skip anything starting with --
+        const positionalId = rest.find(a => !a.startsWith('--') && rest.indexOf(a) === 0 || (!a.startsWith('--') && rest[rest.indexOf(a) - 1]?.startsWith('--') === false));
         const prIdx = rest.indexOf('--pr');
-        if (prIdx !== -1 && rest[prIdx + 1]) doneOpts.pr = parseInt(rest[prIdx + 1], 10);
         const brIdx = rest.indexOf('--branch');
-        if (brIdx !== -1 && rest[brIdx + 1]) doneOpts.branch = rest[brIdx + 1];
         const mergedIdx = rest.indexOf('--merged');
-        if (mergedIdx !== -1 && rest[mergedIdx + 1]) doneOpts.merged = parseInt(rest[mergedIdx + 1], 10);
+        if (prIdx !== -1) {
+          const val = parseInt(rest[prIdx + 1], 10);
+          if (!Number.isInteger(val) || val <= 0) throw new Error('--pr requires a positive integer PR number');
+          doneOpts.pr = val;
+        }
+        if (brIdx !== -1) {
+          if (!rest[brIdx + 1] || rest[brIdx + 1].startsWith('--')) throw new Error('--branch requires a branch name');
+          doneOpts.branch = rest[brIdx + 1];
+        }
+        if (mergedIdx !== -1) {
+          const val = parseInt(rest[mergedIdx + 1], 10);
+          if (!Number.isInteger(val) || val <= 0) throw new Error('--merged requires a positive integer PR number');
+          doneOpts.merged = val;
+        }
+        if (doneOpts.pr !== undefined && doneOpts.merged !== undefined) {
+          throw new Error('--pr and --merged are mutually exclusive');
+        }
         const hasRecordFlags = doneOpts.pr !== undefined || doneOpts.merged !== undefined;
-        await done(workspaceRoot, getProjectId(rest[0]), resolver, hasRecordFlags ? doneOpts : undefined);
+        // For project ID: use first positional arg, or fall back to auto-detection
+        const projectIdArg = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
+        await done(workspaceRoot, getProjectId(projectIdArg), resolver, hasRecordFlags ? doneOpts : undefined);
         break;
       }
 
@@ -908,6 +926,8 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  status [id]              Show current state and instructions');
         console.log('  check [id]               Run checks for current phase');
         console.log('  done [id]                Signal build complete (validates checks, advances)');
+        console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
+        console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
