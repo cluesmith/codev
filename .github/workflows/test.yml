@@ -143,11 +143,15 @@ jobs:
         working-directory: packages/codev
         run: pnpm build
 
+      - name: Pack core tarball
+        working-directory: packages/core
+        run: pnpm pack
+
       - name: Pack tarball
         working-directory: packages/codev
         run: pnpm pack
 
       - name: Verify install from tarball
         working-directory: packages/codev
-        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz
+        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz
 
