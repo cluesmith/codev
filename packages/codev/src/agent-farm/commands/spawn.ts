@@ -337,17 +337,34 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   const builderId = buildAgentName('spec', projectId, protocol);
-  const specSlug = specName.replace(/^[0-9]+-/, '');
 
-  // Spec 609: when --branch is provided, use the existing branch name and
-  // derive worktree name with a compatible pattern for detection utilities.
+  // Spec 653: worktree path uses project ID only — no title suffix.
+  // This decouples the worktree from the issue title so renames don't break --resume.
   let worktreeName: string;
   let branchName: string;
   if (options.branch) {
     branchName = options.branch;
-    worktreeName = `${protocol}-${strippedId}-branch-${slugify(options.branch)}`;
+    worktreeName = `${protocol}-${strippedId}`;
+  } else if (options.resume) {
+    // Migration: try ID-only path first, fall back to old title-based path
+    const idOnlyName = `${protocol}-${strippedId}`;
+    const idOnlyPath = resolve(config.buildersDir, idOnlyName);
+    if (existsSync(idOnlyPath)) {
+      worktreeName = idOnlyName;
+    } else {
+      // Search for old-format worktree: <protocol>-<id>-<title-slug>
+      const prefix = `${protocol}-${strippedId}-`;
+      try {
+        const entries = readdirSync(config.buildersDir, { withFileTypes: true });
+        const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
+        worktreeName = match ? match.name : idOnlyName;
+      } catch {
+        worktreeName = idOnlyName;
+      }
+    }
+    branchName = `builder/${worktreeName}`;
   } else {
-    worktreeName = `${protocol}-${strippedId}-${specSlug}`;
+    worktreeName = `${protocol}-${strippedId}`;
     branchName = `builder/${worktreeName}`;
   }
   const worktreePath = resolve(config.buildersDir, worktreeName);
@@ -386,7 +403,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   // Pre-initialize porch so the builder doesn't need to figure out project ID
   if (!options.resume) {
-    const porchProjectName = specSlug;
+    const porchProjectName = specName.replace(/^[0-9]+-/, '');
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
@@ -662,21 +679,28 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   // When resuming, find the existing worktree by issue number pattern
   // instead of recomputing from the current title (which may have changed).
   let worktreeName: string;
+  // Spec 653: worktree path uses project ID only — no title suffix.
   let branchName: string;
   if (options.branch) {
-    // Spec 609: use existing remote branch
     branchName = options.branch;
-    worktreeName = `bugfix-${issueNumber}-branch-${slugify(options.branch)}`;
+    worktreeName = `bugfix-${issueNumber}`;
   } else if (options.resume) {
-    const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
-    if (existing) {
-      worktreeName = existing;
+    // Migration: try ID-only path first, fall back to old title-based path
+    const idOnlyName = `bugfix-${issueNumber}`;
+    const idOnlyPath = resolve(config.buildersDir, idOnlyName);
+    if (existsSync(idOnlyPath)) {
+      worktreeName = idOnlyName;
     } else {
-      worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+      const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
+      if (existing) {
+        worktreeName = existing;
+      } else {
+        worktreeName = idOnlyName;
+      }
     }
     branchName = `builder/${worktreeName}`;
   } else {
-    worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+    worktreeName = `bugfix-${issueNumber}`;
     branchName = `builder/${worktreeName}`;
   }
 

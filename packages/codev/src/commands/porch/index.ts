@@ -251,13 +251,39 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
  * porch done <id>
  * Advances to next phase if checks pass. Refuses if checks fail.
  */
-export async function done(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
+export async function done(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver, options?: { pr?: number; branch?: string; merged?: number }): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
 
   let state = readState(statusPath);
+
+  // Record-only mode: --pr or --merged writes PR metadata and exits immediately.
+  // Does NOT run checks, does NOT advance the phase, does NOT mark build_complete.
+  if (options?.pr) {
+    if (!options.branch) throw new Error('--pr requires --branch <name>');
+    if (!state.pr_history) state.pr_history = [];
+    state.pr_history.push({
+      phase: state.phase,
+      pr_number: options.pr,
+      branch: options.branch,
+      created_at: new Date().toISOString(),
+    });
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} record PR #${options.pr}`);
+    console.log(chalk.green(`Recorded PR #${options.pr} (branch: ${options.branch}) in pr_history.`));
+    return;
+  }
+  if (options?.merged) {
+    if (!state.pr_history) throw new Error(`No PR history found for project ${projectId}`);
+    const entry = state.pr_history.find(e => e.pr_number === options.merged);
+    if (!entry) throw new Error(`PR #${options.merged} not found in pr_history`);
+    entry.merged = true;
+    entry.merged_at = new Date().toISOString();
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} PR #${options.merged} merged`);
+    console.log(chalk.green(`Marked PR #${options.merged} as merged.`));
+    return;
+  }
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const overrides = loadCheckOverrides(workspaceRoot);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
@@ -839,9 +865,18 @@ export async function cli(args: string[]): Promise<void> {
         await check(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
-      case 'done':
-        await done(workspaceRoot, getProjectId(rest[0]), resolver);
+      case 'done': {
+        const doneOpts: { pr?: number; branch?: string; merged?: number } = {};
+        const prIdx = rest.indexOf('--pr');
+        if (prIdx !== -1 && rest[prIdx + 1]) doneOpts.pr = parseInt(rest[prIdx + 1], 10);
+        const brIdx = rest.indexOf('--branch');
+        if (brIdx !== -1 && rest[brIdx + 1]) doneOpts.branch = rest[brIdx + 1];
+        const mergedIdx = rest.indexOf('--merged');
+        if (mergedIdx !== -1 && rest[mergedIdx + 1]) doneOpts.merged = parseInt(rest[mergedIdx + 1], 10);
+        const hasRecordFlags = doneOpts.pr !== undefined || doneOpts.merged !== undefined;
+        await done(workspaceRoot, getProjectId(rest[0]), resolver, hasRecordFlags ? doneOpts : undefined);
         break;
+      }
 
       case 'gate':
         await gate(workspaceRoot, getProjectId(rest[0]), resolver);
