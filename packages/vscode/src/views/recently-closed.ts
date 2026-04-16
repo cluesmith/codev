@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { OverviewCache } from './overview-cache.js';
+import type { OverviewCache } from './overview-data.js';
 
 export class RecentlyClosedProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { TerminalManager } from './terminal-manager.js';
-import { OverviewCache } from './views/overview-cache.js';
+import { OverviewCache } from './views/overview-data.js';
 import { NeedsAttentionProvider } from './views/needs-attention.js';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
@@ -70,9 +70,18 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
 	);
 
-	// Refresh overview on connect
-	connectionManager.onStateChange((state) => {
-		if (state === 'connected') { overviewCache.refresh(); }
+	// Refresh overview on connect + set team visibility
+	connectionManager.onStateChange(async (state) => {
+		if (state === 'connected') {
+			overviewCache.refresh();
+			// Check if team is enabled for this workspace
+			const client = connectionManager?.getClient();
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (client && workspacePath) {
+				const wsState = await client.getWorkspaceState(workspacePath);
+				vscode.commands.executeCommand('setContext', 'codev.teamEnabled', wsState?.teamEnabled ?? false);
+			}
+		}
 	});
 
 	// Commands
