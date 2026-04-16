@@ -4,6 +4,7 @@
   "displayName": "Codev",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
   "version": "0.0.1",
+  "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.110.0"
   },
