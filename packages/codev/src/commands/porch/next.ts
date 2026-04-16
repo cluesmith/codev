@@ -245,7 +245,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   // Protocol complete
   // Note: status.yaml is already committed automatically by writeStateAndCommit
   // at every phase transition. No manual "commit status.yaml" task needed.
-  if (state.phase === 'complete' || !phaseConfig) {
+  if (state.phase === 'verified' || state.phase === 'complete' || !phaseConfig) {
     // Bugfix builders are done after PR + CMAP — architect handles merge/cleanup
     if (state.protocol === 'bugfix') {
       return {
@@ -342,7 +342,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     if (gateStatus?.status === 'approved') {
       const nextPhase = getNextPhase(protocol, state.phase);
       if (!nextPhase) {
-        state.phase = 'complete';
+        state.phase = 'verified';
         await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
         return next(workspaceRoot, projectId);
       }
@@ -709,7 +709,7 @@ async function handleVerifyApproved(
   // No gate — advance to next phase directly
   const nextPhase = getNextPhase(protocol, state.phase);
   if (!nextPhase) {
-    state.phase = 'complete';
+    state.phase = 'verified';
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     return next(workspaceRoot, projectId);
   }
@@ -740,6 +740,23 @@ async function handleOncePhase(
   let description = prompt;
   if (phaseConfig.checks && phaseConfig.checks.length > 0) {
     description += `\n\nAfter completing the work, run these checks:\n${phaseConfig.checks.map(c => `- ${c}`).join('\n')}`;
+  }
+
+  // Verify phase: customize task description and make skip option prominent
+  if (state.phase === 'verify') {
+    description = `The PR has been merged. Verify the change in your environment.\n\nWhen verified, run: porch done ${state.id}\nPorch will then request the verify-approval gate — the architect approves it.\n\nIf verification is not needed, skip it:\n  porch verify ${state.id} --skip "reason"`;
+
+    return {
+      status: 'tasks',
+      phase: state.phase,
+      iteration: state.iteration,
+      tasks: [{
+        subject: 'Verify: Post-merge environmental verification',
+        activeForm: 'Waiting for verification',
+        description,
+        sequential: true,
+      }],
+    };
   }
 
   description += `\n\nWhen complete, run: porch done ${state.id}`;

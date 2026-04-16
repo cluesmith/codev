@@ -428,7 +428,11 @@ describe('overview', () => {
       }))).toBe(95);
     });
 
-    it('returns 100 for complete phase', () => {
+    it('returns 100 for verified phase', () => {
+      expect(calculateProgress(makeParsed({ phase: 'verified' }))).toBe(100);
+    });
+
+    it('returns 100 for legacy complete phase (backward compat)', () => {
       expect(calculateProgress(makeParsed({ phase: 'complete' }))).toBe(100);
     });
 
@@ -442,7 +446,7 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'plan' }))).toBe(35);
       expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'implement' }))).toBe(70);
       expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'review' }))).toBe(92);
-      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'complete' }))).toBe(100);
+      expect(calculateProgress(makeParsed({ protocol: 'aspir', phase: 'verified' }))).toBe(100);
     });
 
     it('tracks ASPIR implement plan phases like SPIR (Bugfix #454)', () => {
@@ -481,7 +485,7 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'investigate' }), tmpDir)).toBe(25);
       expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'fix' }), tmpDir)).toBe(50);
       expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'pr' }), tmpDir)).toBe(75);
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'complete' }), tmpDir)).toBe(100);
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'verified' }), tmpDir)).toBe(100);
     });
 
     it('loads tick phases from protocol.json and calculates progress', () => {
@@ -505,7 +509,7 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'defend' }), tmpDir)).toBe(63);
       expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'evaluate' }), tmpDir)).toBe(75);
       expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'review' }), tmpDir)).toBe(88);
-      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'complete' }), tmpDir)).toBe(100);
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'verified' }), tmpDir)).toBe(100);
     });
 
     it('returns 0 when loadProtocol throws (protocol not found)', () => {
@@ -534,7 +538,11 @@ describe('overview', () => {
       expect(calculateEvenProgress('c', phases)).toBe(75);
     });
 
-    it('returns 100 for complete phase', () => {
+    it('returns 100 for verified phase', () => {
+      expect(calculateEvenProgress('verified', ['a', 'b'])).toBe(100);
+    });
+
+    it('returns 100 for legacy complete phase (backward compat)', () => {
       expect(calculateEvenProgress('complete', ['a', 'b'])).toBe(100);
     });
 
@@ -544,7 +552,7 @@ describe('overview', () => {
 
     it('handles single-phase protocol', () => {
       expect(calculateEvenProgress('only', ['only'])).toBe(50);
-      expect(calculateEvenProgress('complete', ['only'])).toBe(100);
+      expect(calculateEvenProgress('verified', ['only'])).toBe(100);
     });
   });
 

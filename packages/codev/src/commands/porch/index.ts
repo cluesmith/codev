@@ -124,7 +124,8 @@ export async function status(workspaceRoot: string, projectId: string, resolver?
     // Status icons
     const icon = (status: string) => {
       switch (status) {
-        case 'complete': return chalk.green('✓');
+        case 'verified': return chalk.green('✓');
+        case 'complete': return chalk.green('✓'); // backward compat
         case 'in_progress': return chalk.yellow('►');
         default: return chalk.gray('○');
       }
@@ -420,7 +421,7 @@ async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, 
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
-    state.phase = 'complete';
+    state.phase = 'verified';
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     console.log('');
     console.log(chalk.green.bold('🎉 PROTOCOL COMPLETE'));
@@ -562,6 +563,12 @@ export async function approve(
 
   const state = readState(statusPath);
 
+  // Convenience: for verify-approval, auto-complete porch done if build_complete is false
+  if (gateName === 'verify-approval' && state.phase === 'verify' && !state.build_complete) {
+    state.build_complete = true;
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} verify build-complete (auto)`);
+  }
+
   if (!state.gates[gateName]) {
     const knownGates = Object.keys(state.gates).join(', ');
     throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
@@ -653,7 +660,7 @@ export async function rollback(
   const targetIndex = protocol.phases.findIndex(p => p.id === targetPhase);
 
   // Handle completed projects (phase not in protocol phases array)
-  if (state.phase === 'complete') {
+  if (state.phase === 'verified' || state.phase === 'complete') {
     // Allow rollback from complete state to any valid phase
   } else if (currentIndex === -1) {
     throw new Error(`Current phase '${state.phase}' not found in protocol.`);
@@ -911,6 +918,28 @@ export async function cli(args: string[]): Promise<void> {
         await rollback(workspaceRoot, rest[0], rest[1], resolver);
         break;
 
+      case 'verify': {
+        const verifyProjectId = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
+        const skipIdx = rest.indexOf('--skip');
+        if (skipIdx === -1) throw new Error('Usage: porch verify <id> --skip "reason"');
+        const skipReason = rest[skipIdx + 1];
+        if (!skipReason || skipReason.startsWith('--')) throw new Error('--skip requires a reason');
+        const pid = getProjectId(verifyProjectId);
+        const sp = findStatusPath(workspaceRoot, pid);
+        if (!sp) throw new Error(`Project ${pid} not found.`);
+        const st = readState(sp);
+        if (st.phase !== 'verify' && st.phase !== 'review') {
+          throw new Error(`porch verify --skip can only be used in verify or review phase (current: ${st.phase})`);
+        }
+        st.phase = 'verified';
+        st.context = { ...st.context, verify_skip_reason: skipReason };
+        await writeStateAndCommit(sp, st, `chore(porch): ${st.id} verify skipped: ${skipReason}`);
+        console.log('');
+        console.log(chalk.green(`VERIFIED (skipped): ${st.id}`));
+        console.log(`  Reason: ${skipReason}`);
+        break;
+      }
+
       case 'init':
         if (!rest[0] || !rest[1] || !rest[2]) {
           throw new Error('Usage: porch init <protocol> <id> <name>');
@@ -930,6 +959,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
+        console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
         console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
         console.log('');

@@ -284,7 +284,10 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
     }
     case 'review':
       return gateRequested('pr') ? 95 : 92;
-    case 'complete':
+    case 'verify':
+      return 98;
+    case 'verified':
+    case 'complete': // backward compat
       return 100;
     default:
       return 0;
@@ -293,10 +296,10 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
 
 /**
  * Even-split progress for protocols with fixed phase lists.
- * Each phase gets an equal share of 100%, with 'complete' always = 100.
+ * Each phase gets an equal share of 100%, with 'verified'/'complete' always = 100.
  */
 export function calculateEvenProgress(phase: string, phases: string[]): number {
-  if (phase === 'complete') return 100;
+  if (phase === 'verified' || phase === 'complete') return 100;
   const idx = phases.indexOf(phase);
   if (idx === -1) return 0;
   return Math.round(((idx + 1) / (phases.length + 1)) * 100);

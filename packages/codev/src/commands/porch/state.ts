@@ -119,6 +119,14 @@ export function readState(statusPath: string): ProjectState {
       throw new Error('Invalid state file: missing required fields (id, protocol, phase)');
     }
 
+    // Spec 653: backward compat migration — rename 'complete' → 'verified'
+    // Universal: applies to ALL protocols, not just those with a verify phase.
+    if (state.phase === 'complete') {
+      state.phase = 'verified';
+      // Write the migration in-place (sync — no git commit here; callers handle persistence)
+      writeState(statusPath, state);
+    }
+
     return state;
   } catch (err) {
     if (err instanceof yaml.YAMLException) {
