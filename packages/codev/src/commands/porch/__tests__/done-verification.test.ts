@@ -94,6 +94,14 @@ const spirProtocol = {
       verify: { type: 'plan', models: ['gemini', 'codex', 'claude'] },
       max_iterations: 1,
       gate: 'plan-approval',
+      next: 'verify',
+    },
+    {
+      id: 'verify',
+      name: 'Verify',
+      type: 'once',
+      gate: 'verify-approval',
+      next: null,
     },
   ],
 };
@@ -374,5 +382,40 @@ describe('porch done — verification enforcement', () => {
     setupProtocol(testDir, 'spir', spirProtocol);
 
     await expect(done(testDir, '0001', undefined, { merged: 99 })).rejects.toThrow('PR #99 not found');
+  });
+
+  // ==========================================================================
+  // Verify Phase (Spec 653 Phase 4)
+  // ==========================================================================
+
+  it('porch done in verify phase auto-requests verify-approval gate', async () => {
+    const state = makeState({
+      phase: 'verify',
+      build_complete: false,
+      gates: {
+        'spec-approval': { status: 'approved' as const },
+        'plan-approval': { status: 'approved' as const },
+        'pr': { status: 'approved' as const },
+      },
+    });
+    setupState(testDir, state);
+
+    await done(testDir, '0001');
+
+    const updated = readState(getStatusPath(testDir, '0001', 'test-feature'));
+    // Gate should be auto-requested
+    expect(updated.gates['verify-approval']).toBeDefined();
+    expect(updated.gates['verify-approval'].status).toBe('pending');
+    expect(updated.gates['verify-approval'].requested_at).toBeDefined();
+  });
+
+  it('readState migrates phase complete to verified (backward compat)', () => {
+    const state = makeState({ phase: 'complete' as string });
+    const statusPath = getStatusPath(testDir, '0001', 'test-feature');
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    writeState(statusPath, state);
+
+    const loaded = readState(statusPath);
+    expect(loaded.phase).toBe('verified');
   });
 });

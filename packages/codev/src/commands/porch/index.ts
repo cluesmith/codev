@@ -390,9 +390,17 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     }
   }
 
-  // Check for gate
+  // Check for gate — auto-request if not yet requested
   const gate = getPhaseGate(protocol, state.phase);
   if (gate && state.gates[gate]?.status !== 'approved') {
+    // Auto-request the gate if it hasn't been requested yet
+    if (!state.gates[gate]) {
+      state.gates[gate] = { status: 'pending' };
+    }
+    if (!state.gates[gate].requested_at) {
+      state.gates[gate].requested_at = new Date().toISOString();
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gate} gate-requested`);
+    }
     console.log('');
     console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
     console.log(`\n  Run: porch gate ${state.id}`);
@@ -626,7 +634,13 @@ export async function approve(
 
   console.log('');
   console.log(chalk.green(`Gate ${gateName} approved.`));
-  console.log(`\n  Run: porch done ${state.id} (to advance)`);
+
+  // For verify-approval: auto-advance to terminal state (convenience — one command)
+  if (gateName === 'verify-approval') {
+    await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
+  } else {
+    console.log(`\n  Run: porch done ${state.id} (to advance)`);
+  }
   console.log('');
 }
 
