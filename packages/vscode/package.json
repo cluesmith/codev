@@ -38,6 +38,55 @@
       {
         "command": "codev.newShell",
         "title": "Codev: New Shell"
+      },
+      {
+        "command": "codev.spawnBuilder",
+        "title": "Codev: Spawn Builder"
+      },
+      {
+        "command": "codev.sendMessage",
+        "title": "Codev: Send Message"
+      },
+      {
+        "command": "codev.approveGate",
+        "title": "Codev: Approve Gate"
+      },
+      {
+        "command": "codev.cleanupBuilder",
+        "title": "Codev: Cleanup Builder"
+      },
+      {
+        "command": "codev.refreshOverview",
+        "title": "Codev: Refresh Overview"
+      },
+      {
+        "command": "codev.connectTunnel",
+        "title": "Codev: Connect Tunnel"
+      },
+      {
+        "command": "codev.disconnectTunnel",
+        "title": "Codev: Disconnect Tunnel"
+      },
+      {
+        "command": "codev.cronTasks",
+        "title": "Codev: Cron Tasks"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codev.openArchitectTerminal",
+        "key": "ctrl+k a",
+        "mac": "cmd+k a"
+      },
+      {
+        "command": "codev.sendMessage",
+        "key": "ctrl+k d",
+        "mac": "cmd+k d"
+      },
+      {
+        "command": "codev.approveGate",
+        "key": "ctrl+k g",
+        "mac": "cmd+k g"
       }
     ],
     "viewsContainers": {

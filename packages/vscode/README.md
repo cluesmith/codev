@@ -42,11 +42,19 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| Codev: Open Architect Terminal | Open the architect terminal in the left editor group |
-| Codev: Open Builder Terminal | Pick a builder and open its terminal |
-| Codev: New Shell | Create a new persistent shell terminal |
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| Codev: Open Architect Terminal | `Cmd+K, A` | Open the architect terminal in the left editor group |
+| Codev: Send Message | `Cmd+K, D` | Pick a builder, type a message, send via Tower |
+| Codev: Approve Gate | `Cmd+K, G` | Approve a blocked builder's gate |
+| Codev: Open Builder Terminal | | Pick a builder and open its terminal |
+| Codev: New Shell | | Create a new persistent shell terminal |
+| Codev: Spawn Builder | | Issue number + protocol + optional branch |
+| Codev: Cleanup Builder | | Remove a completed builder's worktree |
+| Codev: Refresh Overview | | Manually refresh sidebar data |
+| Codev: Connect Tunnel | | Connect cloud tunnel for remote access |
+| Codev: Disconnect Tunnel | | Disconnect cloud tunnel |
+| Codev: Cron Tasks | | List, run, enable, or disable cron tasks |
 
 ## Settings
 

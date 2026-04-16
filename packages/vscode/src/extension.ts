@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { TerminalManager } from './terminal-manager.js';
 import { OverviewCache } from './views/overview-data.js';
+import { spawnBuilder } from './commands/spawn.js';
+import { sendMessage } from './commands/send.js';
+import { approveGate } from './commands/approve.js';
+import { cleanupBuilder } from './commands/cleanup.js';
+import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
+import { listCronTasks } from './commands/cron.js';
 import { NeedsAttentionProvider } from './views/needs-attention.js';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
@@ -56,9 +62,22 @@ export async function activate(context: vscode.ExtensionContext) {
 	terminalManager = new TerminalManager(connectionManager, outputChannel);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
 
+	// Update status bar with builder/gate counts
+	const updateStatusBarCounts = () => {
+		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
+		const data = overviewCache.getData();
+		if (!data) { return; }
+		const builderCount = data.builders.length;
+		const blockedCount = data.builders.filter(b => b.blocked).length;
+		statusBarItem.text = blockedCount > 0
+			? `$(server) Codev: ${builderCount} builders · $(bell) ${blockedCount} blocked`
+			: `$(server) Codev: ${builderCount} builders`;
+	};
+
 	// Sidebar TreeViews
 	const overviewCache = new OverviewCache(connectionManager);
 	context.subscriptions.push({ dispose: () => overviewCache.dispose() });
+	overviewCache.onDidChange(updateStatusBarCounts);
 
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('codev.needsAttention', new NeedsAttentionProvider(overviewCache)),
@@ -151,6 +170,14 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');
 			}
 		}),
+		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
+		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
+		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
+		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
+		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
+		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
+		vscode.commands.registerCommand('codev.disconnectTunnel', () => disconnectTunnel(connectionManager!)),
+		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
 	);
 
 	// Connect
