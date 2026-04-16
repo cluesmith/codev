@@ -35,7 +35,8 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
 ```json
 {
   "phases": [
-    {"id": "shared_types", "title": "Phase 1: Shared Types Package"},
+    {"id": "shared_types", "title": "Phase 1a: Shared Types Package (done)"},
+    {"id": "shared_runtime", "title": "Phase 1b: Shared Runtime Package"},
     {"id": "connection_core", "title": "Phase 2a: Connection Manager + Auth"},
     {"id": "connection_reactive", "title": "Phase 2b: SSE + Tower Auto-Start"},
     {"id": "terminal_integration", "title": "Phase 3: Terminal Integration"},
@@ -88,16 +89,16 @@ The shared types package (`@cluesmith/codev-types`) is extracted in Phase 1 as a
 **Key decision:** Types package uses `"type": "module"` to match the codev package. The extension's `"moduleResolution": "bundler"` handles ESM imports.
 
 #### Acceptance Criteria
-- [ ] `npm install` from root resolves all three workspace members
-- [ ] `npm run build` in `packages/codev` passes with shared type imports
-- [ ] `npm run check-types` in `packages/codev-vscode` passes with shared type imports
+- [ ] `pnpm install` from root resolves all workspace members
+- [ ] `pnpm build` in `packages/codev` passes with shared type imports
+- [ ] `pnpm check-types` in `packages/vscode` passes with shared type imports
 - [ ] `vsce package` produces a valid `.vsix` (workspace symlinks correctly resolved by esbuild at bundle time)
 - [ ] Existing 2422 unit tests still pass
 
 #### Test Plan
 - **Unit Tests**: Type exports compile correctly
 - **Integration Tests**: Server build + extension type-check both pass
-- **Manual Testing**: `npm install` from root, verify symlinks
+- **Manual Testing**: `pnpm install` from root, verify symlinks
 
 #### Rollback Strategy
 Revert the extraction — types go back to local definitions. No runtime behavior change.
@@ -108,55 +109,128 @@ Revert the extraction — types go back to local definitions. No runtime behavio
 
 ---
 
-### Phase 2a: Connection Manager + Auth
-**Dependencies**: Phase 1
+### Phase 1b: Shared Runtime Package
+**Dependencies**: Phase 1a
 
 #### Objectives
-- Implement the singleton Connection Manager with state machine
-- REST client with auth and proxy support
-- Register Output Channel for diagnostics
-- Workspace path detection and config reading
+- Extract shared runtime utilities from `packages/codev/src/agent-farm/lib/tower-client.ts` into `packages/core/`
+- Extract `EscapeBuffer` from `packages/dashboard/src/lib/escapeBuffer.ts`
+- Both codev server and VS Code extension import from `@cluesmith/codev-core` — no duplication
+- Publish `@cluesmith/codev-core` to npm as part of the release process
 
 #### Deliverables
-- [ ] `src/connection-manager.ts` — singleton with state machine (DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING)
-- [ ] REST client with authenticated fetch (`codev-web-key` header)
-- [ ] HTTP proxy support via `vscode.workspace.getConfiguration('http').get('proxy')` with `https-proxy-agent`
-- [ ] Health check against `/api/health` with protocol version compatibility check
-- [ ] Workspace path detection (traverse up to `.codev/config.json` root)
-- [ ] Base64url encoding for workspace-scoped routes
-- [ ] `Codev` Output Channel for diagnostic logging (redacts auth tokens)
-- [ ] Auth via `SecretStorage` with re-read from disk on 401
-- [ ] Extension settings registration: `codev.towerHost`, `codev.towerPort`, `codev.workspacePath`, `codev.terminalPosition`, `codev.autoConnect`, `codev.autoStartTower`, `codev.telemetry`
-- [ ] Activation events: `onCommand:codev.*` (implicit via command registration) and `workspaceContains:.codev/config.json`
-- [ ] Proper `deactivate()` — close all connections, dispose resources
-- [ ] Add `ws` and `https-proxy-agent` as runtime dependencies in `package.json`
-- [ ] Update `esbuild.js` to mark `bufferutil` and `utf-8-validate` as external
-- [ ] `src/extension.ts` updated to initialize Connection Manager on activation
+- [ ] `packages/core/package.json` with `"name": "@cluesmith/codev-core"`
+- [ ] `packages/core/tsconfig.json` extending `../config/tsconfig.base.json`
+- [ ] `packages/core/src/auth.ts` — `readLocalKey()` (read-only, returns `string | null`) + `ensureLocalKey()` (creates dir + generates, CLI-only) extracted from `tower-client.ts`
+- [ ] `packages/core/src/workspace.ts` — `encodeWorkspacePath()`, `decodeWorkspacePath()` extracted from `tower-client.ts`
+- [ ] `packages/core/src/tower-client.ts` — `TowerClient` class refactored with injectable auth (`getAuthKey` option), all Tower API types
+- [ ] `packages/core/src/escape-buffer.ts` — `EscapeBuffer` class extracted from dashboard
+- [ ] `packages/core/src/constants.ts` — `DEFAULT_TOWER_PORT` and other shared constants
+- [ ] Subpath exports in `package.json` (not single barrel — prevents Node builtins leaking into dashboard Vite build)
+- [ ] `packages/codev/src/agent-farm/lib/tower-client.ts` — replaced with re-exports from `@cluesmith/codev-core`
+- [ ] `packages/codev/package.json` — add `@cluesmith/codev-core` as dependency (exact version, runtime, must be published)
+- [ ] `packages/vscode/package.json` — add `@cluesmith/codev-core` as dependency (esbuild bundles it, no publish needed for extension)
+- [ ] `packages/dashboard/src/lib/escapeBuffer.ts` — replaced with import from `@cluesmith/codev-core/escape-buffer`
+- [ ] Update release protocol with two-package publish order (shared first, then codev)
 
 #### Implementation Details
 
 **Files to create:**
-- `src/connection-manager.ts` — core class with state machine, REST client
-- `src/auth.ts` — local-key reading, SecretStorage caching, 401 re-read
-- `src/config.ts` — `.codev/config.json` reader, workspace path detection
+- `packages/core/package.json` — `"type": "module"`, subpath exports per module (tower-client, auth, workspace, constants, escape-buffer)
+- `packages/core/tsconfig.json` — extends base config
+- `packages/core/src/auth.ts` — `readLocalKey()` (read-only) + `ensureLocalKey()` (CLI-only)
+- `packages/core/src/workspace.ts` — extract `encodeWorkspacePath()` / `decodeWorkspacePath()`
+- `packages/core/src/tower-client.ts` — `TowerClient` with injectable auth (`{ getAuthKey?: () => string | null }`)
+- `packages/core/src/escape-buffer.ts` — extract `EscapeBuffer` from dashboard
+- `packages/core/src/constants.ts` — `DEFAULT_TOWER_PORT = 4100`
+- (no barrel index.ts — subpath exports only)
+
+**Files to modify:**
+- `packages/codev/src/agent-farm/lib/tower-client.ts` — replace with re-exports from `@cluesmith/codev-core`
+- `packages/codev/package.json` — add `@cluesmith/codev-core` to dependencies
+- `packages/dashboard/src/lib/escapeBuffer.ts` — replace with re-export from `@cluesmith/codev-core`
+- `packages/dashboard/package.json` — add `@cluesmith/codev-core` to dependencies
+- `.gitignore` — add `packages/core/dist/`
+
+**Key decision:** `@cluesmith/codev-core` is a runtime dependency of `@cluesmith/codev` (the server runs under Node.js, not bundled). It must be published to npm alongside `@cluesmith/codev` during releases. The VS Code extension uses esbuild which bundles it at build time — no npm publish needed for the extension.
+
+**TowerClient extraction:** The `TowerClient` class is the core API client used by all `afx` CLI commands. Moving it to the shared package means the extension gets the full Tower API client for free — no need to reimplement REST calls, auth, health checks, or workspace operations.
+
+#### Acceptance Criteria
+- [ ] `pnpm install` from root resolves all workspace members including shared
+- [ ] `packages/codev/src/agent-farm/lib/tower-client.ts` is a thin re-export file
+- [ ] All existing consumers of `TowerClient` work without changes (re-exports preserve the API)
+- [ ] Extension can import `TowerClient` from `@cluesmith/codev-core`
+- [ ] `pnpm build` in `packages/codev` passes
+- [ ] All 2422+ unit tests pass
+- [ ] `pnpm pack` + `npm install -g` succeeds (codev-core must be published first, or use devDependency pattern for local testing)
+
+#### Test Plan
+- **Unit Tests**: Existing tower-client tests continue to pass via re-exports
+- **Integration Tests**: `afx` commands work after extraction
+- **Manual Testing**: `pnpm install` from root, verify workspace symlinks, build all packages
+
+#### Rollback Strategy
+Revert extraction — move code back to `tower-client.ts`. No runtime behavior change.
+
+#### Risks
+- **Risk**: `TowerClient` has hidden dependencies on Node.js APIs not available in extension
+  - **Mitigation**: `TowerClient` uses `fetch` (available everywhere) and `fs` (only for `getLocalKey`). Extension wraps `getLocalKey` with `SecretStorage` at the consumer level.
+- **Risk**: Publishing `@cluesmith/codev-core` adds release complexity
+  - **Mitigation**: Publish both packages in same release step. Version them together.
+
+---
+
+### Phase 2a: Connection Manager + Auth
+**Dependencies**: Phase 1b
+
+#### Objectives
+- Implement the singleton Connection Manager wrapping `TowerClient` from `@cluesmith/codev-core`
+- Add VS Code-specific layers: state machine, Output Channel, SecretStorage auth wrapper, settings, activation
+- No duplication of REST/auth/encoding logic — reuse `TowerClient` directly
+
+#### Deliverables
+- [ ] `src/connection-manager.ts` — singleton wrapping `TowerClient` from `@cluesmith/codev-core`, adds state machine (DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING) and VS Code integration
+- [ ] `src/auth-wrapper.ts` — wraps `getLocalKey()` from shared with VS Code `SecretStorage` caching + 401 re-read
+- [ ] `src/workspace-detector.ts` — uses `findProjectRoot()` pattern to traverse up from `vscode.workspace.workspaceFolders[0]` to `.codev/config.json`, reads Tower port from config
+- [ ] `Codev` Output Channel for diagnostic logging (redacts auth tokens)
+- [ ] Extension settings registration: all 7 settings
+- [ ] Activation events: `workspaceContains:.codev` + `workspaceContains:codev` + implicit `onCommand:`
+- [ ] Proper `deactivate()` — close all connections, dispose resources
+- [ ] Add `ws` as runtime dependency, update `esbuild.js` externals
+- [ ] `src/extension.ts` updated to initialize Connection Manager on activation
+- [ ] Workspace auto-activation: after connecting to Tower, call `client.activateWorkspace(workspacePath)` to ensure architect terminal is created
+- [ ] Status bar showing connection state
+
+#### Implementation Details
+
+**Key principle:** The extension does NOT reimplement Tower API calls. It imports `TowerClient` from `@cluesmith/codev-core` and wraps it with VS Code-specific concerns (state machine, Output Channel logging, SecretStorage, settings).
+
+**Files to create:**
+- `src/connection-manager.ts` — owns a `TowerClient` instance, adds state machine + reconnection + VS Code event emitters
+- `src/auth-wrapper.ts` — thin wrapper: calls `getLocalKey()` from shared, caches in `SecretStorage`, re-reads on 401
+- `src/workspace-detector.ts` — traverses up from workspace folder to find `.codev/config.json`, reads port
 
 **Files to modify:**
 - `src/extension.ts` — activate initializes Connection Manager, deactivate cleans up
-- `package.json` — add `contributes.configuration` for all 7 settings, add activation events, add `https-proxy-agent` dependency
+- `package.json` — add settings, activation events, `ws` + `@cluesmith/codev-core` dependencies
+- `esbuild.js` — add `bufferutil`, `utf-8-validate` to externals
 
-**Note on `ws` dependency**: The `ws` package has optional native bindings (`bufferutil`, `utf-8-validate`) that don't bundle with esbuild. Mark these as external in `esbuild.js` or use the pure-JS fallback (ws works without them, just slower). Add to `esbuild.js`:
-```javascript
-external: ['vscode', 'bufferutil', 'utf-8-validate'],
-```
+**What the extension adds on top of `TowerClient`:**
+- State machine with VS Code event emitter (`onStateChange`)
+- Status bar item reflecting connection state
+- Output Channel logging (connection events, errors, redacted auth)
+- `SecretStorage` caching for the auth key
+- Settings-based host/port configuration
+- Workspace auto-detection from VS Code workspace folders
 
-**State machine:**
-```
-DISCONNECTED → (health check) → CONNECTING → (connected) → CONNECTED
-CONNECTED → (connection drops) → RECONNECTING → (backoff retry) → CONNECTING
-RECONNECTING → (max retries) → DISCONNECTED
-```
-
-**Workspace detection:** Walk up from `vscode.workspace.workspaceFolders[0]` looking for `.codev/config.json`. Read Tower port from config. Match against `GET /api/workspaces`.
+**What the extension does NOT implement (reused from shared):**
+- REST client with auth headers → `TowerClient.request()`
+- Health check → `TowerClient.isRunning()`, `TowerClient.getHealth()`
+- Workspace encoding → `encodeWorkspacePath()`
+- Terminal operations → `TowerClient.createTerminal()`, etc.
+- Send message → `TowerClient.sendMessage()`
+- Tunnel control → `TowerClient.signalTunnel()`
 
 **Activation:** Register `activationEvents` in `package.json`:
 ```json
@@ -257,7 +331,7 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 
 #### Deliverables
 - [ ] `src/terminal-adapter.ts` — Pseudoterminal implementation with WebSocket binary protocol
-- [ ] `src/escape-buffer.ts` — port of `dashboard/src/lib/escapeBuffer.ts`
+- [ ] Import `EscapeBuffer` from `@cluesmith/codev-core/escape-buffer` (extracted in Phase 1b)
 - [ ] Binary protocol adapter: inbound `0x01` → `TextDecoder({ stream: true })` → `onDidWrite`, outbound → `0x01` prefix → `ws.send()`
 - [ ] Control frame handling (`0x00`): resize, ping/pong, sequence numbers
 - [ ] Reconnection with inline ANSI banner and ring buffer replay
@@ -266,8 +340,8 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 - [ ] Editor layout: architect in left group, builders as tabs in right group
 - [ ] Terminal naming: `Codev: Architect`, `Codev: #42 password-hashing [implement]`, `Codev: Shell #1`
 - [ ] WebSocket auth via `0x00` control message after connection (not query param)
-- [ ] Respect `codev.terminalPosition` setting — only attempt `moveIntoEditor` when set to `"editor"`
-- [ ] Fallback to bottom panel if `moveIntoEditor` fails
+- [ ] Use `TerminalLocation.Editor` + `ViewColumn` for editor placement (stable API, no `moveIntoEditor`)
+- [ ] Respect `codev.terminalPosition` setting — `"editor"` uses ViewColumn, `"panel"` uses TerminalLocation.Panel
 - [ ] WebSocket pool management (max 10 concurrent)
 - [ ] Image paste: intercept clipboard paste in terminal, upload via `POST /api/paste-image` (note: VS Code Pseudoterminal only delivers text input — investigate clipboard API feasibility, defer if not possible)
 
@@ -275,7 +349,7 @@ Remove SSE client and Tower starter. REST connection still works for manual refr
 
 **Files to create:**
 - `src/terminal-adapter.ts` — `CodevPseudoterminal` class implementing `vscode.Pseudoterminal`
-- `src/escape-buffer.ts` — ANSI escape sequence buffering
+- (EscapeBuffer imported from `@cluesmith/codev-core/escape-buffer`)
 - `src/terminal-manager.ts` — WebSocket pool, terminal lifecycle, editor layout
 
 **Files to modify:**
@@ -306,12 +380,12 @@ handleInput(data: string): void {
 }
 ```
 
-**Editor layout sequence:**
-1. Create terminal with `createTerminal({ name, pty })`
-2. `vscode.commands.executeCommand('workbench.action.terminal.moveIntoEditor')`
-3. For architect: move to first editor group
-4. For builders: move to second editor group (split if needed)
-5. Catch errors → fallback to bottom panel
+**Editor layout:**
+Create terminals directly in editor area via `createTerminal({ name, pty, location })`:
+- Architect: `{ viewColumn: ViewColumn.One }`
+- Builders/shells: `{ viewColumn: ViewColumn.Two }`
+- VS Code auto-creates the split when ViewColumn.Two is first used
+- Panel fallback: `TerminalLocation.Panel` when setting is `"panel"`
 
 #### Acceptance Criteria
 - [ ] Architect terminal opens in left editor group
@@ -331,8 +405,8 @@ handleInput(data: string): void {
 Remove terminal adapter, revert to scaffold. Connection Manager stays functional.
 
 #### Risks
-- **Risk**: `moveIntoEditor` fails on some VS Code versions
-  - **Mitigation**: Try/catch with panel fallback, log warning to Output Channel
+- **Risk**: Terminal editor placement not working as expected
+  - **Mitigation**: Uses stable `TerminalLocation.Editor` + `ViewColumn` API, `"panel"` setting as fallback
 - **Risk**: EscapeBuffer diverges from dashboard implementation
   - **Mitigation**: Port tests alongside code, verify against same fixtures
 
@@ -644,15 +718,16 @@ Remove URI handler and link provider. `afx open` continues to work via Tower API
 
 ## Dependency Map
 ```
-Phase 1 (types) ──→ Phase 2a (connection) ──→ Phase 2b (SSE + auto-start) ──→ Phase 4 (sidebar)
-                                           ──→ Phase 3 (terminals)
-                         Phase 2b + 3 + 4 ──→ Phase 5 (commands)
-                                Phase 2a ──→ Phase 8 (analytics, post-V1)
-                                Phase 3 ──→ Phase 9 (file links, post-V1)
+Phase 1a (types, done) ──→ Phase 1b (shared runtime) ──→ Phase 2a (connection)
+                                                      ──→ Phase 2b (SSE + auto-start) ──→ Phase 4 (sidebar)
+                                                      ──→ Phase 3 (terminals)
+                                            Phase 2b + 3 + 4 ──→ Phase 5 (commands)
+                                                   Phase 2a ──→ Phase 8 (analytics, post-V1)
+                                                   Phase 3 ──→ Phase 9 (file links, post-V1)
 
 Phase 6 (review comments) ── NO DEPENDENCIES ── can run in parallel from Day 1
 
-All V1 phases (1-6) ──→ Phase 7 (V1 polish + packaging)
+All V1 phases (1a, 1b, 2a, 2b, 3-6) ──→ Phase 7 (V1 polish + packaging)
 ```
 
 Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero dependencies and can start immediately.
@@ -679,8 +754,8 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 | Tower auto-start PATH issues | Medium | Low | Resolve full afx path, log errors | 2b |
 | SSE double-retry (native + custom backoff) | Medium | Medium | Disable native EventSource reconnection | 2b |
 | HTTP proxy not configured in enterprise | Medium | Medium | Integrate with VS Code proxy settings, `https-proxy-agent` | 2a |
-| `moveIntoEditor` API instability | Medium | Medium | Check `terminalPosition` setting first, try/catch with panel fallback | 3 |
-| EscapeBuffer divergence (third copy) | Low | High | Port dashboard tests alongside code, extract to shared package post-V1 | 3 |
+| Terminal editor placement | Low | Low | Uses stable TerminalLocation.Editor + ViewColumn API | 3 |
+| `@cluesmith/codev-core` must be published to npm | Medium | High | Publish alongside codev in same release step, version together | 1b |
 | Image paste infeasible via Pseudoterminal | High | Low | Investigate clipboard API, defer if not possible | 3 |
 | 7 TreeView providers cause excessive API calls | Low | Medium | Single cached overview call | 4 |
 | Phase 4 context menu actions depend on later phases | Medium | Low | Register as no-ops, wire up in Phase 5 | 4 |
@@ -733,9 +808,9 @@ Phases 3, 4, and 6 can run in parallel. Phase 6 (review comments) has zero depen
 
 **Parallel execution**: Phase 6 (review comments) has zero dependencies and can start Day 1. Phases 3 and 4 can run in parallel after Phase 2b. Most Phase 5 commands only need Phase 2b (not 3 or 4).
 
-**Monorepo prerequisite**: Already done — npm workspaces set up with root `package.json`, extension scaffold at `packages/codev-vscode/`, cross-package imports verified.
+**Monorepo prerequisite**: Already done — pnpm workspaces set up with `pnpm-workspace.yaml`, extension scaffold at `packages/vscode/`, cross-package imports verified.
 
-**Tech debt acknowledged**: Phase 3 creates a third copy of EscapeBuffer (server, dashboard, extension). This is pragmatic for V1 — extraction into `@cluesmith/codev-shared` happens post-V1 when patterns stabilize across two consumers.
+**No duplication by design**: Phase 1b extracts `TowerClient`, auth, workspace encoding, and `EscapeBuffer` into `@cluesmith/codev-core` before any extension code is written. Phase 2a wraps the shared `TowerClient` with VS Code-specific concerns (state machine, SecretStorage, Output Channel) instead of reimplementing REST calls.
 
 **Consultation feedback incorporated**: Phase 2 split into 2a/2b per Claude recommendation. Review comments moved into V1 per Gemini/Codex. Image paste feasibility flagged per Codex. Cross-platform `afx open` per Codex. `ws` bundling risk per Claude. All missing settings/activation events added.
 

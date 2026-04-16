@@ -25,6 +25,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build core package
+        working-directory: packages/core
+        run: pnpm build
+
       - name: Copy skeleton for unit tests
         working-directory: packages/codev
         run: pnpm copy-skeleton
@@ -69,6 +73,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build core package
+        working-directory: packages/core
+        run: pnpm build
+
       - name: Build package
         working-directory: packages/codev
         run: pnpm build
@@ -95,6 +103,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build core package
+        working-directory: packages/core
+        run: pnpm build
 
       - name: Build package
         working-directory: packages/codev
@@ -123,9 +135,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build core package
+        working-directory: packages/core
+        run: pnpm build
+
       - name: Build package
         working-directory: packages/codev
         run: pnpm build
+
+      - name: Pack core tarball
+        working-directory: packages/core
+        run: pnpm pack
 
       - name: Pack tarball
         working-directory: packages/codev
@@ -133,5 +153,5 @@ jobs:
 
       - name: Verify install from tarball
         working-directory: packages/codev
-        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz
+        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz
 

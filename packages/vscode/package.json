@@ -3,22 +3,163 @@
   "publisher": "cluesmith",
   "displayName": "Codev",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "0.0.1",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cluesmith/codev",
+    "directory": "packages/vscode"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.codev",
+    "workspaceContains:codev"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "codev.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "codev.openArchitectTerminal",
+        "title": "Codev: Open Architect Terminal"
+      },
+      {
+        "command": "codev.openBuilderTerminal",
+        "title": "Codev: Open Builder Terminal"
+      },
+      {
+        "command": "codev.newShell",
+        "title": "Codev: New Shell"
+      },
+      {
+        "command": "codev.spawnBuilder",
+        "title": "Codev: Spawn Builder"
+      },
+      {
+        "command": "codev.sendMessage",
+        "title": "Codev: Send Message"
+      },
+      {
+        "command": "codev.approveGate",
+        "title": "Codev: Approve Gate"
+      },
+      {
+        "command": "codev.cleanupBuilder",
+        "title": "Codev: Cleanup Builder"
+      },
+      {
+        "command": "codev.refreshOverview",
+        "title": "Codev: Refresh Overview"
+      },
+      {
+        "command": "codev.connectTunnel",
+        "title": "Codev: Connect Tunnel"
+      },
+      {
+        "command": "codev.disconnectTunnel",
+        "title": "Codev: Disconnect Tunnel"
+      },
+      {
+        "command": "codev.cronTasks",
+        "title": "Codev: Cron Tasks"
+      },
+      {
+        "command": "codev.addReviewComment",
+        "title": "Codev: Add Review Comment"
       }
-    ]
+    ],
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./snippets/review.json"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codev.openArchitectTerminal",
+        "key": "ctrl+k a",
+        "mac": "cmd+k a"
+      },
+      {
+        "command": "codev.sendMessage",
+        "key": "ctrl+k d",
+        "mac": "cmd+k d"
+      },
+      {
+        "command": "codev.approveGate",
+        "key": "ctrl+k g",
+        "mac": "cmd+k g"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codev",
+          "title": "Codev",
+          "icon": "icons/codev.svg"
+        }
+      ]
+    },
+    "views": {
+      "codev": [
+        { "id": "codev.needsAttention", "name": "Needs Attention" },
+        { "id": "codev.builders", "name": "Builders" },
+        { "id": "codev.pullRequests", "name": "Pull Requests" },
+        { "id": "codev.backlog", "name": "Backlog" },
+        { "id": "codev.recentlyClosed", "name": "Recently Closed" },
+        { "id": "codev.team", "name": "Team", "when": "codev.teamEnabled" },
+        { "id": "codev.status", "name": "Status" }
+      ]
+    },
+    "configuration": {
+      "title": "Codev",
+      "properties": {
+        "codev.towerHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Tower server host"
+        },
+        "codev.towerPort": {
+          "type": "number",
+          "default": 4100,
+          "description": "Tower server port"
+        },
+        "codev.workspacePath": {
+          "type": "string",
+          "default": "",
+          "description": "Override workspace path for Tower matching (auto-detected if empty)"
+        },
+        "codev.terminalPosition": {
+          "type": "string",
+          "enum": ["editor", "panel"],
+          "default": "editor",
+          "description": "Where to open Codev terminals (editor area or bottom panel)"
+        },
+        "codev.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Connect to Tower on activation"
+        },
+        "codev.autoStartTower": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-start Tower if not running on activation"
+        },
+        "codev.telemetry": {
+          "type": "boolean",
+          "default": false,
+          "description": "No telemetry collected"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm package",
@@ -35,12 +176,15 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@cluesmith/codev-types": "workspace:*"
+    "@cluesmith/codev-core": "workspace:*",
+    "@cluesmith/codev-types": "workspace:*",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/vscode": "^1.110.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/ws": "^8.18.1",
     "typescript-eslint": "^8.48.1",
     "eslint": "^9.39.1",
     "esbuild": "^0.27.1",

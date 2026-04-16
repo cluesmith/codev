@@ -14,7 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@cluesmith/codev-types": "workspace:*",
+    "@cluesmith/codev-core": "workspace:*",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -25,6 +25,7 @@
     "recharts": "^3.7.0"
   },
   "devDependencies": {
+    "@cluesmith/codev-types": "workspace:*",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/react": "^19.0.0",

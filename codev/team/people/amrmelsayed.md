@@ -1,9 +1,8 @@
 ---
 name: Amr Elsayed
 github: amrmelsayed
-role: Developer — CLI & Architect Commands
+role: Developer & Architect
 ---
 
-Amr built the `afx architect` command (TICK 0002-001) and fixed architect
-command flag parsing (#577). Also contributed ruler documentation and
-installation instructions.
+Contributions include the VS Code extension, monorepo architecture
+(pnpm workspaces, shared packages), CLI and CI pipeline improvements.

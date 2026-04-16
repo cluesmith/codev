@@ -37,6 +37,7 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
+    "@cluesmith/codev-core": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@google/genai": "^1.0.0",
     "@openai/codex-sdk": "^0.101.0",
@@ -80,7 +81,7 @@
     "multi-agent"
   ],
   "author": "Cluesmith",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cluesmith/codev"

@@ -13,6 +13,9 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 
 **To understand a specific subsystem:**
 - **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
+- **Shared Runtime**: `packages/core/` — TowerClient, auth, workspace encoding, EscapeBuffer
+- **VS Code Extension**: `packages/vscode/` — thin client over Tower API
+- **Dashboard**: `packages/dashboard/` — React SPA served by Tower
 - **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
 - **Protocols**: Read the relevant protocol in `codev/protocols/{spir,tick,maintain,experiment}/protocol.md`
 
@@ -110,27 +113,30 @@ This section provides comprehensive documentation of how the Agent Farm (`afx`) 
 
 ### Architecture Overview
 
-Agent Farm orchestrates multiple AI agents working in parallel on a codebase. The architecture consists of:
+Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Two clients connect to the same Tower server:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                   Dashboard (React SPA on Tower :4100)               │
-│              HTTP server + WebSocket multiplexer                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
-│  │Architect │  │ Builder  │  │ Builder  │  │  Utils   │            │
-│  │  Tab     │  │  Tab 1   │  │  Tab 2   │  │  Tabs    │            │
-│  │(xterm.js)│  │(xterm.js)│  │(xterm.js)│  │(xterm.js)│            │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
-│       │             │             │             │                   │
-│       └─────────────┴──────┬──────┴─────────────┘                   │
-│                            ▼                                        │
-│                  ┌───────────────────┐                               │
-│                  │ Terminal Manager  │                               │
-│                  │  (node-pty PTY    │                               │
-│                  │   sessions)       │                               │
-│                  └────────┬──────────┘                               │
-└───────────────────────────┼─────────────────────────────────────────┘
+┌─────────────────────────────┐  ┌─────────────────────────────┐
+│  Browser Dashboard          │  │  VS Code Extension          │
+│  (React SPA on Tower :4100) │  │  (packages/vscode)          │
+│                             │  │                             │
+│  xterm.js terminals         │  │  Pseudoterminal ↔ WS        │
+│  Work View (React)          │  │  Sidebar TreeViews          │
+│  SSE for updates            │  │  SSE for updates            │
+└──────────────┬──────────────┘  └──────────────┬──────────────┘
+               │ HTTP + WebSocket + SSE          │
+               └────────────────┬────────────────┘
+                                ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                    Tower Server (:4100)                            │
+│              HTTP routes + WebSocket + SSE push                   │
+│                                                                   │
+│                  ┌───────────────────┐                             │
+│                  │ Terminal Manager  │                             │
+│                  │  (node-pty PTY    │                             │
+│                  │   sessions)       │                             │
+│                  └────────┬──────────┘                             │
+└───────────────────────────┼───────────────────────────────────────┘
                             │ WebSocket /ws/terminal/<id>
               ┌─────────────┼─────────────┬─────────────┐
               ▼             ▼             ▼             ▼
@@ -157,12 +163,13 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 5. **Git Worktrees**: Isolated working directories for each Builder
 6. **SQLite Databases**: State persistence (local and global)
 
-**Data Flow**:
-1. User opens dashboard at `http://localhost:4100`
-2. React dashboard polls `/api/state` for current state (1-second interval). Response includes `persistent` boolean per terminal.
-3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
-4. Terminal creation uses `SessionManager.createSession()` for persistent shellper-backed sessions, or direct node-pty for non-persistent sessions
-5. Shellper-backed PtySessions delegate write/resize/kill to the shellper's Unix socket via `IShellperClient`
+**Data Flow** (both clients use the same Tower API):
+1. User opens browser dashboard at `http://localhost:4100` or VS Code auto-connects on workspace open
+2. Client subscribes to SSE at `/api/events` for real-time push notifications
+3. Client fetches workspace state via `/api/overview` and `/workspace/:encoded/api/state`
+4. Terminals connect via WebSocket to `/workspace/:encoded/ws/terminal/<id>` (binary protocol: `0x00` control, `0x01` data)
+5. Terminal creation uses `SessionManager.createSession()` for persistent shellper-backed sessions
+6. Shellper-backed PtySessions delegate write/resize/kill to the shellper's Unix socket via `IShellperClient`
 6. Builders work in isolated git worktrees under `.builders/`
 
 ### Port System
@@ -841,8 +848,13 @@ const CONFIG = {
 - **tree-kill**: Process cleanup and termination
 - **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
-- **React 19 + Vite 6**: Dashboard SPA (replaced vanilla JS in Spec 0085)
-- **xterm.js**: Terminal emulator in the browser (with `customGlyphs: true` for Unicode)
+- **React 19 + Vite 6**: Dashboard SPA at `packages/dashboard/` (standalone workspace member)
+- **xterm.js**: Terminal emulator in the browser dashboard (with `customGlyphs: true` for Unicode)
+
+### VS Code Extension
+- **VS Code Extension API**: TreeViews, Pseudoterminal, StatusBar, Commands, Decorations
+- **esbuild**: Bundles extension + codev-core into single `dist/extension.js`
+- **ws**: WebSocket client for terminal binary protocol
 
 ### Testing Framework
 - **Vitest**: Unit and integration tests (`packages/codev/src/__tests__/`)
@@ -862,6 +874,75 @@ const CONFIG = {
 - Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
 - Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
 - Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions)
+
+## Monorepo Structure
+
+The repository uses pnpm workspaces with the following packages:
+
+| Package | npm Name | Purpose |
+|---------|----------|---------|
+| `packages/codev` | `@cluesmith/codev` | CLI + Tower server (published to npm) |
+| `packages/core` | `@cluesmith/codev-core` | Shared runtime: TowerClient, auth, workspace encoding, EscapeBuffer (published to npm) |
+| `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
+| `packages/config` | `@cluesmith/config` | Shared tsconfig base (cross-project) |
+| `packages/dashboard` | `@cluesmith/codev-dashboard` | React dashboard SPA (built into codev package) |
+| `packages/vscode` | `codev` (Marketplace) | VS Code extension |
+
+**Dependency graph:**
+```
+codev-types (types only, dev dep)
+     ↓
+codev-core (runtime: TowerClient, auth, EscapeBuffer)
+     ↓
+codev (CLI + Tower)        vscode (extension)        dashboard (React SPA)
+  imports core               imports core              imports core/escape-buffer
+  imports types (dev)        imports types (dev)        imports types (dev)
+```
+
+**Build order:** `pnpm build` from root builds core → codev (including dashboard).
+
+**Publishing:** `codev-core` must be published to npm before `codev` (runtime dependency).
+
+## VS Code Extension
+
+The VS Code extension (`packages/vscode`) is a thin client over Tower's existing API. It adds VS Code-specific UI on top of `TowerClient` from `@cluesmith/codev-core` — no Tower logic is reimplemented.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    VS Code Extension                          │
+│                                                               │
+│  ConnectionManager (singleton)                                │
+│  ├── TowerClient (from @cluesmith/codev-core)                │
+│  ├── AuthWrapper (SecretStorage + readLocalKey)               │
+│  ├── WorkspaceDetector (traverse up to .codev/ or codev/)    │
+│  ├── SSEClient (real-time state updates)                      │
+│  └── TowerStarter (auto-start as detached daemon)             │
+│                                                               │
+│  UI Layer                                                     │
+│  ├── Sidebar: 7 TreeView sections (overview + team + status)  │
+│  ├── Terminals: Pseudoterminal ↔ WebSocket binary protocol    │
+│  ├── Status Bar: builder count + blocked gates                │
+│  ├── Commands: spawn, send, approve, cleanup, tunnel, cron    │
+│  └── Review: snippet + Decorations API highlighting           │
+│                                                               │
+│  esbuild → dist/extension.js (bundles codev-core inline)      │
+└──────────────┬───────────────────────────────────────────────┘
+               │ HTTP + WebSocket + SSE (localhost:4100)
+┌──────────────▼───────────────────────────────────────────────┐
+│                    Tower Server                               │
+│              (unchanged — same API as browser dashboard)      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+- **Thin client**: All state stays in Tower/shellper. Extension is a viewport, not a second orchestrator.
+- **TowerClient reuse**: Extension imports `TowerClient` from `codev-core` — same class the CLI uses. No duplicate REST/auth/encoding logic.
+- **TerminalLocation.Editor**: Terminals open directly in editor area via `ViewColumn.One` (architect) and `ViewColumn.Two` (builders). Uses stable VS Code API, not the undocumented `moveIntoEditor` command.
+- **Subpath exports**: `codev-core` uses subpath exports (`./tower-client`, `./escape-buffer`, etc.) to prevent Node builtins from leaking into the dashboard's Vite build.
+- **Injectable auth**: `TowerClient` accepts a `getAuthKey` callback. CLI uses `ensureLocalKey()` (creates key if missing). Extension uses `readLocalKey()` + `SecretStorage` (never creates keys).
 
 ## Repository Dual Nature
 
@@ -919,7 +1000,36 @@ This is the `@cluesmith/codev` npm package containing all CLI tools:
 ## Complete Directory Structure
 
 ```
-codev/                                  # Project root (git repository)
+codev/                                  # Project root (pnpm monorepo)
+├── packages/core/                      # @cluesmith/codev-core (shared runtime)
+│   └── src/
+│       ├── tower-client.ts             # TowerClient class (injectable auth)
+│       ├── auth.ts                     # readLocalKey() + ensureLocalKey()
+│       ├── workspace.ts               # encodeWorkspacePath() / decodeWorkspacePath()
+│       ├── constants.ts               # DEFAULT_TOWER_PORT, AGENT_FARM_DIR
+│       └── escape-buffer.ts           # EscapeBuffer (ANSI sequence buffering)
+├── packages/types/                     # @cluesmith/codev-types (shared interfaces)
+│   └── src/
+│       ├── websocket.ts               # FRAME_CONTROL, FRAME_DATA, ControlMessage
+│       ├── sse.ts                     # SSEEventType, SSENotification
+│       └── api.ts                     # DashboardState, OverviewData, TeamApiResponse, etc.
+├── packages/config/                    # @cluesmith/config (shared tsconfig)
+│   └── tsconfig.base.json
+├── packages/dashboard/                 # @cluesmith/codev-dashboard (React SPA)
+│   └── src/                           # React 19 + Vite 6 + xterm.js + Recharts
+├── packages/vscode/                    # VS Code extension (Marketplace: cluesmith.codev)
+│   └── src/
+│       ├── extension.ts               # Activation, command/view registration
+│       ├── connection-manager.ts      # Singleton wrapping TowerClient
+│       ├── auth-wrapper.ts            # SecretStorage + readLocalKey()
+│       ├── workspace-detector.ts      # Traverse to .codev/ or codev/
+│       ├── sse-client.ts             # SSE with heartbeat filtering
+│       ├── tower-starter.ts          # Auto-start Tower as detached process
+│       ├── terminal-adapter.ts       # Pseudoterminal ↔ WebSocket binary protocol
+│       ├── terminal-manager.ts       # WebSocket pool, editor layout
+│       ├── review-decorations.ts     # REVIEW(...) line highlighting
+│       ├── commands/                 # spawn, send, approve, cleanup, tunnel, cron, review
+│       └── views/                    # TreeView providers (7 sidebar sections)
 ├── packages/codev/                     # @cluesmith/codev npm package
 │   ├── src/                            # TypeScript source code
 │   │   ├── cli.ts                      # Main CLI entry point
@@ -964,13 +1074,15 @@ codev/                                  # Project root (git repository)
 │   │   │   │   └── migrate.ts          # JSON → SQLite migration
 │   │   │   └── __tests__/              # Vitest unit tests
 │   │   └── lib/                        # Shared library code
+│   │       ├── tower-client.ts         # Re-exports from @cluesmith/codev-core
 │   │       └── templates.ts            # Template file handling
 │   ├── bin/                            # CLI entry points
 │   │   ├── codev.js                    # codev command
-│   │   ├── af.js                       # afx command
+│   │   ├── afx.js                      # afx command (af.js deprecated, redirects)
 │   │   ├── consult.js                  # consult command
 │   │   ├── team.js                     # team command
 │   │   └── porch.js                    # porch command
+│   ├── dashboard-dist/                 # Dashboard build output (copied from packages/dashboard/dist)
 │   ├── skeleton/                       # Embedded codev-skeleton (built)
 │   ├── templates/                      # HTML templates
 │   │   ├── tower.html                  # Multi-project overview

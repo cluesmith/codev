@@ -7,10 +7,10 @@
  * all CLI binaries exist and respond to --help.
  *
  * Usage:
- *   node scripts/verify-install.mjs <tarball-or-package>
+ *   node scripts/verify-install.mjs <tarball-or-package> [...extra-tarballs]
  *
  * Examples:
- *   node scripts/verify-install.mjs ./cluesmith-codev-2.0.0.tgz
+ *   node scripts/verify-install.mjs ./cluesmith-codev-2.0.0.tgz ../core/cluesmith-codev-core-0.0.1.tgz
  *   node scripts/verify-install.mjs @cluesmith/codev@2.0.0
  */
 
@@ -19,18 +19,18 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const target = process.argv[2];
-if (!target) {
-  console.error('Usage: node scripts/verify-install.mjs <tarball-or-package>');
+const targets = process.argv.slice(2);
+if (targets.length === 0) {
+  console.error('Usage: node scripts/verify-install.mjs <tarball-or-package> [...extra-tarballs]');
   process.exit(1);
 }
-
 const prefix = mkdtempSync(join(tmpdir(), 'codev-install-verify-'));
 let failed = false;
 
 try {
-  console.log(`Installing ${target} into ${prefix}...`);
-  execSync(`npm install -g --prefix "${prefix}" "${target}"`, { stdio: 'inherit' });
+  const quoted = targets.map(t => `"${t}"`).join(' ');
+  console.log(`Installing ${targets.join(', ')} into ${prefix}...`);
+  execSync(`npm install -g --prefix "${prefix}" ${quoted}`, { stdio: 'inherit' });
 
   const bins = ['codev', 'af', 'porch', 'consult'];
   for (const bin of bins) {

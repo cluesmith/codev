@@ -29,8 +29,10 @@ node_modules/
 packages/codev/dist/
 packages/codev/skeleton/
 packages/types/dist/
+packages/core/dist/
 packages/vscode/dist/
 packages/vscode/out/
+*.vsix
 *.tsbuildinfo
 test-results/
 

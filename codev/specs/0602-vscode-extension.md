@@ -236,14 +236,14 @@ Singleton service managing all communication with Tower:
 - **REST client**: Authenticated calls to all `/api/*` endpoints
 - **WebSocket pool**: One WebSocket per open terminal, managed lifecycle
 - **Auth**: Reads `~/.agent-farm/local-key`, sends as `codev-web-key` header (HTTP). For WebSocket, send auth via a `0x00` control message after connection (not query param — query params leak into logs and process lists). Store key in VS Code `SecretStorage` for persistence, but **re-read from disk on 401** to handle key rotation.
-- **Health check**: Pings `/api/health` on activation and after SSE drops. Health response should include a protocol version for compatibility checking.
+- **Health check**: Pings `/health` on activation and after SSE drops. Health response should include a protocol version for compatibility checking.
 - **Output Channel**: Register `Codev` Output Channel for structured diagnostic logging (connection events, errors, reconnections). Essential for debugging.
 - **Reconnection**: Exponential backoff (1s → 2s → 4s → 8s → max 30s)
 - **Config**: Reads `.codev/config.json` for Tower port override and project-level settings
 
 **Workspace-scoped routing:**
 Tower has two route layers. The extension must use the correct one:
-- **Global routes** (no prefix): `/api/overview`, `/api/send`, `/api/events`, `/api/health`, `/api/analytics`, `/api/cron/*`, `/api/workspaces`
+- **Global routes** (no prefix): `/health`, `/api/overview`, `/api/send`, `/api/events`, `/api/analytics`, `/api/cron/*`, `/api/workspaces`
 - **Workspace-scoped routes** (prefixed): `/workspace/:base64urlPath/api/state`, `/workspace/:base64urlPath/api/team`, `/workspace/:base64urlPath/api/tabs/shell`, `/workspace/:base64urlPath/ws/terminal/:id`
 
 The Connection Manager encodes the active workspace path as base64url and prefixes all workspace-scoped requests. The workspace path is determined by traversing up from VS Code's workspace folder to find the `.codev/config.json` root, then matching that path against Tower's known workspaces (via `GET /api/workspaces`). This handles cases where the user opens a subdirectory (e.g., `~/project/src`) rather than the project root.
@@ -263,10 +263,10 @@ Each Tower PTY session maps to a VS Code `Pseudoterminal`:
 **Terminal layout (editor area, not bottom panel):**
 All Codev terminals (architect, builders, shells) open in the **editor area** as terminal-in-editor views — not the bottom panel. This provides full vertical height and mirrors the browser dashboard's layout.
 
-On first terminal open, the extension arranges two editor groups:
-1. Move terminals into the editor area via `workbench.action.terminal.moveIntoEditor`
-2. **Left editor group**: Architect terminal (single tab, always visible)
-3. **Right editor group**: Builder terminals (one tab per builder) + shell terminals
+Terminals are created directly in the editor area using `createTerminal({ location })` with `TerminalEditorLocationOptions`:
+- **Architect**: `ViewColumn.One` (left editor group)
+- **Builders + shells**: `ViewColumn.Two` (right editor group, one tab per terminal)
+- VS Code auto-creates the split when `ViewColumn.Two` is first used
 
 ```
 ┌──────────────┬────────────────┬────────────────┐
@@ -288,7 +288,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 
 **Shell terminals**: Open as additional tabs in the right editor group alongside builders.
 
-**Fallback**: `workbench.action.terminal.moveIntoEditor` is an undocumented internal VS Code command that may change between versions. If it fails, the extension falls back to the standard bottom panel and logs a warning to the Output Channel.
+**Fallback**: When `codev.terminalPosition` is set to `"panel"`, terminals open in the standard bottom panel instead of the editor area.
 
 **Binary protocol adapter:**
 - **Inbound** (`0x01` data): `slice(1)` → `TextDecoder.decode(bytes, { stream: true })` → `onDidWrite.fire(string)`
@@ -303,7 +303,7 @@ This mirrors the browser dashboard exactly: architect on the left, builders on t
 - Terminal scrollback is preserved via shellper — no data loss
 
 **Escape sequence buffering:**
-WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-shared` as a shared utility.
+WebSocket frames can split ANSI escape sequences mid-sequence (e.g., CSI, OSC, DCS). Writing a partial escape to `onDidWrite` corrupts terminal state (production Bugfix #630). The Pseudoterminal adapter must buffer incomplete trailing sequences and prepend them to the next frame — same logic as `dashboard/src/lib/escapeBuffer.ts`. This should be extracted into `@cluesmith/codev-core` as a shared utility.
 
 **Resize deferral during replay:**
 On reconnect, the ring buffer replays potentially large scrollback. Sending a resize control frame (`0x00` with `type: 'resize'`) while replay data is being written causes garbled rendering (production Bugfix #625). The adapter must queue resize events and flush them only after the replay write completes.
@@ -372,7 +372,7 @@ Single VS Code sidebar pane (like Explorer or Source Control) with collapsible s
 | Backlog | `GET /api/overview` | SSE events |
 | Recently Closed | `GET /api/overview` | SSE events |
 | Team | `GET /workspace/:path/api/team` | On activation + manual refresh |
-| Status | `/api/health`, `/api/tunnel/*`, `/api/cron/tasks` | SSE events + polling |
+| Status | `/health`, `/api/tunnel/*`, `/api/cron/tasks` | SSE events + polling |
 
 **Team section**: Conditional on `teamEnabled` — hidden when fewer than 2 team members configured. Shows member name, role, current work, open PRs, and 7-day activity summary. Context menu: "View on GitHub", "View Activity". Team messages accessible via `Codev: View Team Messages` command.
 
@@ -498,43 +498,45 @@ Single Webview panel embedding the existing Recharts analytics page:
 
 ## Prerequisite: Shared Package Extraction
 
-Extract shared code to avoid triple-duplicating types and API client logic across server, dashboard, and extension. **Phased approach** — do not block V1 on extracting everything.
+Extract shared code to avoid duplicating logic across server, dashboard, and extension. **Extract and reuse existing code — do not duplicate as a default approach.**
 
-**Phase 1 (before V1)**: Extract `@cluesmith/codev-types` only. Low risk, high value.
-**Phase 2 (after V1 ships)**: Extract `@cluesmith/codev-shared` once patterns stabilize across two real consumers (dashboard + extension).
+**Monorepo prerequisite**: Root `package.json` with `"workspaces": ["packages/*"]` — already done.
 
-**Monorepo prerequisite**: Add a root `package.json` with `"workspaces": ["packages/*"]` before extracting. Currently no workspace manager exists. Without this, `file:` dependencies will break `vsce` packaging.
+### `@cluesmith/codev-types` (Required — done)
 
-### `@cluesmith/codev-types` (Required, Phase 1)
+Zero-dependency package with shared TypeScript interfaces at `packages/types/`. Already extracted and in use. Contains WebSocket frame types, SSE event types, and API response shapes.
 
-Zero-dependency package with shared TypeScript interfaces currently duplicated between `packages/codev/src/agent-farm/types.ts` (server) and `packages/codev/dashboard/src/lib/api.ts` (dashboard):
+### `@cluesmith/codev-core` (Required — before V1)
 
-- `DashboardState`, `Builder`, `Annotation`, `OverviewData`, `ArchitectState`, `UtilTerminal`
-- WebSocket frame types (`FRAME_CONTROL = 0x00`, `FRAME_DATA = 0x01`)
-- SSE event type catalog (`overview-changed`, `notification`, `connected`)
-- API request/response shapes for all Tower endpoints
+Shared runtime utilities extracted from existing code and reused by server, extension, and dashboard. This is NOT new code — it's existing logic moved to a shared location.
 
-Without this package, the extension becomes a third independent copy of these types, making protocol drift inevitable.
+**Subpath exports** (not a single barrel — prevents Node builtins leaking into browser builds):
+- `@cluesmith/codev-core/tower-client` — `TowerClient` class + Tower API types (Node-only, uses `fs`/`os`/`crypto`)
+- `@cluesmith/codev-core/auth` — `readLocalKey()` (read-only) + `ensureLocalKey()` (creates dir + generates, CLI-only)
+- `@cluesmith/codev-core/workspace` — `encodeWorkspacePath()` / `decodeWorkspacePath()` (pure, universal)
+- `@cluesmith/codev-core/constants` — `DEFAULT_TOWER_PORT`, `AGENT_FARM_DIR` (pure, universal)
+- `@cluesmith/codev-core/escape-buffer` — `EscapeBuffer` class (pure, browser-safe)
 
-### `@cluesmith/codev-shared` (Recommended, Phase 2 — after V1)
+**`TowerClient` auth refactoring** — current class reads auth key once in constructor (`private readonly localKey`). Must be refactored to accept injectable auth (key provider function or setter) so the extension can:
+- Use `SecretStorage` instead of `fs.readFileSync`
+- Refresh the key on 401 without recreating the client
 
-Shared runtime utilities and API client logic used by dashboard and extension:
+**Auth function split:**
+- `readLocalKey()` — read-only, returns `string | null` if file doesn't exist. Used by the extension.
+- `ensureLocalKey()` — creates `~/.agent-farm/` directory and generates key if missing. CLI-only — the extension must never auto-generate keys.
 
-- REST client with authenticated fetch (local-key header)
-- SSE client with reconnection logic and heartbeat handling
-- WebSocket binary protocol adapter (encode/decode `0x00`/`0x01` frames)
-- EscapeBuffer (from `dashboard/src/lib/escapeBuffer.ts`) for incomplete ANSI sequence handling
-- Workspace path encoding (base64url) for workspace-scoped routes
-- Connection state machine (`DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`)
-- Must accept a custom HTTP agent — VS Code extensions run behind corporate proxies and need to integrate with `vscode.workspace.getConfiguration('http').get('proxy')`
+**After extraction:**
+- `packages/codev` imports from `@cluesmith/codev-core` instead of local `tower-client.ts`
+- `packages/vscode` imports from `@cluesmith/codev-core` — wraps `TowerClient` with VS Code concerns
+- `packages/dashboard` imports `EscapeBuffer` from `@cluesmith/codev-core/escape-buffer` (browser-safe subpath)
+
+**Publishing:** `@cluesmith/codev-core` must be published to npm **before** `@cluesmith/codev` during releases (server has a runtime dependency). Pin exact versions (not `*` or `^`). Update release protocol with two-package publish order.
 
 ### Changes to Main `@cluesmith/codev` Package
 
-1. Export types cleanly from `types.ts` for the shared types package
-2. Move protocol constants (`0x00`, `0x01`) to shared package
-3. Make auth helpers (local-key reading) importable
-4. Reference shared types in Tower route response bodies
-5. Define SSE event type catalog as shared constants
+1. Replace `src/agent-farm/lib/tower-client.ts` with re-exports from `@cluesmith/codev-core`
+2. Import frame constants from shared package
+3. Reference shared types in Tower route response bodies
 
 ### What NOT to Extract
 
@@ -704,7 +706,7 @@ All errors surface through a consistent pattern:
 ## Dependencies
 - **External Services**: None (localhost only)
 - **Internal Systems**: Tower server (existing), shellper (existing), all existing REST/WebSocket/SSE APIs
-- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-shared` (shared runtime utilities + API client, post-V1)
+- **Internal Packages (new)**: `@cluesmith/codev-types` (shared interfaces), `@cluesmith/codev-core` (shared runtime utilities + API client, post-V1)
 - **Libraries/Frameworks**: VS Code Extension API, `ws` (WebSocket client), `eventsource` (SSE client), React + Vite (analytics + team Webviews)
 - **Build**: `@vscode/vsce` for packaging and Marketplace publishing
 
@@ -729,9 +731,9 @@ All errors surface through a consistent pattern:
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|---------------------|
 | Extension host CPU spikes from high-volume terminal output | Medium | High | Chunk `onDidWrite` calls with `setImmediate`, 16KB threshold |
-| Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types, version in `/api/health` |
+| Protocol drift between Tower WebSocket and extension adapter | Medium | High | Unit tests against captured binary frames, shared protocol types, version in `/health` |
 | WebSocket backpressure causing frozen terminals | Low | High | Never drop frames — disconnect and reconnect via ring buffer replay if > 1MB queued |
-| `moveIntoEditor` API instability | Medium | Medium | Fallback to bottom panel on failure, log warning to Output Channel |
+| Terminal position setting ignored | Low | Low | `TerminalLocation.Editor` + `ViewColumn` used via stable API, `"panel"` fallback via setting |
 | Multi-workspace confusion (actions against wrong workspace) | Medium | Medium | Scope all actions to active workspace, traverse up to `.codev/config.json` root |
 | Comment thread line-drift after edits | Medium | Medium | Re-scan on `TextDocumentChangeEvent`, update thread positions |
 | Concurrent annotation edits (browser + VS Code) | Low | Medium | Document as unsupported — last writer wins |
@@ -784,7 +786,7 @@ All consultation feedback has been incorporated into the relevant sections above
 - **No monorepo workspace config**: `vsce` fails with unmanaged `file:` dependencies. → **Added monorepo prerequisite.**
 
 **GPT-5.4 Codex — Key findings:**
-- **Protocol versioning missing**: No handshake or version header. Extension breaks silently as Tower evolves. → **Added version in `/api/health` requirement.**
+- **Protocol versioning missing**: No handshake or version header. Extension breaks silently as Tower evolves. → **Added version in `/health` requirement.**
 - **Error UX unspecified**: No error presentation for command failures. → **Added Error Handling UX section.**
 - **WebSocket auth via query param**: Key leaks into logs. → **Changed to `0x00` control message post-connection.**
 - **SSE refresh storms**: Burst of SSE events can overload extension. → **Added rate limiting (max 1/second).**
