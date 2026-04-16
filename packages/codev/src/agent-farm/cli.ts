@@ -197,7 +197,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--task <text>', 'Spawn builder with a task description')
     .option('--shell', 'Spawn a bare Claude session')
     .option('--worktree', 'Spawn worktree session')
-    .option('--amends <number>', 'Original spec number for TICK amendments')
     .option('--files <files>', 'Context files (comma-separated)')
     .option('--no-comment', 'Skip commenting on issue')
     .option('--force', 'Skip safety checks (dirty worktree, collision detection)')

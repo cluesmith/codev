@@ -91,8 +91,7 @@ function generateShortId(): string {
  * - issueNumber, task, shell, worktree are mutually exclusive
  * - --protocol is required when issueNumber is present (unless --resume or --soft)
  * - --protocol alone (no issueNumber) is valid as a protocol-only run
- * - --amends requires --protocol tick
- * - --protocol tick requires --amends
+ * - TICK protocol removed (spec 653)
  */
 function validateSpawnOptions(options: SpawnOptions): void {
   // Count primary input modes
@@ -130,7 +129,6 @@ function validateSpawnOptions(options: SpawnOptions): void {
       'Usage:\n' +
       '  afx spawn 315 --protocol spir      # Feature\n' +
       '  afx spawn 315 --protocol bugfix    # Bug fix\n' +
-      '  afx spawn 315 --protocol tick --amends 42  # Amendment\n' +
       '  afx spawn 315 --resume             # Resume (reads protocol from worktree)\n' +
       '  afx spawn 315 --soft               # Soft mode (defaults to SPIR)'
     );
@@ -153,14 +151,9 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal('--protocol cannot be used with --shell or --worktree');
   }
 
-  // --amends requires --protocol tick
-  if (options.amends && options.protocol !== 'tick') {
-    fatal('--amends requires --protocol tick');
-  }
-
-  // --protocol tick requires --amends
-  if (options.protocol === 'tick' && !options.amends) {
-    fatal('--protocol tick requires --amends <spec-number> to identify the spec being amended');
+  // --amends is no longer supported (TICK protocol removed, spec 653)
+  if (options.amends) {
+    fatal('--amends is no longer supported. The TICK protocol has been removed.');
   }
 
   // --strict and --soft are mutually exclusive
@@ -270,7 +263,7 @@ function inferProtocolFromWorktree(config: Config, issueNumber: number): string 
 // =============================================================================
 
 /**
- * Spawn builder for a spec (SPIR, TICK, and other non-bugfix protocols)
+ * Spawn builder for a spec (SPIR, ASPIR, AIR, and other non-bugfix protocols)
  */
 async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issueNumber!;
@@ -282,10 +275,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // Load protocol definition early — needed for input.required check
   const protocolDef = loadProtocol(config, protocol);
 
-  // For TICK amendments, resolve spec by the amends number (the original spec)
-  const specLookupId = (protocol === 'tick' && options.amends)
-    ? String(options.amends)
-    : projectId;
+  const specLookupId = projectId;
 
   // Resolve spec file (supports legacy zero-padded IDs)
   const specFile = await findSpecFile(config.codevDir, specLookupId);
@@ -303,13 +293,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   // When no spec file exists (and resolver didn't find one), check if the protocol allows spawning without one.
-  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
   if (!specFile && !resolverSpecName) {
-    if (protocolDef?.input?.required === false && !options.amends) {
+    if (protocolDef?.input?.required === false) {
       // Protocol allows no-spec spawn — will derive naming from GitHub issue title
       logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
     } else {
-      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected spec ID: ${specLookupId}`);
+      fatal(`Spec not found for issue #${issueNumber}. Expected spec ID: ${specLookupId}`);
     }
   }
 

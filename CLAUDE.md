@@ -70,7 +70,7 @@ You are working in the Codev project itself, with multiple development protocols
 - **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
 - **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
 - **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
-- **TICK**: Amendment workflow for existing specs - `codev/protocols/tick/protocol.md`
+- **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
 
@@ -144,13 +144,6 @@ validated: [gemini, codex, claude]
 
 **AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
 
-### Use TICK for (amendments to existing specs):
-- **Amendments** to an existing SPIR spec that is already `integrated`
-- Small scope (< 300 lines of new/changed code)
-- Clear requirements that extend existing functionality
-
-**TICK modifies spec/plan in-place** and creates a new review file. Cannot be used for greenfield work.
-
 ### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)
 - New protocols or protocol variants
@@ -196,7 +189,6 @@ project-root/
 ├── codev/
 │   ├── protocols/           # Development protocols
 │   │   ├── spir/          # Multi-phase development with consultation
-│   │   ├── tick/           # Fast autonomous implementation
 │   │   ├── experiment/     # Disciplined experimentation
 │   │   └── maintain/       # Codebase maintenance (code + docs)
 │   ├── maintain/            # MAINTAIN protocol runtime artifacts
@@ -322,7 +314,6 @@ afx workspace start                   # Start the workspace
 afx spawn 42 --protocol spir          # Spawn builder for SPIR project
 afx spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
 afx spawn 42 --protocol bugfix        # Spawn builder for a bugfix
-afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
 afx status                            # Check all builders
 afx cleanup --project 0042            # Clean up after merge
 afx open file.ts            # Open file in annotation viewer (NOT system open)
@@ -336,7 +327,7 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## Porch - Protocol Orchestrator
 
-Porch drives SPIR, TICK, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
+Porch drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
 
 ### Key Commands
 

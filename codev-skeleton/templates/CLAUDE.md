@@ -8,7 +8,8 @@ This project uses **Codev** for AI-assisted development.
 
 - **SPIR**: Multi-phase development with consultation (`codev/protocols/spir/protocol.md`)
 - **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
-- **TICK**: Fast autonomous implementation (`codev/protocols/tick/protocol.md`)
+- **AIR**: Autonomous Implement & Review for small features (`codev/protocols/air/protocol.md`)
+- **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
 
