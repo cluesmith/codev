@@ -53,11 +53,34 @@ Follow the implementation plan at: `{{plan.path}}`
 {{task_text}}
 {{/if}}
 
+## Multi-PR Workflow
+
+Your worktree is persistent — it survives across PR merges. You can produce multiple PRs sequentially:
+
+1. Cut a branch, open a PR, wait for merge
+2. After merge: `git fetch origin main && git checkout -b <next-branch> origin/main`
+3. Continue to the next phase, open another PR
+4. Repeat
+
+**Important**: Do NOT run `git checkout main` — git worktrees cannot check out a branch that's checked out elsewhere. Always branch off `origin/main` via fetch.
+
+Record PRs in status.yaml: `porch done {{project_id}} --pr <N> --branch <name>`
+Record merges: `porch done {{project_id}} --merged <N>`
+
+## Verify Phase
+
+After the final PR merges, the project enters the **verify** phase. You stay alive through verify:
+1. Pull main into your worktree
+2. Run `porch done {{project_id}}` to signal verification is ready
+3. The architect approves `verify-approval` when satisfied
+
+If verification is not needed: `porch verify {{project_id}} --skip "reason"`
+
 ## Notifications
 Always use `afx send architect "..."` to notify the architect at key moments:
 - **Gate reached**: `afx send architect "Project {{project_id}}: <gate-name> ready for approval"`
 - **PR ready**: `afx send architect "PR #N ready for review (project {{project_id}})"`
-- **PR merged**: `afx send architect "Project {{project_id}} complete. PR merged. Ready for cleanup."`
+- **PR merged**: `afx send architect "Project {{project_id}} PR merged. Entering verify phase."`
 - **Blocked**: `afx send architect "Blocked on project {{project_id}}: [reason]"`
 
 ## Handling Flaky Tests

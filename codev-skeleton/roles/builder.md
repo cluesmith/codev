@@ -147,7 +147,7 @@ afx status         # All builders
 |------|-------------|
 | **Gate reached** | `afx send architect "Project XXXX: <gate-name> ready for approval"` |
 | **PR ready** | `afx send architect "PR #N ready for review"` |
-| **PR merged** | `afx send architect "Project XXXX complete. PR merged. Ready for cleanup."` |
+| **PR merged** | `afx send architect "Project XXXX PR merged. Entering verify phase."` |
 | **Blocked/stuck** | `afx send architect "Blocked on X — need guidance"` |
 | **Escalation needed** | `afx send architect "Issue too complex — recommend escalating to SPIR"` |
 
