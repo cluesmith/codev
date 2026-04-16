@@ -36,12 +36,8 @@ export class OverviewCache {
         return;
       }
 
-      const result = await client.request<OverviewData>('/api/overview');
-      if (result.ok && result.data) {
-        this.data = result.data;
-      } else {
-        this.data = null;
-      }
+      const workspacePath = this.connectionManager.getWorkspacePath();
+      this.data = await client.getOverview(workspacePath ?? undefined) ?? null;
     } finally {
       this.loading = false;
       this.changeEmitter.fire();
