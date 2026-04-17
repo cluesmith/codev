@@ -94,6 +94,19 @@ export function getStatusPath(workspaceRoot: string, projectId: string, name: st
   return path.join(getProjectDir(workspaceRoot, projectId, name), 'status.yaml');
 }
 
+/**
+ * Derive the artifact root (worktree root) from a status.yaml path.
+ * Status paths are always <artifactRoot>/codev/projects/<id>-<name>/status.yaml,
+ * so the artifact root is three levels up from the containing directory.
+ *
+ * Used by commands that must resolve specs/plans/reviews relative to the
+ * worktree that owns the status file (bugfix #676). `findStatusPath` already
+ * searches `.builders/*` first, so this matches its resolution.
+ */
+export function getArtifactRoot(statusPath: string): string {
+  return path.resolve(path.dirname(statusPath), '..', '..', '..');
+}
+
 // ============================================================================
 // State Operations
 // ============================================================================

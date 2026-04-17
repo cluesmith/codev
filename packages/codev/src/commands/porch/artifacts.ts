@@ -362,8 +362,18 @@ export class CliResolver implements ArtifactResolver {
 /**
  * Create the appropriate artifact resolver for this workspace.
  * Reads config via loadConfig() (v3.0.0 unified config — .codev/config.json).
+ *
+ * @param workspaceRoot - The top-level workspace (where .codev/config.json lives).
+ *                        Always used to load config; also used as the .env source
+ *                        for the CLI backend.
+ * @param artifactRoot - Optional override for where the local backend reads
+ *                        specs/plans/reviews from. When the project lives in a
+ *                        builder worktree (`.builders/<slug>/`), pass that
+ *                        worktree's root so artifact lookups find files there
+ *                        instead of the top-level `codev/` directory (bugfix #676).
+ *                        Defaults to workspaceRoot.
  */
-export function getResolver(workspaceRoot: string): ArtifactResolver {
+export function getResolver(workspaceRoot: string, artifactRoot?: string): ArtifactResolver {
   const config = loadConfig(workspaceRoot);
   const artifacts = config.artifacts;
 
@@ -390,5 +400,5 @@ export function getResolver(workspaceRoot: string): ArtifactResolver {
     );
   }
 
-  return new LocalResolver(workspaceRoot);
+  return new LocalResolver(artifactRoot ?? workspaceRoot);
 }

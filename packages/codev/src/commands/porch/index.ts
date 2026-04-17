@@ -15,6 +15,7 @@ import {
   writeStateAndCommit,
   createInitialState,
   findStatusPath,
+  getArtifactRoot,
   getProjectDir,
   getStatusPath,
   detectProjectId,
@@ -39,7 +40,7 @@ import {
   allPlanPhasesComplete,
   isPlanPhaseComplete,
 } from './plan.js';
-import { getResolver, type ArtifactResolver } from './artifacts.js';
+import { getResolver, LocalResolver, type ArtifactResolver } from './artifacts.js';
 import {
   runPhaseChecks,
   formatCheckResults,
@@ -60,6 +61,29 @@ function header(text: string): string {
 
 function section(title: string, content: string): string {
   return `\n${chalk.bold(title)}:\n${content}`;
+}
+
+/**
+ * Return a resolver scoped to `artifactRoot` when it differs from the caller's
+ * cwd-rooted resolver. The incoming `resolver` is typically built from
+ * `process.cwd()` (the main workspace), but `findStatusPath` may resolve a
+ * project to a builder worktree under `.builders/`. Checks like `plan_exists`
+ * must read from that worktree, not from the main tree (bugfix #676).
+ *
+ * For the LOCAL backend we rebuild the resolver against `artifactRoot` so file
+ * lookups point at `<artifactRoot>/codev/...`. For other backends (e.g. CLI)
+ * artifact location is already independent of the filesystem, so we keep the
+ * caller's resolver.
+ */
+function scopeResolver(
+  workspaceRoot: string,
+  artifactRoot: string,
+  resolver?: ArtifactResolver,
+): ArtifactResolver | undefined {
+  if (artifactRoot === workspaceRoot) return resolver;
+  // Only rebuild if the existing resolver is a LocalResolver (path-dependent).
+  if (resolver && !(resolver instanceof LocalResolver)) return resolver;
+  return getResolver(workspaceRoot, artifactRoot);
 }
 
 /**
@@ -206,6 +230,12 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
     throw new Error(`Project ${projectId} not found.`);
   }
 
+  // Scope artifact reads + check cwd to the worktree that owns this status.yaml.
+  // `findStatusPath` searches `.builders/*` first; resolver/cwd must match so
+  // checks like `plan_exists` see files in the same worktree (bugfix #676).
+  const artifactRoot = getArtifactRoot(statusPath);
+  const scopedResolver = scopeResolver(workspaceRoot, artifactRoot, resolver);
+
   const state = readState(statusPath);
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const overrides = loadCheckOverrides(workspaceRoot);
@@ -218,7 +248,7 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
     return;
   }
 
-  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
+  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(artifactRoot, state.id, state.title, scopedResolver) };
 
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
@@ -234,7 +264,7 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
     return;
   }
 
-  const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+  const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
   console.log(formatCheckResults(results));
 
   console.log('');
@@ -291,6 +321,11 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   const phaseCheckNames = phaseConfig?.checks ?? [];
   const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
+  // Scope artifact reads + check cwd to the worktree that owns this status.yaml
+  // (bugfix #676 — see check() for rationale).
+  const artifactRoot = getArtifactRoot(statusPath);
+  const scopedResolver = scopeResolver(workspaceRoot, artifactRoot, resolver);
+
   // Run checks first — but skip if the gate was just approved (approve already ran them)
   if (phaseCheckNames.length > 0) {
     const gate = getPhaseGate(protocol, state.phase);
@@ -302,14 +337,14 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
       console.log('');
       console.log(chalk.dim('Checks skipped (gate approved <60s ago).'));
     } else {
-      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
+      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(artifactRoot, state.id, state.title, scopedResolver) };
 
       console.log('');
       console.log(chalk.bold('RUNNING CHECKS...'));
       logCheckOverrides(phaseCheckNames, checks, overrides);
 
       if (Object.keys(checks).length > 0) {
-        const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+        const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
         console.log(formatCheckResults(results));
 
         if (!allChecksPassed(results)) {
@@ -422,7 +457,7 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   }
 
   // Advance to next protocol phase
-  await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
+  await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, scopedResolver);
 }
 
 async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): Promise<void> {
@@ -569,6 +604,11 @@ export async function approve(
     throw new Error(`Project ${projectId} not found.`);
   }
 
+  // Scope artifact reads + check cwd to the worktree that owns this status.yaml
+  // (bugfix #676 — see check() for rationale).
+  const artifactRoot = getArtifactRoot(statusPath);
+  const scopedResolver = scopeResolver(workspaceRoot, artifactRoot, resolver);
+
   const state = readState(statusPath);
 
   // Convenience: for verify-approval, auto-complete porch done if build_complete is false
@@ -616,14 +656,14 @@ export async function approve(
   const checks = getPhaseChecks(protocol, state.phase, overrides ?? undefined);
 
   if (phaseCheckNames.length > 0) {
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver) };
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(artifactRoot, state.id, state.title, scopedResolver) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
     logCheckOverrides(phaseCheckNames, checks, overrides);
 
     if (Object.keys(checks).length > 0) {
-      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv, undefined, resolver);
+      const results = await runPhaseChecks(checks, artifactRoot, checkEnv, undefined, scopedResolver);
       console.log(formatCheckResults(results));
 
       if (!allChecksPassed(results)) {
