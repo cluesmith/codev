@@ -1,64 +1,33 @@
-# Maintenance Run NNN
+# Maintenance Run NNNN
 
-## Metadata
-- **Date**: YYYY-MM-DD
-- **Base Commit**: (commit hash at start)
-- **PR**: #NNN
-- **Scope**: full | code-only | docs-only
+**Date**: YYYY-MM-DD
+**Base Commit**: <hash>
+**PR**: #NNN
 
 ## Changes Since Last Run
 
-<!-- Auto-generated summary of commits since last maintenance -->
+<key commits or summary>
 
-```
-git log --oneline <last-maint-commit>..HEAD
-```
+## What Was Done
 
-## Tasks Completed
+### Dead Code Removed
+- <file>: <item> — <reason>
 
-### Code Hygiene
-- [ ] Dead code removal
-- [ ] Unused dependencies
-- [ ] Dependency updates
-- [ ] Test maintenance
+### Dependencies Cleaned
+- <package> — <reason>
 
-### Documentation
-- [ ] arch.md sync
-- [ ] lessons-learned.md generation
-- [ ] CLAUDE.md / AGENTS.md sync
-- [ ] Documentation pruning (obsolete content, size limits)
+### Documentation Updated
+- arch.md: <what changed>
+- lessons-learned.md: <what changed>
 
-### Framework
-- [ ] codev update
-- [ ] GitHub Issue status updates (close completed, update labels)
-
-## Findings
-
-<!-- Notable discoveries during maintenance -->
-
-## Documentation Changes
-
-<!-- REQUIRED: Log all documentation deletions/moves with justification -->
-
-### arch.md
-| Section | Action | Reason |
-|---------|--------|--------|
-| (example) | KEPT/MOVED/DELETED | (justification) |
-
-### CLAUDE.md
-| Section | Action | Reason |
-|---------|--------|--------|
-| (example) | KEPT/MOVED/DELETED | (justification) |
-
-### README.md
-| Section | Action | Reason |
-|---------|--------|--------|
-| (example) | KEPT/MOVED/DELETED | (justification) |
+### Documentation Changes Log
+| Document | Section | Action | Reason |
+|----------|---------|--------|--------|
 
 ## Deferred
 
-<!-- Items discovered but deferred to next run, with reason -->
+- <items found but not fixed, with reason>
 
 ## Summary
 
-<!-- Brief summary of what was accomplished -->
+<2-3 sentences>
