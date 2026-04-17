@@ -121,10 +121,10 @@ export function readState(statusPath: string): ProjectState {
 
     // Spec 653: backward compat migration — rename 'complete' → 'verified'
     // Universal: applies to ALL protocols, not just those with a verify phase.
+    // readState is pure — it migrates in-memory but does NOT write to disk.
+    // Callers that mutate state will commit the migrated value via writeStateAndCommit.
     if (state.phase === 'complete') {
       state.phase = 'verified';
-      // Write the migration in-place (sync — no git commit here; callers handle persistence)
-      writeState(statusPath, state);
     }
 
     return state;
@@ -263,15 +263,15 @@ function findProjectInDir(projectsDir: string, projectId: string): string | null
 
 /**
  * Find status.yaml by project ID.
- * Searches local codev/projects/ first, then falls back to
- * .builders/* /codev/projects/ worktrees (enables porch status from repo root).
+ * Searches .builders/ worktrees FIRST (active, up-to-date state),
+ * then falls back to local codev/projects/ (main — may be stale after merge).
+ *
+ * Spec 653: in multi-PR workflows, early phases merge status.yaml to main,
+ * which becomes stale. Worktree copies are always the most recent.
  */
 export function findStatusPath(workspaceRoot: string, projectId: string): string | null {
-  // 1. Search local codev/projects/
-  const localResult = findProjectInDir(path.join(workspaceRoot, PROJECTS_DIR), projectId);
-  if (localResult) return localResult;
-
-  // 2. Search builder worktrees (.builders/*/codev/projects/)
+  // 1. Search builder worktrees first (.builders/*/codev/projects/)
+  // These have the most up-to-date state in multi-PR workflows.
   const buildersDir = path.join(workspaceRoot, '.builders');
   if (fs.existsSync(buildersDir)) {
     const worktrees = fs.readdirSync(buildersDir, { withFileTypes: true });
@@ -281,6 +281,10 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
       if (result) return result;
     }
   }
+
+  // 2. Fall back to local codev/projects/ (main copy)
+  const localResult = findProjectInDir(path.join(workspaceRoot, PROJECTS_DIR), projectId);
+  if (localResult) return localResult;
 
   return null;
 }

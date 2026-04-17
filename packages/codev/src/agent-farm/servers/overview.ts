@@ -414,7 +414,7 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   const spirMatch = lower.match(/^spir-(\d+)/);
   if (spirMatch) return `builder-spir-${Number(spirMatch[1])}`;
 
-  // TICK: tick-130-slug → builder-tick-130
+  // Legacy compat: TICK protocol removed (spec 653), but old worktrees may still exist
   const tickMatch = lower.match(/^tick-(\d+)/);
   if (tickMatch) return `builder-tick-${Number(tickMatch[1])}`;
 
@@ -452,7 +452,7 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const spirMatch = dirName.match(/^spir-(\d+)/);
   if (spirMatch) return spirMatch[1];
 
-  // TICK: tick-130-slug → try both "130" and "0130"
+  // Legacy compat: TICK protocol removed (spec 653), but old worktrees may still exist
   const tickMatch = dirName.match(/^tick-(\d+)/);
   if (tickMatch) return tickMatch[1];
 

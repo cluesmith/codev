@@ -577,9 +577,18 @@ export async function approve(
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} verify build-complete (auto)`);
   }
 
+  // Auto-create gate entry for upgraded projects (e.g., verify-approval missing after upgrade)
   if (!state.gates[gateName]) {
-    const knownGates = Object.keys(state.gates).join(', ');
-    throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
+    const protocol = loadProtocol(workspaceRoot, state.protocol);
+    const phaseGate = getPhaseGate(protocol, state.phase);
+    if (phaseGate === gateName) {
+      // Gate belongs to the current phase — initialize it
+      state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-created (upgrade)`);
+    } else {
+      const knownGates = Object.keys(state.gates).join(', ');
+      throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
+    }
   }
 
   if (state.gates[gateName].status === 'approved') {
@@ -636,6 +645,10 @@ export async function approve(
   console.log(chalk.green(`Gate ${gateName} approved.`));
 
   // For verify-approval: auto-advance to terminal state (convenience — one command)
+  // NOTE: The 'verified' state is committed to the builder branch, which may not
+  // be merged back to main. The closed GitHub Issue serves as the canonical "done"
+  // signal on main. State alignment (making status.yaml on main authoritative) is
+  // tracked as future work per spec 653.
   if (gateName === 'verify-approval') {
     await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
   } else {
@@ -888,8 +901,6 @@ export async function cli(args: string[]): Promise<void> {
 
       case 'done': {
         const doneOpts: { pr?: number; branch?: string; merged?: number } = {};
-        // Extract positional arg (project ID) — skip anything starting with --
-        const positionalId = rest.find(a => !a.startsWith('--') && rest.indexOf(a) === 0 || (!a.startsWith('--') && rest[rest.indexOf(a) - 1]?.startsWith('--') === false));
         const prIdx = rest.indexOf('--pr');
         const brIdx = rest.indexOf('--branch');
         const mergedIdx = rest.indexOf('--merged');
@@ -942,8 +953,8 @@ export async function cli(args: string[]): Promise<void> {
         const sp = findStatusPath(workspaceRoot, pid);
         if (!sp) throw new Error(`Project ${pid} not found.`);
         const st = readState(sp);
-        if (st.phase !== 'verify' && st.phase !== 'review') {
-          throw new Error(`porch verify --skip can only be used in verify or review phase (current: ${st.phase})`);
+        if (st.phase !== 'verify') {
+          throw new Error(`porch verify --skip can only be used in the verify phase (current: ${st.phase}). The PR must be merged first.`);
         }
         st.phase = 'verified';
         st.context = { ...st.context, verify_skip_reason: skipReason };

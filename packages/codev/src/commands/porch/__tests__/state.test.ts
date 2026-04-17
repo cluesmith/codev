@@ -317,7 +317,7 @@ updated_at: "${state.updated_at}"
       expect(result).toContain('0042-some-feature/status.yaml');
     });
 
-    it('should prefer local codev/projects over .builders worktrees (bugfix #622)', () => {
+    it('should prefer .builders worktrees over local codev/projects (spec #653)', () => {
       // Create project in both local and worktree
       const localProjectDir = path.join(projectsDir, '0074-test-feature');
       fs.mkdirSync(localProjectDir, { recursive: true });
@@ -331,8 +331,8 @@ updated_at: "${state.updated_at}"
       const result = findStatusPath(testDir, '0074');
 
       expect(result).not.toBeNull();
-      // Should find the local one, not the worktree one
-      expect(result).not.toContain('.builders');
+      // Spec 653: worktree copies are most up-to-date in multi-PR workflows
+      expect(result).toContain('.builders');
       expect(result).toContain('0074-test-feature');
     });
 
