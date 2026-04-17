@@ -1046,16 +1046,26 @@ codev/                                  # Project root (pnpm monorepo)
 │   │   │   ├── state.ts                # SQLite state management
 │   │   │   ├── types.ts                # Type definitions
 │   │   │   ├── commands/               # afx CLI commands
-│   │   │   │   ├── start.ts            # Start architect dashboard
+│   │   │   │   ├── start.ts            # Start Tower workspace
 │   │   │   │   ├── stop.ts             # Stop all processes
 │   │   │   │   ├── spawn.ts            # Spawn builder
+│   │   │   │   ├── spawn-worktree.ts   # Create git worktree for spawn
+│   │   │   │   ├── spawn-roles.ts      # Role prompt injection for spawn
 │   │   │   │   ├── status.ts           # Show status
 │   │   │   │   ├── cleanup.ts          # Clean up builder
-│   │   │   │   ├── util.ts             # Utility shell
 │   │   │   │   ├── open.ts             # File annotation viewer
 │   │   │   │   ├── send.ts             # Send message to builder
-│   │   │   │   ├── rename.ts           # Rename builder/util
-│   │   │   │   └── bench.ts            # Consultation benchmarking (afx bench)
+│   │   │   │   ├── rename.ts           # Rename builder
+│   │   │   │   ├── bench.ts            # Consultation benchmarking (afx bench)
+│   │   │   │   ├── attach.ts           # Attach directly to shellper session
+│   │   │   │   ├── architect.ts        # Architect session management
+│   │   │   │   ├── shell.ts            # Shell session management
+│   │   │   │   ├── tower.ts            # Tower daemon control (start/stop)
+│   │   │   │   ├── tower-cloud.ts      # Cloud tunnel management
+│   │   │   │   ├── cron.ts             # Scheduled task management
+│   │   │   │   ├── team.ts             # Team operations (deprecated; use `team` CLI)
+│   │   │   │   ├── team-update.ts      # Team activity aggregation
+│   │   │   │   └── db.ts               # SQLite database commands
 │   │   │   ├── servers/                # Web servers (Spec 0105 decomposition)
 │   │   │   │   ├── tower-server.ts     # Orchestrator: HTTP/WS server creation, subsystem init, shutdown
 │   │   │   │   ├── tower-routes.ts     # HTTP route handlers (~30 routes)
@@ -1078,9 +1088,11 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── bin/                            # CLI entry points
 │   │   ├── codev.js                    # codev command
 │   │   ├── afx.js                      # afx command (af.js deprecated, redirects)
+│   │   ├── af.js                       # Deprecated; redirects to afx
 │   │   ├── consult.js                  # consult command
 │   │   ├── team.js                     # team command
-│   │   └── porch.js                    # porch command
+│   │   ├── porch.js                    # porch command
+│   │   └── generate-image.js           # generate-image command
 │   ├── dashboard-dist/                 # Dashboard build output (copied from packages/dashboard/dist)
 │   ├── skeleton/                       # Embedded codev-skeleton (built)
 │   ├── templates/                      # HTML templates
@@ -1100,10 +1112,19 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── protocols/                      # Working copies for development
 │   │   ├── spir/                       # Multi-phase with consultation
 │   │   │   ├── protocol.md
+│   │   │   ├── protocol.json
+│   │   │   ├── builder-prompt.md
 │   │   │   ├── templates/
-│   │   │   └── manifest.yaml
+│   │   │   ├── prompts/
+│   │   │   └── consult-types/
+│   │   ├── aspir/                      # Autonomous SPIR (no human gates)
+│   │   ├── air/                        # Autonomous Implement & Review
+│   │   ├── bugfix/                     # GitHub Issue-driven fixes
 │   │   ├── experiment/                 # Disciplined experimentation
-│   │   └── maintain/                   # Codebase maintenance
+│   │   ├── release/                    # Version release procedure
+│   │   ├── spike/                      # Time-boxed research
+│   │   ├── maintain/                   # Codebase maintenance
+│   │   └── protocol-schema.json        # JSON schema for protocol.json files
 │   ├── specs/                          # Our feature specifications
 │   ├── plans/                          # Our implementation plans
 │   ├── reviews/                        # Our lessons learned
@@ -1118,7 +1139,11 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── templates/                      # Document templates (CLAUDE.md, arch.md, etc.)
 │   ├── protocols/                      # Protocol definitions
 │   │   ├── spir/
+│   │   ├── aspir/
+│   │   ├── air/
+│   │   ├── bugfix/
 │   │   ├── experiment/
+│   │   ├── spike/
 │   │   └── maintain/
 │   ├── specs/                          # Empty (placeholder)
 │   ├── plans/                          # Empty (placeholder)
@@ -1771,6 +1796,6 @@ See [MAINTAIN protocol](../protocols/maintain/protocol.md) for codebase hygiene 
 
 ---
 
-**Last Updated**: 2026-02-18
-**Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Refinement round 4/4 -- final fresh-eyes pass. See CHANGELOG.md for version history.
+**Last Updated**: 2026-04-17
+**Version**: v3.0.0-rc.9 (Pre-release)
+**Changes**: Pre-v3.0.0 MAINTAIN run (0007): directory tree refresh, protocol list update, removed unused http-proxy dependency. See CHANGELOG.md for version history.
