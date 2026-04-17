@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
+import { readState, writeStateAndCommit, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import { getForgeCommand, loadForgeConfig } from '../../lib/forge.js';
 import {
   loadProtocol,
@@ -243,19 +243,9 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   const resolver = getResolver(workspaceRoot);
 
   // Protocol complete
-  if (state.phase === 'complete' || !phaseConfig) {
-    // Build the status.yaml commit task (preserves project history for analytics)
-    const projectDir = getProjectDir(workspaceRoot, state.id, state.title);
-    const statusYamlPath = path.join(projectDir, 'status.yaml');
-    const relStatusPath = path.relative(workspaceRoot, statusYamlPath);
-
-    const commitStatusTask: PorchTask = {
-      subject: 'Commit project status for historical record',
-      activeForm: 'Committing project status',
-      description: `Commit status.yaml to your branch so project history survives cleanup:\n\ngit add "${relStatusPath}"\ngit commit -m "chore: Preserve project status for analytics"\ngit push\n\nThis ensures wall clock time, gate timestamps, and protocol data are available for analytics after cleanup.`,
-      sequential: true,
-    };
-
+  // Note: status.yaml is already committed automatically by writeStateAndCommit
+  // at every phase transition. No manual "commit status.yaml" task needed.
+  if (state.phase === 'verified' || state.phase === 'complete' || !phaseConfig) {
     // Bugfix builders are done after PR + CMAP — architect handles merge/cleanup
     if (state.protocol === 'bugfix') {
       return {
@@ -263,7 +253,18 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         phase: state.phase,
         iteration: state.iteration,
         summary: `Project ${state.id} has completed the ${state.protocol} protocol. The architect will review, merge, and clean up.`,
-        tasks: [commitStatusTask],
+      };
+    }
+
+    // For protocols with a verify phase (SPIR, ASPIR), merge already happened in verify.
+    // For protocols without verify (AIR, BUGFIX, MAINTAIN), merge is still needed.
+    const hasVerifyPhase = protocol.phases.some(p => p.id === 'verify');
+    if (hasVerifyPhase) {
+      return {
+        status: 'complete',
+        phase: state.phase,
+        iteration: state.iteration,
+        summary: `Project ${state.id} has completed the ${state.protocol} protocol (verified).`,
       };
     }
 
@@ -273,7 +274,6 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       iteration: state.iteration,
       summary: `Project ${state.id} has completed the ${state.protocol} protocol.`,
       tasks: [
-        commitStatusTask,
         {
           subject: 'Merge the pull request',
           activeForm: 'Merging pull request',
@@ -321,7 +321,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.iteration = 1;
           state.build_complete = false;
           state.history = [];
-          writeState(statusPath, state);
+          await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip pre-approved ${state.phase}`);
           // Recurse to compute tasks for the new phase
           return next(workspaceRoot, projectId);
         }
@@ -354,8 +354,8 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     if (gateStatus?.status === 'approved') {
       const nextPhase = getNextPhase(protocol, state.phase);
       if (!nextPhase) {
-        state.phase = 'complete';
-        writeState(statusPath, state);
+        state.phase = 'verified';
+        await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
         return next(workspaceRoot, projectId);
       }
 
@@ -363,6 +363,12 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       state.iteration = 1;
       state.build_complete = false;
       state.history = [];
+
+      // Ensure gate entry exists for the new phase (needed for upgraded projects)
+      const newGate = getPhaseGate(protocol, nextPhase.id);
+      if (newGate && !state.gates[newGate]) {
+        state.gates[newGate] = { status: 'pending' as const };
+      }
 
       // If entering phased protocol, extract plan phases
       if (isPhased(protocol, nextPhase.id)) {
@@ -375,7 +381,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         }
       }
 
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
       return next(workspaceRoot, projectId);
     }
   }
@@ -385,7 +391,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath, resolver);
   }
 
-  // Handle 'once' phases (TICK, BUGFIX)
+  // Handle 'once' phases (BUGFIX, verify)
   return await handleOncePhase(workspaceRoot, state, protocol, phaseConfig, resolver);
 }
 
@@ -603,7 +609,7 @@ async function handleBuildVerify(
           reviews,
         });
       }
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} review-recorded`);
       return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
     }
 
@@ -685,14 +691,14 @@ async function handleVerifyApproved(
         // All plan phases done — move to review
         state.phase = 'review';
         state.current_plan_phase = null;
-        writeState(statusPath, state);
+        await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} all plan phases complete → review`);
         return next(workspaceRoot, projectId);
       }
 
       // Next plan phase
       const newCurrent = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrent?.id || null;
-      writeState(statusPath, state);
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} advance plan phase → ${state.current_plan_phase}`);
       return next(workspaceRoot, projectId);
     }
   }
@@ -703,7 +709,7 @@ async function handleVerifyApproved(
     state.build_complete = false;
     state.iteration = 1;
     state.history = [];
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
 
     return {
       status: 'gate_pending',
@@ -721,8 +727,8 @@ async function handleVerifyApproved(
   // No gate — advance to next phase directly
   const nextPhase = getNextPhase(protocol, state.phase);
   if (!nextPhase) {
-    state.phase = 'complete';
-    writeState(statusPath, state);
+    state.phase = 'verified';
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     return next(workspaceRoot, projectId);
   }
 
@@ -730,12 +736,12 @@ async function handleVerifyApproved(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
   return next(workspaceRoot, projectId);
 }
 
 /**
- * Handle 'once' phases (TICK, BUGFIX).
+ * Handle 'once' phases (BUGFIX, verify).
  * These don't have build/verify config — emit a single task.
  */
 async function handleOncePhase(
@@ -752,6 +758,29 @@ async function handleOncePhase(
   let description = prompt;
   if (phaseConfig.checks && phaseConfig.checks.length > 0) {
     description += `\n\nAfter completing the work, run these checks:\n${phaseConfig.checks.map(c => `- ${c}`).join('\n')}`;
+  }
+
+  // Verify phase: merge PR first, then verify. Skip option prominent.
+  if (state.phase === 'verify') {
+    const forgeConfig = loadForgeConfig(workspaceRoot);
+    const mergeCmd = getForgeCommand('pr-merge', forgeConfig);
+    const mergeInstructions = mergeCmd
+      ? `Merge the PR using:\n\n${mergeCmd}\n\nDo NOT squash merge. Use regular merge commits to preserve development history.`
+      : `Merge the PR manually using your forge's merge mechanism. Do NOT squash merge.`;
+
+    description = `## Step 1: Merge the PR\n\n${mergeInstructions}\n\n## Step 2: Verify (optional)\n\nAfter merging, verify the change works in the target environment.\n\nWhen done, run: porch done ${state.id}\nPorch will request the verify-approval gate — the architect approves it.\n\nIf verification is not needed, skip it:\n  porch verify ${state.id} --skip "reason"`;
+
+    return {
+      status: 'tasks',
+      phase: state.phase,
+      iteration: state.iteration,
+      tasks: [{
+        subject: 'Verify: Merge PR and post-merge verification',
+        activeForm: 'Waiting for merge and verification',
+        description,
+        sequential: true,
+      }],
+    };
   }
 
   description += `\n\nWhen complete, run: porch done ${state.id}`;

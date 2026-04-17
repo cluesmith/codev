@@ -17,7 +17,7 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 - **VS Code Extension**: `packages/vscode/` — thin client over Tower API
 - **Dashboard**: `packages/dashboard/` — React SPA served by Tower
 - **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
-- **Protocols**: Read the relevant protocol in `codev/protocols/{spir,tick,maintain,experiment}/protocol.md`
+- **Protocols**: Read the relevant protocol in `codev/protocols/{spir,maintain,experiment}/protocol.md`
 
 **To add a new feature to Codev:**
 1. Create a GitHub Issue describing the feature
@@ -75,9 +75,8 @@ tail -f ~/.agent-farm/tower.log
 | **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
 | **CMAP** | "Consult Multiple Agents in Parallel" — shorthand for running 3-way parallel consultation (Gemini + Codex + Claude) |
 | **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
-| **Protocol** | Defined workflow for a type of work (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE) |
+| **Protocol** | Defined workflow for a type of work (SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE) |
 | **SPIR** | Multi-phase protocol: Specify → Plan → Implement → Review |
-| **TICK** | Amendment protocol for extending existing SPIR specs |
 | **BUGFIX** | Lightweight protocol for isolated bug fixes (< 300 LOC) |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Workspace** | Tower's term for a registered project directory. Used in API paths and code; synonymous with "project" in user-facing contexts |
@@ -968,7 +967,7 @@ This is where the Codev project uses Codev to develop itself:
 This is what gets distributed to users when they install Codev:
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
-  - `protocols/` - Protocol definitions (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE)
+  - `protocols/` - Protocol definitions (SPIR, ASPIR, AIR, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE)
   - `specs/` - Empty directory (users create their own)
   - `plans/` - Empty directory (users create their own)
   - `reviews/` - Empty directory (users create their own)
@@ -1103,7 +1102,6 @@ codev/                                  # Project root (pnpm monorepo)
 │   │   │   ├── protocol.md
 │   │   │   ├── templates/
 │   │   │   └── manifest.yaml
-│   │   ├── tick/                       # Fast autonomous protocol
 │   │   ├── experiment/                 # Disciplined experimentation
 │   │   └── maintain/                   # Codebase maintenance
 │   ├── specs/                          # Our feature specifications
@@ -1120,7 +1118,6 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── templates/                      # Document templates (CLAUDE.md, arch.md, etc.)
 │   ├── protocols/                      # Protocol definitions
 │   │   ├── spir/
-│   │   ├── tick/
 │   │   ├── experiment/
 │   │   └── maintain/
 │   ├── specs/                          # Empty (placeholder)
@@ -1182,27 +1179,6 @@ codev/                                  # Project root (pnpm monorepo)
 - `templates/spec.md` - Specification template
 - `templates/plan.md` - Planning template
 - `templates/review.md` - Review template
-
-#### TICK Protocol (`codev/protocols/tick/`)
-**Purpose**: **T**ask **I**dentification, **C**oding, **K**ickout - Fast autonomous implementation
-
-**Workflow**:
-1. **Specification** (autonomous) - Define task
-2. **Planning** (autonomous) - Create single-phase plan
-3. **Implementation** (autonomous) - Execute plan
-4. **Review** (with multi-agent consultation) - Document and validate
-
-**Key Features**:
-- Single autonomous execution from spec to implementation
-- Multi-agent consultation ONLY at review phase
-- Two user checkpoints: start and end
-- Suitable for simple tasks (<300 lines)
-- Architecture documentation updated automatically at review
-
-**Selection Criteria**:
-- Use TICK for: Simple features, utilities, configuration, amendments to existing specs
-- Use SPIR for: Complex features, architecture changes, unclear requirements
-- Use BUGFIX for: Minor bugs reported as GitHub Issues (< 300 LOC)
 
 #### BUGFIX Protocol (`codev/protocols/bugfix/`)
 **Purpose**: Lightweight protocol for minor bugfixes using GitHub Issues
@@ -1287,7 +1263,6 @@ afx workspace stop             # Stop all agent-farm processes
 afx spawn 3 --protocol spir              # Spawn builder (strict mode, default)
 afx spawn 3 --protocol spir --soft       # Soft mode - AI follows protocol, you verify compliance
 afx spawn 42 --protocol bugfix           # Spawn builder for GitHub issue (BUGFIX protocol)
-afx spawn 42 --protocol tick --amends 30 # TICK amendment to spec 30
 afx status                     # Check all agent status
 afx cleanup --project 0003     # Clean up builder (checks for uncommitted work)
 afx cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
@@ -1403,7 +1378,7 @@ See `codev/resources/testing-guide.md` for Playwright patterns and Tower regress
 
 **Location**: `packages/codev/src/commands/porch/`
 
-**Purpose**: Porch is a stateless planner that drives SPIR, TICK, and BUGFIX protocols via a state machine. It does NOT spawn subprocesses or call LLM APIs — it reads state, decides the next action, and emits JSON task definitions that the Builder executes.
+**Purpose**: Porch is a stateless planner that drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine. It does NOT spawn subprocesses or call LLM APIs — it reads state, decides the next action, and emits JSON task definitions that the Builder executes.
 
 #### The next/done Loop
 
@@ -1611,7 +1586,7 @@ Messages sent via `afx send` are not injected immediately — they pass through 
 - Users of any AI coding assistant get appropriate file format
 
 ### 5. Multi-Agent Consultation by Default
-**Decision**: SPIR and TICK default to consulting GPT-5 and Gemini 3 Pro
+**Decision**: SPIR and ASPIR default to consulting GPT-5 and Gemini 3 Pro
 
 **Rationale**:
 - Multiple perspectives catch issues single agent misses
@@ -1656,17 +1631,7 @@ consult -m claude spec 42
 1. **Unset `CLAUDECODE`**: Builder's shellper session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
 2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
 
-### 6. TICK Protocol for Fast Iteration
-**Decision**: Create lightweight protocol for simple tasks
-
-**Rationale**:
-- SPIR is excellent but heavy for simple tasks
-- Fast iteration needed for bug fixes and utilities
-- Single autonomous execution reduces overhead
-- Multi-agent review at end maintains quality
-- Fills gap between informal changes and full SPIR
-
-### 7. Single Canonical Implementation (TypeScript agent-farm)
+### 6. Single Canonical Implementation (TypeScript agent-farm)
 **Decision**: Delete all bash architect scripts; TypeScript agent-farm is the single source of truth
 
 **Rationale**:
@@ -1676,7 +1641,7 @@ consult -m claude spec 42
 - **Rich features** - Easier to implement complex features (port registry, state locking)
 - **Thin wrapper pattern** - Bash wrappers just call `node agent-farm/dist/index.js`
 
-### 8. Global Registry for Multi-Workspace Support
+### 7. Global Registry for Multi-Workspace Support
 **Decision**: Use `~/.agent-farm/global.db` (SQLite) for cross-workspace coordination
 
 **Rationale**:

@@ -1,6 +1,6 @@
 ---
 name: porch
-description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, TICK, and BUGFIX protocols via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
+description: Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine. ALWAYS check this skill before running any `porch` command. Use when you need to check project status, approve gates, signal phase completion, or manage protocol state. Also use when a builder asks about gate approvals or phase transitions.
 ---
 
 # porch - Protocol Orchestrator
@@ -31,7 +31,7 @@ Gates are human-only approval checkpoints. The `--a-human-explicitly-approved-th
 |------|----------|------|
 | `spec-approval` | SPIR | After spec is written |
 | `plan-approval` | SPIR | After plan is written |
-| `pr` | SPIR, TICK, AIR | After PR is created |
+| `pr` | SPIR, AIR | After PR is created |
 
 ```bash
 porch approve 42 spec-approval --a-human-explicitly-approved-this

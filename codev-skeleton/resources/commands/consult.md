@@ -46,7 +46,7 @@ Cannot combine `--prompt` with `--prompt-file` or `--type`.
 
 ### Protocol Mode
 
-Run structured reviews tied to a development protocol (SPIR, TICK, bugfix, maintain).
+Run structured reviews tied to a development protocol (SPIR, ASPIR, AIR, bugfix, maintain).
 
 ```bash
 # Review a spec (auto-detects project context in builder worktrees)
@@ -69,7 +69,7 @@ consult -m gemini --type integration
 ```
 
 **Options:**
-- `--protocol <name>` — Protocol: spir, bugfix, tick, maintain
+- `--protocol <name>` — Protocol: spir, aspir, air, bugfix, maintain
 - `-t, --type <type>` — Review type: spec, plan, impl, pr, phase, integration
 - `--issue <number>` — Issue number (required from architect context)
 

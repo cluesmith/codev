@@ -12,7 +12,7 @@ import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import {
   readState,
-  writeState,
+  writeStateAndCommit,
   createInitialState,
   findStatusPath,
   getProjectDir,
@@ -124,7 +124,8 @@ export async function status(workspaceRoot: string, projectId: string, resolver?
     // Status icons
     const icon = (status: string) => {
       switch (status) {
-        case 'complete': return chalk.green('✓');
+        case 'verified': return chalk.green('✓');
+        case 'complete': return chalk.green('✓'); // backward compat
         case 'in_progress': return chalk.yellow('►');
         default: return chalk.gray('○');
       }
@@ -251,13 +252,39 @@ export async function check(workspaceRoot: string, projectId: string, resolver?:
  * porch done <id>
  * Advances to next phase if checks pass. Refuses if checks fail.
  */
-export async function done(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
+export async function done(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver, options?: { pr?: number; branch?: string; merged?: number }): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
   }
 
   let state = readState(statusPath);
+
+  // Record-only mode: --pr or --merged writes PR metadata and exits immediately.
+  // Does NOT run checks, does NOT advance the phase, does NOT mark build_complete.
+  if (options?.pr !== undefined) {
+    if (!options.branch) throw new Error('--pr requires --branch <name>');
+    if (!state.pr_history) state.pr_history = [];
+    state.pr_history.push({
+      phase: state.phase,
+      pr_number: options.pr,
+      branch: options.branch,
+      created_at: new Date().toISOString(),
+    });
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} record PR #${options.pr}`);
+    console.log(chalk.green(`Recorded PR #${options.pr} (branch: ${options.branch}) in pr_history.`));
+    return;
+  }
+  if (options?.merged !== undefined) {
+    if (!state.pr_history) throw new Error(`No PR history found for project ${projectId}`);
+    const entry = state.pr_history.find(e => e.pr_number === options.merged);
+    if (!entry) throw new Error(`PR #${options.merged} not found in pr_history`);
+    entry.merged = true;
+    entry.merged_at = new Date().toISOString();
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} PR #${options.merged} merged`);
+    console.log(chalk.green(`Marked PR #${options.merged} as merged.`));
+    return;
+  }
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const overrides = loadCheckOverrides(workspaceRoot);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
@@ -300,7 +327,7 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   // For build_verify phases: mark build as complete for verification
   if (isBuildVerify(protocol, state.phase) && !state.build_complete) {
     state.build_complete = true;
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} build-complete`);
     console.log('');
     console.log(chalk.green('BUILD COMPLETE. Ready for verification.'));
     console.log(`\n  Run: porch next ${state.id} (to get verification tasks)`);
@@ -363,9 +390,17 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     }
   }
 
-  // Check for gate
+  // Check for gate — auto-request if not yet requested
   const gate = getPhaseGate(protocol, state.phase);
   if (gate && state.gates[gate]?.status !== 'approved') {
+    // Auto-request the gate if it hasn't been requested yet
+    if (!state.gates[gate]) {
+      state.gates[gate] = { status: 'pending' };
+    }
+    if (!state.gates[gate].requested_at) {
+      state.gates[gate].requested_at = new Date().toISOString();
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gate} gate-requested`);
+    }
     console.log('');
     console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
     console.log(`\n  Run: porch gate ${state.id}`);
@@ -387,15 +422,15 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   }
 
   // Advance to next protocol phase
-  advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
+  await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
 }
 
-function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): void {
+async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): Promise<void> {
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
-    state.phase = 'complete';
-    writeState(statusPath, state);
+    state.phase = 'verified';
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     console.log('');
     console.log(chalk.green.bold('🎉 PROTOCOL COMPLETE'));
     console.log(`\n  Project ${state.id} has completed the ${state.protocol} protocol.`);
@@ -419,7 +454,7 @@ function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protoc
     }
   }
 
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${nextPhase.id} phase-transition`);
 
   console.log('');
   console.log(chalk.green(`ADVANCING TO: ${nextPhase.id} - ${nextPhase.name}`));
@@ -484,7 +519,7 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   }
   if (!state.gates[gateName].requested_at) {
     state.gates[gateName].requested_at = new Date().toISOString();
-    writeState(statusPath, state);
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
   }
 
   console.log('');
@@ -536,9 +571,24 @@ export async function approve(
 
   const state = readState(statusPath);
 
+  // Convenience: for verify-approval, auto-complete porch done if build_complete is false
+  if (gateName === 'verify-approval' && state.phase === 'verify' && !state.build_complete) {
+    state.build_complete = true;
+    await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} verify build-complete (auto)`);
+  }
+
+  // Auto-create gate entry for upgraded projects (e.g., verify-approval missing after upgrade)
   if (!state.gates[gateName]) {
-    const knownGates = Object.keys(state.gates).join(', ');
-    throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
+    const protocol = loadProtocol(workspaceRoot, state.protocol);
+    const phaseGate = getPhaseGate(protocol, state.phase);
+    if (phaseGate === gateName) {
+      // Gate belongs to the current phase — initialize it
+      state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
+      await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-created (upgrade)`);
+    } else {
+      const knownGates = Object.keys(state.gates).join(', ');
+      throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
+    }
   }
 
   if (state.gates[gateName].status === 'approved') {
@@ -589,11 +639,21 @@ export async function approve(
 
   state.gates[gateName].status = 'approved';
   state.gates[gateName].approved_at = new Date().toISOString();
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-approved`);
 
   console.log('');
   console.log(chalk.green(`Gate ${gateName} approved.`));
-  console.log(`\n  Run: porch done ${state.id} (to advance)`);
+
+  // For verify-approval: auto-advance to terminal state (convenience — one command)
+  // NOTE: The 'verified' state is committed to the builder branch, which may not
+  // be merged back to main. The closed GitHub Issue serves as the canonical "done"
+  // signal on main. State alignment (making status.yaml on main authoritative) is
+  // tracked as future work per spec 653.
+  if (gateName === 'verify-approval') {
+    await advanceProtocolPhase(workspaceRoot, state, protocol, statusPath, resolver);
+  } else {
+    console.log(`\n  Run: porch done ${state.id} (to advance)`);
+  }
   console.log('');
 }
 
@@ -627,7 +687,7 @@ export async function rollback(
   const targetIndex = protocol.phases.findIndex(p => p.id === targetPhase);
 
   // Handle completed projects (phase not in protocol phases array)
-  if (state.phase === 'complete') {
+  if (state.phase === 'verified' || state.phase === 'complete') {
     // Allow rollback from complete state to any valid phase
   } else if (currentIndex === -1) {
     throw new Error(`Current phase '${state.phase}' not found in protocol.`);
@@ -673,7 +733,7 @@ export async function rollback(
     state.current_plan_phase = null;
   }
 
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} rollback ${previousPhase} → ${targetPhase}`);
 
   console.log('');
   console.log(chalk.green(`ROLLED BACK: ${previousPhase} → ${targetPhase}`));
@@ -732,7 +792,7 @@ export async function init(
   }
 
   const state = createInitialState(protocol, projectId, projectName, workspaceRoot);
-  writeState(statusPath, state);
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} init ${protocolName}`);
 
   console.log('');
   console.log(chalk.green(`Project initialized: ${projectId}-${projectName}`));
@@ -839,9 +899,34 @@ export async function cli(args: string[]): Promise<void> {
         await check(workspaceRoot, getProjectId(rest[0]), resolver);
         break;
 
-      case 'done':
-        await done(workspaceRoot, getProjectId(rest[0]), resolver);
+      case 'done': {
+        const doneOpts: { pr?: number; branch?: string; merged?: number } = {};
+        const prIdx = rest.indexOf('--pr');
+        const brIdx = rest.indexOf('--branch');
+        const mergedIdx = rest.indexOf('--merged');
+        if (prIdx !== -1) {
+          const val = parseInt(rest[prIdx + 1], 10);
+          if (!Number.isInteger(val) || val <= 0) throw new Error('--pr requires a positive integer PR number');
+          doneOpts.pr = val;
+        }
+        if (brIdx !== -1) {
+          if (!rest[brIdx + 1] || rest[brIdx + 1].startsWith('--')) throw new Error('--branch requires a branch name');
+          doneOpts.branch = rest[brIdx + 1];
+        }
+        if (mergedIdx !== -1) {
+          const val = parseInt(rest[mergedIdx + 1], 10);
+          if (!Number.isInteger(val) || val <= 0) throw new Error('--merged requires a positive integer PR number');
+          doneOpts.merged = val;
+        }
+        if (doneOpts.pr !== undefined && doneOpts.merged !== undefined) {
+          throw new Error('--pr and --merged are mutually exclusive');
+        }
+        const hasRecordFlags = doneOpts.pr !== undefined || doneOpts.merged !== undefined;
+        // For project ID: use first positional arg, or fall back to auto-detection
+        const projectIdArg = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
+        await done(workspaceRoot, getProjectId(projectIdArg), resolver, hasRecordFlags ? doneOpts : undefined);
         break;
+      }
 
       case 'gate':
         await gate(workspaceRoot, getProjectId(rest[0]), resolver);
@@ -858,6 +943,28 @@ export async function cli(args: string[]): Promise<void> {
         await rollback(workspaceRoot, rest[0], rest[1], resolver);
         break;
 
+      case 'verify': {
+        const verifyProjectId = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
+        const skipIdx = rest.indexOf('--skip');
+        if (skipIdx === -1) throw new Error('Usage: porch verify <id> --skip "reason"');
+        const skipReason = rest[skipIdx + 1];
+        if (!skipReason || skipReason.startsWith('--')) throw new Error('--skip requires a reason');
+        const pid = getProjectId(verifyProjectId);
+        const sp = findStatusPath(workspaceRoot, pid);
+        if (!sp) throw new Error(`Project ${pid} not found.`);
+        const st = readState(sp);
+        if (st.phase !== 'verify') {
+          throw new Error(`porch verify --skip can only be used in the verify phase (current: ${st.phase}). The PR must be merged first.`);
+        }
+        st.phase = 'verified';
+        st.context = { ...st.context, verify_skip_reason: skipReason };
+        await writeStateAndCommit(sp, st, `chore(porch): ${st.id} verify skipped: ${skipReason}`);
+        console.log('');
+        console.log(chalk.green(`VERIFIED (skipped): ${st.id}`));
+        console.log(`  Reason: ${skipReason}`);
+        break;
+      }
+
       case 'init':
         if (!rest[0] || !rest[1] || !rest[2]) {
           throw new Error('Usage: porch init <protocol> <id> <name>');
@@ -873,8 +980,11 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  status [id]              Show current state and instructions');
         console.log('  check [id]               Run checks for current phase');
         console.log('  done [id]                Signal build complete (validates checks, advances)');
+        console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
+        console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
+        console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
         console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
         console.log('');

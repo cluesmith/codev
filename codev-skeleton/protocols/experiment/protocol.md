@@ -10,7 +10,7 @@ Disciplined experimentation: Each experiment gets its own directory with `notes.
 
 **Use for**: Testing approaches, evaluating models, prototyping, proof-of-concept work, research spikes
 
-**Skip for**: Production code (use SPIR), simple one-off scripts, well-understood implementations (use TICK)
+**Skip for**: Production code (use SPIR), simple one-off scripts
 
 ## Structure
 
@@ -155,11 +155,6 @@ Example spec reference:
 Experiment 5 validated that [approach] achieves [results].
 See: experiments/5_validation_test/notes.md
 ```
-
-### Experiment → TICK
-For small, validated changes discovered during experimentation:
-- Use TICK for quick implementation
-- Reference experiment as justification
 
 ## Numbering Convention
 

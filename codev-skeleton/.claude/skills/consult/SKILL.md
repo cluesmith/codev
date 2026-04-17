@@ -30,7 +30,7 @@ The `-m` / `--model` flag is **always required** except for `consult stats`.
 -m, --model <model>         Model to use (required except stats)
 --prompt <text>              Inline prompt (general mode)
 --prompt-file <path>         Prompt file path (general mode)
---protocol <name>            Protocol: spir, aspir, air, bugfix, tick, maintain
+--protocol <name>            Protocol: spir, aspir, air, bugfix, maintain
 -t, --type <type>            Review type (see below)
 --issue <number>             Issue number (required in architect context)
 --output <path>              Save result to file

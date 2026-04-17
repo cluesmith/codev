@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codev.dev/protocol-schema.json",
   "title": "Codev Protocol Definition",
-  "description": "Schema for porch protocol definitions (SPIR, TICK, BUGFIX, etc.)",
+  "description": "Schema for porch protocol definitions (SPIR, BUGFIX, AIR, etc.)",
   "type": "object",
   "required": ["name", "phases"],
   "properties": {
@@ -12,7 +12,7 @@
     },
     "name": {
       "type": "string",
-      "description": "Protocol name (e.g., 'spir', 'tick', 'bugfix')",
+      "description": "Protocol name (e.g., 'spir', 'bugfix', 'air')",
       "pattern": "^[a-z][a-z0-9-]*$"
     },
     "alias": {

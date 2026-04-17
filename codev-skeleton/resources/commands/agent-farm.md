@@ -153,7 +153,7 @@ afx spawn [issue-number] --protocol <name> [options]
 - `issue-number` - Issue number to build (positional, e.g., `42`)
 
 **Required:**
-- `--protocol <name>` - Protocol to use: spir, bugfix, tick, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
+- `--protocol <name>` - Protocol to use: spir, aspir, air, bugfix, maintain, experiment. **REQUIRED** for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip this flag.
 
 **Options:**
 - `--task <text>` - Spawn builder with a task description (no `--protocol` needed)
@@ -200,7 +200,7 @@ afx spawn 42 --protocol spir --files "src/auth.ts,tests/auth.test.ts"
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, tick, etc.) |
+| "Missing required flag: --protocol" | Forgot `--protocol` | Add `--protocol spir` (or bugfix, air, etc.) |
 | "Dirty worktree" | Uncommitted changes | Run `git status`, commit changes, retry |
 | "Builder already exists" | Worktree collision | Use `--resume` to resume, or `afx cleanup` first |
 

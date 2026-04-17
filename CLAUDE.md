@@ -75,7 +75,7 @@ You are working in the Codev project itself, with multiple development protocols
 - **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
 - **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
 - **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
-- **TICK**: Amendment workflow for existing specs - `codev/protocols/tick/protocol.md`
+- **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
 
@@ -149,13 +149,6 @@ validated: [gemini, codex, claude]
 
 **AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
 
-### Use TICK for (amendments to existing specs):
-- **Amendments** to an existing SPIR spec that is already `integrated`
-- Small scope (< 300 lines of new/changed code)
-- Clear requirements that extend existing functionality
-
-**TICK modifies spec/plan in-place** and creates a new review file. Cannot be used for greenfield work.
-
 ### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)
 - New protocols or protocol variants
@@ -166,10 +159,10 @@ validated: [gemini, codex, claude]
 ### Use ASPIR for (autonomous SPIR):
 - Same as SPIR but **without human approval gates** on spec and plan
 - Trusted, low-risk work where spec/plan review can be deferred to PR
-- Builder runs autonomously through Specify → Plan → Implement → Review
+- Builder runs autonomously through Specify → Plan → Implement → Review (→ Verify)
 - Human approval still required at the PR gate before merge
 
-**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. See `codev/protocols/aspir/protocol.md`.
+**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. Both include an optional verify phase after review. See `codev/protocols/aspir/protocol.md`.
 
 ### Use EXPERIMENT for:
 - Testing new approaches or techniques
@@ -192,7 +185,7 @@ validated: [gemini, codex, claude]
 
 1. **When asked to build NEW FEATURES FOR CODEV**: Start with the Specification phase
 2. **Create exactly THREE documents per feature**: spec, plan, and review (all with same filename)
-3. **Follow the SPIR phases**: Specify → Plan → Implement → Review
+3. **Follow the SPIR phases**: Specify → Plan → Implement → Review (→ Verify)
 4. **Use multi-agent consultation by default** unless user says "without consultation"
 
 ## Directory Structure
@@ -201,7 +194,6 @@ project-root/
 ├── codev/
 │   ├── protocols/           # Development protocols
 │   │   ├── spir/          # Multi-phase development with consultation
-│   │   ├── tick/           # Fast autonomous implementation
 │   │   ├── experiment/     # Disciplined experimentation
 │   │   └── maintain/       # Codebase maintenance (code + docs)
 │   ├── maintain/            # MAINTAIN protocol runtime artifacts
@@ -328,9 +320,8 @@ afx workspace start                   # Start the workspace
 afx spawn 42 --protocol spir          # Spawn builder for SPIR project
 afx spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
 afx spawn 42 --protocol bugfix        # Spawn builder for a bugfix
-afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
 afx status                            # Check all builders
-afx cleanup --project 0042            # Clean up after merge
+afx cleanup --project 0042            # Clean up (architect-driven, not automatic)
 afx open file.ts            # Open file in annotation viewer (NOT system open)
 ```
 
@@ -342,7 +333,7 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## Porch - Protocol Orchestrator
 
-Porch drives SPIR, TICK, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
+Porch drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
 
 ### Key Commands
 

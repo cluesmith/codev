@@ -202,7 +202,11 @@ function getStatusColor(status: string, running: boolean): (text: string) => str
       return chalk.yellow;
     case 'pr':
       return chalk.green;
-    case 'complete':
+    case 'verify':
+      return chalk.green;
+    case 'verified':
+      return chalk.green;
+    case 'complete': // backward compat
       return chalk.green;
     default:
       return chalk.white;

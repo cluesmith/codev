@@ -91,8 +91,7 @@ function generateShortId(): string {
  * - issueNumber, task, shell, worktree are mutually exclusive
  * - --protocol is required when issueNumber is present (unless --resume or --soft)
  * - --protocol alone (no issueNumber) is valid as a protocol-only run
- * - --amends requires --protocol tick
- * - --protocol tick requires --amends
+ * - TICK protocol removed (spec 653)
  */
 function validateSpawnOptions(options: SpawnOptions): void {
   // Count primary input modes
@@ -130,7 +129,6 @@ function validateSpawnOptions(options: SpawnOptions): void {
       'Usage:\n' +
       '  afx spawn 315 --protocol spir      # Feature\n' +
       '  afx spawn 315 --protocol bugfix    # Bug fix\n' +
-      '  afx spawn 315 --protocol tick --amends 42  # Amendment\n' +
       '  afx spawn 315 --resume             # Resume (reads protocol from worktree)\n' +
       '  afx spawn 315 --soft               # Soft mode (defaults to SPIR)'
     );
@@ -153,14 +151,9 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal('--protocol cannot be used with --shell or --worktree');
   }
 
-  // --amends requires --protocol tick
-  if (options.amends && options.protocol !== 'tick') {
-    fatal('--amends requires --protocol tick');
-  }
-
-  // --protocol tick requires --amends
-  if (options.protocol === 'tick' && !options.amends) {
-    fatal('--protocol tick requires --amends <spec-number> to identify the spec being amended');
+  // --amends is no longer supported (TICK protocol removed, spec 653)
+  if (options.amends) {
+    fatal('--amends is no longer supported. The TICK protocol has been removed.');
   }
 
   // --strict and --soft are mutually exclusive
@@ -270,7 +263,7 @@ function inferProtocolFromWorktree(config: Config, issueNumber: number): string 
 // =============================================================================
 
 /**
- * Spawn builder for a spec (SPIR, TICK, and other non-bugfix protocols)
+ * Spawn builder for a spec (SPIR, ASPIR, AIR, and other non-bugfix protocols)
  */
 async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issueNumber!;
@@ -282,10 +275,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // Load protocol definition early — needed for input.required check
   const protocolDef = loadProtocol(config, protocol);
 
-  // For TICK amendments, resolve spec by the amends number (the original spec)
-  const specLookupId = (protocol === 'tick' && options.amends)
-    ? String(options.amends)
-    : projectId;
+  const specLookupId = projectId;
 
   // Resolve spec file (supports legacy zero-padded IDs)
   const specFile = await findSpecFile(config.codevDir, specLookupId);
@@ -303,13 +293,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   // When no spec file exists (and resolver didn't find one), check if the protocol allows spawning without one.
-  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
   if (!specFile && !resolverSpecName) {
-    if (protocolDef?.input?.required === false && !options.amends) {
+    if (protocolDef?.input?.required === false) {
       // Protocol allows no-spec spawn — will derive naming from GitHub issue title
       logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
     } else {
-      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected spec ID: ${specLookupId}`);
+      fatal(`Spec not found for issue #${issueNumber}. Expected spec ID: ${specLookupId}`);
     }
   }
 
@@ -337,17 +326,34 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   const builderId = buildAgentName('spec', projectId, protocol);
-  const specSlug = specName.replace(/^[0-9]+-/, '');
 
-  // Spec 609: when --branch is provided, use the existing branch name and
-  // derive worktree name with a compatible pattern for detection utilities.
+  // Spec 653: worktree path uses project ID only — no title suffix.
+  // This decouples the worktree from the issue title so renames don't break --resume.
   let worktreeName: string;
   let branchName: string;
   if (options.branch) {
     branchName = options.branch;
-    worktreeName = `${protocol}-${strippedId}-branch-${slugify(options.branch)}`;
+    worktreeName = `${protocol}-${strippedId}`;
+  } else if (options.resume) {
+    // Migration: try ID-only path first, fall back to old title-based path
+    const idOnlyName = `${protocol}-${strippedId}`;
+    const idOnlyPath = resolve(config.buildersDir, idOnlyName);
+    if (existsSync(idOnlyPath)) {
+      worktreeName = idOnlyName;
+    } else {
+      // Search for old-format worktree: <protocol>-<id>-<title-slug>
+      const prefix = `${protocol}-${strippedId}-`;
+      try {
+        const entries = readdirSync(config.buildersDir, { withFileTypes: true });
+        const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
+        worktreeName = match ? match.name : idOnlyName;
+      } catch {
+        worktreeName = idOnlyName;
+      }
+    }
+    branchName = `builder/${worktreeName}`;
   } else {
-    worktreeName = `${protocol}-${strippedId}-${specSlug}`;
+    worktreeName = `${protocol}-${strippedId}`;
     branchName = `builder/${worktreeName}`;
   }
   const worktreePath = resolve(config.buildersDir, worktreeName);
@@ -386,7 +392,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   // Pre-initialize porch so the builder doesn't need to figure out project ID
   if (!options.resume) {
-    const porchProjectName = specSlug;
+    const porchProjectName = specName.replace(/^[0-9]+-/, '');
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
@@ -662,21 +668,28 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   // When resuming, find the existing worktree by issue number pattern
   // instead of recomputing from the current title (which may have changed).
   let worktreeName: string;
+  // Spec 653: worktree path uses project ID only — no title suffix.
   let branchName: string;
   if (options.branch) {
-    // Spec 609: use existing remote branch
     branchName = options.branch;
-    worktreeName = `bugfix-${issueNumber}-branch-${slugify(options.branch)}`;
+    worktreeName = `bugfix-${issueNumber}`;
   } else if (options.resume) {
-    const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
-    if (existing) {
-      worktreeName = existing;
+    // Migration: try ID-only path first, fall back to old title-based path
+    const idOnlyName = `bugfix-${issueNumber}`;
+    const idOnlyPath = resolve(config.buildersDir, idOnlyName);
+    if (existsSync(idOnlyPath)) {
+      worktreeName = idOnlyName;
     } else {
-      worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+      const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
+      if (existing) {
+        worktreeName = existing;
+      } else {
+        worktreeName = idOnlyName;
+      }
     }
     branchName = `builder/${worktreeName}`;
   } else {
-    worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+    worktreeName = `bugfix-${issueNumber}`;
     branchName = `builder/${worktreeName}`;
   }
 

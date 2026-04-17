@@ -173,7 +173,7 @@ program
   .option('-m, --model <model>', 'Model to use (gemini, codex, claude, hermes, or aliases: pro, gpt, opus)')
   .option('--prompt <text>', 'Inline prompt (general mode)')
   .option('--prompt-file <path>', 'Prompt file path (general mode)')
-  .option('--protocol <name>', 'Protocol name: spir, aspir, air, bugfix, tick, maintain')
+  .option('--protocol <name>', 'Protocol name: spir, aspir, air, bugfix, maintain')
   .option('-t, --type <type>', 'Review type: spec, plan, impl, pr, phase, integration')
   .option('--issue <number>', 'Issue number (required from architect context)')
   .option('--output <path>', 'Write consultation output to file (used by porch)')

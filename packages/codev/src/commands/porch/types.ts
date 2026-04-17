@@ -156,6 +156,14 @@ export interface ProjectState {
   awaiting_input_output?: string;           // Output file path when AWAITING_INPUT was set (for resume guard)
   awaiting_input_hash?: string;            // SHA-256 hash of output at time of AWAITING_INPUT (for resume guard)
   context?: Record<string, string>;        // User-provided context (e.g., answers to questions)
+  pr_history?: Array<{                     // PR history — one entry per stage (spec 653)
+    phase: string;                         // porch phase when PR was created
+    pr_number: number;
+    branch: string;
+    created_at: string;
+    merged?: boolean;
+    merged_at?: string;
+  }>;
   started_at: string;
   updated_at: string;
 }

@@ -91,6 +91,5 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 ## Related Documentation
 
 - [SPIR Protocol](../protocols/spir/protocol.md) - Multi-phase development workflow
-- [TICK Protocol](../protocols/tick/protocol.md) - Fast amendment workflow
 - [Architect Role](../roles/architect.md) - Architect responsibilities
 - [Builder Role](../roles/builder.md) - Builder responsibilities

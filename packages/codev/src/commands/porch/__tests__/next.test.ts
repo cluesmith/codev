@@ -686,36 +686,36 @@ describe('porch next', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Once phase (TICK/BUGFIX) — emits single task
+  // Once phase (BUGFIX/verify) — emits single task
   // --------------------------------------------------------------------------
 
   it('emits single task for once-type phase', async () => {
     // Set up a simple protocol with a 'once' phase
     const onceProtocol = {
-      name: 'tick',
+      name: 'bugfix',
       version: '1.0.0',
       phases: [
         {
-          id: 'identify',
-          name: 'Identify Target',
+          id: 'investigate',
+          name: 'Investigate',
           type: 'once',
-          transition: { on_complete: 'amend_spec' },
+          transition: { on_complete: 'fix' },
         },
         {
-          id: 'amend_spec',
-          name: 'Amend Specification',
+          id: 'fix',
+          name: 'Fix',
           type: 'once',
           transition: { on_complete: null },
         },
       ],
     };
-    setupProtocol(testDir, 'tick', onceProtocol);
+    setupProtocol(testDir, 'bugfix', onceProtocol);
 
     const state: ProjectState = {
       id: '0002',
-      title: 'tick-test',
-      protocol: 'tick',
-      phase: 'identify',
+      title: 'once-test',
+      protocol: 'bugfix',
+      phase: 'investigate',
       plan_phases: [],
       current_plan_phase: null,
       gates: {},
@@ -730,9 +730,9 @@ describe('porch next', () => {
     const result = await next(testDir, '0002');
 
     expect(result.status).toBe('tasks');
-    expect(result.phase).toBe('identify');
+    expect(result.phase).toBe('investigate');
     expect(result.tasks!.length).toBe(1);
-    expect(result.tasks![0].subject).toContain('Identify Target');
+    expect(result.tasks![0].subject).toContain('Investigate');
     expect(result.tasks![0].description).toContain('porch done');
   });
 
@@ -740,7 +740,7 @@ describe('porch next', () => {
   // Bugfix complete — no merge task, no second notification (#319)
   // --------------------------------------------------------------------------
 
-  it('returns commit-status task for completed bugfix protocol (no merge instruction)', async () => {
+  it('returns no tasks for completed bugfix protocol (no merge instruction)', async () => {
     const bugfixProtocol = {
       name: 'bugfix',
       version: '1.1.0',
@@ -786,29 +786,23 @@ describe('porch next', () => {
     const result = await next(testDir, 'builder-bugfix-42');
 
     expect(result.status).toBe('complete');
-    // Should have a commit-status task (preserves project history)
-    expect(result.tasks!.length).toBe(1);
-    expect(result.tasks![0].subject).toContain('status');
-    expect(result.tasks![0].description).toContain('status.yaml');
+    // No manual commit-status task — writeStateAndCommit handles it automatically
     // Must NOT contain merge instructions — bugfix builder doesn't merge
     expect(result.summary).not.toContain('Merge');
     expect(result.summary).toContain('architect');
   });
 
-  it('returns commit-status and merge tasks for completed non-bugfix protocol', async () => {
+  it('returns merge task for completed non-bugfix protocol (no manual commit-status task)', async () => {
     const state = makeState({ phase: 'complete' });
     setupState(testDir, state);
 
     const result = await next(testDir, '0001');
 
     expect(result.status).toBe('complete');
-    expect(result.tasks!.length).toBe(2);
-    // First task: commit status.yaml
-    expect(result.tasks![0].subject).toContain('status');
-    expect(result.tasks![0].description).toContain('status.yaml');
-    // Second task: merge PR
-    expect(result.tasks![1].subject).toContain('Merge');
-    expect(result.tasks![1].description).toContain('pr-merge');
+    // Only merge task — no manual commit-status task (writeStateAndCommit handles it)
+    expect(result.tasks!.length).toBe(1);
+    expect(result.tasks![0].subject).toContain('Merge');
+    expect(result.tasks![0].description).toContain('pr-merge');
   });
 
   // --------------------------------------------------------------------------

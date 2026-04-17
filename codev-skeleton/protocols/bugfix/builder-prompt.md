@@ -44,7 +44,7 @@ Follow the BUGFIX protocol: `codev/protocols/bugfix/protocol.md`
 
 If the fix is too complex (> 300 LOC or architectural changes), notify the Architect via:
 ```bash
-afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to SPIR/TICK."
+afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to SPIR."
 ```
 
 ## Notifications

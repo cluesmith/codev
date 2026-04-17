@@ -132,6 +132,14 @@
         }
       },
       "gate": "pr",
+      "next": "verify"
+    },
+    {
+      "id": "verify",
+      "name": "Verify",
+      "description": "Post-merge environmental verification (optional — skip with porch verify --skip)",
+      "type": "once",
+      "gate": "verify-approval",
       "next": null
     }
   ],

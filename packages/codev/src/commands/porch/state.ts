@@ -8,8 +8,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
 import type { ArtifactResolver } from './artifacts.js';
+
+const execFileAsync = promisify(execFile);
 
 /** Directory for project state (relative to project root) */
 export const PROJECTS_DIR = 'codev/projects';
@@ -115,6 +119,14 @@ export function readState(statusPath: string): ProjectState {
       throw new Error('Invalid state file: missing required fields (id, protocol, phase)');
     }
 
+    // Spec 653: backward compat migration — rename 'complete' → 'verified'
+    // Universal: applies to ALL protocols, not just those with a verify phase.
+    // readState is pure — it migrates in-memory but does NOT write to disk.
+    // Callers that mutate state will commit the migrated value via writeStateAndCommit.
+    if (state.phase === 'complete') {
+      state.phase = 'verified';
+    }
+
     return state;
   } catch (err) {
     if (err instanceof yaml.YAMLException) {
@@ -146,6 +158,42 @@ export function writeState(statusPath: string, state: ProjectState): void {
 
   fs.writeFileSync(tmpPath, content, 'utf-8');
   fs.renameSync(tmpPath, statusPath);
+}
+
+/**
+ * Write state and commit+push to git.
+ * Uses execFile with args array (no shell injection risk).
+ * Uses `git push -u origin HEAD` so new branches get upstream tracking.
+ *
+ * Spec 653 §B.3: every phase transition, gate request, gate approval,
+ * and verify skip must commit and push status.yaml. Zero gaps.
+ */
+export async function writeStateAndCommit(
+  statusPath: string,
+  state: ProjectState,
+  message: string,
+): Promise<void> {
+  writeState(statusPath, state);
+
+  // Find the worktree root (status path is <root>/codev/projects/<id>/status.yaml)
+  const worktreeRoot = path.resolve(path.dirname(statusPath), '..', '..', '..');
+
+  // Skip git operations in test environment (vitest sets VITEST=true).
+  // State mutation is still tested; only the git IO is skipped.
+  if (process.env.VITEST) {
+    return;
+  }
+
+  try {
+    await execFileAsync('git', ['add', statusPath], { cwd: worktreeRoot });
+    await execFileAsync('git', ['commit', '-m', message], { cwd: worktreeRoot });
+    await execFileAsync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: worktreeRoot });
+  } catch (err: unknown) {
+    // If git commit fails because nothing changed, that's a logic bug — don't mask it.
+    // If git push fails (network, auth), surface the error clearly.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`writeStateAndCommit failed: ${msg}`);
+  }
 }
 
 /**
@@ -215,15 +263,15 @@ function findProjectInDir(projectsDir: string, projectId: string): string | null
 
 /**
  * Find status.yaml by project ID.
- * Searches local codev/projects/ first, then falls back to
- * .builders/* /codev/projects/ worktrees (enables porch status from repo root).
+ * Searches .builders/ worktrees FIRST (active, up-to-date state),
+ * then falls back to local codev/projects/ (main — may be stale after merge).
+ *
+ * Spec 653: in multi-PR workflows, early phases merge status.yaml to main,
+ * which becomes stale. Worktree copies are always the most recent.
  */
 export function findStatusPath(workspaceRoot: string, projectId: string): string | null {
-  // 1. Search local codev/projects/
-  const localResult = findProjectInDir(path.join(workspaceRoot, PROJECTS_DIR), projectId);
-  if (localResult) return localResult;
-
-  // 2. Search builder worktrees (.builders/*/codev/projects/)
+  // 1. Search builder worktrees first (.builders/*/codev/projects/)
+  // These have the most up-to-date state in multi-PR workflows.
   const buildersDir = path.join(workspaceRoot, '.builders');
   if (fs.existsSync(buildersDir)) {
     const worktrees = fs.readdirSync(buildersDir, { withFileTypes: true });
@@ -233,6 +281,10 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
       if (result) return result;
     }
   }
+
+  // 2. Fall back to local codev/projects/ (main copy)
+  const localResult = findProjectInDir(path.join(workspaceRoot, PROJECTS_DIR), projectId);
+  if (localResult) return localResult;
 
   return null;
 }
@@ -245,15 +297,15 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
   // Bugfix worktrees: .builders/bugfix-{N}-{slug} (slug is optional for legacy paths)
-  // Protocol worktrees: .builders/{protocol}-{N}-{slug} (aspir, spir, air, tick)
+  // Protocol worktrees: .builders/{protocol}-{N}-{slug} (aspir, spir, air)
   // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
   const match = normalized.match(
-    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|tick)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
+    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
   );
   if (!match) return null;
   // Bugfix worktrees use "bugfix-N" as the porch project ID
   if (match[2]) return `bugfix-${match[2]}`;
-  // Protocol worktrees (aspir, spir, air, tick) use the bare numeric ID
+  // Protocol worktrees (aspir, spir, air) use the bare numeric ID
   if (match[3]) return match[3];
   // Spec worktrees use zero-padded numeric IDs
   return match[4];
