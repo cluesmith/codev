@@ -36,23 +36,28 @@ To release a new version, tell the AI: `Let's release v1.6.0`. The AI follows th
 To test changes locally before publishing to npm:
 
 ```bash
-# From packages/codev directory:
-cd packages/codev
+# From the repository root:
 
-# 1. Build and create tarball (Tower stays up during this)
+# 1. Build (Tower stays up during this)
 pnpm build
-pnpm pack
 
-# 2. Install (Tower stays up — running process already loaded old code)
-npm install -g ./cluesmith-codev-*.tgz
+# 2. Pack both tarballs
+pnpm --filter @cluesmith/codev-core pack
+pnpm --filter @cluesmith/codev pack
+
+# 3. Install globally (Tower stays up)
+pnpm local-install
 
 # 3. Restart (only this step needs downtime)
 afx tower stop && afx tower start
 ```
 
+- `pnpm build` builds core first, then codev (including dashboard)
+- `pnpm --filter <package> pack` creates tarballs (run for core and codev separately)
+- `pnpm local-install` installs both tarballs in a single `npm install -g` command — separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry
 - Install while Tower is running — it doesn't affect the running process
 - Do NOT stop Tower before installing — unnecessary downtime
-- Do NOT delete the tarball — keep it for debugging if restart fails
+- Do NOT delete the tarballs — keep them for debugging if restart fails
 - Do NOT build between stop and start
 - Do NOT use `npm link` or `pnpm link` — it breaks global installs
 
