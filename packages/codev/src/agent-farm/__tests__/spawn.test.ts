@@ -44,8 +44,8 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     return '--no-comment requires an issue number';
   }
 
-  if (options.force && !options.issueNumber && !options.task) {
-    return '--force requires an issue number (not needed for --task)';
+  if (options.force && !options.issueNumber && !options.task && !options.protocol) {
+    return '--force requires an issue number, --task, or --protocol';
   }
 
   // --protocol cannot be used with --shell or --worktree
@@ -194,6 +194,11 @@ describe('Spawn Command', () => {
         expect(validateSpawnOptions(options)).toBeNull();
       });
 
+      it('should accept --protocol with --force (Bugfix #677: protocol-only spawns skip dirty worktree)', () => {
+        const options: SpawnOptions = { protocol: 'maintain', force: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
       it('should accept --shell alone', () => {
         const options: SpawnOptions = { shell: true };
         expect(validateSpawnOptions(options)).toBeNull();
@@ -260,8 +265,8 @@ describe('Spawn Command', () => {
         expect(error).toContain('--no-comment requires an issue number');
       });
 
-      it('should reject --force without issue number or task', () => {
-        const options: SpawnOptions = { protocol: 'maintain', force: true };
+      it('should reject --force without issue number, task, or protocol', () => {
+        const options: SpawnOptions = { shell: true, force: true };
         const error = validateSpawnOptions(options);
         expect(error).toContain('--force requires an issue number');
       });

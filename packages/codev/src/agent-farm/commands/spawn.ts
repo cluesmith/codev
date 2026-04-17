@@ -142,8 +142,8 @@ function validateSpawnOptions(options: SpawnOptions): void {
     fatal('--no-comment requires an issue number');
   }
 
-  if (options.force && !options.issueNumber && !options.task) {
-    fatal('--force requires an issue number (not needed for --task)');
+  if (options.force && !options.issueNumber && !options.task && !options.protocol) {
+    fatal('--force requires an issue number, --task, or --protocol');
   }
 
   // --protocol cannot be used with --shell or --worktree
