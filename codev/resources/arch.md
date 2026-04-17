@@ -1112,15 +1112,19 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── protocols/                      # Working copies for development
 │   │   ├── spir/                       # Multi-phase with consultation
 │   │   │   ├── protocol.md
+│   │   │   ├── protocol.json
+│   │   │   ├── builder-prompt.md
 │   │   │   ├── templates/
-│   │   │   └── manifest.yaml
+│   │   │   ├── prompts/
+│   │   │   └── consult-types/
 │   │   ├── aspir/                      # Autonomous SPIR (no human gates)
 │   │   ├── air/                        # Autonomous Implement & Review
 │   │   ├── bugfix/                     # GitHub Issue-driven fixes
 │   │   ├── experiment/                 # Disciplined experimentation
 │   │   ├── release/                    # Version release procedure
 │   │   ├── spike/                      # Time-boxed research
-│   │   └── maintain/                   # Codebase maintenance
+│   │   ├── maintain/                   # Codebase maintenance
+│   │   └── protocol-schema.json        # JSON schema for protocol.json files
 │   ├── specs/                          # Our feature specifications
 │   ├── plans/                          # Our implementation plans
 │   ├── reviews/                        # Our lessons learned
@@ -1135,7 +1139,11 @@ codev/                                  # Project root (pnpm monorepo)
 │   ├── templates/                      # Document templates (CLAUDE.md, arch.md, etc.)
 │   ├── protocols/                      # Protocol definitions
 │   │   ├── spir/
+│   │   ├── aspir/
+│   │   ├── air/
+│   │   ├── bugfix/
 │   │   ├── experiment/
+│   │   ├── spike/
 │   │   └── maintain/
 │   ├── specs/                          # Empty (placeholder)
 │   ├── plans/                          # Empty (placeholder)

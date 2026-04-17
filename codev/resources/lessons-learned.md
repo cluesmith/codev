@@ -38,6 +38,9 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0324] `detached: true` and `child.unref()` are necessary but not sufficient for process independence -- any pipe-based stdio (e.g., `stdio: ['ignore', 'pipe', 'pipe']`) creates a lifecycle dependency between parent and child processes. When the parent exits, the broken pipe triggers unhandled EPIPE errors in the child. Use file FDs or `'ignore'` for truly independent daemon children.
 - [From bugfix-274] Startup ordering matters when multiple subsystems share resources (Shellper sockets). Initialization order creates implicit synchronization -- calling `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation. Document ordering constraints in comments.
 - [From bugfix-274] Defense in depth for race conditions: the startup reorder closes the primary race path, but the `_reconciling` guard provides a safety net for code paths that bypass the primary fix (e.g., direct `/project/.../api/state` requests bypassing `getInstances()`).
+- [From 653] Start from the structural insight, not the feature list. The first three spec drafts built elaborate gate-ceremony machinery (checkpoint PRs, feedback commands, verify notes) that was all eliminated once the core insight — break the 1:1 builder↔PR assumption — was identified. When a spec feels bloated, look for the one structural change that makes the ceremony unnecessary.
+- [From 653] Protocol removal requires full-repo grep, not targeted searches. Removing a protocol touches ~50 files across source, docs, templates, skills, tests, and CLI help text. Scoped searches miss skeleton templates, test fixtures, and user-facing help strings. Run `rg` across the entire repo and verify zero hits before committing.
+- [From 653] Single verify pass + rebuttal is the right consultation cadence. Multi-iteration consult loops (running `consult` manually after each fix) violate `max_iterations=1` and add little marginal value over one rigorous verify pass followed by rebuttals.
 
 ## Security
 
@@ -361,10 +364,6 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 627] When multiple bugfix patches compete over the same state, consolidate them into a single owner (e.g., a state machine) rather than adding more guards. Three scroll mechanisms fighting each other created more bugs than they fixed.
 - [From 627] Lifecycle phases (initial-load → buffer-replay → interactive) eliminate magic thresholds. Instead of asking "is this scroll event real?", ask "what phase am I in?" to determine behavior.
 - [From 627] Always add a `reset()` method to state machines that persist across reconnections. The ScrollController's phase transitions were one-way until reconnection revealed the need to return to initial-load.
-
-- [From 653] Start from the structural insight, not the feature list. The first three spec drafts built elaborate gate-ceremony machinery (checkpoint PRs, feedback commands, verify notes) that was all eliminated once the core insight — break the 1:1 builder↔PR assumption — was identified. When a spec feels bloated, look for the one structural change that makes the ceremony unnecessary.
-- [From 653] Protocol removal requires full-repo grep, not targeted searches. Removing a protocol touches ~50 files across source, docs, templates, skills, tests, and CLI help text. Scoped searches miss skeleton templates, test fixtures, and user-facing help strings. Run `rg` across the entire repo and verify zero hits before committing.
-- [From 653] Single verify pass + rebuttal is the right consultation cadence. Multi-iteration consult loops (running `consult` manually after each fix) violate `max_iterations=1` and add little marginal value over one rigorous verify pass followed by rebuttals.
 
 ---
 
