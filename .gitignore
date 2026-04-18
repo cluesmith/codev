@@ -8,6 +8,7 @@ worktrees/
 .env
 .update-hashes.json
 .architect-role.md
+.codev/config.json
 
 # OS files
 .DS_Store
