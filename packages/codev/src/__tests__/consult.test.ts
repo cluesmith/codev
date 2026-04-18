@@ -792,6 +792,144 @@ describe('consult command', () => {
     });
   });
 
+  describe('Gemini large-prompt crash mitigation (Bugfix #680)', () => {
+    // V8 old-space exhaustion crashed gemini-cli v0.37.x on PR diffs >500KB.
+    // Fix: bump heap via NODE_OPTIONS and pipe the prompt via stdin (no argv).
+
+    it('should bump NODE_OPTIONS heap when spawning gemini', async () => {
+      vi.resetModules();
+      const { spawn: spawnBefore } = await import('node:child_process');
+      vi.mocked(spawnBefore).mockClear();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        return Buffer.from('');
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { consult } = await import('../commands/consult/index.js');
+
+      await consult({ model: 'gemini', prompt: 'review this PR' });
+
+      const geminiCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'gemini');
+      expect(geminiCall).toBeDefined();
+      const spawnOpts = geminiCall![2] as { env?: Record<string, string> };
+      expect(spawnOpts.env).toBeDefined();
+      expect(spawnOpts.env!.NODE_OPTIONS).toContain('--max-old-space-size=8192');
+    });
+
+    it('should NOT pass the query as a positional argv to gemini', async () => {
+      // Large queries on argv risk E2BIG and force V8 to hold the prompt twice.
+      // The query must flow through stdin, not argv.
+      vi.resetModules();
+      const { spawn: spawnBefore } = await import('node:child_process');
+      vi.mocked(spawnBefore).mockClear();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        return Buffer.from('');
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { consult } = await import('../commands/consult/index.js');
+
+      const uniqueQuery = 'UNIQUE_BUGFIX_680_SENTINEL_' + Date.now();
+      await consult({ model: 'gemini', prompt: uniqueQuery });
+
+      const geminiCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'gemini');
+      expect(geminiCall).toBeDefined();
+      const args = geminiCall![1] as string[];
+      expect(args.some(a => a.includes(uniqueQuery))).toBe(false);
+    });
+
+    it('should pipe the query to stdin instead of argv', async () => {
+      // stdio[0] must be 'pipe' for gemini (so we can write the prompt), not 'ignore'.
+      vi.resetModules();
+      const { spawn: spawnBefore } = await import('node:child_process');
+      vi.mocked(spawnBefore).mockClear();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        return Buffer.from('');
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { consult } = await import('../commands/consult/index.js');
+
+      await consult({ model: 'gemini', prompt: 'small prompt' });
+
+      const geminiCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'gemini');
+      expect(geminiCall).toBeDefined();
+      const spawnOpts = geminiCall![2] as { stdio?: Array<string> };
+      expect(spawnOpts.stdio).toBeDefined();
+      expect(spawnOpts.stdio![0]).toBe('pipe');
+    });
+
+    it('should preserve the caller NODE_OPTIONS when appending max-old-space-size', async () => {
+      vi.resetModules();
+      const { spawn: spawnBefore } = await import('node:child_process');
+      vi.mocked(spawnBefore).mockClear();
+
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
+      fs.writeFileSync(
+        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
+        '# Consultant Role'
+      );
+      process.chdir(testBaseDir);
+
+      const { execSync } = await import('node:child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/gemini');
+        return Buffer.from('');
+      });
+
+      const priorNodeOptions = process.env.NODE_OPTIONS;
+      process.env.NODE_OPTIONS = '--enable-source-maps';
+      try {
+        const { spawn } = await import('node:child_process');
+        const { consult } = await import('../commands/consult/index.js');
+
+        await consult({ model: 'gemini', prompt: 'test' });
+
+        const geminiCall = vi.mocked(spawn).mock.calls.find(call => call[0] === 'gemini');
+        expect(geminiCall).toBeDefined();
+        const spawnOpts = geminiCall![2] as { env?: Record<string, string> };
+        expect(spawnOpts.env!.NODE_OPTIONS).toContain('--enable-source-maps');
+        expect(spawnOpts.env!.NODE_OPTIONS).toContain('--max-old-space-size=8192');
+      } finally {
+        if (priorNodeOptions === undefined) {
+          delete process.env.NODE_OPTIONS;
+        } else {
+          process.env.NODE_OPTIONS = priorNodeOptions;
+        }
+      }
+    });
+  });
+
   describe('diff stat approach (Bugfix #240)', () => {
     it('should export getDiffStat for file-based review', async () => {
       vi.resetModules();

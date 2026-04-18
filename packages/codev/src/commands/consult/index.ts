@@ -610,6 +610,9 @@ async function runConsultation(
   let tempFile: string | null = null;
   const env: Record<string, string> = {};
   let cmd: string[];
+  // When true, the query is written to the child's stdin instead of argv.
+  // Used for gemini to avoid V8 heap exhaustion on large prompts (#680).
+  let stdinPayload: string | null = null;
 
   if (model === 'gemini') {
     // Gemini uses GEMINI_SYSTEM_MD env var for role
@@ -617,9 +620,20 @@ async function runConsultation(
     fs.writeFileSync(tempFile, role);
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
+    // Bugfix #680: gemini-cli v0.37.x crashes on large PR diffs (>500KB) due to
+    // V8 old-space exhaustion in the spawned subprocess. Mitigations:
+    //   1. Bump heap via NODE_OPTIONS (survives gemini-cli's internal relaunch).
+    //   2. Pipe the prompt via stdin instead of argv — avoids ARG_MAX and keeps
+    //      V8 from holding the full prompt buffer twice.
+    env['NODE_OPTIONS'] = [process.env.NODE_OPTIONS ?? '', '--max-old-space-size=8192']
+      .join(' ')
+      .trim();
+    stdinPayload = query;
+
     // Use --output-format json to capture token usage/cost in structured output.
     // Never use --yolo — it allows Gemini to write files (#370).
-    cmd = [config.cli, '--output-format', 'json', ...config.args, query];
+    // No positional query arg: prompt arrives on stdin (triggers non-interactive mode).
+    cmd = [config.cli, '--output-format', 'json', ...config.args];
   } else if (model === 'hermes') {
     // Hermes does not have a dedicated system prompt flag for single-shot mode.
     // Include role context at the top of the prompt.
@@ -643,17 +657,29 @@ async function runConsultation(
     throw new Error(`Unknown model: ${model}`);
   }
 
-  // Execute with passthrough stdio
-  // Use 'ignore' for stdin to prevent blocking when spawned as subprocess
+  // Execute with passthrough stdio.
+  // Use 'ignore' for stdin when no payload — prevents blocking when spawned as subprocess.
+  // Use 'pipe' when we need to stream the prompt in (e.g. gemini, see #680).
   const fullEnv = { ...process.env, ...env };
   const startTime = Date.now();
+  const stdinMode: 'ignore' | 'pipe' = stdinPayload !== null ? 'pipe' : 'ignore';
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       env: fullEnv,
-      stdio: ['ignore', 'pipe', 'inherit'],
+      stdio: [stdinMode, 'pipe', 'inherit'],
     });
+
+    if (stdinPayload !== null && proc.stdin) {
+      proc.stdin.on('error', (err) => {
+        // EPIPE can happen if the child exits before reading all input — not fatal.
+        if ((err as NodeJS.ErrnoException).code !== 'EPIPE') {
+          reject(err);
+        }
+      });
+      proc.stdin.end(stdinPayload, 'utf-8');
+    }
 
     const chunks: Buffer[] = [];
 
