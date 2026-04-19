@@ -447,7 +447,15 @@ describe('tower-instances', () => {
       fs.mkdirSync(path.join(tmpDir, 'codev'));
 
       try {
-        const deps = makeDeps();
+        const deps = makeDeps({
+          getTerminalManager: vi.fn().mockReturnValue({
+            getSession: vi.fn(),
+            killSession: vi.fn(),
+            createSession: vi.fn().mockResolvedValue({ id: 'test-session', pid: 1234 }),
+            createSessionRaw: vi.fn(),
+            listSessions: vi.fn().mockReturnValue([]),
+          }) as any,
+        });
         initInstances(deps);
 
         const result = await launchInstance(tmpDir);
@@ -501,6 +509,37 @@ describe('tower-instances', () => {
         } else {
           process.env.TOWER_ARCHITECT_CMD = originalEnv;
         }
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('returns failure when architect spawn throws', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-launch-fail-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+
+      try {
+        const logSpy = vi.fn();
+        const deps = makeDeps({
+          log: logSpy,
+          getTerminalManager: vi.fn().mockReturnValue({
+            getSession: vi.fn(),
+            killSession: vi.fn(),
+            createSession: vi.fn().mockRejectedValue(new Error('spawn claude ENOENT')),
+            createSessionRaw: vi.fn(),
+            listSessions: vi.fn().mockReturnValue([]),
+          }) as any,
+        });
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/Failed to create architect terminal/);
+        expect(result.error).toMatch(/spawn claude ENOENT/);
+        expect(logSpy).toHaveBeenCalledWith(
+          'ERROR',
+          expect.stringMatching(/Failed to create architect terminal/),
+        );
+      } finally {
         fs.rmSync(tmpDir, { recursive: true });
       }
     });

@@ -468,8 +468,9 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
         _deps.log('INFO', `Created architect terminal for workspace: ${workspacePath}`);
       } catch (err) {
-        _deps.log('WARN', `Failed to create architect terminal: ${(err as Error).message}`);
-        // Don't fail the launch - workspace is still active, just without architect
+        const errMsg = `Failed to create architect terminal: ${(err as Error).message}`;
+        _deps.log('ERROR', errMsg);
+        return { success: false, error: errMsg, adopted };
       }
     }
 
