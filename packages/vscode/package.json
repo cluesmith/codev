@@ -157,6 +157,17 @@
           "type": "boolean",
           "default": false,
           "description": "No telemetry collected"
+        },
+        "codev.autoOpenBuilderTerminal": {
+          "type": "string",
+          "enum": ["off", "notify", "auto"],
+          "enumDescriptions": [
+            "Do nothing when a builder is spawned (sidebar still updates)",
+            "Show a notification with an Open Terminal button",
+            "Open the builder terminal in the editor immediately"
+          ],
+          "default": "notify",
+          "description": "Behavior when Tower reports a new builder spawn"
         }
       }
     }
