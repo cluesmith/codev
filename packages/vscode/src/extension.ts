@@ -10,6 +10,8 @@ import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateReviewDecorations } from './review-decorations.js';
+import { BuilderSpawnHandler } from './builder-spawn-handler.js';
+import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
 import { NeedsAttentionProvider } from './views/needs-attention.js';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
@@ -185,6 +187,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Review comment decorations
 	activateReviewDecorations(context);
+
+	// Auto-open builder terminals on Tower spawn events
+	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
+	context.subscriptions.push(
+		connectionManager.onSSEEvent(({ type, data }) => builderSpawnHandler.handle(type, data)),
+	);
+
+	// Make builder names clickable in any terminal output
+	context.subscriptions.push(
+		vscode.window.registerTerminalLinkProvider(
+			new BuilderTerminalLinkProvider(connectionManager, terminalManager, outputChannel),
+		),
+	);
 
 	// Connect
 	await connectionManager.initialize();

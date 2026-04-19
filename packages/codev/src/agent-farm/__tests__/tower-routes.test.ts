@@ -606,6 +606,25 @@ describe('tower-routes', () => {
 
       expect(statusCode()).toBe(200);
     });
+
+    it('returns 400 with error body when launchInstance fails', async () => {
+      const { launchInstance } = await import('../servers/tower-instances.js');
+      (launchInstance as any).mockResolvedValueOnce({
+        success: false,
+        error: 'Failed to create architect terminal: spawn claude ENOENT',
+      });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('POST', `/api/workspaces/${encoded}/activate`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      const json = JSON.parse(body());
+      expect(json.success).toBe(false);
+      expect(json.error).toMatch(/Failed to create architect terminal/);
+      expect(json.error).toMatch(/spawn claude ENOENT/);
+    });
   });
 
   // =========================================================================
