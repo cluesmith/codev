@@ -39,13 +39,22 @@ export class TerminalManager {
   }
 
   /**
-   * Open a builder terminal.
+   * Open a builder terminal. If a terminal already exists for this builder
+   * but points at a different (stale) Tower session, dispose it before
+   * opening a new one — happens when a builder is re-spawned and Tower
+   * issues a new terminalId for the same roleId.
    */
   async openBuilder(terminalId: string, builderId: string, label: string): Promise<void> {
     const key = `builder-${builderId}`;
-    if (this.terminals.has(key)) {
-      this.terminals.get(key)!.terminal.show();
-      return;
+    const existing = this.terminals.get(key);
+    if (existing) {
+      if (existing.id === terminalId) {
+        existing.terminal.show();
+        return;
+      }
+      existing.pty.close();
+      existing.terminal.dispose();
+      this.terminals.delete(key);
     }
     await this.openTerminal(terminalId, 'builder', label, key);
   }
