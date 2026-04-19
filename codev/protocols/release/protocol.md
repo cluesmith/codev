@@ -113,9 +113,23 @@ gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX
 
 ### 7. Publish to npm
 
+`@cluesmith/codev` has runtime dependencies on workspace packages (`@cluesmith/codev-core`, `@cluesmith/codev-types`). Those must be on npm **before** the main package, or `npm install -g @cluesmith/codev` will fail with E404. The VS Code extension (`packages/vscode`) also imports from these packages at runtime.
+
+Use pnpm filters to publish the workspace deps first, then the main package. `pnpm publish` is idempotent — it skips versions already on the registry, so re-running is safe.
+
 ```bash
-cd packages/codev && pnpm publish
+# 1. Publish workspace dependencies (skips already-published versions)
+pnpm publish --filter '@cluesmith/codev-core' --filter '@cluesmith/codev-types' --no-git-checks --access public
+
+# 2. Publish the main package with the appropriate tag
+cd packages/codev && pnpm publish --no-git-checks            # stable → tag latest
+# OR
+cd packages/codev && pnpm publish --tag next --no-git-checks # RC → tag next
 ```
+
+**When to bump workspace dep versions:** if you've changed `packages/core/src/**` or `packages/types/src/**` since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing. Otherwise the publish step will skip it (existing version) and consumers will get the old code.
+
+**Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`.
 
 ### 8. Post to Discussion Forum
 
@@ -198,8 +212,9 @@ git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"
 git push && git push origin v1.7.0-rc.1
 
-# Publish to "next" channel (NOT "latest")
-cd packages/codev && pnpm publish --tag next
+# Publish workspace deps first, then main package (see step 7 above for full details)
+pnpm publish --filter '@cluesmith/codev-core' --filter '@cluesmith/codev-types' --no-git-checks --access public
+cd packages/codev && pnpm publish --tag next --no-git-checks
 ```
 
 ### RC → Stable Promotion
@@ -251,7 +266,10 @@ git add packages/codev/package.json pnpm-lock.yaml
 git commit -m "v1.6.1 - Backport: <fix description>"
 git tag -a v1.6.1 -m "v1.6.1 - Backport fix"
 git push origin release/1.6.x && git push origin v1.6.1
-cd packages/codev && pnpm publish
+
+# Publish workspace deps first, then main package (see step 7 above for full details)
+pnpm publish --filter '@cluesmith/codev-core' --filter '@cluesmith/codev-types' --no-git-checks --access public
+cd packages/codev && pnpm publish --no-git-checks
 ```
 
 ### When to Use RCs
