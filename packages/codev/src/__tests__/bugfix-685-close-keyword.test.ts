@@ -68,4 +68,37 @@ describe('PR close-keyword directive (#685)', () => {
       expect(skeletonContent, `mismatch: ${skeletonPath}`).toBe(codevContent);
     }
   });
+
+  /**
+   * Porch's phase prompt renderer (packages/codev/src/commands/porch/prompts.ts
+   * `substituteVariables`) only replaces `{{word}}` tokens — NOT dotted paths
+   * like `{{issue.number}}`. So any `{{issue...}}` left inside the PR body
+   * template would render literally and break GitHub auto-close.
+   *
+   * New directive text added for #685 must use `<N>` placeholders, not
+   * `{{issue.number}}`, inside the PR body template (the lines between
+   * `gh pr create ... --body "$(cat <<'EOF'` and the matching `EOF`).
+   *
+   * The bugfix prompt's `{{issue.number}}` in `gh pr create --title` and in
+   * the notification `afx send architect` command predates this fix and is
+   * out of scope — this test only guards the PR body template itself.
+   */
+  const prBodyTargets: PromptTarget[] = [
+    { protocol: 'bugfix', relPath: 'codev/protocols/bugfix/prompts/pr.md' },
+    { protocol: 'air', relPath: 'codev/protocols/air/prompts/pr.md' },
+    { protocol: 'spir', relPath: 'codev/protocols/spir/prompts/review.md' },
+    { protocol: 'aspir', relPath: 'codev/protocols/aspir/prompts/review.md' },
+    { protocol: 'maintain', relPath: 'codev/protocols/maintain/prompts/review.md' },
+  ];
+
+  it.each(prBodyTargets)(
+    '$protocol PR body template does not contain unrendered {{issue...}} tokens',
+    ({ relPath }) => {
+      const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf-8');
+      const bodyMatch = content.match(/--body\s+"\$\(cat\s+<<\s*'(\w+)'([\s\S]*?)^\1\s*$/m);
+      expect(bodyMatch, `PR body template not found in ${relPath}`).not.toBeNull();
+      const body = bodyMatch![2];
+      expect(body, `${relPath} PR body contains {{issue.*}}`).not.toMatch(/\{\{issue\./);
+    },
+  );
 });
