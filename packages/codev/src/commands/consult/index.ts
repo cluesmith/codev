@@ -827,35 +827,48 @@ function fetchPRDiff(prId: string): string {
 }
 
 /**
- * Build query for PR review.
- * Includes full PR diff + file list; model reads surrounding context from disk.
+ * Compose the PR review prompt text from already-fetched pieces.
+ *
+ * Split from the I/O wrapper so it can be tested without mocking the forge
+ * layer. Points the model at a temp-file path rather than inlining the diff:
+ * large (~800KB+) inlined diffs blow past the gemini-cli JSON path and bloat
+ * prompts for all models (#684).
  */
-function buildPRQuery(prId: string): string {
-  const prData = fetchPRData(prId);
-  const diff = fetchPRDiff(prId);
-
-  const fileList = prData.changedFiles.map(f => `- ${f}`).join('\n');
+function composePRQueryText(params: {
+  prId: string;
+  info: string;
+  changedFiles: string[];
+  comments: string;
+  diffPath: string;
+  diffBytes: number;
+  diffLines: number;
+}): string {
+  const { prId, info, changedFiles, comments, diffPath, diffBytes, diffLines } = params;
+  const fileList = changedFiles.map(f => `- ${f}`).join('\n');
+  const diffSizeKb = (diffBytes / 1024).toFixed(1);
 
   return `Review Pull Request #${prId}
 
 ## PR Info
 \`\`\`json
-${prData.info}
+${info}
 \`\`\`
 
-## Changed Files
+## Changed Files (${changedFiles.length})
 ${fileList}
 
 ## PR Diff
-\`\`\`diff
-${diff}
-\`\`\`
+The full PR diff is **not inlined** in this prompt to keep the payload small. It has been written to this path on disk:
+
+**Diff file**: \`${diffPath}\`
+**Size**: ${diffSizeKb} KB (${diffBytes} bytes, ${diffLines} lines)
 
 ## How to Review
-Review the PR diff above for the changes. You also have **full filesystem access** — read files from disk for surrounding context beyond what the diff shows.
+1. **Read the diff file** from \`${diffPath}\` to see the exact changes (use the Read tool or \`cat\`).
+2. You have **full filesystem access** — read any project files from disk for surrounding context beyond what the diff shows.
 
 ## Comments
-${prData.comments}
+${comments}
 
 ---
 
@@ -876,6 +889,43 @@ CONFIDENCE: [HIGH | MEDIUM | LOW]
 ---
 
 KEY_ISSUES: [List of critical issues if any, or "None"]`;
+}
+
+/**
+ * Build query for PR review.
+ *
+ * Writes the full PR diff to a temp file and points the model at the path
+ * instead of inlining it. Inlining large diffs (~800KB+) caused gemini-cli's
+ * JSON output path to fail with "Unexpected end of JSON input" in 0.3s
+ * (#684); it also bloats prompts for Claude/Codex. This mirrors the pattern
+ * used by buildImplQuery.
+ *
+ * The temp file is left in place for the model to read during consultation.
+ * OS /tmp rotation handles cleanup.
+ */
+function buildPRQuery(prId: string): string {
+  const prData = fetchPRData(prId);
+  const diff = fetchPRDiff(prId);
+
+  // Private-per-user dir to avoid world-readable /tmp diffs + symlink/clobber
+  // races: mkdtempSync creates a fresh dir owned by us; writeFileSync with
+  // flag 'wx' refuses to follow a symlink or overwrite an existing file.
+  const diffDir = fs.mkdtempSync(path.join(tmpdir(), 'codev-pr-'));
+  const diffPath = path.join(diffDir, `pr-${prId}.diff`);
+  fs.writeFileSync(diffPath, diff, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+
+  const diffBytes = Buffer.byteLength(diff, 'utf-8');
+  const diffLines = diff ? diff.split('\n').length : 0;
+
+  return composePRQueryText({
+    prId,
+    info: prData.info,
+    changedFiles: prData.changedFiles,
+    comments: prData.comments,
+    diffPath,
+    diffBytes,
+    diffLines,
+  });
 }
 
 /**
@@ -1428,5 +1478,7 @@ export {
   getDiffStat as _getDiffStat,
   buildSpecQuery as _buildSpecQuery,
   buildPlanQuery as _buildPlanQuery,
+  buildPRQuery as _buildPRQuery,
+  composePRQueryText as _composePRQueryText,
   computePersistentOutputPath as _computePersistentOutputPath,
 };
