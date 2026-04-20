@@ -70,22 +70,35 @@ describe('composePRQueryText (#684)', () => {
   });
 });
 
-describe('buildPRQuery temp-file contract (#684)', () => {
-  it('writes diff to a /tmp path matching the codev-pr-<N>-<ts>.diff pattern', () => {
-    // This is a contract test for the temp-file convention, exercised without
-    // spawning the forge layer. We re-do the write locally and assert the
-    // pattern: it must live in os.tmpdir() with the expected prefix so /tmp
-    // rotation can reliably find and reap these files.
-    const prId = '796';
-    const ts = Date.now();
-    const diffPath = path.join(tmpdir(), `codev-pr-${prId}-${ts}.diff`);
-    fs.writeFileSync(diffPath, 'fake diff contents', 'utf-8');
+describe('buildPRQuery temp-file security contract (#684)', () => {
+  it('creates an owner-only dir + file and refuses to follow symlinks', () => {
+    // Contract test for the secure temp-file convention used by buildPRQuery:
+    //   - mkdtempSync gives us a dedicated dir, so nothing else can race us
+    //     into the final filename.
+    //   - writeFileSync with mode 0o600 + flag 'wx' enforces owner-only perms
+    //     and fails on an existing file/symlink.
+    // We exercise the same primitives to lock in the convention.
+    const diffDir = fs.mkdtempSync(path.join(tmpdir(), 'codev-pr-'));
+    const diffPath = path.join(diffDir, 'pr-796.diff');
     try {
-      expect(diffPath.startsWith(tmpdir())).toBe(true);
-      expect(path.basename(diffPath)).toMatch(/^codev-pr-\d+-\d+\.diff$/);
-      expect(fs.readFileSync(diffPath, 'utf-8')).toBe('fake diff contents');
+      fs.writeFileSync(diffPath, 'fake diff', { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+
+      expect(diffDir.startsWith(tmpdir())).toBe(true);
+      expect(path.basename(diffDir)).toMatch(/^codev-pr-/);
+
+      const stat = fs.statSync(diffPath);
+      // Verify owner-only bits; strip the file-type bits so we can compare permissions.
+      expect(stat.mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(diffPath, 'utf-8')).toBe('fake diff');
+
+      // Second write must refuse (would-overwrite), confirming flag 'wx' is
+      // enforced — the real guard against a pre-planted symlink.
+      expect(() =>
+        fs.writeFileSync(diffPath, 'collision', { encoding: 'utf-8', mode: 0o600, flag: 'wx' }),
+      ).toThrow(/EEXIST/);
     } finally {
-      fs.unlinkSync(diffPath);
+      if (fs.existsSync(diffPath)) fs.unlinkSync(diffPath);
+      if (fs.existsSync(diffDir)) fs.rmdirSync(diffDir);
     }
   });
 });

@@ -907,8 +907,12 @@ function buildPRQuery(prId: string): string {
   const prData = fetchPRData(prId);
   const diff = fetchPRDiff(prId);
 
-  const diffPath = path.join(tmpdir(), `codev-pr-${prId}-${Date.now()}.diff`);
-  fs.writeFileSync(diffPath, diff, 'utf-8');
+  // Private-per-user dir to avoid world-readable /tmp diffs + symlink/clobber
+  // races: mkdtempSync creates a fresh dir owned by us; writeFileSync with
+  // flag 'wx' refuses to follow a symlink or overwrite an existing file.
+  const diffDir = fs.mkdtempSync(path.join(tmpdir(), 'codev-pr-'));
+  const diffPath = path.join(diffDir, `pr-${prId}.diff`);
+  fs.writeFileSync(diffPath, diff, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
 
   const diffBytes = Buffer.byteLength(diff, 'utf-8');
   const diffLines = diff ? diff.split('\n').length : 0;
