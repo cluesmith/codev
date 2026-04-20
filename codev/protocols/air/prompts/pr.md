@@ -15,15 +15,27 @@ Create a pull request with the review embedded in the PR body, optionally run CM
 
 ### 1. Create the Pull Request
 
-Create a PR that links to the issue. The PR body IS the review — include a summary, key decisions, and test plan:
+Create a PR that links to the issue. The PR body IS the review — include a summary, key decisions, and test plan.
+
+**PR body requirements**: The PR body MUST include `Closes #<N>` (where `<N>` is
+the driving issue number) so GitHub auto-closes the issue on merge. If the PR
+closes multiple issues (e.g. duplicates consolidated), include one `Closes #<N>`
+per issue. Without this, GitHub will not auto-close the issue.
+
+**Exception**: if this PR only partially addresses the issue, use `Refs #<N>`
+or `Part of #<N>` instead of `Closes` — the issue stays open until a
+follow-up PR closes it.
+
+**Note**: substitute the real issue number for `<N>` — do not leave the
+placeholder or any `{{...}}` template tag in the committed PR body.
 
 ```bash
-gh pr create --title "[Air #{{issue.number}}] feat: <brief description>" --body "$(cat <<'EOF'
+gh pr create --title "[Air #<N>] feat: <brief description>" --body "$(cat <<'EOF'
 ## Summary
 
 <1-2 sentence description of the feature>
 
-Implements #{{issue.number}}
+Closes #<N>  <!-- Substitute <N> with the real issue number -->
 
 ## What Changed
 

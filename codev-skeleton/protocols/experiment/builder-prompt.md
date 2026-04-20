@@ -46,6 +46,21 @@ The EXPERIMENT protocol ensures disciplined experimentation:
 - Document findings regardless of outcome
 - Separate experiment artifacts from production code
 
+## If You Open a PR
+
+Most experiments are committed to a branch without a PR, but if you do open one
+to integrate findings and the experiment was triggered by a GitHub issue:
+
+**PR body requirements**: The PR body MUST include `Closes #<N>` (for feature
+issues) or `Fixes #<N>` (for bug issues) for the driving issue so GitHub
+auto-closes it on merge. If the PR closes multiple issues, include one keyword
+per issue.
+
+**Exception**: if this PR only partially addresses the issue (e.g. experiment
+validates an approach but production implementation is deferred), use
+`Refs #<N>` or `Part of #<N>` instead — the issue stays open until a follow-up
+PR closes it.
+
 ## Handling Flaky Tests
 
 If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):

@@ -1,0 +1,12 @@
+id: bugfix-685
+title: builder-prompts-should-require
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-20T02:01:15.931Z'
+updated_at: '2026-04-20T13:45:03.109Z'

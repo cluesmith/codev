@@ -15,15 +15,27 @@ Create a pull request, run CMAP review, and address feedback.
 
 ### 1. Create the Pull Request
 
-Create a PR that links to the issue:
+Create a PR that links to the issue.
+
+**PR body requirements**: The PR body MUST include `Fixes #<N>` (where `<N>` is
+the driving issue number) so GitHub auto-closes the issue on merge. If the PR
+fixes multiple issues (e.g. duplicates consolidated), include one `Fixes #<N>`
+per issue. Without this, GitHub will not auto-close the issue.
+
+**Exception**: if this PR only partially addresses the issue, use `Refs #<N>`
+or `Part of #<N>` instead of `Fixes` — the issue stays open until a
+follow-up PR closes it.
+
+**Note**: substitute the real issue number for `<N>` — do not leave the
+placeholder or any `{{...}}` template tag in the committed PR body.
 
 ```bash
-gh pr create --title "Fix #{{issue.number}}: <brief description>" --body "$(cat <<'EOF'
+gh pr create --title "Fix #<N>: <brief description>" --body "$(cat <<'EOF'
 ## Summary
 
 <1-2 sentence description of the bug and fix>
 
-Fixes #{{issue.number}}
+Fixes #<N>  <!-- Substitute <N> with the real issue number -->
 
 ## Root Cause
 

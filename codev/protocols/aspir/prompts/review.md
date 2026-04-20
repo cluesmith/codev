@@ -181,10 +181,21 @@ Before PR:
 porch consultation reviews the actual PR, and the architect can review a real PR
 when the pr gate fires.
 
+**PR body requirements**: The PR body MUST include `Closes #<N>` (for feature issues)
+or `Fixes #<N>` (for bug issues) for the driving GitHub issue. If the PR closes
+multiple issues (e.g. duplicates consolidated), include one keyword per issue.
+Without this, GitHub will not auto-close the issue on merge.
+
+**Exception**: if this PR only partially addresses the issue (e.g. one phase of a
+multi-PR effort), DO NOT use `Closes`/`Fixes` — reference the issue with `Refs #<N>`
+or `Part of #<N>` instead. The issue stays open until the follow-up PR closes it.
+
 ```bash
 gh pr create --title "[Spec {{project_id}}] {{title}}" --body "$(cat <<'EOF'
 ## Summary
 [Brief description of the implementation]
+
+Closes #<N>  <!-- Replace <N> with the driving issue number, or use "Refs #<N>" for partial fixes -->
 
 ## Changes
 - [Change 1]
