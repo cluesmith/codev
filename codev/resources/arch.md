@@ -592,7 +592,7 @@ packages/codev/dashboard/
 │   │   ├── TabBar.tsx           # Tab management (builders, shells, annotations)
 │   │   ├── WorkView.tsx         # Work view: builders, PRs, backlog (Spec 0126)
 │   │   ├── StatisticsView.tsx  # Statistics tab: GitHub, Builder, Consultation metrics (Spec 456)
-│   │   ├── TeamView.tsx         # Team tab: member cards, messages, GitHub activity (Spec 587)
+│   │   ├── TeamView.tsx         # Team tab: member cards, messages, GitHub activity, review-blocking (Spec 587, 694)
 │   │   ├── BuilderCard.tsx      # Builder card with phase/gate indicators (Spec 0126)
 │   │   ├── PRList.tsx           # Pending PR list with review status (Spec 0126)
 │   │   ├── BacklogList.tsx      # Backlog grouped by readiness (Spec 0126)

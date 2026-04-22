@@ -56,6 +56,11 @@ test.describe('Team tab: API contract', () => {
         expect(member).toHaveProperty('role');
         expect(member).toHaveProperty('filePath');
         expect(member).toHaveProperty('github_data');
+
+        // When github_data is present, reviewBlocking must always be an array (spec 694).
+        if (member.github_data !== null) {
+          expect(Array.isArray(member.github_data.reviewBlocking)).toBe(true);
+        }
       }
 
       // Verify message shape
@@ -103,5 +108,104 @@ test.describe('Team tab: UI visibility', () => {
     } else {
       await expect(teamTab).not.toBeVisible();
     }
+  });
+});
+
+test.describe('Team tab: review-blocking rendering (spec 694)', () => {
+  test('renders both-direction sentences with a mocked /api/team response', async ({ page }) => {
+    const mockedTeam = {
+      enabled: true,
+      members: [
+        {
+          name: 'Amr',
+          github: 'amr',
+          role: 'Developer',
+          filePath: 'codev/team/people/amr.md',
+          github_data: {
+            assignedIssues: [],
+            openPRs: [
+              { number: 688, title: 'local-install consolidation', url: 'https://github.com/org/repo/pull/688' },
+            ],
+            recentActivity: { mergedPRs: [], closedIssues: [] },
+            reviewBlocking: [
+              {
+                direction: 'authored',
+                otherName: 'Waleed',
+                otherGithub: 'waleed',
+                pr: {
+                  number: 688,
+                  title: 'local-install consolidation',
+                  url: 'https://github.com/org/repo/pull/688',
+                  createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+                },
+              },
+            ],
+          },
+        },
+        {
+          name: 'Waleed',
+          github: 'waleed',
+          role: 'Architect',
+          filePath: 'codev/team/people/waleed.md',
+          github_data: {
+            assignedIssues: [],
+            openPRs: [],
+            recentActivity: { mergedPRs: [], closedIssues: [] },
+            reviewBlocking: [
+              {
+                direction: 'reviewing',
+                otherName: 'Amr',
+                otherGithub: 'amr',
+                pr: {
+                  number: 688,
+                  title: 'local-install consolidation',
+                  url: 'https://github.com/org/repo/pull/688',
+                  createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+                },
+              },
+            ],
+          },
+        },
+      ],
+      messages: [],
+      warnings: [],
+    };
+
+    // Intercept both the API and state so the tab is enabled.
+    await page.route('**/api/team', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockedTeam),
+      }),
+    );
+
+    await page.goto(DASH_URL);
+    await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
+    await page.locator('.tab-bar').waitFor({ state: 'visible', timeout: 10_000 });
+
+    // Skip the render check if the team tab is disabled in this workspace.
+    const teamTab = page.locator('button[role="tab"]:has-text("Team")');
+    if (!(await teamTab.isVisible().catch(() => false))) {
+      test.skip(true, 'Team tab disabled in this workspace; contract covered elsewhere.');
+    }
+
+    await teamTab.click();
+    await page.locator('.team-review-blocking').first().waitFor({ state: 'visible', timeout: 5_000 });
+
+    // Amr's card: second-person "You're waiting for Waleed".
+    const amrCard = page.locator('.team-member-card', { hasText: 'Amr' });
+    await expect(amrCard).toContainText("You're waiting for");
+    await expect(amrCard).toContainText('Waleed');
+    await expect(amrCard).toContainText('#688');
+
+    // Waleed's card: "Amr is waiting for you".
+    const waleedCard = page.locator('.team-member-card', { hasText: 'Waleed' });
+    await expect(waleedCard).toContainText('is waiting for you to review');
+    await expect(waleedCard).toContainText('#688');
+
+    // Link href resolves to the GitHub PR.
+    const link = amrCard.locator('.team-review-blocking-link').first();
+    await expect(link).toHaveAttribute('href', 'https://github.com/org/repo/pull/688');
   });
 });

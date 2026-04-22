@@ -2,7 +2,7 @@
  * Unit tests for activity feed logic — relativeDate and buildActivityFeed.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { relativeDate, buildActivityFeed } from '../src/components/TeamView.js';
+import { relativeDate, relativeAge, buildActivityFeed } from '../src/components/TeamView.js';
 import type { TeamApiMember } from '../src/lib/api.js';
 
 function makeMember(github: string, data: TeamApiMember['github_data'] = null): TeamApiMember {
@@ -32,6 +32,39 @@ describe('relativeDate', () => {
     vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
     expect(relativeDate('2026-03-31T12:00:00Z')).toBe('1d ago');
     expect(relativeDate('2026-03-25T12:00:00Z')).toBe('7d ago');
+  });
+});
+
+describe('relativeAge', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('returns "<1h waiting" for PRs under 1 hour old', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2026-04-01T11:30:00Z')).toBe('<1h waiting');
+    expect(relativeAge('2026-04-01T11:59:00Z')).toBe('<1h waiting');
+  });
+
+  it('returns "Xh waiting" for 1-23 hour range', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2026-04-01T11:00:00Z')).toBe('1h waiting');
+    expect(relativeAge('2026-03-31T14:00:00Z')).toBe('22h waiting');
+  });
+
+  it('returns "Xd waiting" for 24+ hours', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-04T12:00:00Z'));
+    expect(relativeAge('2026-04-01T12:00:00Z')).toBe('3d waiting');
+  });
+
+  it('returns empty string for empty, invalid, or future timestamps', () => {
+    expect(relativeAge('')).toBe('');
+    expect(relativeAge('not-a-date')).toBe('');
+    // Future timestamps (negative diff) are guarded and return empty.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2030-01-01T00:00:00Z')).toBe('');
   });
 });
 
