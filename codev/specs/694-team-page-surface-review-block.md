@@ -77,16 +77,18 @@ When a PR is not blocked on any team member (approved, or only external reviewer
 - [ ] When no review-blocking relationships exist for a member (in either direction), the section is either omitted or shows a clear empty state — no dangling headers with empty bodies.
 - [ ] Existing team tab data (assigned issues, open PRs, recent activity, messages) continues to render correctly — this is additive, not a replacement.
 - [ ] Unit tests cover the review-blocking-relationship derivation: the rules for inclusion/exclusion above.
-- [ ] Documentation updated: the team tab section in any user-facing docs mentions the new review-blocking block.
+- [ ] Documentation updated: the team tab section in `codev/resources/arch.md` (if the team tab is documented there) and `codev/resources/commands/team.md` (if it exists and describes the tab) mention the new review-blocking block. If neither file discusses the tab content today, a brief note may be added where appropriate.
 
 ## Constraints
 
 ### Technical Constraints
-- **GraphQL query budget.** The existing query is already batched across all members. New fields (`reviewRequests`, `reviewDecision`, `isDraft`) must be added without breaking the batched shape or exceeding GitHub's query complexity limits.
+- **GraphQL query budget.** The existing query is already batched across all members. New fields (`reviewRequests`, `reviewDecision`, `isDraft`, `createdAt`) must be added without breaking the batched shape or exceeding GitHub's query complexity limits.
+- **Pagination.** The existing authored-PR search uses `first: 20` per member. The new `reviewRequests` connection must also specify an explicit page size (target: `first: 20`, matching the existing convention). Team-PR relationships beyond 20 open PRs per author or 20 requested reviewers per PR will be missed — acceptable for this feature; documented as a known limit.
 - **Forge concept boundary.** The `team-activity` forge concept is a thin shell wrapper around `gh api graphql`. All query-building logic must stay in `team-github.ts` on the Node side.
-- **Shared types.** `TeamMemberGitHubData` in `packages/types/src/api.ts` is the canonical wire type; any new field is a breaking change that must be reflected in both backend and dashboard.
-- **No new GitHub permissions.** The existing `gh` CLI token must be sufficient; `reviewRequests` and `reviewDecision` are readable with standard repo read scope.
+- **Shared types.** `TeamMemberGitHubData` is currently defined in *two* places: `packages/types/src/api.ts` (the canonical wire type) **and** `packages/codev/src/lib/team-github.ts` (an internal duplicate). Any new field must be added to both and kept in sync.
+- **No new GitHub permissions.** The existing `gh` CLI token must be sufficient; `reviewRequests`, `reviewDecision`, `isDraft`, and `createdAt` are readable with standard repo read scope.
 - **Team roster is a file on disk.** The set of "team members" is what `loadTeamMembers()` returns — no dynamic API, no org membership queries.
+- **Individual reviewers only.** GitHub's `requestedReviewer` can resolve to either a `User` or a `Team`. This feature only handles `User` requests (matching the "Amr is waiting for Waleed" framing). `Team` review requests are silently ignored — documented as a known limitation.
 
 ### Business Constraints
 - Additive change — must not regress the existing team tab behaviour.
@@ -120,12 +122,15 @@ This section pins down the rules precisely so the plan and implementation have n
 - On the **author's** card: "You're waiting for **`<Reviewer name>`** to review [#N title]".
 - On the **reviewer's** card: "**`<Author name>`** is waiting for you to review [#N title]".
 - Names are taken from the `name:` YAML field in the `codev/team/people/<handle>.md` file. GitHub handle is the fallback if `name` is missing.
-- Multiple relationships on the same card are listed; optionally sort by PR age (oldest first) so stale reviews surface. (See open questions.)
+- **Name resolution happens server-side.** Each wire entry includes a pre-resolved display name for the "other" party so the dashboard doesn't need to reconstruct the roster.
+- **Age label.** Each entry shows a relative-age label (e.g., "3d waiting") derived from PR `createdAt`, to surface stale reviews.
+- **Sort order.** Oldest-first within each card, so the stalest review is at the top.
+- **Empty state.** When a member has zero review-blocking relationships in either direction, the section is **omitted entirely** from that member's card — no header, no placeholder text. This keeps cards tight.
 
 ## Solution Approaches
 
 ### Approach 1: Extend the existing GraphQL query in place
-**Description**: Add `reviewRequests { nodes { requestedReviewer { ... on User { login } } } }`, `reviewDecision`, and `isDraft` to the existing per-member `openPRs` fragment. Derive relationships server-side in `team-github.ts`, attaching a new `reviewBlocking` array to each member's `github_data`. Dashboard reads this array.
+**Description**: Add `isDraft`, `createdAt`, `reviewDecision`, and `reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }` to the existing per-member `openPRs` fragment. Derive relationships server-side in `team-github.ts` using a two-pass parse — first collect all PRs authored by team members and their requested team reviewers, then distribute relationships into each affected member's `reviewBlocking` array (the author *and* each requested reviewer). Dashboard reads this array. Each entry carries the pre-resolved display name of the "other" party and the PR's `createdAt` for age display.
 
 **Pros**:
 - One query, one round-trip.
@@ -175,8 +180,10 @@ This section pins down the rules precisely so the plan and implementation have n
 - None. The issue description and this spec cover the decisions needed to plan.
 
 ### Important (Affects Design)
-- [ ] Should the review-blocking section have a **PR age** indicator (e.g., "3d waiting")? Optional but mentioned as a likely-useful cue. **Proposal:** include a simple relative-age label per entry.
-- [ ] Sort order of entries within the section — by PR age (oldest first, most stale) or by PR number? **Proposal:** oldest first (most stale first) to surface attention-worthy reviews.
+- **[Resolved]** PR age indicator: **included** as a relative-age label (e.g., "3d waiting") per entry — see [Rendering](#review-blocking-semantics).
+- **[Resolved]** Sort order: **oldest first** within each card — see [Rendering](#review-blocking-semantics).
+- **[Resolved]** Empty state: section is **omitted** when there are no relationships — see [Rendering](#review-blocking-semantics).
+- **[Resolved]** VS Code extension: `packages/vscode/src/views/team.ts` consumes the same wire type. **Out of scope** for this feature — the wire-type change is additive, so the extension will not break; surfacing review-blocking in the VS Code tree view is a follow-up if desired. The `TeamApiResponse` shape must remain backwards-compatible (new field is additive).
 
 ### Nice-to-Know (Optimization)
 - [ ] If a PR has `reviewDecision = CHANGES_REQUESTED` and the author has pushed new commits since, could we surface "Waleed requested changes, now waiting on Amr"? Out of scope for this feature; note as possible future enhancement.
@@ -206,6 +213,9 @@ This section pins down the rules precisely so the plan and implementation have n
 7. **Multiple blocked PRs**: An author has three PRs each waiting on a different team reviewer. Assert three sentences on the author's card.
 8. **No review-blocking work**: Member has no authored PRs awaiting team review and no review requests on other teammates' PRs. Assert the section is omitted (or shows an appropriate empty state — whichever is chosen in the plan).
 9. **Case mismatch on GitHub login**: Team roster has `github: waleedkadous` but API returns `WaleedKadous`. Assert the match succeeds and the sentence renders.
+10. **Mixed state — changes requested from one reviewer, another still pending**: Amr authors PR; Waleed previously requested changes (removed from `reviewRequests` by GitHub); Younes is still in `reviewRequests`; `reviewDecision = CHANGES_REQUESTED`. Assert exactly one relationship appears — Amr↔Younes. No relationship appears for Waleed.
+11. **Team-based reviewer request**: A PR's `reviewRequests` contains a `Team` (not a `User`). Assert the entry is silently skipped and no error surfaces.
+12. **Empty state**: A member with no review-blocking relationships in either direction is rendered without a review-blocking section header (section omitted entirely).
 
 ### Non-Functional Tests
 1. **GraphQL response schema**: Validate the new fields (`reviewRequests`, `reviewDecision`, `isDraft`) are present and correctly typed in the response parser.
@@ -216,10 +226,11 @@ This section pins down the rules precisely so the plan and implementation have n
 
 - **External Services**: GitHub GraphQL API (via `gh api graphql` through the `team-activity` forge concept).
 - **Internal Systems**:
-  - `packages/codev/src/lib/team-github.ts` — GraphQL query builder + response parser.
+  - `packages/codev/src/lib/team-github.ts` — GraphQL query builder + response parser (also contains an internal duplicate of `TeamMemberGitHubData`).
   - `packages/codev/src/agent-farm/servers/tower-routes.ts` — `/api/team` handler.
-  - `packages/types/src/api.ts` — `TeamMemberGitHubData` wire type.
+  - `packages/types/src/api.ts` — canonical `TeamMemberGitHubData` wire type.
   - `packages/dashboard/src/components/TeamView.tsx` — `MemberCard` rendering.
+  - `packages/vscode/src/views/team.ts` — VS Code tree view consumer (out of scope for UI updates; wire type change must remain backwards-compatible).
   - `codev/team/people/*.md` — team roster source of truth.
 - **Libraries/Frameworks**: None new. Existing React, TypeScript, `gh` CLI, Vitest.
 
@@ -241,7 +252,20 @@ This section pins down the rules precisely so the plan and implementation have n
 | Empty state noise (section with zero rows) | Medium | Low | Omit the section entirely when empty, or render a subtle "No reviews blocking" line — decide in plan phase |
 
 ## Expert Consultation
-<!-- Populated by porch-orchestrated 3-way consultation (Gemini, Codex, Claude) -->
+
+**Date**: 2026-04-21
+**Models Consulted**: Gemini 3 Pro, GPT-5.4 Codex, Claude
+**Verdicts**: Gemini APPROVE (HIGH), Codex COMMENT (HIGH), Claude APPROVE (HIGH)
+
+Sections updated based on consultation:
+- **Constraints → Pagination**: Added — surfacing the `first: 20` page-size limit for `reviewRequests` and acknowledging the existing 20-PR-per-author cap (Codex).
+- **Constraints → Individual reviewers only**: Added — called out that `Team`-based review requests are silently ignored (Gemini).
+- **Constraints → Shared types**: Called out the duplicate `TeamMemberGitHubData` definition in `team-github.ts` (Claude).
+- **Review-Blocking Semantics → Rendering**: Resolved three open questions — age label included, sort oldest-first, empty section omitted; added note that names are resolved server-side (Gemini, Codex).
+- **Solution Approaches → Approach 1**: Added `createdAt`, explicit `first: 20`, and described the two-pass parse that distributes relationships to both author and reviewer (Gemini).
+- **Test Scenarios**: Added scenario 10 (CHANGES_REQUESTED with another pending reviewer — Codex), 11 (Team-based reviewer skipped — Gemini), 12 (empty-state section omission).
+- **Dependencies → Internal Systems**: Added `packages/vscode/src/views/team.ts` as an out-of-scope consumer; noted the duplicate type in `team-github.ts` (Claude).
+- **Success Criteria → Documentation**: Named `codev/resources/arch.md` and `codev/resources/commands/team.md` explicitly (Codex).
 
 ## Approval
 - [ ] Technical Lead Review
