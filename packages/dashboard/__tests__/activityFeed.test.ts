@@ -40,6 +40,7 @@ describe('buildActivityFeed', () => {
     const members = [makeMember('alice', {
       assignedIssues: [], openPRs: [],
       recentActivity: { mergedPRs: [], closedIssues: [] },
+      reviewBlocking: [],
     })];
     expect(buildActivityFeed(members)).toEqual([]);
   });
@@ -51,14 +52,14 @@ describe('buildActivityFeed', () => {
   it('aggregates merged PRs and closed issues from multiple members', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [{ number: 10, title: 'PR A', url: 'https://github.com/org/repo/pull/10', mergedAt: '2026-04-01T10:00:00Z' }],
           closedIssues: [],
         },
       }),
       makeMember('bob', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [],
           closedIssues: [{ number: 5, title: 'Issue B', url: 'https://github.com/org/repo/issues/5', closedAt: '2026-04-01T08:00:00Z' }],
@@ -76,7 +77,7 @@ describe('buildActivityFeed', () => {
   it('sorts entries reverse chronologically', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [
             { number: 1, title: 'Old', url: 'u1', mergedAt: '2026-03-30T10:00:00Z' },
@@ -95,7 +96,7 @@ describe('buildActivityFeed', () => {
   it('correctly attributes entries to their member', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [{ number: 1, title: 'X', url: 'u', mergedAt: '2026-04-01T10:00:00Z' }],
           closedIssues: [],

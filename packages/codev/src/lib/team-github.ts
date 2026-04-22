@@ -19,6 +19,19 @@ const execFileAsync = promisify(execFile);
 // Types
 // =============================================================================
 
+export interface ReviewBlockingEntry {
+  direction: 'authored' | 'reviewing';
+  otherName: string;
+  otherGithub: string;
+  pr: {
+    number: number;
+    title: string;
+    url: string;
+    createdAt: string;
+  };
+}
+
+// Keep in sync with the canonical definition in @cluesmith/codev-types.
 export interface TeamMemberGitHubData {
   assignedIssues: { number: number; title: string; url: string }[];
   openPRs: { number: number; title: string; url: string }[];
@@ -26,6 +39,7 @@ export interface TeamMemberGitHubData {
     mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
     closedIssues: { number: number; title: string; url: string; closedAt: string }[];
   };
+  reviewBlocking: ReviewBlockingEntry[];
 }
 
 // =============================================================================
@@ -130,6 +144,7 @@ export function parseTeamGraphQLResponse(
         mergedPRs: (merged?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, mergedAt: n.mergedAt })),
         closedIssues: (closed?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, closedAt: n.closedAt })),
       },
+      reviewBlocking: [],
     });
   }
 
