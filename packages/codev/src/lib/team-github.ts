@@ -12,35 +12,11 @@ import { promisify } from 'node:util';
 import { isValidGitHubHandle } from './team.js';
 import type { TeamMember } from './team.js';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
+import type { ReviewBlockingEntry, TeamMemberGitHubData } from '@cluesmith/codev-types';
+
+export type { ReviewBlockingEntry, TeamMemberGitHubData };
 
 const execFileAsync = promisify(execFile);
-
-// =============================================================================
-// Types
-// =============================================================================
-
-export interface ReviewBlockingEntry {
-  direction: 'authored' | 'reviewing';
-  otherName: string;
-  otherGithub: string;
-  pr: {
-    number: number;
-    title: string;
-    url: string;
-    createdAt: string;
-  };
-}
-
-// Keep in sync with the canonical definition in @cluesmith/codev-types.
-export interface TeamMemberGitHubData {
-  assignedIssues: { number: number; title: string; url: string }[];
-  openPRs: { number: number; title: string; url: string }[];
-  recentActivity: {
-    mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
-    closedIssues: { number: number; title: string; url: string; closedAt: string }[];
-  };
-  reviewBlocking: ReviewBlockingEntry[];
-}
 
 // =============================================================================
 // Repo Detection
