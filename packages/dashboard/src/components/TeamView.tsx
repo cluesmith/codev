@@ -1,8 +1,61 @@
 import { useTeam } from '../hooks/useTeam.js';
-import type { TeamApiMember, TeamApiMessage } from '../lib/api.js';
+import type { TeamApiMember, TeamApiMessage, ReviewBlockingEntry } from '../lib/api.js';
 
 interface TeamViewProps {
   isActive: boolean;
+}
+
+/**
+ * Format an ISO timestamp as a compact "X waiting" label.
+ * Sub-hour: "<1h waiting"; hours: "Xh waiting"; days: "Xd waiting".
+ */
+export function relativeAge(isoString: string): string {
+  if (!isoString) return '';
+  const diff = Date.now() - new Date(isoString).getTime();
+  if (!isFinite(diff) || diff < 0) return '';
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  if (hours < 1) return '<1h waiting';
+  if (hours < 24) return `${hours}h waiting`;
+  const days = Math.floor(hours / 24);
+  return `${days}d waiting`;
+}
+
+function ReviewBlockingSection({ entries }: { entries: ReviewBlockingEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="team-member-section team-review-blocking">
+      <span className="team-section-label">Review blocking</span>
+      <ul className="team-review-blocking-list">
+        {entries.map((entry, i) => (
+          <li
+            key={`${entry.direction}-${entry.pr.number}-${entry.otherGithub}-${i}`}
+            className="team-review-blocking-item"
+          >
+            <span className="team-review-blocking-sentence">
+              {entry.direction === 'authored' ? (
+                <>
+                  You're waiting for <strong>{entry.otherName}</strong> to review{' '}
+                </>
+              ) : (
+                <>
+                  <strong>{entry.otherName}</strong> is waiting for you to review{' '}
+                </>
+              )}
+              <a
+                className="team-item-link team-review-blocking-link"
+                href={entry.pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                #{entry.pr.number} {entry.pr.title}
+              </a>
+            </span>
+            <span className="team-review-blocking-age">{relativeAge(entry.pr.createdAt)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function MemberCard({ member }: { member: TeamApiMember }) {
@@ -66,6 +119,7 @@ function MemberCard({ member }: { member: TeamApiMember }) {
               <span className="team-item-empty">No open PRs</span>
             )}
           </div>
+          <ReviewBlockingSection entries={gh.reviewBlocking} />
         </>
       )}
       {(mergedCount > 0 || closedCount > 0) && (
