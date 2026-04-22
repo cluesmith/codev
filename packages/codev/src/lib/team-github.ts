@@ -103,7 +103,19 @@ export function buildTeamGraphQLQuery(members: TeamMember[], owner: string, name
       nodes { ... on Issue { number title url } }
     }
     ${alias}_prs: search(query: "repo:${repo} author:${m.github} is:pr is:open", type: ISSUE, first: 20) {
-      nodes { ... on PullRequest { number title url } }
+      nodes {
+        ... on PullRequest {
+          number
+          title
+          url
+          isDraft
+          createdAt
+          reviewDecision
+          reviewRequests(first: 20) {
+            nodes { requestedReviewer { ... on User { login } } }
+          }
+        }
+      }
     }
     ${alias}_merged: search(query: "repo:${repo} author:${m.github} is:pr is:merged merged:>=${since}", type: ISSUE, first: 20) {
       nodes { ... on PullRequest { number title url mergedAt } }
@@ -119,6 +131,118 @@ export function buildTeamGraphQLQuery(members: TeamMember[], owner: string, name
 }`;
 }
 
+// =============================================================================
+// Review-Blocking Derivation
+// =============================================================================
+
+/**
+ * Raw shape of an open-PR node as returned by the batched GraphQL query.
+ * Exported for unit-test fixtures.
+ */
+export interface OpenPrNode {
+  number: number;
+  title: string;
+  url: string;
+  isDraft?: boolean;
+  createdAt?: string;
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
+  reviewRequests?: {
+    nodes?: Array<{ requestedReviewer?: { login?: string } | null } | null> | null;
+  } | null;
+}
+
+/**
+ * Derive review-blocking relationships from every team member's authored PRs.
+ *
+ * Two-pass algorithm:
+ *   1. Collect (author, reviewer, pr) tuples by iterating each author's PRs
+ *      and cross-referencing requested reviewers against the team roster.
+ *   2. Distribute each tuple into the author's `reviewBlocking` array (as
+ *      `direction: 'authored'`) and the reviewer's (as `direction: 'reviewing'`).
+ *
+ * Rules are documented in spec 694:
+ *   - Open, not draft.
+ *   - reviewDecision !== 'APPROVED'.
+ *   - Requested reviewer must resolve to a User (not Team) and match the team roster.
+ *   - Author is guaranteed to be a team member by construction (query scope).
+ */
+export function deriveReviewBlocking(
+  prsByAuthor: Map<string, OpenPrNode[]>,
+  members: TeamMember[],
+): Map<string, ReviewBlockingEntry[]> {
+  // Case-insensitive lookup: lower-case github handle → TeamMember.
+  const roster = new Map<string, TeamMember>();
+  for (const m of members) {
+    if (!isValidGitHubHandle(m.github)) continue;
+    roster.set(m.github.toLowerCase(), m);
+  }
+
+  const displayName = (m: TeamMember): string => m.name || m.github;
+
+  const perMember = new Map<string, ReviewBlockingEntry[]>();
+  const entriesFor = (handle: string): ReviewBlockingEntry[] => {
+    const existing = perMember.get(handle);
+    if (existing) return existing;
+    const fresh: ReviewBlockingEntry[] = [];
+    perMember.set(handle, fresh);
+    return fresh;
+  };
+
+  for (const [authorHandle, prs] of prsByAuthor) {
+    const author = roster.get(authorHandle.toLowerCase());
+    if (!author) continue;
+
+    for (const pr of prs) {
+      if (pr.isDraft) continue;
+      if (pr.reviewDecision === 'APPROVED') continue;
+
+      const requestedNodes = pr.reviewRequests?.nodes ?? [];
+      for (const node of requestedNodes) {
+        const login = node?.requestedReviewer?.login;
+        if (!login) continue; // Team-based requests resolve to undefined login.
+        const reviewer = roster.get(login.toLowerCase());
+        if (!reviewer) continue; // External reviewer.
+        if (reviewer.github.toLowerCase() === author.github.toLowerCase()) continue; // Self-review edge.
+
+        const prMeta = {
+          number: pr.number,
+          title: pr.title,
+          url: pr.url,
+          createdAt: pr.createdAt ?? '',
+        };
+
+        entriesFor(author.github).push({
+          direction: 'authored',
+          otherName: displayName(reviewer),
+          otherGithub: reviewer.github,
+          pr: prMeta,
+        });
+        entriesFor(reviewer.github).push({
+          direction: 'reviewing',
+          otherName: displayName(author),
+          otherGithub: author.github,
+          pr: prMeta,
+        });
+      }
+    }
+  }
+
+  // Sort each member's entries oldest-first (stable, with PR number as tiebreaker).
+  for (const list of perMember.values()) {
+    list.sort((a, b) => {
+      const byDate = (a.pr.createdAt ?? '').localeCompare(b.pr.createdAt ?? '');
+      if (byDate !== 0) return byDate;
+      return a.pr.number - b.pr.number;
+    });
+  }
+
+  return perMember;
+}
+
+// =============================================================================
+// Response Parser
+// =============================================================================
+
 /**
  * Parse the GraphQL response into a map of github handle → TeamMemberGitHubData.
  */
@@ -127,25 +251,35 @@ export function parseTeamGraphQLResponse(
   members: TeamMember[],
 ): Map<string, TeamMemberGitHubData> {
   const result = new Map<string, TeamMemberGitHubData>();
+  const prsByAuthor = new Map<string, OpenPrNode[]>();
 
   for (const member of members) {
     if (!isValidGitHubHandle(member.github)) continue;
 
     const alias = toAlias(member.github);
     const assigned = data[`${alias}_assigned`] as { nodes?: Array<{ number: number; title: string; url: string }> } | undefined;
-    const prs = data[`${alias}_prs`] as { nodes?: Array<{ number: number; title: string; url: string }> } | undefined;
+    const prs = data[`${alias}_prs`] as { nodes?: OpenPrNode[] } | undefined;
     const merged = data[`${alias}_merged`] as { nodes?: Array<{ number: number; title: string; url: string; mergedAt: string }> } | undefined;
     const closed = data[`${alias}_closed`] as { nodes?: Array<{ number: number; title: string; url: string; closedAt: string }> } | undefined;
 
+    const openPrNodes = prs?.nodes ?? [];
+    prsByAuthor.set(member.github, openPrNodes);
+
     result.set(member.github, {
       assignedIssues: (assigned?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url })),
-      openPRs: (prs?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url })),
+      openPRs: openPrNodes.map(n => ({ number: n.number, title: n.title, url: n.url })),
       recentActivity: {
         mergedPRs: (merged?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, mergedAt: n.mergedAt })),
         closedIssues: (closed?.nodes ?? []).map(n => ({ number: n.number, title: n.title, url: n.url, closedAt: n.closedAt })),
       },
       reviewBlocking: [],
     });
+  }
+
+  const perMemberBlocking = deriveReviewBlocking(prsByAuthor, members);
+  for (const [handle, entries] of perMemberBlocking) {
+    const bucket = result.get(handle);
+    if (bucket) bucket.reviewBlocking = entries;
   }
 
   return result;
