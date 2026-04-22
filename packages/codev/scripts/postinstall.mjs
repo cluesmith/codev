@@ -4,7 +4,7 @@
 // the `bin` field. See issue #693 — without this, `afx spawn` fails with
 // Permission denied when invoking forge concept scripts.
 
-import { chmodSync, readdirSync, statSync } from 'node:fs';
+import { chmodSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,26 +13,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const forgeRoot = join(here, 'forge');
 
 function chmodForgeScripts(root) {
-  let stat;
+  let providers;
   try {
-    stat = statSync(root);
+    providers = readdirSync(root, { withFileTypes: true });
   } catch {
-    return 0;
+    return;
   }
-  if (!stat.isDirectory()) return 0;
-
-  let count = 0;
-  for (const dir of readdirSync(root)) {
-    const dirPath = join(root, dir);
-    if (!statSync(dirPath).isDirectory()) continue;
-    for (const file of readdirSync(dirPath)) {
-      if (!file.endsWith('.sh')) continue;
-      const filePath = join(dirPath, file);
-      chmodSync(filePath, 0o755);
-      count += 1;
+  for (const provider of providers) {
+    if (!provider.isDirectory()) continue;
+    const providerDir = join(root, provider.name);
+    for (const entry of readdirSync(providerDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.sh')) continue;
+      chmodSync(join(providerDir, entry.name), 0o755);
     }
   }
-  return count;
 }
 
 function chmodNodePtySpawnHelper() {
