@@ -54,11 +54,13 @@ Copied from the spec's Success Criteria and augmented with implementation-specif
 #### Objectives
 - Add the new `reviewBlocking` entry shape to `TeamMemberGitHubData` in both code locations (canonical + internal duplicate).
 - Establish the wire contract so subsequent phases have a stable type to target.
+- Update the one existing dashboard test fixture that constructs `TeamMemberGitHubData` literals so type-check continues to pass.
 
 #### Deliverables
-- [ ] Update canonical `TeamMemberGitHubData` in `packages/types/src/api.ts` — add `reviewBlocking: ReviewBlockingEntry[]` and define `ReviewBlockingEntry`.
+- [ ] Update canonical `TeamMemberGitHubData` in `packages/types/src/api.ts` (`@cluesmith/codev-types`) — add `reviewBlocking: ReviewBlockingEntry[]` and export `ReviewBlockingEntry`.
 - [ ] Update internal duplicate in `packages/codev/src/lib/team-github.ts` to match.
 - [ ] Both types stay byte-for-byte identical (same field order, same shape).
+- [ ] Update existing test fixtures in `packages/dashboard/__tests__/activityFeed.test.ts` (four `github_data` literals at lines 41, 54, 61, 79, 98 construct `assignedIssues`/`openPRs`/`recentActivity`) — add `reviewBlocking: []` to each so type-check passes.
 - [ ] Type-check passes across all packages.
 
 #### Implementation Details
@@ -106,9 +108,10 @@ The field is **required** (not optional) to force subsequent phases to populate 
 **Backwards compatibility note**: The field is additive. VS Code extension (`packages/vscode/src/views/team.ts`) reads `github_data` as `TeamApiMember['github_data']` but only references `assignedIssues`, `openPRs`, and `recentActivity` — adding a new field does not break its compile or runtime behaviour.
 
 #### Acceptance Criteria
-- [ ] `pnpm --filter @cluesmith/codev-core build` succeeds.
+- [ ] `pnpm --filter @cluesmith/codev-types build` (or check-types) succeeds — this is the canonical location.
 - [ ] `pnpm --filter @cluesmith/codev build` succeeds (uses the shared type).
-- [ ] `pnpm --filter @cluesmith/codev-dashboard build` succeeds.
+- [ ] `pnpm --filter @cluesmith/codev-dashboard build` (or equivalent dashboard build) succeeds.
+- [ ] `pnpm --filter @cluesmith/codev-dashboard test` succeeds — the updated activityFeed test fixtures must compile.
 - [ ] Both `TeamMemberGitHubData` definitions match.
 
 #### Test Plan
@@ -176,7 +179,7 @@ ${alias}_prs: search(query: "repo:${repo} author:${m.github} is:pr is:open", typ
 **Edge-case handling** (matching spec test scenarios):
 - **Team-based review requests** (where `requestedReviewer` has no `login` because it's a Team, not a User): skipped silently. The GraphQL fragment uses `... on User { login }`, so a Team resolves to `{ login: undefined }` or similar; treat as "no match".
 - **Case-insensitive match**: Compare `login.toLowerCase()` against `team-member.github.toLowerCase()`.
-- **Display name fallback**: If the team roster has no `name` field for a member, fall back to the github handle.
+- **Display name fallback**: `loadTeamMembers()` already skips members missing a `name`, so in production the fallback to the github handle is defensive only. Keep the fallback for safety in unit tests that construct minimal `TeamMember` objects.
 - **Author is not a team member**: Impossible here because the GraphQL query is scoped to `author:${m.github}` for each team member — every PR in the response is team-authored by construction. Still, guard against a null `author` defensively.
 - **`APPROVED` with stale `reviewRequests`**: Rule 3 excludes `APPROVED` outright, so stale entries never render.
 
@@ -279,17 +282,23 @@ Revert the `TeamView.tsx` changes. API still returns `reviewBlocking` but nothin
 
 #### Objectives
 - Guard the new rendering against future regressions with an E2E assertion.
+- Extend the contract E2E test so the `reviewBlocking` field is part of the wire contract it validates.
 - Update any user-facing docs that describe the team tab.
 
 #### Deliverables
-- [ ] Add one assertion to `packages/codev/src/agent-farm/__tests__/e2e/team-tab.test.ts` that mocks a team API response with a `reviewBlocking` entry and verifies the rendered sentence in the DOM.
-- [ ] Update `codev/resources/arch.md` if it describes the team tab (check first; if it doesn't, skip with a comment in the PR).
+- [ ] Extend `packages/codev/src/agent-farm/__tests__/e2e/team-tab.test.ts` — in the existing `/api/team returns valid response shape` test, assert that when `github_data` is non-null it also contains a `reviewBlocking` array (possibly empty).
+- [ ] Add a new test block (same file or a sibling render test) that uses `page.route('**/api/team', ...)` to inject a mocked response with `reviewBlocking` entries in both directions, navigates to the Team tab, and asserts both sentences render. The existing harness hits the live API — this test introduces the mock itself.
+- [ ] Update `codev/resources/arch.md` if it describes the team tab (check first; if it doesn't, skip with a note in the PR).
 - [ ] Update `codev/resources/commands/team.md` if it exists and describes the tab content (check first).
-- [ ] Add a short section to `codev/specs/587-team-tab-in-tower-right-panel.md`'s Amendments log pointing at this spec as a follow-up (optional — captures project history).
+- [ ] Add a short entry to `codev/specs/587-team-tab-in-tower-right-panel.md`'s Amendments log pointing at this spec as a follow-up (optional — captures project history).
 
 #### Implementation Details
 
-**E2E test**: Use the existing Playwright harness in `team-tab.test.ts`. Mock the `/api/team` response (the harness already stubs this endpoint) to include a `reviewBlocking` entry of each direction; assert both sentences appear in the DOM and that the GitHub link has the expected `href`.
+**Contract assertion**: `/api/team returns valid response shape` currently verifies top-level keys. Add one additional check: when iterating `members[*].github_data` and the value is non-null, assert `Array.isArray(github_data.reviewBlocking)`. This is cheap insurance that the server always emits the field.
+
+**Mocked render test**: `team-tab.test.ts` today hits the live Tower API — it does **not** yet mock `/api/team`. Introduce the mock using Playwright's `page.route('**/api/team', route => route.fulfill({ body: ... }))`, mock `/api/state` if needed so the tab is enabled, navigate to the Team tab, and assert the rendered sentences. Follow the pattern used in `tower-cloud-connect.test.ts` for `page.route` usage.
+
+**Unit tests for `relativeAge`**: Add 2–3 unit tests for the new helper (sub-hour case, multi-day case, far-future guard) in the dashboard test suite near `activityFeed.test.ts` or as a standalone `relativeAge.test.ts`.
 
 **Doc updates**: Quick edits only. No new files unless the team tab is already documented.
 
@@ -392,7 +401,24 @@ No runtime metrics added — this is a read-only UI enrichment with no write pat
 - [ ] File a follow-up issue for "cap at N visible, show 'more' link" if card clutter becomes a real problem.
 
 ## Expert Review
-<!-- Populated by porch-orchestrated 3-way consultation (Gemini, Codex, Claude) -->
+
+**Date**: 2026-04-21
+**Models Consulted**: Gemini 3 Pro, GPT-5.4 Codex, Claude
+**Verdicts**: Gemini APPROVE (HIGH), Codex COMMENT (HIGH), Claude APPROVE (HIGH)
+
+**Key Feedback**:
+- **Feasibility**: All three reviewers confirmed the plan matches existing patterns in the codebase and is safe/additive.
+- **Accurate wire-type package name**: Canonical type lives in `@cluesmith/codev-types`, not `@cluesmith/codev-core` (Codex).
+- **Existing test fixtures update**: `packages/dashboard/__tests__/activityFeed.test.ts` constructs `TeamMemberGitHubData` literals that must include the new required `reviewBlocking` field (Codex).
+- **E2E harness does not currently mock `/api/team`**: All three reviewers flagged the plan's incorrect statement. Use `page.route()` to inject the mock, matching the pattern in `tower-cloud-connect.test.ts` (Gemini, Codex, Claude).
+- **Contract assertion**: Add `reviewBlocking` to the wire-contract E2E assertion (Codex).
+- **Display-name fallback framing**: `loadTeamMembers()` already skips members without a `name` field, so the fallback is defensive only — framed accordingly (Codex).
+- **Relative-age helper unit tests**: Add 2–3 unit tests for edge cases (Claude).
+
+**Plan Adjustments**:
+- Phase 1 now includes updating `activityFeed.test.ts` fixtures and names the correct package (`@cluesmith/codev-types`).
+- Phase 2 clarifies the display-name fallback as defensive only.
+- Phase 4 corrects the E2E description — it now specifies using `page.route()` to introduce the mock, extending the contract assertion, and adding `relativeAge` unit tests.
 
 ## Approval
 - [ ] Technical Lead Review
