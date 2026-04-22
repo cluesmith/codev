@@ -171,7 +171,19 @@ test.describe('Team tab: review-blocking rendering (spec 694)', () => {
       warnings: [],
     };
 
-    // Intercept both the API and state so the tab is enabled.
+    // Mock both /api/state (force teamEnabled: true) and /api/team so the render
+    // test is deterministic regardless of whether the underlying workspace has
+    // a team directory.
+    await page.route('**/api/state', async (route) => {
+      // Let the real response come through, then patch teamEnabled = true.
+      const response = await route.fetch();
+      const base = response.ok() ? await response.json().catch(() => ({})) : {};
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...base, teamEnabled: true }),
+      });
+    });
     await page.route('**/api/team', (route) =>
       route.fulfill({
         status: 200,
@@ -184,12 +196,8 @@ test.describe('Team tab: review-blocking rendering (spec 694)', () => {
     await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
     await page.locator('.tab-bar').waitFor({ state: 'visible', timeout: 10_000 });
 
-    // Skip the render check if the team tab is disabled in this workspace.
     const teamTab = page.locator('button[role="tab"]:has-text("Team")');
-    if (!(await teamTab.isVisible().catch(() => false))) {
-      test.skip(true, 'Team tab disabled in this workspace; contract covered elsewhere.');
-    }
-
+    await expect(teamTab).toBeVisible({ timeout: 5_000 });
     await teamTab.click();
     await page.locator('.team-review-blocking').first().waitFor({ state: 'visible', timeout: 5_000 });
 

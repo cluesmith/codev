@@ -119,7 +119,7 @@ function MemberCard({ member }: { member: TeamApiMember }) {
               <span className="team-item-empty">No open PRs</span>
             )}
           </div>
-          <ReviewBlockingSection entries={gh.reviewBlocking} />
+          <ReviewBlockingSection entries={gh.reviewBlocking ?? []} />
         </>
       )}
       {(mergedCount > 0 || closedCount > 0) && (
