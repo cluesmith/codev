@@ -6,6 +6,7 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 
 - **Unified Sidebar** — Needs Attention, Builders, Pull Requests, Backlog, Team, and Status in a single pane
 - **Native Terminals** — Architect and builder terminals in the editor area with full vertical height
+- **Live Spawn Notifications** — Get notified (or auto-open a terminal) the moment a new builder starts
 - **Status Bar** — Connection state, builder count, blocked gates at a glance
 - **Command Palette** — Open terminals, send messages, approve gates via keyboard
 - **Auto-Connect** — Detects Codev workspaces and connects to Tower automatically
@@ -57,6 +58,14 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 | Codev: Cron Tasks | | List, run, enable, or disable cron tasks |
 | Codev: Add Review Comment | | Insert a `REVIEW(@architect):` comment at cursor |
 
+## When a Builder Spawns
+
+Whenever a new builder starts (e.g. you ran `afx spawn 42`), the extension can open its terminal for you. Choose how with the `codev.autoOpenBuilderTerminal` setting:
+
+- **Notify** (default) — A toast appears with an **Open Terminal** button.
+- **Auto** — The terminal opens immediately in the right editor group.
+- **Off** — No toast, no terminal. Click the builder in the sidebar when you want it.
+
 ## Review Comments
 
 - **Snippet**: Type `rev` + Tab in markdown files to insert a review comment
@@ -73,3 +82,4 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 | `codev.terminalPosition` | `editor` | Terminal placement (`editor` or `panel`) |
 | `codev.autoConnect` | `true` | Connect to Tower on activation |
 | `codev.autoStartTower` | `true` | Auto-start Tower if not running |
+| `codev.autoOpenBuilderTerminal` | `notify` | Behavior on builder-spawned events (`off` / `notify` / `auto`) |

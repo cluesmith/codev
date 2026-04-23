@@ -8,6 +8,7 @@ export {
 export {
   type SSEEventType,
   type SSENotification,
+  type BuilderSpawnedPayload,
 } from './sse.js';
 
 export {

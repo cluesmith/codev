@@ -553,6 +553,18 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `GET` | `/api/events` | SSE stream for push notifications |
 | `POST` | `/api/notify` | Broadcast notification to SSE clients |
 
+**SSE event types** broadcast on `/api/events` (each arrives as a JSON envelope `{ type, title, body, workspace?, id }` on the `data:` field):
+
+| Type | Emitted when | `body` payload |
+|------|--------------|----------------|
+| `overview-changed` | Overview cache invalidated | Human-readable string |
+| `notification` | `POST /api/notify` called | Caller-supplied string |
+| `builder-spawned` | Tower registers a new builder terminal (in `handleTerminalCreate`) | JSON-stringified `BuilderSpawnedPayload`: `{ terminalId, roleId, workspacePath }` (see `packages/types/src/sse.ts`) |
+| `connected` | SSE client first connects | Client id |
+| `heartbeat` | Every 30s keepalive | `:heartbeat` (not JSON) |
+
+Clients may ignore unknown event types — older clients silently drop `builder-spawned`, and newer clients fall back to `overview-changed` when connected to older Tower builds.
+
 **Workspace-scoped APIs (via Tower proxy):**
 
 | Method | Path | Purpose |

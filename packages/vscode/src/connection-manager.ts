@@ -151,10 +151,14 @@ export class ConnectionManager {
       if (result.ok) {
         this.log('INFO', `Workspace activated: ${this.workspacePath}`);
       } else {
-        this.log('WARN', `Workspace activation failed: ${result.error}`);
+        const msg = `Workspace activation failed: ${result.error}`;
+        this.log('ERROR', msg);
+        vscode.window.showErrorMessage(`Codev: ${msg}`);
       }
     } catch (err) {
-      this.log('ERROR', `Workspace activation error: ${(err as Error).message}`);
+      const msg = `Workspace activation error: ${(err as Error).message}`;
+      this.log('ERROR', msg);
+      vscode.window.showErrorMessage(`Codev: ${msg}`);
     }
   }
 

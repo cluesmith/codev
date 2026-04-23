@@ -27,6 +27,7 @@ import { version } from '../../version.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
+import type { BuilderSpawnedPayload } from '@cluesmith/codev-types';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient } from './tower-types.js';
 import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
@@ -360,6 +361,15 @@ async function handleWorkspaceAction(
   }
 }
 
+function emitBuilderSpawned(ctx: RouteContext, payload: BuilderSpawnedPayload): void {
+  ctx.broadcastNotification({
+    type: 'builder-spawned',
+    title: `Builder ${payload.roleId} spawned`,
+    body: JSON.stringify(payload),
+    workspace: payload.workspacePath,
+  });
+}
+
 async function handleTerminalCreate(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -424,6 +434,7 @@ async function handleTerminalCreate(
           const entry = getWorkspaceTerminalsEntry(normalizeWorkspacePath(workspacePath));
           if (termType === 'builder') {
             entry.builders.set(roleId, session.id);
+            emitBuilderSpawned(ctx, { terminalId: session.id, roleId, workspacePath });
           } else {
             entry.shells.set(roleId, session.id);
           }
@@ -446,6 +457,7 @@ async function handleTerminalCreate(
         const entry = getWorkspaceTerminalsEntry(normalizeWorkspacePath(workspacePath));
         if (termType === 'builder') {
           entry.builders.set(roleId, info.id);
+          emitBuilderSpawned(ctx, { terminalId: info.id, roleId, workspacePath });
         } else {
           entry.shells.set(roleId, info.id);
         }
