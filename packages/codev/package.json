@@ -18,7 +18,8 @@
     "skeleton",
     "templates",
     "dashboard-dist",
-    "scripts/forge"
+    "scripts/forge",
+    "scripts/postinstall.mjs"
   ],
   "scripts": {
     "clean": "rm -rf dist",
@@ -33,7 +34,7 @@
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:e2e:playwright": "pnpm exec playwright test",
     "test:e2e:cli": "pnpm build && vitest run --config vitest.cli.config.ts",
-    "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(require.resolve('node-pty'),'..','..','prebuilds',process.platform+'-'+process.arch,'spawn-helper'),0o755)}catch{}\"",
+    "postinstall": "node ./scripts/postinstall.mjs",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {

@@ -1,0 +1,12 @@
+id: bugfix-693
+title: forge-scripts-ship-without-exe
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-22T13:23:57.250Z'
+updated_at: '2026-04-22T14:30:03.204Z'
