@@ -201,14 +201,23 @@ test.describe('Team tab: review-blocking rendering (spec 694)', () => {
     await teamTab.click();
     await page.locator('.team-review-blocking').first().waitFor({ state: 'visible', timeout: 5_000 });
 
+    // Identify each card by its GitHub handle element (unique per member),
+    // not by substring match on the whole card — review-blocking sentences
+    // legitimately mention the other member's name, which would otherwise
+    // cause `hasText: 'Amr'` / `hasText: 'Waleed'` to match multiple cards.
+    const amrCard = page
+      .locator('.team-member-card')
+      .filter({ has: page.locator('.team-member-github', { hasText: /^@amr$/ }) });
+    const waleedCard = page
+      .locator('.team-member-card')
+      .filter({ has: page.locator('.team-member-github', { hasText: /^@waleed$/ }) });
+
     // Amr's card: second-person "You're waiting for Waleed".
-    const amrCard = page.locator('.team-member-card', { hasText: 'Amr' });
     await expect(amrCard).toContainText("You're waiting for");
     await expect(amrCard).toContainText('Waleed');
     await expect(amrCard).toContainText('#688');
 
     // Waleed's card: "Amr is waiting for you".
-    const waleedCard = page.locator('.team-member-card', { hasText: 'Waleed' });
     await expect(waleedCard).toContainText('is waiting for you to review');
     await expect(waleedCard).toContainText('#688');
 

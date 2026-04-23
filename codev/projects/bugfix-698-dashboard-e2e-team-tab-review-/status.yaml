@@ -1,0 +1,17 @@
+id: bugfix-698
+title: dashboard-e2e-team-tab-review-
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-23T09:01:55.935Z'
+updated_at: '2026-04-23T09:19:12.176Z'
+pr_history:
+  - phase: investigate
+    pr_number: 699
+    branch: builder/bugfix-698
+    created_at: '2026-04-23T09:18:07.701Z'
