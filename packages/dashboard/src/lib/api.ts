@@ -8,6 +8,7 @@ export type {
   ArchitectState,
   DashboardState,
   TeamMemberGitHubData,
+  ReviewBlockingEntry,
   TeamApiMember,
   TeamApiMessage,
   TeamApiResponse,

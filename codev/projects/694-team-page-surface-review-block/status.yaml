@@ -1,0 +1,16 @@
+id: '694'
+title: team-page-surface-review-block
+protocol: aspir
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-22T02:57:51.872Z'
+updated_at: '2026-04-22T03:34:40.174Z'

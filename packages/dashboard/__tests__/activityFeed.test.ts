@@ -2,7 +2,7 @@
  * Unit tests for activity feed logic — relativeDate and buildActivityFeed.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { relativeDate, buildActivityFeed } from '../src/components/TeamView.js';
+import { relativeDate, relativeAge, buildActivityFeed } from '../src/components/TeamView.js';
 import type { TeamApiMember } from '../src/lib/api.js';
 
 function makeMember(github: string, data: TeamApiMember['github_data'] = null): TeamApiMember {
@@ -35,11 +35,45 @@ describe('relativeDate', () => {
   });
 });
 
+describe('relativeAge', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('returns "<1h waiting" for PRs under 1 hour old', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2026-04-01T11:30:00Z')).toBe('<1h waiting');
+    expect(relativeAge('2026-04-01T11:59:00Z')).toBe('<1h waiting');
+  });
+
+  it('returns "Xh waiting" for 1-23 hour range', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2026-04-01T11:00:00Z')).toBe('1h waiting');
+    expect(relativeAge('2026-03-31T14:00:00Z')).toBe('22h waiting');
+  });
+
+  it('returns "Xd waiting" for 24+ hours', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-04T12:00:00Z'));
+    expect(relativeAge('2026-04-01T12:00:00Z')).toBe('3d waiting');
+  });
+
+  it('returns empty string for empty, invalid, or future timestamps', () => {
+    expect(relativeAge('')).toBe('');
+    expect(relativeAge('not-a-date')).toBe('');
+    // Future timestamps (negative diff) are guarded and return empty.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T12:00:00Z'));
+    expect(relativeAge('2030-01-01T00:00:00Z')).toBe('');
+  });
+});
+
 describe('buildActivityFeed', () => {
   it('returns empty array when no members have activity', () => {
     const members = [makeMember('alice', {
       assignedIssues: [], openPRs: [],
       recentActivity: { mergedPRs: [], closedIssues: [] },
+      reviewBlocking: [],
     })];
     expect(buildActivityFeed(members)).toEqual([]);
   });
@@ -51,14 +85,14 @@ describe('buildActivityFeed', () => {
   it('aggregates merged PRs and closed issues from multiple members', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [{ number: 10, title: 'PR A', url: 'https://github.com/org/repo/pull/10', mergedAt: '2026-04-01T10:00:00Z' }],
           closedIssues: [],
         },
       }),
       makeMember('bob', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [],
           closedIssues: [{ number: 5, title: 'Issue B', url: 'https://github.com/org/repo/issues/5', closedAt: '2026-04-01T08:00:00Z' }],
@@ -76,7 +110,7 @@ describe('buildActivityFeed', () => {
   it('sorts entries reverse chronologically', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [
             { number: 1, title: 'Old', url: 'u1', mergedAt: '2026-03-30T10:00:00Z' },
@@ -95,7 +129,7 @@ describe('buildActivityFeed', () => {
   it('correctly attributes entries to their member', () => {
     const members = [
       makeMember('alice', {
-        assignedIssues: [], openPRs: [],
+        assignedIssues: [], openPRs: [], reviewBlocking: [],
         recentActivity: {
           mergedPRs: [{ number: 1, title: 'X', url: 'u', mergedAt: '2026-04-01T10:00:00Z' }],
           closedIssues: [],

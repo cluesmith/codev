@@ -1919,6 +1919,48 @@ a.attention-row {
   margin-top: 4px;
 }
 
+.team-review-blocking-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.team-review-blocking-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.team-review-blocking-sentence {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-review-blocking-sentence strong {
+  font-weight: 600;
+}
+
+.team-review-blocking-link {
+  display: inline;
+  white-space: normal;
+}
+
+.team-review-blocking-age {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .team-activity-label {
   color: var(--text-muted);
   font-style: italic;

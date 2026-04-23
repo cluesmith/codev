@@ -137,6 +137,18 @@ export interface OverviewData {
 
 // --- Team (GET /workspace/:path/api/team) ---
 
+export interface ReviewBlockingEntry {
+  direction: 'authored' | 'reviewing';
+  otherName: string;
+  otherGithub: string;
+  pr: {
+    number: number;
+    title: string;
+    url: string;
+    createdAt: string;
+  };
+}
+
 export interface TeamMemberGitHubData {
   assignedIssues: { number: number; title: string; url: string }[];
   openPRs: { number: number; title: string; url: string }[];
@@ -144,6 +156,7 @@ export interface TeamMemberGitHubData {
     mergedPRs: { number: number; title: string; url: string; mergedAt: string }[];
     closedIssues: { number: number; title: string; url: string; closedAt: string }[];
   };
+  reviewBlocking: ReviewBlockingEntry[];
 }
 
 export interface TeamApiMember {
