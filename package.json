@@ -5,6 +5,6 @@
   "scripts": {
     "build": "pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev build",
     "test": "pnpm --filter @cluesmith/codev test",
-    "local-install": "npm install -g ./packages/core/cluesmith-codev-core-*.tgz ./packages/codev/cluesmith-codev-*.tgz"
+    "local-install": "scripts/local-install.sh"
   }
 }

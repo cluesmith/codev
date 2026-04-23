@@ -41,24 +41,18 @@ To test changes locally before publishing to npm:
 # 1. Build (Tower stays up during this)
 pnpm build
 
-# 2. Pack both tarballs
-pnpm --filter @cluesmith/codev-core pack
-pnpm --filter @cluesmith/codev pack
-
-# 3. Install globally (Tower stays up)
-pnpm local-install
-
-# 3. Restart (only this step needs downtime)
-afx tower stop && afx tower start
+# 2. Pack, install globally, and restart Tower (one command)
+pnpm -w run local-install
 ```
 
 - `pnpm build` builds core first, then codev (including dashboard)
-- `pnpm --filter <package> pack` creates tarballs (run for core and codev separately)
-- `pnpm local-install` installs both tarballs in a single `npm install -g` command — separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry
-- Install while Tower is running — it doesn't affect the running process
-- Do NOT stop Tower before installing — unnecessary downtime
-- Do NOT delete the tarballs — keep them for debugging if restart fails
-- Do NOT build between stop and start
+- `pnpm -w run local-install` runs `scripts/local-install.sh`, which:
+  - Packs both `@cluesmith/codev-core` and `@cluesmith/codev` tarballs into their package directories
+  - Globally installs both in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)
+  - Restores the executable bit on `scripts/forge/**/*.sh` (pnpm pack strips it, causing "GitHub CLI unavailable" errors otherwise)
+  - Restarts Tower so it picks up the new code
+- Install runs while Tower is up — only the final restart causes downtime
+- Do NOT stop Tower yourself before running the script — the script handles restart at the end
 - Do NOT use `npm link` or `pnpm link` — it breaks global installs
 
 ### Testing
