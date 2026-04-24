@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev",
-  "version": "3.0.0-rc.11",
+  "version": "3.0.0-rc.12",
   "description": "Codev CLI - AI-assisted software development framework",
   "type": "module",
   "bin": {
