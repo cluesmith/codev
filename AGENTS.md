@@ -72,6 +72,7 @@ You are working in the Codev project itself, with multiple development protocols
 - **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev/protocols/research/protocol.md`
 
 Key locations:
 - Protocol details: `codev/protocols/` (Choose appropriate protocol)
@@ -169,6 +170,13 @@ validated: [gemini, codex, claude]
 - Quarterly codebase maintenance
 - Before releases (clean slate for shipping)
 - Syncing documentation (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md)
+
+### Use RESEARCH for:
+- Competitive analysis and technology evaluation
+- Market research and "state of X" questions
+- Architectural decision support when unfamiliar with the domain
+- Triangulating across 3 AI models to get a high-confidence answer
+- Output goes to `codev/research/<topic>.md`
 
 ### Skip formal protocols for:
 - README typos or minor documentation fixes

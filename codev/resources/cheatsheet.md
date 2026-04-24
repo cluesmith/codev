@@ -67,6 +67,7 @@ A **protocol** is a structured workflow that defines how work progresses from id
 | **TICK** | Amendments to existing specs | Task Identification → Coding → Kickout |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
+| **RESEARCH** | Multi-agent research | Scope → Investigate (3-way) → Synthesize → Critique (3-way) |
 
 ### Roles
 

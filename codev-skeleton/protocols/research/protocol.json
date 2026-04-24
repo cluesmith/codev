@@ -1,0 +1,118 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "research",
+  "version": "1.0.0",
+  "description": "Multi-agent research with 3-way investigation, synthesis, and critique",
+  "input": {
+    "type": "none",
+    "required": false,
+    "default_for": []
+  },
+  "hooks": {
+    "pre-spawn": {}
+  },
+  "phases": [
+    {
+      "id": "scope",
+      "name": "Scope",
+      "description": "Define the research question, scope, and acceptance criteria",
+      "type": "once",
+      "steps": [
+        "clarify_question",
+        "define_scope",
+        "define_acceptance_criteria",
+        "create_research_brief"
+      ],
+      "gate": {
+        "name": "scope-approval",
+        "description": "Architect confirms the research question is correctly scoped",
+        "requires": ["research_brief_exists"],
+        "next": "investigate"
+      }
+    },
+    {
+      "id": "investigate",
+      "name": "Investigate",
+      "description": "3-way parallel investigation — each model researches independently",
+      "type": "once",
+      "steps": [
+        "dispatch_gemini_investigation",
+        "dispatch_codex_investigation",
+        "dispatch_claude_investigation",
+        "collect_all_reports"
+      ],
+      "consultation": {
+        "enabled": true,
+        "models": ["codex"],
+        "parallel": true,
+        "type": "investigation"
+      },
+      "transition": {
+        "on_complete": "synthesize"
+      }
+    },
+    {
+      "id": "synthesize",
+      "name": "Synthesize",
+      "description": "Merge the 3 investigation reports into a single coherent research document",
+      "type": "once",
+      "steps": [
+        "read_all_investigation_reports",
+        "identify_consensus_and_disagreements",
+        "resolve_conflicts",
+        "write_synthesis_report"
+      ],
+      "transition": {
+        "on_complete": "critique"
+      }
+    },
+    {
+      "id": "critique",
+      "name": "Critique",
+      "description": "3-way review of the synthesis — each model critiques for gaps, errors, and bias",
+      "type": "once",
+      "steps": [
+        "dispatch_gemini_critique",
+        "dispatch_codex_critique",
+        "dispatch_claude_critique",
+        "incorporate_feedback",
+        "finalize_report"
+      ],
+      "consultation": {
+        "enabled": true,
+        "models": ["codex"],
+        "parallel": true,
+        "type": "critique"
+      },
+      "gate": {
+        "name": "research-complete",
+        "description": "Research report finalized",
+        "requires": ["report_finalized"],
+        "next": null
+      }
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "BLOCKED": {
+      "description": "Signal research is blocked",
+      "requires": "reason"
+    },
+    "SCOPE_REJECTED": {
+      "description": "Architect rejects the scope — rework needed",
+      "transitions_to": "scope"
+    }
+  },
+  "defaults": {
+    "mode": "strict",
+    "consultation": {
+      "enabled": true,
+      "models": ["codex"],
+      "parallel": true
+    },
+    "checks": {}
+  }
+}

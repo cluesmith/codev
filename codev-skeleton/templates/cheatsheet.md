@@ -63,6 +63,7 @@ A **protocol** is a structured workflow that defines how work progresses from id
 | **SPIR** | New features | Specify → Plan → Implement → Review |
 | **MAINTAIN** | Codebase hygiene | Dead code removal, documentation sync |
 | **EXPERIMENT** | Research & prototyping | Hypothesis → Experiment → Conclude |
+| **RESEARCH** | Multi-agent research | Scope → Investigate (3-way) → Synthesize → Critique (3-way) |
 
 ### Roles
 

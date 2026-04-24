@@ -12,6 +12,7 @@ This project uses **Codev** for AI-assisted development.
 - **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
 
 ## Key Locations
 
