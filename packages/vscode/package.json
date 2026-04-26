@@ -1,20 +1,43 @@
 {
-  "name": "codev",
+  "name": "codev-vscode",
   "publisher": "cluesmith",
-  "displayName": "Codev",
+  "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "0.2.0",
+  "version": "3.0.0",
   "license": "Apache-2.0",
+  "icon": "icons/codev.png",
+  "pricing": "Free",
   "repository": {
     "type": "git",
     "url": "https://github.com/cluesmith/codev",
     "directory": "packages/vscode"
   },
+  "homepage": "https://github.com/cluesmith/codev",
+  "bugs": {
+    "url": "https://github.com/cluesmith/codev/issues"
+  },
+  "qna": "https://github.com/cluesmith/codev/discussions",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },
   "categories": [
+    "AI",
     "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codev",
+    "agent-farm",
+    "multi-agent",
+    "autonomous",
+    "tower",
+    "spir"
   ],
   "activationEvents": [
     "workspaceContains:.codev",
@@ -184,7 +207,10 @@
     "pretest": "pnpm compile-tests && pnpm compile && pnpm lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "vsix": "vsce package --no-dependencies",
+    "vscode:publish": "vsce publish --no-dependencies",
+    "vscode:publish:pre": "vsce publish --no-dependencies --pre-release"
   },
   "dependencies": {
     "@cluesmith/codev-core": "workspace:*",
