@@ -1408,7 +1408,8 @@ a.attention-row {
   white-space: nowrap;
 }
 
-.backlog-row-author {
+.backlog-row-author,
+.backlog-row-assignees {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;

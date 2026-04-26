@@ -110,6 +110,7 @@ export interface OverviewBacklogItem {
   hasBuilder: boolean;
   createdAt: string;
   author?: string;
+  assignees?: string[];
   specPath?: string;
   planPath?: string;
   reviewPath?: string;
