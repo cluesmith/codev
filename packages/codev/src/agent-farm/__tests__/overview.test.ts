@@ -1266,6 +1266,33 @@ describe('overview', () => {
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
       expect(backlog[0].author).toBeUndefined();
     });
+
+    it('maps a single assignee login', () => {
+      const issues = [{ ...issueItem(42, 'Test'), assignees: [{ login: 'amr' }] }];
+
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].assignees).toEqual(['amr']);
+    });
+
+    it('maps multiple assignee logins', () => {
+      const issues = [
+        { ...issueItem(42, 'Test'), assignees: [{ login: 'amr' }, { login: 'bob' }] },
+      ];
+
+      const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
+      expect(backlog[0].assignees).toEqual(['amr', 'bob']);
+    });
+
+    it('omits assignees when array is empty or missing', () => {
+      const empty = [{ ...issueItem(42, 'Test'), assignees: [] }];
+      const missing = [issueItem(43, 'Test')];
+
+      const backlogEmpty = deriveBacklog(empty, tmpDir, new Set(), new Set());
+      const backlogMissing = deriveBacklog(missing, tmpDir, new Set(), new Set());
+
+      expect(backlogEmpty[0].assignees).toBeUndefined();
+      expect(backlogMissing[0].assignees).toBeUndefined();
+    });
   });
 
   // ==========================================================================

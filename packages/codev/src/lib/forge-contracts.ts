@@ -37,6 +37,7 @@ export interface IssueListItem {
   createdAt: string;
   closedAt?: string;
   author?: { login: string };
+  assignees?: Array<{ login: string }>;
 }
 
 /** Output of the `issue-list` concept command. */

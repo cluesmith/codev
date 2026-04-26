@@ -70,6 +70,7 @@ export interface BacklogItem {
   hasBuilder: boolean;
   createdAt: string;
   author?: string;
+  assignees?: string[];
   specPath?: string;
   planPath?: string;
   reviewPath?: string;
@@ -659,6 +660,8 @@ export function deriveBacklog(
         createdAt: issue.createdAt,
         author: issue.author?.login,
       };
+      const assignees = issue.assignees?.map(a => a.login) ?? [];
+      if (assignees.length > 0) item.assignees = assignees;
       if (specFile) item.specPath = `codev/specs/${specFile}`;
       if (planFile) item.planPath = `codev/plans/${planFile}`;
       if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;

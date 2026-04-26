@@ -1,0 +1,14 @@
+id: '700'
+title: dashboard-backlog-show-assigne
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-26T01:12:08.135Z'
+updated_at: '2026-04-26T01:17:50.460Z'
