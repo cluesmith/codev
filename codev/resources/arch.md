@@ -1028,7 +1028,7 @@ codev/                                  # Project root (pnpm monorepo)
 │   └── tsconfig.base.json
 ├── packages/dashboard/                 # @cluesmith/codev-dashboard (React SPA)
 │   └── src/                           # React 19 + Vite 6 + xterm.js + Recharts
-├── packages/vscode/                    # VS Code extension (Marketplace: cluesmith.codev)
+├── packages/vscode/                    # VS Code extension (Marketplace: cluesmith.codev-vscode)
 │   └── src/
 │       ├── extension.ts               # Activation, command/view registration
 │       ├── connection-manager.ts      # Singleton wrapping TowerClient
