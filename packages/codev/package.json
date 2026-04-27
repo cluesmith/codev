@@ -24,7 +24,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm clean && tsc && pnpm build:dashboard && pnpm copy-skeleton",
-    "build:dashboard": "cd ../dashboard && pnpm build && cp -r dist ../../packages/codev/dashboard-dist",
+    "build:dashboard": "cd ../dashboard && pnpm build && rm -rf ../../packages/codev/dashboard-dist && cp -r dist ../../packages/codev/dashboard-dist",
     "dev:dashboard": "cd ../dashboard && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",

@@ -14,7 +14,12 @@ pnpm --filter @cluesmith/codev pack --pack-destination packages/codev
 
 # Uninstall first — `npm install -g` over an existing same-name package
 # is sometimes a silent no-op, leaving the previous version installed.
+# The rm -rf is belt-and-suspenders: when the tarball version matches the
+# previously-installed version, npm's same-version short-circuit can leave
+# stale files on disk even after uninstall+install.
+GLOBAL_ROOT="$(npm root -g)"
 npm uninstall -g @cluesmith/codev @cluesmith/codev-core 2>/dev/null || true
+rm -rf "$GLOBAL_ROOT/@cluesmith/codev" "$GLOBAL_ROOT/@cluesmith/codev-core"
 
 npm install -g \
   "$REPO_ROOT/packages/core/cluesmith-codev-core-"*.tgz \
