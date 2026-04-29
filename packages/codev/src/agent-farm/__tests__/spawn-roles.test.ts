@@ -6,7 +6,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderTemplate, buildPromptFromTemplate, buildResumeNotice, resolveMode, findSpecFile } from '../commands/spawn-roles.js';
+import {
+  renderTemplate,
+  buildPromptFromTemplate,
+  buildResumeNotice,
+  resolveMode,
+  findSpecFile,
+  validateProtocol,
+  loadProtocol,
+  loadProtocolRole,
+} from '../commands/spawn-roles.js';
 import type { TemplateContext } from '../commands/spawn-roles.js';
 
 // Mock dependencies
@@ -22,6 +31,32 @@ vi.mock('../utils/logger.js', () => ({
 vi.mock('../utils/roles.js', () => ({
   loadRolePrompt: vi.fn(() => ({ content: 'builder role', source: 'codev' })),
 }));
+
+// Hoisted shared state for the skeleton mock (vi.mock factories are hoisted, so
+// we use vi.hoisted to make this state available before the factory runs).
+const skeletonMock = vi.hoisted(() => ({ root: '' as string }));
+
+vi.mock('../../lib/skeleton.js', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  return {
+    // Mirrors the real four-tier resolver: .codev/ → codev/ → cache → skeleton.
+    // The cache tier is omitted (irrelevant to these tests).
+    resolveCodevFile: (relativePath: string, workspaceRoot?: string): string | null => {
+      const root = workspaceRoot || process.cwd();
+      const overridePath = path.join(root, '.codev', relativePath);
+      if (fs.existsSync(overridePath)) return overridePath;
+      const localPath = path.join(root, 'codev', relativePath);
+      if (fs.existsSync(localPath)) return localPath;
+      if (skeletonMock.root) {
+        const skeletonPath = path.join(skeletonMock.root, relativePath);
+        if (fs.existsSync(skeletonPath)) return skeletonPath;
+      }
+      return null;
+    },
+    getSkeletonDir: (): string => skeletonMock.root,
+  };
+});
 
 // We need fs mocks for findSpecFile tests but must preserve real behavior for other tests.
 // Use spyOn approach within the findSpecFile describe block instead.
@@ -232,6 +267,114 @@ describe('spawn-roles', () => {
     it('returns null when specs directory does not exist', async () => {
       const result = await findSpecFile('/nonexistent-codev-dir', '76');
       expect(result).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // Skeleton Fallback (Issue #706)
+  //
+  // v3-cleaned projects don't carry a local codev/protocols/ directory. The
+  // resolver must fall back to the bundled skeleton in those cases — the
+  // hardcoded resolve(config.codevDir, 'protocols', ...) lookups previously
+  // failed with "Protocol not found".
+  // =========================================================================
+  describe('skeleton fallback (issue #706)', () => {
+    let workspaceRoot: string;
+    let skeletonRoot: string;
+    let codevDir: string;
+
+    function makeConfig() {
+      return {
+        workspaceRoot,
+        codevDir,
+        buildersDir: `${workspaceRoot}/.builders`,
+        stateDir: `${workspaceRoot}/.builders/state`,
+        templatesDir: '',
+        serversDir: '',
+        bundledRolesDir: '',
+        terminalBackend: 'node-pty' as const,
+      };
+    }
+
+    beforeEach(async () => {
+      const os = await import('node:os');
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+
+      workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-roles-ws-'));
+      skeletonRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-roles-skel-'));
+      // Simulate a v3-cleaned project: codev/ exists but protocols/ does not.
+      codevDir = path.join(workspaceRoot, 'codev');
+      fs.mkdirSync(codevDir, { recursive: true });
+
+      // Skeleton has spir/ and bugfix/ protocols.
+      fs.mkdirSync(path.join(skeletonRoot, 'protocols', 'spir'), { recursive: true });
+      fs.writeFileSync(
+        path.join(skeletonRoot, 'protocols', 'spir', 'protocol.json'),
+        JSON.stringify({ name: 'spir', version: '1', phases: [] }),
+      );
+      fs.writeFileSync(
+        path.join(skeletonRoot, 'protocols', 'spir', 'role.md'),
+        '# SPIR builder role',
+      );
+      fs.writeFileSync(
+        path.join(skeletonRoot, 'protocols', 'spir', 'builder-prompt.md'),
+        '# {{protocol_name}} prompt for {{input_description}}',
+      );
+      fs.mkdirSync(path.join(skeletonRoot, 'protocols', 'bugfix'), { recursive: true });
+      fs.writeFileSync(
+        path.join(skeletonRoot, 'protocols', 'bugfix', 'protocol.json'),
+        JSON.stringify({ name: 'bugfix', phases: [] }),
+      );
+
+      skeletonMock.root = skeletonRoot;
+    });
+
+    it('validateProtocol succeeds when protocol exists only in skeleton', () => {
+      // Local codev/protocols/ does not exist (v3-cleaned project).
+      expect(() => validateProtocol(makeConfig(), 'spir')).not.toThrow();
+    });
+
+    it('validateProtocol lists skeleton protocols when local dir is empty', () => {
+      expect(() => validateProtocol(makeConfig(), 'bogus')).toThrow(
+        /Protocol not found: bogus[\s\S]*Available protocols:[\s\S]*spir/,
+      );
+    });
+
+    it('loadProtocol falls back to skeleton', () => {
+      const protocol = loadProtocol(makeConfig(), 'spir');
+      expect(protocol).toEqual({ name: 'spir', version: '1', phases: [] });
+    });
+
+    it('loadProtocolRole falls back to skeleton', () => {
+      const role = loadProtocolRole(makeConfig(), 'spir');
+      expect(role).toEqual({ content: '# SPIR builder role', source: 'protocol' });
+    });
+
+    it('buildPromptFromTemplate uses skeleton template when local is missing', () => {
+      const ctx: TemplateContext = {
+        protocol_name: 'SPIR',
+        mode: 'strict',
+        mode_soft: false,
+        mode_strict: true,
+        input_description: 'a v3 feature',
+      };
+      const prompt = buildPromptFromTemplate(makeConfig(), 'spir', ctx);
+      expect(prompt).toContain('SPIR prompt for a v3 feature');
+    });
+
+    it('local codev/protocols/ takes precedence over skeleton', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const localProtocolDir = path.join(codevDir, 'protocols', 'spir');
+      fs.mkdirSync(localProtocolDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(localProtocolDir, 'protocol.json'),
+        JSON.stringify({ name: 'spir-local', phases: [] }),
+      );
+
+      const protocol = loadProtocol(makeConfig(), 'spir');
+      expect(protocol).toEqual({ name: 'spir-local', phases: [] });
     });
   });
 });

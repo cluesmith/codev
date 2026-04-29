@@ -6,13 +6,14 @@
  * for builder sessions.
  */
 
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { existsSync, readFileSync, readdirSync, type Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { stripLeadingZeros } from '../utils/agent-names.js';
+import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 // =============================================================================
 // Template Rendering
@@ -92,11 +93,15 @@ export function renderTemplate(template: string, context: TemplateContext): stri
 }
 
 /**
- * Load builder-prompt.md template for a protocol
+ * Load builder-prompt.md template for a protocol.
+ * Resolves through .codev/ → codev/ → cache → skeleton (via resolveCodevFile).
  */
 function loadBuilderPromptTemplate(config: Config, protocolName: string): string | null {
-  const templatePath = resolve(config.codevDir, 'protocols', protocolName, 'builder-prompt.md');
-  if (existsSync(templatePath)) {
+  const templatePath = resolveCodevFile(
+    `protocols/${protocolName}/builder-prompt.md`,
+    config.workspaceRoot,
+  );
+  if (templatePath) {
     return readFileSync(templatePath, 'utf-8');
   }
   return null;
@@ -189,11 +194,15 @@ If porch reports "not found", run \`porch init\` to re-initialize.
 // =============================================================================
 
 /**
- * Load a protocol-specific role if it exists
+ * Load a protocol-specific role if it exists.
+ * Resolves through .codev/ → codev/ → cache → skeleton (via resolveCodevFile).
  */
 export function loadProtocolRole(config: Config, protocolName: string): { content: string; source: string } | null {
-  const protocolRolePath = resolve(config.codevDir, 'protocols', protocolName, 'role.md');
-  if (existsSync(protocolRolePath)) {
+  const protocolRolePath = resolveCodevFile(
+    `protocols/${protocolName}/role.md`,
+    config.workspaceRoot,
+  );
+  if (protocolRolePath) {
     return { content: readFileSync(protocolRolePath, 'utf-8'), source: 'protocol' };
   }
   // Fall back to builder role
@@ -239,38 +248,62 @@ export async function findSpecFile(codevDir: string, projectId: string): Promise
 }
 
 /**
- * Validate that a protocol exists
+ * List all protocol directory names visible across the resolver tiers
+ * (.codev/protocols, codev/protocols, embedded skeleton). Used to surface
+ * available alternatives when a requested protocol is not found.
+ */
+function listAvailableProtocols(config: Config): string[] {
+  const seen = new Set<string>();
+  const candidates = [
+    resolve(config.workspaceRoot, '.codev', 'protocols'),
+    resolve(config.codevDir, 'protocols'),
+    join(getSkeletonDir(), 'protocols'),
+  ];
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue;
+    try {
+      readdirSync(dir, { withFileTypes: true })
+        .filter((d: Dirent) => d.isDirectory())
+        .forEach((d: Dirent) => seen.add(d.name));
+    } catch {
+      // Ignore unreadable directories
+    }
+  }
+  return Array.from(seen).sort();
+}
+
+/**
+ * Validate that a protocol exists.
+ * Resolves through .codev/ → codev/ → cache → skeleton (via resolveCodevFile),
+ * so v3-cleaned projects without local protocols still find the skeleton copy.
  */
 export function validateProtocol(config: Config, protocolName: string): void {
-  const protocolDir = resolve(config.codevDir, 'protocols', protocolName);
-  const protocolFile = resolve(protocolDir, 'protocol.md');
+  const protocolJson = resolveCodevFile(
+    `protocols/${protocolName}/protocol.json`,
+    config.workspaceRoot,
+  );
+  const protocolMd = resolveCodevFile(
+    `protocols/${protocolName}/protocol.md`,
+    config.workspaceRoot,
+  );
 
-  if (!existsSync(protocolDir)) {
-    const protocolsDir = resolve(config.codevDir, 'protocols');
-    let available = '';
-    if (existsSync(protocolsDir)) {
-      const dirs = readdirSync(protocolsDir, { withFileTypes: true })
-        .filter((d: Dirent) => d.isDirectory())
-        .map((d: Dirent) => d.name);
-      if (dirs.length > 0) {
-        available = `\n\nAvailable protocols: ${dirs.join(', ')}`;
-      }
-    }
+  if (!protocolJson && !protocolMd) {
+    const dirs = listAvailableProtocols(config);
+    const available = dirs.length > 0 ? `\n\nAvailable protocols: ${dirs.join(', ')}` : '';
     fatal(`Protocol not found: ${protocolName}${available}`);
-  }
-
-  const protocolJson = resolve(protocolDir, 'protocol.json');
-  if (!existsSync(protocolFile) && !existsSync(protocolJson)) {
-    fatal(`Protocol ${protocolName} exists but has no protocol.md or protocol.json file`);
   }
 }
 
 /**
- * Load and parse a protocol.json file
+ * Load and parse a protocol.json file.
+ * Resolves through .codev/ → codev/ → cache → skeleton (via resolveCodevFile).
  */
 export function loadProtocol(config: Config, protocolName: string): ProtocolDefinition | null {
-  const protocolJsonPath = resolve(config.codevDir, 'protocols', protocolName, 'protocol.json');
-  if (!existsSync(protocolJsonPath)) {
+  const protocolJsonPath = resolveCodevFile(
+    `protocols/${protocolName}/protocol.json`,
+    config.workspaceRoot,
+  );
+  if (!protocolJsonPath) {
     return null;
   }
   try {

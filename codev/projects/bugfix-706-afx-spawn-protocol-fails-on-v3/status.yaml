@@ -1,0 +1,12 @@
+id: bugfix-706
+title: afx-spawn-protocol-fails-on-v3
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-29T01:00:10.880Z'
+updated_at: '2026-04-29T01:12:47.802Z'
