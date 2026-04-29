@@ -7,6 +7,16 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Workaround pnpm's prefix redirection: when this script is invoked via
+# `pnpm -w run local-install`, pnpm sets `npm_config_prefix` to the workspace
+# root, which makes `npm install -g` install into <workspace>/lib/node_modules
+# instead of the actual system-global location. The result: the script
+# reports "Installed" but the system binary is unchanged. Unset the override
+# so npm uses the user's real global prefix (e.g. /opt/homebrew). Also clear
+# the matching pnpm var for completeness.
+unset npm_config_prefix
+unset PNPM_CONFIG_PREFIX
+
 # Pack — clear stale tarballs first so the install glob matches exactly one file.
 rm -f packages/core/*.tgz packages/codev/*.tgz
 pnpm --filter @cluesmith/codev-core pack --pack-destination packages/core
