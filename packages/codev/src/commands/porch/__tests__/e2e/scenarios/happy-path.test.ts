@@ -5,6 +5,12 @@
  * This is an expensive test (~$4, ~40 minutes).
  *
  * Run with: npm run test:e2e
+ *
+ * NOTE (issue #710): These tests are skipped because they depend on the
+ * `porch run` orchestrator removed in spec 0095 (commit ed2012ae). The new
+ * planner architecture (`porch next`) requires a parent agent to execute
+ * tasks, so an orchestrator-style E2E test no longer applies. Rewriting
+ * these tests for the planner architecture needs its own spec.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -29,7 +35,7 @@ import {
   assertGateApproved,
 } from '../helpers/assertions.js';
 
-describe('Porch E2E: Happy Path', () => {
+describe.skip('Porch E2E: Happy Path', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {
@@ -103,7 +109,7 @@ describe('Porch E2E: Happy Path', () => {
  * Full lifecycle test with auto-approve.
  * This runs the entire SPIR protocol from start to finish.
  */
-describe('Porch E2E: Full Lifecycle', () => {
+describe.skip('Porch E2E: Full Lifecycle', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {

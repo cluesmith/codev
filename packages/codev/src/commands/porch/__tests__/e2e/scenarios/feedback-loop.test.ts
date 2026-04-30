@@ -5,6 +5,12 @@
  * Also tests the max iterations limit.
  *
  * Run with: npm run test:e2e
+ *
+ * NOTE (issue #710): These tests are skipped because they depend on the
+ * `porch run` orchestrator removed in spec 0095 (commit ed2012ae). The
+ * iteration / feedback loop is now driven by the parent agent calling
+ * `porch next` repeatedly, not by an internal porch loop. Re-enabling
+ * this coverage needs a planner-aware test harness and its own spec.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -25,7 +31,7 @@ import {
   assertIteration,
 } from '../helpers/assertions.js';
 
-describe('Porch E2E: Feedback Loop', () => {
+describe.skip('Porch E2E: Feedback Loop', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {
@@ -83,7 +89,7 @@ describe('Porch E2E: Feedback Loop', () => {
   });
 });
 
-describe('Porch E2E: Max Iterations', () => {
+describe.skip('Porch E2E: Max Iterations', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {
@@ -120,7 +126,7 @@ describe('Porch E2E: Max Iterations', () => {
  * Test with mock consult that always rejects.
  * This verifies porch stops at max iterations even with constant rejection.
  */
-describe('Porch E2E: Max Iterations with Mock Consult', () => {
+describe.skip('Porch E2E: Max Iterations with Mock Consult', () => {
   let ctx: TestContext;
   let originalPath: string | undefined;
 

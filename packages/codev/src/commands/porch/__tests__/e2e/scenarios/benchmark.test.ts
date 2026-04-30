@@ -9,6 +9,12 @@
  * Specs and plans are pre-approved to skip specify/plan phases.
  *
  * Run with: npm run test:e2e -- --grep benchmark
+ *
+ * NOTE (issue #710): The benchmark is skipped because the strict-mode arm
+ * relies on the `porch run` orchestrator removed in spec 0095 (commit
+ * ed2012ae). With no orchestrator, there is no "strict mode" to benchmark
+ * against soft mode. Reviving the benchmark needs a planner-architecture
+ * comparison and its own spec.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -255,7 +261,7 @@ function formatTimingSummary(result: BenchmarkResult): string {
   return lines.join('\n');
 }
 
-describe('Porch Benchmark: Strict vs Soft Mode', () => {
+describe.skip('Porch Benchmark: Strict vs Soft Mode', () => {
   let strictCtx: TestContext;
   let softCtx: TestContext;
 
