@@ -271,7 +271,6 @@ Each session has a unique name based on its purpose:
 | Architect | `architect` | `architect` |
 | Builder | `builder-{protocol}-{id}` | `builder-spir-126` |
 | Shell | `shell-{id}` | `shell-U1A2B3C4` |
-| Utility | `af-shell-{id}` | `af-shell-U5D6E7F8` |
 
 #### node-pty Terminal Manager (Spec 0085, extended by Spec 0104)
 
@@ -999,7 +998,7 @@ This is the `@cluesmith/codev` npm package containing all CLI tools:
   - `src/agent-farm/` - Agent Farm orchestration (afx command)
   - `src/commands/` - codev subcommands (init, adopt, doctor, update, eject, tower)
   - `src/commands/consult/` - Multi-agent consultation (consult command)
-  - `bin/` - CLI entry points (codev.js, af.js, consult.js, team.js, porch.js)
+  - `bin/` - CLI entry points (codev.js, afx.js, af.js (deprecated alias), consult.js, team.js, porch.js)
   - `skeleton/` - Embedded copy of codev-skeleton (built during `npm run build`)
   - `templates/` - HTML templates for Agent Farm (`afx`) dashboard and annotator
   - `dist/` - Compiled JavaScript

@@ -114,7 +114,7 @@ These are the most expensive tests and are NOT run in CI.
 | `tests/e2e/init.bats` | `codev init` creates correct files and directories |
 | `tests/e2e/adopt.bats` | `codev adopt` for existing projects |
 | `tests/e2e/doctor.bats` | `codev doctor` diagnostics |
-| `tests/e2e/af.bats` | `afx` subcommands (status, help, etc.) |
+| `tests/e2e/afx.bats` | `afx` subcommands (status, help, etc.) |
 | `tests/e2e/consult.bats` | `consult` subcommands |
 
 ### Legacy/framework tests

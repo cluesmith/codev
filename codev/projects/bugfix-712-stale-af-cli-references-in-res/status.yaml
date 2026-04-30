@@ -1,0 +1,12 @@
+id: bugfix-712
+title: stale-af-cli-references-in-res
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-30T20:57:47.917Z'
+updated_at: '2026-04-30T21:08:35.302Z'
