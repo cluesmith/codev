@@ -233,6 +233,24 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.0.1"
+    name: "Ionic"
+    status: released
+    target_date: "2026-04-30"
+    notes: "VS Code extension, configurable forges (GitHub/Gitea/GitLab), configurable harnesses (Claude/Codex/Gemini/OpenCode), per-stage consults, Teams tab, multi-PR builders. v3.0.0 was deprecated due to a broken publish; v3.0.1 is the actual stable release."
+
+  - version: "v2.0.0"
+    name: "Hagia Sophia"
+    status: released
+    target_date: "2026-02-14"
+    notes: "Shellper terminal session manager, Tower server decomposition, Cloud Connect, mobile-friendly dashboard, porch protocol orchestrator"
+
+  - version: "v1.6.0"
+    name: "Gothic"
+    status: released
+    target_date: "2025-12-22"
+    notes: "Release candidate workflow, expanded protocol library"
+
   - version: "v1.4.0"
     name: "Eichler"
     status: released
