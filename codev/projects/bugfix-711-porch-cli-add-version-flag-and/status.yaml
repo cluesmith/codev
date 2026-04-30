@@ -1,0 +1,12 @@
+id: bugfix-711
+title: porch-cli-add-version-flag-and
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-30T19:34:01.012Z'
+updated_at: '2026-04-30T19:34:01.014Z'
