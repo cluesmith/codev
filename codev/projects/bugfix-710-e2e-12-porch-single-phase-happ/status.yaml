@@ -1,0 +1,12 @@
+id: bugfix-710
+title: e2e-12-porch-single-phase-happ
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-04-30T19:33:52.093Z'
+updated_at: '2026-04-30T19:33:52.094Z'
