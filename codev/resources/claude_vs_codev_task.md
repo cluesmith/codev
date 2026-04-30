@@ -76,7 +76,7 @@ Commit the settings in both repos:
 
 ```bash
 cd /tmp/todo-vibe-2026 && git add .claude/settings.json && git commit -m "Initial" && git push
-cd /tmp/todo-spir-2026 && git add .claude/settings.json af-config.json codev/ CLAUDE.md AGENTS.md && git commit -m "Initial" && git push
+cd /tmp/todo-spir-2026 && git add .claude/settings.json .codev/config.json codev/ CLAUDE.md AGENTS.md && git commit -m "Initial" && git push
 ```
 
 ### 1.4 Write Prompt Files

@@ -41,7 +41,7 @@ gh pr view <N> --json files | jq '.files[].path'
 | `packages/codev/src/state/` | State management | High |
 | `codev/protocols/` | Protocol definitions | High |
 | `codev-skeleton/protocols/` | Protocol templates | High |
-| `packages/codev/src/commands/af/` | Agent Farm commands | Medium |
+| `packages/codev/src/agent-farm/commands/` | Agent Farm commands | Medium |
 | `packages/codev/src/commands/consult/` | Consultation system | Medium |
 | `packages/codev/src/lib/` | Shared libraries | Medium |
 | `packages/codev/src/commands/` (other) | CLI commands | Medium |
