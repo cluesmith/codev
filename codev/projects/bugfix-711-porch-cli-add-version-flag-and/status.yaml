@@ -1,7 +1,7 @@
 id: bugfix-711
 title: porch-cli-add-version-flag-and
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates: {}
@@ -9,7 +9,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-04-30T19:34:01.012Z'
-updated_at: '2026-04-30T22:56:52.081Z'
+updated_at: '2026-04-30T22:56:57.904Z'
 pr_history:
   - phase: pr
     pr_number: 714
