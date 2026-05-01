@@ -49,6 +49,7 @@ import {
 } from './checks.js';
 import { loadCheckOverrides } from './config.js';
 import { loadConfig } from '../../lib/config.js';
+import { version } from '../../version.js';
 
 // ============================================================================
 // Output Helpers
@@ -882,6 +883,87 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
   return `Complete the phase work, then run: porch done ${state.id}`;
 }
 
+/**
+ * porch pending
+ * List all projects with gates awaiting human approval.
+ * Scans both the local workspace and any builder worktrees under .builders/*.
+ */
+export async function pending(workspaceRoot: string): Promise<void> {
+  type PendingGate = {
+    id: string;
+    title: string;
+    phase: string;
+    gate: string;
+    requested_at?: string;
+    statusPath: string;
+  };
+
+  const seen = new Set<string>(); // dedupe by status.yaml path
+  const results: PendingGate[] = [];
+
+  // Build the list of project directories to scan: main + every builder worktree.
+  const projectsDirs: string[] = [path.join(workspaceRoot, 'codev', 'projects')];
+  const buildersDir = path.join(workspaceRoot, '.builders');
+  if (fs.existsSync(buildersDir)) {
+    for (const wt of fs.readdirSync(buildersDir, { withFileTypes: true })) {
+      if (!wt.isDirectory()) continue;
+      projectsDirs.push(path.join(buildersDir, wt.name, 'codev', 'projects'));
+    }
+  }
+
+  for (const projectsDir of projectsDirs) {
+    if (!fs.existsSync(projectsDir)) continue;
+    for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
+      if (!fs.existsSync(statusPath)) continue;
+
+      const realPath = fs.realpathSync(statusPath);
+      if (seen.has(realPath)) continue;
+      seen.add(realPath);
+
+      let state: ProjectState;
+      try {
+        state = readState(statusPath);
+      } catch {
+        continue; // skip corrupted status files
+      }
+
+      for (const [gateName, gateStatus] of Object.entries(state.gates)) {
+        if (gateStatus?.status === 'pending' && gateStatus.requested_at) {
+          results.push({
+            id: state.id,
+            title: state.title,
+            phase: state.phase,
+            gate: gateName,
+            requested_at: gateStatus.requested_at,
+            statusPath,
+          });
+        }
+      }
+    }
+  }
+
+  console.log('');
+  if (results.length === 0) {
+    console.log(chalk.dim('No gates pending approval.'));
+    console.log('');
+    return;
+  }
+
+  // Sort oldest-first so the longest-waiting gates surface at the top.
+  results.sort((a, b) => (a.requested_at ?? '').localeCompare(b.requested_at ?? ''));
+
+  console.log(chalk.bold(`${results.length} gate${results.length === 1 ? '' : 's'} pending approval:`));
+  console.log('');
+  for (const r of results) {
+    console.log(`  ${chalk.cyan(r.id)} ${chalk.dim('—')} ${r.title}`);
+    console.log(`    phase: ${r.phase}  gate: ${chalk.yellow(r.gate)}  requested: ${r.requested_at}`);
+    console.log(chalk.dim(`    approve: porch approve ${r.id} ${r.gate} --a-human-explicitly-approved-this`));
+    console.log('');
+  }
+}
+
 function getArtifactForPhase(workspaceRoot: string, state: ProjectState, resolver?: ArtifactResolver): string | null {
   const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title, resolver);
   switch (state.phase) {
@@ -902,6 +984,14 @@ function getArtifactForPhase(workspaceRoot: string, state: ProjectState, resolve
 
 export async function cli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
+
+  // Handle --version / -v before any project resolution — version output
+  // must work from any directory and never require a project context.
+  if (command === '--version' || command === '-v') {
+    console.log(version);
+    return;
+  }
+
   const workspaceRoot = process.cwd();
   const resolver = getResolver(workspaceRoot);
 
@@ -918,6 +1008,10 @@ export async function cli(args: string[]): Promise<void> {
 
   try {
     switch (command) {
+      case 'pending':
+        await pending(workspaceRoot);
+        break;
+
       case 'next': {
         const { next: porchNext } = await import('./next.js');
         const result = await porchNext(workspaceRoot, getProjectId(rest[0]));
@@ -1023,10 +1117,14 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
         console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
         console.log('  gate [id]                Request human approval');
+        console.log('  pending                  List all gates awaiting approval across projects');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
         console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
+        console.log('');
+        console.log('Flags:');
+        console.log('  --version, -v            Print porch (codev) version');
         console.log('');
         console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
         console.log('');
