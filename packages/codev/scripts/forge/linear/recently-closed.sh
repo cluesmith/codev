@@ -32,7 +32,7 @@ curl -sf -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: $LINEAR_API_KEY" \
   -d "$(jq -n --argjson filter "$FILTER" '{
-    query: "query($filter: IssueFilter) { issues(filter: $filter, first: 200, orderBy: completedAt) { nodes { identifier title url labels { nodes { name } } createdAt completedAt } } }",
+    query: "query($filter: IssueFilter) { issues(filter: $filter, first: 200, orderBy: updatedAt) { nodes { identifier title url labels { nodes { name } } createdAt completedAt } } }",
     variables: { filter: $filter }
   }')" \
   | jq '[.data.issues.nodes[] | {

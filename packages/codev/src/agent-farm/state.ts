@@ -105,7 +105,7 @@ export function upsertBuilder(builder: Builder): void {
     type: builder.type,
     taskText: builder.taskText ?? null,
     protocolName: builder.protocolName ?? null,
-    issueNumber: builder.issueNumber ?? null,
+    issueNumber: builder.issueNumber != null ? String(builder.issueNumber) : null,
     terminalId: builder.terminalId ?? null,
   });
 }

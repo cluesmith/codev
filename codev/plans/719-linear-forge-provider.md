@@ -1,7 +1,7 @@
 # Plan: Linear Forge Provider
 
 ## Metadata
-- **Spec**: 695-linear-forge-provider
+- **Spec**: 719-linear-forge-provider
 - **Protocol**: ASPIR
 - **Created**: 2026-05-01
 

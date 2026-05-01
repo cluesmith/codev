@@ -21,13 +21,17 @@ curl -sf -X POST https://api.linear.app/graphql \
     query: "query($id: String!) { issueVcsByFilter: issues(filter: { identifier: { eq: $id } }) { nodes { title description state { name } comments { nodes { body createdAt user { displayName } } } } } }",
     variables: { id: $id }
   }')" \
-  | jq '{
-    title: .data.issueVcsByFilter.nodes[0].title,
-    body: (.data.issueVcsByFilter.nodes[0].description // ""),
-    state: .data.issueVcsByFilter.nodes[0].state.name,
-    comments: [.data.issueVcsByFilter.nodes[0].comments.nodes[] | {
-      body: .body,
-      createdAt: .createdAt,
-      author: { login: .user.displayName }
-    }]
-  }'
+  | jq 'if (.data.issueVcsByFilter.nodes | length) == 0 then
+    error("issue not found: \(env.CODEV_ISSUE_ID)")
+  else
+    .data.issueVcsByFilter.nodes[0] | {
+      title: .title,
+      body: (.description // ""),
+      state: .state.name,
+      comments: [.comments.nodes[] | {
+        body: .body,
+        createdAt: .createdAt,
+        author: { login: .user.displayName }
+      }]
+    }
+  end'
