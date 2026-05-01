@@ -7,6 +7,13 @@
  * 3. Exits after the phase completes (or hits a gate)
  *
  * Run with: npm run test:e2e
+ *
+ * NOTE (issue #710): These tests are skipped because they depend on the
+ * `porch run --single-phase` mode removed in spec 0095 (commit ed2012ae).
+ * The Agent SDK orchestration was deliberately moved out of porch — the
+ * parent agent now executes tasks emitted by `porch next`. Re-enabling
+ * single-phase E2E coverage requires a new test harness for the planner
+ * architecture and needs its own spec.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -27,7 +34,7 @@ import {
   assertGateApproved,
 } from '../helpers/assertions.js';
 
-describe('Porch E2E: Single Phase Mode', () => {
+describe.skip('Porch E2E: Single Phase Mode', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {
@@ -103,7 +110,7 @@ describe('Porch E2E: Single Phase Mode', () => {
   }, 600000);
 });
 
-describe('Porch E2E: Single Phase Result Format', () => {
+describe.skip('Porch E2E: Single Phase Result Format', () => {
   let ctx: TestContext;
 
   beforeAll(async () => {
