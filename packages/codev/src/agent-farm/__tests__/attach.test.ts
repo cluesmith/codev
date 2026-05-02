@@ -57,9 +57,10 @@ vi.mock('../utils/logger.js', () => ({
 
 // Mock DB — configurable per test
 const mockDbGet = vi.fn();
+const mockDbAll = vi.fn().mockReturnValue([]);
 vi.mock('../db/index.js', () => ({
   getGlobalDb: () => ({
-    prepare: () => ({ get: mockDbGet }),
+    prepare: () => ({ get: mockDbGet, all: mockDbAll }),
   }),
 }));
 
@@ -126,6 +127,7 @@ describe('attach command', () => {
   beforeEach(() => {
     mockBuilders.length = 0;
     mockDbGet.mockReset();
+    mockDbAll.mockReset().mockReturnValue([]);
     mockExistsSync.mockReset().mockReturnValue(false);
     mockAccessSync.mockReset();
     mockReaddirSync.mockReset().mockReturnValue([]);
@@ -172,6 +174,26 @@ describe('attach command', () => {
       await expect(attach({ issue: 999 })).rejects.toThrow();
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('No builder found for issue #999'));
     });
+
+    // Regression for bugfix #717: when local state.db is empty but Tower's
+    // terminal_sessions table knows about the builder, attach must fall back
+    // to that registry instead of erroring "Builder not found."
+    it('should fall back to Tower terminal_sessions when local state has no match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-bugfix-717',
+          cwd: '/workspace/.builders/bugfix-717',
+          label: 'Bugfix #717',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ issue: 717, browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
   });
 
   describe('findBuilderById', () => {
@@ -215,6 +237,59 @@ describe('attach command', () => {
     });
 
     it('should error when builder not found', async () => {
+      const { attach } = await import('../commands/attach.js');
+      const { fatal } = await import('../utils/logger.js');
+
+      await expect(attach({ project: 'nonexistent' })).rejects.toThrow();
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Builder "nonexistent" not found'));
+    });
+
+    // Regression for bugfix #717: a builder visible in Tower (via
+    // terminal_sessions.role_id) but missing from local state.db must still
+    // be resolvable by `afx attach -p`.
+    it('should fall back to Tower terminal_sessions for exact ID', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-118',
+          cwd: '/workspace/.builders/spir-118',
+          label: '118-feature',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ project: 'builder-spir-118', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('should fall back to Tower terminal_sessions for substring match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-bugfix-717',
+          cwd: '/workspace/.builders/bugfix-717',
+          label: 'Bugfix #717',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ project: '717', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('should error when Tower fallback also has no match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-100',
+          cwd: '/workspace/.builders/spir-100',
+          label: '100-other',
+        },
+      ]);
+
       const { attach } = await import('../commands/attach.js');
       const { fatal } = await import('../utils/logger.js');
 
