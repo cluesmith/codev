@@ -1,0 +1,12 @@
+id: bugfix-717
+title: afx-attach-can-t-find-builders
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-02T01:51:59.248Z'
+updated_at: '2026-05-02T02:10:47.664Z'

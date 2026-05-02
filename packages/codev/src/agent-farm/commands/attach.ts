@@ -32,7 +32,12 @@ export interface AttachOptions {
  */
 function findBuilderByIssue(issueNumber: number): Builder | null {
   const builders = getBuilders();
-  return builders.find((b) => b.issueNumber === issueNumber) ?? null;
+  const local = builders.find((b) => b.issueNumber === issueNumber);
+  if (local) return local;
+
+  // Fallback: Tower's terminal_sessions table may know about builders that
+  // were never written to local state.db (Bugfix #717).
+  return findBuilderInTowerByIssue(issueNumber);
 }
 
 /**
@@ -59,7 +64,101 @@ function findBuilderById(id: string): Builder | null {
     return null;
   }
 
+  // Fallback: Tower's terminal_sessions table may know about builders that
+  // were never written to local state.db (Bugfix #717).
+  return findBuilderInTowerById(id);
+}
+
+/**
+ * Row shape we read from terminal_sessions for builder reconstruction.
+ */
+interface TowerBuilderRow {
+  role_id: string;
+  cwd: string | null;
+  label: string | null;
+}
+
+/**
+ * Load all builder-type terminal sessions for the current workspace from
+ * Tower's global SQLite db. Returns [] if Tower db is unavailable.
+ */
+function loadTowerBuilderRows(): TowerBuilderRow[] {
+  try {
+    const db = getGlobalDb();
+    const config = getConfig();
+    const workspacePath = normalizeWorkspacePath(config.workspaceRoot);
+    return db.prepare(`
+      SELECT role_id, cwd, label
+      FROM terminal_sessions
+      WHERE workspace_path = ?
+        AND type = 'builder'
+        AND role_id IS NOT NULL
+      ORDER BY created_at DESC
+    `).all(workspacePath) as TowerBuilderRow[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Reconstruct a minimal Builder from a Tower terminal_sessions row. The
+ * resulting object has the fields needed by attach (id, worktree) and
+ * placeholder values elsewhere — it's enough to drive findShellperSocket.
+ */
+function towerRowToBuilder(row: TowerBuilderRow): Builder {
+  const isBugfix = row.role_id.includes('-bugfix-');
+  const issueMatch = isBugfix ? row.role_id.match(/-bugfix-(\d+)/) : null;
+  return {
+    id: row.role_id,
+    name: row.label ?? row.role_id,
+    status: 'implementing',
+    phase: 'unknown',
+    worktree: row.cwd ?? '',
+    branch: '',
+    type: isBugfix ? 'bugfix' : 'spec',
+    issueNumber: issueMatch ? Number(issueMatch[1]) : undefined,
+  };
+}
+
+/**
+ * Tower fallback for findBuilderById. Applies the same exact-then-substring
+ * matching used against local state.
+ */
+function findBuilderInTowerById(id: string): Builder | null {
+  const rows = loadTowerBuilderRows();
+  if (rows.length === 0) return null;
+
+  const exact = rows.find((r) => r.role_id === id);
+  if (exact) return towerRowToBuilder(exact);
+
+  const matches = rows.filter((r) => r.role_id.startsWith(id) || r.role_id.includes(id));
+  if (matches.length === 1) return towerRowToBuilder(matches[0]);
+
+  if (matches.length > 1) {
+    logger.error(`Ambiguous builder ID "${id}" in Tower terminal registry. Matches:`);
+    for (const r of matches) {
+      logger.info(`  - ${r.role_id}`);
+    }
+    return null;
+  }
+
   return null;
+}
+
+/**
+ * Tower fallback for findBuilderByIssue. Matches builder-bugfix-<n> rows
+ * with leading zeros stripped from the issue number.
+ */
+function findBuilderInTowerByIssue(issueNumber: number): Builder | null {
+  const rows = loadTowerBuilderRows();
+  if (rows.length === 0) return null;
+
+  const stripped = String(issueNumber);
+  const match = rows.find((r) => {
+    const m = r.role_id.match(/-bugfix-(\d+)/);
+    return m !== null && m[1] === stripped;
+  });
+  return match ? towerRowToBuilder(match) : null;
 }
 
 /**
@@ -115,10 +214,14 @@ async function displayBuilderList(): Promise<void> {
  * 2. Fallback: scan ~/.codev/run/shellper-*.sock
  */
 export function findShellperSocket(builder: Builder): string | null {
-  // 1. Try SQLite lookup
+  // 1. Try SQLite lookup. terminal_sessions.workspace_path is the workspace
+  // ROOT (set to config.workspaceRoot at spawn time), not the builder's
+  // worktree path — querying by builder.worktree would never match. Without
+  // this scoping, the fallback scan below could attach to the wrong builder
+  // when multiple shellper sockets exist.
   try {
     const db = getGlobalDb();
-    const workspacePath = normalizeWorkspacePath(builder.worktree);
+    const workspacePath = normalizeWorkspacePath(getConfig().workspaceRoot);
 
     const session = db.prepare(`
       SELECT shellper_socket FROM terminal_sessions

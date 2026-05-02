@@ -57,9 +57,10 @@ vi.mock('../utils/logger.js', () => ({
 
 // Mock DB — configurable per test
 const mockDbGet = vi.fn();
+const mockDbAll = vi.fn().mockReturnValue([]);
 vi.mock('../db/index.js', () => ({
   getGlobalDb: () => ({
-    prepare: () => ({ get: mockDbGet }),
+    prepare: () => ({ get: mockDbGet, all: mockDbAll }),
   }),
 }));
 
@@ -126,6 +127,7 @@ describe('attach command', () => {
   beforeEach(() => {
     mockBuilders.length = 0;
     mockDbGet.mockReset();
+    mockDbAll.mockReset().mockReturnValue([]);
     mockExistsSync.mockReset().mockReturnValue(false);
     mockAccessSync.mockReset();
     mockReaddirSync.mockReset().mockReturnValue([]);
@@ -172,6 +174,26 @@ describe('attach command', () => {
       await expect(attach({ issue: 999 })).rejects.toThrow();
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('No builder found for issue #999'));
     });
+
+    // Regression for bugfix #717: when local state.db is empty but Tower's
+    // terminal_sessions table knows about the builder, attach must fall back
+    // to that registry instead of erroring "Builder not found."
+    it('should fall back to Tower terminal_sessions when local state has no match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-bugfix-717',
+          cwd: '/workspace/.builders/bugfix-717',
+          label: 'Bugfix #717',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ issue: 717, browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
   });
 
   describe('findBuilderById', () => {
@@ -215,6 +237,59 @@ describe('attach command', () => {
     });
 
     it('should error when builder not found', async () => {
+      const { attach } = await import('../commands/attach.js');
+      const { fatal } = await import('../utils/logger.js');
+
+      await expect(attach({ project: 'nonexistent' })).rejects.toThrow();
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Builder "nonexistent" not found'));
+    });
+
+    // Regression for bugfix #717: a builder visible in Tower (via
+    // terminal_sessions.role_id) but missing from local state.db must still
+    // be resolvable by `afx attach -p`.
+    it('should fall back to Tower terminal_sessions for exact ID', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-118',
+          cwd: '/workspace/.builders/spir-118',
+          label: '118-feature',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ project: 'builder-spir-118', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('should fall back to Tower terminal_sessions for substring match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-bugfix-717',
+          cwd: '/workspace/.builders/bugfix-717',
+          label: 'Bugfix #717',
+        },
+      ]);
+
+      const { attach } = await import('../commands/attach.js');
+      const { openBrowser } = await import('../utils/shell.js');
+
+      await attach({ project: '717', browser: true });
+
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/workspace/'));
+    });
+
+    it('should error when Tower fallback also has no match', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-100',
+          cwd: '/workspace/.builders/spir-100',
+          label: '100-other',
+        },
+      ]);
+
       const { attach } = await import('../commands/attach.js');
       const { fatal } = await import('../utils/logger.js');
 
@@ -298,7 +373,11 @@ describe('attach command', () => {
       expect(result).toBe('/tmp/shellper-test.sock');
     });
 
-    it('should pass workspace_path and role_id to SQLite query', async () => {
+    // Regression for bugfix #717: terminal_sessions.workspace_path stores
+    // config.workspaceRoot (the workspace ROOT), not the builder's worktree
+    // path. Querying with the worktree would always miss and the fallback
+    // scan could attach to the wrong builder.
+    it('should query SQLite with workspace ROOT, not builder.worktree', async () => {
       const { findShellperSocket } = await import('../commands/attach.js');
 
       mockDbGet.mockReturnValue(undefined);
@@ -315,7 +394,8 @@ describe('attach command', () => {
 
       findShellperSocket(builder);
 
-      expect(mockDbGet).toHaveBeenCalledWith('/workspace/.builders/spir-118', 'spir-118');
+      // Mock config.workspaceRoot is '/test/workspace' (see top of file).
+      expect(mockDbGet).toHaveBeenCalledWith('/test/workspace', 'spir-118');
     });
 
     it('should return null when no socket found in DB or filesystem', async () => {
@@ -563,6 +643,44 @@ describe('attach command', () => {
 
       await expect(attach({ project: '0116' })).rejects.toThrow();
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('No shellper socket found'));
+    });
+
+    // Regression for bugfix #717: end-to-end terminal-mode attach when the
+    // builder is only in Tower's terminal_sessions (not local state.db) —
+    // must locate the right shellper socket via the SQLite lookup, not the
+    // first-socket-found scan.
+    it('should attach to Tower-only builder using its socket from SQLite', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-118',
+          cwd: '/workspace/.builders/spir-118',
+          label: '118-feature',
+        },
+      ]);
+      mockDbGet.mockReturnValue({ shellper_socket: '/tmp/shellper-118.sock' });
+      mockExistsSync.mockImplementation((p) => p === '/tmp/shellper-118.sock');
+
+      // Make attachTerminal exit immediately so the test doesn't hang.
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('process.exit called');
+      }) as never);
+      mockShellperConnect.mockImplementation(() => {
+        throw new Error('attachTerminal aborted for test');
+      });
+
+      const { attach } = await import('../commands/attach.js');
+      const { fatal } = await import('../utils/logger.js');
+
+      await expect(attach({ project: 'builder-spir-118' })).rejects.toThrow();
+
+      // Tower fallback must have been queried.
+      expect(mockDbAll).toHaveBeenCalled();
+      // SQLite socket lookup must use workspace ROOT + role_id.
+      expect(mockDbGet).toHaveBeenCalledWith('/test/workspace', 'builder-spir-118');
+      // We should fail on the connect step (socket was found), not "no socket".
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Failed to attach'));
+
+      exitSpy.mockRestore();
     });
   });
 });
