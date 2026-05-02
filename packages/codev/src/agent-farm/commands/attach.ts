@@ -214,10 +214,14 @@ async function displayBuilderList(): Promise<void> {
  * 2. Fallback: scan ~/.codev/run/shellper-*.sock
  */
 export function findShellperSocket(builder: Builder): string | null {
-  // 1. Try SQLite lookup
+  // 1. Try SQLite lookup. terminal_sessions.workspace_path is the workspace
+  // ROOT (set to config.workspaceRoot at spawn time), not the builder's
+  // worktree path — querying by builder.worktree would never match. Without
+  // this scoping, the fallback scan below could attach to the wrong builder
+  // when multiple shellper sockets exist.
   try {
     const db = getGlobalDb();
-    const workspacePath = normalizeWorkspacePath(builder.worktree);
+    const workspacePath = normalizeWorkspacePath(getConfig().workspaceRoot);
 
     const session = db.prepare(`
       SELECT shellper_socket FROM terminal_sessions

@@ -373,7 +373,11 @@ describe('attach command', () => {
       expect(result).toBe('/tmp/shellper-test.sock');
     });
 
-    it('should pass workspace_path and role_id to SQLite query', async () => {
+    // Regression for bugfix #717: terminal_sessions.workspace_path stores
+    // config.workspaceRoot (the workspace ROOT), not the builder's worktree
+    // path. Querying with the worktree would always miss and the fallback
+    // scan could attach to the wrong builder.
+    it('should query SQLite with workspace ROOT, not builder.worktree', async () => {
       const { findShellperSocket } = await import('../commands/attach.js');
 
       mockDbGet.mockReturnValue(undefined);
@@ -390,7 +394,8 @@ describe('attach command', () => {
 
       findShellperSocket(builder);
 
-      expect(mockDbGet).toHaveBeenCalledWith('/workspace/.builders/spir-118', 'spir-118');
+      // Mock config.workspaceRoot is '/test/workspace' (see top of file).
+      expect(mockDbGet).toHaveBeenCalledWith('/test/workspace', 'spir-118');
     });
 
     it('should return null when no socket found in DB or filesystem', async () => {
@@ -638,6 +643,44 @@ describe('attach command', () => {
 
       await expect(attach({ project: '0116' })).rejects.toThrow();
       expect(fatal).toHaveBeenCalledWith(expect.stringContaining('No shellper socket found'));
+    });
+
+    // Regression for bugfix #717: end-to-end terminal-mode attach when the
+    // builder is only in Tower's terminal_sessions (not local state.db) —
+    // must locate the right shellper socket via the SQLite lookup, not the
+    // first-socket-found scan.
+    it('should attach to Tower-only builder using its socket from SQLite', async () => {
+      mockDbAll.mockReturnValue([
+        {
+          role_id: 'builder-spir-118',
+          cwd: '/workspace/.builders/spir-118',
+          label: '118-feature',
+        },
+      ]);
+      mockDbGet.mockReturnValue({ shellper_socket: '/tmp/shellper-118.sock' });
+      mockExistsSync.mockImplementation((p) => p === '/tmp/shellper-118.sock');
+
+      // Make attachTerminal exit immediately so the test doesn't hang.
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('process.exit called');
+      }) as never);
+      mockShellperConnect.mockImplementation(() => {
+        throw new Error('attachTerminal aborted for test');
+      });
+
+      const { attach } = await import('../commands/attach.js');
+      const { fatal } = await import('../utils/logger.js');
+
+      await expect(attach({ project: 'builder-spir-118' })).rejects.toThrow();
+
+      // Tower fallback must have been queried.
+      expect(mockDbAll).toHaveBeenCalled();
+      // SQLite socket lookup must use workspace ROOT + role_id.
+      expect(mockDbGet).toHaveBeenCalledWith('/test/workspace', 'builder-spir-118');
+      // We should fail on the connect step (socket was found), not "no socket".
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('Failed to attach'));
+
+      exitSpy.mockRestore();
     });
   });
 });
