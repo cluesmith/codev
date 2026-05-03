@@ -14,7 +14,7 @@ export interface Builder {
   type: BuilderType;
   taskText?: string;      // For task mode (display in dashboard)
   protocolName?: string;  // For protocol mode
-  issueNumber?: number;   // For bugfix mode
+  issueNumber?: number | string;   // For bugfix mode
   terminalId?: string;    // Terminal session ID
 }
 
@@ -63,8 +63,8 @@ export interface StartOptions {
 }
 
 export interface SpawnOptions {
-  // Primary input: issue number as positional arg
-  issueNumber?: number;   // Positional arg: `afx spawn 315`
+  // Primary input: issue identifier as positional arg
+  issueNumber?: number | string;   // Positional arg: `afx spawn 315` or `afx spawn ENG-123`
 
   // Protocol selection (required for issue-based spawns)
   protocol?: string;      // --protocol spir|aspir|air|bugfix|maintain|experiment

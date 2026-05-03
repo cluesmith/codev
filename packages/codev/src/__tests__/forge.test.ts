@@ -427,11 +427,12 @@ describe('loadForgeConfig', () => {
 // =============================================================================
 
 describe('provider presets', () => {
-  it('returns known providers', () => {
+  it('returns known providers including linear', () => {
     const providers = getKnownProviders();
     expect(providers).toContain('github');
     expect(providers).toContain('gitlab');
     expect(providers).toContain('gitea');
+    expect(providers).toContain('linear');
   });
 
   it('uses provider preset when no manual override', () => {
@@ -470,6 +471,43 @@ describe('provider presets', () => {
     const results = validateForgeConfig({ provider: 'gitlab' });
     expect(results[0].status).toBe('provider');
     expect(results[0].message).toContain('gitlab');
+  });
+
+  it('linear provider uses linear scripts for concepts with scripts', () => {
+    const config = { provider: 'linear' };
+    const cmd = getForgeCommand('issue-view', config);
+    expect(cmd).toContain('scripts/forge/linear/issue-view.sh');
+  });
+
+  it('linear provider falls through to github default for concepts without scripts', () => {
+    const config = { provider: 'linear' };
+    const cmd = getForgeCommand('pr-list', config);
+    expect(cmd).toContain('scripts/forge/github/pr-list.sh');
+  });
+
+  it('linear provider omits (not nulls) concepts without scripts so they fall through', () => {
+    const config = { provider: 'linear' };
+    const resolutions = resolveAllConcepts(config);
+    const prList = resolutions.find(r => r.concept === 'pr-list');
+    // pr-list has no linear script — should fall through to default, NOT be disabled
+    expect(prList?.source).toBe('default');
+    expect(prList?.command).toContain('github/pr-list.sh');
+  });
+
+  it('linear provider disables explicitly disabled concepts', () => {
+    const config = { provider: 'linear' };
+    const resolutions = resolveAllConcepts(config);
+    const teamActivity = resolutions.find(r => r.concept === 'team-activity');
+    expect(teamActivity?.source).toBe('disabled');
+    expect(teamActivity?.command).toBeNull();
+  });
+
+  it('linear provider resolves issue-view as preset', () => {
+    const config = { provider: 'linear' };
+    const resolutions = resolveAllConcepts(config);
+    const issueView = resolutions.find(r => r.concept === 'issue-view');
+    expect(issueView?.source).toBe('preset');
+    expect(issueView?.command).toContain('linear/issue-view.sh');
   });
 });
 

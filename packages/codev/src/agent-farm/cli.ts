@@ -192,7 +192,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   const spawnCmd = program
     .command('spawn')
     .description('Spawn a new builder')
-    .argument('[number]', 'Issue number (positional)')
+    .argument('[identifier]', 'Issue identifier (positional, e.g. 315 or ENG-123)')
     .option('--protocol <name>', 'Protocol to use (spir, aspir, air, bugfix, maintain, experiment)')
     .option('--task <text>', 'Spawn builder with a task description')
     .option('--shell', 'Spawn a bare Claude session')
@@ -227,10 +227,17 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       const { spawn } = await import('./commands/spawn.js');
       try {
         const files = options.files ? (options.files as string).split(',').map((f: string) => f.trim()) : undefined;
-        const issueNumber = numberArg ? parseInt(numberArg, 10) : undefined;
-        if (numberArg && (isNaN(issueNumber!) || issueNumber! <= 0)) {
-          logger.error(`Invalid issue number: ${numberArg}`);
-          process.exit(1);
+        let issueNumber: number | string | undefined;
+        if (numberArg) {
+          const parsed = parseInt(numberArg, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            issueNumber = parsed;
+          } else if (/^[A-Z]+-\d+$/i.test(numberArg)) {
+            issueNumber = numberArg;
+          } else {
+            logger.error(`Invalid issue identifier: ${numberArg}`);
+            process.exit(1);
+          }
         }
         const amends = options.amends ? parseInt(options.amends as string, 10) : undefined;
         await spawn({

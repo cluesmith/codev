@@ -102,14 +102,14 @@ function issueItem(number: number, title: string, labels: Array<{ name: string }
 }
 
 /** Create a state.db in the workspace's .agent-farm/ with builder issue_number rows. */
-function createStateDb(root: string, rows: Array<{ worktree: string; issue_number: number }>): void {
+function createStateDb(root: string, rows: Array<{ worktree: string; issue_number: number | string }>): void {
   const agentFarmDir = path.join(root, '.agent-farm');
   fs.mkdirSync(agentFarmDir, { recursive: true });
   const db = new Database(path.join(agentFarmDir, 'state.db'));
-  db.exec('CREATE TABLE IF NOT EXISTS builders (worktree TEXT, issue_number INTEGER)');
+  db.exec('CREATE TABLE IF NOT EXISTS builders (worktree TEXT, issue_number TEXT)');
   const insert = db.prepare('INSERT INTO builders (worktree, issue_number) VALUES (?, ?)');
   for (const row of rows) {
-    insert.run(row.worktree, row.issue_number);
+    insert.run(row.worktree, String(row.issue_number));
   }
   db.close();
 }

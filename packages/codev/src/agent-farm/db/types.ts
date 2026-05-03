@@ -34,7 +34,7 @@ export interface DbBuilder {
   type: string;
   task_text: string | null;
   protocol_name: string | null;
-  issue_number: number | null;
+  issue_number: string | null;
   terminal_id: string | null;
   started_at: string;
   updated_at: string;

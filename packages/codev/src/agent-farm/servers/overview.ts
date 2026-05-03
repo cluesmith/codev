@@ -710,7 +710,7 @@ export class OverviewCache {
         try {
           const rows = db.prepare(
             'SELECT worktree, issue_number FROM builders WHERE issue_number IS NOT NULL',
-          ).all() as Array<{ worktree: string; issue_number: number }>;
+          ).all() as Array<{ worktree: string; issue_number: string }>;
           for (const row of rows) {
             const builder = builders.find(b => b.worktreePath === row.worktree);
             if (builder) {

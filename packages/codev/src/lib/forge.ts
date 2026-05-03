@@ -94,7 +94,8 @@ function getDefaultCommands(): Record<string, string> {
 
 /**
  * Build a provider preset from on-disk scripts.
- * Concepts without a script file are null (disabled).
+ * Concepts without a script file are omitted (fall through to default).
+ * Explicitly disabled concepts are set to null.
  */
 function buildPresetFromScripts(provider: string, disabledConcepts: string[] = []): Record<string, string | null> {
   const preset: Record<string, string | null> = {};
@@ -106,8 +107,6 @@ function buildPresetFromScripts(provider: string, disabledConcepts: string[] = [
     const scriptPath = resolveScriptPath(provider, concept);
     if (existsSync(scriptPath)) {
       preset[concept] = scriptPath;
-    } else {
-      preset[concept] = null;
     }
   }
   return preset;
@@ -128,6 +127,7 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     github: getDefaultCommands(),
     gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
     gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
   };
   return _providerPresets;
 }
@@ -314,10 +314,12 @@ export async function executeForgeCommand(
     return null;
   }
 
+  const forgeEnv = buildForgeEnv(forgeConfig);
+
   try {
     const { stdout } = await execAsync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...forgeEnv, ...env },
       timeout: 30_000,
       maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
     });
@@ -347,10 +349,12 @@ export function executeForgeCommandSync(
     return null;
   }
 
+  const forgeEnv = buildForgeEnv(forgeConfig);
+
   try {
     const stdout = execSync(command, {
       cwd: options?.cwd,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...forgeEnv, ...env },
       encoding: 'utf-8',
       timeout: 30_000,
       maxBuffer: options?.maxBuffer ?? DEFAULT_MAX_BUFFER,
@@ -367,6 +371,23 @@ export function executeForgeCommandSync(
 // =============================================================================
 // Internal helpers
 // =============================================================================
+
+const _knownConceptSet = new Set<string>(KNOWN_CONCEPTS);
+
+/**
+ * Build environment variables from non-concept forge config keys.
+ * E.g., `forge.linear-team: "ENG"` → `CODEV_LINEAR_TEAM=ENG`.
+ */
+function buildForgeEnv(forgeConfig: ForgeConfig | null): Record<string, string> {
+  if (!forgeConfig) return {};
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(forgeConfig)) {
+    if (key === 'provider' || _knownConceptSet.has(key) || value === null) continue;
+    const envKey = 'CODEV_' + key.toUpperCase().replace(/-/g, '_');
+    result[envKey] = value;
+  }
+  return result;
+}
 
 /** Parse command stdout: try JSON when raw=false (null on parse failure), raw string otherwise. */
 function parseOutput(stdout: string, raw?: boolean): unknown | null {
