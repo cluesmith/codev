@@ -758,9 +758,15 @@ Agent Farm is designed for local development use only. Understanding the securit
 
 #### Network Binding
 
-All services bind to `localhost` only:
+All services bind to `localhost` by default:
 - Tower server + Dashboard + WebSocket terminals: `127.0.0.1:4100`
 - No external network exposure
+
+The Tower bind address can be overridden via `TOWER_HOST` environment variable
+(e.g., `TOWER_HOST=0.0.0.0` for all network interfaces). Accepted values are
+`127.0.0.1` (default), `0.0.0.0`, `localhost`, valid IPv4 literals, and
+bracketed IPv6 literals (e.g., `[::1]`). Hostname resolution is not supported;
+only IP literals are accepted.
 
 #### Authentication
 
@@ -769,7 +775,7 @@ All services bind to `localhost` only:
 - Terminal WebSocket endpoints have no authentication
 - All processes share the user's permissions
 
-**Justification**: Since all services bind to localhost, only processes running as the same user can connect. External network access is blocked at the binding level.
+**Justification**: Since all services bind to localhost by default, only processes running as the same user can connect. External network access is blocked at the binding level. If `TOWER_HOST` is set to `0.0.0.0`, ensure your firewall restricts access accordingly.
 
 #### Request Validation
 

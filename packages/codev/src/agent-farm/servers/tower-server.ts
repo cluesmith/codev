@@ -50,6 +50,7 @@ import {
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { validateHost } from '../utils/server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +76,11 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_TOWER_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
+
+// Resolve bind host: TOWER_HOST env var (for containerized setups) or default to localhost.
+// The spawned tower-server process inherits process.env from the afx CLI, so no CLI
+// flag plumbing is needed — set TOWER_HOST=0.0.0.0 in your environment or docker-compose.
+const bindHost = validateHost(process.env.TOWER_HOST || '127.0.0.1');
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -317,9 +323,12 @@ const server = http.createServer(async (req, res) => {
   await handleRequest(req, res, routeCtx);
 });
 
-// SECURITY: Bind to localhost only to prevent network exposure
-server.listen(port, '127.0.0.1', async () => {
-  log('INFO', `Tower server listening at http://localhost:${port}`);
+// SECURITY: Bind to configured host (default 127.0.0.1 for localhost-only).
+// Set TOWER_HOST env var to override (e.g., 0.0.0.0 for all network interfaces).
+server.listen(port, bindHost, async () => {
+  // Display localhost in URLs for local UX even when bound to 0.0.0.0.
+  const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
+  log('INFO', `Tower server listening at http://${displayHost}:${port}`);
 
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');

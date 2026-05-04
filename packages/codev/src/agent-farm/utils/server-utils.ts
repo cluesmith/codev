@@ -80,3 +80,49 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
 export function isRequestAllowed(_req: http.IncomingMessage): boolean {
   return true;
 }
+/**
+ * Validate a bind host value for server.listen().
+ *
+ * Accepts 127.0.0.1, 0.0.0.0, localhost, valid IPv4, and bracketed IPv6.
+ * Returns the validated host string, or throws on invalid input.
+ *
+ * Used by tower-server.ts to resolve TOWER_HOST.
+ *
+ * @param host - The bind host string (e.g., from TOWER_HOST env var)
+ * @returns The validated/trimmed host string
+ * @throws Error with a clear message if the host is invalid
+ */
+export function validateHost(host: string): string {
+  if (!host || host.trim().length === 0) {
+    throw new Error(
+      'Invalid bind host "". ' +
+        'Accepted values: 127.0.0.1 (default), 0.0.0.0, localhost, ' +
+        'or a valid IPv4/IPv6 literal.',
+    );
+  }
+  const h = host.trim();
+
+  // Allow common literals
+  if (h === '127.0.0.1' || h === '0.0.0.0' || h === 'localhost') {
+    return h;
+  }
+
+  // IPv4: four octets 0-255
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(h)) {
+    const parts = h.split('.').map(Number);
+    if (parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255)) {
+      return h;
+    }
+  }
+
+  // Bracketed IPv6 (e.g., [::1], [::])
+  if (/^\[.+\]$/.test(h)) {
+    return h;
+  }
+
+  throw new Error(
+    `Invalid bind host "${h}". ` +
+      'Accepted values: 127.0.0.1 (default), 0.0.0.0, localhost, ' +
+      'or a valid IPv4/IPv6 literal.',
+  );
+}

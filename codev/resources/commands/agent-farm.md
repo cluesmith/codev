@@ -460,6 +460,9 @@ afx tower start [options]
 **Options:**
 - `-p, --port <port>` - Port to run on (default: 4100)
 
+**Environment Variables:**
+- `TOWER_HOST` - Bind address (default: `127.0.0.1`). Set to `0.0.0.0` for all network interfaces. Accepts IP literals only (no hostnames).
+
 #### afx tower stop
 
 Stop the tower dashboard.
