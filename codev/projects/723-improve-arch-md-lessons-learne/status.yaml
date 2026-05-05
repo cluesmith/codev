@@ -11,27 +11,13 @@ gates:
     approved_at: '2026-05-05T12:17:24.557Z'
   plan-approval:
     status: pending
+    requested_at: '2026-05-05T12:26:08.921Z'
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-plan-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-plan-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-plan-iter1-claude.txt
+build_complete: false
+history: []
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T12:26:07.702Z'
+updated_at: '2026-05-05T12:26:08.921Z'
