@@ -23,7 +23,7 @@ Inherited from spec; reorganized by phase below. Top-level rollup:
 
 - [ ] All deterministic Success Criteria from the spec pass (skill literal-content checks, template parity, protocol parity).
 - [ ] `diff -r` shows zero output across every touched skeleton/codev pair.
-- [ ] Scaffold tests pass: `pnpm --filter @cluesmith/codev test -- --testPathPatterns=scaffold`.
+- [ ] Scaffold tests pass: `pnpm --filter @cluesmith/codev test -- scaffold`.
 - [ ] `codev init` smoke test in a tmp directory produces all the new artifacts.
 - [ ] Self-consistency check against `codev/resources/arch.md` lists ≥3 candidate-cut categories in the review document.
 - [ ] PR description contains the post-merge cutover note (`rm ~/.claude/agents/architecture-documenter.md`).
@@ -49,7 +49,9 @@ Inherited from spec; reorganized by phase below. Top-level rollup:
 
 - Author the `update-arch-docs` skill — the keystone artifact that owns documenter discipline.
 - Author the new arch.md template (with inline preface) and lessons-learned.md template (with preface).
-- Land the four template files and two skill files in both `codev/` and `codev-skeleton/`, byte-identical.
+- Land each artifact in both its self-hosted location and its skeleton location, byte-identical. Specifically:
+  - The skill lives at **repo-root** `.claude/skills/update-arch-docs/SKILL.md` (not under `codev/`) and at `codev-skeleton/.claude/skills/update-arch-docs/SKILL.md`.
+  - The templates live at `codev/templates/<file>.md` and `codev-skeleton/templates/<file>.md`.
 
 #### Deliverables
 
@@ -73,7 +75,7 @@ Inherited from spec; reorganized by phase below. Top-level rollup:
   - `## arch.md vs. lessons-learned.md (two-doc framing)` — arch.md owns system shape, unique mechanism, pointers; lessons-learned.md owns durable engineering wisdom; system-shape surprises ("looks like X but isn't") live in arch.md not lessons-learned.md.
   - `## Sizing by purpose, not by line count` — purpose-driven sizing guidance; no hard line budgets.
   - `## Mode: diff-mode (apply a specific change)` — apply the smallest section update; surface the proposed diff.
-  - `## Mode: audit-mode (identify what to cut)` — read against principles; produce a candidate-cuts list with reasons; the skill *may* directly edit the files via Edit tooling in audit-mode but must surface reasons alongside the diff so PR review can evaluate intent.
+  - `## Mode: audit-mode (identify what to cut)` — read against principles; produce a candidate-cuts list with reasons; the skill *may* directly edit the files via Edit tooling in audit-mode but must surface reasons alongside the diff so PR review can evaluate intent. **Echo the existing MAINTAIN "when in doubt, KEEP" rule explicitly** so audit-mode does not over-prune; bias toward fewer, higher-confidence cuts with rationale, not maximal aggression.
   - `## Output contract` — codifies: skill edits files via Edit tooling; never invokes destructive shell commands; in audit-mode surfaces *reasons* alongside the diff.
 
 **arch.md template** — required structure:
@@ -118,7 +120,7 @@ Inherited from spec; reorganized by phase below. Top-level rollup:
 #### Test Plan
 
 - **Unit Tests**: None applicable (Phase 1 changes are docs/skill prose only).
-- **Integration Tests**: `pnpm --filter @cluesmith/codev test -- --testPathPatterns=scaffold` still passes (Phase 1 does not touch scaffold logic, but we verify).
+- **Integration Tests**: `pnpm --filter @cluesmith/codev test -- scaffold` still passes (positional argument; Vitest does not accept `--testPathPatterns`). Phase 1 does not touch scaffold logic, but we verify.
 - **Manual Testing**:
   1. `cat .claude/skills/update-arch-docs/SKILL.md` — visually confirm structure.
   2. `grep -E "^## " codev/templates/arch.md` — confirm all expected section headings.
@@ -158,19 +160,20 @@ Each artifact is a new file or a self-contained replacement. To roll back: `git 
 
 **MAINTAIN protocol edits** (applied to both `codev/protocols/maintain/protocol.md` and `codev-skeleton/protocols/maintain/protocol.md`, kept byte-identical):
 
-1. **Add a "Lives where" matrix** to the protocol overview area (probably a new subsection under "Key Documents MAINTAIN keeps current"). The matrix routes facts/insights to the right home. Starter rows from the issue, plus refinements during implementation:
+1. **Add a "Lives where" matrix** to the protocol overview area as a new subsection ("Lives where: routing facts to the right home") under "Key Documents MAINTAIN keeps current". The matrix routes each fact/insight to a single canonical home. The exact rows below are **locked at plan-approval time** (per the spec's open question — no further refinement during implementation):
 
    | Type of fact/insight | Lives in |
    |---|---|
-   | Current system shape (services, transports, mental models) | arch.md |
-   | Mechanism for a unique subsystem | arch.md (subsystem section) OR a meta-spec under `codev/architecture/<domain>.md` |
-   | A durable engineering pattern that applies across specs | lessons-learned.md |
-   | A spec-narrow fix recipe | Spec review only |
-   | A system-shape surprise verified-wrong in production | arch.md § Verified-Wrong Assumptions |
-   | Aspirational architectural direction | The relevant meta-spec, NOT arch.md body |
-   | A changelog of "we shipped X in spec Y on date Z" | git log + spec review |
+   | Current system shape (services, transports, key mental models) | `codev/resources/arch.md` |
+   | Mechanism for a unique subsystem | `codev/resources/arch.md` (subsystem section) OR a meta-spec under `codev/architecture/<domain>.md` if the mechanism is large enough to warrant its own doc |
+   | A durable engineering pattern that applies across multiple specs | `codev/resources/lessons-learned.md` |
+   | A spec-narrow fix recipe (only relevant inside the originating feature) | Spec review only — does NOT belong in `lessons-learned.md` |
+   | A system-shape surprise verified-wrong in production ("looks like X but isn't") | `codev/resources/arch.md` § "Verified-Wrong Assumptions" |
+   | Aspirational architectural direction (where we want to go) | The relevant meta-spec or roadmap doc, NOT `arch.md` body |
+   | A changelog entry ("we shipped X in spec Y on date Z") | `git log` + the spec/review document — NOT `arch.md`, NOT `lessons-learned.md` |
+   | A retired or removed component | Delete the section entirely; do NOT keep a "retired components" graveyard. (`git log` retains history.) |
 
-   Final exact rows are locked at plan-approval time per the spec's open question.
+   Eight rows total; the eighth (retired components) is added beyond the issue's starter list to address the "graveyard" pattern visible in the live `arch.md`.
 
 2. **Split Step 3 ("Sync Documentation") into 3a (Audit) and 3b (Update)**:
    - **Step 3a — Audit documentation**: invoke the `update-arch-docs` skill in audit-mode. Produce a candidate-cuts list against the per-arch.md-section pruning checklist and per-lessons-learned.md-entry pruning checklist. Record findings in the run file (`codev/maintain/NNNN.md`) under a new `## Audit Findings` section before any edits land.
@@ -202,9 +205,29 @@ Each artifact is a new file or a self-contained replacement. To roll back: `git 
    - `diff codev/protocols/maintain/protocol.md codev-skeleton/protocols/maintain/protocol.md`
    - `diff -r .claude/skills/update-arch-docs/ codev-skeleton/.claude/skills/update-arch-docs/`
 2. Skill literal-content check — verify required frontmatter phrases and body sections (re-run from Phase 1; defends against regressions).
-3. Scaffold tests — `pnpm --filter @cluesmith/codev test -- --testPathPatterns=scaffold` (run in background; reasonable timeout 120s).
-4. `codev init` smoke test — `node packages/codev/dist/cli.js init /tmp/codev-723-smoke 2>&1` (or equivalent), then verify the new arch.md, new lessons-learned.md, and the new skill landed in the scratch project. Clean up the scratch directory.
-5. Skill propagation via `codev update` — in a separate scratch project that has Codev already installed, run `codev update` and verify `.claude/skills/update-arch-docs/SKILL.md` appears.
+3. Scaffold tests — `pnpm --filter @cluesmith/codev test -- scaffold` (positional argument; Vitest does not support `--testPathPatterns`). Run in background; reasonable timeout 120s.
+4. `codev init` smoke test — explicit command sequence:
+   ```bash
+   pnpm --filter @cluesmith/codev build      # Phase 2 must build first; dist/ is not present in worktree
+   mkdir -p /tmp/codev-723-smoke
+   node packages/codev/dist/cli.js init /tmp/codev-723-smoke
+   ```
+   Then verify:
+   - `cat /tmp/codev-723-smoke/codev/resources/arch.md` — matches the new richer template (grep for the "Updating This Document" preface marker).
+   - `cat /tmp/codev-723-smoke/codev/resources/lessons-learned.md` — has the new preface (grep for "what NOT to add").
+   - `ls /tmp/codev-723-smoke/.claude/skills/update-arch-docs/SKILL.md` — exists.
+   Then `rm -rf /tmp/codev-723-smoke`.
+   **Fallback if `pnpm build` fails or dist invocation breaks**: verify the skeleton template content directly: `cat codev-skeleton/templates/arch.md` and confirm the preface and section stubs are present. (The smoke test's purpose is to verify the templates are correct; reading the skeleton template directly demonstrates the same thing without exercising the propagation pipeline.)
+5. Skill propagation via `codev update` — explicit command sequence:
+   ```bash
+   pnpm --filter @cluesmith/codev build      # if not already built in step 4
+   mkdir -p /tmp/codev-723-update
+   node packages/codev/dist/cli.js init /tmp/codev-723-update
+   rm -rf /tmp/codev-723-update/.claude/skills/update-arch-docs   # simulate "existing project missing the new skill"
+   (cd /tmp/codev-723-update && node /Users/mwk/Development/cluesmith/codev/.builders/spir-723/packages/codev/dist/cli.js update)
+   ls /tmp/codev-723-update/.claude/skills/update-arch-docs/SKILL.md   # should now exist again
+   rm -rf /tmp/codev-723-update
+   ```
 6. Self-consistency check — invoke `update-arch-docs` in audit-mode against `codev/resources/arch.md`. Capture at least three categories of candidate cuts in the review document. **Do not apply the cuts** — that's a separate MAINTAIN run, out of scope per the spec.
 7. Manual smoke test of skill discovery — invoke `/update-arch-docs` and confirm it surfaces. Note the result in the review.
 
@@ -229,7 +252,7 @@ Each artifact is a new file or a self-contained replacement. To roll back: `git 
 
 #### Test Plan
 
-- **Unit Tests**: `pnpm --filter @cluesmith/codev test -- --testPathPatterns=scaffold`.
+- **Unit Tests**: `pnpm --filter @cluesmith/codev test -- scaffold`.
 - **Integration Tests**: `codev init` smoke test (covered above). Skill propagation via `codev update` (covered above).
 - **Manual Testing**: Skill discovery (manual `/update-arch-docs` invocation). Audit-mode self-consistency check against live arch.md.
 
@@ -336,9 +359,25 @@ Inherited from spec's Out-of-Scope; not part of this work but explicitly enumera
 
 **Date**: 2026-05-05
 **Models**: Gemini 3 Pro, GPT-5.4 Codex, Claude (3-way via `consult`)
-**Key Feedback**: To be filled in after consultation round.
+**Verdicts**: Gemini APPROVE (HIGH), Codex REQUEST_CHANGES (HIGH), Claude APPROVE (HIGH)
 
-**Plan Adjustments**: To be filled in after consultation.
+**Key Feedback**:
+
+- *Codex (REQUEST_CHANGES)*:
+  1. Lock down "Lives where" matrix rows in the plan — don't defer.
+  2. `codev init` smoke test command underspecified; `packages/codev/dist/cli.js` is not present in the worktree.
+  3. Phase 1 wording incorrectly implies all self-hosted artifacts live under `codev/`; the new skill actually lives at repo-root `.claude/skills/`.
+- *Gemini (APPROVE)*: Vitest CLI doesn't accept `--testPathPatterns`; pass `scaffold` as a positional argument instead. Scaffold tests use mock dirs, so template content changes are safe.
+- *Claude (APPROVE)*: All spec coverage verified. Audit-mode prose should echo the existing MAINTAIN "when in doubt, KEEP" rule so audits don't over-prune. Skill propagation test setup needs a clear command sequence.
+
+**Plan Adjustments**:
+
+- Locked the "Lives where" matrix rows in Phase 2 — eight rows total, expanded one beyond the issue's starter list (added the "retired component" row to address the graveyard pattern visible in the live `arch.md`).
+- Replaced the underspecified `codev init` smoke test with an explicit command sequence that includes `pnpm --filter @cluesmith/codev build` first; added a fallback (direct skeleton-template `cat`) if the build path breaks.
+- Tightened Phase 1 deliverables to call out that the self-hosted skill lives at **repo-root** `.claude/skills/update-arch-docs/SKILL.md`, not under `codev/`.
+- Replaced `--testPathPatterns=scaffold` with `scaffold` (positional) in all four occurrences.
+- Added explicit instruction in the skill's `## Mode: audit-mode` section to echo "when in doubt, KEEP" from the existing MAINTAIN rules.
+- Spelled out the skill-propagation-via-`codev update` test as a concrete command sequence (init scratch project, delete the new skill, run update, verify it returns).
 
 ## Approval
 
