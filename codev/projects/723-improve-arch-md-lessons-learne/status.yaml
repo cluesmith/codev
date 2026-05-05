@@ -1,7 +1,7 @@
 id: '723'
 title: improve-arch-md-lessons-learne
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T12:17:24.558Z'
+updated_at: '2026-05-05T12:18:21.870Z'
