@@ -1,8 +1,13 @@
+---
+approved: 2026-05-05
+validated: [gemini, codex, claude]
+---
+
 # Plan: Improve arch.md / lessons-learned.md governance
 
 ## Metadata
 - **ID**: plan-2026-05-05-723-arch-md-governance
-- **Status**: draft
+- **Status**: approved
 - **Specification**: `codev/specs/723-improve-arch-md-lessons-learne.md`
 - **Created**: 2026-05-05
 
