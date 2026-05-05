@@ -59,4 +59,9 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_2-iter1-claude.txt
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T14:43:46.051Z'
+updated_at: '2026-05-05T14:46:35.501Z'
+pr_history:
+  - phase: review
+    pr_number: 724
+    branch: builder/spir-723
+    created_at: '2026-05-05T14:46:35.501Z'
