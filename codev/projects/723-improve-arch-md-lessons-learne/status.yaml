@@ -1,15 +1,15 @@
 id: '723'
 title: improve-arch-md-lessons-learne
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: 'Authored artifacts: skill + templates'
     status: complete
   - id: phase_2
     title: Wire into MAINTAIN + verify
-    status: in_progress
-current_plan_phase: phase_2
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -24,7 +24,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -59,4 +59,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_2-iter1-claude.txt
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T14:43:33.172Z'
+updated_at: '2026-05-05T14:43:46.051Z'
