@@ -77,10 +77,14 @@ const portArg = opts.port || args[0] || String(DEFAULT_TOWER_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
 
-// Resolve bind host: TOWER_HOST env var (for containerized setups) or default to localhost.
-// The spawned tower-server process inherits process.env from the afx CLI, so no CLI
-// flag plumbing is needed — set TOWER_HOST=0.0.0.0 in your environment or docker-compose.
-const bindHost = validateHost(process.env.TOWER_HOST || '127.0.0.1');
+// Bridge mode: Tower binds to non-localhost when explicitly enabled.
+// BRIDGE_MODE=1 is the opt-in flag; without it, no non-localhost bind is possible.
+// BRIDGE_TOWER_HOST specifies the bind address when bridge mode is enabled
+// (default: 127.0.0.1 — the spawned tower-server inherits process.env from the afx CLI).
+const bridgeMode = process.env.BRIDGE_MODE === '1';
+const bindHost = bridgeMode
+  ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
+  : '127.0.0.1';
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -324,9 +328,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 // SECURITY: Bind to configured host (default 127.0.0.1 for localhost-only).
-// Set TOWER_HOST env var to override (e.g., 0.0.0.0 for all network interfaces).
+// Bridge mode enables non-localhost binding when BRIDGE_MODE=1 is set.
 server.listen(port, bindHost, async () => {
-  // Display localhost in URLs for local UX even when bound to 0.0.0.0.
+  if (bridgeMode) {
+    log('WARN', `Bridge mode is ENABLED — Tower is listening on ${bindHost} network interfaces.`);
+  }
+  // Display localhost in URLs for local UX even when bound to all interfaces.
   const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
   log('INFO', `Tower server listening at http://${displayHost}:${port}`);
 

@@ -86,9 +86,9 @@ export function isRequestAllowed(_req: http.IncomingMessage): boolean {
  * Accepts 127.0.0.1, 0.0.0.0, localhost, valid IPv4, and bracketed IPv6.
  * Returns the validated host string, or throws on invalid input.
  *
- * Used by tower-server.ts to resolve TOWER_HOST.
+ * Used by tower-server.ts to resolve BRIDGE_TOWER_HOST when BRIDGE_MODE=1.
  *
- * @param host - The bind host string (e.g., from TOWER_HOST env var)
+ * @param host - The bind host string (e.g., from BRIDGE_TOWER_HOST env var)
  * @returns The validated/trimmed host string
  * @throws Error with a clear message if the host is invalid
  */
@@ -116,7 +116,7 @@ export function validateHost(host: string): string {
   }
 
   // Bracketed IPv6 (e.g., [::1], [::])
-  if (/^\[.+\]$/.test(h)) {
+  if (/^\[[0-9a-fA-F:]+\]$/.test(h)) {
     return h;
   }
 

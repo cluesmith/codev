@@ -461,7 +461,8 @@ afx tower start [options]
 - `-p, --port <port>` - Port to run on (default: 4100)
 
 **Environment Variables:**
-- `TOWER_HOST` - Bind address (default: `127.0.0.1`). Set to `0.0.0.0` for all network interfaces. Accepts IP literals only (no hostnames).
+- `BRIDGE_MODE=1` — Enable non-localhost binding (required). Without this flag, Tower only binds to `127.0.0.1`.
+- `BRIDGE_TOWER_HOST` — Bind address when bridge mode is enabled (default: `127.0.0.1`). Only consulted when `BRIDGE_MODE=1`. Set to `0.0.0.0` for all network interfaces. Accepts IP literals only (no hostnames). Note: `BRIDGE_TOWER_HOST` has no effect unless `BRIDGE_MODE=1`.
 
 #### afx tower stop
 
