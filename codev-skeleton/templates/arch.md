@@ -115,4 +115,12 @@ Before committing an arch.md change, run through these:
 
 ### Note on propagation
 
-`codev update` does **not** copy templates. The template you're reading lives at `codev/templates/arch.md` and propagates to new projects via `codev init`/`adopt` only. Existing projects that want this richer template need to copy it manually from `codev-skeleton/templates/arch.md`.
+By design, **`codev init`, `codev adopt`, and `codev update` do not copy framework templates** (including this `arch.md` template) into the consuming project's filesystem. They are framework files that resolve at runtime from the installed `@cluesmith/codev` npm package — see `packages/codev/src/commands/init.ts` and `adopt.ts` (the `// Framework files ... are NOT copied` comments).
+
+To opt into this richer template for a project's *living* `codev/resources/arch.md`, copy it manually:
+
+```bash
+cp $(node -p 'require.resolve("@cluesmith/codev/skeleton/templates/arch.md")') codev/resources/arch.md
+```
+
+(Or, if developing inside the codev repo itself, simply `cp codev-skeleton/templates/arch.md codev/resources/arch.md` and edit from there.)
