@@ -115,9 +115,25 @@ All checked items below correspond to the Success Criteria block in the spec:
 - [x] Scaffold tests pass.
 - [x] `codev init` smoke test produces the expected skill artifact (template behavior is pre-existing init limitation, documented above).
 
+## Architecture Updates
+
+**No architecture updates needed for `codev/resources/arch.md`.**
+
+This project changed *governance* documents (templates, the skill, the MAINTAIN protocol). It introduced no new subsystems, no new data flows, no new architectural decisions, no new file locations within `packages/codev/`. The only source-level reference touched was reading `packages/codev/src/lib/scaffold.ts` to verify propagation semantics (`copyResourceTemplates` for templates, `copySkills` for skills) — and even that finding (templates are init-time only, skills propagate via `update`) is already documented inline in the new arch.md template's "Updating This Document" preface and in the spec's Resolved Decisions section.
+
+The new `update-arch-docs` skill is documented in this PR as a first-class artifact; if the live arch.md grew an "Available Skills" section in the future, that's where it would land — but the current arch.md does not maintain such a section, and adding one purely to mention the new skill would itself be the kind of add-bias the spec is fixing.
+
+## Lessons Learned Updates
+
+**No live `codev/resources/lessons-learned.md` updates in this PR.**
+
+The five candidate lessons listed below are recorded in this review document. They are the right inputs for the next MAINTAIN run that uses the new audit-then-update governance — at which point the architect can decide which (if any) belong in lessons-learned.md as durable, cross-spec wisdom and which are spec-narrow recipes that should stay in this review.
+
+This is consistent with the spec's explicit out-of-scope: "no live arch.md / lessons-learned.md content rewritten as part of this spec." Adding entries to the live file in this same PR would undermine the audit-then-update discipline we're shipping.
+
 ## Lessons Learned
 
-(To be reviewed for inclusion in `lessons-learned.md` during the next MAINTAIN run.)
+(Five candidates for inclusion in `lessons-learned.md` during the next MAINTAIN run.)
 
 - **Skill replaces agent — clean cutover beats coexistence.** The original spec proposed running the new skill alongside the user-global `architecture-documenter` agent. Architect feedback collapsed this to a clean replacement; the resulting design is simpler and avoids ambiguity. *General principle*: when introducing a new mechanism that supersedes an old one, prefer cutover over coexistence — coexistence framing accumulates ambiguity that compounds over time.
 
@@ -128,6 +144,108 @@ All checked items below correspond to the Success Criteria block in the spec:
 - **Two homes are simpler than three (architect intervention).** The original design had three places carrying the documenter discipline: the skill, a new `arch-md-guide.md` template, and the MAINTAIN protocol. Architect compressed to two: the skill (discipline content) and the arch.md preface (in-template reminder). Removing the third home cut redundancy without losing any load-bearing content. *General principle*: when discipline content has multiple homes, ask which homes are *load-bearing*; collapse the rest.
 
 - **Pre-existing scaffold behavior shapes the smoke-test scope.** The plan assumed `codev init` would copy resource templates; in fact `init.ts` only copies skills + root files (templates are scaffold-internal, used by `adopt` and tests but not `init`). Caught during Phase 2 verification; documented in the review rather than treated as a bug. *General principle*: when planning verification, read the consumer code — assumptions about pipeline behavior should be code-grounded, not API-name-grounded.
+
+## Consultation Feedback
+
+### Specify Phase (Round 1)
+
+#### Gemini (COMMENT)
+- **Concern**: Spec's "Open Questions" claimed `codev-skeleton/` lacks a `.claude/skills/` directory; this is wrong.
+  - **Addressed**: Removed false claim; verified directory exists and contains 5 skills; moved skeleton-skill-location from "Open Questions" to "Resolved Decisions."
+- **Concern**: Spec under-specifies `lessons-learned.md` template improvements relative to `arch.md`.
+  - **Addressed**: Added explicit Success Criterion for `lessons-learned.md` template (preface + "what NOT to add" + sanity-check checklist).
+- **Concern**: Naming collision between new skill and user-global `architecture-documenter` agent.
+  - **Addressed**: Renamed skill to `update-arch-docs`. Later collapsed further: architect directed clean cutover, removing the coexistence framing entirely.
+- **Concern**: Audit-pass results should be recorded in the `codev/maintain/NNNN.md` run file.
+  - **Addressed**: Added explicit run-file recording requirement to MAINTAIN protocol Step 3a; included `## Audit Findings` section in the run-file template.
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Same factual error about `codev-skeleton/.claude/skills/` as Gemini.
+  - **Addressed**: Same fix.
+- **Concern**: Skill discovery/triggering criteria too fuzzy for acceptance.
+  - **Addressed**: Restructured into deterministic literal-content checks (frontmatter must contain specific phrases; body must contain six specific named sections).
+- **Concern**: lessons-learned.md deliverables weaker than arch.md.
+  - **Addressed**: Same fix as Gemini's.
+- **Concern**: `pnpm build && pnpm test` is too broad a test target.
+  - **Addressed**: Narrowed to scaffold-only test surface.
+- **Concern**: Skill should be guidance-only, no destructive command suggestions.
+  - **Addressed**: Added "guidance-only" constraint, later relaxed by architect to "no destructive shell commands" (rm -rf, git rm, destructive sed) — direct file edits via Edit tool are expected and reviewed in PR diff.
+
+#### Claude (COMMENT)
+- **Concern**: Skeleton-skill propagation question (already answerable; verified `copySkills` runs in `codev update`).
+  - **Addressed**: Same fix as Gemini/Codex.
+- **Concern**: Naming collision with user-global agent.
+  - **Addressed**: Same as Gemini's.
+- **Concern**: Template propagation semantics unclear (does `codev update` overwrite templates?).
+  - **Addressed**: Verified `copyResourceTemplates` is not called from `update`; documented in Resolved Decisions and risks table.
+- **Concern**: Step 3 split vs prepend ambiguity.
+  - **Addressed**: Locked to "sub-step split into 3a/3b; top-level Steps 1, 2, 4 numbering preserved."
+
+### Specify Phase — Architect Iteration (Round 2)
+
+Architect feedback (delivered out-of-band as inline review comments on the spec, not a 3-way consult):
+- **Drop `arch-md-guide.md` template entirely; fold into arch.md preface + skill body.**
+  - **Addressed**: Removed all references to `arch-md-guide.md` from spec and plan; the "how to maintain arch.md" content lives in two places only — the skill body's discipline sections and the arch.md template's "Updating This Document" preface.
+- **Relax "guidance-only" constraint** to apply only to destructive shell commands; direct file edits are expected.
+  - **Addressed**: Reworded constraint and skill `## Output contract` section accordingly.
+- **Reword skeleton/main parity constraint to explain the why.**
+  - **Addressed**: Rewrote with the dual-nature framing (codev/ = what we use; codev-skeleton/ = what we ship; byte-identical prevents drift).
+- **Drop coexistence framing** for the user-global agent; the skill replaces it.
+  - **Addressed**: Removed the "Relationship to architecture-documenter agent" required section from the skill body and the corresponding test scenario; removed the naming-collision risk row; added a post-merge cutover note (architect deletes `~/.claude/agents/architecture-documenter.md` at merge time).
+- **Confirm skill name `update-arch-docs`** (architect direction).
+  - **Addressed**: Confirmed in Resolved Decisions; no change to existing artifacts since the rename had already happened in Round 1.
+
+### Plan Phase (Round 1)
+
+#### Gemini (APPROVE)
+- **Concern (minor)**: `--testPathPatterns=scaffold` may not work in Vitest; pass `scaffold` as a positional argument instead.
+  - **Addressed**: Replaced flag form with positional argument across all four occurrences in the plan.
+- No blocking concerns.
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: "Lives where" matrix rows still left open — should be locked at plan time.
+  - **Addressed**: Locked the matrix to 8 rows in the plan; added a "retired component" row beyond the issue's starter list to address the graveyard pattern visible in the live arch.md.
+- **Concern**: `codev init` smoke-test command is brittle (`packages/codev/dist/cli.js` doesn't exist in worktree).
+  - **Addressed**: Spelled out an explicit command sequence including `pnpm --filter @cluesmith/codev build`; added a fallback (verify skeleton template content directly via `cat`) in case the dist invocation breaks.
+- **Concern**: Phase 1 wording incorrectly implies all self-hosted artifacts live under `codev/`; the new skill actually lives at repo-root `.claude/skills/`.
+  - **Addressed**: Tightened Phase 1 deliverables to call out the repo-root location explicitly.
+
+#### Claude (APPROVE)
+- **Concern (minor)**: Skill propagation test setup needs a clear command sequence.
+  - **Addressed**: Spelled out the test as a concrete bash sequence (init scratch, delete the new skill, run `codev update`, verify return).
+- **Concern (minor)**: First MAINTAIN protocol cross-reference to a skill — phrase carefully.
+  - **N/A**: Deferred to Phase 2 implementation. The MAINTAIN protocol now refers to the skill twice (Step 3a and Step 3b) using consistent naming and a relative path.
+- **Concern (minor)**: Audit-mode prose should echo "when in doubt, KEEP" so audit isn't over-aggressive.
+  - **Addressed**: Added explicit instruction to the skill's `## Mode: audit-mode` section.
+
+### Implement Phase 1 (Round 1)
+
+#### Gemini (APPROVE)
+- No concerns raised — Phase 1 deliverables "complete, exact, and correctly synchronized to the skeleton directory."
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Skill files still untracked (`??` in git status); Phase 1's keystone deliverable not actually landed.
+  - **Addressed**: Pure administrative concern — skill files were committed atomically in commit ca003d99 immediately after the consult ran. No content change needed.
+
+#### Claude (APPROVE)
+- No concerns raised — detailed verification table confirmed all six deliverables correct, all parity checks pass, all literal-content checks pass. Noted the same untracked-files observation as Codex but explicitly classified as "an administrative staging step, not a content gap."
+
+### Implement Phase 2 (Round 1)
+
+#### Gemini (REQUEST_CHANGES)
+- **Concern**: Missing `codev/reviews/723-*.md` review document.
+  - **Addressed**: Authored the review document (this file).
+- **Concern**: Missing PR description draft.
+  - **Addressed**: Drafted inline within this review document under `## PR Description Draft`; surfaces the post-merge cutover note prominently.
+
+#### Codex (REQUEST_CHANGES)
+- **Concern**: Same review-doc and PR-draft missing as Gemini.
+  - **Addressed**: Same fixes.
+- **Concern**: `status.yaml` shows `phase_2 in_progress` / `build_complete: false`.
+  - **N/A**: This is porch-internal state; strict mode forbids manual editing of `status.yaml`. State updates automatically when porch advances on `porch done`.
+
+#### Claude (APPROVE)
+- No concerns raised. Detailed verification confirmed all six MAINTAIN edits in place; parity zero; "when in doubt, KEEP" preserved in three load-bearing locations; matrix rows match plan verbatim. Classified missing review-doc and PR-draft as "downstream operational steps the builder runs after the implementation edits land."
 
 ## Flaky Tests
 
