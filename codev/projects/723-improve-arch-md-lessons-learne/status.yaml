@@ -25,6 +25,22 @@ gates:
     status: pending
 iteration: 1
 build_complete: true
-history: []
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_1-iter1-claude.txt
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T14:25:34.900Z'
+updated_at: '2026-05-05T14:26:42.814Z'
