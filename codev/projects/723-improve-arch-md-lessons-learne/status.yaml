@@ -1,9 +1,15 @@
 id: '723'
 title: improve-arch-md-lessons-learne
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: 'Authored artifacts: skill + templates'
+    status: in_progress
+  - id: phase_2
+    title: Wire into MAINTAIN + verify
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +24,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T14:17:16.334Z'
+updated_at: '2026-05-05T14:17:27.006Z'
