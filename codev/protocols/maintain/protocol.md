@@ -10,6 +10,23 @@ MAINTAIN is a single-pass maintenance protocol for keeping codebases healthy. Th
 - `codev/resources/arch.md` - Architecture documentation
 - `codev/resources/lessons-learned.md` - Extracted wisdom from reviews
 
+The two governance docs are siblings with **different purposes**: `arch.md` owns system shape (services, transports, mental models, verified-wrong assumptions about *this* system); `lessons-learned.md` owns durable engineering wisdom that applies *across* specs. Use the routing matrix below to decide where each fact belongs.
+
+### Lives where: routing facts to the right home
+
+| Type of fact/insight | Lives in |
+|---|---|
+| Current system shape (services, transports, key mental models) | `codev/resources/arch.md` |
+| Mechanism for a unique subsystem | `codev/resources/arch.md` (subsystem section) OR a meta-spec under `codev/architecture/<domain>.md` if the mechanism is large enough to warrant its own doc |
+| A durable engineering pattern that applies across multiple specs | `codev/resources/lessons-learned.md` |
+| A spec-narrow fix recipe (only relevant inside the originating feature) | Spec review only — does NOT belong in `lessons-learned.md` |
+| A system-shape surprise verified-wrong in production ("looks like X but isn't") | `codev/resources/arch.md` § "Verified-Wrong Assumptions" |
+| Aspirational architectural direction (where we want to go) | The relevant meta-spec or roadmap doc, NOT `arch.md` body |
+| A changelog entry ("we shipped X in spec Y on date Z") | `git log` + the spec/review document — NOT `arch.md`, NOT `lessons-learned.md` |
+| A retired or removed component | Delete the section entirely; do NOT keep a "retired components" graveyard. (`git log` retains history.) |
+
+The most commonly-misrouted entry is the system-shape surprise. If a future reader needs to know "the system *looks* like X but actually does Y," that is system shape and lives in `arch.md`. If they need to know "we learned that doing X is generally a bad idea," that is engineering wisdom and lives in `lessons-learned.md`.
+
 ## When to Use
 
 - Before a release (clean slate for shipping)
@@ -90,14 +107,54 @@ For each finding from the audit:
 
 ### Step 3: Sync Documentation
 
+Step 3 is split into two sub-steps: **Audit first, then update.** This split exists because `arch.md` and `lessons-learned.md` accumulate without bound when MAINTAIN does only "what's new" — the audit pass surfaces what should be cut so the update pass is not purely additive.
+
+The `update-arch-docs` skill (at `.claude/skills/update-arch-docs/SKILL.md`) is invoked by both sub-steps. Read it before starting Step 3 so the discipline is fresh.
+
+#### Step 3a: Audit documentation
+
+Invoke the `update-arch-docs` skill in **audit-mode**. The skill reads `codev/resources/arch.md` and `codev/resources/lessons-learned.md` end-to-end against the discipline below and produces a candidate-cuts list (with reasons) recorded in the run file (`codev/maintain/NNNN.md`) under a new `## Audit Findings` section before any edits land.
+
+**Per-arch.md-section pruning checklist** — for each section in `arch.md`, ask:
+- Does it describe **current state**? If aspirational, the section moves to a meta-spec; `arch.md` keeps a 1-paragraph summary + pointer (or nothing, if the meta-spec stands on its own).
+- Does it duplicate a meta-spec? If yes, replace with a 1-paragraph summary + pointer.
+- Is it a per-file enumeration that's gone stale? If yes, prune to the directory shape + a few key files.
+- Is it a changelog/narrative section ("Spec 0042 added X")? If yes, absorb the architecturally-relevant facts and remove the spec-numbered framing.
+- Is the component still alive? If retired, delete the section entirely.
+
+**Per-lessons-learned.md-entry pruning checklist** — for each entry, ask:
+- Is it cross-applicable beyond the spec that produced it? If no, remove (the lesson belongs in the spec's review).
+- Is it terse (1–3 sentences)? If multi-paragraph, split or compress.
+- Is the topic section the right home? If filed under "Architecture (continued)" or a spec-numbered section, move it to the right topical home.
+- Is it a duplicate of an adjacent entry? If yes, fold them.
+
+**Sample audit prompt** (paste into the skill invocation if you want a baseline checklist run):
+
+```
+Audit codev/resources/arch.md and codev/resources/lessons-learned.md against the
+discipline in the update-arch-docs skill. For each section/entry, run the per-
+arch.md-section and per-lessons-learned.md-entry pruning checklists from the
+MAINTAIN protocol (Step 3a). Produce a candidate-cuts list with one-line reasons.
+Bias toward fewer, higher-confidence cuts ("when in doubt, KEEP"). Record the
+findings in the current run file's ## Audit Findings section before applying.
+```
+
+**When in doubt, KEEP.** This rule is preserved from the older Step 3. A confident cut is better than three speculative ones. The audit pass is a *proposal*; the architect's PR review confirms it.
+
+#### Step 3b: Update documentation
+
+Apply the audit decisions from Step 3a, plus any additive content needed.
+
 **arch.md**: Compare documented structure with actual codebase. Update:
 - Directory structure
 - Component descriptions (explain HOW things work, not just WHAT)
 - Key files and their purposes
-- Remove references to deleted code
+- Remove references to deleted code (per Step 3a audit findings)
 - Add new components/utilities
 
-**lessons-learned.md**: Scan `codev/reviews/` for new reviews since last run. Extract lessons that are actionable, durable, and general.
+**lessons-learned.md**: Scan `codev/reviews/` for new reviews since last run. Extract lessons that are actionable, durable, and general. Apply Step 3a's per-entry cuts.
+
+For specific additive changes, invoke `update-arch-docs` in **diff-mode** — it applies the smallest section update needed.
 
 **CLAUDE.md / AGENTS.md**: Diff the two files. They must be identical. Update the stale one.
 
@@ -132,6 +189,16 @@ Each run creates `codev/maintain/NNNN.md`:
 ## Changes Since Last Run
 
 <key commits summary>
+
+## Audit Findings
+
+Recorded by Step 3a (Audit documentation) before any edits land. One line per candidate cut.
+
+### arch.md
+- <section-name>: <reason for proposed cut/compression>
+
+### lessons-learned.md
+- <entry>: <reason>
 
 ## What Was Done
 

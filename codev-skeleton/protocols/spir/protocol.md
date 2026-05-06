@@ -504,9 +504,10 @@ Execute for each phase in the plan. Each phase follows a build-verify cycle.
    - Enhance documentation
 
 3. **Update Architecture Documentation**
-   - Update `codev/resources/arch.md` with new modules, utilities, or architectural changes
-   - Follow guidance in MAINTAIN protocol's "Update arch.md" task for structure and standards
-   - Ensure arch.md reflects current codebase state
+   - Update `codev/resources/arch.md` and `codev/resources/lessons-learned.md` with new modules, utilities, architectural changes, and durable engineering wisdom uncovered during this work
+   - Use the **`update-arch-docs` skill** (at `.claude/skills/update-arch-docs/SKILL.md`) to apply changes — the skill encodes the discipline for what NOT to include and the two-doc framing (arch.md owns system shape; lessons-learned.md owns durable engineering wisdom)
+   - Follow guidance in the MAINTAIN protocol's Step 3 ("Sync Documentation") for structure, the "Lives where" routing matrix, and pruning checklists
+   - Ensure both docs reflect current state
 
 4. **Revision Requirements** (MANDATORY)
    - Update README.md with any new features or changes
