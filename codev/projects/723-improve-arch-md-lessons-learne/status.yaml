@@ -20,8 +20,9 @@ gates:
     requested_at: '2026-05-05T12:26:08.921Z'
     approved_at: '2026-05-05T14:15:58.934Z'
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-05-05T14:57:12.932Z'
+    approved_at: '2026-05-06T23:16:08.076Z'
   verify-approval:
     status: pending
 iteration: 1
@@ -60,7 +61,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-723/codev/projects/723-improve-arch-md-lessons-learne/723-phase_2-iter1-claude.txt
 started_at: '2026-05-05T11:28:46.695Z'
-updated_at: '2026-05-05T14:57:12.932Z'
+updated_at: '2026-05-06T23:16:08.076Z'
 pr_history:
   - phase: review
     pr_number: 724
