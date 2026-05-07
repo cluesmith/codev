@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Core runtime utilities for Codev — Tower client, auth, workspace helpers, escape buffer",
   "type": "module",
   "exports": {
