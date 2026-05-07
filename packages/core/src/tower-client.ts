@@ -88,10 +88,10 @@ export class TowerClient {
   private readonly getAuthKey: () => string | null;
 
   constructor(portOrOptions?: number | TowerClientOptions) {
-    const options = typeof portOrOptions === 'number'
+    const options: TowerClientOptions = typeof portOrOptions === 'number'
       ? { port: portOrOptions }
       : portOrOptions ?? {};
-    const host = options.host ?? 'localhost';
+    const host = options.host ?? process.env.BRIDGE_TOWER_HOST ?? 'localhost';
     const port = options.port ?? DEFAULT_TOWER_PORT;
     this.baseUrl = `http://${host}:${port}`;
     this.getAuthKey = options.getAuthKey ?? ensureLocalKey;

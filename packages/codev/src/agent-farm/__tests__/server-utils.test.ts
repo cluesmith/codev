@@ -10,6 +10,7 @@ import { Readable } from 'node:stream';
 import {
   escapeHtml,
   parseJsonBody,
+  validateHost,
 } from '../utils/server-utils.js';
 
 describe('Server Utilities', () => {
@@ -69,6 +70,81 @@ describe('Server Utilities', () => {
       const req = createMockRequest(body);
       const result = await parseJsonBody(req, 1000);
       expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('validateHost', () => {
+    it('should accept 127.0.0.1', () => {
+      expect(validateHost('127.0.0.1')).toBe('127.0.0.1');
+    });
+
+    it('should accept 0.0.0.0', () => {
+      expect(validateHost('0.0.0.0')).toBe('0.0.0.0');
+    });
+
+    it('should accept localhost', () => {
+      expect(validateHost('localhost')).toBe('localhost');
+    });
+
+    it('should accept valid IPv4 addresses', () => {
+      expect(validateHost('192.168.1.1')).toBe('192.168.1.1');
+      expect(validateHost('10.0.0.1')).toBe('10.0.0.1');
+      expect(validateHost('255.255.255.255')).toBe('255.255.255.255');
+      expect(validateHost('0.0.0.0')).toBe('0.0.0.0');
+    });
+
+    it('should accept whitespace and return trimmed value', () => {
+      expect(validateHost('  127.0.0.1  ')).toBe('127.0.0.1');
+    });
+
+    it('should reject empty string', () => {
+      expect(() => validateHost('')).toThrow('Invalid bind host ""');
+    });
+
+    it('should reject null/undefined via empty check', () => {
+      expect(() => validateHost(null as unknown as string)).toThrow();
+      expect(() => validateHost('')).toThrow();
+    });
+
+    it('should reject octets outside 0-255 range', () => {
+      expect(() => validateHost('256.1.1.1')).toThrow();
+      expect(() => validateHost('1.1.1.999')).toThrow();
+      expect(() => validateHost('-1.1.1.1')).toThrow();
+    });
+
+    it('should reject non-localhost hostnames', () => {
+      expect(() => validateHost('example.com')).toThrow();
+      expect(() => validateHost('myhost.local')).toThrow();
+    });
+
+    it('should reject non-localhost with trailing/leading slash', () => {
+      expect(() => validateHost('/127.0.0.1')).toThrow();
+    });
+
+    // Bracketed IPv6 validation - strict hex+colon only
+    it('should accept valid bracketed IPv6 addresses', () => {
+      expect(validateHost('[::1]')).toBe('[::1]');
+      expect(validateHost('[::]')).toBe('[::]');
+      expect(validateHost('[fe80::1]')).toBe('[fe80::1]');
+      expect(validateHost('[2001:db8::1]')).toBe('[2001:db8::1]');
+      expect(validateHost('[2001:0db8:0000:0000:0000:0000:0000:0001]')).toBe('[2001:0db8:0000:0000:0000:0000:0000:0001]');
+    });
+
+    it('should reject invalid bracketed IPv6 addresses', () => {
+      expect(() => validateHost('[not-an-ip]')).toThrow();
+      expect(() => validateHost('[anything]')).toThrow();
+      expect(() => validateHost('[foo]')).toThrow();
+      expect(() => validateHost('[::g]')).toThrow(); // 'g' is not valid hex
+      expect(() => validateHost('[hello]')).toThrow();
+    });
+
+    it('should reject unbracketed IPv6', () => {
+      expect(() => validateHost('::1')).toThrow();
+      expect(() => validateHost('fe80::1')).toThrow();
+    });
+
+    it('should reject bracketed but missing IPv6', () => {
+      expect(() => validateHost('[]')).toThrow();
     });
   });
 

@@ -758,9 +758,25 @@ Agent Farm is designed for local development use only. Understanding the securit
 
 #### Network Binding
 
-All services bind to `localhost` only:
+All services bind to `localhost` by default:
 - Tower server + Dashboard + WebSocket terminals: `127.0.0.1:4100`
 - No external network exposure
+
+##### Bridge Mode
+
+Bridge mode enables Tower to bind to non-localhost addresses for container access.
+It requires an explicit opt-in via two environment variables:
+
+- `BRIDGE_MODE=1` — Required to enable non-localhost binding. Without this flag, Tower
+  only binds to `127.0.0.1` regardless of other settings.
+- `BRIDGE_TOWER_HOST` — The bind address used when `BRIDGE_MODE=1` is set. Default:
+  `127.0.0.1`. Accepted values: `0.0.0.0` (all interfaces), `127.0.0.1`, `localhost`,
+  valid IPv4 literals, and bracketed IPv6 literals (e.g., `[::1]`).
+
+When bridge mode is enabled, Tower logs a warning on startup:
+`Bridge mode is ENABLED — Tower is listening on 0.0.0.0 network interfaces.`
+
+**Note:** `BRIDGE_TOWER_HOST` has no effect unless `BRIDGE_MODE=1` is also set.
 
 #### Authentication
 
@@ -769,7 +785,7 @@ All services bind to `localhost` only:
 - Terminal WebSocket endpoints have no authentication
 - All processes share the user's permissions
 
-**Justification**: Since all services bind to localhost, only processes running as the same user can connect. External network access is blocked at the binding level.
+**Justification**: Since all services bind to localhost by default, only processes running as the same user can connect. External network access is blocked at the binding level. If bridge mode is enabled with `BRIDGE_MODE=1`, ensure your firewall restricts access accordingly.
 
 #### Request Validation
 

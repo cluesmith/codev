@@ -50,6 +50,7 @@ import {
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { validateHost } from '../utils/server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +76,15 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_TOWER_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
+
+// Bridge mode: Tower binds to non-localhost when explicitly enabled.
+// BRIDGE_MODE=1 is the opt-in flag; without it, no non-localhost bind is possible.
+// BRIDGE_TOWER_HOST specifies the bind address when bridge mode is enabled
+// (default: 127.0.0.1 — the spawned tower-server inherits process.env from the afx CLI).
+const bridgeMode = process.env.BRIDGE_MODE === '1';
+const bindHost = bridgeMode
+  ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
+  : '127.0.0.1';
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -317,9 +327,15 @@ const server = http.createServer(async (req, res) => {
   await handleRequest(req, res, routeCtx);
 });
 
-// SECURITY: Bind to localhost only to prevent network exposure
-server.listen(port, '127.0.0.1', async () => {
-  log('INFO', `Tower server listening at http://localhost:${port}`);
+// SECURITY: Bind to configured host (default 127.0.0.1 for localhost-only).
+// Bridge mode enables non-localhost binding when BRIDGE_MODE=1 is set.
+server.listen(port, bindHost, async () => {
+  if (bridgeMode) {
+    log('WARN', `Bridge mode is ENABLED — Tower is listening on ${bindHost} network interfaces.`);
+  }
+  // Display localhost in URLs for local UX even when bound to all interfaces.
+  const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
+  log('INFO', `Tower server listening at http://${displayHost}:${port}`);
 
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
