@@ -168,6 +168,16 @@ describe('Spawn Command', () => {
         const options: SpawnOptions = { issueNumber: 315, protocol: 'bugfix', force: true };
         expect(validateSpawnOptions(options)).toBeNull();
       });
+
+      it('should accept alphanumeric issue identifier (e.g. ENG-123)', () => {
+        const options: SpawnOptions = { issueNumber: 'ENG-123', protocol: 'spir' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept alphanumeric issue identifier + --protocol bugfix', () => {
+        const options: SpawnOptions = { issueNumber: 'PROJ-42', protocol: 'bugfix' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
     });
 
     describe('valid options — alternative modes', () => {
@@ -353,6 +363,14 @@ describe('Spawn Command', () => {
     it('--task takes precedence over --protocol', () => {
       // task + protocol is valid: protocol overrides the task's default
       expect(getSpawnMode({ task: 'Fix bug', protocol: 'spir' })).toBe('task');
+    });
+
+    it('returns spec for alphanumeric issue identifier + protocol', () => {
+      expect(getSpawnMode({ issueNumber: 'ENG-123', protocol: 'spir' })).toBe('spec');
+    });
+
+    it('returns bugfix for alphanumeric issue identifier + bugfix protocol', () => {
+      expect(getSpawnMode({ issueNumber: 'PROJ-42', protocol: 'bugfix' })).toBe('bugfix');
     });
   });
 

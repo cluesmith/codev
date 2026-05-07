@@ -30,7 +30,7 @@ export interface IssueViewResult {
 
 /** Single item in `issue-list` concept output. */
 export interface IssueListItem {
-  number: number;
+  number: number | string;
   title: string;
   url: string;
   labels: Array<{ name: string }>;

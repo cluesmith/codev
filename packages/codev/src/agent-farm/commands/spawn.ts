@@ -243,7 +243,7 @@ async function resolveIssueProtocol(
  * Worktree naming: <protocol>-<id>-<slug> or bugfix-<id>-<slug>
  * Handles legacy zero-padded IDs: worktree `spir-0076-feature` matches issueNumber=76.
  */
-function inferProtocolFromWorktree(config: Config, issueNumber: number): string | null {
+function inferProtocolFromWorktree(config: Config, issueNumber: number | string): string | null {
   if (!existsSync(config.buildersDir)) return null;
   const strippedId = stripLeadingZeros(String(issueNumber));
   const dirs = readdirSync(config.buildersDir);

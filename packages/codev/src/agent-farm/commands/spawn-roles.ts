@@ -38,7 +38,7 @@ export interface TemplateContext {
     name: string;
   };
   issue?: {
-    number: number;
+    number: number | string;
     title: string;
     body: string;
   };

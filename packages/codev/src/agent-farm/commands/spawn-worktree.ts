@@ -370,7 +370,7 @@ export function slugify(title: string): string {
  * Scans the builders directory for directories matching `bugfix-{issueNumber}-*`.
  * Returns the directory name if found, or null if no match exists.
  */
-export function findExistingBugfixWorktree(buildersDir: string, issueNumber: number): string | null {
+export function findExistingBugfixWorktree(buildersDir: string, issueNumber: number | string): string | null {
   const prefix = `bugfix-${issueNumber}-`;
   try {
     const entries = readdirSync(buildersDir, { withFileTypes: true });
@@ -386,7 +386,7 @@ export function findExistingBugfixWorktree(buildersDir: string, issueNumber: num
  * Delegates to shared github utility but wraps with fatal() for spawn context.
  */
 export async function fetchGitHubIssue(
-  issueNumber: number,
+  issueNumber: number | string,
   options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
 ): Promise<ForgeIssue> {
   try {
@@ -411,7 +411,7 @@ export async function fetchGitHubIssue(
  * Uses forge concept commands for PR search (graceful degradation if unavailable).
  */
 export async function checkBugfixCollisions(
-  issueNumber: number,
+  issueNumber: number | string,
   worktreePath: string,
   issue: ForgeIssue,
   force: boolean,
@@ -481,7 +481,7 @@ export async function checkBugfixCollisions(
 export async function executePreSpawnHooks(
   protocol: ProtocolDefinition | null,
   context: {
-    issueNumber?: number;
+    issueNumber?: number | string;
     issue?: ForgeIssue;
     worktreePath?: string;
     force?: boolean;

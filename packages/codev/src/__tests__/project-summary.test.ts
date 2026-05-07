@@ -41,7 +41,7 @@ describe('getProjectSummary', () => {
 
     const result = await getProjectSummary(testDir, '0126');
     expect(result).toBe('Project Management Rework');
-    expect(mockFetchIssue).toHaveBeenCalledWith(126);
+    expect(mockFetchIssue).toHaveBeenCalledWith('0126');
   });
 
   it('falls back to spec file heading when GitHub fails', async () => {
@@ -88,9 +88,10 @@ describe('getProjectSummary', () => {
   });
 
   it('returns null for non-numeric project IDs with no spec file', async () => {
-    // Non-numeric ID means GitHub fetch is skipped
+    mockFetchIssue.mockResolvedValue(null);
+
     const result = await getProjectSummary(testDir, 'abc');
-    expect(mockFetchIssue).not.toHaveBeenCalled();
+    expect(mockFetchIssue).toHaveBeenCalledWith('abc');
     expect(result).toBeNull();
   });
 

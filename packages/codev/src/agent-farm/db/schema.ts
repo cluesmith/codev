@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS builders (
     CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
   task_text TEXT,
   protocol_name TEXT,
-  issue_number INTEGER,
+  issue_number TEXT,
   terminal_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

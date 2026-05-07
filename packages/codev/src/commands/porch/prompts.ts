@@ -27,13 +27,10 @@ import { resolveCodevFile } from '../../lib/skeleton.js';
  * 3. Project title from status.yaml — last resort
  */
 export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
-  // 1. Try GitHub issue
-  const issueNumber = parseInt(projectId, 10);
-  if (!isNaN(issueNumber)) {
-    const issue = await fetchIssue(issueNumber);
-    if (issue?.title) {
-      return issue.title;
-    }
+  // 1. Try forge issue lookup (supports numeric and alphanumeric IDs like "ENG-123")
+  const issue = await fetchIssue(projectId);
+  if (issue?.title) {
+    return issue.title;
   }
 
   // 2. Fallback: read first heading from spec file
