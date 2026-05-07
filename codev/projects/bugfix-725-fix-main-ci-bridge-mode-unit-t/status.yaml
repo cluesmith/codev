@@ -1,0 +1,12 @@
+id: bugfix-725
+title: fix-main-ci-bridge-mode-unit-t
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-07T12:02:01.323Z'
+updated_at: '2026-05-07T12:02:01.327Z'
