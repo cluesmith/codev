@@ -233,6 +233,12 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.0.2"
+    name: "Ionic"
+    status: released
+    target_date: "2026-05-07"
+    notes: "Linear forge provider with hybrid GitHub fallback, Tower bridge mode for container-bridging, doc governance (update-arch-docs skill + MAINTAIN Lives-where matrix and audit-then-update split), bug fixes."
+
   - version: "v3.0.1"
     name: "Ionic"
     status: released
