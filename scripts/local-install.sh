@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Pack workspace packages into tarballs and install them globally for testing.
 # Run from the monorepo root: pnpm -w run local-install
 
@@ -38,7 +38,7 @@ npm install -g \
 # pnpm pack strips the executable bit from shell scripts in the tarball,
 # which causes "GitHub CLI unavailable" errors when overview.ts tries to
 # spawn scripts/forge/github/*.sh. Restore +x after install.
-chmod -R +x "$(npm root -g)/@cluesmith/codev/scripts/forge"
+find "$(npm root -g)/@cluesmith/codev/scripts/forge" -name '*.sh' -exec chmod +x {} +
 
 echo "Installed: $(codev --version)"
 
