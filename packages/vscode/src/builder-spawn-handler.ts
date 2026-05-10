@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { BuilderSpawnedPayload } from '@cluesmith/codev-types';
 import type { ConnectionManager } from './connection-manager.js';
@@ -37,8 +38,11 @@ export class BuilderSpawnHandler {
 
     if (!payload.terminalId || !payload.roleId || !payload.workspacePath) { return; }
 
+    // path.resolve handles trailing-slash and `..` normalization. Symlink
+    // realpath is intentionally skipped — Tower passes canonical paths and
+    // realpath would add sync FS I/O on every event.
     const active = this.connectionManager.getWorkspacePath();
-    if (active && payload.workspacePath !== active) { return; }
+    if (active && path.resolve(payload.workspacePath) !== path.resolve(active)) { return; }
 
     if (this.seen.has(payload.terminalId)) { return; }
     this.seen.add(payload.terminalId);
