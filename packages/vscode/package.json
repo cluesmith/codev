@@ -168,6 +168,7 @@
     },
     "views": {
       "codev": [
+        { "id": "codev.workspace", "name": "Workspace" },
         { "id": "codev.needsAttention", "name": "Needs Attention" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },

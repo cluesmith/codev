@@ -19,6 +19,7 @@ import { BacklogProvider } from './views/backlog.js';
 import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
+import { WorkspaceProvider } from './views/workspace.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -86,6 +87,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	overviewCache.onDidChange(updateStatusBarCounts);
 
 	context.subscriptions.push(
+		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
 		vscode.window.registerTreeDataProvider('codev.needsAttention', new NeedsAttentionProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.builders', new BuildersProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.pullRequests', new PullRequestsProvider(overviewCache)),
@@ -126,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			try {
 				const state = await client.getWorkspaceState(workspacePath);
 				if (state?.architect?.terminalId) {
-					await terminalManager?.openArchitect(state.architect.terminalId);
+					await terminalManager?.openArchitect(state.architect.terminalId, true);
 				} else {
 					vscode.window.showWarningMessage('Codev: No architect terminal found — is the workspace activated?');
 				}

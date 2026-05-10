@@ -34,15 +34,16 @@ export class TerminalManager {
   }
 
   /**
-   * Open the architect terminal.
+   * Open the architect terminal. `focus` defaults to false so background
+   * paths don't steal focus; click paths pass true.
    */
-  async openArchitect(terminalId: string): Promise<void> {
-    if (this.terminals.has('architect')) {
-      // Focus existing
-      this.terminals.get('architect')!.terminal.show();
+  async openArchitect(terminalId: string, focus = false): Promise<void> {
+    const existing = this.terminals.get('architect');
+    if (existing) {
+      existing.terminal.show(!focus);
       return;
     }
-    await this.openTerminal(terminalId, 'architect', 'Codev: Architect');
+    await this.openTerminal(terminalId, 'architect', 'Codev: Architect', undefined, focus);
   }
 
   /**
