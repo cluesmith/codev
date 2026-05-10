@@ -21,10 +21,16 @@ export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>();
   private outputChannel: vscode.OutputChannel;
   private connectionManager: ConnectionManager;
+  private readonly iconPath: vscode.Uri;
 
-  constructor(connectionManager: ConnectionManager, outputChannel: vscode.OutputChannel) {
+  constructor(
+    connectionManager: ConnectionManager,
+    outputChannel: vscode.OutputChannel,
+    extensionUri: vscode.Uri,
+  ) {
     this.connectionManager = connectionManager;
     this.outputChannel = outputChannel;
+    this.iconPath = vscode.Uri.joinPath(extensionUri, 'icons', 'codev.svg');
   }
 
   /**
@@ -145,7 +151,7 @@ export class TerminalManager {
       ? { viewColumn: type === 'architect' ? vscode.ViewColumn.One : vscode.ViewColumn.Two }
       : vscode.TerminalLocation.Panel;
 
-    const terminal = vscode.window.createTerminal({ name, pty, location });
+    const terminal = vscode.window.createTerminal({ name, pty, location, iconPath: this.iconPath });
 
     const mapKey = key ?? type;
     this.terminals.set(mapKey, { terminal, pty, type, id: terminalId });

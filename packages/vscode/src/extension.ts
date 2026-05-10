@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 
 	// Terminal Manager
-	terminalManager = new TerminalManager(connectionManager, outputChannel);
+	terminalManager = new TerminalManager(connectionManager, outputChannel, context.extensionUri);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
 
 	// Update status bar with builder/gate counts
