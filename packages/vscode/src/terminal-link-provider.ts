@@ -31,6 +31,6 @@ export class BuilderTerminalLinkProvider implements vscode.TerminalLinkProvider<
   }
 
   async handleTerminalLink(link: BuilderLink): Promise<void> {
-    await this.terminalManager.openBuilderByRoleOrId(link.roleId);
+    await this.terminalManager.openBuilderByRoleOrId(link.roleId, true);
   }
 }

@@ -44,20 +44,26 @@ export class TerminalManager {
    * but points at a different (stale) Tower session, dispose it before
    * opening a new one — happens when a builder is re-spawned and Tower
    * issues a new terminalId for the same roleId.
+   *
+   * `focus` defaults to false so background paths (e.g. auto-spawn when
+   * the architect spawns a new builder) don't steal focus mid-typing.
+   * Explicit user actions — sidebar click, terminal-link click, toast
+   * click, command-palette pick — pass `true` to activate the terminal
+   * for keyboard input.
    */
-  async openBuilder(terminalId: string, builderId: string, label: string): Promise<void> {
+  async openBuilder(terminalId: string, builderId: string, label: string, focus = false): Promise<void> {
     const key = `builder-${builderId}`;
     const existing = this.terminals.get(key);
     if (existing) {
       if (existing.id === terminalId) {
-        existing.terminal.show();
+        existing.terminal.show(!focus);
         return;
       }
       existing.pty.close();
       existing.terminal.dispose();
       this.terminals.delete(key);
     }
-    await this.openTerminal(terminalId, 'builder', label, key);
+    await this.openTerminal(terminalId, 'builder', label, key, focus);
   }
 
   /**
@@ -65,7 +71,7 @@ export class TerminalManager {
    * open its terminal. Used by the sidebar tree views, terminal link
    * provider, and command palette so the lookup logic lives in one place.
    */
-  async openBuilderByRoleOrId(roleOrId: string): Promise<void> {
+  async openBuilderByRoleOrId(roleOrId: string, focus = false): Promise<void> {
     const client = this.connectionManager.getClient();
     const workspacePath = this.connectionManager.getWorkspacePath();
     if (!client || !workspacePath) {
@@ -89,7 +95,7 @@ export class TerminalManager {
         vscode.window.showWarningMessage(`Codev: No active terminal for ${roleOrId}`);
         return;
       }
-      await this.openBuilder(builder.terminalId, builder.id, `Codev: ${builder.name}`);
+      await this.openBuilder(builder.terminalId, builder.id, `Codev: ${builder.name}`, focus);
     } catch (err) {
       this.log('ERROR', `Failed to open builder ${roleOrId}: ${(err as Error).message}`);
       vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`);
@@ -119,6 +125,7 @@ export class TerminalManager {
     type: 'architect' | 'builder' | 'shell',
     name: string,
     key?: string,
+    focus = false,
   ): Promise<void> {
     if (this.terminals.size >= MAX_TERMINALS) {
       vscode.window.showWarningMessage(`Too many terminals (${MAX_TERMINALS} max) — close unused terminals`);
@@ -156,7 +163,7 @@ export class TerminalManager {
       disposable.dispose();
     });
 
-    terminal.show(true);
+    terminal.show(!focus);
   }
 
   private buildWsUrl(terminalId: string): string | null {

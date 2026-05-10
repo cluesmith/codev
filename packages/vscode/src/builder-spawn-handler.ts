@@ -54,23 +54,26 @@ export class BuilderSpawnHandler {
     if (mode === 'off') { return; }
 
     if (mode === 'auto') {
-      void this.open(payload);
+      // Background open: never steal focus from the user's current terminal.
+      void this.open(payload, false);
       return;
     }
 
     void vscode.window
       .showInformationMessage(`Builder ${payload.roleId} spawned.`, 'Open Terminal')
       .then((choice) => {
-        if (choice === 'Open Terminal') { void this.open(payload); }
+        // Toast click is an explicit user action — focus the new terminal.
+        if (choice === 'Open Terminal') { void this.open(payload, true); }
       });
   }
 
-  private async open(payload: BuilderSpawnedPayload): Promise<void> {
+  private async open(payload: BuilderSpawnedPayload, focus: boolean): Promise<void> {
     try {
       await this.terminalManager.openBuilder(
         payload.terminalId,
         payload.roleId,
         `Codev: ${payload.roleId}`,
+        focus,
       );
     } catch (err) {
       this.log('ERROR', `Failed to open builder terminal ${payload.roleId}: ${(err as Error).message}`);

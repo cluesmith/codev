@@ -153,7 +153,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					{ placeHolder: 'Select a builder' },
 				);
 				if (picked) {
-					await terminalManager?.openBuilder(picked.terminalId, picked.id, `Codev: ${picked.label}`);
+					await terminalManager?.openBuilder(picked.terminalId, picked.id, `Codev: ${picked.label}`, true);
 				}
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get builders');
@@ -178,7 +178,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.openBuilderById', async (roleOrId: string) => {
 			if (!roleOrId) { return; }
-			await terminalManager?.openBuilderByRoleOrId(roleOrId);
+			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
