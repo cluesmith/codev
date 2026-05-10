@@ -118,10 +118,13 @@ export class ConnectionManager {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
-        this.setState('connected');
         this.reconnectAttempt = 0;
         this.log('INFO', `Connected to Tower (status: ${health.status}, uptime: ${health.uptime}s)`);
+        // Activate the workspace before announcing 'connected' so onStateChange
+        // subscribers (e.g. OverviewCache.refresh) see a fully-registered
+        // workspace on their first fetch instead of racing the activate POST.
         await this.activateWorkspace();
+        this.setState('connected');
         this.startSSE();
       } else {
         this.log('WARN', 'Tower not responding');
