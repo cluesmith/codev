@@ -106,13 +106,17 @@ export class TerminalManager {
     const mapKey = key ?? type;
     this.terminals.set(mapKey, { terminal, pty, type, id: terminalId });
 
-    // Clean up when terminal is closed by user
+    // Clean up when terminal is closed by user. The map-delete is guarded
+    // because a stale terminal disposed via openBuilder's re-spawn path can
+    // emit onDidCloseTerminal *after* the replacement registers under the
+    // same mapKey — without the identity check we'd unmap the live one.
     const disposable = vscode.window.onDidCloseTerminal((t) => {
-      if (t === terminal) {
-        pty.close();
+      if (t !== terminal) { return; }
+      pty.close();
+      if (this.terminals.get(mapKey)?.terminal === terminal) {
         this.terminals.delete(mapKey);
-        disposable.dispose();
       }
+      disposable.dispose();
     });
 
     terminal.show(true);
