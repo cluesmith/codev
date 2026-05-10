@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
 import { loadConfig } from '../../lib/config.js';
 import { getGlobalDb } from '../db/index.js';
 import {
@@ -138,6 +138,26 @@ export function getWorkspaceTerminalsEntry(workspacePath: string): WorkspaceTerm
     entry.fileTabs = new Map();
   }
   return entry;
+}
+
+/**
+ * Get the wsTerminals entry for a workspace after rehydrating it from SQLite
+ * and reconnecting any missing shellper sessions. Use this in any HTTP route
+ * that reads wsTerminals to build a UI response — it ensures the read sees
+ * a freshly-reconciled entry instead of whatever drift has accumulated since
+ * the last write.
+ *
+ * Bugfix #718: /api/overview previously read wsTerminals directly while
+ * /api/state had its own ad-hoc rehydration call. The two endpoints diverged
+ * after any state-loss event (Tower restart with non-shellper sessions,
+ * crashed builders, etc.), and the extension's sidebar showed empty while
+ * the dashboard self-healed. Centralizing the read path here keeps every
+ * future endpoint consistent without each having to remember to opt in.
+ */
+export async function getRehydratedTerminalsEntry(workspacePath: string): Promise<WorkspaceTerminals> {
+  const proxyUrl = `/workspace/${encodeWorkspacePath(workspacePath)}/`;
+  await getTerminalsForWorkspace(workspacePath, proxyUrl);
+  return getWorkspaceTerminalsEntry(workspacePath);
 }
 
 /**

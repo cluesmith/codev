@@ -18,6 +18,7 @@ import type { RouteContext } from '../servers/tower-routes.js';
 
 const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
+  mockGetRehydratedTerminalsEntry,
   mockIsSessionPersistent, mockGetNextShellId,
   mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
   mockParseJsonBody,
@@ -31,6 +32,11 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions: vi.fn(),
   mockGetWorkspaceTerminalsEntry: vi.fn(),
   mockGetTerminalsForWorkspace: vi.fn(),
+  mockGetRehydratedTerminalsEntry: vi.fn(async () => ({
+    builders: new Map(),
+    shells: new Map(),
+    fileTabs: new Map(),
+  })),
   mockIsSessionPersistent: vi.fn(),
   mockGetNextShellId: vi.fn(),
   mockResolveTarget: vi.fn(),
@@ -70,6 +76,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
   saveFileTab: vi.fn(),
   deleteFileTab: vi.fn(),
   getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
+  getRehydratedTerminalsEntry: mockGetRehydratedTerminalsEntry,
 }));
 
 vi.mock('../servers/tower-tunnel.js', () => ({
@@ -474,7 +481,7 @@ describe('tower-routes', () => {
 
     it('includes lastDataAt in shell entries of /api/state response (Spec 467)', async () => {
       const now = Date.now();
-      mockGetWorkspaceTerminalsEntry.mockReturnValue({
+      mockGetRehydratedTerminalsEntry.mockResolvedValueOnce({
         architect: undefined,
         shells: new Map([['shell-1', 'term-abc']]),
         builders: new Map(),
