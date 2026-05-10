@@ -25,6 +25,11 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       item.iconPath = b.blocked
         ? new vscode.ThemeIcon('debug-pause', new vscode.ThemeColor('testing.iconFailed'))
         : new vscode.ThemeIcon('play', new vscode.ThemeColor('testing.iconPassed'));
+      item.command = {
+        command: 'codev.openBuilderById',
+        title: 'Open Builder Terminal',
+        arguments: [b.id],
+      };
       return item;
     });
   }

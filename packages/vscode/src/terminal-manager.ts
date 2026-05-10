@@ -60,6 +60,32 @@ export class TerminalManager {
   }
 
   /**
+   * Resolve a builder by `roleId` or `id` via Tower workspace state, then
+   * open its terminal. Used by the sidebar tree views, terminal link
+   * provider, and command palette so the lookup logic lives in one place.
+   */
+  async openBuilderByRoleOrId(roleOrId: string): Promise<void> {
+    const client = this.connectionManager.getClient();
+    const workspacePath = this.connectionManager.getWorkspacePath();
+    if (!client || !workspacePath) {
+      vscode.window.showErrorMessage('Codev: Not connected to Tower');
+      return;
+    }
+    try {
+      const state = await client.getWorkspaceState(workspacePath);
+      const builder = state?.builders?.find((b) => b.name === roleOrId || b.id === roleOrId);
+      if (!builder?.terminalId) {
+        vscode.window.showWarningMessage(`Codev: No active terminal for ${roleOrId}`);
+        return;
+      }
+      await this.openBuilder(builder.terminalId, builder.id, `Codev: ${builder.name}`);
+    } catch (err) {
+      this.log('ERROR', `Failed to open builder ${roleOrId}: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`);
+    }
+  }
+
+  /**
    * Open a shell terminal.
    */
   async openShell(terminalId: string, shellNumber: number): Promise<void> {

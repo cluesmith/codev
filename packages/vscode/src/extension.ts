@@ -176,6 +176,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');
 			}
 		}),
+		vscode.commands.registerCommand('codev.openBuilderById', async (roleOrId: string) => {
+			if (!roleOrId) { return; }
+			await terminalManager?.openBuilderByRoleOrId(roleOrId);
+		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
@@ -200,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Make builder names clickable in any terminal output
 	context.subscriptions.push(
 		vscode.window.registerTerminalLinkProvider(
-			new BuilderTerminalLinkProvider(connectionManager, terminalManager, outputChannel),
+			new BuilderTerminalLinkProvider(terminalManager),
 		),
 	);
 
