@@ -24,6 +24,7 @@ export class ConnectionManager {
   private reconnectAttempt = 0;
   private readonly maxReconnectDelay = 30000;
   private disposed = false;
+  private autoStartInFlight = false;
 
   private readonly stateChangeEmitter = new vscode.EventEmitter<ConnectionState>();
   readonly onStateChange = this.stateChangeEmitter.event;
@@ -80,11 +81,23 @@ export class ConnectionManager {
     if (autoConnect) {
       // Try connecting; if Tower isn't running, try auto-start
       await this.connect();
-      if (this.state === 'disconnected' && config.get<boolean>('autoStartTower', true)) {
-        this.log('INFO', 'Tower not running, attempting auto-start...');
-        const started = await autoStartTower(this.client!, this.workspacePath, this.outputChannel);
-        if (started) {
-          await this.connect();
+      if (this.state !== 'connected' && config.get<boolean>('autoStartTower', true)) {
+        // A failed connect() will have scheduled a backoff retry; cancel it so the
+        // explicit auto-start path isn't racing the timer.
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+          this.setState('disconnected');
+        }
+        this.autoStartInFlight = true;
+        try {
+          this.log('INFO', 'Tower not running, attempting auto-start...');
+          const started = await autoStartTower(this.client!, this.workspacePath, this.outputChannel);
+          if (started) {
+            await this.connect();
+          }
+        } finally {
+          this.autoStartInFlight = false;
         }
       }
     }
@@ -95,11 +108,16 @@ export class ConnectionManager {
    */
   async connect(): Promise<void> {
     if (this.disposed || !this.client) { return; }
+    if (this.state === 'connecting' || this.state === 'connected') { return; }
     this.setState('connecting');
 
     try {
       const health = await this.client.getHealth();
       if (health) {
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
         this.setState('connected');
         this.reconnectAttempt = 0;
         this.log('INFO', `Connected to Tower (status: ${health.status}, uptime: ${health.uptime}s)`);
@@ -108,25 +126,59 @@ export class ConnectionManager {
       } else {
         this.log('WARN', 'Tower not responding');
         this.setState('disconnected');
+        this.scheduleReconnect();
       }
     } catch (err) {
       this.log('ERROR', `Connection failed: ${(err as Error).message}`);
       this.setState('disconnected');
+      this.scheduleReconnect();
     }
+  }
+
+  /**
+   * User-initiated reconnect. Bypasses backoff and skips any pending timer.
+   * No-op when already connected or already trying.
+   */
+  async reconnect(): Promise<void> {
+    if (this.disposed) { return; }
+    if (this.state === 'connected' || this.state === 'connecting') { return; }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempt = 0;
+    this.log('INFO', 'Manual reconnect requested');
+
+    const config = vscode.workspace.getConfiguration('codev');
+    if (config.get<boolean>('autoStartTower', true) && this.client && !this.autoStartInFlight) {
+      this.autoStartInFlight = true;
+      try {
+        await autoStartTower(this.client, this.workspacePath, this.outputChannel);
+      } finally {
+        this.autoStartInFlight = false;
+      }
+    }
+
+    await this.connect();
   }
 
   /**
    * Schedule reconnection with exponential backoff.
    */
   scheduleReconnect(): void {
-    if (this.disposed || this.state === 'connected') { return; }
+    if (this.disposed || this.state === 'connected' || this.state === 'connecting') { return; }
+    if (this.reconnectTimer) { return; }
 
     this.setState('reconnecting');
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), this.maxReconnectDelay);
     this.reconnectAttempt++;
 
     this.log('INFO', `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect();
+    }, delay);
   }
 
   /**
