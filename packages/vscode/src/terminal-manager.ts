@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CodevPseudoterminal } from './terminal-adapter.js';
 import type { ConnectionManager } from './connection-manager.js';
 import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
+import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
 
 const MAX_TERMINALS = 10;
 
@@ -73,7 +74,17 @@ export class TerminalManager {
     }
     try {
       const state = await client.getWorkspaceState(workspacePath);
-      const builder = state?.builders?.find((b) => b.name === roleOrId || b.id === roleOrId);
+      const builders = state?.builders ?? [];
+      // Use resolveAgentName so the bare numeric IDs the sidebar passes
+      // (e.g. '153' from OverviewBuilder) tail-match canonical
+      // 'builder-spir-153' IDs from Tower's runtime state.
+      const { builder, ambiguous } = resolveAgentName(roleOrId, builders);
+      if (ambiguous) {
+        vscode.window.showWarningMessage(
+          `Codev: Multiple builders match "${roleOrId}": ${ambiguous.map(b => b.name).join(', ')}`,
+        );
+        return;
+      }
       if (!builder?.terminalId) {
         vscode.window.showWarningMessage(`Codev: No active terminal for ${roleOrId}`);
         return;

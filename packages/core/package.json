@@ -23,6 +23,10 @@
     "./escape-buffer": {
       "types": "./dist/escape-buffer.d.ts",
       "default": "./dist/escape-buffer.js"
+    },
+    "./agent-names": {
+      "types": "./dist/agent-names.d.ts",
+      "default": "./dist/agent-names.js"
     }
   },
   "files": [

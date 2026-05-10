@@ -8,26 +8,15 @@
  *   Branch name:   builder/{protocol}-{id}[-{slug}]
  *
  * All names are stored and compared in lowercase per spec.
- */
-
-import type { Builder, BuilderType } from '../types.js';
-
-/**
- * Strip leading zeros from a numeric ID string.
- * Non-numeric IDs are returned unchanged.
  *
- * Examples:
- *   '0109' → '109'
- *   '0001' → '1'
- *   '0'    → '0'
- *   'AbCd' → 'AbCd'
+ * `stripLeadingZeros` and `resolveAgentName` live in codev-core so the
+ * VS Code extension can use the same matching semantics; we re-export
+ * them here so existing agent-farm callsites are unaffected.
  */
-export function stripLeadingZeros(id: string): string {
-  if (/^\d+$/.test(id)) {
-    return String(Number(id));
-  }
-  return id;
-}
+
+import type { BuilderType } from '../types.js';
+export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import { stripLeadingZeros } from '@cluesmith/codev-core/agent-names';
 
 /**
  * Build a canonical agent name from builder type and ID.
@@ -106,46 +95,3 @@ export function parseAddress(target: string): { project?: string; agent: string 
   return { agent: target.toLowerCase() };
 }
 
-/**
- * Resolve an agent name against a list of builders using case-insensitive
- * matching with tail-match fallback.
- *
- * Resolution order:
- * 1. Exact match (case-insensitive): 'builder-spir-109' matches 'builder-spir-109'
- * 2. Tail match: bare ID matches the trailing segment of builder-{protocol}-{id}.
- *    E.g., '109' matches 'builder-spir-109' because the name ends with '-109'.
- *    Leading zeros are stripped before comparison: '0109' → '109'.
- *    Also handles partial names: 'bugfix-42' matches 'builder-bugfix-42'.
- * 3. Returns null if no match found or multiple ambiguous tail matches.
- *
- * @returns { builder, ambiguous? } — builder is the matched Builder or null.
- *   If ambiguous, candidates are provided for error messaging.
- */
-export function resolveAgentName(
-  target: string,
-  builders: Builder[],
-): { builder: Builder | null; ambiguous?: Builder[] } {
-  const originalTarget = target.toLowerCase();
-  const strippedTarget = stripLeadingZeros(target).toLowerCase();
-
-  // 1. Exact match (case-insensitive) — try original first, then stripped
-  const exact = builders.find(b => {
-    const id = b.id.toLowerCase();
-    return id === originalTarget || id === strippedTarget;
-  });
-  if (exact) return { builder: exact };
-
-  // 2. Tail match: check if any builder ID ends with -{strippedTarget}
-  const tailMatches = builders.filter(b => {
-    const builderId = b.id.toLowerCase();
-    // Check if the builder ID ends with the target as a tail segment
-    // e.g., builder-spir-109 ends with -109, -spir-109
-    return builderId.endsWith(`-${strippedTarget}`);
-  });
-
-  if (tailMatches.length === 1) return { builder: tailMatches[0] };
-  if (tailMatches.length > 1) return { builder: null, ambiguous: tailMatches };
-
-  // 3. No match
-  return { builder: null };
-}
