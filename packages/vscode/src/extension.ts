@@ -37,6 +37,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Status bar
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBarItem.text = '$(circle-slash) Codev: Offline';
+	statusBarItem.command = 'codev.reconnect';
+	statusBarItem.tooltip = 'Click to reconnect to Tower';
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
 
@@ -179,6 +181,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
+		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.disconnectTunnel', () => disconnectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),

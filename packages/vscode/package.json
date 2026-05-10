@@ -83,6 +83,10 @@
         "title": "Codev: Refresh Overview"
       },
       {
+        "command": "codev.reconnect",
+        "title": "Codev: Reconnect to Tower"
+      },
+      {
         "command": "codev.connectTunnel",
         "title": "Codev: Connect Tunnel"
       },
