@@ -5,15 +5,14 @@ export type SSEListener = (eventType: string, data: string) => void;
 /**
  * SSE client for Tower's /api/events endpoint.
  *
- * Handles heartbeat filtering, rate-limited refresh dispatch,
- * and reconnection via the Connection Manager's state machine.
+ * Filters heartbeats and dispatches every other event to listeners.
+ * Throttling, if needed, is the consumer's responsibility (e.g. the
+ * overview cache self-throttles via its `loading` guard) — coalescing
+ * here would silently drop payload-carrying events like `builder-spawned`.
  */
 export class SSEClient {
   private eventSource: EventSource | null = null;
   private listeners: SSEListener[] = [];
-  private lastRefreshAt = 0;
-  private pendingRefresh: ReturnType<typeof setTimeout> | null = null;
-  private readonly minRefreshInterval = 1000; // max 1 refresh/second
   private disposed = false;
 
   constructor(
@@ -51,10 +50,6 @@ export class SSEClient {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
-    }
-    if (this.pendingRefresh) {
-      clearTimeout(this.pendingRefresh);
-      this.pendingRefresh = null;
     }
   }
 
@@ -135,28 +130,10 @@ export class SSEClient {
   }
 
   private handleEvent(eventType: string, data: string): void {
-    // Filter heartbeats — don't trigger refresh
     if (eventType === 'heartbeat' || eventType === 'ping') {
       return;
     }
-
-    // Rate-limit refresh dispatch
-    const now = Date.now();
-    const elapsed = now - this.lastRefreshAt;
-
-    if (elapsed >= this.minRefreshInterval) {
-      this.lastRefreshAt = now;
-      this.dispatch(eventType, data);
-    } else if (!this.pendingRefresh) {
-      // Schedule a deferred refresh
-      const delay = this.minRefreshInterval - elapsed;
-      this.pendingRefresh = setTimeout(() => {
-        this.pendingRefresh = null;
-        this.lastRefreshAt = Date.now();
-        this.dispatch(eventType, data);
-      }, delay);
-    }
-    // If a refresh is already pending, skip — the pending one covers it
+    this.dispatch(eventType, data);
   }
 
   private dispatch(eventType: string, data: string): void {

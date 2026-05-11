@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -80,7 +80,13 @@
       },
       {
         "command": "codev.refreshOverview",
-        "title": "Codev: Refresh Overview"
+        "title": "Codev: Refresh Overview",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codev.reconnect",
+        "title": "Codev: Reconnect to Tower",
+        "icon": "$(sync)"
       },
       {
         "command": "codev.connectTunnel",
@@ -99,6 +105,35 @@
         "title": "Codev: Add Review Comment"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codev.refreshOverview",
+          "when": "view == codev.needsAttention",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.refreshOverview",
+          "when": "view == codev.builders",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.refreshOverview",
+          "when": "view == codev.pullRequests",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.refreshOverview",
+          "when": "view == codev.backlog",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.reconnect",
+          "when": "view == codev.status",
+          "group": "navigation"
+        }
+      ]
+    },
     "snippets": [
       {
         "language": "markdown",
@@ -133,6 +168,7 @@
     },
     "views": {
       "codev": [
+        { "id": "codev.workspace", "name": "Workspace" },
         { "id": "codev.needsAttention", "name": "Needs Attention" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },

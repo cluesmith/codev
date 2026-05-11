@@ -19,6 +19,7 @@ import { BacklogProvider } from './views/backlog.js';
 import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
+import { WorkspaceProvider } from './views/workspace.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -37,6 +38,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Status bar
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBarItem.text = '$(circle-slash) Codev: Offline';
+	statusBarItem.command = 'codev.reconnect';
+	statusBarItem.tooltip = 'Click to reconnect to Tower';
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
 
@@ -63,7 +66,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 
 	// Terminal Manager
-	terminalManager = new TerminalManager(connectionManager, outputChannel);
+	terminalManager = new TerminalManager(connectionManager, outputChannel, context.extensionUri);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
 
 	// Update status bar with builder/gate counts
@@ -84,6 +87,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	overviewCache.onDidChange(updateStatusBarCounts);
 
 	context.subscriptions.push(
+		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
 		vscode.window.registerTreeDataProvider('codev.needsAttention', new NeedsAttentionProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.builders', new BuildersProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.pullRequests', new PullRequestsProvider(overviewCache)),
@@ -124,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			try {
 				const state = await client.getWorkspaceState(workspacePath);
 				if (state?.architect?.terminalId) {
-					await terminalManager?.openArchitect(state.architect.terminalId);
+					await terminalManager?.openArchitect(state.architect.terminalId, true);
 				} else {
 					vscode.window.showWarningMessage('Codev: No architect terminal found — is the workspace activated?');
 				}
@@ -151,7 +155,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					{ placeHolder: 'Select a builder' },
 				);
 				if (picked) {
-					await terminalManager?.openBuilder(picked.terminalId, picked.id, `Codev: ${picked.label}`);
+					await terminalManager?.openBuilder(picked.terminalId, picked.id, `Codev: ${picked.label}`, true);
 				}
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get builders');
@@ -174,11 +178,16 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');
 			}
 		}),
+		vscode.commands.registerCommand('codev.openBuilderById', async (roleOrId: string) => {
+			if (!roleOrId) { return; }
+			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
+		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
+		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.disconnectTunnel', () => disconnectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
@@ -197,7 +206,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Make builder names clickable in any terminal output
 	context.subscriptions.push(
 		vscode.window.registerTerminalLinkProvider(
-			new BuilderTerminalLinkProvider(connectionManager, terminalManager, outputChannel),
+			new BuilderTerminalLinkProvider(terminalManager),
 		),
 	);
 

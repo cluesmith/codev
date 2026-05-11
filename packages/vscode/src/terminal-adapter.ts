@@ -35,6 +35,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   ) {}
 
   open(_initialDimensions: vscode.TerminalDimensions | undefined): void {
+    // Prime the renderer synchronously inside open() — VS Code drops or
+    // mis-orders writes that arrive purely asynchronously after open()
+    // when the terminal becomes the active editor (microsoft/vscode#108298),
+    // which manifests as a blank pane when openTerminal calls show(false).
+    this.writeEmitter.fire('');
     this.connect();
   }
 

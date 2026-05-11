@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import type { ConnectionManager } from './connection-manager.js';
 import type { TerminalManager } from './terminal-manager.js';
 
 // Matches Codev builder role names like `builder-spir-153`, `builder-bugfix-42`.
@@ -14,11 +13,7 @@ interface BuilderLink extends vscode.TerminalLink {
  * Clicking opens (or focuses) that builder's terminal.
  */
 export class BuilderTerminalLinkProvider implements vscode.TerminalLinkProvider<BuilderLink> {
-  constructor(
-    private connectionManager: ConnectionManager,
-    private terminalManager: TerminalManager,
-    private outputChannel: vscode.OutputChannel,
-  ) {}
+  constructor(private terminalManager: TerminalManager) {}
 
   provideTerminalLinks(context: vscode.TerminalLinkContext): BuilderLink[] {
     const links: BuilderLink[] = [];
@@ -36,29 +31,6 @@ export class BuilderTerminalLinkProvider implements vscode.TerminalLinkProvider<
   }
 
   async handleTerminalLink(link: BuilderLink): Promise<void> {
-    const client = this.connectionManager.getClient();
-    const workspacePath = this.connectionManager.getWorkspacePath();
-    if (!client || !workspacePath) {
-      vscode.window.showErrorMessage('Codev: Not connected to Tower');
-      return;
-    }
-
-    try {
-      const state = await client.getWorkspaceState(workspacePath);
-      const builder = state?.builders?.find(b => b.name === link.roleId || b.id === link.roleId);
-      if (!builder?.terminalId) {
-        vscode.window.showWarningMessage(`Codev: No active terminal for ${link.roleId}`);
-        return;
-      }
-      await this.terminalManager.openBuilder(builder.terminalId, builder.id, `Codev: ${builder.name}`);
-    } catch (err) {
-      this.log('ERROR', `Failed to open builder ${link.roleId}: ${(err as Error).message}`);
-      vscode.window.showErrorMessage(`Codev: Failed to open ${link.roleId}`);
-    }
-  }
-
-  private log(level: string, message: string): void {
-    const timestamp = new Date().toISOString();
-    this.outputChannel.appendLine(`[${timestamp}] [BuilderLinks] [${level}] ${message}`);
+    await this.terminalManager.openBuilderByRoleOrId(link.roleId, true);
   }
 }

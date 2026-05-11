@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
-import { encodeWorkspacePath, decodeWorkspacePath } from '../lib/tower-client.js';
+import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
 import { version } from '../../version.js';
@@ -73,7 +73,7 @@ import {
   deleteFileTabsForWorkspace,
   saveFileTab,
   deleteFileTab,
-  getTerminalsForWorkspace,
+  getRehydratedTerminalsEntry,
   getTerminalSessionById,
   getActiveShellLabels,
   updateTerminalLabel,
@@ -686,14 +686,15 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     return;
   }
 
-  // Build set of active builder role_ids (lowercased) from live terminal sessions
-  const wsTerminals = getWorkspaceTerminals();
-  const entry = wsTerminals.get(normalizeWorkspacePath(workspaceRoot));
+  // Build set of active builder role_ids (lowercased) from live terminal sessions.
+  // Bugfix #718: rehydrate the wsTerminals entry from SQLite + shellper before
+  // reading, matching what /api/state has always done. Without this the sidebar
+  // diverges from the dashboard after any state-loss event (Tower restart with
+  // non-shellper sessions, crashed builders, etc.).
+  const entry = await getRehydratedTerminalsEntry(workspaceRoot);
   const activeBuilderRoleIds = new Set<string>();
-  if (entry) {
-    for (const key of entry.builders.keys()) {
-      activeBuilderRoleIds.add(key.toLowerCase());
-    }
+  for (const key of entry.builders.keys()) {
+    activeBuilderRoleIds.add(key.toLowerCase());
   }
 
   const data = await overviewCache.getOverview(workspaceRoot, activeBuilderRoleIds);
@@ -1377,14 +1378,10 @@ async function handleWorkspaceState(
   res: http.ServerResponse,
   workspacePath: string,
 ): Promise<void> {
-  // Refresh cache via getTerminalsForWorkspace (handles SQLite sync
-  // and shellper reconnection in one place)
-  const encodedPath = encodeWorkspacePath(workspacePath);
-  const proxyUrl = `/workspace/${encodedPath}/`;
-  await getTerminalsForWorkspace(workspacePath, proxyUrl);
-
-  // Now read from the refreshed cache
-  const entry = getWorkspaceTerminalsEntry(workspacePath);
+  // Rehydrate wsTerminals (SQLite sync + shellper reconnect) before reading.
+  // Shared with /api/overview so both endpoints always see a freshly-reconciled
+  // entry — see getRehydratedTerminalsEntry doc.
+  const entry = await getRehydratedTerminalsEntry(workspacePath);
   const manager = getTerminalManager();
   const state: {
     architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
