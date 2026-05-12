@@ -103,9 +103,20 @@
       {
         "command": "codev.addReviewComment",
         "title": "Codev: Add Review Comment"
+      },
+      {
+        "command": "codev.reviewDiff",
+        "title": "Codev: View Diff"
       }
     ],
     "menus": {
+      "view/item/context": [
+        {
+          "command": "codev.reviewDiff",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "codev@1"
+        }
+      ],
       "view/title": [
         {
           "command": "codev.refreshOverview",

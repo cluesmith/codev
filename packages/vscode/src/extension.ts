@@ -6,6 +6,7 @@ import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
+import { reviewDiff } from './commands/review-diff.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -186,6 +187,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
+		vscode.commands.registerCommand('codev.reviewDiff', (arg: string | undefined) =>
+			reviewDiff(connectionManager!, typeof arg === 'string' ? arg : undefined)),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
 		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
