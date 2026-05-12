@@ -233,10 +233,10 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
-  - version: "v3.1.0"
-    name: "Jugendstil"
+  - version: "v3.0.3"
+    name: "Ionic"
     status: released
-    target_date: "2026-05-10"
+    target_date: "2026-05-12"
     notes: "Runnable worktrees (worktree.symlinks/postSpawn/devCommand, afx dev, afx setup), VSCode review tooling (sidebar context menu, View Diff, Run/Stop Dev Server), lockstep version bumps (pnpm bump-version), VSCode reliability fixes (#682 follow-up, #718, #728)."
   - version: "v3.0.2"
     name: "Ionic"

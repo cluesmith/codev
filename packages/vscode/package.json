@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.1.0",
+  "version": "3.0.3",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
