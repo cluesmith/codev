@@ -34,7 +34,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
     "@cluesmith/codev-types": "workspace:*",

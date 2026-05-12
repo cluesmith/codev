@@ -1,10 +1,12 @@
 {
   "name": "cluesmith-codev",
+  "version": "3.0.2",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "scripts/check-main-fresh.sh && pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev build",
     "test": "pnpm --filter @cluesmith/codev test",
-    "local-install": "scripts/local-install.sh"
+    "local-install": "scripts/local-install.sh",
+    "bump-version": "scripts/bump-all.sh"
   }
 }
