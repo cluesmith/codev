@@ -1,10 +1,12 @@
 /**
- * Codev: View Diff — open `main...HEAD` diff for a builder's worktree.
+ * Codev: View Diff — open `main...HEAD` for a builder's worktree as a
+ * single multi-file diff editor (matches VSCode's built-in "Working Tree"
+ * view in the Source Control panel).
  *
- * Right-click a builder row in the Codev sidebar → "View Diff". Opens one
- * native VSCode diff tab per changed file: left = file at `main`'s tip
- * (resolved via the Git extension's `git:` URI scheme), right = the
- * worktree's current working-tree file.
+ * Right-click a builder row → "View Diff". Opens ONE tab with a file
+ * list on the left and a diff that updates as the reviewer clicks each
+ * file. Handles added / modified / deleted files uniformly via VSCode's
+ * `vscode.changes` command.
  *
  * Why this works across worktrees: each `.builders/<id>/` is a real git
  * worktree linked to the parent repo's `.git`, so all branches live in the
@@ -21,9 +23,6 @@ import type { ConnectionManager } from '../connection-manager.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Guard against opening too many diff tabs in one shot. */
-const MAX_FILES_WITHOUT_CONFIRM = 30;
-
 export async function reviewDiff(
   connectionManager: ConnectionManager,
   builderIdArg: string | undefined,
@@ -35,7 +34,7 @@ export async function reviewDiff(
     return;
   }
 
-  // Resolve the builder. If no id was passed (palette invocation), show a quick-pick.
+  // Resolve the builder. Quick-pick fallback for command-palette invocation.
   const overview = await client.getOverview(workspacePath);
   const builders = overview?.builders ?? [];
   if (builders.length === 0) {
@@ -57,46 +56,93 @@ export async function reviewDiff(
     return;
   }
 
-  // Enumerate changed files via git.
-  let files: string[];
+  // Enumerate changed files with status letters so we can handle
+  // added (A) / deleted (D) files distinctly from modified (M).
+  let changes: Array<{ status: string; path: string }>;
   try {
     const { stdout } = await execFileAsync('git', [
       '-C', builder.worktreePath,
-      'diff', '--name-only', 'main...HEAD',
+      'diff', '--name-status', 'main...HEAD',
     ]);
-    files = stdout.split('\n').map(s => s.trim()).filter(Boolean);
+    changes = stdout
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(line => {
+        // Status letter, then tab(s), then the path. For renames/copies the
+        // line is "R100\told\tnew" — take the new (last) path.
+        const parts = line.split('\t');
+        return { status: parts[0]![0]!, path: parts[parts.length - 1]! };
+      });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Codev: git diff failed — ${message}`);
     return;
   }
 
-  if (files.length === 0) {
+  if (changes.length === 0) {
     vscode.window.showInformationMessage(`Codev: No changes to review yet for ${builder.id}`);
     return;
   }
 
-  if (files.length > MAX_FILES_WITHOUT_CONFIRM) {
-    const proceed = await vscode.window.showWarningMessage(
-      `Open ${files.length} diff tabs for ${builder.id}?`,
-      { modal: true },
-      'Open All',
-    );
-    if (proceed !== 'Open All') { return; }
-  }
-
-  for (const rel of files) {
+  // Build the resources array for vscode.changes. Each entry is a tuple of
+  // [resourceUri, leftUri, rightUri]:
+  //   - resourceUri: the file as it lives in the worktree (used for icon /
+  //     file-list display)
+  //   - leftUri: main's version (empty for added files)
+  //   - rightUri: worktree's version (empty for deleted files)
+  // Empty sides are signalled with the `git:` URI at a non-existent ref —
+  // VSCode's diff editor renders that as a one-sided view.
+  const resources: Array<[vscode.Uri, vscode.Uri, vscode.Uri]> = changes.map(({ status, path: rel }) => {
     const abs = path.join(builder.worktreePath, rel);
-    const query = encodeURIComponent(JSON.stringify({ ref: 'main', path: rel }));
-    const left = vscode.Uri.parse(`git:${abs}?${query}`);
-    const right = vscode.Uri.file(abs);
-    await vscode.commands.executeCommand(
-      'vscode.diff',
-      left,
-      right,
-      `${rel} (main ↔ ${builder.id})`,
-    );
-  }
+    const resourceUri = vscode.Uri.file(abs);
+    const mainUri = toGitUri(abs, rel, 'main');
+    const headUri = vscode.Uri.file(abs);
+
+    if (status === 'A') {
+      // Added: no main version. Left = empty, right = file.
+      return [resourceUri, emptyGitUri(abs, rel), headUri];
+    }
+    if (status === 'D') {
+      // Deleted: no worktree version. Left = main, right = empty.
+      return [resourceUri, mainUri, emptyGitUri(abs, rel)];
+    }
+    // Modified / renamed / copied / unmerged → side-by-side diff
+    return [resourceUri, mainUri, headUri];
+  });
+
+  await vscode.commands.executeCommand(
+    'vscode.changes',
+    `Reviewing ${builder.id} (main ↔ HEAD)`,
+    resources,
+  );
+}
+
+/**
+ * Build a `git:` URI VSCode's built-in Git extension resolves against the
+ * worktree's shared object database. Matches the Git extension's canonical
+ * `toGitUri` shape: scheme=git, path=fsPath, query=JSON of `{ path, ref }`.
+ */
+function toGitUri(absPath: string, relPath: string, ref: string): vscode.Uri {
+  return vscode.Uri.file(absPath).with({
+    scheme: 'git',
+    query: JSON.stringify({ path: relPath, ref }),
+  });
+}
+
+/**
+ * URI that renders as empty content in the diff editor. Used for the
+ * "missing" side of added/deleted files. We use a `git:` URI at a known
+ * empty ref (`HEAD~0` resolves but the file doesn't exist for added files;
+ * the Git extension returns empty content for unresolved paths at a valid
+ * ref). If that ever becomes flaky, the alternative is a `data:` URI or
+ * an untitled scheme.
+ */
+function emptyGitUri(absPath: string, relPath: string): vscode.Uri {
+  return vscode.Uri.file(absPath).with({
+    scheme: 'git',
+    query: JSON.stringify({ path: relPath, ref: '' }),
+  });
 }
 
 interface BuilderLike {
