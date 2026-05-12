@@ -7,12 +7,13 @@
  * and terminal session creation via the Tower REST API.
  */
 
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
-import { getBuilderHarness } from '../utils/config.js';
+import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
 import { shellEscapeSingleQuote } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
@@ -40,6 +41,11 @@ export async function checkDependencies(): Promise<void> {
 /**
  * Symlink config files from workspace root into a worktree (if they exist).
  * Shared by createWorktree() and createWorktreeFromBranch().
+ *
+ * Always symlinks root `.env` and `.codev/config.json` (existing behavior).
+ * Additionally, when `worktree.symlinks` is configured in `.codev/config.json`,
+ * expands each glob pattern from the workspace root and symlinks each match
+ * into the worktree at the same relative path.
  */
 export function symlinkConfigFiles(config: Config, worktreePath: string): void {
   // Symlink .env at root level
@@ -71,10 +77,40 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
       }
     }
   }
+
+  // Opt-in: expand worktree.symlinks globs and link each match at the same
+  // relative path inside the worktree. Unconfigured repos see no effect.
+  for (const pattern of getWorktreeConfig(config.workspaceRoot).symlinks) {
+    for (const rel of globSync(pattern, { cwd: config.workspaceRoot, dot: true, nodir: true })) {
+      const target = resolve(worktreePath, rel);
+      if (existsSync(target)) continue;
+      mkdirSync(dirname(target), { recursive: true });
+      symlinkSync(resolve(config.workspaceRoot, rel), target);
+      logger.info(`Linked ${rel} from workspace root`);
+    }
+  }
 }
 
 /**
- * Create git branch and worktree
+ * Run user-configured post-spawn commands inside a freshly-created worktree.
+ * Each runs sequentially with cwd = worktreePath. A non-zero exit aborts the
+ * spawn via run()'s native error (which already names the failing command
+ * and stderr); the half-built worktree stays where it is.
+ */
+export async function runPostSpawnHooks(
+  worktreePath: string,
+  commands: string[],
+): Promise<void> {
+  for (const cmd of commands) {
+    logger.info(`Running post-spawn hook: ${cmd}`);
+    await run(cmd, { cwd: worktreePath });
+  }
+}
+
+/**
+ * Create git branch and worktree, then run the configured worktree setup
+ * (symlinks + post-spawn hooks). Callers do not need to invoke setup
+ * separately — `createWorktree` produces a runnable worktree.
  */
 export async function createWorktree(config: Config, branchName: string, worktreePath: string): Promise<void> {
   logger.info('Creating branch...');
@@ -93,6 +129,7 @@ export async function createWorktree(config: Config, branchName: string, worktre
   }
 
   symlinkConfigFiles(config, worktreePath);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
 }
 
 /**
@@ -324,6 +361,7 @@ export async function createWorktreeFromBranch(
   }
 
   symlinkConfigFiles(config, worktreePath);
+  await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
 }
 
 /**

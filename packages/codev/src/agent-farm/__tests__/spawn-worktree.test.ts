@@ -11,6 +11,7 @@ import {
   checkDependencies, createWorktree, createWorktreeFromBranch,
   validateBranchName, validateRemoteName, detectForkRemote,
   symlinkConfigFiles,
+  runPostSpawnHooks,
   checkBugfixCollisions,
   findExistingBugfixWorktree,
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
@@ -62,8 +63,16 @@ vi.mock('../../lib/forge.js', () => ({
 // Mock the harness resolution to return claude harness by default
 import { CLAUDE_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
+const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null }));
 vi.mock('../utils/config.js', () => ({
   getBuilderHarness: (...args: unknown[]) => getBuilderHarnessMock(...args),
+  getWorktreeConfig: (...args: unknown[]) => getWorktreeConfigMock(...args),
+}));
+
+// Mock the glob package used for worktree.symlinks expansion
+const globSyncMock = vi.fn(() => [] as string[]);
+vi.mock('glob', () => ({
+  globSync: (...args: unknown[]) => globSyncMock(...args),
 }));
 
 describe('spawn-worktree', () => {
@@ -854,6 +863,100 @@ describe('spawn-worktree', () => {
         .mockReturnValueOnce(true); // .codev/config.json already in worktree
       symlinkConfigFiles(config, '/tmp/wt');
       expect(symlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('does not run glob expansion when worktree.symlinks is unset', async () => {
+      const { symlinkSync } = await import('node:fs');
+      // Default mock returns symlinks: [] — should never invoke globSync
+      symlinkConfigFiles(config, '/tmp/wt');
+      expect(globSyncMock).not.toHaveBeenCalled();
+      // Only the hardcoded .env / .codev/config.json paths are eligible to symlink
+      // (which our existsSync mock defaults to false → 0 calls expected here)
+      expect(symlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('symlinks glob-matched files when worktree.symlinks is configured', async () => {
+      const { existsSync, symlinkSync, mkdirSync } = await import('node:fs');
+      getWorktreeConfigMock.mockReturnValueOnce({
+        symlinks: ['.env.local', 'packages/*/.env'],
+        postSpawn: [],
+        devCommand: null,
+      });
+      // Hardcoded section (.env / .codev/config.json) — both absent
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(false)  // root .env
+        .mockReturnValueOnce(false); // root .codev/config.json
+      // Glob expansion produces three matches across two patterns
+      globSyncMock
+        .mockReturnValueOnce(['.env.local'])
+        .mockReturnValueOnce(['packages/web/.env', 'packages/api/.env']);
+      // Each match: existsSync(target) → false (clear path to symlink)
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(false);
+
+      symlinkConfigFiles(config, '/tmp/wt');
+
+      expect(globSyncMock).toHaveBeenCalledTimes(2);
+      expect(symlinkSync).toHaveBeenCalledTimes(3);
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/.env.local', '/tmp/wt/.env.local');
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/web/.env', '/tmp/wt/packages/web/.env');
+      expect(symlinkSync).toHaveBeenCalledWith('/projects/test/packages/api/.env', '/tmp/wt/packages/api/.env');
+      // mkdirSync called for the nested dirs (packages/web, packages/api)
+      expect(mkdirSync).toHaveBeenCalled();
+    });
+
+    it('skips glob match when target already exists in worktree', async () => {
+      const { existsSync, symlinkSync } = await import('node:fs');
+      getWorktreeConfigMock.mockReturnValueOnce({
+        symlinks: ['.env.local'],
+        postSpawn: [],
+        devCommand: null,
+      });
+      // Hardcoded section: both absent so no calls there
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(false)  // root .env
+        .mockReturnValueOnce(false); // root .codev/config.json
+      globSyncMock.mockReturnValueOnce(['.env.local']);
+      // Target already exists in worktree → skip
+      vi.mocked(existsSync).mockReturnValueOnce(true);
+
+      symlinkConfigFiles(config, '/tmp/wt');
+
+      expect(symlinkSync).not.toHaveBeenCalled();
+    });
+
+  });
+
+  describe('runPostSpawnHooks', () => {
+    it('is a no-op when commands array is empty', async () => {
+      const { run } = await import('../utils/shell.js');
+      await runPostSpawnHooks('/tmp/wt', []);
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it('runs each command sequentially with cwd = worktreePath', async () => {
+      const { run } = await import('../utils/shell.js');
+      await runPostSpawnHooks('/tmp/wt', ['cmd1', 'cmd2', 'cmd3']);
+      expect(run).toHaveBeenCalledTimes(3);
+      expect(run).toHaveBeenNthCalledWith(1, 'cmd1', { cwd: '/tmp/wt' });
+      expect(run).toHaveBeenNthCalledWith(2, 'cmd2', { cwd: '/tmp/wt' });
+      expect(run).toHaveBeenNthCalledWith(3, 'cmd3', { cwd: '/tmp/wt' });
+    });
+
+    it('aborts on non-zero exit and does not run subsequent commands', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockRejectedValueOnce(new Error('Command failed: bad-cmd\nexit 7'));
+
+      await expect(
+        runPostSpawnHooks('/tmp/wt', ['good-cmd', 'bad-cmd', 'never-run-cmd']),
+      ).rejects.toThrow(/Command failed: bad-cmd/);
+
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).not.toHaveBeenCalledWith('never-run-cmd', expect.anything());
     });
   });
 });
