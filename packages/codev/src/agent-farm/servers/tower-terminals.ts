@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
+import type { TerminalType } from '@cluesmith/codev-core/tower-client';
 import { loadConfig } from '../../lib/config.js';
 import { getGlobalDb } from '../db/index.js';
 import {
@@ -180,7 +181,7 @@ export function getNextShellId(workspacePath: string): string {
 export function saveTerminalSession(
   terminalId: string,
   workspacePath: string,
-  type: 'architect' | 'builder' | 'shell',
+  type: TerminalType,
   roleId: string | null,
   pid: number | null,
   shellperSocket: string | null = null,

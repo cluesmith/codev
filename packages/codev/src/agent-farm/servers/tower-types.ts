@@ -6,6 +6,7 @@
 import type http from 'node:http';
 import type { WebSocketServer } from 'ws';
 import type Database from 'better-sqlite3';
+import type { TerminalType } from '@cluesmith/codev-core/tower-client';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { TunnelClient } from '../lib/tunnel-client.js';
@@ -50,9 +51,9 @@ export interface RateLimitEntry {
   windowStart: number;
 }
 
-/** Terminal entry returned to tower UI */
+/** Terminal entry returned to tower UI. `'file'` is a UI-only file-tab pseudo-terminal. */
 export interface TerminalEntry {
-  type: 'architect' | 'builder' | 'shell' | 'file';
+  type: TerminalType | 'file';
   id: string;
   label: string;
   url: string;
@@ -70,11 +71,15 @@ export interface InstanceStatus {
   lastUsed?: string;
 }
 
-/** SQLite terminal session row shape */
+/**
+ * SQLite terminal session row shape.
+ * Note: dev PTYs (`type: 'dev'`) are intentionally never written here — see
+ * the runtime filter in tower-routes.ts that gates shellper persistence.
+ */
 export interface DbTerminalSession {
   id: string;
   workspace_path: string;
-  type: 'architect' | 'builder' | 'shell';
+  type: TerminalType;
   role_id: string | null;
   pid: number | null;
   shellper_socket: string | null;

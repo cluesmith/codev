@@ -546,7 +546,13 @@ export async function createPtySession(
   command: string,
   args: string[],
   cwd: string,
-  registration?: { workspacePath: string; type: 'builder' | 'shell'; roleId: string },
+  registration?: {
+    workspacePath: string;
+    /** Architects are spawned server-side by Tower's launchInstance, not via this path. */
+    type: 'builder' | 'shell' | 'dev';
+    roleId: string;
+    label?: string;
+  },
 ): Promise<{ terminalId: string }> {
   const { cols, rows } = defaultSessionOptions();
   const client = getTowerClient();
@@ -556,6 +562,7 @@ export async function createPtySession(
     workspacePath: registration?.workspacePath,
     type: registration?.type,
     roleId: registration?.roleId,
+    label: registration?.label,
   });
 
   if (!terminal) {

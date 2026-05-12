@@ -20,6 +20,7 @@ import { getGlobalDb } from '../db/index.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
+import type { TerminalType } from '@cluesmith/codev-core/tower-client';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,
@@ -42,7 +43,7 @@ export interface InstanceDeps {
   getWorkspaceTerminalsEntry: (workspacePath: string) => WorkspaceTerminals;
   /** Persist a terminal session row to SQLite */
   saveTerminalSession: (
-    id: string, workspacePath: string, type: 'architect' | 'builder' | 'shell',
+    id: string, workspacePath: string, type: TerminalType,
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
     label?: string | null, cwd?: string | null,
