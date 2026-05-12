@@ -53,6 +53,32 @@ bats tests/e2e/
 
 ### 4. Update Version and Tag
 
+**Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every publishable package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-types`, and the VS Code extension) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches.
+
+The script anchors on the root `package.json`'s current version (Vue/Babel pattern) and accepts several invocation forms:
+
+| Command | Effect |
+|---|---|
+| `pnpm bump-version` | **Default** — patch bump from the current root version (e.g. `3.0.2` → `3.0.3`) |
+| `pnpm bump-version patch` | Same as no-arg |
+| `pnpm bump-version minor` | Minor bump (e.g. `3.0.2` → `3.1.0`) |
+| `pnpm bump-version major` | Major bump (e.g. `3.0.2` → `4.0.0`) |
+| `pnpm bump-version 3.1.0-rc.1` | Explicit version (use for RCs; pre-release versions auto-skip `packages/vscode` because the VS Code Marketplace rejects pre-release suffixes) |
+
+Replace `X.Y.Z` below with the version the script just wrote (it prints it as `Bumped … → X.Y.Z`).
+
+```bash
+pnpm bump-version            # or: pnpm bump-version minor / major / 3.1.0-rc.1
+
+# Commit and tag (root package.json is the version anchor — Vue/Babel pattern)
+git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/vscode/package.json pnpm-lock.yaml
+git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
+git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
+git push && git push origin vX.Y.Z
+```
+
+**Backport path (single-package patch on a release branch)** — use `pnpm version` directly:
+
 ```bash
 cd packages/codev
 
@@ -127,7 +153,7 @@ cd packages/codev && pnpm publish --no-git-checks            # stable → tag la
 cd packages/codev && pnpm publish --tag next --no-git-checks # RC → tag next
 ```
 
-**When to bump workspace dep versions:** if you've changed `packages/core/src/**` or `packages/types/src/**` since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing. Otherwise the publish step will skip it (existing version) and consumers will get the old code.
+**When to bump workspace dep versions:** unnecessary if step 4 used `pnpm bump-version` (lockstep already bumped core and types). If you took the backport path and `packages/core/src/**` or `packages/types/src/**` changed since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing — otherwise the publish step will skip it (existing version) and consumers will get the old code.
 
 **Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`.
 
@@ -201,13 +227,13 @@ Starting with v1.7.0, minor releases use a release candidate workflow for testin
 ### RC Publishing
 
 ```bash
-# Set version to RC
-cd packages/codev
-pnpm version 1.7.0-rc.1 --no-git-tag-version
+# Set version to RC. bump-all.sh auto-skips packages/vscode for pre-release
+# versions (VS Code Marketplace rejects semver pre-release suffixes), so only
+# codev, core, and types are bumped here. vscode catches up at RC → stable.
+pnpm bump-version 1.7.0-rc.1
 
-# Commit and tag
-cd ../..
-git add packages/codev/package.json pnpm-lock.yaml
+# Commit and tag (note: no packages/vscode/package.json — it wasn't bumped)
+git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json pnpm-lock.yaml
 git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"
 git push && git push origin v1.7.0-rc.1
@@ -222,9 +248,8 @@ cd packages/codev && pnpm publish --tag next --no-git-checks
 When an RC is validated and ready for stable release:
 
 ```bash
-# Bump to stable version
-cd packages/codev
-pnpm version 1.7.0 --no-git-tag-version
+# Bump to stable version (lockstep)
+pnpm bump-version 1.7.0
 
 # Follow standard release process (steps 4-9 above)
 ```
