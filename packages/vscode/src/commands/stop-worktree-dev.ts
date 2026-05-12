@@ -1,9 +1,11 @@
 /**
  * Codev: Stop Dev Server — kill the currently running Codev-managed dev PTY.
  *
- * Counterpart to `codev.runWorktreeDev`. Finds the running dev terminal by
- * its `Dev: <id>` label prefix, kills it via Tower, and disposes the
- * corresponding VSCode terminal tab.
+ * Counterpart to `codev.runWorktreeDev`. Asks TerminalManager which dev
+ * terminals it has open (its local map is the source of truth — see
+ * `TerminalManager.listDevTerminals`), kills the Tower-side PTY for each,
+ * and disposes the VSCode tab so the user doesn't see a dead "Process
+ * exited" tab lingering.
  */
 
 import * as vscode from 'vscode';
@@ -20,15 +22,19 @@ export async function stopWorktreeDev(
     return;
   }
 
-  const all = await client.listTerminals();
-  const dev = all.find(t => t.label?.startsWith('Dev: '));
-  if (!dev) {
+  const devs = terminalManager.listDevTerminals();
+  if (devs.length === 0) {
     vscode.window.showInformationMessage('Codev: No dev server is running');
     return;
   }
 
-  const builderId = dev.label.slice('Dev: '.length);
-  await client.killTerminal(dev.id);
-  terminalManager.closeDevTerminal(builderId);
-  vscode.window.showInformationMessage(`Codev: Dev server stopped for ${builderId}`);
+  for (const { builderId, terminalId } of devs) {
+    await client.killTerminal(terminalId);
+    terminalManager.closeDevTerminal(builderId);
+  }
+
+  const summary = devs.length === 1
+    ? `Codev: Dev server stopped for ${devs[0]!.builderId}`
+    : `Codev: Stopped ${devs.length} dev servers`;
+  vscode.window.showInformationMessage(summary);
 }

@@ -22,7 +22,7 @@ export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>();
   private outputChannel: vscode.OutputChannel;
   private connectionManager: ConnectionManager;
-  private readonly iconPath: vscode.Uri;
+  private readonly iconPath: { light: vscode.Uri; dark: vscode.Uri };
 
   constructor(
     connectionManager: ConnectionManager,
@@ -31,7 +31,14 @@ export class TerminalManager {
   ) {
     this.connectionManager = connectionManager;
     this.outputChannel = outputChannel;
-    this.iconPath = vscode.Uri.joinPath(extensionUri, 'icons', 'codev.svg');
+    // Theme-aware icon pair. The single-Uri form rendered as solid black on
+    // dark themes (VSCode doesn't resolve currentColor on terminal-tab icons).
+    // codev-light.svg has dark fill (visible on light themes), codev-dark.svg
+    // has light fill (visible on dark themes).
+    this.iconPath = {
+      light: vscode.Uri.joinPath(extensionUri, 'icons', 'codev-light.svg'),
+      dark: vscode.Uri.joinPath(extensionUri, 'icons', 'codev-dark.svg'),
+    };
   }
 
   /**
@@ -132,7 +139,7 @@ export class TerminalManager {
       existing.terminal.dispose();
       this.terminals.delete(key);
     }
-    await this.openTerminal(terminalId, 'dev', `Dev: ${builderId}`, key, focus);
+    await this.openTerminal(terminalId, 'dev', `Codev: Dev (${builderId})`, key, focus);
   }
 
   /**
@@ -147,6 +154,23 @@ export class TerminalManager {
     existing.pty.close();
     existing.terminal.dispose();
     this.terminals.delete(key);
+  }
+
+  /**
+   * Return { builderId, terminalId } for every dev terminal this VSCode
+   * instance has open. Used by `codev.stopWorktreeDev` as the source of
+   * truth — more reliable than round-tripping through Tower's label filter
+   * (whose preservation through create→list isn't worth depending on, and
+   * cross-VSCode-instance discovery is a #690 non-goal anyway).
+   */
+  listDevTerminals(): Array<{ builderId: string; terminalId: string }> {
+    const out: Array<{ builderId: string; terminalId: string }> = [];
+    for (const [key, entry] of this.terminals.entries()) {
+      if (key.startsWith('dev-')) {
+        out.push({ builderId: key.slice('dev-'.length), terminalId: entry.id });
+      }
+    }
+    return out;
   }
 
   /**

@@ -63,26 +63,29 @@ export async function runWorktreeDev(
     return;
   }
 
-  // Swap detection. Tower terminal `label` carries the "Dev: <id>" marker.
-  const all = await client.listTerminals();
-  const existing = all.find(t => t.label?.startsWith('Dev: '));
-  if (existing) {
-    const existingBuilderId = existing.label.slice('Dev: '.length);
-    if (existingBuilderId === builder.id) {
-      vscode.window.showInformationMessage(`Codev: Dev server is already running for ${builder.id}`);
-      await terminalManager.openDevTerminal(existing.id, builder.id, true);
-      return;
-    }
+  // Swap detection. Source of truth for "what dev terminals exist" is
+  // TerminalManager's local map — Tower's label filter would be brittle
+  // and wouldn't catch terminals across VSCode instances anyway (a #690
+  // non-goal). For now we assume one VSCode instance per workspace.
+  const existing = terminalManager.listDevTerminals();
+  const sameBuilder = existing.find(d => d.builderId === builder.id);
+  if (sameBuilder) {
+    vscode.window.showInformationMessage(`Codev: Dev server is already running for ${builder.id}`);
+    await terminalManager.openDevTerminal(sameBuilder.terminalId, builder.id, true);
+    return;
+  }
+  if (existing.length > 0) {
+    const other = existing[0]!;
     const choice = await vscode.window.showWarningMessage(
-      `Stop dev for ${existingBuilderId} and start for ${builder.id}?`,
+      `Stop dev for ${other.builderId} and start for ${builder.id}?`,
       { modal: true },
       'Yes', 'No',
     );
     if (choice !== 'Yes') { return; }
-    await client.killTerminal(existing.id);
-    terminalManager.closeDevTerminal(existingBuilderId);
+    await client.killTerminal(other.terminalId);
+    terminalManager.closeDevTerminal(other.builderId);
     try {
-      await waitForTerminalGone(client, existing.id);
+      await waitForTerminalGone(client, other.terminalId);
     } catch (err) {
       vscode.window.showErrorMessage(`Codev: ${(err as Error).message}`);
       return;
