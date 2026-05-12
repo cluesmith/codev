@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { OverviewCache } from './overview-data.js';
+import { BuilderTreeItem } from './builder-tree-item.js';
 
 export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
@@ -19,7 +20,7 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
     return data.builders.map(b => {
       const phase = b.blocked ? `[${b.blocked}] blocked` : `[${b.phase}]`;
-      const item = new vscode.TreeItem(`#${b.issueId ?? b.id} ${b.issueTitle ?? ''} ${phase}`);
+      const item = new BuilderTreeItem(b.id, `#${b.issueId ?? b.id} ${b.issueTitle ?? ''} ${phase}`);
       item.tooltip = `Protocol: ${b.protocol} | Mode: ${b.mode} | Progress: ${b.progress}%`;
       item.contextValue = 'builder';
       item.iconPath = b.blocked

@@ -23,11 +23,25 @@ import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { WorkspaceProvider } from './views/workspace.js';
+import { BuilderTreeItem } from './views/builder-tree-item.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
 let outputChannel: vscode.OutputChannel | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
+
+/**
+ * Resolve a builder id from a command argument.
+ *
+ * Tree-item context-menu invocations pass a BuilderTreeItem; command-palette
+ * invocations pass nothing; programmatic invocations may pass a string id.
+ * Anything else → undefined → the command falls back to its quick-pick.
+ */
+function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | undefined {
+	if (typeof arg === 'string') { return arg; }
+	if (arg instanceof BuilderTreeItem) { return arg.builderId; }
+	return undefined;
+}
 
 export async function activate(context: vscode.ExtensionContext) {
 	// Output Channel for diagnostics
@@ -189,10 +203,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
-		vscode.commands.registerCommand('codev.reviewDiff', (arg: string | undefined) =>
-			reviewDiff(connectionManager!, typeof arg === 'string' ? arg : undefined)),
-		vscode.commands.registerCommand('codev.runWorktreeDev', (arg: string | undefined) =>
-			runWorktreeDev(connectionManager!, terminalManager!, typeof arg === 'string' ? arg : undefined)),
+		vscode.commands.registerCommand('codev.reviewDiff', (arg: vscode.TreeItem | string | undefined) =>
+			reviewDiff(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
+			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.stopWorktreeDev', () =>
 			stopWorktreeDev(connectionManager!, terminalManager!)),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
