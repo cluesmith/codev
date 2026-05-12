@@ -48,7 +48,7 @@
     "commands": [
       {
         "command": "codev.helloWorld",
-        "title": "Hello World"
+        "title": "Codev: Show Connection State"
       },
       {
         "command": "codev.openArchitectTerminal",
@@ -103,9 +103,75 @@
       {
         "command": "codev.addReviewComment",
         "title": "Codev: Add Review Comment"
+      },
+      {
+        "command": "codev.reviewDiff",
+        "title": "Codev: View Diff"
+      },
+      {
+        "command": "codev.runWorktreeDev",
+        "title": "Codev: Run Dev Server"
+      },
+      {
+        "command": "codev.stopWorktreeDev",
+        "title": "Codev: Stop Dev Server"
+      },
+      {
+        "command": "codev.openBuilderById",
+        "title": "Codev: Open Builder Terminal"
+      },
+      {
+        "command": "codev.openWorktreeFolder",
+        "title": "Codev: Open Worktree Folder"
+      },
+      {
+        "command": "codev.runWorktreeSetup",
+        "title": "Codev: Run Worktree Setup"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "codev.openBuilderById",
+          "when": "false"
+        },
+        {
+          "command": "codev.addReviewComment",
+          "when": "editorLangId == 'markdown'"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codev.openBuilderById",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "1_terminal@1"
+        },
+        {
+          "command": "codev.openWorktreeFolder",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "2_files@1"
+        },
+        {
+          "command": "codev.reviewDiff",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "3_review@1"
+        },
+        {
+          "command": "codev.runWorktreeSetup",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "4_worktree@1"
+        },
+        {
+          "command": "codev.runWorktreeDev",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "4_worktree@2"
+        },
+        {
+          "command": "codev.stopWorktreeDev",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "4_worktree@3"
+        }
+      ],
       "view/title": [
         {
           "command": "codev.refreshOverview",

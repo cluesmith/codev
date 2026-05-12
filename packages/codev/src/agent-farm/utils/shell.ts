@@ -37,6 +37,37 @@ export async function run(
 }
 
 /**
+ * Run a shell command with output streamed live to the parent's stdout/stderr.
+ *
+ * Same exit-code semantics as `run()` (non-zero throws), but stdout and
+ * stderr are inherited from the parent process rather than buffered. Use
+ * this for long-running commands where the user benefits from seeing
+ * progress in real time — `pnpm install`, `uv sync`, build commands, etc.
+ *
+ * Does NOT return captured output (use `run()` if you need to inspect it).
+ */
+export async function runStreaming(
+  command: string,
+  options: { cwd?: string } = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, {
+      cwd: options.cwd,
+      shell: true,       // route through /bin/sh -c so shell features (cd, &&, $VAR) work
+      stdio: 'inherit',  // stream output straight to the parent terminal
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Command failed: ${command} (exit ${code})`));
+      }
+    });
+  });
+}
+
+/**
  * Spawn a detached process that continues after parent exits.
  * Now always captures stderr for error reporting.
  */

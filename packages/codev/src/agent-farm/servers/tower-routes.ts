@@ -388,7 +388,11 @@ async function handleTerminalCreate(
     const env = typeof body.env === 'object' && body.env !== null ? (body.env as Record<string, string>) : undefined;
     const label = typeof body.label === 'string' ? body.label : undefined;
 
-    // Optional session persistence via shellper
+    // Optional session persistence via shellper.
+    // The whitelist below is the gate that keeps `'dev'` (ephemeral dev PTYs)
+    // out of SQLite and shellper — the dev process dies with Tower, so
+    // persisting a row would point at a non-existent process. Add new
+    // persistent terminal kinds here if you ever introduce one.
     const workspacePath = typeof body.workspacePath === 'string' ? body.workspacePath : null;
     const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
     const roleId = typeof body.roleId === 'string' ? body.roleId : null;

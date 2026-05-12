@@ -54,7 +54,10 @@ export async function status(): Promise<void> {
         logger.blank();
         logger.info('Terminals:');
         for (const term of workspaceStatus.terminals) {
-          const typeColor = term.type === 'architect' ? chalk.cyan : term.type === 'builder' ? chalk.blue : chalk.gray;
+          const typeColor = term.type === 'architect' ? chalk.cyan
+            : term.type === 'builder' ? chalk.blue
+            : term.type === 'dev' ? chalk.green
+            : chalk.gray;
           logger.info(`  ${typeColor(term.type)} - ${term.label} (${term.active ? 'active' : 'stopped'})`);
         }
       }

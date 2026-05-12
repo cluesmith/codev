@@ -12,153 +12,20 @@ import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getTypeColor } from '../utils/display.js';
 import { openBrowser } from '../utils/shell.js';
-import { loadState, getBuilder, getBuilders } from '../state.js';
+import { loadState } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ShellperClient } from '../../terminal/shellper-client.js';
 import type { DbTerminalSession } from '../servers/tower-types.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
+import { findBuilderById, findBuilderByIssue } from '../lib/builder-lookup.js';
 import chalk from 'chalk';
 
 export interface AttachOptions {
   project?: string;     // Builder ID / project ID
   issue?: number;       // Issue number (for bugfix builders)
   browser?: boolean;    // Open in browser instead of attaching
-}
-
-/**
- * Find a builder by issue number
- */
-function findBuilderByIssue(issueNumber: number): Builder | null {
-  const builders = getBuilders();
-  const local = builders.find((b) => b.issueNumber === issueNumber);
-  if (local) return local;
-
-  // Fallback: Tower's terminal_sessions table may know about builders that
-  // were never written to local state.db (Bugfix #717).
-  return findBuilderInTowerByIssue(issueNumber);
-}
-
-/**
- * Find a builder by ID (supports partial matching)
- */
-function findBuilderById(id: string): Builder | null {
-  // First try exact match
-  const exact = getBuilder(id);
-  if (exact) return exact;
-
-  // Try prefix match (e.g., "0073" matches "0073-feature-name")
-  const builders = getBuilders();
-  const matches = builders.filter((b) => b.id.startsWith(id) || b.id.includes(id));
-
-  if (matches.length === 1) {
-    return matches[0];
-  }
-
-  if (matches.length > 1) {
-    logger.error(`Ambiguous builder ID "${id}". Matches:`);
-    for (const b of matches) {
-      logger.info(`  - ${b.id}`);
-    }
-    return null;
-  }
-
-  // Fallback: Tower's terminal_sessions table may know about builders that
-  // were never written to local state.db (Bugfix #717).
-  return findBuilderInTowerById(id);
-}
-
-/**
- * Row shape we read from terminal_sessions for builder reconstruction.
- */
-interface TowerBuilderRow {
-  role_id: string;
-  cwd: string | null;
-  label: string | null;
-}
-
-/**
- * Load all builder-type terminal sessions for the current workspace from
- * Tower's global SQLite db. Returns [] if Tower db is unavailable.
- */
-function loadTowerBuilderRows(): TowerBuilderRow[] {
-  try {
-    const db = getGlobalDb();
-    const config = getConfig();
-    const workspacePath = normalizeWorkspacePath(config.workspaceRoot);
-    return db.prepare(`
-      SELECT role_id, cwd, label
-      FROM terminal_sessions
-      WHERE workspace_path = ?
-        AND type = 'builder'
-        AND role_id IS NOT NULL
-      ORDER BY created_at DESC
-    `).all(workspacePath) as TowerBuilderRow[];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Reconstruct a minimal Builder from a Tower terminal_sessions row. The
- * resulting object has the fields needed by attach (id, worktree) and
- * placeholder values elsewhere — it's enough to drive findShellperSocket.
- */
-function towerRowToBuilder(row: TowerBuilderRow): Builder {
-  const isBugfix = row.role_id.includes('-bugfix-');
-  const issueMatch = isBugfix ? row.role_id.match(/-bugfix-(\d+)/) : null;
-  return {
-    id: row.role_id,
-    name: row.label ?? row.role_id,
-    status: 'implementing',
-    phase: 'unknown',
-    worktree: row.cwd ?? '',
-    branch: '',
-    type: isBugfix ? 'bugfix' : 'spec',
-    issueNumber: issueMatch ? Number(issueMatch[1]) : undefined,
-  };
-}
-
-/**
- * Tower fallback for findBuilderById. Applies the same exact-then-substring
- * matching used against local state.
- */
-function findBuilderInTowerById(id: string): Builder | null {
-  const rows = loadTowerBuilderRows();
-  if (rows.length === 0) return null;
-
-  const exact = rows.find((r) => r.role_id === id);
-  if (exact) return towerRowToBuilder(exact);
-
-  const matches = rows.filter((r) => r.role_id.startsWith(id) || r.role_id.includes(id));
-  if (matches.length === 1) return towerRowToBuilder(matches[0]);
-
-  if (matches.length > 1) {
-    logger.error(`Ambiguous builder ID "${id}" in Tower terminal registry. Matches:`);
-    for (const r of matches) {
-      logger.info(`  - ${r.role_id}`);
-    }
-    return null;
-  }
-
-  return null;
-}
-
-/**
- * Tower fallback for findBuilderByIssue. Matches builder-bugfix-<n> rows
- * with leading zeros stripped from the issue number.
- */
-function findBuilderInTowerByIssue(issueNumber: number): Builder | null {
-  const rows = loadTowerBuilderRows();
-  if (rows.length === 0) return null;
-
-  const stripped = String(issueNumber);
-  const match = rows.find((r) => {
-    const m = r.role_id.match(/-bugfix-(\d+)/);
-    return m !== null && m[1] === stripped;
-  });
-  return match ? towerRowToBuilder(match) : null;
 }
 
 /**

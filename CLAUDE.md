@@ -275,6 +275,146 @@ Codev provides five CLI tools. For complete reference documentation, see:
 - **[consult](codev/resources/commands/consult.md)** - AI consultation (general, protocol, stats)
 - **[team](codev/resources/commands/team.md)** - Team coordination (list, message, update, add)
 
+## Runnable Worktrees
+
+When configured, each builder worktree (`.builders/<id>/`) becomes runnable — reviewers can spin up a dev server against the builder's branch without `cd`'ing, manually installing, or finding the right command. Opt-in via `.codev/config.json`; unconfigured repos see zero behavior change.
+
+### Config: the `worktree` block
+
+```jsonc
+{
+  "worktree": {
+    "symlinks":   ["..."],        // glob patterns of files to symlink from root into each new worktree
+    "postSpawn":  ["..."],        // shell commands run inside each new worktree after createWorktree
+    "devCommand": "..."           // consumed by `afx dev <builder-id>`
+  }
+}
+```
+
+- `symlinks`: globs resolve from the workspace root; matches symlink into the worktree at the same relative path. Root `.env` and `.codev/config.json` are *always* symlinked regardless. **Symlinks, not copies** — edits to main's env files reflect instantly in any running dev session.
+- `postSpawn`: each command runs sequentially with `cwd` = worktree path. Non-zero exit aborts the spawn loud (half-built worktree stays for inspection).
+- `devCommand`: the foreground command that starts your dev server. Required for `afx dev` to work.
+
+**Codev does not auto-detect your stack.** Pick the recipe below that matches your toolchain.
+
+### CLI
+
+```bash
+afx dev <builder-id>     # start the dev server in <builder-id>'s worktree
+afx dev --stop           # stop the currently running dev PTY
+```
+
+Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below). Running `afx dev` while another builder's dev is up prompts for swap. Same-builder requests print the existing terminal URL and exit.
+
+### VSCode
+
+The same actions are available via right-click on any builder row in the Codev sidebar (Builders or Needs Attention view):
+
+- **Codev: Open Builder Terminal** — opens that builder's AI terminal in a VSCode tab (same as left-clicking the row).
+- **Codev: Open Worktree Folder** — opens `.builders/<id>/` in the OS file manager (Finder on macOS, Explorer on Windows, xdg-open on Linux).
+- **Codev: Run Worktree Setup** — applies the configured `worktree.symlinks` and runs the `worktree.postSpawn` commands against the existing worktree (mirrors what spawn does, minus the git steps). Idempotent: existing symlinks are skipped, missing ones added. Useful when the lockfile changed (reinstall deps), `symlinks` or `postSpawn` was extended after the builder spawned, a symlink was accidentally deleted, or the original setup aborted mid-run. Opens a fresh VSCode terminal so install output streams live. Available via CLI too: `afx setup <builder-id>`.
+- **Codev: View Diff** — opens a single unified diff editor for `main...HEAD` of that builder's worktree, with a file-list pane on the left (matches VSCode's built-in Source Control "Working Tree" view). Status icons indicate added / modified / deleted. Empty diff → friendly toast.
+- **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Codev: <name> (dev)`. If another builder's dev is already running, you get a modal asking whether to swap.
+- **Codev: Stop Dev Server** — kills the running dev PTY and closes its tab.
+
+The three commands are also available from the command palette (Cmd+Shift+P). No default keybindings; bind via `keybindings.json` if you use them often.
+
+### URLs are load-bearing
+
+The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`.
+
+### Cleanup semantics
+
+`afx dev --stop` and the swap path kill the entire PTY process group (SIGTERM, escalating to SIGKILL after 5s via `PtySession.kill`). That signals every grandchild of a monorepo dev orchestrator (`pnpm dev`, `turbo dev`, `pnpm -r --parallel run dev`, etc.) simultaneously. The OS reclaims ports as a consequence — Codev never touches ports directly.
+
+**Orphan recovery** — if Tower itself hard-crashes mid-dev and a process is left holding a port outside Codev's records:
+
+```bash
+lsof -ti :<port> | xargs kill                       # one port
+lsof -ti :3000,:3001,:4000 | xargs kill             # several at once
+```
+
+### Runnable Worktree Recipes
+
+Ready-to-paste blocks per stack. Adjust ports / paths to your project.
+
+**pnpm monorepo (Next.js + Turbo style):**
+```json
+{
+  "worktree": {
+    "symlinks": [".env.local", ".env.development.local", "packages/*/.env", "packages/*/.env.local", "turbo.json"],
+    "postSpawn": ["pnpm install --frozen-lockfile"],
+    "devCommand": "pnpm dev"
+  }
+}
+```
+
+**npm (single package):**
+```json
+{
+  "worktree": {
+    "symlinks": [".env.local", ".env.development"],
+    "postSpawn": ["npm ci"],
+    "devCommand": "npm run dev"
+  }
+}
+```
+
+**yarn:**
+```json
+{
+  "worktree": {
+    "symlinks": [".env.local"],
+    "postSpawn": ["yarn install --frozen-lockfile"],
+    "devCommand": "yarn dev"
+  }
+}
+```
+
+**bun:**
+```json
+{
+  "worktree": {
+    "symlinks": [".env.local"],
+    "postSpawn": ["bun install --frozen-lockfile"],
+    "devCommand": "bun dev"
+  }
+}
+```
+
+**cargo (Rust):**
+```json
+{
+  "worktree": {
+    "symlinks": [".env"],
+    "postSpawn": [],
+    "devCommand": "cargo run"
+  }
+}
+```
+
+**poetry / uv (Python):**
+```json
+{
+  "worktree": {
+    "symlinks": [".env", ".env.local"],
+    "postSpawn": ["uv sync"],
+    "devCommand": "uv run python -m myapp"
+  }
+}
+```
+
+**go mod:**
+```json
+{
+  "worktree": {
+    "symlinks": [".env"],
+    "postSpawn": ["go mod download"],
+    "devCommand": "go run ./cmd/server"
+  }
+}
+```
+
 ## Architect-Builder Pattern
 
 The Architect-Builder pattern enables parallel AI-assisted development:

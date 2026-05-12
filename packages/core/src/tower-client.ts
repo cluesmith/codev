@@ -15,6 +15,14 @@ const REQUEST_TIMEOUT_MS = 10000;
 
 // ── Types ──────────────────────────────────────────────────────
 
+/**
+ * All terminal kinds Tower can host. Used wherever a terminal is created or
+ * enumerated. `'dev'` is the ephemeral dev-server PTY spawned by `afx dev`;
+ * it is intentionally kept out of SQLite by the runtime filter at
+ * `tower-routes.ts` (search for `['builder', 'shell'].includes(body.type)`).
+ */
+export type TerminalType = 'architect' | 'builder' | 'shell' | 'dev';
+
 export interface TowerWorkspace {
   path: string;
   name: string;
@@ -28,7 +36,7 @@ export interface TowerWorkspaceStatus {
   name: string;
   active: boolean;
   terminals: Array<{
-    type: 'architect' | 'builder' | 'shell';
+    type: TerminalType;
     id: string;
     label: string;
     url: string;
@@ -239,7 +247,7 @@ export class TowerClient {
     env?: Record<string, string>;
     persistent?: boolean;
     workspacePath?: string;
-    type?: 'architect' | 'builder' | 'shell';
+    type?: TerminalType;
     roleId?: string;
   }): Promise<TowerTerminal | null> {
     const result = await this.request<TowerTerminal>('/api/terminals', {

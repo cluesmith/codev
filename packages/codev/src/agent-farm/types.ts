@@ -185,6 +185,32 @@ export interface UserConfig {
   };
   /** Forge concept command overrides. Keys are concept names, values are command strings or null (disabled). */
   forge?: Record<string, string | null>;
+  /**
+   * Runnable worktree setup. Opt-in — when omitted, builders spawn with only
+   * the existing root `.env` + `.codev/config.json` symlinks (zero behavior change).
+   */
+  worktree?: {
+    /**
+     * Glob patterns of files to symlink from the workspace root into each new
+     * worktree. Resolved at spawn time relative to the workspace root.
+     * Example values: '.env.local', 'packages/<any>/.env', 'turbo.json'.
+     * Note: root `.env` and `.codev/config.json` are always symlinked regardless.
+     */
+    symlinks?: string[];
+    /**
+     * Shell commands to run inside each new worktree after `createWorktree`
+     * completes. Executed sequentially with cwd = worktree path. A non-zero
+     * exit aborts the spawn.
+     * Example: ['pnpm install --frozen-lockfile'].
+     */
+    postSpawn?: string[];
+    /**
+     * Command consumed by `afx dev <builder-id>` to start the worktree's dev
+     * server. Required for `afx dev` to work.
+     * Example: 'pnpm dev'.
+     */
+    devCommand?: string;
+  };
 }
 
 /**

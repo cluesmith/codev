@@ -6,6 +6,11 @@ import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
+import { reviewDiff } from './commands/review-diff.js';
+import { runWorktreeDev } from './commands/run-worktree-dev.js';
+import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
+import { openWorktreeFolder } from './commands/open-worktree-folder.js';
+import { runWorktreeSetup } from './commands/run-worktree-setup.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -20,11 +25,25 @@ import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { WorkspaceProvider } from './views/workspace.js';
+import { BuilderTreeItem } from './views/builder-tree-item.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
 let outputChannel: vscode.OutputChannel | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
+
+/**
+ * Resolve a builder id from a command argument.
+ *
+ * Tree-item context-menu invocations pass a BuilderTreeItem; command-palette
+ * invocations pass nothing; programmatic invocations may pass a string id.
+ * Anything else → undefined → the command falls back to its quick-pick.
+ */
+function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | undefined {
+	if (typeof arg === 'string') { return arg; }
+	if (arg instanceof BuilderTreeItem) { return arg.builderId; }
+	return undefined;
+}
 
 export async function activate(context: vscode.ExtensionContext) {
 	// Output Channel for diagnostics
@@ -178,7 +197,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');
 			}
 		}),
-		vscode.commands.registerCommand('codev.openBuilderById', async (roleOrId: string) => {
+		vscode.commands.registerCommand('codev.openBuilderById', async (arg: vscode.TreeItem | string | undefined) => {
+			// Left-click on a tree item passes b.id (string) via item.command.arguments;
+			// right-click context-menu invocations pass the BuilderTreeItem itself.
+			const roleOrId = extractBuilderId(arg);
 			if (!roleOrId) { return; }
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
@@ -186,6 +208,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
+		vscode.commands.registerCommand('codev.reviewDiff', (arg: vscode.TreeItem | string | undefined) =>
+			reviewDiff(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
+			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.stopWorktreeDev', () =>
+			stopWorktreeDev(connectionManager!, terminalManager!)),
+		vscode.commands.registerCommand('codev.openWorktreeFolder', (arg: vscode.TreeItem | string | undefined) =>
+			openWorktreeFolder(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.runWorktreeSetup', (arg: vscode.TreeItem | string | undefined) =>
+			runWorktreeSetup(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
 		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),

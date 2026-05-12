@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { OverviewCache } from './overview-data.js';
+import { BuilderTreeItem } from './builder-tree-item.js';
 
 export class NeedsAttentionProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
@@ -24,7 +25,7 @@ export class NeedsAttentionProvider implements vscode.TreeDataProvider<vscode.Tr
       const waitTime = b.blockedSince
         ? `(${timeSince(b.blockedSince)})`
         : '';
-      const item = new vscode.TreeItem(`#${b.issueId ?? b.id} — blocked on ${b.blocked} ${waitTime}`);
+      const item = new BuilderTreeItem(b.id, `#${b.issueId ?? b.id} — blocked on ${b.blocked} ${waitTime}`);
       item.iconPath = new vscode.ThemeIcon('bell', new vscode.ThemeColor('notificationsWarningIcon.foreground'));
       item.contextValue = 'blocked-builder';
       item.command = {
