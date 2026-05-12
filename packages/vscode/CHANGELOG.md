@@ -6,11 +6,16 @@ What's changed in the Codev VS Code extension, version by version, written for t
 
 ### What's new
 
-- **Right-click any builder → review and run.** Three new commands on the Codev sidebar's Builders and Needs Attention views (#690):
-  - **Codev: View Diff** opens VSCode's native side-by-side diff editor showing `main ↔ <builder>` for every changed file. Works across worktrees because each `.builders/<id>/` is a real git worktree sharing the parent repo's object database.
-  - **Codev: Run Dev Server** reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn the dev process in the builder's worktree, and opens it as a VSCode terminal tab labeled `Dev: <builder-id>`. If another builder's dev is already running, a modal asks whether to swap — confirming kills the old PTY, waits for it to exit, then starts the new one.
-  - **Codev: Stop Dev Server** kills the running dev PTY and closes its VSCode tab.
-- Pairs with `afx dev <builder-id>` (CLI, #689) for users who prefer the terminal. Same Tower API, same `Dev: <builder-id>` tab convention; either entry point produces the same result.
+- **Right-click any builder → six review/test/setup actions.** New context-menu surface on the Codev sidebar's Builders and Needs Attention views (#690), backed by the runnable-worktrees primitives from #689:
+  - **Codev: Open Builder Terminal** — opens that builder's AI terminal (same action as left-clicking the row, now also discoverable via right-click).
+  - **Codev: Open Worktree Folder** — opens `.builders/<id>/` in the OS file manager (Finder / Explorer / xdg-open).
+  - **Codev: Run Worktree Setup** — runs the configured `worktree.postSpawn` commands against the existing worktree. Use when the lockfile changed and dependencies need reinstalling, when `postSpawn` was extended after the builder spawned, or to recover from an aborted setup. Opens a fresh VSCode terminal so install output streams live. CLI equivalent: `afx setup <builder-id>`.
+  - **Codev: View Diff** — opens a single unified diff editor showing `main ↔ <builder>` with a file-list pane and status icons (added / modified / deleted). One tab regardless of how many files changed; matches VSCode's built-in "Working Tree" view. Works across worktrees because each `.builders/<id>/` is a real git worktree sharing the parent repo's object database.
+  - **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn the dev process in the builder's worktree, and opens it as a VSCode terminal tab labeled `Codev: <name> (dev)`. If another builder's dev is already running, a modal asks whether to swap — confirming kills the old PTY, waits for it to exit, then starts the new one.
+  - **Codev: Stop Dev Server** — kills the running dev PTY and closes its VSCode tab.
+- Each builder action pairs with a CLI equivalent (`afx dev <id>`, `afx dev --stop`, `afx setup <id>`) for users who prefer the terminal. Same Tower API, same conventions.
+- **Theme-aware Codev brand icon** on terminal tabs. The single-SVG approach added in 3.0.2 rendered as solid black on dark themes (VSCode doesn't resolve `currentColor` on terminal-tab icons); we now ship `codev-light.svg` + `codev-dark.svg` and pass them as the `{ light, dark }` pair to `createTerminal`.
+- **Command palette tightened.** `codev.openBuilderById` is now declared but hidden from the palette (it needs a builder-id arg and would silently fail). `codev.addReviewComment` only appears when a markdown file is active. `codev.helloWorld` renamed to "Codev: Show Connection State" so its palette entry actually says what it does.
 
 ## [3.0.2] - 2026-05-10
 

@@ -203,6 +203,20 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Setup command — run worktree.postSpawn for an existing builder (#689)
+  program
+    .command('setup [builder-id]')
+    .description('Run worktree.postSpawn against an existing builder (e.g. after a lockfile change)')
+    .action(async (builderId) => {
+      const { setup } = await import('./commands/setup.js');
+      try {
+        await setup({ builderId });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Spawn command
   const spawnCmd = program
     .command('spawn')
