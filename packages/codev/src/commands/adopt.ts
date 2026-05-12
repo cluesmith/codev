@@ -164,6 +164,11 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
         builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
         shell: 'bash',
       },
+      worktree: {
+        '//': 'Opt-in runnable worktree config. See CLAUDE.md > Runnable Worktrees for stack-specific recipes (pnpm, npm, yarn, bun, cargo, poetry/uv, go mod). Defaults shown below are no-ops; fill in to enable.',
+        symlinks: [],
+        postSpawn: [],
+      },
     };
     fs.writeFileSync(codevConfigPath, JSON.stringify(codevConfig, null, 2) + '\n');
     console.log(chalk.green('  +'), '.codev/config.json');

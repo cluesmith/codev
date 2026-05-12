@@ -126,6 +126,11 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
       builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
       shell: 'bash',
     },
+    worktree: {
+      '//': 'Opt-in runnable worktree config. See CLAUDE.md > Runnable Worktrees for stack-specific recipes (pnpm, npm, yarn, bun, cargo, poetry/uv, go mod). Defaults shown below are no-ops; fill in to enable.',
+      symlinks: [],
+      postSpawn: [],
+    },
   };
   fs.writeFileSync(
     path.join(codevConfigDir, 'config.json'),

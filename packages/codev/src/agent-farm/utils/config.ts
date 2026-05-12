@@ -270,6 +270,36 @@ export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
 }
 
 /**
+ * Resolved view of the `worktree` config block with defaults applied.
+ * Unset fields collapse to empty / null so callers don't have to branch.
+ */
+export interface ResolvedWorktreeConfig {
+  /** Glob patterns to symlink from workspace root into each worktree. `[]` when unset. */
+  symlinks: string[];
+  /** Shell commands to run in each worktree after creation. `[]` when unset. */
+  postSpawn: string[];
+  /** Command for `afx dev <builder-id>`. `null` when unset. */
+  devCommand: string | null;
+}
+
+/**
+ * Load the `worktree` block from .codev/config.json, applying defaults.
+ * Unconfigured repos get `{ symlinks: [], postSpawn: [], devCommand: null }`
+ * — equivalent to the pre-#689 behavior (no glob symlinks, no post-spawn
+ * commands, `afx dev` errors with a clear message pointing at the config).
+ */
+export function getWorktreeConfig(workspaceRoot?: string): ResolvedWorktreeConfig {
+  const root = workspaceRoot || findWorkspaceRoot();
+  const userConfig = loadUserConfig(root);
+  const w = userConfig?.worktree;
+  return {
+    symlinks: w?.symlinks ?? [],
+    postSpawn: w?.postSpawn ?? [],
+    devCommand: w?.devCommand ?? null,
+  };
+}
+
+/**
  * Build configuration for the current project
  */
 export function getConfig(): Config {
