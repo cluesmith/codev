@@ -1,20 +1,30 @@
 /**
- * `afx setup <builder-id>` — run the configured `worktree.postSpawn`
- * commands against an existing builder's worktree.
+ * `afx setup <builder-id>` — apply worktree setup (symlinks + postSpawn)
+ * to an existing builder's worktree, without recreating it.
  *
- * Use cases: lockfile changed and dependencies need reinstalling; a new
- * step was added to `worktree.postSpawn` after the builder was spawned;
- * the original spawn aborted mid-setup and the worktree needs recovery;
- * running setup for the first time on a builder that predates the config.
+ * Mirrors what `createWorktree` does at spawn time minus the git steps:
+ *   1. `symlinkConfigFiles` — root `.env`, `.codev/config.json`, and any
+ *      `worktree.symlinks` glob matches. Idempotent: skips targets that
+ *      already exist; adds missing.
+ *   2. `runPostSpawnHooks` — each `worktree.postSpawn` command runs in
+ *      its own bash subshell with cwd = worktree root. Output streams live.
  *
- * No confirmation prompt — the user invoked this explicitly. If you want
- * a dry-run, read `.codev/config.json` directly.
+ * Use cases:
+ *   - lockfile changed; dependencies need reinstalling
+ *   - new entry added to `worktree.symlinks` or `worktree.postSpawn` after
+ *     the builder was spawned
+ *   - main added a new file matching an existing symlinks glob
+ *   - a symlink was accidentally deleted inside the worktree
+ *   - the original spawn aborted mid-setup; recovery
+ *   - running setup for the first time on a builder that predates the config
+ *
+ * No confirmation prompt — the user invoked this explicitly.
  */
 
 import { logger } from '../utils/logger.js';
 import { getConfig, getWorktreeConfig } from '../utils/index.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
-import { runPostSpawnHooks } from './spawn-worktree.js';
+import { runPostSpawnHooks, symlinkConfigFiles } from './spawn-worktree.js';
 
 export interface SetupOptions {
   builderId?: string;
@@ -30,13 +40,21 @@ export async function setup(options: SetupOptions): Promise<void> {
     throw new Error(`No builder found matching "${options.builderId}". Try \`afx status\`.`);
   }
   if (!builder.worktree) {
-    throw new Error(`Builder ${builder.id} has no worktree path on record — cannot re-run setup.`);
+    throw new Error(`Builder ${builder.id} has no worktree path on record — cannot apply setup.`);
   }
 
   const config = getConfig();
-  const { postSpawn } = getWorktreeConfig(config.workspaceRoot);
+  const { symlinks, postSpawn } = getWorktreeConfig(config.workspaceRoot);
+
+  logger.info(`Applying symlinks for ${builder.id}...`);
+  symlinkConfigFiles(config, builder.worktree);
+
   if (postSpawn.length === 0) {
-    logger.info('No worktree.postSpawn configured in .codev/config.json. Nothing to do.');
+    if (symlinks.length === 0) {
+      logger.info('No worktree.symlinks or worktree.postSpawn configured. Nothing further to do.');
+    } else {
+      logger.success(`Setup complete for ${builder.id} (symlinks only — no postSpawn configured)`);
+    }
     return;
   }
 
