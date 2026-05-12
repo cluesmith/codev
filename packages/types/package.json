@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-types",
-  "version": "0.0.2",
+  "version": "3.1.0",
   "description": "Shared TypeScript types for Codev — WebSocket protocol, API shapes, SSE events",
   "type": "module",
   "exports": {
