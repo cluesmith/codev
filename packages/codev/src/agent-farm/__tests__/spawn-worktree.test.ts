@@ -52,6 +52,7 @@ vi.mock('../utils/logger.js', () => ({
 
 vi.mock('../utils/shell.js', () => ({
   run: vi.fn(async () => ({ stdout: '', stderr: '' })),
+  runStreaming: vi.fn(async () => undefined),
   commandExists: vi.fn(async () => true),
 }));
 
@@ -931,32 +932,32 @@ describe('spawn-worktree', () => {
 
   describe('runPostSpawnHooks', () => {
     it('is a no-op when commands array is empty', async () => {
-      const { run } = await import('../utils/shell.js');
+      const { runStreaming } = await import('../utils/shell.js');
       await runPostSpawnHooks('/tmp/wt', []);
-      expect(run).not.toHaveBeenCalled();
+      expect(runStreaming).not.toHaveBeenCalled();
     });
 
     it('runs each command sequentially with cwd = worktreePath', async () => {
-      const { run } = await import('../utils/shell.js');
+      const { runStreaming } = await import('../utils/shell.js');
       await runPostSpawnHooks('/tmp/wt', ['cmd1', 'cmd2', 'cmd3']);
-      expect(run).toHaveBeenCalledTimes(3);
-      expect(run).toHaveBeenNthCalledWith(1, 'cmd1', { cwd: '/tmp/wt' });
-      expect(run).toHaveBeenNthCalledWith(2, 'cmd2', { cwd: '/tmp/wt' });
-      expect(run).toHaveBeenNthCalledWith(3, 'cmd3', { cwd: '/tmp/wt' });
+      expect(runStreaming).toHaveBeenCalledTimes(3);
+      expect(runStreaming).toHaveBeenNthCalledWith(1, 'cmd1', { cwd: '/tmp/wt' });
+      expect(runStreaming).toHaveBeenNthCalledWith(2, 'cmd2', { cwd: '/tmp/wt' });
+      expect(runStreaming).toHaveBeenNthCalledWith(3, 'cmd3', { cwd: '/tmp/wt' });
     });
 
     it('aborts on non-zero exit and does not run subsequent commands', async () => {
-      const { run } = await import('../utils/shell.js');
-      vi.mocked(run)
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })
-        .mockRejectedValueOnce(new Error('Command failed: bad-cmd\nexit 7'));
+      const { runStreaming } = await import('../utils/shell.js');
+      vi.mocked(runStreaming)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('Command failed: bad-cmd (exit 7)'));
 
       await expect(
         runPostSpawnHooks('/tmp/wt', ['good-cmd', 'bad-cmd', 'never-run-cmd']),
       ).rejects.toThrow(/Command failed: bad-cmd/);
 
-      expect(run).toHaveBeenCalledTimes(2);
-      expect(run).not.toHaveBeenCalledWith('never-run-cmd', expect.anything());
+      expect(runStreaming).toHaveBeenCalledTimes(2);
+      expect(runStreaming).not.toHaveBeenCalledWith('never-run-cmd', expect.anything());
     });
   });
 });

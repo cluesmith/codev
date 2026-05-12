@@ -16,7 +16,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
 import { shellEscapeSingleQuote } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
-import { run, commandExists } from '../utils/shell.js';
+import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
@@ -93,9 +93,12 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
 
 /**
  * Run user-configured post-spawn commands inside a freshly-created worktree.
- * Each runs sequentially with cwd = worktreePath. A non-zero exit aborts the
- * spawn via run()'s native error (which already names the failing command
- * and stderr); the half-built worktree stays where it is.
+ *
+ * Each command runs sequentially in its own `bash -c` subshell with cwd =
+ * worktreePath — so `cd` inside one command (e.g. `cd apps/foo && uv sync`)
+ * doesn't carry over into the next. Output streams live via runStreaming
+ * so users see install progress in real time. A non-zero exit aborts the
+ * sequence; the half-built worktree stays where it is.
  */
 export async function runPostSpawnHooks(
   worktreePath: string,
@@ -103,7 +106,7 @@ export async function runPostSpawnHooks(
 ): Promise<void> {
   for (const cmd of commands) {
     logger.info(`Running post-spawn hook: ${cmd}`);
-    await run(cmd, { cwd: worktreePath });
+    await runStreaming(cmd, { cwd: worktreePath });
   }
 }
 
