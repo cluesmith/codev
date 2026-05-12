@@ -306,6 +306,16 @@ afx dev --stop           # stop the currently running dev PTY
 
 Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below). Running `afx dev` while another builder's dev is up prompts for swap. Same-builder requests print the existing terminal URL and exit.
 
+### VSCode
+
+The same actions are available via right-click on any builder row in the Codev sidebar (Builders or Needs Attention view):
+
+- **Codev: View Diff** — opens VSCode's native diff editor for each file in `main...HEAD` of that builder's worktree. Empty diff → friendly toast. 30+ files → "Open N diff tabs?" confirmation.
+- **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Dev: <builder-id>`. If another builder's dev is already running, you get a modal asking whether to swap.
+- **Codev: Stop Dev Server** — kills the running dev PTY and closes its tab.
+
+The three commands are also available from the command palette (Cmd+Shift+P). No default keybindings; bind via `keybindings.json` if you use them often.
+
 ### URLs are load-bearing
 
 The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`.

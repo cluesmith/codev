@@ -107,6 +107,14 @@
       {
         "command": "codev.reviewDiff",
         "title": "Codev: View Diff"
+      },
+      {
+        "command": "codev.runWorktreeDev",
+        "title": "Codev: Run Dev Server"
+      },
+      {
+        "command": "codev.stopWorktreeDev",
+        "title": "Codev: Stop Dev Server"
       }
     ],
     "menus": {
@@ -115,6 +123,16 @@
           "command": "codev.reviewDiff",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
           "group": "codev@1"
+        },
+        {
+          "command": "codev.runWorktreeDev",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "codev@2"
+        },
+        {
+          "command": "codev.stopWorktreeDev",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "codev@2"
         }
       ],
       "view/title": [

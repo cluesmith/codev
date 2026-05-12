@@ -3,13 +3,14 @@ import { CodevPseudoterminal } from './terminal-adapter.js';
 import type { ConnectionManager } from './connection-manager.js';
 import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
 import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import type { TerminalType } from '@cluesmith/codev-core/tower-client';
 
 const MAX_TERMINALS = 10;
 
 interface ManagedTerminal {
   terminal: vscode.Terminal;
   pty: CodevPseudoterminal;
-  type: 'architect' | 'builder' | 'shell';
+  type: TerminalType;
   id: string;
 }
 
@@ -110,6 +111,45 @@ export class TerminalManager {
   }
 
   /**
+   * Open a dev-server terminal for a builder's worktree (#690).
+   * Keyed `dev-<builderId>` so it lives alongside (not on top of) the
+   * builder's own AI terminal at `builder-<id>`. Tab label is set by the
+   * caller (server-side `'Dev: <id>'` flows through Tower's terminal name).
+   *
+   * `focus` defaults to true — `afx dev` / "Run Dev Server" are explicit
+   * user actions, so activate the tab so they see the spawning output.
+   */
+  async openDevTerminal(terminalId: string, builderId: string, focus = true): Promise<void> {
+    const key = `dev-${builderId}`;
+    const existing = this.terminals.get(key);
+    if (existing) {
+      if (existing.id === terminalId) {
+        existing.terminal.show(!focus);
+        return;
+      }
+      // Stale terminal for the same builder — dispose before re-opening
+      existing.pty.close();
+      existing.terminal.dispose();
+      this.terminals.delete(key);
+    }
+    await this.openTerminal(terminalId, 'dev', `Dev: ${builderId}`, key, focus);
+  }
+
+  /**
+   * Dispose the VSCode terminal tab for a builder's dev server, if any.
+   * Used by `codev.stopWorktreeDev` after killing the Tower-side PTY so the
+   * user doesn't see a dead "Process exited" tab lingering.
+   */
+  closeDevTerminal(builderId: string): void {
+    const key = `dev-${builderId}`;
+    const existing = this.terminals.get(key);
+    if (!existing) { return; }
+    existing.pty.close();
+    existing.terminal.dispose();
+    this.terminals.delete(key);
+  }
+
+  /**
    * Open a shell terminal.
    */
   async openShell(terminalId: string, shellNumber: number): Promise<void> {
@@ -129,7 +169,7 @@ export class TerminalManager {
 
   private async openTerminal(
     terminalId: string,
-    type: 'architect' | 'builder' | 'shell',
+    type: TerminalType,
     name: string,
     key?: string,
     focus = false,

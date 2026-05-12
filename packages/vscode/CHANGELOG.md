@@ -2,6 +2,16 @@
 
 What's changed in the Codev VS Code extension, version by version, written for the developers who use it.
 
+## [Unreleased]
+
+### What's new
+
+- **Right-click any builder → review and run.** Three new commands on the Codev sidebar's Builders and Needs Attention views (#690):
+  - **Codev: View Diff** opens VSCode's native side-by-side diff editor showing `main ↔ <builder>` for every changed file. Works across worktrees because each `.builders/<id>/` is a real git worktree sharing the parent repo's object database.
+  - **Codev: Run Dev Server** reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn the dev process in the builder's worktree, and opens it as a VSCode terminal tab labeled `Dev: <builder-id>`. If another builder's dev is already running, a modal asks whether to swap — confirming kills the old PTY, waits for it to exit, then starts the new one.
+  - **Codev: Stop Dev Server** kills the running dev PTY and closes its VSCode tab.
+- Pairs with `afx dev <builder-id>` (CLI, #689) for users who prefer the terminal. Same Tower API, same `Dev: <builder-id>` tab convention; either entry point produces the same result.
+
 ## [3.0.2] - 2026-05-10
 
 ### What's new
