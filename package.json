@@ -7,6 +7,7 @@
     "build": "scripts/check-main-fresh.sh && pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev build",
     "test": "pnpm --filter @cluesmith/codev test",
     "local-install": "scripts/local-install.sh",
-    "bump-version": "scripts/bump-all.sh"
+    "bump-version": "scripts/bump-all.sh",
+    "bump-vscode-version": "scripts/bump-vscode.sh"
   }
 }
