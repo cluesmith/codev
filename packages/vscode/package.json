@@ -298,7 +298,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "pnpm package",
+    "vscode:prepublish": "pnpm --filter @cluesmith/codev-core --filter @cluesmith/codev-types build && pnpm package",
     "compile": "pnpm check-types && pnpm lint && node esbuild.js",
     "watch": "pnpm run --parallel '/^watch:/'",
     "watch:esbuild": "node esbuild.js --watch",
