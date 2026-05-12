@@ -48,7 +48,7 @@
     "commands": [
       {
         "command": "codev.helloWorld",
-        "title": "Hello World"
+        "title": "Codev: Show Connection State"
       },
       {
         "command": "codev.openArchitectTerminal",
@@ -115,24 +115,52 @@
       {
         "command": "codev.stopWorktreeDev",
         "title": "Codev: Stop Dev Server"
+      },
+      {
+        "command": "codev.openBuilderById",
+        "title": "Codev: Open Builder Terminal"
+      },
+      {
+        "command": "codev.openWorktreeFolder",
+        "title": "Codev: Open Worktree Folder"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "codev.openBuilderById",
+          "when": "false"
+        },
+        {
+          "command": "codev.addReviewComment",
+          "when": "editorLangId == 'markdown'"
+        }
+      ],
       "view/item/context": [
+        {
+          "command": "codev.openBuilderById",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "codev.openWorktreeFolder",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "group": "1_open@2"
+        },
         {
           "command": "codev.reviewDiff",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
-          "group": "codev@1"
+          "group": "2_review@1"
         },
         {
           "command": "codev.runWorktreeDev",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
-          "group": "codev@2"
+          "group": "3_dev@1"
         },
         {
           "command": "codev.stopWorktreeDev",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
-          "group": "codev@2"
+          "group": "3_dev@2"
         }
       ],
       "view/title": [

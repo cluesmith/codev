@@ -310,7 +310,9 @@ Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below
 
 The same actions are available via right-click on any builder row in the Codev sidebar (Builders or Needs Attention view):
 
-- **Codev: View Diff** — opens VSCode's native diff editor for each file in `main...HEAD` of that builder's worktree. Empty diff → friendly toast. 30+ files → "Open N diff tabs?" confirmation.
+- **Codev: Open Builder Terminal** — opens that builder's AI terminal in a VSCode tab (same as left-clicking the row).
+- **Codev: Open Worktree Folder** — opens `.builders/<id>/` in the OS file manager (Finder on macOS, Explorer on Windows, xdg-open on Linux).
+- **Codev: View Diff** — opens a single unified diff editor for `main...HEAD` of that builder's worktree, with a file-list pane on the left (matches VSCode's built-in Source Control "Working Tree" view). Status icons indicate added / modified / deleted. Empty diff → friendly toast.
 - **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Dev: <builder-id>`. If another builder's dev is already running, you get a modal asking whether to swap.
 - **Codev: Stop Dev Server** — kills the running dev PTY and closes its tab.
 

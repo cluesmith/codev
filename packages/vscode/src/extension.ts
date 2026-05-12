@@ -9,6 +9,7 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { reviewDiff } from './commands/review-diff.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
+import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -209,6 +210,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.stopWorktreeDev', () =>
 			stopWorktreeDev(connectionManager!, terminalManager!)),
+		vscode.commands.registerCommand('codev.openWorktreeFolder', (arg: vscode.TreeItem | string | undefined) =>
+			openWorktreeFolder(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
 		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),
