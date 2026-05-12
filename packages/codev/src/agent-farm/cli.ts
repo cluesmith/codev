@@ -188,6 +188,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Dev command — start/stop a builder's dev server (#689)
+  program
+    .command('dev [builder-id]')
+    .description('Start the dev server for a builder worktree (or --stop)')
+    .option('--stop', 'Stop the currently running dev PTY')
+    .action(async (builderId, options) => {
+      const { dev } = await import('./commands/dev.js');
+      try {
+        await dev({ builderId, stop: options.stop });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Spawn command
   const spawnCmd = program
     .command('spawn')
