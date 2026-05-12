@@ -12,6 +12,7 @@
 import * as vscode from 'vscode';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 
@@ -63,6 +64,15 @@ export async function runWorktreeDev(
     return;
   }
 
+  // Look up the human-friendly builder name from workspace state — same
+  // source and matching strategy the builder tab uses (openBuilderByRoleOrId
+  // in terminal-manager.ts). OverviewBuilder.id and Builder.id can differ in
+  // shape (one may include the worktree slug, the other not), so we use
+  // resolveAgentName for the tail-match fallback rather than strict ===.
+  const workspaceState = await client.getWorkspaceState(workspacePath);
+  const { builder: namedBuilder } = resolveAgentName(builder.id, workspaceState?.builders ?? []);
+  const builderName = namedBuilder?.name ?? builder.id;
+
   // Swap detection. Source of truth for "what dev terminals exist" is
   // TerminalManager's local map — Tower's label filter would be brittle
   // and wouldn't catch terminals across VSCode instances anyway (a #690
@@ -70,14 +80,14 @@ export async function runWorktreeDev(
   const existing = terminalManager.listDevTerminals();
   const sameBuilder = existing.find(d => d.builderId === builder.id);
   if (sameBuilder) {
-    vscode.window.showInformationMessage(`Codev: Dev server is already running for ${builder.id}`);
-    await terminalManager.openDevTerminal(sameBuilder.terminalId, builder.id, true);
+    vscode.window.showInformationMessage(`Codev: Dev server is already running for ${builderName}`);
+    await terminalManager.openDevTerminal(sameBuilder.terminalId, builder.id, builderName, true);
     return;
   }
   if (existing.length > 0) {
     const other = existing[0]!;
     const choice = await vscode.window.showWarningMessage(
-      `Stop dev for ${other.builderId} and start for ${builder.id}?`,
+      `Stop dev for ${other.builderId} and start for ${builderName}?`,
       { modal: true },
       'Yes', 'No',
     );
@@ -105,12 +115,12 @@ export async function runWorktreeDev(
     persistent: false,
   });
   if (!terminal) {
-    vscode.window.showErrorMessage(`Codev: Failed to spawn dev terminal for ${builder.id}`);
+    vscode.window.showErrorMessage(`Codev: Failed to spawn dev terminal for ${builderName}`);
     return;
   }
 
-  await terminalManager.openDevTerminal(terminal.id, builder.id, true);
-  vscode.window.showInformationMessage(`Codev: Dev server started for ${builder.id}`);
+  await terminalManager.openDevTerminal(terminal.id, builder.id, builderName, true);
+  vscode.window.showInformationMessage(`Codev: Dev server started for ${builderName}`);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────

@@ -126,7 +126,7 @@ export class TerminalManager {
    * `focus` defaults to true — `afx dev` / "Run Dev Server" are explicit
    * user actions, so activate the tab so they see the spawning output.
    */
-  async openDevTerminal(terminalId: string, builderId: string, focus = true): Promise<void> {
+  async openDevTerminal(terminalId: string, builderId: string, builderName: string, focus = true): Promise<void> {
     const key = `dev-${builderId}`;
     const existing = this.terminals.get(key);
     if (existing) {
@@ -139,7 +139,9 @@ export class TerminalManager {
       existing.terminal.dispose();
       this.terminals.delete(key);
     }
-    await this.openTerminal(terminalId, 'dev', `Codev: Dev (${builderId})`, key, focus);
+    // Tab title matches the builder-tab format (`Codev: <name>`) with a
+    // `(dev)` suffix so the pairing is obvious in the tab strip.
+    await this.openTerminal(terminalId, 'dev', `Codev: ${builderName} (dev)`, key, focus);
   }
 
   /**

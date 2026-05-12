@@ -196,7 +196,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Codev: Failed to create shell');
 			}
 		}),
-		vscode.commands.registerCommand('codev.openBuilderById', async (roleOrId: string) => {
+		vscode.commands.registerCommand('codev.openBuilderById', async (arg: vscode.TreeItem | string | undefined) => {
+			// Left-click on a tree item passes b.id (string) via item.command.arguments;
+			// right-click context-menu invocations pass the BuilderTreeItem itself.
+			const roleOrId = extractBuilderId(arg);
 			if (!roleOrId) { return; }
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
