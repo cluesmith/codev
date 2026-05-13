@@ -7,17 +7,24 @@ import type { OverviewCache } from '../views/overview-data.js';
 const execFileAsync = promisify(execFile);
 
 /**
- * Codev: Approve Gate — show blocked builders, pick one, approve via porch CLI.
+ * Codev: Approve Gate.
  *
- * After `porch approve` succeeds, refresh the OverviewCache so the Needs
- * Attention tree drops the just-approved builder immediately rather than
- * waiting for the next SSE-driven tick. (The builder wake-up itself is
- * fired by porch's notifyTerminal — see packages/codev/src/commands/porch/
- * notify.ts.)
+ * Two invocation paths:
+ *
+ *   1. Right-click a blocked-builder row → pass the builder ID directly.
+ *      Skips the quick-pick; auto-detects the gate from b.blocked.
+ *
+ *   2. Command palette / Cmd+K G → no builder ID → show quick-pick of all
+ *      blocked builders.
+ *
+ * After `porch approve` succeeds, refresh the OverviewCache so the
+ * sidebar updates immediately rather than waiting for the SSE round-trip
+ * triggered by porch's overview-refresh broadcast.
  */
 export async function approveGate(
   connectionManager: ConnectionManager,
   cache?: OverviewCache,
+  builderIdArg?: string,
 ): Promise<void> {
   const client = connectionManager.getClient();
   const workspacePath = connectionManager.getWorkspacePath();
@@ -33,31 +40,56 @@ export async function approveGate(
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
-    blocked.map(b => ({
-      label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
-      description: `blocked on ${b.blocked}`,
-      id: b.id,
-      gate: b.blocked!,
-    })),
-    { placeHolder: 'Select gate to approve' },
+  // We need blockedGate (canonical name like "plan-approval"), not blocked
+  // (display label like "plan review"). Porch's gate keys are the canonical
+  // names; the display label is for the sidebar only.
+  let id: string;
+  let gate: string;
+  if (builderIdArg) {
+    const direct = blocked.find(b => b.id === builderIdArg);
+    if (!direct || !direct.blockedGate) {
+      vscode.window.showWarningMessage(`Codev: Builder ${builderIdArg} is not blocked at a gate`);
+      return;
+    }
+    id = direct.id;
+    gate = direct.blockedGate;
+  } else {
+    const candidates = blocked.filter(b => b.blockedGate);
+    const picked = await vscode.window.showQuickPick(
+      candidates.map(b => ({
+        label: `#${b.issueId ?? b.id} ${b.issueTitle ?? ''}`,
+        description: `blocked on ${b.blocked}`,
+        id: b.id,
+        gate: b.blockedGate!,
+      })),
+      { placeHolder: 'Select gate to approve' },
+    );
+    if (!picked) { return; }
+    id = picked.id;
+    gate = picked.gate;
+  }
+
+  const confirmed = await vscode.window.showInformationMessage(
+    `Approve ${gate} for ${id}?`,
+    { modal: true },
+    'Approve',
   );
-  if (!picked) { return; }
+  if (confirmed !== 'Approve') { return; }
 
   try {
     await execFileAsync('porch', [
       'approve',
-      picked.id,
-      picked.gate,
+      id,
+      gate,
       '--a-human-explicitly-approved-this',
-    ]);
+    ], { cwd: workspacePath });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`Codev: porch approve failed — ${msg}`);
     return;
   }
 
-  vscode.window.showInformationMessage(`Codev: Approved ${picked.gate} for #${picked.id}`);
+  vscode.window.showInformationMessage(`Codev: Approved ${gate} for ${id}`);
 
   // Refresh the cache so Needs Attention updates without waiting for SSE.
   cache?.refresh();

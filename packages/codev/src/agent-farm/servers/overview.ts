@@ -42,7 +42,14 @@ export interface BuilderOverview {
   protocol: string;
   planPhases: PlanPhase[];
   progress: number;
+  /** Human-readable label for the gate the builder is blocked on (e.g. "plan review"). */
   blocked: string | null;
+  /**
+   * Canonical gate name (e.g. "plan-approval") for the gate the builder is
+   * blocked on. Use this when calling `porch approve` — `blocked` is a
+   * display label and won't match porch's gate keys.
+   */
+  blockedGate: string | null;
   blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;
@@ -338,17 +345,31 @@ function loadProtocolPhases(workspaceRoot: string, protocolName: string): string
  * `OverviewBuilder.blocked` and downstream UIs (VSCode Needs Attention tree,
  * VSCode toast, dashboard NeedsAttentionList, status bar counter).
  */
-export function detectBlocked(parsed: ParsedStatus): string | null {
-  const gateLabels: Record<string, string> = {
-    'spec-approval': 'spec review',
-    'plan-approval': 'plan review',
-    'code-review': 'code review',
-    'pr': 'PR review',
-  };
+const GATE_LABELS: Record<string, string> = {
+  'spec-approval': 'spec review',
+  'plan-approval': 'plan review',
+  'code-review': 'code review',
+  'pr': 'PR review',
+};
 
-  for (const [gate, label] of Object.entries(gateLabels)) {
+export function detectBlocked(parsed: ParsedStatus): string | null {
+  for (const [gate, label] of Object.entries(GATE_LABELS)) {
     if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
       return label;
+    }
+  }
+  return null;
+}
+
+/**
+ * Canonical gate name (e.g. "plan-approval") for the gate the builder is
+ * blocked on. Sibling to `detectBlocked` which returns the display label.
+ * Returns null if the builder isn't blocked.
+ */
+export function detectBlockedGate(parsed: ParsedStatus): string | null {
+  for (const gate of Object.keys(GATE_LABELS)) {
+    if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
+      return gate;
     }
   }
   return null;
@@ -531,6 +552,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        blockedGate: null,
         blockedSince: null,
         startedAt: null,
         idleMs: 0,
@@ -582,6 +604,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             planPhases: parsed.planPhases,
             progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
+            blockedGate: detectBlockedGate(parsed),
             blockedSince: detectBlockedSince(parsed),
             startedAt: parsed.startedAt || null,
             idleMs: computeIdleMs(parsed),
@@ -610,6 +633,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        blockedGate: null,
         blockedSince: null,
         startedAt: null,
         idleMs: 0,

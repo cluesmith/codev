@@ -82,7 +82,14 @@ export interface OverviewBuilder {
   protocol: string;
   planPhases: Array<{ id: string; title: string; status: string }>;
   progress: number;
+  /** Human-readable label for the gate the builder is blocked on (e.g. "plan review"). */
   blocked: string | null;
+  /**
+   * Canonical gate name (e.g. "plan-approval") for the gate the builder is
+   * blocked on. Use this when calling `porch approve` — `blocked` is a
+   * display label and won't match porch's gate keys.
+   */
+  blockedGate: string | null;
   blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;

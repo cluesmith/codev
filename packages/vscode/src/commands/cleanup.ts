@@ -47,7 +47,7 @@ export async function cleanupBuilder(
   if (!picked) { return; }
 
   try {
-    await execFileAsync('afx', ['cleanup', '-p', picked.id]);
+    await execFileAsync('afx', ['cleanup', '-p', picked.id], { cwd: workspacePath });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`Codev: afx cleanup failed — ${msg}`);
