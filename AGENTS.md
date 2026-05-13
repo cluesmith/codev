@@ -70,9 +70,33 @@ You are working in the Codev project itself, with multiple development protocols
 - **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
 - **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
 - **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
+- **PIR**: Plan / Implement / Review — issue-driven with two human gates (plan-approval, code-review). Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev/protocols/pir/protocol.md`.
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
 - **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev/protocols/research/protocol.md`
+
+### File Resolution (How Codev Finds Protocols and Templates)
+
+Codev resolves protocol files, prompts, agent definitions, and roles through a four-tier lookup (highest priority first):
+
+1. `.codev/<path>` — user override (project-local customization)
+2. `codev/<path>` — project-local copy (customized and checked in)
+3. Runtime cache
+4. **Installed package skeleton** — ships with `@cluesmith/codev` (the default for every standard protocol)
+
+**The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
+
+**Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol (e.g., PIR), do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes the protocol from the user's available-protocol list while it's still callable from the CLI.
+
+### Protocol Verification (When You Don't Recognize a Protocol Name)
+
+If the user mentions a protocol name you don't immediately recognize, verify against the CLI before responding:
+
+```bash
+afx spawn --protocol <name> --help
+```
+
+This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
 
 Key locations:
 - Protocol details: `codev/protocols/` (Choose appropriate protocol)
@@ -143,6 +167,26 @@ validated: [gemini, codex, claude]
 - Would be overkill for full SPIR/ASPIR ceremony
 
 **AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
+
+### Use PIR for (engineer-judged — based on the nature of the work, not its size):
+
+Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change:
+
+**1. The approach needs review before coding starts**:
+- Root cause is ambiguous; multiple valid fixes exist
+- Area is unfamiliar or high-blast-radius (shared utilities, auth, migrations, public APIs)
+- Design-sensitive (affects conventions, patterns, architecture)
+- Cheaper to redirect at plan time than at PR time
+
+**2. The implementation needs to be TESTED before a PR is created** (PR diff alone is insufficient):
+- Mobile app changes (needs device testing on Android, iOS, possibly web)
+- UI / UX changes (visual inspection, interaction flow, accessibility)
+- Hardware-adjacent behavior (sensors, camera, permissions, notifications)
+- Integration with external services that don't mock cleanly (OAuth, payments, analytics)
+- User-journey changes that need a full-flow exercise
+- Performance-sensitive changes that need profiling on the running app
+
+**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `code-review`) → Review (PR + CMAP-2 at PR, matching BUGFIX / AIR). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `code-review` gate, not the PR diff post-creation). See `codev/protocols/pir/protocol.md`.
 
 ### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)

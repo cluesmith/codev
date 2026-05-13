@@ -10,9 +10,33 @@ This project uses **Codev** for AI-assisted development.
 - **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
 - **AIR**: Autonomous Implement & Review for small features (`codev/protocols/air/protocol.md`)
 - **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
+- **PIR**: Plan / Implement / Review — issue-driven with two human gates (plan-approval, code-review) (`codev/protocols/pir/protocol.md`)
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
 - **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
+
+## File Resolution (How Codev Finds Protocols and Templates)
+
+Codev resolves protocol files, prompts, agent definitions, and roles through a four-tier lookup (highest priority first):
+
+1. `.codev/<path>` — user override (project-local customization)
+2. `codev/<path>` — project-local copy (customized and checked in)
+3. Runtime cache
+4. **Installed package skeleton** — ships with `@cluesmith/codev` (the default for every standard protocol)
+
+**The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
+
+**Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
+
+## Protocol Verification (When You Don't Recognize a Protocol Name)
+
+If the user mentions a protocol name you don't immediately recognize, verify against the CLI before responding:
+
+```bash
+afx spawn --protocol <name> --help
+```
+
+This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
 
 ## Key Locations
 
