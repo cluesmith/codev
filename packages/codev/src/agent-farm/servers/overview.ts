@@ -504,9 +504,12 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   const bugfixMatch = dirName.match(/^bugfix-(\d+)/);
   if (bugfixMatch) return `bugfix-${bugfixMatch[1]}`;
 
-  // PIR: pir-1298-slug → "pir-1298" (porch uses this, mirroring bugfix's convention)
+  // PIR: pir-1298-slug → "1298" (porch project ID is just the issue
+  // number, aligning with SPIR's convention so artifacts land in
+  // codev/{plans,reviews}/<N>-<slug>.md without a protocol prefix).
+  // Worktree dir keeps the `pir-` prefix for namespace separation.
   const pirMatch = dirName.match(/^pir-(\d+)/);
-  if (pirMatch) return `pir-${pirMatch[1]}`;
+  if (pirMatch) return pirMatch[1];
 
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);

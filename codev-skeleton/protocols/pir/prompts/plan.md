@@ -4,7 +4,7 @@ You are executing the **PLAN** phase of the PIR protocol.
 
 ## Your Goal
 
-Read the GitHub issue, investigate the codebase, and write a plan to `codev/plans/pir-{{project_id}}-<slug>.md`. The plan is reviewed by a human at the `plan-approval` gate before any code is written.
+Read the GitHub issue, investigate the codebase, and write a plan to `codev/plans/{{artifact_name}}.md`. The plan is reviewed by a human at the `plan-approval` gate before any code is written.
 
 ## Context
 
@@ -45,7 +45,7 @@ Understand what's being asked. For a bug, identify the symptom. For a feature, i
 
 ### 3. Write the Plan
 
-Create `codev/plans/pir-{{project_id}}-<slug>.md` where `<slug>` is a short kebab-case description of the change. Use this structure:
+Create `codev/plans/{{artifact_name}}.md` where `<slug>` is a short kebab-case description of the change. Use this structure:
 
 ```markdown
 # PIR Plan: <Short Title>
@@ -82,7 +82,7 @@ How to verify this works once implemented. The reviewer will use this at the `co
 ### 4. Commit and Push
 
 ```bash
-git add codev/plans/pir-{{project_id}}-<slug>.md
+git add codev/plans/{{artifact_name}}.md
 git commit -m "[PIR #{{issue.number}}] Plan draft"
 git push -u origin "$(git branch --show-current)"
 ```
@@ -102,7 +102,7 @@ porch next {{project_id}}
 
 Output something like:
 
-> Plan written to `codev/plans/pir-{{project_id}}-<slug>.md` and committed. Ready for review — type any feedback here, edit the plan file directly in VSCode, or approve with `porch approve {{project_id}} plan-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
+> Plan written to `codev/plans/{{artifact_name}}.md` and committed. Ready for review — type any feedback here, edit the plan file directly in VSCode, or approve with `porch approve {{project_id}} plan-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
 
 Then **stay in the interactive session**. Do not exit. Wait for the user's next message.
 
@@ -127,7 +127,7 @@ When the reviewer provides feedback (typed in pane, file-edit, `afx send`, or is
 
 1. Re-read the plan file (the user may have edited it)
 2. Apply the requested changes to your plan
-3. Recommit: `git add codev/plans/pir-{{project_id}}-<slug>.md && git commit -m "[PIR #{{issue.number}}] Plan revised"`
+3. Recommit: `git add codev/plans/{{artifact_name}}.md && git commit -m "[PIR #{{issue.number}}] Plan revised"`
 4. Push
 5. Output a short "Revised — see commit X" message
 6. Wait for next input — the gate remains pending until the human approves

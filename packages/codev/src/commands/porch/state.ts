@@ -305,25 +305,25 @@ export function findStatusPath(workspaceRoot: string, projectId: string): string
 /**
  * Detect project ID from the current working directory if inside a builder worktree.
  * Works from any subdirectory within the worktree.
- * Returns the porch project ID (e.g. "bugfix-237" or "0073"), or null if not in a recognized worktree.
+ * Returns the porch project ID (e.g. "bugfix-237", "1298", or "0073"), or null if not in a recognized worktree.
  */
 export function detectProjectIdFromCwd(cwd: string): string | null {
   const normalized = path.resolve(cwd).split(path.sep).join('/');
-  // Issue-driven worktrees: .builders/{bugfix|pir}-{N}-{slug} (slug optional for legacy paths)
-  //   bugfix and pir use a "{prefix}-{N}" porch project ID.
-  // Protocol worktrees: .builders/{aspir|spir|air}-{N}-{slug} (slug optional)
-  //   These use the bare numeric ID as the porch project ID.
+  // bugfix worktrees: .builders/bugfix-{N}-{slug} (slug optional)
+  //   porch project ID is "bugfix-{N}" — historical convention, kept untouched.
+  // PIR / SPIR / ASPIR / AIR worktrees: .builders/{prefix}-{N}-{slug} (slug optional)
+  //   porch project ID is the bare numeric ID.
   // Spec worktrees (legacy): .builders/{NNNN} (bare 4-digit ID, no slug)
   const match = normalized.match(
-    /\/\.builders\/((bugfix|pir)-(\d+)(?:-[^/]*)?|(?:aspir|spir|air)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
+    /\/\.builders\/(bugfix-(\d+)(?:-[^/]*)?|(?:aspir|spir|air|pir)-(\d+)(?:-[^/]*)?|(\d{4}))(\/|$)/,
   );
   if (!match) return null;
-  // Issue-driven worktrees (bugfix, pir) use "{prefix}-N" as the porch project ID
-  if (match[2] && match[3]) return `${match[2]}-${match[3]}`;
-  // Protocol worktrees (aspir, spir, air) use the bare numeric ID
-  if (match[4]) return match[4];
+  // bugfix uses "bugfix-N" as the porch project ID
+  if (match[2]) return `bugfix-${match[2]}`;
+  // Protocol worktrees (aspir, spir, air, pir) use the bare numeric ID
+  if (match[3]) return match[3];
   // Spec worktrees use zero-padded numeric IDs
-  return match[5];
+  return match[4];
 }
 
 export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };

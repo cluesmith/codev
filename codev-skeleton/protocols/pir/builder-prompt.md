@@ -31,9 +31,9 @@ Follow the PIR protocol: `codev/protocols/pir/protocol.md`
 Read and internalize the protocol before starting any work.
 
 PIR has three phases:
-1. **plan** (gated by `plan-approval`) — write `codev/plans/pir-{{project_id}}-<slug>.md`, await human review
+1. **plan** (gated by `plan-approval`) — write `codev/plans/{{artifact_name}}.md`, await human review
 2. **implement** (gated by `code-review`) — write code + tests, run build/tests, push branch; await the human's review of the *running worktree* (no file artifact in this phase — code-review summary is prose-in-pane)
-3. **review** — write `codev/reviews/pir-{{project_id}}-<slug>.md` (retrospective with Architecture Updates + Lessons Learned, same shape as SPIR's review file), open PR with the review as body, run CMAP, notify architect, merge on instruction
+3. **review** — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates + Lessons Learned, same shape as SPIR's review file), open PR with the review as body, run CMAP, notify architect, merge on instruction
 
 {{#if issue}}
 ## Issue #{{issue.number}}

@@ -781,6 +781,14 @@ describe('overview', () => {
       expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('bugfix-296');
     });
 
+    it('extracts bare numeric ID from PIR worktree (aligns with SPIR convention)', () => {
+      expect(extractProjectIdFromWorktreeName('pir-1298-fix-foo')).toBe('1298');
+    });
+
+    it('extracts bare numeric ID from PIR worktree with no slug', () => {
+      expect(extractProjectIdFromWorktreeName('pir-1298')).toBe('1298');
+    });
+
     it('extracts legacy numeric ID', () => {
       expect(extractProjectIdFromWorktreeName('0110')).toBe('0110');
     });

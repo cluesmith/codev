@@ -4,7 +4,7 @@ You are executing the **REVIEW** phase of the PIR protocol.
 
 ## Your Goal
 
-Write a retrospective at `codev/reviews/pir-{{project_id}}-<slug>.md` — same shape as SPIR's review file, including **Architecture Updates** and **Lessons Learned Updates** sections. Then push, open a PR using the review file as the PR body, run CMAP-2 (Gemini + Codex), notify the architect, and merge on instruction.
+Write a retrospective at `codev/reviews/{{artifact_name}}.md` — same shape as SPIR's review file, including **Architecture Updates** and **Lessons Learned Updates** sections. Then push, open a PR using the review file as the PR body, run CMAP-2 (Gemini + Codex), notify the architect, and merge on instruction.
 
 The retrospective ships with the merged PR — it's durable team knowledge, searchable in `codev/reviews/` on `main`.
 
@@ -25,7 +25,7 @@ The retrospective ships with the merged PR — it's durable team knowledge, sear
 
 ### 1. Write the Review File
 
-Create `codev/reviews/pir-{{project_id}}-<slug>.md` with these sections:
+Create `codev/reviews/{{artifact_name}}.md` with these sections:
 
 ```markdown
 # PIR Review: <Short Title>
@@ -74,7 +74,7 @@ Tricky spots the PR reviewer should focus on. Honest — if a section was hard t
 
 For reviewers pulling the branch:
 
-- **View diff**: VSCode sidebar → right-click builder pir-{{project_id}} → **Review Diff**, or `git -C .builders/pir-{{project_id}} diff main`
+- **View diff**: VSCode sidebar → right-click builder pir-{{project_id}} → **Review Diff** (auto-detects the repo's default branch)
 - **Run dev server**: VSCode sidebar → **Run Dev Server**, or `afx dev pir-{{project_id}}`
 - **What to verify**: <bullet list mapped to the plan's Test Plan>
 
@@ -92,7 +92,7 @@ If neither doc needs updating, your review file's sections still need to explain
 ### 3. Commit the Review File (and arch / lessons updates)
 
 ```bash
-git add codev/reviews/pir-{{project_id}}-<slug>.md
+git add codev/reviews/{{artifact_name}}.md
 # Add arch.md / lessons-learned.md only if you changed them
 git add codev/resources/arch.md           # only if changed
 git add codev/resources/lessons-learned.md  # only if changed
@@ -110,13 +110,13 @@ gh pr create \
   --base main \
   --head "$BRANCH" \
   --title "$PR_TITLE" \
-  --body-file codev/reviews/pir-{{project_id}}-<slug>.md
+  --body-file codev/reviews/{{artifact_name}}.md
 ```
 
 **Verify the PR body contains `Fixes #{{issue.number}}`** (it should — the review file has it at the top). If somehow missing, edit and re-apply:
 
 ```bash
-gh pr edit <PR-number> --body-file codev/reviews/pir-{{project_id}}-<slug>.md
+gh pr edit <PR-number> --body-file codev/reviews/{{artifact_name}}.md
 ```
 
 **Exception**: if this PR only partially addresses the issue, use `Refs #{{issue.number}}` instead — the issue stays open until a follow-up PR closes it.

@@ -754,11 +754,17 @@ async function spawnIssueDrivenBuilder(
   await ensureDirectories(config);
   await checkDependencies();
 
-  // <prefix>-{N} is the porch project ID, distinct from the builder agent
-  // name (builder-<prefix>-{N}). Used as the project key in
-  // codev/projects/<id>/status.yaml and what `porch next/done/approve`
-  // expect as their argument. Also matches detectProjectIdFromCwd's regex.
-  const porchProjectId = `${prefix}-${issueNumber}`;
+  // Porch project ID:
+  //   - PIR uses the bare issue number (matches SPIR's convention, so
+  //     artifacts land at codev/{plans,reviews}/<N>-<slug>.md).
+  //   - BUGFIX uses <prefix>-<N> (historical, kept untouched).
+  //
+  // Distinct from the worktree dir (.builders/<prefix>-<N>/), the branch
+  // (builder/<prefix>-<N>), and the Tower agent name (builder-<prefix>-<N>).
+  // All four are namespaced differently — porch state ID lines up with
+  // artifacts; the other three encode protocol for collision-free worktree
+  // / branch / agent management.
+  const porchProjectId = prefix === 'pir' ? String(issueNumber) : `${prefix}-${issueNumber}`;
 
   if (options.resume) {
     validateResumeWorktree(worktreePath);

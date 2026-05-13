@@ -420,6 +420,18 @@ updated_at: "${state.updated_at}"
       expect(detectProjectIdFromCwd('/repo/.builders/spir-042-feature-name')).toBe('042');
     });
 
+    it('should detect numeric ID from pir worktree (aligns with SPIR convention)', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-1298-fix-foo')).toBe('1298');
+    });
+
+    it('should detect numeric ID from pir worktree without slug', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-1298')).toBe('1298');
+    });
+
+    it('should detect numeric ID from pir worktree subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/pir-1298-fix-foo/src/file.ts')).toBe('1298');
+    });
+
     it('should detect numeric ID from air worktree', () => {
       expect(detectProjectIdFromCwd('/repo/.builders/air-100-small-feature')).toBe('100');
     });
