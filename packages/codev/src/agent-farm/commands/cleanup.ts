@@ -393,6 +393,19 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
+  // Invalidate Tower's overview cache + broadcast an `overview-changed`
+  // SSE event. Connected clients (VSCode sidebar, dashboard) subscribe
+  // to SSE and re-fetch on any event — without this, the just-removed
+  // builder would linger in their UI until some unrelated SSE event
+  // happened to trigger an incidental refresh. Best-effort — silently
+  // no-ops if Tower isn't running.
+  try {
+    const client = new TowerClient();
+    await client.refreshOverview();
+  } catch {
+    // Tower not running or unreachable — non-fatal.
+  }
+
   logger.blank();
   logger.success(`Builder ${builder.id} cleaned up!`);
 }

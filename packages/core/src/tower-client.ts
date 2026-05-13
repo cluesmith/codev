@@ -222,6 +222,20 @@ export class TowerClient {
     return result.ok ? result.data! : null;
   }
 
+  /**
+   * Invalidate Tower's in-memory overview cache and broadcast an
+   * `overview-changed` SSE event. Subscribed clients (VSCode sidebar,
+   * dashboard) re-fetch /api/overview on any SSE event, so this is
+   * what makes them notice out-of-band mutations to builder state —
+   * e.g., `afx cleanup` invoked from a shell or the architect. Without
+   * it, the change is invisible to clients until some other SSE event
+   * happens to fire. Best-effort: returns false if Tower isn't running.
+   */
+  async refreshOverview(): Promise<boolean> {
+    const result = await this.request<{ ok: boolean }>('/api/overview/refresh', { method: 'POST' });
+    return result.ok;
+  }
+
   async getWorkspaceState(workspacePath: string): Promise<DashboardState | null> {
     const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<DashboardState>(`/workspace/${encoded}/api/state`);
