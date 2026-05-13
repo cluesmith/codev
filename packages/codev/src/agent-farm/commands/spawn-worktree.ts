@@ -407,19 +407,35 @@ export function slugify(title: string): string {
 }
 
 /**
- * Find an existing bugfix worktree directory for a given issue number.
- * Scans the builders directory for directories matching `bugfix-{issueNumber}-*`.
- * Returns the directory name if found, or null if no match exists.
+ * Find an existing issue-driven worktree directory for a given protocol prefix
+ * and issue number. Scans the builders directory for directories matching
+ * `<protocolPrefix>-<issueNumber>-*`. Returns the directory name if found, or
+ * null if no match exists.
+ *
+ * Used by the bugfix / PIR resume path to locate a worktree whose suffix
+ * (slug) may have changed since the original spawn.
  */
-export function findExistingBugfixWorktree(buildersDir: string, issueNumber: number | string): string | null {
-  const prefix = `bugfix-${issueNumber}-`;
+export function findExistingIssueWorktree(
+  buildersDir: string,
+  protocolPrefix: string,
+  issueNumber: number | string,
+): string | null {
+  const dirPrefix = `${protocolPrefix}-${issueNumber}-`;
   try {
     const entries = readdirSync(buildersDir, { withFileTypes: true });
-    const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
+    const match = entries.find(e => e.isDirectory() && e.name.startsWith(dirPrefix));
     return match ? match.name : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * @deprecated Use `findExistingIssueWorktree(buildersDir, 'bugfix', issueNumber)` directly.
+ * Kept as a thin wrapper for backwards compatibility with existing tests.
+ */
+export function findExistingBugfixWorktree(buildersDir: string, issueNumber: number | string): string | null {
+  return findExistingIssueWorktree(buildersDir, 'bugfix', issueNumber);
 }
 
 /**

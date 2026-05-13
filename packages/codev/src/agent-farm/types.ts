@@ -2,7 +2,7 @@
  * Core types for Agent Farm
  */
 
-export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 'bugfix';
+export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 'bugfix' | 'pir';
 
 export interface Builder {
   id: string;

@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS builders (
   worktree TEXT NOT NULL,
   branch TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'spec'
-    CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
+    CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix', 'pir')),
   task_text TEXT,
   protocol_name TEXT,
   issue_number TEXT,

@@ -391,6 +391,53 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (8)').run();
   }
 
+  // Migration v9: Add 'pir' to builders.type CHECK constraint (Issue 691)
+  const v9 = db.prepare('SELECT version FROM _migrations WHERE version = 9').get();
+  if (!v9) {
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
+      .get() as { sql: string } | undefined;
+
+    // Only recreate if the constraint doesn't already include 'pir' (idempotent).
+    if (tableInfo?.sql && !tableInfo.sql.includes("'pir'")) {
+      // SQLite can't alter CHECK constraints, so recreate the table.
+      db.exec(`
+        CREATE TABLE builders_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'spawning'
+            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
+          phase TEXT NOT NULL DEFAULT '',
+          worktree TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'spec'
+            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix', 'pir')),
+          task_text TEXT,
+          protocol_name TEXT,
+          issue_number TEXT,
+          terminal_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO builders_new SELECT * FROM builders;
+        DROP TABLE builders;
+        ALTER TABLE builders_new RENAME TO builders;
+        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
+        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
+        CREATE TRIGGER IF NOT EXISTS builders_updated_at
+          AFTER UPDATE ON builders
+          FOR EACH ROW
+          BEGIN
+            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
+          END;
+      `);
+      console.log("[info] Migrated builders table: added 'pir' to type CHECK constraint");
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (9)').run();
+  }
+
   return db;
 }
 
