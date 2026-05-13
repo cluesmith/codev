@@ -15,6 +15,7 @@ import { viewPlanFile, viewReviewFile } from './commands/view-artifact.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
+import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
@@ -233,6 +234,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Review comment decorations
 	activateReviewDecorations(context);
+
+	// Toast on new gate-pending — surfaces blocked builders without forcing the
+	// user to watch the Needs Attention tree. Respects `codev.gateToasts.enabled`.
+	activateGateToasts(context, overviewCache);
 
 	// Auto-open builder terminals on Tower spawn events
 	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);

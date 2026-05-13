@@ -311,6 +311,11 @@
           ],
           "default": "notify",
           "description": "Behavior when Tower reports a new builder spawn"
+        },
+        "codev.gateToasts.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a VSCode notification toast when a builder reaches a human-approval gate (plan-approval, code-review, etc.)"
         }
       }
     }
