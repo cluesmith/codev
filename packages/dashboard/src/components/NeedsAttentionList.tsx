@@ -15,6 +15,20 @@ interface AttentionItem {
   url?: string;
 }
 
+/**
+ * Map an OverviewBuilder.blocked label to a CSS class. The labels come from
+ * `detectBlocked` in packages/codev/src/agent-farm/servers/overview.ts.
+ * Unknown kinds fall back to the plan styling so the row still renders.
+ */
+function gateKindClass(blocked: string): string {
+  switch (blocked) {
+    case 'spec review': return 'attention-kind--spec';
+    case 'plan review': return 'attention-kind--plan';
+    case 'code review': return 'attention-kind--code-review';
+    default: return 'attention-kind--plan';
+  }
+}
+
 function timeAgo(dateStr: string): string {
   const ms = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(ms / 60000);
@@ -52,9 +66,7 @@ function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionIt
       issueOrPR: label,
       title: b.issueTitle || b.id,
       kind: b.blocked,
-      kindClass: b.blocked === 'spec review'
-        ? 'attention-kind--spec'
-        : 'attention-kind--plan',
+      kindClass: gateKindClass(b.blocked),
       waitingSince: b.blockedSince,
     });
   }

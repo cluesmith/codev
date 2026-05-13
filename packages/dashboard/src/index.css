@@ -1282,6 +1282,10 @@ a.attention-row {
   color: var(--status-error);
 }
 
+.attention-kind--code-review {
+  color: var(--status-waiting);
+}
+
 .attention-row-age {
   font-size: 13px;
   color: var(--text-muted);

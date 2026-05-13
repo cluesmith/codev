@@ -331,11 +331,18 @@ function loadProtocolPhases(workspaceRoot: string, protocolName: string): string
 /**
  * Detect if a builder is blocked on a gate (requested but not approved).
  * Returns a human-readable label or null.
+ *
+ * The allowlist mirrors the gates emitted by the bundled protocols (SPIR,
+ * ASPIR, BUGFIX, AIR, PIR). New protocols that introduce new gate names must
+ * register them here, otherwise their gate-pending state is invisible to
+ * `OverviewBuilder.blocked` and downstream UIs (VSCode Needs Attention tree,
+ * VSCode toast, dashboard NeedsAttentionList, status bar counter).
  */
 export function detectBlocked(parsed: ParsedStatus): string | null {
   const gateLabels: Record<string, string> = {
     'spec-approval': 'spec review',
     'plan-approval': 'plan review',
+    'code-review': 'code review',
     'pr': 'PR review',
   };
 
@@ -350,9 +357,11 @@ export function detectBlocked(parsed: ParsedStatus): string | null {
 /**
  * Detect when the current blocked gate was first requested.
  * Returns the ISO timestamp string or null if not blocked.
+ *
+ * Keep this list in sync with `detectBlocked`'s `gateLabels` keys.
  */
 export function detectBlockedSince(parsed: ParsedStatus): string | null {
-  const gateNames = ['spec-approval', 'plan-approval', 'pr'];
+  const gateNames = ['spec-approval', 'plan-approval', 'code-review', 'pr'];
   for (const gate of gateNames) {
     if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
       return parsed.gateRequestedAt[gate];
