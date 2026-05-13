@@ -27,7 +27,8 @@ export class NeedsAttentionProvider implements vscode.TreeDataProvider<vscode.Tr
         : '';
       const item = new BuilderTreeItem(b.id, `#${b.issueId ?? b.id} — blocked on ${b.blocked} ${waitTime}`);
       item.iconPath = new vscode.ThemeIcon('bell', new vscode.ThemeColor('notificationsWarningIcon.foreground'));
-      item.contextValue = 'blocked-builder';
+      // contextValue encodes protocol so menus can scope by it.
+      item.contextValue = `blocked-builder-${b.protocol || 'unknown'}`;
       item.command = {
         command: 'codev.openBuilderById',
         title: 'Open Builder Terminal',

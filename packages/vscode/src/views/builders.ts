@@ -22,7 +22,9 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       const phase = b.blocked ? `[${b.blocked}] blocked` : `[${b.phase}]`;
       const item = new BuilderTreeItem(b.id, `#${b.issueId ?? b.id} ${b.issueTitle ?? ''} ${phase}`);
       item.tooltip = `Protocol: ${b.protocol} | Mode: ${b.mode} | Progress: ${b.progress}%`;
-      item.contextValue = 'builder';
+      // contextValue encodes protocol so menus can scope by it
+      // (e.g., codev.viewPlanFile only shows on `builder-pir`).
+      item.contextValue = `builder-${b.protocol || 'unknown'}`;
       item.iconPath = b.blocked
         ? new vscode.ThemeIcon('debug-pause', new vscode.ThemeColor('testing.iconFailed'))
         : new vscode.ThemeIcon('play', new vscode.ThemeColor('testing.iconPassed'));

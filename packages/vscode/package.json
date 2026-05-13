@@ -143,32 +143,32 @@
       "view/item/context": [
         {
           "command": "codev.openBuilderById",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "1_terminal@1"
         },
         {
           "command": "codev.openWorktreeFolder",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "2_files@1"
         },
         {
           "command": "codev.reviewDiff",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "3_review@1"
         },
         {
           "command": "codev.runWorktreeSetup",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@1"
         },
         {
           "command": "codev.runWorktreeDev",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@2"
         },
         {
           "command": "codev.stopWorktreeDev",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)$/",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@3"
         }
       ],
