@@ -2,6 +2,12 @@
 
 What's changed in the Codev VS Code extension, version by version, written for the developers who use it.
 
+## [3.0.4] - 2026-05-13
+
+### Bug fixes
+
+- **Lower `engines.vscode` floor from `^1.110.0` to `^1.105.0`** so the extension installs on Cursor 3.3.30 (VSCode 1.105.1), Antigravity 1.107.0, and AWS Kiro 0.12.184 (VSCode 1.107.1). Windsurf and standard VSCode (≥1.110) are unaffected. `@types/vscode` pinned to `~1.105.0` so tsc validates against the actual supported API surface.
+
 ## [3.0.3] - 2026-05-13
 
 ### What's new
