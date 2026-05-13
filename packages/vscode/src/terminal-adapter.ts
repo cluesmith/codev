@@ -25,6 +25,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private lastSeq = 0;
   private replaying = false;
   private pendingResize: { cols: number; rows: number } | null = null;
+  // Latest dimensions VSCode has told us about. Seeded from open()'s
+  // initialDimensions and refreshed on every setDimensions(). Re-sent after
+  // every WS auth so Tower's PTY isn't stuck at node-pty's 80×24 default
+  // until the user happens to manually resize the panel (Bugfix #737).
+  private lastDimensions: { cols: number; rows: number } | null = null;
   private queuedBytes = 0;
   private disposed = false;
 
@@ -34,7 +39,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     private outputChannel: vscode.OutputChannel,
   ) {}
 
-  open(_initialDimensions: vscode.TerminalDimensions | undefined): void {
+  open(initialDimensions: vscode.TerminalDimensions | undefined): void {
+    if (initialDimensions) {
+      this.lastDimensions = { cols: initialDimensions.columns, rows: initialDimensions.rows };
+    }
     // Prime the renderer synchronously inside open() — VS Code drops or
     // mis-orders writes that arrive purely asynchronously after open()
     // when the terminal becomes the active editor (microsoft/vscode#108298),
@@ -64,6 +72,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   }
 
   setDimensions(dimensions: vscode.TerminalDimensions): void {
+    this.lastDimensions = { cols: dimensions.columns, rows: dimensions.rows };
     if (this.replaying) {
       // Defer resize during replay to prevent garbled rendering (Bugfix #625)
       this.pendingResize = { cols: dimensions.columns, rows: dimensions.rows };
@@ -86,6 +95,14 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // Send auth via control message (not query param)
       if (this.authKey) {
         this.sendControl({ type: 'ping', payload: { auth: this.authKey } });
+      }
+      // Sync Tower's PTY to the dimensions VSCode reported. Without this,
+      // the PTY stays at node-pty's 80×24 default until a manual resize,
+      // which makes Claude Code's TUI render its input box mid-screen and
+      // overlap streaming content. Pause/replay messages arrive *after*
+      // this outbound resize, so the order is auth → resize → replay → resume.
+      if (this.lastDimensions) {
+        this.sendResize(this.lastDimensions.cols, this.lastDimensions.rows);
       }
     });
 
