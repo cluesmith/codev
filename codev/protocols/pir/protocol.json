@@ -1,0 +1,124 @@
+{
+  "$schema": "../../protocol-schema.json",
+  "name": "pir",
+  "alias": "plan-implement-review",
+  "version": "1.0.0",
+  "description": "PIR: Plan → Implement → Review for GitHub-issue-driven work with two human gates (plan-approval, code-review). Lighter than SPIR (no specify phase, no review-with-arch-updates ceremony), with a code-review gate that fires before the PR is opened.",
+  "input": {
+    "type": "github-issue",
+    "required": true,
+    "default_for": ["--issue", "-i"]
+  },
+  "hooks": {
+    "pre-spawn": {
+      "collision-check": true,
+      "comment-on-issue": "On it! Working on this with the PIR protocol (plan + code-review gates before PR)."
+    }
+  },
+  "phases": [
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Read the issue, investigate the codebase, write codev/plans/<id>-<slug>.md, await plan-approval",
+      "type": "build_verify",
+      "build": {
+        "prompt": "plan.md",
+        "artifact": "codev/plans/${PROJECT_TITLE}.md"
+      },
+      "verify": null,
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "plan_exists": "test -f codev/plans/${PROJECT_TITLE}.md"
+      },
+      "gate": "plan-approval",
+      "next": "implement"
+    },
+    {
+      "id": "implement",
+      "name": "Implement",
+      "description": "Write code + tests, run build/test checks, await code-review on the running worktree",
+      "type": "build_verify",
+      "build": {
+        "prompt": "implement.md",
+        "artifact": "src/**/*.{ts,tsx,js,jsx,py,go,rs}"
+      },
+      "verify": null,
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "build": {
+          "command": "npm run build",
+          "on_fail": "retry",
+          "max_retries": 2
+        },
+        "tests": {
+          "command": "npm test",
+          "on_fail": "retry",
+          "max_retries": 2
+        }
+      },
+      "gate": "code-review",
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Write retrospective (arch + lessons), push, open PR with review as body, run CMAP, merge on instruction",
+      "type": "build_verify",
+      "build": {
+        "prompt": "review.md",
+        "artifact": "codev/reviews/${PROJECT_TITLE}.md"
+      },
+      "verify": {
+        "type": "impl",
+        "models": ["gemini", "codex"],
+        "parallel": true
+      },
+      "max_iterations": 1,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
+      "checks": {
+        "pr_exists": {
+          "command": "gh pr list --state all --head \"$(git branch --show-current)\" --json number --jq 'length' | grep -q '^[1-9]'",
+          "description": "PR must be created before signaling completion"
+        },
+        "review_has_arch_updates": {
+          "command": "grep -q '## Architecture Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Architecture Updates' section (what changed in arch.md, or why no changes needed)"
+        },
+        "review_has_lessons_updates": {
+          "command": "grep -q '## Lessons Learned Updates' codev/reviews/${PROJECT_TITLE}.md",
+          "description": "Review must include '## Lessons Learned Updates' section (what changed in lessons-learned.md, or why no changes needed)"
+        }
+      },
+      "next": null
+    }
+  ],
+  "signals": {
+    "PHASE_COMPLETE": {
+      "description": "Signal current build phase is complete",
+      "transitions_to": "next_phase"
+    },
+    "BLOCKED": {
+      "description": "Signal implementation is blocked",
+      "requires": "reason"
+    }
+  },
+  "defaults": {
+    "mode": "strict",
+    "max_iterations": 1,
+    "consultation": {
+      "enabled": true,
+      "parallel": true
+    }
+  }
+}
