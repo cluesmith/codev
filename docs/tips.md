@@ -153,8 +153,8 @@ afx workspace start   # Fresh start
 If things are really stuck, restart Tower:
 
 ```bash
-afx workspace stop    # Stop Tower and all shellper sessions
-afx workspace start   # Fresh start
+afx tower stop    # Stop Tower and all shellper sessions
+afx tower start   # Fresh start
 ```
 
 ### Port Conflicts
