@@ -9,18 +9,11 @@ const execFileAsync = promisify(execFile);
 /**
  * Codev: Approve Gate — show blocked builders, pick one, approve via porch CLI.
  *
- * After a successful `porch approve`, two follow-ups fire:
- *
- *   1. **Wake-up nudge** — `afx send <builder-id> "Gate approved..."` typed
- *      into the builder's PTY. The builder is alive in interactive mode and
- *      reads this as its next user input; on its next turn it calls
- *      `porch next`, sees the gate is approved, and advances. Without this
- *      nudge the builder would sit idle until the user typed something into
- *      the pane themselves.
- *
- *   2. **Cache refresh** — `OverviewCache.refresh()` invalidates the Needs
- *      Attention tree immediately rather than waiting for the next SSE-driven
- *      tick. Eliminates the brief "still blocked" flash after approving.
+ * After `porch approve` succeeds, refresh the OverviewCache so the Needs
+ * Attention tree drops the just-approved builder immediately rather than
+ * waiting for the next SSE-driven tick. (The builder wake-up itself is
+ * fired by porch's notifyTerminal — see packages/codev/src/commands/porch/
+ * notify.ts.)
  */
 export async function approveGate(
   connectionManager: ConnectionManager,
@@ -65,22 +58,6 @@ export async function approveGate(
   }
 
   vscode.window.showInformationMessage(`Codev: Approved ${picked.gate} for #${picked.id}`);
-
-  // Note: porch approve itself fires a notifyTerminal wake-up to the builder;
-  // no need to duplicate that here.
-
-  // Notify the architect. Porch fires notifyTerminal(architect) when a gate
-  // becomes pending, but not when it transitions to approved — so without this
-  // breadcrumb, the architect's view of the protocol state goes stale.
-  // This `afx send architect` line keeps the architect's conversation
-  // history in sync with what the user did via VSCode.
-  execFileAsync('afx', [
-    'send',
-    'architect',
-    `User approved ${picked.gate} for ${picked.id} via VSCode.`,
-  ]).catch(() => {
-    // Best-effort — architect may not be running in some workflows.
-  });
 
   // Refresh the cache so Needs Attention updates without waiting for SSE.
   cache?.refresh();

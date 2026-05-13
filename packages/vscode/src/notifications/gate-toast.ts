@@ -77,9 +77,9 @@ function showGateToast(
   const titleSuffix = issueTitle ? ` — ${truncate(issueTitle, 50)}` : '';
   const message = `Codev: ${label} blocked on ${gateName}${titleSuffix}`;
 
-  // Fire and forget. "Review" opens the architect terminal — porch already
-  // notified the architect terminal about this gate, so the architect pane
-  // has the context. User talks to the architect from there.
+  // Fire and forget. "Review" opens the architect terminal so the user can
+  // talk about the gate from there if they want; the architect itself is
+  // not pre-notified about gate state.
   vscode.window
     .showInformationMessage(message, 'Review')
     .then((selection) => {

@@ -1,9 +1,18 @@
 /**
- * Porch terminal notifications — sends `afx send <target>` to deliver messages
- * into a target terminal (architect or builder) as PTY input.
+ * Porch terminal notifications — sends `afx send <target>` to deliver
+ * messages into a target terminal as PTY input.
  *
- * Used by porch's state machine to notify the architect when a gate becomes
- * pending (Spec 0108) and to wake the builder when a gate is approved.
+ * Currently used only to wake the builder after a gate is approved. The
+ * builder's interactive Claude session sits idle at the gate until it
+ * receives an input event; without this wake-up it would not call
+ * `porch next` and advance.
+ *
+ * Architect-bound gate notifications were removed deliberately: PIR/SPIR
+ * gates are explicit human-decision points (review the plan / review the
+ * worktree), surfaced via the VSCode sidebar tree and toast. The
+ * architect cannot act on a gate autonomously (approval requires a human
+ * `--a-human-explicitly-approved-this` flag), so pushing gate state into
+ * its conversation history only adds noise.
  */
 
 import { execFile } from 'node:child_process';
@@ -16,31 +25,12 @@ function resolveAfxBinary(): string {
 }
 
 export interface NotifyTerminalOptions {
-  /** Target terminal: 'architect' or a builder ID (e.g., 'pir-1298'). */
+  /** Target terminal — currently always a builder ID (e.g., 'pir-1298'). */
   target: string;
   /** Message text to deliver. */
   message: string;
   /** Working directory — used by afx to resolve the workspace. */
   worktreeDir: string;
-  /**
-   * When true, deliver the message as a draft (typed into the input buffer
-   * but Enter is NOT pressed). The receiver sees the text but won't act on
-   * it until they manually submit. Used for the architect convention.
-   *
-   * When false / omitted, the message is submitted immediately so the
-   * receiver Claude session processes it on its next turn. Used for builder
-   * wake-ups after gate approval.
-   */
-  draft?: boolean;
-}
-
-/** Architect-bound notification when a gate becomes pending. */
-export function gatePendingMessage(projectId: string, gateName: string): string {
-  return [
-    `GATE: ${gateName} (Builder ${projectId})`,
-    `Builder ${projectId} is waiting for approval.`,
-    `Run: porch approve ${projectId} ${gateName}`,
-  ].join('\n');
 }
 
 /** Builder-bound wake-up after a gate is approved. */
@@ -49,19 +39,16 @@ export function gateApprovedMessage(gateName: string): string {
 }
 
 /**
- * Fire-and-forget notification to a terminal (architect or builder).
+ * Fire-and-forget notification to a terminal.
  * Uses `afx send <target>` via execFile (no shell, no injection risk).
  * Errors are logged but never thrown — notification is best-effort.
  */
 export function notifyTerminal(opts: NotifyTerminalOptions): void {
-  const args = ['send', opts.target, opts.message, '--raw'];
-  if (opts.draft) args.push('--no-enter');
-
   const afBinary = resolveAfxBinary();
 
   execFile(
     process.execPath,
-    [afBinary, ...args],
+    [afBinary, 'send', opts.target, opts.message, '--raw'],
     { cwd: opts.worktreeDir, timeout: 10_000 },
     (error) => {
       if (error) {

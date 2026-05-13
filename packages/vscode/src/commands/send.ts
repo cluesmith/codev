@@ -1,17 +1,8 @@
 import * as vscode from 'vscode';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { ConnectionManager } from '../connection-manager.js';
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Codev: Send Message — pick builder, type message, send via TowerClient.
- *
- * After successful send, fires a breadcrumb to the architect so its view of
- * the protocol state stays in sync. Porch orchestrates through the architect;
- * a builder's behavior changing in response to user feedback is a fact the
- * architect should know about without having to poll porch state.
  */
 export async function sendMessage(connectionManager: ConnectionManager): Promise<void> {
   const client = connectionManager.getClient();
@@ -47,15 +38,4 @@ export async function sendMessage(connectionManager: ConnectionManager): Promise
   }
 
   vscode.window.showInformationMessage(`Codev: Message sent to ${picked.label}`);
-
-  // Architect breadcrumb. Short preview (first 80 chars) — full text lives
-  // in the builder's pane; architect only needs the gist + target builder.
-  const preview = message.length > 80 ? `${message.slice(0, 77)}...` : message;
-  execFileAsync('afx', [
-    'send',
-    'architect',
-    `User sent feedback to ${picked.id} via VSCode: "${preview}"`,
-  ]).catch(() => {
-    // Best-effort.
-  });
 }
