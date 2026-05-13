@@ -48,6 +48,7 @@ import {
   type CheckEnv,
 } from './checks.js';
 import { loadCheckOverrides } from './config.js';
+import { notifyTerminal, gatePendingMessage, gateApprovedMessage } from './notify.js';
 import { loadConfig } from '../../lib/config.js';
 import { version } from '../../version.js';
 
@@ -483,6 +484,12 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     if (!state.gates[gate].requested_at) {
       state.gates[gate].requested_at = new Date().toISOString();
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gate} gate-requested`);
+      notifyTerminal({
+        target: 'architect',
+        message: gatePendingMessage(state.id, gate),
+        worktreeDir: workspaceRoot,
+        draft: true,
+      });
     }
     console.log('');
     console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
@@ -603,6 +610,12 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   if (!state.gates[gateName].requested_at) {
     state.gates[gateName].requested_at = new Date().toISOString();
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
+    notifyTerminal({
+      target: 'architect',
+      message: gatePendingMessage(state.id, gateName),
+      worktreeDir: workspaceRoot,
+      draft: true,
+    });
   }
 
   console.log('');
@@ -673,6 +686,12 @@ export async function approve(
       // Gate belongs to the current phase — initialize it
       state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-created (upgrade)`);
+      notifyTerminal({
+        target: 'architect',
+        message: gatePendingMessage(state.id, gateName),
+        worktreeDir: workspaceRoot,
+        draft: true,
+      });
     } else {
       const knownGates = Object.keys(state.gates).join(', ');
       throw new Error(`Unknown gate: ${gateName}\nKnown gates: ${knownGates || 'none'}`);
@@ -728,6 +747,17 @@ export async function approve(
   state.gates[gateName].status = 'approved';
   state.gates[gateName].approved_at = new Date().toISOString();
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-approved`);
+
+  // Wake the builder. The builder's interactive Claude session sits idle at
+  // the gate; without an input event nothing prompts it to call porch next
+  // and advance. Symmetric counterpart to the architect notification that
+  // fires when a gate becomes pending. Submitted immediately (draft:false)
+  // so Claude's next turn processes it.
+  notifyTerminal({
+    target: state.id,
+    message: gateApprovedMessage(gateName),
+    worktreeDir: workspaceRoot,
+  });
 
   console.log('');
   console.log(chalk.green(`Gate ${gateName} approved.`));

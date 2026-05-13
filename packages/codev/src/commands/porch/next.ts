@@ -34,6 +34,7 @@ import {
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides } from './config.js';
+import { notifyTerminal, gatePendingMessage } from './notify.js';
 import { loadConfig } from '../../lib/config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
 
@@ -710,6 +711,12 @@ async function handleVerifyApproved(
     state.iteration = 1;
     state.history = [];
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-requested`);
+    notifyTerminal({
+      target: 'architect',
+      message: gatePendingMessage(state.id, gateName),
+      worktreeDir: workspaceRoot,
+      draft: true,
+    });
 
     return {
       status: 'gate_pending',
