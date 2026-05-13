@@ -91,6 +91,6 @@ export async function approveGate(
 
   vscode.window.showInformationMessage(`Codev: Approved ${gate} for ${id}`);
 
-  // Refresh the cache so Needs Attention updates without waiting for SSE.
+  // Refresh the cache so the Builders tree updates without waiting for SSE.
   cache?.refresh();
 }

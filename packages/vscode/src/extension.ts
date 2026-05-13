@@ -19,7 +19,6 @@ import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
-import { NeedsAttentionProvider } from './views/needs-attention.js';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
@@ -109,7 +108,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
-		vscode.window.registerTreeDataProvider('codev.needsAttention', new NeedsAttentionProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.builders', new BuildersProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.pullRequests', new PullRequestsProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.backlog', new BacklogProvider(overviewCache)),
@@ -235,7 +233,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	activateReviewDecorations(context);
 
 	// Toast on new gate-pending — surfaces blocked builders without forcing the
-	// user to watch the Needs Attention tree. Respects `codev.gateToasts.enabled`.
+	// user to watch the Builders tree. Respects `codev.gateToasts.enabled`.
 	activateGateToasts(context, overviewCache);
 
 	// Auto-open builder terminals on Tower spawn events

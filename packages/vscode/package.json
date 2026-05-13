@@ -148,56 +148,51 @@
       "view/item/context": [
         {
           "command": "codev.openBuilderById",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "1_terminal@1"
         },
         {
           "command": "codev.openWorktreeFolder",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "2_files@1"
         },
         {
           "command": "codev.reviewDiff",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "3_review@1"
         },
         {
           "command": "codev.runWorktreeSetup",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@1"
         },
         {
           "command": "codev.runWorktreeDev",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@2"
         },
         {
           "command": "codev.stopWorktreeDev",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@3"
         },
         {
           "command": "codev.approveGate",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^blocked-builder-/",
+          "when": "view == codev.builders && viewItem =~ /^blocked-builder-/",
           "group": "inline@1"
         },
         {
           "command": "codev.approveGate",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^blocked-builder-/",
+          "when": "view == codev.builders && viewItem =~ /^blocked-builder-/",
           "group": "0_gate@1"
         },
         {
           "command": "codev.viewPlanFile",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-pir$/",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-pir$/",
           "group": "3_review@2"
         }
       ],
       "view/title": [
-        {
-          "command": "codev.refreshOverview",
-          "when": "view == codev.needsAttention",
-          "group": "navigation"
-        },
         {
           "command": "codev.refreshOverview",
           "when": "view == codev.builders",
@@ -255,7 +250,6 @@
     "views": {
       "codev": [
         { "id": "codev.workspace", "name": "Workspace" },
-        { "id": "codev.needsAttention", "name": "Needs Attention" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },
         { "id": "codev.backlog", "name": "Backlog" },

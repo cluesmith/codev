@@ -14,9 +14,9 @@ const execFileAsync = promisify(execFile);
  *
  *   1. Show success / error toast based on the actual exit status (the old
  *      fire-and-forget spawn silently swallowed errors).
- *   2. Refresh OverviewCache so the Needs Attention and Builders trees
- *      drop the removed entry without waiting for the next SSE tick.
- *      This fixes the user-visible bug where a cleaned-up builder lingered.
+ *   2. Refresh OverviewCache so the Builders tree drops the removed
+ *      entry without waiting for the next SSE tick. This fixes the
+ *      user-visible bug where a cleaned-up builder lingered.
  */
 export async function cleanupBuilder(
   connectionManager: ConnectionManager,

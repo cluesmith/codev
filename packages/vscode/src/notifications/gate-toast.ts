@@ -20,8 +20,8 @@ import type { OverviewCache } from '../views/overview-data.js';
  * advances) so that re-blocking later (on a different gate) will re-toast.
  *
  * Respects the `codev.gateToasts.enabled` setting (default: true). Set to
- * false to silence; status bar counters and the Needs Attention tree
- * remain unaffected.
+ * false to silence; status bar counters and the Builders tree remain
+ * unaffected.
  */
 export function activateGateToasts(
   context: vscode.ExtensionContext,
@@ -77,14 +77,16 @@ function showGateToast(
   const titleSuffix = issueTitle ? ` — ${truncate(issueTitle, 50)}` : '';
   const message = `Codev: ${label} blocked on ${gateName}${titleSuffix}`;
 
-  // Fire and forget. "Review" opens the architect terminal so the user can
-  // talk about the gate from there if they want; the architect itself is
-  // not pre-notified about gate state.
+  // Fire and forget. "Review" opens the builder's own pane — the gate-
+  // reached message and the builder's interactive Claude live there. From
+  // that pane the user can read the plan/diff, type feedback, edit files
+  // in VSCode, or approve via Cmd+K G (or the inline Approve button on
+  // the sidebar row).
   vscode.window
     .showInformationMessage(message, 'Review')
     .then((selection) => {
       if (selection === 'Review') {
-        vscode.commands.executeCommand('codev.openArchitectTerminal');
+        vscode.commands.executeCommand('codev.openBuilderById', builderId);
       }
     });
 }
