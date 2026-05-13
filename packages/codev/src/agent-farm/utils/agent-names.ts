@@ -43,6 +43,9 @@ export function buildAgentName(type: BuilderType, id: string, protocol?: string)
     case 'bugfix':
       protocolSegment = 'bugfix';
       break;
+    case 'pir':
+      protocolSegment = 'pir';
+      break;
     case 'task':
       protocolSegment = 'task';
       break;

@@ -42,6 +42,11 @@ describe('buildAgentName', () => {
     expect(buildAgentName('bugfix', '269')).toBe('builder-bugfix-269');
   });
 
+  it('generates pir builder names', () => {
+    expect(buildAgentName('pir', '737')).toBe('builder-pir-737');
+    expect(buildAgentName('pir', '0042')).toBe('builder-pir-42');
+  });
+
   it('generates task builder names', () => {
     expect(buildAgentName('task', 'AbCd')).toBe('builder-task-abcd');
     expect(buildAgentName('task', 'XyZ1')).toBe('builder-task-xyz1');
