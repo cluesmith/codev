@@ -40,6 +40,42 @@ export interface ArtifactResolver {
 // =============================================================================
 
 /**
+ * Match a file basename (or directory name) against a porch project ID.
+ *
+ * Supports two project-ID formats used in this codebase:
+ *
+ * 1. **Numeric** (SPIR, ASPIR, AIR): e.g. `"0073"`. Matches filenames whose
+ *    leading digits, zero-stripped, equal the project ID (also zero-stripped).
+ *    Example: `"0073"` matches `"0073-feature.md"` and `"73-feature.md"`.
+ *
+ * 2. **Prefix-N** (BUGFIX, PIR, any issue-driven protocol): e.g. `"pir-1099"`
+ *    or `"bugfix-237"`. Matches filenames that equal `<prefix>-<N>` or start
+ *    with `<prefix>-<N>-`. Example: `"pir-1099"` matches
+ *    `"pir-1099-fix-avatar.md"` but NOT `"pir-1099fix.md"`.
+ *
+ * Without this distinction, the previous regex `name.match(/^(\d+)/)` silently
+ * failed to find any file for prefix-N IDs, breaking `plan_exists` and other
+ * artifact-resolution checks for BUGFIX and PIR projects. PIR exposed the bug
+ * because it was the first issue-driven protocol with `plan_exists` configured.
+ */
+export function matchesProjectId(name: string, projectId: string): boolean {
+  const base = name.replace(/\.md$/, '');
+
+  // Prefix-N format: `<letters>-<digits>` (one or more hyphen-separated letter
+  // segments followed by a numeric segment). Catches "pir-1099", "bugfix-237",
+  // and hypothetical future "issue-driven-237".
+  if (/^[a-z]+(?:-[a-z]+)*-\d+$/i.test(projectId)) {
+    return base === projectId || base.startsWith(`${projectId}-`);
+  }
+
+  // Numeric format: zero-stripped equality on leading digits.
+  const normalizedId = projectId.replace(/^0+/, '') || '0';
+  const numMatch = base.match(/^(\d+)/);
+  if (!numMatch) return false;
+  return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+}
+
+/**
  * Check if artifact content has pre-approval frontmatter.
  * Looks for YAML frontmatter with `approved:` and `validated:` fields.
  * Used by both LocalResolver and CliResolver for consistency.
@@ -66,15 +102,9 @@ export class LocalResolver implements ArtifactResolver {
     const specsDir = path.join(this.workspaceRoot, 'codev', 'specs');
     if (!fs.existsSync(specsDir)) return null;
 
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
     try {
       const files = fs.readdirSync(specsDir);
-      const specFile = files.find(f => {
-        if (!f.endsWith('.md')) return false;
-        const numMatch = f.match(/^(\d+)/);
-        if (!numMatch) return false;
-        return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-      });
+      const specFile = files.find(f => f.endsWith('.md') && matchesProjectId(f, projectId));
       return specFile ? specFile.replace(/\.md$/, '') : null;
     } catch {
       return null;
@@ -92,18 +122,13 @@ export class LocalResolver implements ArtifactResolver {
     }
   }
 
-  getPlanContent(projectId: string, title: string): string | null {
+  getPlanContent(projectId: string, _title: string): string | null {
     // Try new location first: codev/projects/<id>-<name>/plan.md
     const projectsDir = path.join(this.workspaceRoot, 'codev', 'projects');
     if (fs.existsSync(projectsDir)) {
-      const normalizedId = projectId.replace(/^0+/, '') || '0';
       try {
         const dirs = fs.readdirSync(projectsDir);
-        const projDir = dirs.find(d => {
-          const numMatch = d.match(/^(\d+)/);
-          if (!numMatch) return false;
-          return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-        });
+        const projDir = dirs.find(d => matchesProjectId(d, projectId));
         if (projDir) {
           const planPath = path.join(projectsDir, projDir, 'plan.md');
           if (fs.existsSync(planPath)) {
@@ -117,15 +142,9 @@ export class LocalResolver implements ArtifactResolver {
     const plansDir = path.join(this.workspaceRoot, 'codev', 'plans');
     if (!fs.existsSync(plansDir)) return null;
 
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
     try {
       const files = fs.readdirSync(plansDir);
-      const planFile = files.find(f => {
-        if (!f.endsWith('.md')) return false;
-        const numMatch = f.match(/^(\d+)/);
-        if (!numMatch) return false;
-        return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-      });
+      const planFile = files.find(f => f.endsWith('.md') && matchesProjectId(f, projectId));
       if (planFile) {
         return fs.readFileSync(path.join(plansDir, planFile), 'utf-8');
       }
@@ -138,15 +157,9 @@ export class LocalResolver implements ArtifactResolver {
     const reviewsDir = path.join(this.workspaceRoot, 'codev', 'reviews');
     if (!fs.existsSync(reviewsDir)) return null;
 
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
     try {
       const files = fs.readdirSync(reviewsDir);
-      const reviewFile = files.find(f => {
-        if (!f.endsWith('.md')) return false;
-        const numMatch = f.match(/^(\d+)/);
-        if (!numMatch) return false;
-        return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-      });
+      const reviewFile = files.find(f => f.endsWith('.md') && matchesProjectId(f, projectId));
       if (reviewFile) {
         return fs.readFileSync(path.join(reviewsDir, reviewFile), 'utf-8');
       }
@@ -206,12 +219,7 @@ export class CliResolver implements ArtifactResolver {
     const children = this.listChildren('specs');
     if (!children) return null;
 
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
-    const match = children.find(name => {
-      const numMatch = name.match(/^(\d+)/);
-      if (!numMatch) return false;
-      return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-    });
+    const match = children.find(name => matchesProjectId(name, projectId));
     return match || null;
   }
 
@@ -234,12 +242,14 @@ export class CliResolver implements ArtifactResolver {
   }
 
   hasPreApproval(artifactGlob: string): boolean {
-    // Determine artifact type from glob path (e.g., "codev/specs/0559-*.md" or "codev/plans/0559-*.md")
+    // Determine artifact type from glob path (e.g., "codev/specs/0559-*.md" or "codev/plans/pir-1099-*.md")
     const typeMatch = artifactGlob.match(/\b(specs|plans|reviews)\b/);
-    const idMatch = artifactGlob.match(/(?:specs|plans|reviews)\/0*(\d+)/);
-    if (!idMatch) return false;
+    // Extract project ID — supports both numeric ("0073") and prefix-N ("pir-1099", "bugfix-237") formats.
+    const prefixedMatch = artifactGlob.match(/(?:specs|plans|reviews)\/([a-z]+(?:-[a-z]+)*-\d+)/i);
+    const numericMatch = artifactGlob.match(/(?:specs|plans|reviews)\/0*(\d+)/);
+    const projectId = prefixedMatch?.[1] ?? numericMatch?.[1];
+    if (!projectId) return false;
 
-    const projectId = idMatch[1];
     let content: string | null = null;
     const artifactType = typeMatch?.[1] || 'specs';
 
@@ -262,27 +272,13 @@ export class CliResolver implements ArtifactResolver {
   private findPlanBaseName(projectId: string): string | null {
     const children = this.listChildren('plans');
     if (!children) return null;
-
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
-    const match = children.find(name => {
-      const numMatch = name.match(/^(\d+)/);
-      if (!numMatch) return false;
-      return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-    });
-    return match || null;
+    return children.find(name => matchesProjectId(name, projectId)) || null;
   }
 
   private findReviewBaseName(projectId: string): string | null {
     const children = this.listChildren('reviews');
     if (!children) return null;
-
-    const normalizedId = projectId.replace(/^0+/, '') || '0';
-    const match = children.find(name => {
-      const numMatch = name.match(/^(\d+)/);
-      if (!numMatch) return false;
-      return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
-    });
-    return match || null;
+    return children.find(name => matchesProjectId(name, projectId)) || null;
   }
 
   private listChildren(subPath: string): string[] | null {
