@@ -1,11 +1,31 @@
 import * as vscode from 'vscode';
-import { spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ConnectionManager } from '../connection-manager.js';
+import type { OverviewCache } from '../views/overview-data.js';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Codev: Approve Gate — show blocked builders, pick one, approve via porch CLI.
+ *
+ * After a successful `porch approve`, two follow-ups fire:
+ *
+ *   1. **Wake-up nudge** — `afx send <builder-id> "Gate approved..."` typed
+ *      into the builder's PTY. The builder is alive in interactive mode and
+ *      reads this as its next user input; on its next turn it calls
+ *      `porch next`, sees the gate is approved, and advances. Without this
+ *      nudge the builder would sit idle until the user typed something into
+ *      the pane themselves.
+ *
+ *   2. **Cache refresh** — `OverviewCache.refresh()` invalidates the Needs
+ *      Attention tree immediately rather than waiting for the next SSE-driven
+ *      tick. Eliminates the brief "still blocked" flash after approving.
  */
-export async function approveGate(connectionManager: ConnectionManager): Promise<void> {
+export async function approveGate(
+  connectionManager: ConnectionManager,
+  cache?: OverviewCache,
+): Promise<void> {
   const client = connectionManager.getClient();
   const workspacePath = connectionManager.getWorkspacePath();
   if (!client || !workspacePath || connectionManager.getState() !== 'connected') {
@@ -31,10 +51,37 @@ export async function approveGate(connectionManager: ConnectionManager): Promise
   );
   if (!picked) { return; }
 
-  const child = spawn('porch', ['approve', picked.id, picked.gate, '--a-human-explicitly-approved-this'], {
-    detached: true,
-    stdio: 'ignore',
+  try {
+    await execFileAsync('porch', [
+      'approve',
+      picked.id,
+      picked.gate,
+      '--a-human-explicitly-approved-this',
+    ]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`Codev: porch approve failed — ${msg}`);
+    return;
+  }
+
+  vscode.window.showInformationMessage(`Codev: Approved ${picked.gate} for #${picked.id}`);
+
+  // Note: porch approve itself fires a notifyTerminal wake-up to the builder;
+  // no need to duplicate that here.
+
+  // Notify the architect. Porch fires notifyTerminal(architect) when a gate
+  // becomes pending, but not when it transitions to approved — so without this
+  // breadcrumb, the architect's view of the protocol state goes stale.
+  // This `afx send architect` line keeps the architect's conversation
+  // history in sync with what the user did via VSCode.
+  execFileAsync('afx', [
+    'send',
+    'architect',
+    `User approved ${picked.gate} for ${picked.id} via VSCode.`,
+  ]).catch(() => {
+    // Best-effort — architect may not be running in some workflows.
   });
-  child.unref();
-  vscode.window.showInformationMessage(`Codev: Approving ${picked.gate} for #${picked.id}`);
+
+  // Refresh the cache so Needs Attention updates without waiting for SSE.
+  cache?.refresh();
 }

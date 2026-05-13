@@ -207,8 +207,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
-		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!)),
-		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!)),
+		vscode.commands.registerCommand('codev.approveGate', () => approveGate(connectionManager!, overviewCache)),
+		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!, overviewCache)),
 		vscode.commands.registerCommand('codev.reviewDiff', (arg: vscode.TreeItem | string | undefined) =>
 			reviewDiff(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
