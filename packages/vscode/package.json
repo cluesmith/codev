@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -22,7 +22,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.105.0"
   },
   "categories": [
     "AI",
@@ -320,7 +320,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.110.0",
+    "@types/vscode": "~1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/ws": "^8.18.1",
