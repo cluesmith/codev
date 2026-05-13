@@ -72,7 +72,8 @@
       },
       {
         "command": "codev.approveGate",
-        "title": "Codev: Approve Gate"
+        "title": "Codev: Approve Gate",
+        "icon": "$(check)"
       },
       {
         "command": "codev.cleanupBuilder",
@@ -131,10 +132,6 @@
       {
         "command": "codev.viewPlanFile",
         "title": "Codev: View Plan File"
-      },
-      {
-        "command": "codev.viewReviewFile",
-        "title": "Codev: View Review File"
       }
     ],
     "menus": {
@@ -180,14 +177,19 @@
           "group": "4_worktree@3"
         },
         {
+          "command": "codev.approveGate",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^blocked-builder-/",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.approveGate",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^blocked-builder-/",
+          "group": "0_gate@1"
+        },
+        {
           "command": "codev.viewPlanFile",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-pir$/",
           "group": "3_review@2"
-        },
-        {
-          "command": "codev.viewReviewFile",
-          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-pir$/",
-          "group": "3_review@3"
         }
       ],
       "view/title": [

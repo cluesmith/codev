@@ -1,15 +1,18 @@
 /**
- * Codev: View Plan File / View Review File — open the markdown artifact a
- * gated builder is waiting on (or has just written) directly in a VSCode
- * editor tab.
+ * Codev: View Plan File — open the plan markdown a gated PIR builder is
+ * waiting on directly in a VSCode editor tab.
  *
- * Right-click a builder row → "View Plan File" or "View Review File".
+ * Right-click a builder row → "View Plan File".
  *
- * Strategy: locate `<worktree>/codev/plans/` or `<worktree>/codev/reviews/`,
- * list the `.md` files inside, and:
+ * Strategy: locate `<worktree>/codev/plans/`, filter to files prefixed
+ * with the builder ID, and:
  *   - 0 files  → friendly message ("no file yet — the builder hasn't written one")
  *   - 1 file   → open it
  *   - 2+ files → quick-pick (newer files float to the top)
+ *
+ * View Review File was intentionally not added: the review file is the
+ * PR body in PIR's review phase, so reviewers read it on GitHub when
+ * it matters.
  */
 
 import * as vscode from 'vscode';
@@ -17,19 +20,14 @@ import { resolve } from 'node:path';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { ConnectionManager } from '../connection-manager.js';
 
-type ArtifactKind = 'plan' | 'review';
+type ArtifactKind = 'plan';
 
 const ARTIFACT_SUBDIR: Record<ArtifactKind, string> = {
   plan: 'codev/plans',
-  review: 'codev/reviews',
 };
 
 export function viewPlanFile(connectionManager: ConnectionManager, builderIdArg: string | undefined) {
   return viewArtifact(connectionManager, builderIdArg, 'plan');
-}
-
-export function viewReviewFile(connectionManager: ConnectionManager, builderIdArg: string | undefined) {
-  return viewArtifact(connectionManager, builderIdArg, 'review');
 }
 
 async function viewArtifact(
