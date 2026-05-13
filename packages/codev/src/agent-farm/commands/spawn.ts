@@ -754,21 +754,20 @@ async function spawnIssueDrivenBuilder(
   await ensureDirectories(config);
   await checkDependencies();
 
+  // <prefix>-{N} is the porch project ID, distinct from the builder agent
+  // name (builder-<prefix>-{N}). Used as the project key in
+  // codev/projects/<id>/status.yaml and what `porch next/done/approve`
+  // expect as their argument. Also matches detectProjectIdFromCwd's regex.
+  const porchProjectId = `${prefix}-${issueNumber}`;
+
   if (options.resume) {
     validateResumeWorktree(worktreePath);
   } else if (options.branch) {
     await createWorktreeFromBranch(config, branchName, worktreePath, { remote: options.remote });
-    // Pre-initialize porch for --branch mode too
-    const porchProjectId = `${prefix}-${issueNumber}`;
     const slug = slugify(issue.title);
     await initPorchInWorktree(worktreePath, protocol, porchProjectId, slug);
   } else {
     await createWorktree(config, branchName, worktreePath);
-
-    // Pre-initialize porch so the builder doesn't need to figure out project ID.
-    // Use <prefix>-{N} as the porch project ID (not the builder agent name).
-    // This aligns with porch's CWD-based detection from worktree paths.
-    const porchProjectId = `${prefix}-${issueNumber}`;
     const slug = slugify(issue.title);
     await initPorchInWorktree(worktreePath, protocol, porchProjectId, slug);
   }
@@ -776,7 +775,9 @@ async function spawnIssueDrivenBuilder(
   const templateContext: TemplateContext = {
     protocol_name: protocol.toUpperCase(), mode,
     mode_soft: mode === 'soft', mode_strict: mode === 'strict',
-    project_id: builderId,
+    // The porch project ID — what `porch next/done/approve` expects.
+    // NOT the builder agent name (which includes the `builder-` prefix).
+    project_id: porchProjectId,
     input_description: `work for GitHub Issue #${issueNumber}`,
     issue: { number: issueNumber, title: issue.title, body: issue.body || '(No description provided)' },
   };
