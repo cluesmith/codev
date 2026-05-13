@@ -730,15 +730,23 @@ export async function approve(
   state.gates[gateName].approved_at = new Date().toISOString();
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-approved`);
 
-  // Wake the builder. The builder's interactive Claude session sits idle at
-  // the gate; without an input event nothing prompts it to call porch next
-  // and advance. Submitted as a regular message so Claude's next turn
-  // processes it.
-  notifyTerminal({
-    target: state.id,
-    message: gateApprovedMessage(gateName),
-    worktreeDir: workspaceRoot,
-  });
+  // Wake the builder iff porch was invoked from OUTSIDE the builder's
+  // worktree. The wake-up wakes an *idle* builder; when the builder is
+  // the one running `porch approve` (the user typed feedback into the
+  // builder's pane and the builder ran the command itself), it's already
+  // active and the message would be echoed back as the builder's next
+  // input — Claude then "responds" to its own approval message.
+  //
+  // workspaceRoot is process.cwd() at CLI invocation. When called from
+  // inside the worktree it resolves to the same path as artifactRoot.
+  const calledFromBuilderWorktree = path.resolve(workspaceRoot) === path.resolve(artifactRoot);
+  if (!calledFromBuilderWorktree) {
+    notifyTerminal({
+      target: state.id,
+      message: gateApprovedMessage(gateName),
+      worktreeDir: workspaceRoot,
+    });
+  }
 
   console.log('');
   console.log(chalk.green(`Gate ${gateName} approved.`));
