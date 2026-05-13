@@ -1072,6 +1072,12 @@ export async function cli(args: string[]): Promise<void> {
     return id;
   }
 
+  // Commands that mutate state. After dispatching, we fire a Tower
+  // overview-refresh so subscribed clients (VSCode sidebar, dashboard)
+  // pick up the change immediately instead of waiting for an unrelated
+  // SSE event to incidentally cause a re-fetch.
+  const MUTATING_COMMANDS = new Set(['next', 'done', 'gate', 'approve', 'rollback', 'verify', 'init']);
+
   try {
     switch (command) {
       case 'pending':
@@ -1198,6 +1204,18 @@ export async function cli(args: string[]): Promise<void> {
         console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
         console.log('');
         process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
+    }
+
+    // After a successful mutating command, broadcast `overview-changed`
+    // via Tower so VSCode / dashboard refresh without a manual reload.
+    // Best-effort — silently no-ops if Tower isn't running.
+    if (command && MUTATING_COMMANDS.has(command)) {
+      try {
+        const { TowerClient } = await import('../../agent-farm/lib/tower-client.js');
+        await new TowerClient().refreshOverview();
+      } catch {
+        // Tower not running / unreachable — non-fatal.
+      }
     }
   } catch (err) {
     console.error(chalk.red(`Error: ${(err as Error).message}`));
