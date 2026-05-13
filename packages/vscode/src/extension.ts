@@ -11,6 +11,7 @@ import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
+import { viewPlanFile, viewReviewFile } from './commands/view-artifact.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -218,6 +219,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			openWorktreeFolder(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.runWorktreeSetup', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeSetup(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.viewPlanFile', (arg: vscode.TreeItem | string | undefined) =>
+			viewPlanFile(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.viewReviewFile', (arg: vscode.TreeItem | string | undefined) =>
+			viewReviewFile(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
 		vscode.commands.registerCommand('codev.reconnect', () => connectionManager?.reconnect()),
 		vscode.commands.registerCommand('codev.connectTunnel', () => connectTunnel(connectionManager!)),

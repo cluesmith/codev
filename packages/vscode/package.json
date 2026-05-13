@@ -127,6 +127,14 @@
       {
         "command": "codev.runWorktreeSetup",
         "title": "Codev: Run Worktree Setup"
+      },
+      {
+        "command": "codev.viewPlanFile",
+        "title": "Codev: View Plan File"
+      },
+      {
+        "command": "codev.viewReviewFile",
+        "title": "Codev: View Review File"
       }
     ],
     "menus": {
@@ -170,6 +178,16 @@
           "command": "codev.stopWorktreeDev",
           "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "4_worktree@3"
+        },
+        {
+          "command": "codev.viewPlanFile",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-pir$/",
+          "group": "3_review@2"
+        },
+        {
+          "command": "codev.viewReviewFile",
+          "when": "view =~ /^codev\\.(builders|needsAttention)$/ && viewItem =~ /^(builder|blocked-builder)-pir$/",
+          "group": "3_review@3"
         }
       ],
       "view/title": [
