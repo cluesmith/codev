@@ -1,18 +1,21 @@
 /**
- * Codev: View Diff — open `main...HEAD` for a builder's worktree as a
- * single multi-file diff editor (matches VSCode's built-in "Working Tree"
- * view in the Source Control panel).
+ * Codev: View Diff — open `<defaultBranch>...HEAD` for a builder's worktree
+ * as a single multi-file diff editor (matches VSCode's built-in "Working
+ * Tree" view in the Source Control panel).
  *
  * Right-click a builder row → "View Diff". Opens ONE tab with a file
  * list on the left and a diff that updates as the reviewer clicks each
  * file. Handles added / modified / deleted files uniformly via VSCode's
  * `vscode.changes` command.
  *
+ * Default branch is detected per-worktree via `git symbolic-ref
+ * refs/remotes/origin/HEAD`. Repos using `master`, `develop`, `trunk`,
+ * etc. work without configuration. Falls back to `main` if the symbolic
+ * ref isn't set.
+ *
  * Why this works across worktrees: each `.builders/<id>/` is a real git
  * worktree linked to the parent repo's `.git`, so all branches live in the
- * shared object database. `git -C <wt> rev-parse main` resolves the same
- * SHA as from the parent repo, and `git:?ref=main` reads from that object
- * database regardless of which repo VSCode attributes the file to.
+ * shared object database.
  */
 
 import * as vscode from 'vscode';
@@ -56,13 +59,31 @@ export async function reviewDiff(
     return;
   }
 
+  // Detect the repo's default branch from origin/HEAD. Resolves to a
+  // branch name (e.g. `main`, `master`, `develop`). Falls back to `main`
+  // if origin/HEAD isn't set locally.
+  let defaultBranch = 'main';
+  try {
+    const { stdout } = await execFileAsync('git', [
+      '-C', builder.worktreePath,
+      'symbolic-ref', '--short', 'refs/remotes/origin/HEAD',
+    ]);
+    // Strip the `origin/` prefix to get just the branch name.
+    const ref = stdout.trim().replace(/^origin\//, '');
+    if (ref) { defaultBranch = ref; }
+  } catch {
+    // origin/HEAD not set — keep the `main` default. The diff will still
+    // run; if `main` doesn't exist locally either, the next git call
+    // surfaces a clear error.
+  }
+
   // Enumerate changed files with status letters so we can handle
   // added (A) / deleted (D) files distinctly from modified (M).
   let changes: Array<{ status: string; path: string }>;
   try {
     const { stdout } = await execFileAsync('git', [
       '-C', builder.worktreePath,
-      'diff', '--name-status', 'main...HEAD',
+      'diff', '--name-status', `${defaultBranch}...HEAD`,
     ]);
     changes = stdout
       .split('\n')
@@ -96,24 +117,24 @@ export async function reviewDiff(
   const resources: Array<[vscode.Uri, vscode.Uri, vscode.Uri]> = changes.map(({ status, path: rel }) => {
     const abs = path.join(builder.worktreePath, rel);
     const resourceUri = vscode.Uri.file(abs);
-    const mainUri = toGitUri(abs, rel, 'main');
+    const baseUri = toGitUri(abs, rel, defaultBranch);
     const headUri = vscode.Uri.file(abs);
 
     if (status === 'A') {
-      // Added: no main version. Left = empty, right = file.
+      // Added: no base version. Left = empty, right = file.
       return [resourceUri, emptyGitUri(abs, rel), headUri];
     }
     if (status === 'D') {
-      // Deleted: no worktree version. Left = main, right = empty.
-      return [resourceUri, mainUri, emptyGitUri(abs, rel)];
+      // Deleted: no worktree version. Left = base, right = empty.
+      return [resourceUri, baseUri, emptyGitUri(abs, rel)];
     }
     // Modified / renamed / copied / unmerged → side-by-side diff
-    return [resourceUri, mainUri, headUri];
+    return [resourceUri, baseUri, headUri];
   });
 
   await vscode.commands.executeCommand(
     'vscode.changes',
-    `Reviewing ${builder.id} (main ↔ HEAD)`,
+    `Reviewing ${builder.id} (${defaultBranch} ↔ HEAD)`,
     resources,
   );
 }
