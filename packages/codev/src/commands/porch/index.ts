@@ -121,18 +121,65 @@ function logCheckOverrides(
 // ============================================================================
 
 /**
- * porch status <id>
+ * porch status <id> [--json]
  * Shows current state and prescriptive next steps.
+ *
+ * `--json`: emits a single-line JSON object with the project's current state
+ * and gate status, suppressing all human-readable output. Consumed by the
+ * VSCode Needs Attention view (Issue 691) and any other tooling that needs
+ * structured access to gate state.
+ *
+ * JSON shape:
+ *   {
+ *     "id": string,
+ *     "title": string,
+ *     "protocol": string,
+ *     "phase": string,
+ *     "iteration": number,
+ *     "build_complete": boolean,
+ *     "gate": string | null,
+ *     "gate_status": "pending" | "approved" | null,
+ *     "gate_requested_at": string | null,   // ISO timestamp
+ *     "gate_approved_at": string | null     // ISO timestamp
+ *   }
  */
-export async function status(workspaceRoot: string, projectId: string, resolver?: ArtifactResolver): Promise<void> {
+export async function status(
+  workspaceRoot: string,
+  projectId: string,
+  resolver?: ArtifactResolver,
+  options?: { json?: boolean },
+): Promise<void> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
+    if (options?.json) {
+      console.error(`Project ${projectId} not found.`);
+      process.exit(1);
+    }
     throw new Error(`Project ${projectId} not found.\nRun 'porch init' to create a new project.`);
   }
 
   const state = readState(statusPath);
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const phaseConfig = getPhaseConfig(protocol, state.phase);
+
+  if (options?.json) {
+    const gateName = getPhaseGate(protocol, state.phase);
+    const gateStatus = gateName ? state.gates[gateName] : undefined;
+    const out = {
+      id: state.id,
+      title: state.title,
+      protocol: state.protocol,
+      phase: state.phase,
+      iteration: state.iteration,
+      build_complete: state.build_complete,
+      gate: gateName ?? null,
+      gate_status: gateStatus?.status ?? null,
+      gate_requested_at: gateStatus?.requested_at ?? null,
+      gate_approved_at: gateStatus?.approved_at ?? null,
+    };
+    process.stdout.write(JSON.stringify(out) + '\n');
+    return;
+  }
 
   // Header
   console.log('');
@@ -1025,9 +1072,12 @@ export async function cli(args: string[]): Promise<void> {
         process.exit(1);
         break;
 
-      case 'status':
-        await status(workspaceRoot, getProjectId(rest[0]), resolver);
+      case 'status': {
+        const json = rest.includes('--json');
+        const positional = rest.find(a => !a.startsWith('--'));
+        await status(workspaceRoot, getProjectId(positional), resolver, { json });
         break;
+      }
 
       case 'check':
         await check(workspaceRoot, getProjectId(rest[0]), resolver);
