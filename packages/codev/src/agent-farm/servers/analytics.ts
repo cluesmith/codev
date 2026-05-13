@@ -253,6 +253,7 @@ function computeConsultationMetrics(days: number | undefined, workspacePath: str
  */
 const BRANCH_PROTOCOL_PATTERNS: Array<{ pattern: RegExp; protocol: string }> = [
   { pattern: /^builder\/bugfix-/,  protocol: 'bugfix' },
+  { pattern: /^builder\/pir-/,     protocol: 'pir' },
   { pattern: /^builder\/spir-/,    protocol: 'spir' },
   { pattern: /^spir\//,            protocol: 'spir' },
   { pattern: /^builder\/aspir-/,   protocol: 'aspir' },

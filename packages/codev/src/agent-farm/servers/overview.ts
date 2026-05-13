@@ -433,6 +433,10 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   const bugfixMatch = lower.match(/^bugfix-(\d+)/);
   if (bugfixMatch) return `builder-bugfix-${Number(bugfixMatch[1])}`;
 
+  // PIR: pir-1298-slug → builder-pir-1298
+  const pirMatch = lower.match(/^pir-(\d+)/);
+  if (pirMatch) return `builder-pir-${Number(pirMatch[1])}`;
+
   // Task: task-NAvW → builder-task-navw
   const taskMatch = lower.match(/^task-([a-z0-9]+)/);
   if (taskMatch) return `builder-task-${taskMatch[1]}`;
@@ -478,6 +482,10 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
   // Bugfix: bugfix-382-slug → "bugfix-382" (porch uses this, not "builder-bugfix-382")
   const bugfixMatch = dirName.match(/^bugfix-(\d+)/);
   if (bugfixMatch) return `bugfix-${bugfixMatch[1]}`;
+
+  // PIR: pir-1298-slug → "pir-1298" (porch uses this, mirroring bugfix's convention)
+  const pirMatch = dirName.match(/^pir-(\d+)/);
+  if (pirMatch) return `pir-${pirMatch[1]}`;
 
   // Legacy numeric: 0110 or 0110-slug → "0110"
   const numericMatch = dirName.match(/^(\d+)(?:-|$)/);
