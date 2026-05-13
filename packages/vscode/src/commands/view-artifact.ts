@@ -71,11 +71,11 @@ async function viewArtifact(
     return;
   }
 
-  // Filter to files belonging to THIS builder. Plan/review files written by
-  // PIR builders are named `<builder-id>-<slug>.md` (e.g. `pir-1298-fix-foo.md`),
-  // so the builder ID prefix is the natural filter. Other builders' files for
-  // the same protocol live in the same dir and would otherwise show up in the
-  // quick-pick.
+  // Filter to files belonging to THIS builder. Plan/review files are named
+  // `<id>-<slug>.md` (e.g. `1298-fix-foo.md`) where `<id>` matches the
+  // builder's porch project ID, so the builder ID prefix is the natural
+  // filter. Other builders' files for the same protocol live in the same
+  // dir and would otherwise show up in the quick-pick.
   const builderPrefix = `${builder.id}-`;
   const files = readdirSync(artifactDir)
     .filter(f =>

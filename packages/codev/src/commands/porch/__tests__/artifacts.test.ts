@@ -299,7 +299,11 @@ describe('matchesProjectId', () => {
 // LocalResolver — prefix-N project ID support (Issue 691)
 // ---------------------------------------------------------------------------
 
-describe('LocalResolver — prefix-N project IDs', () => {
+describe('LocalResolver — prefix-N project IDs (bugfix)', () => {
+  // PIR was historically in this group but aligned with SPIR's numeric
+  // convention in commit dc177c83. These tests exercise the prefix-N path
+  // that is still load-bearing for BUGFIX (and any future issue-driven
+  // protocol that opts for a prefix-N ID).
   let tmpDir: string;
 
   beforeEach(() => {
@@ -310,31 +314,7 @@ describe('LocalResolver — prefix-N project IDs', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('getPlanContent finds a PIR plan file by pir-N project ID', () => {
-    writeFile(
-      tmpDir,
-      'codev/plans/pir-1099-fix-avatar-crop.md',
-      '# Plan: fix avatar crop\n',
-    );
-
-    const resolver = new LocalResolver(tmpDir);
-    const content = resolver.getPlanContent('pir-1099', 'fix-avatar-crop');
-    expect(content).toContain('# Plan: fix avatar crop');
-  });
-
-  it('getReviewContent finds a PIR review file by pir-N project ID', () => {
-    writeFile(
-      tmpDir,
-      'codev/reviews/pir-1099-fix-avatar-crop.md',
-      '# Review: fix avatar crop\n',
-    );
-
-    const resolver = new LocalResolver(tmpDir);
-    const content = resolver.getReviewContent('pir-1099', 'fix-avatar-crop');
-    expect(content).toContain('# Review: fix avatar crop');
-  });
-
-  it('getPlanContent finds a BUGFIX plan file by bugfix-N project ID', () => {
+  it('getPlanContent finds a prefix-N plan file (bugfix-style)', () => {
     writeFile(
       tmpDir,
       'codev/plans/bugfix-237-stale-cache.md',
@@ -346,26 +326,38 @@ describe('LocalResolver — prefix-N project IDs', () => {
     expect(content).toContain('# Plan: stale cache');
   });
 
-  it('returns null for a missing PIR plan', () => {
-    fs.mkdirSync(path.join(tmpDir, 'codev', 'plans'), { recursive: true });
-
-    const resolver = new LocalResolver(tmpDir);
-    expect(resolver.getPlanContent('pir-9999', 'nothing-here')).toBeNull();
-  });
-
-  it('does not match PIR plan when looking up a numeric ID with the same digits', () => {
-    // Regression guard: "pir-1099-foo.md" must NOT be returned for projectId="1099".
+  it('getReviewContent finds a prefix-N review file (bugfix-style)', () => {
     writeFile(
       tmpDir,
-      'codev/plans/pir-1099-fix-avatar.md',
-      '# Plan: PIR avatar fix\n',
+      'codev/reviews/bugfix-237-stale-cache.md',
+      '# Review: stale cache\n',
     );
 
     const resolver = new LocalResolver(tmpDir);
-    expect(resolver.getPlanContent('1099', '')).toBeNull();
+    const content = resolver.getReviewContent('bugfix-237', 'stale-cache');
+    expect(content).toContain('# Review: stale cache');
   });
 
-  it('still works for numeric project IDs (regression guard for SPIR/ASPIR/AIR)', () => {
+  it('returns null for a missing prefix-N plan', () => {
+    fs.mkdirSync(path.join(tmpDir, 'codev', 'plans'), { recursive: true });
+
+    const resolver = new LocalResolver(tmpDir);
+    expect(resolver.getPlanContent('bugfix-9999', 'nothing-here')).toBeNull();
+  });
+
+  it('does not match a prefix-N plan when looking up a numeric ID with the same digits', () => {
+    // Regression guard: "bugfix-237-foo.md" must NOT be returned for projectId="237".
+    writeFile(
+      tmpDir,
+      'codev/plans/bugfix-237-stale.md',
+      '# Plan: bugfix stale cache\n',
+    );
+
+    const resolver = new LocalResolver(tmpDir);
+    expect(resolver.getPlanContent('237', '')).toBeNull();
+  });
+
+  it('still works for numeric project IDs (SPIR / ASPIR / AIR / PIR)', () => {
     writeFile(
       tmpDir,
       'codev/plans/0073-user-auth.md',
@@ -375,5 +367,29 @@ describe('LocalResolver — prefix-N project IDs', () => {
     const resolver = new LocalResolver(tmpDir);
     expect(resolver.getPlanContent('0073', 'user-auth')).toContain('# Plan: user auth');
     expect(resolver.getPlanContent('73', 'user-auth')).toContain('# Plan: user auth');
+  });
+
+  it('finds a PIR plan file by bare numeric ID (post-dc177c83 convention)', () => {
+    writeFile(
+      tmpDir,
+      'codev/plans/1298-fix-native-social-login.md',
+      '# Plan: fix social login\n',
+    );
+
+    const resolver = new LocalResolver(tmpDir);
+    const content = resolver.getPlanContent('1298', 'fix-native-social-login');
+    expect(content).toContain('# Plan: fix social login');
+  });
+
+  it('finds a PIR review file by bare numeric ID (post-dc177c83 convention)', () => {
+    writeFile(
+      tmpDir,
+      'codev/reviews/1298-fix-native-social-login.md',
+      '# Review: fix social login\n',
+    );
+
+    const resolver = new LocalResolver(tmpDir);
+    const content = resolver.getReviewContent('1298', 'fix-native-social-login');
+    expect(content).toContain('# Review: fix social login');
   });
 });

@@ -44,26 +44,29 @@ export interface ArtifactResolver {
  *
  * Supports two project-ID formats used in this codebase:
  *
- * 1. **Numeric** (SPIR, ASPIR, AIR): e.g. `"0073"`. Matches filenames whose
- *    leading digits, zero-stripped, equal the project ID (also zero-stripped).
- *    Example: `"0073"` matches `"0073-feature.md"` and `"73-feature.md"`.
+ * 1. **Numeric** (SPIR, ASPIR, AIR, PIR): e.g. `"0073"` or `"1298"`. Matches
+ *    filenames whose leading digits, zero-stripped, equal the project ID
+ *    (also zero-stripped). Example: `"0073"` matches `"0073-feature.md"`
+ *    and `"73-feature.md"`.
  *
- * 2. **Prefix-N** (BUGFIX, PIR, any issue-driven protocol): e.g. `"pir-1099"`
- *    or `"bugfix-237"`. Matches filenames that equal `<prefix>-<N>` or start
- *    with `<prefix>-<N>-`. Example: `"pir-1099"` matches
- *    `"pir-1099-fix-avatar.md"` but NOT `"pir-1099fix.md"`.
+ * 2. **Prefix-N** (BUGFIX only — historical, kept for back-compat with
+ *    existing on-disk artifacts): e.g. `"bugfix-237"`. Matches filenames
+ *    that equal `<prefix>-<N>` or start with `<prefix>-<N>-`. Example:
+ *    `"bugfix-237"` matches `"bugfix-237-stale-cache.md"`.
  *
- * Without this distinction, the previous regex `name.match(/^(\d+)/)` silently
- * failed to find any file for prefix-N IDs, breaking `plan_exists` and other
- * artifact-resolution checks for BUGFIX and PIR projects. PIR exposed the bug
- * because it was the first issue-driven protocol with `plan_exists` configured.
+ * Without this distinction, the previous regex `name.match(/^(\d+)/)`
+ * silently failed for prefix-N IDs, breaking `plan_exists` and other
+ * artifact-resolution checks for BUGFIX projects. (PIR exposed the bug
+ * historically when it also used prefix-N IDs; PIR has since been aligned
+ * with SPIR's numeric convention — see commit dc177c83.)
  */
 export function matchesProjectId(name: string, projectId: string): boolean {
   const base = name.replace(/\.md$/, '');
 
   // Prefix-N format: `<letters>-<digits>` (one or more hyphen-separated letter
-  // segments followed by a numeric segment). Catches "pir-1099", "bugfix-237",
-  // and hypothetical future "issue-driven-237".
+  // segments followed by a numeric segment). Today this catches "bugfix-237";
+  // the shape is kept general for any future issue-driven protocol that opts
+  // for a prefix-N ID.
   if (/^[a-z]+(?:-[a-z]+)*-\d+$/i.test(projectId)) {
     return base === projectId || base.startsWith(`${projectId}-`);
   }
@@ -242,9 +245,9 @@ export class CliResolver implements ArtifactResolver {
   }
 
   hasPreApproval(artifactGlob: string): boolean {
-    // Determine artifact type from glob path (e.g., "codev/specs/0559-*.md" or "codev/plans/pir-1099-*.md")
+    // Determine artifact type from glob path (e.g., "codev/specs/0559-*.md" or "codev/plans/bugfix-237-*.md")
     const typeMatch = artifactGlob.match(/\b(specs|plans|reviews)\b/);
-    // Extract project ID — supports both numeric ("0073") and prefix-N ("pir-1099", "bugfix-237") formats.
+    // Extract project ID — supports both numeric ("0073", "1298") and prefix-N ("bugfix-237") formats.
     const prefixedMatch = artifactGlob.match(/(?:specs|plans|reviews)\/([a-z]+(?:-[a-z]+)*-\d+)/i);
     const numericMatch = artifactGlob.match(/(?:specs|plans|reviews)\/0*(\d+)/);
     const projectId = prefixedMatch?.[1] ?? numericMatch?.[1];

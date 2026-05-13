@@ -190,9 +190,9 @@ Example: `builder/pir-842` for a PIR spawn against GitHub issue #842.
 ## File Locations
 
 ```
-codev/plans/pir-<id>-<slug>.md       # written in plan phase, on builder branch
-codev/reviews/pir-<id>-<slug>.md     # written in review phase (post-code-review-approval), on builder branch; becomes PR body
-codev/projects/pir-<id>/status.yaml  # porch state, managed automatically
+codev/plans/<id>-<slug>.md             # written in plan phase, on builder branch
+codev/reviews/<id>-<slug>.md           # written in review phase (post-code-review-approval), on builder branch; becomes PR body
+codev/projects/<id>-<slug>/status.yaml # porch state, managed automatically
 ```
 
 The plan and review files ship to `main` with the merged PR — durable, searchable, git-versioned. The review file is shaped identically to SPIR's review file (Summary + Architecture Updates + Lessons Learned + supporting sections), so `codev/reviews/` stays semantically consistent across protocols.

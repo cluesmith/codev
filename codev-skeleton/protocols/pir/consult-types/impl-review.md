@@ -31,7 +31,7 @@ Before requesting changes for missing configuration, incorrect patterns, or fram
    - For a bug fix: is there a regression test that would fail without the fix?
 
 4. **Review File Quality**
-   - Does `codev/reviews/pir-<id>-<slug>.md` exist and follow the template?
+   - Does `codev/reviews/<id>-<slug>.md` exist and follow the template?
    - Does it accurately describe what changed?
    - Is "Things to Look At" honest about tricky spots?
    - Is "How to Test Locally" specific enough that the human reviewer can act on it?
