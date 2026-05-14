@@ -1,0 +1,20 @@
+id: '746'
+title: spir-architect-s-baked-archite
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-14T20:59:40.415Z'
+updated_at: '2026-05-14T20:59:40.416Z'
