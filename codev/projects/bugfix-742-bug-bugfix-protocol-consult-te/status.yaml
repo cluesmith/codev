@@ -1,0 +1,12 @@
+id: bugfix-742
+title: bug-bugfix-protocol-consult-te
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-14T20:31:50.498Z'
+updated_at: '2026-05-14T20:45:22.674Z'
