@@ -77,6 +77,18 @@ describe('hasUncommittedTrackedChanges (Bugfix #745)', () => {
     expect(await hasUncommittedTrackedChanges(repo)).toBe(true);
   });
 
+  it('returns false for a brand-new untracked file (documented tradeoff)', async () => {
+    // Per #745, the fix prioritizes signal-to-noise over catching every
+    // possible architect-forgetting-to-stage scenario. If a new spec/plan is
+    // `git add`-staged (test above), the check fires. If it's left entirely
+    // untracked, it slips through — the same way `bin/` and other local
+    // artifacts slip through. The protected workflow is `git add` then spawn;
+    // a totally-unstaged file is treated as draft work the architect is
+    // still authoring.
+    writeFileSync(join(repo, 'codev-specs-new.md'), 'draft spec\n');
+    expect(await hasUncommittedTrackedChanges(repo)).toBe(false);
+  });
+
   it('returns false (fail-open) when git is unavailable / cwd is not a repo', async () => {
     const notARepo = mkdtempSync(join(tmpdir(), 'not-a-repo-'));
     try {
