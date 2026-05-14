@@ -1,7 +1,7 @@
 id: bugfix-744
 title: spir-builder-prompt-ambiguous-
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates: {}
@@ -9,4 +9,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-14T20:58:56.293Z'
-updated_at: '2026-05-14T21:06:23.412Z'
+updated_at: '2026-05-14T21:12:13.608Z'
