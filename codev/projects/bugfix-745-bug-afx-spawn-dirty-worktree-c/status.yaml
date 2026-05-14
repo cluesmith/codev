@@ -1,0 +1,12 @@
+id: bugfix-745
+title: bug-afx-spawn-dirty-worktree-c
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-14T20:59:04.416Z'
+updated_at: '2026-05-14T20:59:04.417Z'
