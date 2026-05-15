@@ -116,6 +116,25 @@ export async function fetchIssueList(
 }
 
 /**
+ * Resolve the current user's forge login.
+ * Routes through the `user-identity` concept command (default:
+ * `gh api user --jq .login`). The concept emits a bare string, not JSON,
+ * so `raw: true` is required. Returns null on failure (e.g. `gh`
+ * unauthenticated) so callers can degrade gracefully.
+ */
+export async function fetchCurrentUser(
+  cwd?: string,
+  forgeConfig?: ForgeConfig | null,
+): Promise<string | null> {
+  const result = await executeForgeCommand('user-identity', {}, {
+    cwd,
+    forgeConfig,
+    raw: true,
+  });
+  return typeof result === 'string' && result.trim() ? result.trim() : null;
+}
+
+/**
  * Fetch recently closed issues (last 24 hours).
  * Routes through the `recently-closed` concept command.
  * Returns null on failure.

@@ -140,6 +140,8 @@ export interface OverviewData {
   pendingPRs: OverviewPR[];
   backlog: OverviewBacklogItem[];
   recentlyClosed: OverviewRecentlyClosed[];
+  /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
+  currentUser?: string;
   errors?: { prs?: string; issues?: string };
 }
 

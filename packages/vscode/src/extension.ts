@@ -28,6 +28,7 @@ import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { WorkspaceProvider } from './views/workspace.js';
 import { BuilderTreeItem } from './views/builder-tree-item.js';
+import { BacklogTreeItem } from './views/backlog-tree-item.js';
 
 let connectionManager: ConnectionManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -44,6 +45,20 @@ let statusBarItem: vscode.StatusBarItem | null = null;
 function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | undefined {
 	if (typeof arg === 'string') { return arg; }
 	if (arg instanceof BuilderTreeItem) { return arg.builderId; }
+	return undefined;
+}
+
+/**
+ * Resolve an issue number from a command argument.
+ *
+ * Backlog row-click passes the issue id as a string via
+ * `item.command.arguments`; right-click context-menu invocations pass the
+ * BacklogTreeItem itself; command-palette invocations pass nothing →
+ * undefined → spawnBuilder falls back to its full quick-pick flow.
+ */
+function extractIssueId(arg: vscode.TreeItem | string | undefined): string | undefined {
+	if (typeof arg === 'string') { return arg; }
+	if (arg instanceof BacklogTreeItem) { return arg.issueId; }
 	return undefined;
 }
 
@@ -245,7 +260,19 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!roleOrId) { return; }
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
-		vscode.commands.registerCommand('codev.spawnBuilder', () => spawnBuilder()),
+		vscode.commands.registerCommand('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
+			spawnBuilder(extractIssueId(arg))),
+		vscode.commands.registerCommand('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {
+			if (arg instanceof BacklogTreeItem) {
+				void vscode.env.openExternal(vscode.Uri.parse(arg.issueUrl));
+			}
+		}),
+		vscode.commands.registerCommand('codev.copyBacklogIssueNumber', async (arg: vscode.TreeItem | undefined) => {
+			if (arg instanceof BacklogTreeItem) {
+				await vscode.env.clipboard.writeText(`#${arg.issueId}`);
+				vscode.window.showInformationMessage(`Codev: Copied #${arg.issueId}`);
+			}
+		}),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', (arg: vscode.TreeItem | string | undefined, options?: { skipConfirmation?: boolean }) =>
 			approveGate(connectionManager!, overviewCache, extractBuilderId(arg), options)),

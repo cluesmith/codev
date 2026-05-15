@@ -134,6 +134,14 @@
         "title": "Codev: View Plan File"
       },
       {
+        "command": "codev.openBacklogIssue",
+        "title": "Codev: Open Issue in Browser"
+      },
+      {
+        "command": "codev.copyBacklogIssueNumber",
+        "title": "Codev: Copy Issue Number"
+      },
+      {
         "command": "codev.submitReviewComment",
         "title": "Submit review comment",
         "enablement": "!commentIsEmpty"
@@ -148,6 +156,14 @@
       "commandPalette": [
         {
           "command": "codev.openBuilderById",
+          "when": "false"
+        },
+        {
+          "command": "codev.openBacklogIssue",
+          "when": "false"
+        },
+        {
+          "command": "codev.copyBacklogIssueNumber",
           "when": "false"
         },
         {
@@ -208,6 +224,21 @@
           "command": "codev.stopWorktreeDev",
           "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "3_dev@3"
+        },
+        {
+          "command": "codev.spawnBuilder",
+          "when": "view == codev.backlog && viewItem == backlog-item",
+          "group": "1_primary@1"
+        },
+        {
+          "command": "codev.openBacklogIssue",
+          "when": "view == codev.backlog && viewItem == backlog-item",
+          "group": "1_primary@2"
+        },
+        {
+          "command": "codev.copyBacklogIssueNumber",
+          "when": "view == codev.backlog && viewItem == backlog-item",
+          "group": "1_primary@3"
         }
       ],
       "view/title": [

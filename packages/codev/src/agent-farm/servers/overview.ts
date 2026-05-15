@@ -14,6 +14,7 @@ import {
   fetchIssueList,
   fetchRecentlyClosed,
   fetchRecentMergedPRs,
+  fetchCurrentUser,
   parseLinkedIssue,
   parseLabelDefaults,
 } from '../../lib/github.js';
@@ -100,6 +101,8 @@ export interface OverviewData {
   pendingPRs: PROverview[];
   backlog: BacklogItem[];
   recentlyClosed: RecentlyClosedItem[];
+  /** Auto-detected forge login of the current user (via the user-identity concept). */
+  currentUser?: string;
   errors?: { prs?: string; issues?: string };
 }
 
@@ -722,7 +725,9 @@ export class OverviewCache {
   private issueCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
   private closedCache = new Map<string, { data: ForgeIssueListItem[]; fetchedAt: number }>();
   private mergedPRCache = new Map<string, { data: ForgePR[]; fetchedAt: number }>();
+  private currentUserCache = new Map<string, { data: string; fetchedAt: number }>();
   private readonly TTL = 30_000;
+  private readonly USER_TTL = 3_600_000; // 1h — GitHub identity is session-stable
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
@@ -775,12 +780,14 @@ export class OverviewCache {
         .filter((id): id is string => id !== null),
     );
 
-    // 2. Fetch PRs, issues, recently closed, and merged PRs in parallel (each is independently cached)
-    const [prs, issues, closed, mergedPRs] = await Promise.all([
+    // 2. Fetch PRs, issues, recently closed, merged PRs, and current user in
+    //    parallel (each is independently cached)
+    const [prs, issues, closed, mergedPRs, currentUser] = await Promise.all([
       this.fetchPRsCached(workspaceRoot),
       this.fetchIssuesCached(workspaceRoot),
       this.fetchRecentlyClosedCached(workspaceRoot),
       this.fetchMergedPRsCached(workspaceRoot),
+      this.fetchCurrentUserCached(workspaceRoot),
     ]);
 
     // 3. Process PRs
@@ -863,6 +870,9 @@ export class OverviewCache {
     }
 
     const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed };
+    if (currentUser) {
+      result.currentUser = currentUser;
+    }
     if (Object.keys(errors).length > 0) {
       result.errors = errors;
     }
@@ -877,6 +887,7 @@ export class OverviewCache {
     this.issueCache.clear();
     this.closedCache.clear();
     this.mergedPRCache.clear();
+    this.currentUserCache.clear();
   }
 
   // ===========================================================================
@@ -909,6 +920,26 @@ export class OverviewCache {
       this.issueCache.set(cwd, { data, fetchedAt: now });
     }
     return data;
+  }
+
+  /**
+   * Resolve the current user's forge login via the `user-identity` concept.
+   * Long TTL — identity is stable for the lifetime of a Tower session.
+   * Only successful resolutions are cached, so a transient failure (gh
+   * logged out, offline) self-heals on the next overview poll.
+   */
+  private async fetchCurrentUserCached(cwd: string): Promise<string | null> {
+    const now = Date.now();
+    const cached = this.currentUserCache.get(cwd);
+    if (cached && (now - cached.fetchedAt) < this.USER_TTL) {
+      return cached.data;
+    }
+
+    const login = await fetchCurrentUser(cwd);
+    if (login !== null) {
+      this.currentUserCache.set(cwd, { data: login, fetchedAt: now });
+    }
+    return login;
   }
 
   private async fetchRecentlyClosedCached(cwd: string): Promise<ForgeIssueListItem[] | null> {
