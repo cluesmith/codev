@@ -3,7 +3,7 @@
   "name": "pir",
   "alias": "plan-implement-review",
   "version": "1.0.0",
-  "description": "PIR: Plan → Implement → Review for GitHub-issue-driven work with two human gates (plan-approval, code-review). Lighter than SPIR (no specify phase, no review-with-arch-updates ceremony), with a code-review gate that fires before the PR is opened.",
+  "description": "PIR: Plan → Implement → Review with build-verify cycles and two pre-PR human gates (plan-approval, code-review), for GitHub-issue-driven work.",
   "input": {
     "type": "github-issue",
     "required": true,
