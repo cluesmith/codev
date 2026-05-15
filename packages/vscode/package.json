@@ -134,6 +134,10 @@
         "title": "Codev: View Plan File"
       },
       {
+        "command": "codev.viewBacklogIssue",
+        "title": "Codev: View Issue"
+      },
+      {
         "command": "codev.openBacklogIssue",
         "title": "Codev: Open Issue in Browser"
       },
@@ -156,6 +160,10 @@
       "commandPalette": [
         {
           "command": "codev.openBuilderById",
+          "when": "false"
+        },
+        {
+          "command": "codev.viewBacklogIssue",
           "when": "false"
         },
         {
@@ -226,19 +234,24 @@
           "group": "3_dev@3"
         },
         {
-          "command": "codev.spawnBuilder",
+          "command": "codev.viewBacklogIssue",
           "when": "view == codev.backlog && viewItem == backlog-item",
           "group": "1_primary@1"
         },
         {
-          "command": "codev.openBacklogIssue",
+          "command": "codev.spawnBuilder",
           "when": "view == codev.backlog && viewItem == backlog-item",
           "group": "1_primary@2"
         },
         {
-          "command": "codev.copyBacklogIssueNumber",
+          "command": "codev.openBacklogIssue",
           "when": "view == codev.backlog && viewItem == backlog-item",
           "group": "1_primary@3"
+        },
+        {
+          "command": "codev.copyBacklogIssueNumber",
+          "when": "view == codev.backlog && viewItem == backlog-item",
+          "group": "1_primary@4"
         }
       ],
       "view/title": [

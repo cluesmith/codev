@@ -145,6 +145,24 @@ export interface OverviewData {
   errors?: { prs?: string; issues?: string };
 }
 
+// --- Issue view (GET /api/issue) ---
+
+/**
+ * A single issue as returned by the `issue-view` forge concept and
+ * surfaced verbatim by Tower's GET /api/issue. Mirrors the server-side
+ * IssueViewResult (packages/codev/src/lib/forge-contracts.ts).
+ */
+export interface IssueView {
+  title: string;
+  body: string;
+  state: string;
+  comments: Array<{
+    body: string;
+    createdAt: string;
+    author: { login: string };
+  }>;
+}
+
 // --- Team (GET /workspace/:path/api/team) ---
 
 export interface ReviewBlockingEntry {

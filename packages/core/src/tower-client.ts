@@ -7,7 +7,7 @@
  * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
  */
 
-import type { DashboardState, OverviewData } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { ensureLocalKey } from './auth.js';
 
@@ -219,6 +219,18 @@ export class TowerClient {
   async getOverview(workspacePath?: string): Promise<OverviewData | null> {
     const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : '';
     const result = await this.request<OverviewData>(`/api/overview${query}`);
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Fetch a single issue's title/body/state/comments via Tower's
+   * forge-backed GET /api/issue. Returns null if the issue can't be
+   * resolved (forge unavailable, bad number) so callers can degrade.
+   */
+  async getIssue(issueNumber: string, workspacePath?: string): Promise<IssueView | null> {
+    const params = new URLSearchParams({ number: issueNumber });
+    if (workspacePath) { params.set('workspace', workspacePath); }
+    const result = await this.request<IssueView>(`/api/issue?${params.toString()}`);
     return result.ok ? result.data! : null;
   }
 

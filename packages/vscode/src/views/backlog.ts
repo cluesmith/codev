@@ -46,8 +46,8 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
       ti.iconPath = new vscode.ThemeIcon(assigned ? 'account' : 'issues');
       if (assigned) { ti.description = 'assigned to you'; }
       ti.command = {
-        command: 'codev.spawnBuilder',
-        title: 'Spawn Builder',
+        command: 'codev.viewBacklogIssue',
+        title: 'View Issue',
         arguments: [item.id],
       };
       return ti;

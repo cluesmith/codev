@@ -12,6 +12,7 @@ import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
 import { viewPlanFile } from './commands/view-artifact.js';
+import { activateIssueView, viewBacklogIssue } from './commands/view-issue.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
@@ -273,6 +274,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage(`Codev: Copied #${arg.issueId}`);
 			}
 		}),
+		vscode.commands.registerCommand('codev.viewBacklogIssue', (arg: vscode.TreeItem | string | undefined) =>
+			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', (arg: vscode.TreeItem | string | undefined, options?: { skipConfirmation?: boolean }) =>
 			approveGate(connectionManager!, overviewCache, extractBuilderId(arg), options)),
@@ -296,6 +299,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
 		vscode.commands.registerCommand('codev.addReviewComment', () => addReviewComment()),
 	);
+
+	// Read-only `codev-issue:` content provider backing the "View Issue"
+	// backlog action — renders issue body + comments as markdown preview.
+	activateIssueView(context);
 
 	// Review comment decorations
 	activateReviewDecorations(context);

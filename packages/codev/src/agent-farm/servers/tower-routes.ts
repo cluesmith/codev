@@ -56,6 +56,7 @@ import {
   stopInstance,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
+import { fetchIssue } from '../../lib/github.js';
 import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
@@ -144,6 +145,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
+  'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
   'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
@@ -704,6 +706,34 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
   const data = await overviewCache.getOverview(workspaceRoot, activeBuilderRoleIds);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void> {
+  // Workspace resolution mirrors handleOverview: ?workspace= param, else
+  // the first known non-builder workspace path.
+  let workspaceRoot = url.searchParams.get('workspace');
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+
+  const number = url.searchParams.get('number');
+  if (!workspaceRoot || !number) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing workspace or number' }));
+    return;
+  }
+
+  // Routes through the `issue-view` forge concept (forge-agnostic).
+  const issue = await fetchIssue(number, { cwd: workspaceRoot });
+  if (!issue) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `Issue #${number} not found or forge unavailable` }));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(issue));
 }
 
 function handleOverviewRefresh(res: http.ServerResponse, ctx?: RouteContext): void {

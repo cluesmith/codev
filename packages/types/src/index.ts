@@ -23,6 +23,7 @@ export {
   type OverviewBacklogItem,
   type OverviewRecentlyClosed,
   type OverviewData,
+  type IssueView,
   type TeamMemberGitHubData,
   type ReviewBlockingEntry,
   type TeamApiMember,
