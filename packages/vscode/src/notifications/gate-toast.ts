@@ -6,17 +6,16 @@ import type { OverviewCache } from '../views/overview-data.js';
  *
  * Subscribes to OverviewCache changes. Whenever a builder appears in the
  * blocked-set for the first time (or its gate name changes), fires an
- * `showInformationMessage` toast with a single action button whose label
- * and target are picked from `GATE_ACTIONS` (see below):
+ * `showInformationMessage` toast with two action buttons:
  *
- *   plan-approval → "View Plan" — opens codev/plans/<id>-*.md
- *   dev-approval  → "Run Dev"   — starts the worktree's dev PTY
- *   other gates   → "Review"    — opens the builder's terminal pane
- *
- * The fallback hands review off to the interactive Claude that just
- * announced the gate-reached message, where the user can read the diff,
- * type feedback, or approve via Cmd+K G (or the inline Approve button on
- * the sidebar row).
+ *   1. A per-gate "inspection" button from `GATE_ACTIONS`:
+ *        plan-approval → "View Plan" — opens codev/plans/<id>-*.md
+ *        dev-approval  → "Run Dev"   — starts the worktree's dev PTY
+ *        other gates   → "Review"    — opens the builder's terminal pane
+ *   2. "Approve" — commits to porch approve directly via
+ *      `codev.approveGate` with `{ skipConfirmation: true }`. The toast
+ *      is the context; surfacing a second confirmation here would be
+ *      friction without value.
  *
  * A `(builderId, gateName)` seen-set is kept in module state so we never
  * re-toast the same blocked state on subsequent cache ticks. The seen-set
@@ -101,11 +100,18 @@ function showGateToast(
 
   const action = GATE_ACTIONS[gateName] ?? { label: 'Review', command: 'codev.openBuilderById' };
 
+  // Two-button toast: [<artifact-specific action>] [Approve].
+  // The toast itself is the context — clicking Approve here skips the
+  // rich confirmation dialog (approve.ts's normal path). The reviewer
+  // chose to act on the toast directly; surfacing a second confirmation
+  // would be friction without value.
   vscode.window
-    .showInformationMessage(message, action.label)
+    .showInformationMessage(message, action.label, 'Approve')
     .then((selection) => {
       if (selection === action.label) {
         vscode.commands.executeCommand(action.command, builderId);
+      } else if (selection === 'Approve') {
+        vscode.commands.executeCommand('codev.approveGate', builderId, { skipConfirmation: true });
       }
     });
 }
