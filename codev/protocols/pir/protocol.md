@@ -103,8 +103,8 @@ The builder:
 4. Opens a PR with `gh pr create`; PR body is the review file content + `Fixes #<N>`. Records the PR with `porch done <id> --pr <M> --branch <name>`.
 5. Runs `porch done <id>` — porch's `verify` block runs CMAP-2 (Gemini + Codex, type=impl); CMAP outputs land in `codev/projects/<id>-*/`. Outcomes are not auto-appended to the PR body; reviewers with the worktree read them from the projects dir.
 6. The `pr` gate fires (pending). Builder notifies the architect once: `afx send architect "PR #<M> ready for review (PIR #<N>), CMAP: gemini=<verdict>, codex=<verdict>. Awaiting human merge + pr gate approval."`
-7. Builder waits at the `pr` gate. **Does not run `gh pr merge`** — capability is intentionally not in the protocol. The human merges via GitHub (or their own `gh pr merge`), then approves the `pr` gate (Cmd+K G or `porch approve <id> pr --a-human-explicitly-approved-this`).
-8. After `pr` gate approval, porch wakes the builder; builder records the merge with `porch done <id> --merged <M>` and sends the final cleanup-ready notification. Protocol is complete (`next: null`).
+7. Builder waits at the `pr` gate. The human reviews the PR on GitHub, then approves the `pr` gate (Cmd+K G or `porch approve <id> pr --a-human-explicitly-approved-this`). Porch wakes the builder.
+8. Builder verifies the gate is genuinely approved via `porch next` (defensive — typed prose can't trigger this branch, only real porch state does), then runs `gh pr merge --merge`, records via `porch done --merged <M>`, and sends the cleanup-ready notification. Protocol complete (`next: null`).
 
 ## Gates
 
@@ -112,7 +112,7 @@ PIR uses porch's existing gate machinery. Gate names are opaque strings; no porc
 
 - **`plan-approval`** — pre-PR. Human reads the plan file (committed on the builder branch) and approves before any code is written. Gates are keyed by `(project_id, gate_name)` so the name is safe to share with other protocols.
 - **`dev-approval`** — pre-PR. The human reviews the *running* worktree (via `afx dev`) before any PR exists. This is PIR's distinctive gate.
-- **`pr`** — post-PR. Gates the merge step. The human merges on GitHub (or via `gh pr merge` from their own shell) and approves this gate to signal "merge done". This gate exists to keep the merge step out of the builder's hands — the builder never runs `gh pr merge` itself.
+- **`pr`** — post-PR. Gates the merge step. The human reviews the PR on GitHub and approves this gate; porch wakes the builder, which then runs `gh pr merge`. The gate exists so the merge trigger is structured porch state (binary approved/not), not free-text prose typed into the builder's pane. Eliminates the self-merge bug class: builders can't infer authorization from ambiguous user input.
 
 When a gate becomes pending, porch broadcasts `overview-changed` via SSE. The VSCode Builders tree picks up the blocked state and renders it with a bell icon; a toast surfaces the new gate-pending event. Architect notification is *not* automatic — gates surface via the toast/sidebar (for IDE users) or by checking the builder pane / `porch pending` (for CLI users). The builder's job at any gate is to write the artifact, commit, signal completion, and wait — never to invoke `porch approve` itself (Claude refuses the `--a-human-explicitly-approved-this` flag by design).
 
