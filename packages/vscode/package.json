@@ -106,8 +106,8 @@
         "title": "Codev: Add Review Comment"
       },
       {
-        "command": "codev.reviewDiff",
-        "title": "Codev: View Diff"
+        "command": "codev.openWorktreeWindow",
+        "title": "Codev: Open Worktree in New Window"
       },
       {
         "command": "codev.runWorktreeDev",
@@ -157,7 +157,7 @@
           "group": "2_files@1"
         },
         {
-          "command": "codev.reviewDiff",
+          "command": "codev.openWorktreeWindow",
           "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "3_review@1"
         },

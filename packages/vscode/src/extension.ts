@@ -6,7 +6,7 @@ import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
-import { reviewDiff } from './commands/review-diff.js';
+import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
@@ -209,8 +209,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.approveGate', (arg: vscode.TreeItem | string | undefined) =>
 			approveGate(connectionManager!, overviewCache, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.cleanupBuilder', () => cleanupBuilder(connectionManager!, overviewCache)),
-		vscode.commands.registerCommand('codev.reviewDiff', (arg: vscode.TreeItem | string | undefined) =>
-			reviewDiff(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.openWorktreeWindow', (arg: vscode.TreeItem | string | undefined) =>
+			openWorktreeWindow(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.stopWorktreeDev', () =>

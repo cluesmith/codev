@@ -10,7 +10,7 @@ import type { OverviewCache } from '../views/overview-data.js';
  * the **architect** terminal — porch orchestrates through the architect,
  * so user-driven review starts there.
  *
- * (Direct artifact access — View Diff, View Plan File, View Review File,
+ * (Direct artifact access — Open Worktree in New Window, View Plan File,
  * Run Dev Server — is available via right-click on builder rows in the
  * sidebar. The toast intentionally does not duplicate those entry points.)
  *
