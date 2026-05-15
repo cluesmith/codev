@@ -118,6 +118,22 @@ export async function activate(context: vscode.ExtensionContext) {
 			: `$(server) Codev: ${builderCount} builders`;
 	};
 
+	// List views show their item count in the title: "Builders (3)".
+	// createTreeView (not registerTreeDataProvider) is required to get a
+	// settable .title. When there's no data yet (disconnected/loading) the
+	// title falls back to the plain base name — no misleading "(0)".
+	let buildersView: vscode.TreeView<vscode.TreeItem> | undefined;
+	let pullRequestsView: vscode.TreeView<vscode.TreeItem> | undefined;
+	let backlogView: vscode.TreeView<vscode.TreeItem> | undefined;
+	const updateListViewTitles = () => {
+		const data = overviewCache.getData();
+		const withCount = (base: string, n: number | undefined) =>
+			typeof n === 'number' ? `${base} (${n})` : base;
+		if (buildersView) { buildersView.title = withCount('Builders', data?.builders.length); }
+		if (pullRequestsView) { pullRequestsView.title = withCount('Pull Requests', data?.pendingPRs.length); }
+		if (backlogView) { backlogView.title = withCount('Backlog', data?.backlog.length); }
+	};
+
 	// Close builder/dev terminal tabs when their builder disappears from Tower
 	// state. Covers cleanup triggered from the VSCode "Cleanup Builder" command,
 	// `afx cleanup` on the CLI, or any other removal path — otherwise Tower
@@ -161,13 +177,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	overviewCache.onDidChange(() => {
 		updateStatusBarCounts();
 		pruneClosedBuilderTerminals();
+		updateListViewTitles();
 	});
 
+	// Active-work list views use createTreeView so their title can carry a
+	// live item count; the rest stay on registerTreeDataProvider.
+	buildersView = vscode.window.createTreeView('codev.builders', { treeDataProvider: new BuildersProvider(overviewCache) });
+	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
+	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: new BacklogProvider(overviewCache) });
 	context.subscriptions.push(
+		buildersView,
+		pullRequestsView,
+		backlogView,
 		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
-		vscode.window.registerTreeDataProvider('codev.builders', new BuildersProvider(overviewCache)),
-		vscode.window.registerTreeDataProvider('codev.pullRequests', new PullRequestsProvider(overviewCache)),
-		vscode.window.registerTreeDataProvider('codev.backlog', new BacklogProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.recentlyClosed', new RecentlyClosedProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.team', new TeamProvider(connectionManager)),
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
