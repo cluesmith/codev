@@ -32,7 +32,7 @@ Read and internalize the protocol before starting any work.
 
 PIR has three phases:
 1. **plan** (gated by `plan-approval`) — write `codev/plans/{{artifact_name}}.md`, await human review
-2. **implement** (gated by `code-review`) — write code + tests, run build/tests, push branch; await the human's review of the *running worktree* (no file artifact in this phase — code-review summary is prose-in-pane)
+2. **implement** (gated by `dev-approval`) — write code + tests, run build/tests, push branch; await the human's review of the *running worktree* (no file artifact in this phase — dev-approval summary is prose-in-pane)
 3. **review** (gated by `pr`) — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates and Lessons Learned sections), open PR with the review as body, record the PR with porch, run CMAP via porch's verify block, notify architect, then wait at the `pr` gate while the human merges on GitHub. **You never run `gh pr merge` yourself.**
 
 {{#if issue}}
@@ -53,7 +53,7 @@ PIR has two human gates. When you reach one:
 4. **Stay in the interactive session**. Do NOT exit. Wait for the user's next message.
 
 The reviewer can give feedback by:
-- Editing the plan file (at the plan-approval gate) or the code itself (at the code-review gate) in the worktree directly — you'll see changes via `git diff`
+- Editing the plan file (at the plan-approval gate) or the code itself (at the dev-approval gate) in the worktree directly — you'll see changes via `git diff`
 - Typing into your PTY pane (this reaches you live)
 - `afx send <your-builder-id> "<feedback>"` (queued; check on next turn)
 - Commenting on the GitHub issue (re-fetch with `gh issue view <N> --comments` if asked)
@@ -82,7 +82,7 @@ If you encounter **pre-existing flaky tests** (intermittent failures unrelated t
 If your Claude session crashes mid-flow, Tower's `while true` loop will relaunch you with the same prompt. On startup:
 
 1. Run `porch next {{project_id}}` to learn what phase you're in
-2. If `gate_pending`: read the latest plan file (plan-approval) or `git diff main` (code-review) plus any new GitHub issue comments; check `afx send` queue. Decide whether to revise or just announce you're back.
+2. If `gate_pending`: read the latest plan file (plan-approval) or `git diff main` (dev-approval) plus any new GitHub issue comments; check `afx send` queue. Decide whether to revise or just announce you're back.
 3. Otherwise: pick up where you left off
 
 ## Getting Started

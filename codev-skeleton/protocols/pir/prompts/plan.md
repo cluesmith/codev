@@ -72,7 +72,7 @@ Concrete file paths. Use `file:line` format for specific edits where possible.
 
 ## Test Plan
 
-How to verify this works once implemented. The reviewer will use this at the `code-review` gate to test the running worktree.
+How to verify this works once implemented. The reviewer will use this at the `dev-approval` gate to test the running worktree.
 
 - Unit test: <what to test>
 - Manual: <what to click / observe>

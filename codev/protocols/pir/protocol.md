@@ -1,6 +1,6 @@
 # PIR Protocol
 
-> **Plan → Implement → Review** for GitHub-issue-driven work that needs human review of *either* the approach (before code is written) *or* the implementation (before a PR exists), or both. Lighter than SPIR/ASPIR (no `specify` phase — the GitHub issue is the implicit spec) with the human code-review moved earlier (pre-PR instead of post-PR). Stronger than BUGFIX/AIR (two human gates before the PR).
+> **Plan → Implement → Review** for GitHub-issue-driven work that needs human review of *either* the approach (before code is written) *or* the implementation (before a PR exists), or both. Lighter than SPIR/ASPIR (no `specify` phase — the GitHub issue is the implicit spec) with the human dev-approval moved earlier (pre-PR instead of post-PR). Stronger than BUGFIX/AIR (two human gates before the PR).
 
 ## When to Use PIR
 
@@ -28,7 +28,7 @@ The PR diff alone is insufficient; the reviewer must *run* the code:
 
 ## How PIR Differs from SPIR
 
-PIR is structurally *SPIR minus the `specify` phase*, with the human code-review moved earlier (pre-PR instead of post-PR).
+PIR is structurally *SPIR minus the `specify` phase*, with the human dev-approval moved earlier (pre-PR instead of post-PR).
 
 | Aspect | SPIR | PIR |
 |---|---|---|
@@ -36,12 +36,12 @@ PIR is structurally *SPIR minus the `specify` phase*, with the human code-review
 | Spec artifact | `codev/specs/<id>-<slug>.md` | GitHub Issue body (implicit spec) |
 | Plan artifact | `codev/plans/<id>-<slug>.md` | Same — committed on builder branch |
 | Review artifact | `codev/reviews/<id>-<slug>.md` (Summary + Architecture Updates + Lessons Learned, becomes PR body) | **Same shape** — `codev/reviews/<id>-<slug>.md` with the same sections, also becomes PR body |
-| Human gates | spec-approval, plan-approval, pr, verify-approval | plan-approval, code-review, pr |
-| Where code is reviewed by the human | On the PR (post-creation) — read the diff | Pre-PR (at the `code-review` gate) — read the diff **and run the worktree locally** |
+| Human gates | spec-approval, plan-approval, pr, verify-approval | plan-approval, dev-approval, pr |
+| Where code is reviewed by the human | On the PR (post-creation) — read the diff | Pre-PR (at the `dev-approval` gate) — read the diff **and run the worktree locally** |
 
 The review file always includes Summary, Architecture Updates, and Lessons Learned sections so `codev/reviews/` stays semantically consistent across all protocols. PIR's lightness comes from skipping the `specify` phase (the issue body is the spec), not from cutting corners on the retrospective.
 
-The `code-review` gate is what makes PIR genuinely different: the human gates the *running implementation* via the worktree before the PR exists, instead of gating the PR after creation.
+The `dev-approval` gate is what makes PIR genuinely different: the human gates the *running implementation* via the worktree before the PR exists, instead of gating the PR after creation.
 
 ## Phases
 
@@ -70,15 +70,15 @@ When satisfied, approve via VSCode's "Approve Gate" command (Cmd+K G) or:
 porch approve <id> plan-approval --a-human-explicitly-approved-this
 ```
 
-### Implement (gated by `code-review`)
+### Implement (gated by `dev-approval`)
 
 The builder:
 1. Reads the approved plan file
 2. Writes code and tests; runs build + tests via the `checks` block
-3. *No AI consult on this phase* — the human at the `code-review` gate is the sole reviewer of the running code. Matches BUGFIX / AIR's pattern of "no consult on implementation, one consult at PR creation".
+3. *No AI consult on this phase* — the human at the `dev-approval` gate is the sole reviewer of the running code. Matches BUGFIX / AIR's pattern of "no consult on implementation, one consult at PR creation".
 4. Pushes the branch
-5. Runs `porch done` and `porch next` — the `code-review` gate becomes pending
-6. Outputs a **prose** code-review summary in the PTY pane (Summary / Files / Test results / Things to look at / How to test locally). This is a transient message to orient the human reviewer — **not a committed file**. The retrospective file is written in the next phase, after the human approves the running code.
+5. Runs `porch done` and `porch next` — the `dev-approval` gate becomes pending
+6. Outputs a **prose** dev-approval summary in the PTY pane (Summary / Files / Test results / Things to look at / How to test locally). This is a transient message to orient the human reviewer — **not a committed file**. The retrospective file is written in the next phase, after the human approves the running code.
 7. Sits at the interactive prompt
 
 **The reviewer's killer move**: run the worktree locally.
@@ -91,7 +91,7 @@ The dev server uses **the same ports and URLs as main** intentionally (OAuth cal
 Reviewer tests the change on real devices / browsers / simulators. When satisfied, approves via Cmd+K G or:
 
 ```bash
-porch approve <id> code-review --a-human-explicitly-approved-this
+porch approve <id> dev-approval --a-human-explicitly-approved-this
 ```
 
 ### Review (gated by `pr`)
@@ -111,7 +111,7 @@ The builder:
 PIR uses porch's existing gate machinery. Gate names are opaque strings; no porch engine changes are needed.
 
 - **`plan-approval`** — pre-PR. Human reads the plan file (committed on the builder branch) and approves before any code is written. Gates are keyed by `(project_id, gate_name)` so the name is safe to share with other protocols.
-- **`code-review`** — pre-PR. The human reviews the *running* worktree (via `afx dev`) before any PR exists. This is PIR's distinctive gate.
+- **`dev-approval`** — pre-PR. The human reviews the *running* worktree (via `afx dev`) before any PR exists. This is PIR's distinctive gate.
 - **`pr`** — post-PR. Gates the merge step. The human merges on GitHub (or via `gh pr merge` from their own shell) and approves this gate to signal "merge done". This gate exists to keep the merge step out of the builder's hands — the builder never runs `gh pr merge` itself.
 
 When a gate becomes pending, porch broadcasts `overview-changed` via SSE. The VSCode Builders tree picks up the blocked state and renders it with a bell icon; a toast surfaces the new gate-pending event. Architect notification is *not* automatic — gates surface via the toast/sidebar (for IDE users) or by checking the builder pane / `porch pending` (for CLI users). The builder's job at any gate is to write the artifact, commit, signal completion, and wait — never to invoke `porch approve` itself (Claude refuses the `--a-human-explicitly-approved-this` flag by design).
@@ -146,15 +146,15 @@ PIR uses the same `.codev/config.json` configuration as other protocols. The `wo
 }
 ```
 
-Without `worktree.devCommand`, `afx dev` won't work and the `code-review` gate degenerates to a diff-read — at which point you should probably use AIR or BUGFIX instead.
+Without `worktree.devCommand`, `afx dev` won't work and the `dev-approval` gate degenerates to a diff-read — at which point you should probably use AIR or BUGFIX instead.
 
 ## Multi-Agent Consultation
 
 - **plan**: human-only review. No AI consultation.
-- **implement**: no AI consult — the human at the `code-review` gate is the sole reviewer of the running code.
+- **implement**: no AI consult — the human at the `dev-approval` gate is the sole reviewer of the running code.
 - **review**: CMAP-2 (Gemini + Codex, type=impl) after the PR is opened; appended to PR body. Same pattern as BUGFIX / AIR's PR-creation consult.
 
-Net: PIR runs **two model calls per protocol run**, matching its BUGFIX/AIR peers — its distinguishing features are the two human gates (`plan-approval`, `code-review`), not AI-consult density.
+Net: PIR runs **two model calls per protocol run**, matching its BUGFIX/AIR peers — its distinguishing features are the two human gates (`plan-approval`, `dev-approval`), not AI-consult density.
 
 To disable consultation entirely, say "without multi-agent consultation" when starting work.
 
@@ -193,7 +193,7 @@ Example: `builder/pir-842` for a PIR spawn against GitHub issue #842.
 
 ```
 codev/plans/<id>-<slug>.md             # written in plan phase, on builder branch
-codev/reviews/<id>-<slug>.md           # written in review phase (post-code-review-approval), on builder branch; becomes PR body
+codev/reviews/<id>-<slug>.md           # written in review phase (post-dev-approval-approval), on builder branch; becomes PR body
 codev/projects/<id>-<slug>/status.yaml # porch state, managed automatically
 ```
 

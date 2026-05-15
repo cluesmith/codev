@@ -3,7 +3,7 @@
   "name": "pir",
   "alias": "plan-implement-review",
   "version": "1.0.0",
-  "description": "PIR: Plan → Implement → Review with build-verify cycles and two pre-PR human gates (plan-approval, code-review), for GitHub-issue-driven work.",
+  "description": "PIR: Plan → Implement → Review with build-verify cycles and two pre-PR human gates (plan-approval, dev-approval), for GitHub-issue-driven work.",
   "input": {
     "type": "github-issue",
     "required": true,
@@ -12,7 +12,7 @@
   "hooks": {
     "pre-spawn": {
       "collision-check": true,
-      "comment-on-issue": "On it! Working on this with the PIR protocol (plan + code-review gates before PR)."
+      "comment-on-issue": "On it! Working on this with the PIR protocol (plan + dev-approval gates before PR)."
     }
   },
   "phases": [
@@ -40,7 +40,7 @@
     {
       "id": "implement",
       "name": "Implement",
-      "description": "Write code + tests, run build/test checks, await code-review on the running worktree",
+      "description": "Write code + tests, run build/test checks, await dev-approval on the running worktree",
       "type": "build_verify",
       "build": {
         "prompt": "implement.md",
@@ -64,7 +64,7 @@
           "max_retries": 2
         }
       },
-      "gate": "code-review",
+      "gate": "dev-approval",
       "next": "review"
     },
     {

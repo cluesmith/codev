@@ -2,7 +2,7 @@
 
 ## Context
 
-You are reviewing the implementation of a PIR protocol project before it reaches the `code-review` human gate. A builder has implemented the approved plan and written a code-review summary. Your job is to verify the implementation matches the plan and is ready for human review.
+You are reviewing the implementation of a PIR protocol project before it reaches the `dev-approval` human gate. A builder has implemented the approved plan and written a dev-approval summary. Your job is to verify the implementation matches the plan and is ready for human review.
 
 ## CRITICAL: Verify Before Flagging
 
@@ -57,7 +57,7 @@ KEY_ISSUES:
 ```
 
 **Verdict meanings:**
-- `APPROVE`: Ready for human at the `code-review` gate
+- `APPROVE`: Ready for human at the `dev-approval` gate
 - `REQUEST_CHANGES`: Issues that must be fixed before reaching the human
 - `COMMENT`: Minor suggestions, can proceed but note feedback
 

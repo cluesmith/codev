@@ -348,7 +348,7 @@ function loadProtocolPhases(workspaceRoot: string, protocolName: string): string
 const GATE_LABELS: Record<string, string> = {
   'spec-approval': 'spec review',
   'plan-approval': 'plan review',
-  'code-review': 'code review',
+  'dev-approval': 'dev review',
   'pr': 'PR review',
 };
 
@@ -382,7 +382,7 @@ export function detectBlockedGate(parsed: ParsedStatus): string | null {
  * Keep this list in sync with `detectBlocked`'s `gateLabels` keys.
  */
 export function detectBlockedSince(parsed: ParsedStatus): string | null {
-  const gateNames = ['spec-approval', 'plan-approval', 'code-review', 'pr'];
+  const gateNames = ['spec-approval', 'plan-approval', 'dev-approval', 'pr'];
   for (const gate of gateNames) {
     if (parsed.gates[gate] === 'pending' && parsed.gateRequestedAt[gate]) {
       return parsed.gateRequestedAt[gate];

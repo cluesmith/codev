@@ -119,8 +119,8 @@ describe('notifyTerminal', () => {
 
 describe('gateApprovedMessage', () => {
   it('references the gate and porch next', () => {
-    const msg = gateApprovedMessage('code-review');
-    expect(msg).toContain('code-review');
+    const msg = gateApprovedMessage('dev-approval');
+    expect(msg).toContain('dev-approval');
     expect(msg).toContain('porch next');
   });
 });

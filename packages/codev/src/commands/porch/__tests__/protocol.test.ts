@@ -260,7 +260,7 @@ describe('porch protocol loading', () => {
  *
  * PIR's contract is meaningful enough that we lock it in here:
  *   plan      → gated by 'plan-approval' → next 'implement'
- *   implement → gated by 'code-review'   → next 'review'
+ *   implement → gated by 'dev-approval'   → next 'review'
  *   review    → no gate, terminal (next: null)
  *
  * The PIR protocol.json itself lives at codev/protocols/pir/ in the repo;
@@ -289,7 +289,7 @@ describe('PIR protocol shape', () => {
         id: 'implement',
         name: 'Implement',
         type: 'build_verify',
-        gate: 'code-review',
+        gate: 'dev-approval',
         next: 'review',
       },
       {
@@ -329,9 +329,9 @@ describe('PIR protocol shape', () => {
     expect(getNextPhase(protocol, 'plan')?.id).toBe('implement');
   });
 
-  it('gates the implement phase on code-review and transitions to review', () => {
+  it('gates the implement phase on dev-approval and transitions to review', () => {
     const protocol = loadProtocol(testDir, 'pir');
-    expect(getPhaseGate(protocol, 'implement')).toBe('code-review');
+    expect(getPhaseGate(protocol, 'implement')).toBe('dev-approval');
     expect(getNextPhase(protocol, 'implement')?.id).toBe('review');
   });
 
@@ -346,11 +346,11 @@ describe('PIR protocol shape', () => {
     expect(protocol.name).toBe('pir');
   });
 
-  it('treats code-review as a valid gate name (no whitelist)', () => {
+  it('treats dev-approval as a valid gate name (no whitelist)', () => {
     // Sanity check: porch must accept new gate names purely from data. If a
     // whitelist were ever added, this test would break before PIR ships.
     const protocol = loadProtocol(testDir, 'pir');
     const gate = getPhaseGate(protocol, 'implement');
-    expect(gate).toBe('code-review');
+    expect(gate).toBe('dev-approval');
   });
 });

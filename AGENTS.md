@@ -70,7 +70,7 @@ You are working in the Codev project itself, with multiple development protocols
 - **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
 - **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
 - **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
-- **PIR**: Plan / Implement / Review — issue-driven with two human gates (plan-approval, code-review). Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev/protocols/pir/protocol.md`.
+- **PIR**: Plan / Implement / Review — issue-driven with two human gates (plan-approval, dev-approval). Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev/protocols/pir/protocol.md`.
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
 - **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev/protocols/research/protocol.md`
@@ -186,7 +186,7 @@ Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change
 - User-journey changes that need a full-flow exercise
 - Performance-sensitive changes that need profiling on the running app
 
-**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `code-review`) → Review (PR + CMAP-2 at PR, matching BUGFIX / AIR). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `code-review` gate, not the PR diff post-creation). See `codev/protocols/pir/protocol.md`.
+**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `dev-approval`) → Review (PR + CMAP-2 at PR, matching BUGFIX / AIR). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `dev-approval` gate, not the PR diff post-creation). See `codev/protocols/pir/protocol.md`.
 
 ### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)

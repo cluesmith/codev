@@ -17,7 +17,7 @@ The retrospective ships with the merged PR — it's durable team knowledge, sear
 
 ## Prerequisites
 
-- The `code-review` gate has been approved (you're here because `porch next` advanced you)
+- The `dev-approval` gate has been approved (you're here because `porch next` advanced you)
 - Your branch contains the implementation commits
 - Build and tests pass
 
@@ -54,7 +54,7 @@ Output of `git log main..HEAD --oneline`:
 
 - `npm run build`: ✓ pass
 - `npm test`: ✓ pass (X tests, Y new)
-- Manual verification: <what was verified, on what platforms — pulled from the human's review at the code-review gate if known>
+- Manual verification: <what was verified, on what platforms — pulled from the human's review at the dev-approval gate if known>
 
 ## Architecture Updates
 
@@ -144,7 +144,7 @@ Porch will:
    - **All APPROVE + checks pass** → review phase complete (the protocol is done from porch's perspective).
    - **Any REQUEST_CHANGES** → porch records the feedback in `status.yaml` and stays in the review phase. The output of `porch done` will surface the verdicts.
 
-> **Why CMAP-2, not CMAP-3?** PIR's design parallels BUGFIX/AIR's consult footprint. The human already approved the *running* implementation at the `code-review` gate; CMAP at PR is a pre-merge hygiene + code-quality pass, not a functional review.
+> **Why CMAP-2, not CMAP-3?** PIR's design parallels BUGFIX/AIR's consult footprint. The human already approved the *running* implementation at the `dev-approval` gate; CMAP at PR is a pre-merge hygiene + code-quality pass, not a functional review.
 
 ### 6. Handle Reviewer Feedback (if porch reports REQUEST_CHANGES)
 
@@ -181,7 +181,7 @@ The human will:
 2. Merge the PR via `gh pr merge <M> --merge`, the GitHub web UI, or any other tool
 3. Approve the `pr` gate via VSCode (Cmd+K G) or `porch approve {{project_id}} pr --a-human-explicitly-approved-this` in a shell
 
-Until the `pr` gate is approved, you sit idle in this pane. Porch will wake you when it fires (same wake-up mechanism as the earlier plan-approval and code-review gates).
+Until the `pr` gate is approved, you sit idle in this pane. Porch will wake you when it fires (same wake-up mechanism as the earlier plan-approval and dev-approval gates).
 
 If the human requests more changes instead of approving, push fixes and re-run `porch done {{project_id}}` (loops back to step 6). If they close the PR without merging, `gh pr close <M>` and stop.
 

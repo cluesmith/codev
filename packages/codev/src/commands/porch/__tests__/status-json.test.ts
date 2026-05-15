@@ -46,7 +46,7 @@ function setupPirProtocol(testDir: string): void {
       version: '1.0.0',
       phases: [
         { id: 'plan', name: 'Plan', type: 'build_verify', gate: 'plan-approval', next: 'implement' },
-        { id: 'implement', name: 'Implement', type: 'build_verify', gate: 'code-review', next: 'review' },
+        { id: 'implement', name: 'Implement', type: 'build_verify', gate: 'dev-approval', next: 'review' },
         { id: 'review', name: 'Review', type: 'build_verify', next: null },
       ],
     }),
@@ -174,11 +174,11 @@ describe('porch status --json', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('reports the code-review gate correctly when in the implement phase', async () => {
+  it('reports the dev-approval gate correctly when in the implement phase', async () => {
     const state = makeState({
       phase: 'implement',
       gates: {
-        'code-review': { status: 'pending', requested_at: '2026-05-12T15:00:00.000Z' },
+        'dev-approval': { status: 'pending', requested_at: '2026-05-12T15:00:00.000Z' },
       },
       build_complete: true,
     });
@@ -188,7 +188,7 @@ describe('porch status --json', () => {
 
     const out = parseStdoutJson();
     expect(out.phase).toBe('implement');
-    expect(out.gate).toBe('code-review');
+    expect(out.gate).toBe('dev-approval');
     expect(out.gate_status).toBe('pending');
   });
 });

@@ -4,7 +4,7 @@ You are executing the **IMPLEMENT** phase of the PIR protocol.
 
 ## Your Goal
 
-Implement the approved plan, write tests, and pause at the `code-review` gate so the human can verify behavior by running the worktree locally. No file artifact is produced in this phase — the retrospective (review file) is written in the next phase, after the human has approved the running code.
+Implement the approved plan, write tests, and pause at the `dev-approval` gate so the human can verify behavior by running the worktree locally. No file artifact is produced in this phase — the retrospective (review file) is written in the next phase, after the human has approved the running code.
 
 ## Context
 
@@ -15,7 +15,7 @@ Implement the approved plan, write tests, and pause at the `code-review` gate so
 
 ## Resumption Check (do this FIRST)
 
-Run `porch next {{project_id}}`. If the response is `gate_pending` on `code-review`, the code is already written and you're awaiting review. In that case:
+Run `porch next {{project_id}}`. If the response is `gate_pending` on `dev-approval`, the code is already written and you're awaiting review. In that case:
 
 1. Check for feedback:
    - `git diff main` — has the reviewer made any direct edits to your code?
@@ -97,7 +97,7 @@ porch done {{project_id}}
 porch next {{project_id}}
 ```
 
-PIR's `implement` phase has no AI consult — the `code-review` gate becomes pending immediately, and the human is the sole reviewer of the running code. (CMAP-2 runs later, in the `review` phase, after the human approves the gate and the PR is opened.)
+PIR's `implement` phase has no AI consult — the `dev-approval` gate becomes pending immediately, and the human is the sole reviewer of the running code. (CMAP-2 runs later, in the `review` phase, after the human approves the gate and the PR is opened.)
 
 ### 7. End Your Turn With a Code-Review Summary (Prose, Not a File)
 
@@ -113,16 +113,16 @@ When the gate goes pending, output a short prose summary in the pane to orient t
 >
 > **How to test locally**: VSCode → right-click builder → **Run Dev Server**, or `afx dev pir-{{project_id}}`. View diff via VSCode → **View Diff** (auto-detects the repo's default branch).
 >
-> Ready for review — type feedback here, or approve with `porch approve {{project_id}} code-review --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
+> Ready for review — type feedback here, or approve with `porch approve {{project_id}} dev-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
 
 Then **stay in the interactive session**. Do not exit. Wait for the user's next message.
 
-(Optional: if your team prefers an issue-thread record, you can also post a one-line comment on the GitHub issue pointing reviewers at the worktree branch. The summary itself stays in the pane — don't duplicate it as a committed file. That's the next phase's job, and that file will be a proper retrospective with arch + lessons updates, not a transient code-review note.)
+(Optional: if your team prefers an issue-thread record, you can also post a one-line comment on the GitHub issue pointing reviewers at the worktree branch. The summary itself stays in the pane — don't duplicate it as a committed file. That's the next phase's job, and that file will be a proper retrospective with arch + lessons updates, not a transient dev-approval note.)
 
 ## Signals
 
 ```
-<signal>PHASE_COMPLETE</signal>          # Implementation + tests done; code-review gate becomes pending
+<signal>PHASE_COMPLETE</signal>          # Implementation + tests done; dev-approval gate becomes pending
 <signal>BLOCKED:reason</signal>          # Cannot proceed
 ```
 
