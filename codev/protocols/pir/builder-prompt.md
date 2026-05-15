@@ -33,7 +33,7 @@ Read and internalize the protocol before starting any work.
 PIR has three phases:
 1. **plan** (gated by `plan-approval`) — write `codev/plans/{{artifact_name}}.md`, await human review
 2. **implement** (gated by `code-review`) — write code + tests, run build/tests, push branch; await the human's review of the *running worktree* (no file artifact in this phase — code-review summary is prose-in-pane)
-3. **review** — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates + Lessons Learned, same shape as SPIR's review file), open PR with the review as body, run CMAP, notify architect, merge on instruction
+3. **review** (gated by `pr`) — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates and Lessons Learned sections), open PR with the review as body, record the PR with porch, run CMAP via porch's verify block, notify architect, then wait at the `pr` gate while the human merges on GitHub. **You never run `gh pr merge` yourself.**
 
 {{#if issue}}
 ## Issue #{{issue.number}}
@@ -66,7 +66,7 @@ Use `afx send architect "..."` at key moments:
 - **PR merged**: `afx send architect "PR #<M> merged for PIR #{{issue.number}}. Ready for cleanup."`
 - **Blocked**: `afx send architect "Blocked on PIR #{{issue.number}}: [reason]"`
 
-Gate-pending notifications are sent automatically by porch — you do not need to send them yourself.
+**Gates are not architect-notified.** When porch transitions a gate to `pending`, the gate-reached message (including the `porch approve <id> <gate> --a-human-explicitly-approved-this` invocation) appears in YOUR pane as part of your normal output. That's the universal notification surface — visible whether the user is in VSCode, tmux, plain Terminal, or any other host. The user reads it directly from your pane (or runs `porch pending` from a shell) and approves themselves; the architect can't approve gates, so notifying it would be informational noise.
 
 ## Handling Flaky Tests
 

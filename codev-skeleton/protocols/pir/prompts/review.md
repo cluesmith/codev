@@ -4,7 +4,7 @@ You are executing the **REVIEW** phase of the PIR protocol.
 
 ## Your Goal
 
-Write a retrospective at `codev/reviews/{{artifact_name}}.md` — same shape as SPIR's review file, including **Architecture Updates** and **Lessons Learned Updates** sections. Push, open a PR using the review file as the PR body, then signal completion to porch — **porch runs CMAP-2 (Gemini + Codex) automatically**. After porch confirms approval, notify the architect and merge on instruction.
+Write a retrospective at `codev/reviews/{{artifact_name}}.md` including **Summary**, **Architecture Updates**, and **Lessons Learned Updates** sections. Push, open a PR using the review file as the PR body, record the PR with porch, then signal completion — **porch runs CMAP-2 (Gemini + Codex) automatically** via the verify block. After CMAP approves, the `pr` gate fires; you notify the architect and wait at the gate while the human merges on GitHub.
 
 The retrospective ships with the merged PR — it's durable team knowledge, searchable in `codev/reviews/` on `main`.
 
@@ -121,6 +121,16 @@ gh pr edit <PR-number> --body-file codev/reviews/{{artifact_name}}.md
 
 **Exception**: if this PR only partially addresses the issue, use `Refs #{{issue.number}}` instead — the issue stays open until a follow-up PR closes it.
 
+### 4a. Record the PR with Porch
+
+Immediately after creating the PR, tell porch about it so `status.yaml` carries the PR number and branch. This is a metadata-only call — it does NOT advance the phase or trigger CMAP:
+
+```bash
+porch done {{project_id}} --pr <PR-number> --branch "$(git branch --show-current)"
+```
+
+Without this, porch's `history:` for the project stays empty and downstream tooling (status views, analytics, audit trails) can't link the porch project to its GitHub PR.
+
 ### 5. Signal Completion to Porch (porch runs CMAP-2)
 
 ```bash
@@ -148,36 +158,47 @@ If `porch done` reports any reviewer requested changes, run `porch next {{projec
 
 Loop until porch reports all reviewers APPROVE.
 
-### 7. Notify the Architect (after porch approves)
+### 7. Notify the Architect (after porch approves CMAP)
 
-After `porch done` reports success (all reviewers APPROVE + checks pass), read the verdicts from porch state and notify the architect:
+After `porch done` reports all reviewers APPROVE + checks pass, porch fires the **`pr` gate** (pending). Read the verdicts from porch state and notify:
 
 ```bash
 GEMINI_VERDICT=$(grep -m1 -i '^\(approve\|request_changes\|comment\)' "codev/projects/{{project_id}}-"*/"{{project_id}}-gemini.txt" || echo UNKNOWN)
 CODEX_VERDICT=$(grep -m1 -i '^\(approve\|request_changes\|comment\)' "codev/projects/{{project_id}}-"*/"{{project_id}}-codex.txt" || echo UNKNOWN)
 
-afx send architect "PR #<M> ready for review (PIR #{{issue.number}}). CMAP: gemini=$GEMINI_VERDICT, codex=$CODEX_VERDICT. Full verdicts in codev/projects/{{project_id}}-*/."
+afx send architect "PR #<M> ready for review (PIR #{{issue.number}}). CMAP: gemini=$GEMINI_VERDICT, codex=$CODEX_VERDICT. Awaiting human merge + pr gate approval. Full verdicts in codev/projects/{{project_id}}-*/."
 ```
 
-This is the only notification you send.
+This is the only notification you send at the gate.
 
-### 8. Wait for Merge Instruction
+### 8. Wait at the `pr` Gate
 
-The architect reviews the PR. They will either:
+Your active work is done. **You do NOT run `gh pr merge`.** Capability is intentionally not in this protocol — the human owns the merge step on GitHub.
 
-- Tell you to merge → run the merge command (step 9)
-- Request more changes → push fixes and re-run `porch done {{project_id}}` (loops back to step 6)
-- Tell you to close without merging → `gh pr close <M>` and stop
+The human will:
 
-### 9. Merge the PR
+1. Review the PR on GitHub (or by running the worktree via `afx dev pir-{{project_id}}` again)
+2. Merge the PR via `gh pr merge <M> --merge`, the GitHub web UI, or any other tool
+3. Approve the `pr` gate via VSCode (Cmd+K G) or `porch approve {{project_id}} pr --a-human-explicitly-approved-this` in a shell
+
+Until the `pr` gate is approved, you sit idle in this pane. Porch will wake you when it fires (same wake-up mechanism as the earlier plan-approval and code-review gates).
+
+If the human requests more changes instead of approving, push fixes and re-run `porch done {{project_id}}` (loops back to step 6). If they close the PR without merging, `gh pr close <M>` and stop.
+
+### 9. After `pr` Gate Approval — Record the Merge
+
+When porch wakes you with "Gate pr approved", the human has merged the PR. Record the merge so porch's `status.yaml` reflects the completed lifecycle:
 
 ```bash
-gh pr merge <PR-number> --merge
+# Read the PR number that was recorded at step 4a
+PR=$(yq '.history[] | select(.event == "pr_recorded") | .pr' codev/projects/{{project_id}}-*/status.yaml | head -1)
+# Or just: PR=<the number you used at step 4a>
+
+porch done {{project_id}} --merged "$PR"
+porch next {{project_id}}   # confirms protocol is complete (next: null)
 ```
 
-**Use `--merge`, not `--squash`.** Project convention: preserve individual commits for development history.
-
-The `Fixes #{{issue.number}}` in the PR body auto-closes the GitHub issue.
+Together with the `--pr` record from step 4a, this gives porch a complete view of the PR lifecycle (created → merged) for analytics, status displays, and audit trails.
 
 ### 10. Final Notification
 
@@ -185,7 +206,7 @@ The `Fixes #{{issue.number}}` in the PR body auto-closes the GitHub issue.
 afx send architect "PR #<M> merged for PIR #{{issue.number}}. Ready for cleanup."
 ```
 
-Porch already marked the review phase complete at step 5 (or whichever iteration's `porch done` got all-APPROVE). No additional `porch done` call is needed — the merge is a GitHub action, not a porch state transition.
+Porch already marked the review phase complete at step 5 (or whichever iteration's `porch done` got all-APPROVE). The merge is a GitHub action, not a porch phase transition — but the `--merged` record in step 9a keeps porch's history complete.
 
 ## Signals
 
@@ -196,8 +217,8 @@ Porch already marked the review phase complete at step 5 (or whichever iteration
 
 ## What NOT to Do
 
-- Don't squash-merge (`--squash`) — use `--merge`
-- Don't merge without architect instruction
+- **Don't run `gh pr merge` ever.** PIR intentionally does not give the builder merge capability — the human merges on GitHub (or via their own `gh pr merge`). If you find yourself reaching for the merge tool, you've misread the protocol. The `pr` gate is the porch-level synchronization point; you wait at it, you don't bypass it.
+- Don't skip porch's PR/merge records (steps 4a, 9). The `--pr` record (step 4a) lets the gate-pending state link to the actual PR; the `--merged` record (step 9) closes the lifecycle in porch state. Skipping either leaves `history:` empty and downstream tooling blind.
 - Don't run `porch approve` for any gate yourself
 - Don't push to main — only merge via PR
 - Don't skip the Architecture Updates / Lessons Learned sections — porch checks enforce their presence (the section must exist; explaining "no changes needed" in one line is fine)

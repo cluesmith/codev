@@ -70,7 +70,7 @@
     {
       "id": "review",
       "name": "Review",
-      "description": "Write retrospective (arch + lessons), push, open PR with review as body, run CMAP, merge on instruction",
+      "description": "Write retrospective (arch + lessons), push, open PR with review as body, run CMAP, then wait at pr gate while the human merges on GitHub",
       "type": "build_verify",
       "build": {
         "prompt": "review.md",
@@ -100,6 +100,7 @@
           "description": "Review must include '## Lessons Learned Updates' section (what changed in lessons-learned.md, or why no changes needed)"
         }
       },
+      "gate": "pr",
       "next": null
     }
   ],

@@ -36,10 +36,10 @@ PIR is structurally *SPIR minus the `specify` phase*, with the human code-review
 | Spec artifact | `codev/specs/<id>-<slug>.md` | GitHub Issue body (implicit spec) |
 | Plan artifact | `codev/plans/<id>-<slug>.md` | Same — committed on builder branch |
 | Review artifact | `codev/reviews/<id>-<slug>.md` (Summary + Architecture Updates + Lessons Learned, becomes PR body) | **Same shape** — `codev/reviews/<id>-<slug>.md` with the same sections, also becomes PR body |
-| Human gates | spec-approval, plan-approval, pr, verify-approval | plan-approval, code-review |
+| Human gates | spec-approval, plan-approval, pr, verify-approval | plan-approval, code-review, pr |
 | Where code is reviewed by the human | On the PR (post-creation) — read the diff | Pre-PR (at the `code-review` gate) — read the diff **and run the worktree locally** |
 
-The review file shape is intentionally identical to SPIR's, so `codev/reviews/` stays semantically consistent across protocols. PIR's lightness comes from skipping the `specify` phase (the issue body is the spec), not from cutting corners on the retrospective.
+The review file always includes Summary, Architecture Updates, and Lessons Learned sections so `codev/reviews/` stays semantically consistent across all protocols. PIR's lightness comes from skipping the `specify` phase (the issue body is the spec), not from cutting corners on the retrospective.
 
 The `code-review` gate is what makes PIR genuinely different: the human gates the *running implementation* via the worktree before the PR exists, instead of gating the PR after creation.
 
@@ -94,25 +94,27 @@ Reviewer tests the change on real devices / browsers / simulators. When satisfie
 porch approve <id> code-review --a-human-explicitly-approved-this
 ```
 
-### Review (no human gate — proceeds autonomously through PR creation; merge gated by architect instruction)
+### Review (gated by `pr`)
 
 The builder:
-1. Writes `codev/reviews/<id>-<slug>.md` with **Summary**, **Architecture Updates**, **Lessons Learned Updates**, plus the supporting sections (Files Changed, Commits, Test Results, Things to Look At, How to Test Locally). Same shape as SPIR's review file.
+1. Writes `codev/reviews/<id>-<slug>.md` with **Summary**, **Architecture Updates**, **Lessons Learned Updates**, plus the supporting sections (Files Changed, Commits, Test Results, Things to Look At, How to Test Locally).
 2. Updates `codev/resources/arch.md` and/or `codev/resources/lessons-learned.md` if real changes need recording. If not, the review file's sections state "no changes needed" with a one-line explanation (the porch `checks` block enforces section presence, not content).
 3. Commits the review file (and arch / lessons updates if any) and pushes
-4. Opens a PR with `gh pr create`; PR body is the review file content + `Fixes #<N>`
-5. Porch's `verify` block runs CMAP-2 (Gemini + Codex, type=impl) — same pattern as BUGFIX / AIR at PR creation. Outcome is appended to the PR body.
-6. Notifies the architect: `afx send architect "PR #<M> ready for review (PIR #<N>)"`
-7. Waits for the architect's merge instruction; merges with `gh pr merge <M> --merge` (no squash — preserves history per project convention)
+4. Opens a PR with `gh pr create`; PR body is the review file content + `Fixes #<N>`. Records the PR with `porch done <id> --pr <M> --branch <name>`.
+5. Runs `porch done <id>` — porch's `verify` block runs CMAP-2 (Gemini + Codex, type=impl); CMAP outputs land in `codev/projects/<id>-*/`. Outcomes are not auto-appended to the PR body; reviewers with the worktree read them from the projects dir.
+6. The `pr` gate fires (pending). Builder notifies the architect once: `afx send architect "PR #<M> ready for review (PIR #<N>), CMAP: gemini=<verdict>, codex=<verdict>. Awaiting human merge + pr gate approval."`
+7. Builder waits at the `pr` gate. **Does not run `gh pr merge`** — capability is intentionally not in the protocol. The human merges via GitHub (or their own `gh pr merge`), then approves the `pr` gate (Cmd+K G or `porch approve <id> pr --a-human-explicitly-approved-this`).
+8. After `pr` gate approval, porch wakes the builder; builder records the merge with `porch done <id> --merged <M>` and sends the final cleanup-ready notification. Protocol is complete (`next: null`).
 
 ## Gates
 
 PIR uses porch's existing gate machinery. Gate names are opaque strings; no porch engine changes are needed.
 
-- **`plan-approval`** — same name as SPIR's plan gate. Reused safely (gates are keyed by `(project_id, gate_name)`).
-- **`code-review`** — new gate name; works without any porch-side allowlist.
+- **`plan-approval`** — pre-PR. Human reads the plan file (committed on the builder branch) and approves before any code is written. Gates are keyed by `(project_id, gate_name)` so the name is safe to share with other protocols.
+- **`code-review`** — pre-PR. The human reviews the *running* worktree (via `afx dev`) before any PR exists. This is PIR's distinctive gate.
+- **`pr`** — post-PR. Gates the merge step. The human merges on GitHub (or via `gh pr merge` from their own shell) and approves this gate to signal "merge done". This gate exists to keep the merge step out of the builder's hands — the builder never runs `gh pr merge` itself.
 
-When a gate becomes pending, porch automatically fires `notifyArchitect()` which sends an `afx send architect "GATE: <name> (Builder <id>)..."` message. The VSCode "Needs Attention" tree picks up the blocked state and renders it with a bell icon; a toast surfaces the new gate-pending event.
+When a gate becomes pending, porch broadcasts `overview-changed` via SSE. The VSCode Builders tree picks up the blocked state and renders it with a bell icon; a toast surfaces the new gate-pending event. Architect notification is *not* automatic — gates surface via the toast/sidebar (for IDE users) or by checking the builder pane / `porch pending` (for CLI users). The builder's job at any gate is to write the artifact, commit, signal completion, and wait — never to invoke `porch approve` itself (Claude refuses the `--a-human-explicitly-approved-this` flag by design).
 
 ## Rejection / Feedback Model
 
@@ -195,4 +197,4 @@ codev/reviews/<id>-<slug>.md           # written in review phase (post-code-revi
 codev/projects/<id>-<slug>/status.yaml # porch state, managed automatically
 ```
 
-The plan and review files ship to `main` with the merged PR — durable, searchable, git-versioned. The review file is shaped identically to SPIR's review file (Summary + Architecture Updates + Lessons Learned + supporting sections), so `codev/reviews/` stays semantically consistent across protocols.
+The plan and review files ship to `main` with the merged PR — durable, searchable, git-versioned. The review file includes Summary + Architecture Updates + Lessons Learned + supporting sections, so `codev/reviews/` stays semantically consistent across protocols.
