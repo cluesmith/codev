@@ -4,9 +4,9 @@ import type { ConnectionManager } from '../connection-manager.js';
 import { getTowerAddress } from '../workspace-detector.js';
 
 /**
- * Workspace-level entry points: architect terminal + Tower web dashboard.
- * Sits at the top of the Codev sidebar so users can launch either with
- * one click instead of hunting in the command palette.
+ * Workspace-level entry points: architect terminal, Tower web dashboard,
+ * spawn builder, and new shell. Sits at the top of the Codev sidebar so
+ * common workspace actions are one click away, not buried in the palette.
  */
 export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
@@ -46,6 +46,26 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       };
       items.push(web);
     }
+
+    const spawn = new vscode.TreeItem('Spawn Builder');
+    spawn.iconPath = new vscode.ThemeIcon('rocket');
+    spawn.tooltip = 'Spawn a new builder for a GitHub issue';
+    spawn.contextValue = 'workspace-spawn';
+    spawn.command = {
+      command: 'codev.spawnBuilder',
+      title: 'Spawn Builder',
+    };
+    items.push(spawn);
+
+    const shell = new vscode.TreeItem('New Shell');
+    shell.iconPath = new vscode.ThemeIcon('terminal-new');
+    shell.tooltip = 'Open a new shell tab in Tower';
+    shell.contextValue = 'workspace-shell';
+    shell.command = {
+      command: 'codev.newShell',
+      title: 'New Shell',
+    };
+    items.push(shell);
 
     return items;
   }
