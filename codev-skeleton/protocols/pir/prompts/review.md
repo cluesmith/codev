@@ -4,7 +4,7 @@ You are executing the **REVIEW** phase of the PIR protocol.
 
 ## Your Goal
 
-Write a retrospective at `codev/reviews/{{artifact_name}}.md` — same shape as SPIR's review file, including **Architecture Updates** and **Lessons Learned Updates** sections. Then push, open a PR using the review file as the PR body, run CMAP-2 (Gemini + Codex), notify the architect, and merge on instruction.
+Write a retrospective at `codev/reviews/{{artifact_name}}.md` — same shape as SPIR's review file, including **Architecture Updates** and **Lessons Learned Updates** sections. Push, open a PR using the review file as the PR body, then signal completion to porch — **porch runs CMAP-2 (Gemini + Codex) automatically**. After porch confirms approval, notify the architect and merge on instruction.
 
 The retrospective ships with the merged PR — it's durable team knowledge, searchable in `codev/reviews/` on `main`.
 
@@ -121,63 +121,55 @@ gh pr edit <PR-number> --body-file codev/reviews/{{artifact_name}}.md
 
 **Exception**: if this PR only partially addresses the issue, use `Refs #{{issue.number}}` instead — the issue stays open until a follow-up PR closes it.
 
-### 5. Run CMAP-2 Review
-
-Run 2-way parallel consultation on the PR (type=impl — same consult type BUGFIX and AIR use at their PR-creation phase):
+### 5. Signal Completion to Porch (porch runs CMAP-2)
 
 ```bash
-consult -m gemini --protocol pir --type impl &
-consult -m codex --protocol pir --type impl &
+porch done {{project_id}}
 ```
 
-Both should run in the background (`run_in_background: true`). **DO NOT proceed until both return verdicts.**
-
-Wait for each consultation. Use `TaskOutput` to retrieve results. Record each verdict (APPROVE / REQUEST_CHANGES / COMMENT).
+Porch will:
+1. Run the `pr_exists` / `review_has_arch_updates` / `review_has_lessons_updates` checks.
+2. **Execute CMAP-2 (Gemini + Codex) automatically** via the protocol's `verify` block. Outputs land in `codev/projects/{{project_id}}-<slug>/{{project_id}}-gemini.txt` and `<id>-codex.txt`.
+3. Evaluate verdicts:
+   - **All APPROVE + checks pass** → review phase complete (the protocol is done from porch's perspective).
+   - **Any REQUEST_CHANGES** → porch records the feedback in `status.yaml` and stays in the review phase. The output of `porch done` will surface the verdicts.
 
 > **Why CMAP-2, not CMAP-3?** PIR's design parallels BUGFIX/AIR's consult footprint. The human already approved the *running* implementation at the `code-review` gate; CMAP at PR is a pre-merge hygiene + code-quality pass, not a functional review.
 
-### 6. Address Any REQUEST_CHANGES
+### 6. Handle Reviewer Feedback (if porch reports REQUEST_CHANGES)
 
-If any reviewer requested changes:
+If `porch done` reports any reviewer requested changes, run `porch next {{project_id}}` — it returns `status: tasks` with the reviewer feedback baked into the task description. Then:
 
-1. Read the specific issues
-2. Fix them in code
-3. Run build + tests
-4. Push the updates
-5. Re-run CMAP only if substantial changes were made
+1. Read the specific issues from the task output (and from `codev/projects/{{project_id}}-*/{{project_id}}-<model>.txt` for full context).
+2. Fix them in code.
+3. Run build + tests.
+4. Commit + push the updates (the PR updates automatically — no new `gh pr create`).
+5. Run `porch done {{project_id}}` again. Porch re-runs CMAP-2 against the updated diff.
 
-End with concrete verdicts from both models before continuing.
+Loop until porch reports all reviewers APPROVE.
 
-### 7. Append CMAP Outcome to PR Body
+### 7. Notify the Architect (after porch approves)
 
-Once you have both verdicts, append them to the PR body:
-
-```markdown
-## CMAP Review
-
-- **Gemini**: APPROVE / REQUEST_CHANGES (one-line summary)
-- **Codex**: APPROVE / REQUEST_CHANGES (one-line summary)
-```
-
-Use `gh pr edit <PR-number> --body-file <updated-body>` to apply.
-
-### 8. Notify the Architect
+After `porch done` reports success (all reviewers APPROVE + checks pass), read the verdicts from porch state and notify the architect:
 
 ```bash
-afx send architect "PR #<M> ready for review (PIR #{{issue.number}}). CMAP: gemini=<verdict>, codex=<verdict>"
+GEMINI_VERDICT=$(grep -m1 -i '^\(approve\|request_changes\|comment\)' "codev/projects/{{project_id}}-"*/"{{project_id}}-gemini.txt" || echo UNKNOWN)
+CODEX_VERDICT=$(grep -m1 -i '^\(approve\|request_changes\|comment\)' "codev/projects/{{project_id}}-"*/"{{project_id}}-codex.txt" || echo UNKNOWN)
+
+afx send architect "PR #<M> ready for review (PIR #{{issue.number}}). CMAP: gemini=$GEMINI_VERDICT, codex=$CODEX_VERDICT. Full verdicts in codev/projects/{{project_id}}-*/."
 ```
 
 This is the only notification you send.
 
-### 9. Wait for Merge Instruction
+### 8. Wait for Merge Instruction
 
 The architect reviews the PR. They will either:
 
-- Tell you to merge → run the merge command (step 10)
-- Request more changes → address them (loop back to step 5)
+- Tell you to merge → run the merge command (step 9)
+- Request more changes → push fixes and re-run `porch done {{project_id}}` (loops back to step 6)
 - Tell you to close without merging → `gh pr close <M>` and stop
 
-### 10. Merge the PR
+### 9. Merge the PR
 
 ```bash
 gh pr merge <PR-number> --merge
@@ -187,12 +179,13 @@ gh pr merge <PR-number> --merge
 
 The `Fixes #{{issue.number}}` in the PR body auto-closes the GitHub issue.
 
-### 11. Final Notification + Signal Phase Complete
+### 10. Final Notification
 
 ```bash
 afx send architect "PR #<M> merged for PIR #{{issue.number}}. Ready for cleanup."
-porch done {{project_id}}
 ```
+
+Porch already marked the review phase complete at step 5 (or whichever iteration's `porch done` got all-APPROVE). No additional `porch done` call is needed — the merge is a GitHub action, not a porch state transition.
 
 ## Signals
 
@@ -208,6 +201,7 @@ porch done {{project_id}}
 - Don't run `porch approve` for any gate yourself
 - Don't push to main — only merge via PR
 - Don't skip the Architecture Updates / Lessons Learned sections — porch checks enforce their presence (the section must exist; explaining "no changes needed" in one line is fine)
+- **Don't run `consult` commands yourself** — porch handles consultations via the `verify` block. Manually invoking `consult` causes CMAP to run twice.
 
 ## Handling Problems
 
@@ -217,9 +211,10 @@ porch done {{project_id}}
 - Force-push with lease: `git push --force-with-lease`
 - Re-run `gh pr create`
 
-**If CMAP consults fail (e.g., model unavailable):**
-- Retry once
-- If still failing, notify the architect and ask whether to proceed without that model's verdict
+**If porch's CMAP consults fail (e.g., model unavailable):**
+- `porch done` will report the failure. Inspect `codev/projects/{{project_id}}-*/{{project_id}}-<model>.txt` for the failure details.
+- Re-run `porch done {{project_id}}` once — porch will retry the consult.
+- If the model is persistently unavailable, notify the architect and ask whether to proceed without that model's verdict. They may direct you to skip via a manual override.
 
 **If the architect doesn't respond within a reasonable window:**
 - Send one follow-up via `afx send architect "..."` after a few hours
