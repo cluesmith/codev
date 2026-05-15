@@ -13,13 +13,15 @@ const execFileAsync = promisify(execFile);
  * before committing to approval — without first dismissing the dialog
  * and re-triggering the command.
  *
- * Mirror of `gate-toast.ts`'s GATE_ACTIONS — kept parallel rather than
- * shared because each surface has different ergonomics (toast at gate-
- * pending fires once; this confirmation fires every approval click).
+ * Mirrors `gate-toast.ts`'s GATE_ACTIONS one-for-one so a given gate
+ * surfaces the same inspection action from either entry point. The maps
+ * are kept in separate files because the two surfaces have different
+ * ergonomics (toast at gate-pending fires once; this confirmation fires
+ * every approval click), but their *contents* must stay in sync.
  */
 const GATE_SIDE_ACTIONS: Record<string, { label: string; command: string }> = {
   'plan-approval': { label: 'View Plan', command: 'codev.viewPlanFile' },
-  'dev-approval':  { label: 'Open Worktree', command: 'codev.openWorktreeWindow' },
+  'dev-approval':  { label: 'Run Dev',   command: 'codev.runWorktreeDev' },
 };
 
 export interface ApproveGateOptions {

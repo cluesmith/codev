@@ -48,14 +48,18 @@ export function activateGateToasts(
 
     const currentBlocked = new Set<string>();
     for (const b of data.builders) {
-      if (!b.blocked) {
+      if (!b.blocked || !b.blockedGate) {
         continue;
       }
-      const key = `${b.id}::${b.blocked}`;
+      // Track and lookup keys use the CANONICAL gate name (b.blockedGate,
+      // e.g. "dev-approval"). The display label (b.blocked, e.g. "dev
+      // review") is for human-facing text only — using it as a lookup key
+      // breaks GATE_ACTIONS since the map's keys are canonical names.
+      const key = `${b.id}::${b.blockedGate}`;
       currentBlocked.add(key);
       if (!seen.has(key)) {
         seen.add(key);
-        showGateToast(b.id, b.blocked, b.issueId, b.issueTitle);
+        showGateToast(b.id, b.blockedGate, b.blocked, b.issueId, b.issueTitle);
       }
     }
 
@@ -90,13 +94,14 @@ const GATE_ACTIONS: Record<string, { label: string; command: string }> = {
 
 function showGateToast(
   builderId: string,
-  gateName: string,
+  gateName: string,         // canonical key for GATE_ACTIONS lookup, e.g. "dev-approval"
+  gateLabel: string,        // human-facing label for the toast text, e.g. "dev review"
   issueId?: string | number | null,
   issueTitle?: string | null,
 ): void {
   const label = issueId ? `#${issueId}` : builderId;
   const titleSuffix = issueTitle ? ` — ${truncate(issueTitle, 50)}` : '';
-  const message = `Codev: ${label} blocked on ${gateName}${titleSuffix}`;
+  const message = `Codev: ${label} blocked on ${gateLabel}${titleSuffix}`;
 
   const action = GATE_ACTIONS[gateName] ?? { label: 'Review', command: 'codev.openBuilderById' };
 
