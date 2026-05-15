@@ -411,6 +411,8 @@ export async function runCodexConsultation(
       if (event.type === 'turn.completed') {
         const input = event.usage.input_tokens;
         const cached = event.usage.cached_input_tokens;
+        // output_tokens already includes reasoning_output_tokens (OpenAI Responses-API
+        // convention) — do NOT add the latter to cost or reasoning is double-billed.
         const output = event.usage.output_tokens;
         const uncached = input - cached;
         const cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
