@@ -159,6 +159,24 @@ export class TerminalManager {
   }
 
   /**
+   * Dispose the VSCode terminal tabs for a builder — both the AI terminal
+   * and any companion dev-server terminal — after the builder has been
+   * cleaned up. Tower kills the PTYs as part of cleanup, so without this
+   * the user sees a stale "Process exited" tab until they close it
+   * manually. Accepts the canonical builder roleId (e.g. `builder-spir-109`),
+   * matching the value passed to `openBuilder`.
+   */
+  closeBuilderTerminal(builderId: string): void {
+    for (const key of [`builder-${builderId}`, `dev-${builderId}`]) {
+      const existing = this.terminals.get(key);
+      if (!existing) { continue; }
+      existing.pty.close();
+      existing.terminal.dispose();
+      this.terminals.delete(key);
+    }
+  }
+
+  /**
    * Return { builderId, terminalId } for every dev terminal this VSCode
    * instance has open. Used by `codev.stopWorktreeDev` as the source of
    * truth — more reliable than round-tripping through Tower's label filter
