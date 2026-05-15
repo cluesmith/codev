@@ -12,7 +12,7 @@ This project uses **Codev** for AI-assisted development.
 - **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
 - **AIR**: Autonomous Implement & Review for small features (`codev/protocols/air/protocol.md`)
 - **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
-- **PIR**: Plan / Implement / Review — issue-driven with two human gates (plan-approval, dev-approval) (`codev/protocols/pir/protocol.md`)
+- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr) (`codev/protocols/pir/protocol.md`)
 - **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
 - **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
 - **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
