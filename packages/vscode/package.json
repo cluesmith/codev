@@ -132,6 +132,16 @@
       {
         "command": "codev.viewPlanFile",
         "title": "Codev: View Plan File"
+      },
+      {
+        "command": "codev.submitReviewComment",
+        "title": "Submit review comment",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.deleteReviewComment",
+        "title": "Delete review comment",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -143,6 +153,14 @@
         {
           "command": "codev.addReviewComment",
           "when": "editorLangId == 'markdown'"
+        },
+        {
+          "command": "codev.submitReviewComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.deleteReviewComment",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -212,6 +230,20 @@
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "codev.submitReviewComment",
+          "group": "inline",
+          "when": "commentController == codev-review && commentThreadIsEmpty"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "codev.deleteReviewComment",
+          "group": "inline@1",
+          "when": "commentController == codev-review && commentThread == inline-review"
         }
       ]
     },

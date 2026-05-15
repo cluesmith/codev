@@ -17,6 +17,7 @@ import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateReviewDecorations } from './review-decorations.js';
+import { activateReviewComments } from './comments/plan-review.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
 import { BuildersProvider } from './views/builders.js';
@@ -231,6 +232,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Review comment decorations
 	activateReviewDecorations(context);
+
+	// Inline plan-review comments via VSCode Comments API. Gutter "+" on
+	// any line in codev/plans/*.md or codev/specs/*.md; submit writes
+	// `<!-- REVIEW(@architect): ... -->` inline, matching the format
+	// produced by `codev.addReviewComment` and review.json snippet.
+	activateReviewComments(context);
 
 	// Toast on new gate-pending — surfaces blocked builders without forcing the
 	// user to watch the Builders tree. Respects `codev.gateToasts.enabled`.
