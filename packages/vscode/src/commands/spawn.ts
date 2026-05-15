@@ -12,7 +12,7 @@ export async function spawnBuilder(): Promise<void> {
   if (!issueNumber) { return; }
 
   const protocol = await vscode.window.showQuickPick(
-    ['spir', 'aspir', 'air', 'bugfix', 'tick'],
+    ['spir', 'aspir', 'pir', 'air', 'bugfix', 'tick'],
     { placeHolder: 'Select protocol' },
   );
   if (!protocol) { return; }
