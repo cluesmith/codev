@@ -6,13 +6,17 @@ import type { OverviewCache } from '../views/overview-data.js';
  *
  * Subscribes to OverviewCache changes. Whenever a builder appears in the
  * blocked-set for the first time (or its gate name changes), fires an
- * `showInformationMessage` toast with a single "Review" action that opens
- * the **architect** terminal — porch orchestrates through the architect,
- * so user-driven review starts there.
+ * `showInformationMessage` toast with a single action button whose label
+ * and target are picked from `GATE_ACTIONS` (see below):
  *
- * (Direct artifact access — Open Worktree in New Window, View Plan File,
- * Run Dev Server — is available via right-click on builder rows in the
- * sidebar. The toast intentionally does not duplicate those entry points.)
+ *   plan-approval → "View Plan" — opens codev/plans/<id>-*.md
+ *   dev-approval  → "Run Dev"   — starts the worktree's dev PTY
+ *   other gates   → "Review"    — opens the builder's terminal pane
+ *
+ * The fallback hands review off to the interactive Claude that just
+ * announced the gate-reached message, where the user can read the diff,
+ * type feedback, or approve via Cmd+K G (or the inline Approve button on
+ * the sidebar row).
  *
  * A `(builderId, gateName)` seen-set is kept in module state so we never
  * re-toast the same blocked state on subsequent cache ticks. The seen-set
@@ -67,6 +71,24 @@ export function activateGateToasts(
   context.subscriptions.push(cache.onDidChange(onChange));
 }
 
+/**
+ * Per-gate action mapping for the toast's single button.
+ *
+ *   plan-approval → "View Plan" opens the plan markdown directly
+ *   dev-approval  → "Run Dev"   starts the dev PTY for the worktree
+ *   other gates   → "Review"    opens the builder's terminal pane
+ *
+ * The plan/dev mappings match the gate's most-useful artifact (plan-approval
+ * reviews the plan file; dev-approval tests the running code). Anything
+ * else falls back to the builder pane — gates without a single obvious
+ * artifact (spec-approval, code-review, pr) are best handled by typing
+ * feedback to the interactive Claude that just announced the gate.
+ */
+const GATE_ACTIONS: Record<string, { label: string; command: string }> = {
+  'plan-approval': { label: 'View Plan', command: 'codev.viewPlanFile' },
+  'dev-approval':  { label: 'Run Dev',   command: 'codev.runWorktreeDev' },
+};
+
 function showGateToast(
   builderId: string,
   gateName: string,
@@ -77,16 +99,13 @@ function showGateToast(
   const titleSuffix = issueTitle ? ` — ${truncate(issueTitle, 50)}` : '';
   const message = `Codev: ${label} blocked on ${gateName}${titleSuffix}`;
 
-  // Fire and forget. "Review" opens the builder's own pane — the gate-
-  // reached message and the builder's interactive Claude live there. From
-  // that pane the user can read the plan/diff, type feedback, edit files
-  // in VSCode, or approve via Cmd+K G (or the inline Approve button on
-  // the sidebar row).
+  const action = GATE_ACTIONS[gateName] ?? { label: 'Review', command: 'codev.openBuilderById' };
+
   vscode.window
-    .showInformationMessage(message, 'Review')
+    .showInformationMessage(message, action.label)
     .then((selection) => {
-      if (selection === 'Review') {
-        vscode.commands.executeCommand('codev.openBuilderById', builderId);
+      if (selection === action.label) {
+        vscode.commands.executeCommand(action.command, builderId);
       }
     });
 }
