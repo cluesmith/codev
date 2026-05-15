@@ -84,10 +84,17 @@ bump_file() {
 # Root first — always bumped (private, no marketplace constraints).
 bump_file "package.json"
 
-for pkg in packages/codev packages/core packages/types packages/vscode; do
-  if [ "$pkg" = "packages/vscode" ] && [ "$IS_PRERELEASE" = "1" ]; then
-    echo "Skipping packages/vscode ($VERSION is a pre-release; VS Code Marketplace requires plain semver)"
-    continue
-  fi
+# Bump the npm-published packages (codev, core, types).
+for pkg in packages/codev packages/core packages/types; do
   bump_file "$pkg/package.json"
 done
+
+# vscode lives in its own script — version + CHANGELOG promotion + marketplace
+# constraints. Delegate to scripts/bump-vscode.sh, which is also callable on
+# its own when bumping the extension independently from a codev release.
+if [ "$IS_PRERELEASE" = "1" ]; then
+  echo "Skipping packages/vscode ($VERSION is a pre-release; VS Code Marketplace requires plain semver)"
+else
+  SCRIPT_DIR="$(dirname "$0")"
+  "$SCRIPT_DIR/bump-vscode.sh" "$VERSION"
+fi

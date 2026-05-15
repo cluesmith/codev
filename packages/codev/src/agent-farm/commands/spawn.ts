@@ -20,6 +20,7 @@ import type { SpawnOptions, BuilderType, Config } from '../types.js';
 import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
+import { hasUncommittedTrackedChanges } from '../utils/git.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
@@ -836,27 +837,25 @@ export async function spawn(options: SpawnOptions): Promise<void> {
 
   const config = getConfig();
 
-  // Refuse to spawn if the main worktree has uncommitted changes.
-  // Builders work in git worktrees branched from HEAD — uncommitted changes
+  // Refuse to spawn if the main worktree has uncommitted changes to tracked files.
+  // Builders work in git worktrees branched from HEAD — uncommitted modifications
   // (specs, plans, codev updates) won't be visible to the builder.
-  // Skip this check for:
+  //
+  // Skip this check entirely for:
   //   - --force: explicit override
   //   - --resume: worktree already exists with its own branch
   //   - --task: ephemeral tasks don't depend on committed specs/plans
   if (!options.force && !options.resume && !options.task && !options.branch) {
-    try {
-      const { stdout } = await run('git status --porcelain', { cwd: config.workspaceRoot });
-      if (stdout.trim().length > 0) {
-        fatal(
-          'Uncommitted changes detected in main worktree.\n\n' +
-          '  Builders branch from HEAD, so uncommitted files (specs, plans,\n' +
-          '  codev updates) will NOT be visible to the builder.\n\n' +
-          '  Please commit or stash your changes first, then retry.\n' +
-          '  Use --force to skip this check.'
-        );
-      }
-    } catch {
-      // Non-fatal — if git status fails, allow spawn to continue
+    if (await hasUncommittedTrackedChanges(config.workspaceRoot)) {
+      fatal(
+        'Uncommitted changes to tracked files detected in main worktree.\n\n' +
+        '  Builders branch from HEAD, so uncommitted modifications (specs,\n' +
+        '  plans, codev updates) will NOT be visible to the builder.\n\n' +
+        '  Untracked files are ignored — only modifications and staged\n' +
+        '  changes to tracked files trigger this check.\n\n' +
+        '  Please commit or stash your changes first, then retry.\n' +
+        '  Use --force to skip this check.'
+      );
     }
   }
 

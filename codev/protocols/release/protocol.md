@@ -55,6 +55,8 @@ bats tests/e2e/
 
 **Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every publishable package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-types`, and the VS Code extension) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches.
 
+For VS Code stable releases the script delegates to `scripts/bump-vscode.sh` (also exposed as `pnpm bump-vscode-version` for standalone use), which bumps the extension manifest **and** renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` in `packages/vscode/CHANGELOG.md` so the Marketplace listing reflects the new version. No fresh `[Unreleased]` heading is inserted — the next PR with notes adds one back. Skipped for pre-release versions (vscode is skipped entirely then). Use `pnpm bump-vscode-version` directly when shipping a vscode-only patch outside the lockstep cadence.
+
 The script anchors on the root `package.json`'s current version (Vue/Babel pattern) and accepts several invocation forms:
 
 | Command | Effect |
