@@ -165,49 +165,49 @@
       ],
       "view/item/context": [
         {
-          "command": "codev.openBuilderById",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "1_terminal@1"
-        },
-        {
-          "command": "codev.openWorktreeFolder",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "2_files@1"
-        },
-        {
-          "command": "codev.openWorktreeWindow",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "3_review@1"
-        },
-        {
-          "command": "codev.runWorktreeSetup",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "4_worktree@1"
-        },
-        {
-          "command": "codev.runWorktreeDev",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "4_worktree@2"
-        },
-        {
-          "command": "codev.stopWorktreeDev",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
-          "group": "4_worktree@3"
-        },
-        {
           "command": "codev.approveGate",
           "when": "view == codev.builders && viewItem =~ /^blocked-builder-/",
           "group": "inline@1"
         },
         {
+          "command": "codev.openBuilderById",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "1_primary@1"
+        },
+        {
           "command": "codev.approveGate",
           "when": "view == codev.builders && viewItem =~ /^blocked-builder-/",
-          "group": "0_gate@1"
+          "group": "1_primary@2"
         },
         {
           "command": "codev.viewPlanFile",
           "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-pir$/",
-          "group": "3_review@2"
+          "group": "1_primary@3"
+        },
+        {
+          "command": "codev.openWorktreeWindow",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "2_worktree@1"
+        },
+        {
+          "command": "codev.openWorktreeFolder",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "2_worktree@2"
+        },
+        {
+          "command": "codev.runWorktreeSetup",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "codev.runWorktreeDev",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "3_dev@2"
+        },
+        {
+          "command": "codev.stopWorktreeDev",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
+          "group": "3_dev@3"
         }
       ],
       "view/title": [
