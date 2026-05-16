@@ -30,8 +30,15 @@ export function activateGateToasts(
   context: vscode.ExtensionContext,
   cache: OverviewCache,
 ): void {
-  // Track (builderId, gateName) pairs we've already toasted for.
-  const seen = new Set<string>();
+  // Track (builderId, gateName) pairs we've already toasted for. Persisted to
+  // workspaceState so a builder that stays blocked on the same gate doesn't
+  // re-toast on every window reload / extension reactivation / Tower reconnect
+  // (the set is otherwise closure state that resets each activation). Pruning
+  // still removes keys once a builder leaves the blocked set, so a genuine
+  // re-block later re-toasts.
+  const SEEN_KEY = 'codev.gateToasts.seen';
+  const seen = new Set<string>(context.workspaceState.get<string[]>(SEEN_KEY, []));
+  const persist = () => context.workspaceState.update(SEEN_KEY, [...seen]);
 
   const onChange = () => {
     const enabled = vscode.workspace
@@ -47,6 +54,7 @@ export function activateGateToasts(
     }
 
     const currentBlocked = new Set<string>();
+    let changed = false;
     for (const b of data.builders) {
       if (!b.blocked || !b.blockedGate) {
         continue;
@@ -59,6 +67,7 @@ export function activateGateToasts(
       currentBlocked.add(key);
       if (!seen.has(key)) {
         seen.add(key);
+        changed = true;
         showGateToast(b.id, b.blockedGate, b.blocked, b.issueId, b.issueTitle);
       }
     }
@@ -67,7 +76,12 @@ export function activateGateToasts(
     for (const key of [...seen]) {
       if (!currentBlocked.has(key)) {
         seen.delete(key);
+        changed = true;
       }
+    }
+
+    if (changed) {
+      persist();
     }
   };
 
@@ -100,7 +114,10 @@ function showGateToast(
   issueTitle?: string | null,
 ): void {
   const label = issueId ? `#${issueId}` : builderId;
-  const titleSuffix = issueTitle ? ` — ${truncate(issueTitle, 50)}` : '';
+  // Quote the issue title so a title that reads like an error
+  // (e.g. "agent/reset returns 504 GATEWAY_TIMEOUT…") is visibly a subject,
+  // not a failure the toast is reporting.
+  const titleSuffix = issueTitle ? ` — “${truncate(issueTitle, 50)}”` : '';
   const message = `Codev: ${label} blocked on ${gateLabel}${titleSuffix}`;
 
   const action = GATE_ACTIONS[gateName] ?? { label: 'Review', command: 'codev.openBuilderById' };
