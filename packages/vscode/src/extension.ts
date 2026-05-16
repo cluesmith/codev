@@ -125,6 +125,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	let buildersView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let pullRequestsView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let backlogView: vscode.TreeView<vscode.TreeItem> | undefined;
+	let recentlyClosedView: vscode.TreeView<vscode.TreeItem> | undefined;
 	const updateListViewTitles = () => {
 		const data = overviewCache.getData();
 		const withCount = (base: string, n: number | undefined) =>
@@ -132,6 +133,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (buildersView) { buildersView.title = withCount('Builders', data?.builders.length); }
 		if (pullRequestsView) { pullRequestsView.title = withCount('Pull Requests', data?.pendingPRs.length); }
 		if (backlogView) { backlogView.title = withCount('Backlog', data?.backlog.length); }
+		if (recentlyClosedView) { recentlyClosedView.title = withCount('Recently Closed', data?.recentlyClosed.length); }
 	};
 
 	// Close builder/dev terminal tabs when their builder disappears from Tower
@@ -180,17 +182,18 @@ export async function activate(context: vscode.ExtensionContext) {
 		updateListViewTitles();
 	});
 
-	// Active-work list views use createTreeView so their title can carry a
-	// live item count; the rest stay on registerTreeDataProvider.
+	// List views use createTreeView so their title can carry a live item
+	// count; the rest stay on registerTreeDataProvider.
 	buildersView = vscode.window.createTreeView('codev.builders', { treeDataProvider: new BuildersProvider(overviewCache) });
 	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: new BacklogProvider(overviewCache) });
+	recentlyClosedView = vscode.window.createTreeView('codev.recentlyClosed', { treeDataProvider: new RecentlyClosedProvider(overviewCache) });
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
 		backlogView,
+		recentlyClosedView,
 		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
-		vscode.window.registerTreeDataProvider('codev.recentlyClosed', new RecentlyClosedProvider(overviewCache)),
 		vscode.window.registerTreeDataProvider('codev.team', new TeamProvider(connectionManager)),
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
 	);
@@ -208,7 +211,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
 		};
 		const anyVisible = (): boolean =>
-			!!buildersView?.visible || !!pullRequestsView?.visible || !!backlogView?.visible;
+			!!buildersView?.visible || !!pullRequestsView?.visible
+			|| !!backlogView?.visible || !!recentlyClosedView?.visible;
 		const stop = () => {
 			if (timer) { clearInterval(timer); timer = undefined; }
 		};
@@ -227,6 +231,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			buildersView!.onDidChangeVisibility(reconcile),
 			pullRequestsView!.onDidChangeVisibility(reconcile),
 			backlogView!.onDidChangeVisibility(reconcile),
+			recentlyClosedView!.onDidChangeVisibility(reconcile),
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('codev.overviewRefreshSeconds')) { stop(); reconcile(); }
 			}),

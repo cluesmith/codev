@@ -271,6 +271,11 @@
           "group": "navigation"
         },
         {
+          "command": "codev.refreshOverview",
+          "when": "view == codev.recentlyClosed",
+          "group": "navigation"
+        },
+        {
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
