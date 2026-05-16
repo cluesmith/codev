@@ -195,6 +195,47 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
 	);
 
+	// Periodic overview refresh. VSCode has no timer-based refresh (event-only),
+	// so an idle workspace never sees externally-merged PRs / new issues. Mirror
+	// the dashboard's poll idiom: refresh on a cadence while the Codev sidebar is
+	// visible, paused when it isn't. The shared Tower-side 30s cache throttles gh
+	// cost across windows; refresh() is last-write-wins so periodic + event-driven
+	// refreshes coexist without flicker.
+	const setupPeriodicOverviewRefresh = () => {
+		let timer: ReturnType<typeof setInterval> | undefined;
+		const readIntervalSeconds = (): number => {
+			const s = vscode.workspace.getConfiguration('codev').get<number>('overviewRefreshSeconds', 60);
+			return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
+		};
+		const anyVisible = (): boolean =>
+			!!buildersView?.visible || !!pullRequestsView?.visible || !!backlogView?.visible;
+		const stop = () => {
+			if (timer) { clearInterval(timer); timer = undefined; }
+		};
+		const reconcile = () => {
+			const seconds = readIntervalSeconds();
+			if (seconds === 0 || !anyVisible()) { stop(); return; }
+			if (!timer) {
+				timer = setInterval(() => {
+					if (connectionManager?.getState() === 'connected') { void overviewCache.refresh(); }
+				}, seconds * 1000);
+				void overviewCache.refresh(); // resume → immediate refresh
+			}
+		};
+
+		context.subscriptions.push(
+			buildersView!.onDidChangeVisibility(reconcile),
+			pullRequestsView!.onDidChangeVisibility(reconcile),
+			backlogView!.onDidChangeVisibility(reconcile),
+			vscode.workspace.onDidChangeConfiguration(e => {
+				if (e.affectsConfiguration('codev.overviewRefreshSeconds')) { stop(); reconcile(); }
+			}),
+			{ dispose: stop },
+		);
+		reconcile();
+	};
+	setupPeriodicOverviewRefresh();
+
 	// Refresh overview on connect + set team visibility
 	connectionManager.onStateChange(async (state) => {
 		if (state === 'connected') {

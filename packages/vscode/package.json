@@ -388,6 +388,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show a VSCode notification toast when a builder reaches a human-approval gate (plan-approval, code-review, etc.)"
+        },
+        "codev.overviewRefreshSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 0,
+          "markdownDescription": "Auto-refresh the Builders / Pull Requests / Backlog / Recently Closed views every N seconds while the Codev sidebar is visible. `0` disables periodic refresh (event-only, the previous behavior). A shared Tower-side 30s cache throttles GitHub calls across all windows."
         }
       }
     }
