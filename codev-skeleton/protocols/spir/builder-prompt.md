@@ -53,13 +53,23 @@ Follow the implementation plan at: `{{plan.path}}`
 {{task_text}}
 {{/if}}
 
-## Multi-PR Workflow
+## PR Strategy
 
-Your worktree is persistent — it survives across PR merges. You can produce multiple PRs sequentially:
+**Do not autonomously open a PR per implementation phase.** Plan phases ship as git commits within a single PR, not as separate PRs. The plan's instruction that "each phase commits independently" refers to git commits, not PRs.
+
+By default, the PR is opened during/after the final implement phase, with all phase-commits already on the branch.
+
+### Architect-requested PRs
+
+The architect MAY request a PR at any point — for spec review, mid-implementation feedback, slicing a large spec into shippable PRs, etc. When the architect explicitly asks for a PR earlier (or for additional PRs), follow that direction. The prohibition is specifically on the *builder* autonomously deciding to open per-phase PRs without architect request.
+
+### Multi-PR Mechanics (when the architect requests sequential PRs)
+
+Your worktree is persistent — it survives across PR merges. When the architect asks for sequential PRs (e.g., to slice a large spec into shippable pieces), use this loop:
 
 1. Cut a branch, open a PR, wait for merge
 2. After merge: `git fetch origin main && git checkout -b <next-branch> origin/main`
-3. Continue to the next phase, open another PR
+3. Continue to the next slice, open another PR
 4. Repeat
 
 **Important**: Do NOT run `git checkout main` — git worktrees cannot check out a branch that's checked out elsewhere. Always branch off `origin/main` via fetch.
