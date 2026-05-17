@@ -345,6 +345,18 @@
         "command": "codev.approveGate",
         "key": "ctrl+k g",
         "mac": "cmd+k g"
+      },
+      {
+        "command": "workbench.view.extension.codev",
+        "key": "ctrl+k c",
+        "mac": "cmd+alt+c",
+        "when": "!sideBarVisible || activeViewlet != 'workbench.view.extension.codev'"
+      },
+      {
+        "command": "workbench.action.closeSidebar",
+        "key": "ctrl+k c",
+        "mac": "cmd+alt+c",
+        "when": "sideBarVisible && activeViewlet == 'workbench.view.extension.codev'"
       }
     ],
     "viewsContainers": {
