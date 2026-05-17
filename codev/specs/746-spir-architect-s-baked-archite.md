@@ -2,8 +2,9 @@
 
 ## Metadata
 - **ID**: spec-2026-05-14-baked-decisions
-- **Status**: draft (iter-2, post-CMAP)
+- **Status**: draft (iter-3, post-architect-feedback)
 - **Created**: 2026-05-14
+- **Last Updated**: 2026-05-17
 - **GitHub Issue**: #746
 
 ## Clarifying Questions Asked
@@ -37,8 +38,6 @@ There is no structured slot in the issue body for **"these decisions are fixed, 
 
 The `spec-review.md` and `plan-review.md` consult-type prompts (used by Codex / Gemini / Claude during CMAP) give reviewers a generic mandate to evaluate completeness, correctness, feasibility, and clarity. `plan-review.md` already says *"don't re-litigate spec decisions"*, which means baked decisions *will* be honored at plan-time *iff* they were faithfully written into the approved spec's Constraints section. The remaining gap is at spec-review (where there is no anti-relitigation instruction at all) and at the moment of initial spec drafting (where the specify prompt does not tell the builder to treat the section as fixed).
 
-The repo currently has **no** `.github/ISSUE_TEMPLATE/` directory (only `.github/workflows/`). Codev itself does not template its own issues today.
-
 ## Desired State
 
 Architects have a **structured, optional channel** in the issue body to declare baked architectural decisions. When present:
@@ -60,11 +59,11 @@ The expected outcome on the Shannon 1353 failure mode: if the architect had list
 
 ## Resolved Decisions
 
-The following decisions were raised during drafting and CMAP review and are now considered settled in this spec:
+The following decisions were raised during drafting and CMAP / architect review and are now considered settled in this spec:
 
 1. **Scope: all three protocols.** SPIR, AIR, and ASPIR all suffer the same failure mode and must all honor baked decisions. ASPIR is identical to SPIR except for gates; it shares the same prompt assets. AIR skips the spec phase but its implement and PR review prompts still need to honor baked decisions surfaced through the issue body.
 
-2. **Template location: both Codev (dogfood) and `codev-skeleton/` (downstream).** Codev does not currently ship an issue template for itself; this work adds one. The skeleton ships the same template so downstream projects benefit.
+2. **No GitHub issue template.** (Revised in iter-3 per architect feedback.) Codev is CLI-driven; `.github/ISSUE_TEMPLATE/` only fires for issues filed via the GitHub web UI. Architects who file via `gh issue create --body-file` or via the API would bypass the template entirely. Templates also add a maintenance surface (Codev mirror + `codev-skeleton/` mirror + downstream inheritance) that pays for itself only if the UI is the dominant filing path — which it is not. The correctness work — prompt-level honoring of the section by builders and CMAP reviewers — is what actually matters. **Discoverability** for architects is achieved instead via a documentation paragraph in each protocol's `protocol.md` (see Decision #9). Architects with strong priors include a `## Baked Decisions` section in the issue body by convention; the prompts honor it whether it arrived via UI or CLI.
 
 3. **Section heading format: heading-level-agnostic match on the name "Baked Decisions".** Prompts and instructions look for a section *named* "Baked Decisions" (case-insensitive), not for an exact `##` heading level. Real-world issue bodies render at varying heading levels (`##`, `###`); the match must tolerate that.
 
@@ -82,97 +81,106 @@ The following decisions were raised during drafting and CMAP review and are now 
 
 10. **AIR coverage**: AIR has no `spec-review.md` (it skips the spec phase). For AIR, the touchpoints are its `builder-prompt.md`, `prompts/implement.md`, and `consult-types/impl-review.md` + `consult-types/pr-review.md`. The instruction in AIR's prompts is "honor baked decisions from the issue body."
 
+11. **Discoverability via documentation, not templates.** Each affected `protocol.md` (SPIR, ASPIR, AIR) gets a short paragraph: *"If you have strong priors on language / framework / deployment / dependencies, include a `## Baked Decisions` section in the issue body. The builder and CMAP reviewers will treat its contents as fixed and will not re-litigate them."* Same change mirrored to `codev-skeleton/protocols/*/protocol.md`. This is the entire discoverability surface — no template ceremony.
+
+12. **Architect-override carveout in all prompt language.** Prompt rules that constrain the builder/reviewer behavior around baked decisions must be framed as *"do not autonomously override a baked decision"*, not *"baked decisions are forbidden to question"*. The architect can always rescind or amend a baked decision in a follow-up message; the rule guards against silent autonomous drift, not against human revision. Every prompt addition this spec drives must include this carveout in spirit (and in the literal phrasing where reasonable).
+
 ## Success Criteria
 
-Each criterion has a concrete pass/fail signal so a builder can verify it without ambiguity.
+Each criterion has a concrete pass/fail signal so a builder can verify it without ambiguity. **All criteria are prompt-and-documentation changes** — no issue templates, no CLI changes (see Resolved Decision #2).
 
-- [ ] **Issue template exists** at `.github/ISSUE_TEMPLATE/` in the Codev repo with a `## Baked Decisions` section. Pass: file present; section header text matches "Baked Decisions"; comment-block placeholder explains category hints (language, framework, deployment, key dependencies, deferred decisions) and tells the architect to leave it blank for free exploration.
-- [ ] **Skeleton parity** — the same template is shipped in `codev-skeleton/.github/ISSUE_TEMPLATE/` (or equivalent skeleton path determined by `codev init` / `codev adopt`). Pass: file present in skeleton; `codev init` of a fresh project produces the template at the project's `.github/ISSUE_TEMPLATE/`.
-- [ ] **SPIR builder-prompt** surfaces baked decisions as a distinct, un-missable section in the rendered prompt. Pass: rendering the template with an issue that contains a "Baked Decisions" section produces a `## Baked Decisions` block at the top level of the rendered prompt (not buried inside `{{issue.body}}` only). When the section is absent or empty, the rendered prompt has no `## Baked Decisions` block (no empty stub).
-- [ ] **ASPIR builder-prompt** behaves identically to SPIR's. Pass: same rendering test as above against ASPIR's template.
+- [ ] **SPIR builder-prompt** surfaces baked decisions as a distinct, un-missable section in the rendered prompt when the issue body contains a "Baked Decisions" section. Pass: rendering the template against an issue with the section produces a `## Baked Decisions` block at the top level of the rendered prompt (not buried inside `{{issue.body}}` only). When the section is absent or empty, the rendered prompt has no `## Baked Decisions` block (no empty stub).
+- [ ] **ASPIR builder-prompt** behaves identically to SPIR's. Pass: same rendering test against ASPIR's template.
 - [ ] **AIR builder-prompt** surfaces baked decisions identically. Pass: same rendering test against AIR's template.
 - [ ] **SPIR `prompts/specify.md`** instructs the builder to read the baked-decisions section first and to write its content verbatim into the spec's Constraints section. Pass: grep the file for an explicit clause referencing "Baked Decisions" and Constraints.
 - [ ] **ASPIR `prompts/specify.md`** has the same clause. Pass: grep.
 - [ ] **AIR `prompts/implement.md`** has an analogous "honor baked decisions from the issue body" clause. Pass: grep.
-- [ ] **SPIR `consult-types/spec-review.md`** contains a "do not relitigate baked decisions" instruction. Pass: grep for explicit phrasing covering the case where the spec respects a baked decision (reviewer should not push back on the underlying choice; only flag if the spec fails to honor the decision).
+- [ ] **SPIR `consult-types/spec-review.md`** contains a "do not autonomously override baked decisions" instruction (carveout phrasing per Decision #12). Pass: grep for explicit phrasing covering the case where the spec respects a baked decision (reviewer should not push back on the underlying choice; only flag if the spec fails to honor the decision).
 - [ ] **ASPIR `consult-types/spec-review.md`** has the same instruction. Pass: grep.
 - [ ] **SPIR `consult-types/plan-review.md`** extends its existing anti-relitigation language to explicitly cover baked decisions. Pass: grep for explicit "baked decisions" language.
 - [ ] **ASPIR `consult-types/plan-review.md`** has the same explicit phrasing. Pass: grep.
 - [ ] **AIR `consult-types/impl-review.md`** has an analogous instruction. Pass: grep.
 - [ ] **AIR `consult-types/pr-review.md`** has an analogous instruction. Pass: grep.
-- [ ] **Skeleton mirror** — every file modified in `codev/protocols/` has the identical edit applied to its mirror in `codev-skeleton/protocols/`. Pass: `diff -r codev/protocols/ codev-skeleton/protocols/` shows no differences for the touched files (other than the project-specific paths that already differ).
-- [ ] **End-to-end transcript test**: a fixture-based test that renders the SPIR builder-prompt with an issue body containing a Baked Decisions section, then runs a dry-render of the consult-type prompt against a sample spec that respects the constraint, and verifies (via assertion or saved transcript) that the rendered prompt would not request relitigation. Pass: the transcript is committed; assertions pass.
-- [ ] **No regression**: existing builder-prompt / consult-prompt rendering against an issue body with no Baked Decisions section produces output byte-identical to today's. Pass: snapshot test or diff against a recorded baseline shows no change for the no-baked-decisions case.
-- [ ] **Documentation updated**: `codev/protocols/spir/protocol.md` (and AIR / ASPIR equivalents) explains the feature, with one paragraph or short subsection. Pass: grep for the keyword "Baked Decisions" in each protocol.md.
+- [ ] **Documentation** — `codev/protocols/spir/protocol.md`, `codev/protocols/aspir/protocol.md`, and `codev/protocols/air/protocol.md` each contain a paragraph instructing architects how to declare baked decisions in the issue body. Pass: grep for "Baked Decisions" in each protocol.md; manual read confirms the paragraph explains the convention, category hints (language / framework / deployment / dependencies), and the "no relitigation by default" behavior.
+- [ ] **Skeleton mirror** — every file modified in `codev/protocols/` has the identical edit applied to its mirror in `codev-skeleton/protocols/`. Pass: `diff -r codev/protocols/ codev-skeleton/protocols/` for the touched files shows no substantive differences (other than path-string differences that already exist).
+- [ ] **Snapshot diff (with-vs-without)** — for each of the three builder-prompts (SPIR, ASPIR, AIR), render the template twice against the same fixture issue: once with a `## Baked Decisions` section and once without. Pass: the diff between the two rendered outputs is non-empty and consists exclusively of the new `## Baked Decisions` block — no other lines change. This is the concrete replacement for the earlier fuzzy "end-to-end transcript" criterion.
+- [ ] **No regression** — rendering each builder-prompt and each consult-type prompt against fixtures that do NOT include a Baked Decisions section produces output byte-identical to a baseline recorded against today's templates. Pass: snapshot test or diff shows no change for the no-baked-decisions case.
 
 ## Constraints
 
 ### Technical Constraints
 - Issue body is the canonical input channel for AIR / BUGFIX / SPIR / ASPIR — anything we add must live in the rendered issue body (or in an equally durable channel that flows through `afx spawn`'s `--issue` path).
 - Changes must be backward compatible: existing issues without the section must work unchanged.
-- The mechanism must work whether the issue was filed via GitHub UI (template-driven) or via `gh issue create --body-file` / API (no template enforcement). The section is plain markdown; CLI-filed issues can include it manually.
+- The mechanism must work regardless of how the issue was filed (GitHub UI, `gh issue create --body-file`, API). The section is plain markdown convention — discoverability comes from protocol documentation, not from GitHub templates (see Resolved Decision #2).
 - Section name matching must be **heading-level-agnostic** (`##`, `###`, etc.) and case-insensitive on the text "Baked Decisions". Builder-prompt and consult-type prompt phrasing must not lock to a specific heading level.
 - Builder-prompt and consult-type prompts are rendered Handlebars-style templates — additions must respect that toolchain.
 - The protocol is meant to apply to SPIR, ASPIR, and AIR (not BUGFIX, which is too small for architectural priors).
+- Prompt language must use the **architect-override carveout** framing (Resolved Decision #12): "do not autonomously override / relitigate baked decisions" rather than absolute prohibitions. The architect can always rescind.
 
 ### Business Constraints
 - This is a tier-2 priority per Shannon's note — design carefully rather than rush.
 - Must not add friction for the common case (no baked decisions). Optional-by-default is non-negotiable.
 
 ## Assumptions
-- GitHub issue templates are the right surface for declaring baked decisions (vs. a separate file or a CLI flag).
+- The issue body is the right surface for declaring baked decisions (vs. a separate file or a CLI flag). A documentation-only convention is sufficient because the Codev workflow is CLI-driven and architects file issues directly.
 - Builders and CMAP reviewers will reliably honor an explicit instruction in their prompts to treat a section as fixed — i.e., we trust the prompt channel more than we trust prose conventions.
-- Architects who don't have strong priors will leave the section blank or delete it; the placeholder text is enough to communicate "leave blank if you want exploration."
+- Architects who don't have strong priors will simply omit the section; absence is the no-op default.
 - The audience for "baked decisions" is **the spec drafter and CMAP reviewers** — not downstream consumers. We do not need a separate API or machine-readable schema.
+- Documentation discoverability (a paragraph in each `protocol.md`) is sufficient — architects learn the convention by reading the protocol they are about to invoke.
 
 ## Solution Approaches
 
-### Approach 1: Optional Issue-Template Section + Reviewer Prompt Update (Option A from the issue)
-**Description**: Add an optional `## Baked Decisions` section to the GitHub issue template(s) that feed SPIR / AIR / ASPIR. Placeholder text explains it is optional and lists the kinds of decisions that belong (language, framework, deployment shape, protocol, key dependencies). Update the SPIR builder-prompt to call out the section if non-empty. Update `spec-review.md` (and `plan-review.md` and AIR's impl/PR reviews) consult-type prompts to instruct reviewers to honor the listed decisions as fixed.
+### Approach 1: Issue-Template + Reviewer Prompt Update (rejected in iter-3)
+**Description**: Add an optional `## Baked Decisions` section to GitHub issue template(s) for SPIR / AIR / ASPIR plus the prompt edits.
 
 **Pros**:
-- Lowest friction — section is optional, blank case is a no-op.
-- Single source of truth (the issue body) — no new file types, no new CLI flags.
-- Backward compatible — existing issues just don't have the section.
-- Architect can fill it in 30 seconds when filing.
+- Discoverability — architects filing via the GitHub UI see the section as a prompt.
+- Single source of truth (the issue body).
 
-**Cons**:
-- Relies on GitHub issue templates, which only fire when filing via the UI. CLI-filed issues need the architect to remember the section by convention.
-- Builder might still under-weight the section if the prompt callout is too subtle.
-- No machine-enforced schema — architects can write fuzzy or contradictory entries.
+**Cons** (decisive):
+- GitHub issue templates only fire when filing via the web UI. Codev is CLI-driven (`gh issue create --body-file`, scripted issue filing, API integrations) and most issues are filed without ever touching the template.
+- Maintenance surface: a template in `codev/.github/ISSUE_TEMPLATE/`, a mirror in `codev-skeleton/.github/ISSUE_TEMPLATE/`, downstream projects inheriting it on `codev init`. Each new mirror is a synchronization burden.
+- Placeholder text in the rendered issue is noise when the architect has no baked decisions.
 
-**Estimated Complexity**: Low
+**Estimated Complexity**: Medium (mostly mirror-management)
 **Risk Level**: Low
+**Decision**: Rejected by architect in iter-3. Discoverability is better served by documentation in each `protocol.md` — architects read those when invoking the protocol.
 
 ### Approach 2: Pre-Spec Checklist Template (Option B from the issue)
-**Description**: A separate one-pager template (e.g., `codev/templates/pre-spec.md`) that architects fill before filing the issue. The filled checklist is pasted verbatim into the issue body. Forces architects to think through language, framework, deployment, key dependencies, and deferred decisions before they file.
+**Description**: A separate one-pager template (e.g., `codev/templates/pre-spec.md`) that architects fill before filing the issue. The filled checklist is pasted verbatim into the issue body.
 
 **Pros**:
 - More rigorous — checklist forces the architect to consider each category.
-- Output is structured and parseable.
 - Useful as a thinking tool even when most fields are "TBD."
 
 **Cons**:
 - More ceremony — friction on every issue, not just the ones with baked decisions.
 - Two-step workflow (fill template → paste into issue) is awkward.
 - For issues with no baked decisions, the checklist is dead weight.
-- Risk of the checklist becoming a box-checking ritual that gets filled with "TBD" everywhere.
 
 **Estimated Complexity**: Medium
 **Risk Level**: Medium (adoption risk — architects skip it under pressure)
+**Decision**: Not chosen.
 
-### Approach 3: Hybrid — Optional Section with Checklist Hints (Recommended)
-**Description**: Approach 1 as the default mechanism (optional issue-template section), but enrich the placeholder text inside the section with the **categories** from Approach 2 (language, framework, deployment, key dependencies, deferred decisions). Architects who want lightweight use it as a free-form list; architects who want rigor use it as an inline checklist. Single channel, two usage patterns.
+### Approach 3: Prompt-Level Honoring + Protocol Documentation (Selected)
+**Description**: Pure prompt-and-documentation change.
+- Builder-prompts (SPIR / ASPIR / AIR) surface a `## Baked Decisions` block in the rendered prompt when the issue body contains a section with that name (heading-level-agnostic, case-insensitive).
+- `prompts/specify.md` (SPIR / ASPIR) instructs the builder to write the section verbatim into the spec's Constraints section.
+- `prompts/implement.md` (AIR) instructs the builder to treat the section as fixed during implementation.
+- `consult-types/spec-review.md`, `plan-review.md`, `impl-review.md`, `pr-review.md` instruct reviewers to honor baked decisions and not autonomously override them.
+- Each `protocol.md` (SPIR, ASPIR, AIR) gets a short paragraph documenting the convention and category hints (language / framework / deployment / dependencies).
+- Mirror everything into `codev-skeleton/`.
 
 **Pros**:
-- Preserves the zero-friction default of Approach 1.
-- Lifts the cognitive scaffolding of Approach 2 into the inline placeholder without forcing a second file.
-- One place to look (the issue body) for both styles of architect.
-- Easy to adopt incrementally — the placeholder educates new users without blocking experienced ones.
+- Zero ceremony when not used — absence of the section is the no-op default.
+- Single source of truth for the *mechanism* (prompts) and a single source of truth for *discoverability* (protocol docs).
+- No GitHub-UI dependency — works for issues filed via CLI or API.
+- Smallest maintenance surface that achieves the goal.
+- Architect can amend or rescind a baked decision at any time (carveout framing per Decision #12).
 
 **Cons**:
-- Placeholder text gets longer, which can be noisy in the rendered issue if not deleted.
-- Still no machine-enforced schema (consistent with the rest of Codev's prompt-driven discipline).
+- Discoverability depends on architects reading the protocol doc — they have to learn the convention, not be prompted by template scaffolding.
+- No machine-enforced schema — architects can write fuzzy or contradictory entries; reviewer prompts handle this by instructing to flag-and-pause.
 
 **Estimated Complexity**: Low
 **Risk Level**: Low
@@ -187,8 +195,7 @@ Each criterion has a concrete pass/fail signal so a builder can verify it withou
 
 ### Important (Affects Design)
 
-- [ ] **Issue-template count**: One generic template covering all protocols, or one per protocol (SPIR / AIR / ASPIR / BUGFIX)? Lean: one generic template with a brief "Protocol" prefix field; details can be elaborated in plan.
-- [ ] **Should `afx spawn` warn at spawn time** if it detects "Baked Decisions" header in the issue but the section is empty? Lean: out of scope for this spec — keep the spec-side change pure prompt/template.
+- [ ] **Should `afx spawn` warn at spawn time** if it detects "Baked Decisions" header in the issue but the section is empty? Lean: out of scope for this spec — keep the spec-side change pure prompt + documentation.
 
 ### Nice-to-Know (Optimization)
 - [ ] Should the spec template (`codev/protocols/spir/templates/spec.md`) explicitly cross-reference baked decisions in its Constraints section header?
@@ -216,11 +223,11 @@ Not applicable — this is a documentation / prompt-template change. No runtime 
    - Render the spec-review consult-type prompt with a fixture spec that respects the constraint.
    - Assertion: rendered prompt contains the anti-relitigation instruction text verbatim.
 
-2. **Baked-decisions absent (empty / omitted)**
-   - Fixture issue body has no `## Baked Decisions` section.
-   - Render the SPIR builder-prompt.
-   - Assertion: rendered prompt has no `## Baked Decisions` block (no empty stub).
-   - Snapshot test: render output is byte-identical to baseline recorded against today's templates.
+2. **Baked-decisions absent (omitted) — snapshot diff**
+   - Render the SPIR builder-prompt twice against the same fixture issue: once with a `## Baked Decisions` section, once without.
+   - Assertion: the diff between the two outputs is non-empty and consists exclusively of the new `## Baked Decisions` block. No other lines change.
+   - Snapshot test: the "without" render is byte-identical to a baseline recorded against today's templates.
+   - Repeat for ASPIR and AIR.
 
 3. **Baked-decisions partial**
    - Fixture issue body lists only language (Python) but no framework.
@@ -245,15 +252,12 @@ Not applicable — this is a documentation / prompt-template change. No runtime 
    - Fixture: prose says "consider Node and Python", baked says "Python".
    - Manual / transcript test: builder treats Python as fixed, prose as superseded.
 
-8. **Issue filed via CLI (no template)**
-   - Builder-prompt rendering for an issue body that was hand-authored with a "Baked Decisions" section produces the same result as a template-filed issue.
-
-9. **Plan-review honors baked decisions**
+8. **Plan-review honors baked decisions**
    - Fixture: spec with a Constraints section listing the baked decisions; plan that respects them.
    - Render plan-review prompt.
    - Assertion: prompt contains the anti-relitigation instruction language.
 
-10. **AIR impl-review honors baked decisions**
+9. **AIR impl-review honors baked decisions**
     - Fixture: AIR issue with baked decisions; implementation respecting them.
     - Render impl-review prompt.
     - Assertion: anti-relitigation instruction present.
@@ -264,7 +268,7 @@ Not applicable — this is a documentation / prompt-template change. No runtime 
 
 ## Dependencies
 
-- **External Services**: GitHub Issue templates (rendered by GitHub's web UI).
+- **External Services**: None.
 - **Internal Systems** (every file in this list is a touchpoint that must be reviewed and most must be edited):
   - `codev/protocols/spir/builder-prompt.md`
   - `codev/protocols/aspir/builder-prompt.md`
@@ -278,11 +282,11 @@ Not applicable — this is a documentation / prompt-template change. No runtime 
   - `codev/protocols/aspir/consult-types/plan-review.md`
   - `codev/protocols/air/consult-types/impl-review.md`
   - `codev/protocols/air/consult-types/pr-review.md`
-  - `codev/protocols/spir/protocol.md` (documentation)
-  - `codev/protocols/aspir/protocol.md` (documentation)
-  - `codev/protocols/air/protocol.md` (documentation)
-  - `.github/ISSUE_TEMPLATE/` (new directory, new template file)
+  - `codev/protocols/spir/protocol.md` (documentation paragraph — primary discoverability surface)
+  - `codev/protocols/aspir/protocol.md` (documentation paragraph)
+  - `codev/protocols/air/protocol.md` (documentation paragraph)
   - `codev-skeleton/` mirror copies of every file above
+- **Explicitly NOT in scope**: `.github/ISSUE_TEMPLATE/` (rejected in iter-3 — see Resolved Decision #2).
 - **Libraries/Frameworks**: None new. Existing Handlebars-style prompt rendering is sufficient.
 
 ## References
@@ -298,29 +302,36 @@ Not applicable — this is a documentation / prompt-template change. No runtime 
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|-------------|--------|--------------------|
-| Architects forget to use the new section, reverting to status quo | Medium | Low | Template placeholder is self-explanatory; SPIR docs add a one-liner; future MAINTAIN can audit usage. |
+| Architects don't discover the convention | Medium | Medium | Documentation paragraph in each `protocol.md` is the discoverability surface; protocol docs are the first thing an architect reads when invoking a protocol. Future MAINTAIN can audit usage and surface examples. |
+| Architects forget to use the section, reverting to status quo | Medium | Low | Same docs paragraph reminds them; CMAP iteration cost is its own incentive — architects who feel the pain of relitigation will adopt. |
 | Builders / CMAP reviewers ignore the prompt instruction | Low–Medium | High | Explicit dedicated section in the rendered prompt; reviewer prompt repeats the instruction verbatim; phrasing puts the constraint at the top of the relevant section. |
-| Baked decisions are wrong or premature | Medium | Medium | Architects can amend the issue and respawn; document this escape hatch in the protocol. The spec-approval gate is still the human checkpoint. |
-| Section becomes a noisy boilerplate that everyone ignores | Low | Medium | Keep the section truly optional — empty placeholder = no-op, no warnings, no friction. |
+| Baked decisions are wrong or premature | Medium | Medium | Architects can amend the issue and respawn; document this escape hatch in the protocol. The spec-approval gate is still the human checkpoint. Carveout framing (Decision #12) makes clear the architect can rescind. |
 | Conflict between baked decisions and CMAP best-practice advice | Medium | Low | Reviewer prompt tells reviewers to flag concerns about a baked decision as a `COMMENT`, not as `REQUEST_CHANGES` — the architect makes the final call. |
 | Heading-level mismatch (`##` vs `###` vs `#`) silently breaks recognition | Medium | High | Prompts instruct readers to match the section by *name*, not by heading level; success criteria require explicit fixtures covering all three levels. |
 | Contradictory baked decisions cause silent failure | Low | Medium | Builder and reviewer prompts both instruct to flag and pause rather than guess. |
-| Issues filed via CLI bypass the template entirely | High | Low | Document the convention; the section being plain markdown means CLI-filed issues can still include it manually. |
+| Prompt language overshoots into absolute prohibition | Low | Medium | Decision #12 mandates "do not autonomously override" framing; reviewer of the implementation PR should verify this carveout is present in every prompt addition. |
 
 ## Expert Consultation
 
 **Iteration 1 — 2026-05-14**: Reviewed by Gemini, Codex, Claude. Verdicts: Gemini `REQUEST_CHANGES`, Codex `REQUEST_CHANGES`, Claude `COMMENT`.
 
-Key consolidated feedback addressed in this iter-2 update:
+Key consolidated feedback addressed in iter-2:
 
 - **Resolved scope** to SPIR + AIR + ASPIR explicitly (was a critical open question in iter-1).
-- **Resolved template location**: both Codev (dogfood) and `codev-skeleton/`.
-- **Added heading-level-agnostic matching** to constraints and test scenarios (Gemini caught this — real-world issues render at varying levels).
-- **Added `prompts/specify.md` (SPIR + ASPIR) and `prompts/implement.md` (AIR) to Dependencies** (Claude caught this — these are the prompts that actually drive spec drafting, distinct from builder-prompt).
-- **Added explicit plan-review.md and AIR impl/pr-review.md changes** to Success Criteria (Gemini noted the existing "don't re-litigate" line is too generic to close the loophole).
-- **Made Success Criteria deterministic** — every criterion now has a concrete pass signal (file exists, grep passes, snapshot matches) so a builder can self-verify (Codex caught this).
+- **Added heading-level-agnostic matching** to constraints and test scenarios (Gemini — real-world issues render at varying levels).
+- **Added `prompts/specify.md` (SPIR + ASPIR) and `prompts/implement.md` (AIR) to Dependencies** (Claude — these are the prompts that actually drive spec drafting, distinct from builder-prompt).
+- **Added explicit plan-review.md and AIR impl/pr-review.md changes** to Success Criteria (Gemini — existing "don't re-litigate" line is too generic to close the loophole).
+- **Made Success Criteria deterministic** — every criterion now has a concrete pass signal (Codex).
 - **Defined section-recognition contract**: heading text "Baked Decisions" (case-insensitive, any level), empty = no-op, with explicit rules for contradictions and conflicts with prose.
 - **Clarified AIR has no `spec-review.md`** — the AIR touchpoints are builder-prompt + implement.md + impl-review.md + pr-review.md.
+
+**Architect Feedback — 2026-05-17** (post iter-2 spec-approval gate):
+
+- **Dropped `.github/ISSUE_TEMPLATE/` scope entirely.** Codev is CLI-driven; templates only fire for GitHub UI filing and add maintenance surface (codev/ + skeleton/ mirrors + downstream inheritance) for discoverability the CLI workflow doesn't need. Resolved Decision #2 rewritten; Success Criteria (issue template + skeleton template), Constraints, Test Scenario "Issue filed via CLI", and Risks rows trimmed.
+- **Replaced with documentation.** Each `protocol.md` (SPIR / ASPIR / AIR) gets a discoverability paragraph. Resolved Decision #11 added; Success Criteria for documentation tightened to require category hints and the no-relitigation behavior to be explained.
+- **Dropped the "one generic template vs per-protocol" open question** as moot.
+- **Tightened the end-to-end transcript success criterion** to a concrete snapshot diff (with-section vs without-section render of each builder-prompt; the diff must consist exclusively of the new `## Baked Decisions` block).
+- **Added Resolved Decision #12** (architect-override carveout) per the memory rule that prompt constraints on builders should be framed as "don't autonomously X" rather than "X is forbidden." All prompt edits this spec drives must use that framing; reviewer of the implementation PR should verify.
 
 ## Approval
 - [ ] Technical Lead Review
@@ -330,9 +341,10 @@ Key consolidated feedback addressed in this iter-2 update:
 
 ## Notes
 
-- This spec deliberately stays at the WHAT level. The HOW — exact placeholder wording, exact phrasing of the reviewer-prompt additions, the order in which files are edited — belongs in the plan.
+- This spec deliberately stays at the WHAT level. The HOW — exact phrasing of the reviewer-prompt additions, exact documentation paragraph wording, the order in which files are edited — belongs in the plan.
 - The Shannon failure case (Spec 1353) is the canonical example; the plan should include it as an end-to-end test scenario.
-- Recommendation crystallized in **Approach 3 (hybrid)**: optional section with category hints inline. Low risk, low friction, immediate benefit when used.
+- Recommendation crystallized in **Approach 3 (prompt-level honoring + protocol documentation)** after architect feedback removed the issue-template scope. Low risk, low friction, smallest maintenance surface.
+- The category hints (language / framework / deployment / dependencies / deferred decisions) live in the `protocol.md` documentation paragraph rather than in a template placeholder — same scaffolding, different surface.
 
 ---
 
