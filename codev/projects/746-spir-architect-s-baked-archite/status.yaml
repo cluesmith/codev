@@ -11,11 +11,11 @@ plan_phases:
     status: complete
   - id: phase_3
     title: 'Reviewer prompts: spec-review / plan-review / impl-review / pr-review + skeleton'
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Protocol documentation + final regression sweep
-    status: pending
-current_plan_phase: phase_3
+    status: in_progress
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -65,4 +65,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_3-iter1-claude.txt
 started_at: '2026-05-14T20:59:40.415Z'
-updated_at: '2026-05-17T20:59:36.904Z'
+updated_at: '2026-05-17T20:59:38.601Z'
