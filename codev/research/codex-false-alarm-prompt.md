@@ -8,15 +8,15 @@
 
 Before issuing `REQUEST_CHANGES`, verify each check below. If your only basis is one of these patterns, downgrade to `COMMENT` and state the uncertainty.
 
-**1. Outside-diff blindness.** You see the diff, not the full codebase. Grep before claiming code or tests are missing — they may exist in unmodified files. If a builder hasn't staged yet (review fired pre-commit), "untracked" is expected.
+**1. Repo-visibility limits.** You see the diff, not the full codebase, and reviews sometimes fire before the builder has staged. Before claiming tests, code, or files are missing, consider that they may exist in unmodified files outside the diff, may be staged later in the same commit, or may be generated/skeleton-only artifacts that don't reflect committed shipped behavior. "Missing from diff" is not evidence of "missing from the codebase."
 
 **2. Test layer for thin orchestrators.** Don't demand direct handler / CLI-process / component tests when the change is a thin wrapper over already-tested primitives requiring many mocks. Contract-style testing of the primitives is valid. Check whether the plan assigns verification to a different layer.
 
-**3. Runtime limits ≠ missing tests.** You cannot run tests in sandbox (EPERM), reach live Tower, or execute E2E harnesses. When you couldn't verify a runtime path, say so explicitly and lower confidence. Don't convert "I couldn't verify X" into "X is missing" or "X is broken."
+**3. Runtime limits ≠ missing tests.** You cannot run tests in sandbox (EPERM), reach live orchestrator state, or execute E2E harnesses. When you couldn't verify a runtime path, say so explicitly and lower confidence. Don't convert "I couldn't verify X" into "X is missing" or "X is broken."
 
-**4. Playwright presence ≠ obligation.** This repo has Playwright with existing tests at `packages/codev/src/agent-farm/__tests__/e2e/`. Builders work in isolated worktrees without Tower, so they cannot run them and cannot meaningfully author new E2E tests during implementation. Don't request new Playwright tests unless the plan explicitly lists them as a deliverable.
+**4. Test-framework presence ≠ obligation.** If this repo has a configured test framework (Playwright, integration harness, etc.) with existing tests, that does not mean every change must add to it. Builders may work in isolated worktrees that cannot run the harness, or in implementation phases that explicitly defer such coverage. Don't request new framework-specific tests unless the plan lists them as a deliverable for this phase.
 
-**5. Porch / gate / status semantics.** `status.yaml` is managed by porch, not the builder. A `pending` gate means "awaiting human approval," not "incomplete." `phase: in_progress` and `build_complete: false` change automatically after `porch done` or human gate approval. Don't flag these as deliverable gaps.
+**5. Orchestrator/gate/status semantics.** Protocol orchestrators manage their own state files (e.g. `status.yaml`) and gate transitions. Pending gates and orchestrator-managed status fields are orchestration state, not by themselves deliverable gaps. Don't flag them as incomplete work.
 
 **6. Phase-scoped legacy code is intentional.** If the plan uses words like "dual-mode," "transitional fallback," "rolling upgrade," "backward compatibility," or "phased migration," treat the legacy path as intentional until the explicitly-named removal phase. Don't request work scheduled for a later phase.
 
@@ -24,8 +24,6 @@ Before issuing `REQUEST_CHANGES`, verify each check below. If your only basis is
 
 **8. Functional equivalence ≠ spec violation.** When implementation differs from the spec's literal wording, evaluate whether it achieves the same outcome or improves on it (testability, backward compat, error safety). Flag only deviations that lose functionality or violate stated intent.
 
-**9. Read Previous Iteration Context.** If prior-iteration context is provided, read it. If you raised a concern previously and the builder rebutted with rationale the spec/plan supports, don't re-raise unless you have **new** evidence the rebuttal was wrong. Cite the prior rebuttal when overruling it.
-
-**10. Generated / staging / admin artifacts.** Ignore worktree-generated files, pre-commit staging gaps, parser/tooling artifacts, and skeleton-only copies unless they affect committed source or shipped behavior.
+**9. Read Previous Iteration Context — and quote it when overruling.** If prior-iteration context is provided, you MUST read it. If you are about to raise a concern that was previously rebutted, you MUST quote the builder's rebuttal rationale and explain exactly why the new diff renders it insufficient. Re-raising a settled concern without engaging the prior rebuttal is not allowed.
 
 When in doubt between `REQUEST_CHANGES` and `COMMENT`, prefer `COMMENT`. `REQUEST_CHANGES` blocks the iteration; `COMMENT` lets the architect weigh the concern.

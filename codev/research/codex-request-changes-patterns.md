@@ -9,7 +9,7 @@
 
 ## Scope summary
 
-We have 71 rebuttal files (across 22–23 distinct projects) where Codex issued `REQUEST_CHANGES` during CMAP cycles. Two questions, one synthesis:
+We have **71 Codex-containing rebuttal files** across **21 distinct projects** (corpus has 23 project directories total; project 671 contains no Codex content in its 2 rebuttal files, and project 589 had Codex skipped by architect instruction). These document `REQUEST_CHANGES` verdicts Codex issued during CMAP cycles. Two questions, one synthesis:
 
 1. **Universal patterns Codex flags correctly** — recurring, *generalizable* objections we can pre-empt by writing tighter specs/plans up front. (This file.)
 2. **Universal patterns Codex consistently false-alarms on** — categories where Codex is reliably wrong because of a structural limitation, fed into a drop-in prompt fragment Codex sees on every consult. ([codex-false-alarm-prompt.md](codex-false-alarm-prompt.md).)
@@ -35,14 +35,16 @@ Three investigators (Gemini 3 Pro, Codex/GPT-5.4, Claude Opus 4.7) each read all
 
 These are the highest-frequency, highest-generalizability patterns Codex correctly flags. Pre-empting them at spec/plan time avoids the iteration.
 
-1. **Specify defaults, nullability, and fail-fast/degraded behavior for every new field, flag, and external dependency.** [Consensus — Codex, Gemini, Claude] — Codex's #1 spec-review move.
+1. **Specify defaults, nullability, fail-fast/degraded behavior, and input-validation handling for every new field, flag, parser, or external dependency.** [Consensus — Codex, Gemini, Claude; input-validation sub-bullet from Claude] — Codex's #1 spec-review move. Sub-checklist for validation surfaces: empty strings, NaN, mutual exclusivity of conflicting flags, strict-equality vs truthiness, behavior on unknown values.
 2. **Per-phase test matrix in the plan**: name the test layer (unit / handler / integration / Playwright), the file(s), and what counts as sufficient coverage. Flag layers deferred to later phases explicitly. [Consensus]
 3. **Lock external contracts early**: ID shapes, response payload nesting, fallback matching rules, cache keys, summary-vs-detail level. [2/3 — Codex, Claude]
 4. **For phased migrations, name the legacy code that intentionally survives this phase, why, and the phase it dies in.** Mark dual-mode segments in the plan. [Consensus]
-5. **For deprecation/removal sweeps, generate an exhaustive grep target list up front**: source, tests, CLI flag registrations, types, *docs*, *skeleton templates*, examples. Codex catches the stragglers. [Consensus]
+5. **For deprecation/removal sweeps, list every reference site up front**: source, tests, CLI flag registrations, types, *docs*, *skeleton templates*, examples. Codex catches the stragglers. [Consensus]
 6. **For protocol/state-machine work (porch, gates, status.yaml), write the command/state flow explicitly**: who runs each command, which transitions are automatic vs human, what "pending" means. [Codex] — Codex misfires here unless state is prose, not just bullets.
 7. **For thin orchestrator handlers, point Codex at where the real logic is tested.** A one-line "underlying primitives X, Y, Z are tested in `…test.ts`; this handler is integration-tested via Z" pre-empts the test-coverage objection. [Consensus] — also feeds the false-alarm prompt.
-8. **For input validation surfaces (CLI flags, parsers, IDs), write a validation checklist into the plan**: empty strings, NaN, mutual exclusivity, strict-equality vs truthiness. [Claude] — single-source but strong evidence.
+8. **List documentation-touchpoint files (arch.md, CLAUDE.md/AGENTS.md, skeleton template docs, INSTALL.md) as explicit deliverables in the plan.** Don't leave them to post-implementation cleanup. [Consensus 2/3]
+
+*See also*: **Watchlist W1** (security hardening — parameterized commands, explicit permissions, scoped tool constraints) — single-investigator, threshold-only, but high stakes.
 
 ---
 
@@ -164,9 +166,9 @@ Each pattern names the rule, evidence (≥3 distinct projects with rebuttal file
 
 ---
 
-### Pattern 8: Documentation-reality alignment after implementation [Consensus 2/3 — Claude, Gemini]
+### Pattern 8: List documentation-touchpoint files in the plan as deliverables [Consensus 2/3 — Claude, Gemini]
 
-**Rule**: After implementation, re-read every prose documentation claim you wrote or touched (arch.md, CLAUDE.md, lessons-learned.md, skeleton template docs, INSTALL.md, README excerpts) and verify it matches what the code actually does. Update or remove stale claims as part of the same PR.
+**Rule**: In the plan, enumerate every documentation file (arch.md, CLAUDE.md, AGENTS.md, lessons-learned.md, skeleton template docs, INSTALL.md, README excerpts) that the change will affect, and list each one as an explicit deliverable. When the plan names them, the builder won't forget them and Codex reviews against the plan rather than the omission. After implementation, re-verify each listed doc matches what the code actually does.
 
 **Evidence** (≥4 distinct projects):
 - `723-review-iter1-rebuttals.md` — Docs overstated template propagation behavior; `codev init` doesn't produce new templates as claimed (accepted)
@@ -178,11 +180,11 @@ Each pattern names the rule, evidence (≥3 distinct projects with rebuttal file
 
 ---
 
-### Pattern 9: Input validation — write the validation checklist into the plan [Claude 1/3 — single-source]
+### Pattern 9: Input validation — write the validation checklist into the plan [Claude 1/3 — single-source; consider sub-bullet of Pattern 1]
 
 **Rule**: For every CLI flag, parser, or external input, the plan must list: empty-string handling, NaN handling for numeric flags, mutual exclusivity of conflicting flags, strict-equality vs truthiness for optional flags, and behavior on unknown values. Don't leave this to "obvious" defensive coding.
 
-**Evidence** (≥5 distinct projects):
+**Evidence** (4 distinct projects):
 - `653-pr_tracking_and_worktree-iter1-rebuttals.md` — Flag parsing too permissive (NaN, missing values), truthiness checks, mutual exclusivity of `--pr/--merged` (3/3 accepted)
 - `587-review-iter1-rebuttals.md` — `detectAuthor()` can return empty string (accepted)
 - `587-backend_api-iter1-rebuttals.md` — GraphQL aliases starting with digits produce invalid queries (accepted)
@@ -193,16 +195,11 @@ Each pattern names the rule, evidence (≥3 distinct projects with rebuttal file
 
 ---
 
-### Pattern 10: Security hardening — parameterized commands, explicit permissions, scoped tools [Claude 1/3 — single-source]
+### Watchlist (lower-confidence patterns)
 
-**Rule**: For every shell-command construction, use `execFile` with args array (never string interpolation). For every file/socket/dir creation, set explicit permissions (0600 / 0700). For every tool or skill that runs commands, write an explicit safety constraint section.
+These appeared at exactly the 3-project threshold from a single investigator (Claude). They're listed for future validation rather than promoted into the core tips list — but each carries enough stakes (or sharp enough actionability) to be worth flagging.
 
-**Evidence** (3 distinct projects):
-- `653-plan-iter1-rebuttals.md` — `writeStateAndCommit` used shell string interpolation → shell injection risk; builder switched to `execFile` (accepted)
-- `0104-phase_2-iter7-rebuttals.md` — Socket file created without 0600 enforcement; builder added `chmodSync` (accepted)
-- `723-specify-iter1-rebuttals.md` — Skill should be constrained to guidance only, no destructive commands; explicit constraint added (accepted)
-
-**Confidence note**: lowest-frequency genuine pattern (3 projects, exactly meets threshold). Single-source. Surface area is small but stakes are high — kept on the tips list because the cost of missing one is much greater than the cost of adding a checklist line.
+**W1: Security hardening** — parameterized commands, explicit permissions, scoped tools. For shell-command construction, use `execFile` with args array (never string interpolation); for file/socket creation, set explicit permissions (0600 / 0700); for tools/skills that run commands, write an explicit safety-constraint section. Evidence (3 projects): `653-plan-iter1-rebuttals.md` (shell injection risk in `writeStateAndCommit`), `0104-phase_2-iter7-rebuttals.md` (socket missing 0600 enforcement), `723-specify-iter1-rebuttals.md` (skill needed destructive-command constraint). Confidence note: lowest-frequency, threshold-only, single-source, reads as general security hygiene rather than a distinctively-Codex pattern. Kept on the watchlist because cost-of-miss is high.
 
 ---
 
@@ -238,10 +235,11 @@ Codex applies a generic "if there's a handler, there should be a test that calls
 
 Codex sees `status.yaml` with `phase: X / build_complete: false`, or a `pending` gate, and interprets it as "the builder hasn't finished." In reality these are deliberate orchestration artifacts: pending gates await human approval, `status.yaml` is managed by porch's state machine (builders don't edit it), and porch advances state on `porch done` only.
 
-**Evidence** (3 projects):
+**Evidence** (2 projects — at threshold; see note):
 - `0124-phase_5-iter1-rebuttals.md` — "PR not created / gate pending"; PR #312 already existed; pending gate is by design
 - `723-phase_2-iter1-rebuttals.md` — "`status.yaml` shows `phase_2 in_progress / build_complete: false`"; flagged porch-managed internal state as deliverable gap
-- `0117-review-iter1-rebuttals.md` — JSONL parse failure caused porch to default to REQUEST_CHANGES; effect was a false REQUEST_CHANGES even though Codex's actual verdict was APPROVE (tooling bug, surfaced here because the user-facing effect was identical)
+
+**Threshold note**: 0117 was originally cited here but removed during critique — Codex's actual verdict on 0117 was APPROVE; the REQUEST_CHANGES outcome was caused by porch's JSONL parser failing to extract Codex's verdict, not by Codex misreading porch semantics. The 0117 case is a tooling bug, not addressable by prompting Codex. FA3 therefore falls to 2 distinct projects, one short of the brief's ≥3 threshold. Retained because (a) all three investigators independently flagged porch-semantics confusion as a real false-alarm pattern in their commentary, and (b) the fix is cheap (one prompt-fragment line). Reclassify or remove if a future audit finds it remains at 2 projects.
 
 ---
 
@@ -271,16 +269,17 @@ Codex literally cannot run tests in its sandbox (EPERM), cannot see live Tower s
 
 ---
 
-### FA6: Flag missing code/tests that exist outside the diff [Claude 1/3 — but extremely actionable] {#fa6-outside-diff}
+### FA6: Repo-visibility limits — flag code/tests/artifacts outside the diff or outside the "shipped" surface [Claude 1/3 + Codex partial — merged with original FA8]
 
-Codex reviews the diff, not the full codebase. When tests or implementation files exist in files that weren't modified, Codex doesn't see them and concludes they're missing. When files haven't been staged yet (review fires before commit), it sees them as "untracked."
+Codex reviews the diff, not the full codebase. When tests or implementation files exist in files that weren't modified, Codex doesn't see them and concludes they're missing. When files haven't been staged yet (review fires before commit), it sees them as "untracked." Adjacent failure mode: Codex sometimes flags generated artifacts, skeleton-only copies, pre-commit-staging gaps, or build outputs as if they were source defects.
 
-**Evidence** (3 projects):
+**Evidence** (4 projects, including original FA8 evidence):
 - `468-phase_1-iter1-rebuttals.md` — "No tests added"; a 372-line test file with 17 tests already existed but wasn't in the diff (Claude independently verified)
 - `467-backend_last_data_at-iter1-rebuttals.md` — "Missing unit tests for `lastDataAt` tracking"; `pty-last-data-at.test.ts` with 5 tests already existed
 - `723-phase_1-iter1-rebuttals.md` / `723-implement-phase_1-iter1-rebuttals.md` — "Skill files are still untracked"; review fired before commit; builder hadn't staged yet
+- `386-final_verification-iter1-rebuttals.md` — Auto-generated file flagged as source defect (from original FA8)
 
-**Note**: only Claude surfaced this as a named false-alarm; the evidence is unambiguous and the fix (one line in the prompt) is cheap.
+**Note**: only Claude surfaced "outside-diff" as a named false-alarm; only Codex surfaced "generated/staging" — but they share a root cause (Codex misreads the bounds of what is and isn't *committed shipped behavior*). Merged per critique. The fix (one prompt-fragment line) is cheap.
 
 ---
 
@@ -293,17 +292,6 @@ Codex evaluates completeness against its general sense of what a feature "should
 - `0126-github_integration-iter1-rebuttals.md` — Missing issue body/comments requested when deliverable was explicitly title-only summary
 - `0126-cleanup-iter1-rebuttals.md` — Skeleton files flagged when they're distribution template, not this phase's scope
 - `653-specify-iter0-rebuttals.md` — Security section requested for standard defensive coding patterns not warranting spec-level treatment
-
----
-
-### FA8: Generated/staging/admin artifacts treated as source defects [Codex 1/3 partial Claude]
-
-Codex sometimes flags worktree-generated files, pre-commit-hook staging artifacts, and intentionally-excluded surfaces (skeleton-only copies, build outputs) as if they were source defects.
-
-**Evidence** (3 projects):
-- `386-final_verification-iter1-rebuttals.md` — Auto-generated file flagged as source defect
-- `723-phase_1-iter1-rebuttals.md` / `723-implement-phase_1-iter1-rebuttals.md` — Pre-commit staging gap
-- `0117-review-iter1-rebuttals.md` — Tooling/parser artifact misread as a behavior issue
 
 ---
 
@@ -327,10 +315,10 @@ The full per-file table (all 71 files × 3 investigators) is kept in the individ
 ## Disagreements and resolution
 
 1. **False-alarm rate**: Gemini 36%, Claude 20%, Codex ~26%. **Resolution**: report the range (20–36%) and note the methodological cause. The aggregate "noise" rate (b+c) is consistent at ~38% across investigators, which is the operationally relevant number.
-2. **Whether input validation deserves its own pattern**: Claude says yes (Pattern 9); Codex/Gemini fold it into spec completeness. **Resolution**: retained as standalone Pattern 9 with a confidence note. Evidence is strong enough (5 projects) and the actionability is sharper than the general rule.
-3. **Whether security hardening deserves its own pattern**: Claude says yes (Pattern 10); others don't surface it. **Resolution**: retained with confidence note. Frequency is at threshold (3 projects), but cost-of-miss justifies inclusion.
+2. **Whether input validation deserves its own pattern**: Claude says yes (Pattern 9); Codex/Gemini fold it into spec completeness. **Resolution after critique**: Codex's critique flagged Pattern 9 as over-weighted in the TL;DR (single-investigator, threshold-only); merged input-validation into TL;DR Tip 1 as a sub-checklist. Standalone Pattern 9 retained in the detailed-patterns section with confidence note for traceability.
+3. **Whether security hardening deserves its own pattern**: Claude says yes (Pattern 10); others don't surface it. **Resolution after critique**: Codex's critique flagged Pattern 10 as too generic for a "Codex-derived pattern." Demoted to **Watchlist W1** — kept for visibility, removed from the numbered core patterns.
 4. **Whether FA4 (re-raise rebutted concerns) is a separate false alarm**: Only Claude names it. **Resolution**: retained — Codex's coverage table shows the pattern (iter2/iter3 of 0104 phase_3 has 0/3 and 1/1 classification, dominated by re-raises), and the fix (one prompt line about Previous Iteration Context) is cheap.
-5. **Whether FA6 (outside-diff blindness) is a separate false alarm**: Only Claude names it. **Resolution**: retained — evidence (3 projects) is unambiguous and the cost of including a prompt line is trivial.
+5. **Whether FA6 (outside-diff blindness) is a separate false alarm**: Only Claude names it. Original FA8 (generated/staging artifacts) surfaced only by Codex. **Resolution after critique**: Codex's critique flagged FA8 as falling below threshold once 0117 evidence was removed, and noted significant overlap with FA6. Merged into a single "FA6: Repo-visibility limits" entry covering both outside-diff blindness and generated/staging artifacts.
 6. **Whether to deliver one prompt fragment or per-consult-type variants**: Brief mandated one drop-in fragment. Investigators suggested per-type variants (FA1 belongs in impl-review, not spec-review). **Resolution**: ship a single fragment per the brief, but Deliverable 1 (this file) notes which patterns are phase-specific so a future split is straightforward.
 
 ---
@@ -349,7 +337,33 @@ The full per-file table (all 71 files × 3 investigators) is kept in the individ
 
 ## Changes from critique
 
-*[To be populated after Phase 4 critique completes.]*
+Phase 4 sent the synthesis + drop-in prompt to Gemini, Codex, and Claude. Both Gemini and Codex returned substantive critiques. Claude's critique cited patterns and details that don't exist in the actual synthesis (referenced "Patterns 11/12" and "29 distinct projects" — the synthesis has 10 patterns and stated 22–23 projects, since reduced to exact 21); the points appear to have been hallucinated from training data rather than from the current artifacts. Claude's *valid* observations (word-count check on the prompt — confirmed ~400 of 500; soften hardcoded path in check #4 — also flagged by Gemini) were incorporated.
+
+### Incorporated (must-fix)
+
+1. **Pattern 8 reframed as plan-time action** (Gemini). Was: "After implementation, re-read every doc claim and verify." Now: "In the plan, enumerate every documentation file that will need updates as explicit deliverables." This restores the synthesis's "pre-empt at spec/plan time" premise.
+2. **Pattern 9 evidence count corrected** (Gemini). Was "(≥5 distinct projects)" — the list actually contains 4 distinct projects (653, 587, 468, 469; 587 appears in two rebuttals but counts once). Now correctly "(4 distinct projects)."
+3. **Pattern 9 demoted in TL;DR** (Codex). Single-investigator + threshold-only doesn't merit a co-equal slot with consensus patterns. Merged into TL;DR Tip 1 as a validation sub-checklist. Standalone Pattern 9 retained in the detailed section.
+4. **Pattern 10 demoted to Watchlist** (Codex). Single-investigator, exactly-3 projects, and reads as general security hygiene rather than a distinctively-Codex pattern. Moved to a "Watchlist W1" appendix entry under detailed patterns.
+5. **Corpus count made exact** (Codex). Was "22–23 distinct projects" (ambiguous). Now: "71 Codex-containing rebuttal files across 21 distinct projects (23 in corpus; 671 has no Codex content, 589 had Codex skipped)."
+6. **FA3 evidence corrected — 0117 removed** (Codex). 0117 was not a Codex misbehavior at all: porch's JSONL parser failed to extract Codex's verdict, defaulted to REQUEST_CHANGES, and Codex's actual verdict was APPROVE. Cannot be addressed by prompting Codex. FA3 now has 2 supporting projects; retained with explicit threshold-note for transparency.
+7. **FA8 merged into FA6** (Codex). After removing 0117, FA8 had 2 projects (386, 723) and substantially overlapped FA6 (both are "Codex misreads the bounds of committed shipped behavior"). Combined entry titled "Repo-visibility limits."
+8. **Drop-in prompt check #1 ("Grep before claiming") softened** (Gemini, Codex). The word "Grep" assumes a tool that Codex may not have in some review contexts (e.g., PR-diff review). Replaced with "Search/inspect the codebase…" — tool-agnostic.
+9. **Drop-in prompt check #4 hardcoded path removed** (Gemini, Codex, Claude). The path `packages/codev/src/agent-farm/__tests__/e2e/` violated the brief's "no rotting refs" constraint. Reworded to refer to existing infrastructure generically.
+10. **Drop-in prompt items #1 and #10 merged** (Codex). Both addressed "Codex misreads what's actually in the committed/shipped surface." Combined into a single "Repo-visibility limits" check, mirroring the FA6 merge in the synthesis.
+11. **Drop-in prompt check #9 strengthened with mechanical constraint** (Gemini). Existing `impl-review.md` already says "read Previous Iteration Context" and it isn't sticking. New wording requires Codex to quote the prior rebuttal explicitly when overruling it, making the check actionable rather than aspirational.
+12. **Drop-in prompt check #5 simplified** (Codex). Removed over-specific mechanics (`phase: in_progress and build_complete: false change automatically after porch done…`) — the audience is Codex, which needs the rule, not the implementation detail. Now: "pending gates and porch-managed status fields are orchestration state, not by themselves deliverable gaps."
+
+### Rejected (with rationale)
+
+- **Claude's claim that "FA9 (re-raising) and FA10 (scope-creep) are missing from the synthesis"** — both are *already present* as FA4 and FA7. Claude appears to have reviewed a hallucinated version of the synthesis. Rejected as factually incorrect.
+- **Claude's claim that the synthesis says "29 distinct projects"** — line 12 says "22–23" (now: exact "21"). Rejected as factually incorrect.
+- **Claude's suggestion to add a "Pattern 11/12" and a "Mining for `gh` flag bugs" rule** — these reference content that doesn't exist in the synthesis and propose patterns not derived from this brief's corpus. Out of scope.
+- **Codex's suggestion to add "Appears in X objections / Y rebuttal files / Z projects" frequency annotations to every pattern heading** — the per-pattern Evidence sections already list distinct-project counts; adding objection-count would require investigator-level recounting (Codex, Gemini, and Claude each used different deduplication rules and produced different totals). Synthesis judgment was to keep the higher-confidence "≥N projects" annotation rather than the more-precise-looking-but-less-comparable "M objections" figure. Reserved for a future deeper audit if a/b/c reliability needs revisiting.
+
+### Summary
+
+12 critique points incorporated (8 must-fix factual/structural, 4 prompt refinements). 4 points rejected with rationale. Of the incorporated must-fixes, 3 were independently surfaced by two investigators (drop-in #1 wording, drop-in #4 hardcoded path, FA8/FA6 overlap); 5 were surfaced by Gemini or Codex alone. Critique was substantive — Pattern 9 was demoted, Pattern 10 was demoted to a watchlist entry, FA3 evidence was rebuilt after invalidating 0117, FA6 absorbed FA8, and the drop-in prompt was tightened in 5 distinct places. This satisfies the brief's acceptance criterion that at least one tip be overturned, refined, or merged based on critique — three were.
 
 ---
 
