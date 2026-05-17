@@ -1,10 +1,15 @@
 # Specification: Baked Architectural Decisions in SPIR Issue Body
 
+---
+approved: 2026-05-17
+validated: [gemini, codex, claude]
+---
+
 ## Metadata
 - **ID**: spec-2026-05-14-baked-decisions
-- **Status**: draft (iter-3, post-architect-feedback)
+- **Status**: approved
 - **Created**: 2026-05-14
-- **Last Updated**: 2026-05-17
+- **Last Updated**: 2026-05-17 (iter-4: spec text amended to match the iter-3 plan-approval direction toward unconditional rendering — see Amendments below)
 - **GitHub Issue**: #746
 
 ## Clarifying Questions Asked
@@ -89,9 +94,9 @@ The following decisions were raised during drafting and CMAP / architect review 
 
 Each criterion has a concrete pass/fail signal so a builder can verify it without ambiguity. **All criteria are prompt-and-documentation changes** — no issue templates, no CLI changes (see Resolved Decision #2).
 
-- [ ] **SPIR builder-prompt** surfaces baked decisions as a distinct, un-missable section in the rendered prompt when the issue body contains a "Baked Decisions" section. Pass: rendering the template against an issue with the section produces a `## Baked Decisions` block at the top level of the rendered prompt (not buried inside `{{issue.body}}` only). When the section is absent or empty, the rendered prompt has no `## Baked Decisions` block (no empty stub).
+- [ ] **SPIR builder-prompt** carries a top-level `## Baked Decisions` instruction paragraph that teaches the builder the convention. (Amended in iter-4: per the iter-3 plan-approval direction, the paragraph is **unconditional** — present in every rendered builder-prompt regardless of whether the issue body contains a Baked Decisions section. The paragraph is a no-op when no section is present; it educates the builder when one is. See Amendments below.) Pass: rendering the template against any issue produces a top-level `## Baked Decisions` block; when the issue itself contains a Baked Decisions section, that content reaches the builder verbatim via `{{issue.body}}`.
 - [ ] **ASPIR builder-prompt** behaves identically to SPIR's. Pass: same rendering test against ASPIR's template.
-- [ ] **AIR builder-prompt** surfaces baked decisions identically. Pass: same rendering test against AIR's template.
+- [ ] **AIR builder-prompt** carries the same instruction paragraph. Pass: same rendering test against AIR's template.
 - [ ] **SPIR `prompts/specify.md`** instructs the builder to read the baked-decisions section first and to write its content verbatim into the spec's Constraints section. Pass: grep the file for an explicit clause referencing "Baked Decisions" and Constraints.
 - [ ] **ASPIR `prompts/specify.md`** has the same clause. Pass: grep.
 - [ ] **AIR `prompts/implement.md`** has an analogous "honor baked decisions from the issue body" clause. Pass: grep.
@@ -103,8 +108,8 @@ Each criterion has a concrete pass/fail signal so a builder can verify it withou
 - [ ] **AIR `consult-types/pr-review.md`** has an analogous instruction. Pass: grep.
 - [ ] **Documentation** — `codev/protocols/spir/protocol.md`, `codev/protocols/aspir/protocol.md`, and `codev/protocols/air/protocol.md` each contain a paragraph instructing architects how to declare baked decisions in the issue body. Pass: grep for "Baked Decisions" in each protocol.md; manual read confirms the paragraph explains the convention, category hints (language / framework / deployment / dependencies), and the "no relitigation by default" behavior.
 - [ ] **Skeleton mirror** — every file modified in `codev/protocols/` has the identical edit applied to its mirror in `codev-skeleton/protocols/`. Pass: `diff -r codev/protocols/ codev-skeleton/protocols/` for the touched files shows no substantive differences (other than path-string differences that already exist).
-- [ ] **Snapshot diff (with-vs-without)** — for each of the three builder-prompts (SPIR, ASPIR, AIR), render the template twice against the same fixture issue: once with a `## Baked Decisions` section and once without. Pass: the diff between the two rendered outputs is non-empty and consists exclusively of the new `## Baked Decisions` block — no other lines change. This is the concrete replacement for the earlier fuzzy "end-to-end transcript" criterion.
-- [ ] **No regression** — rendering each builder-prompt and each consult-type prompt against fixtures that do NOT include a Baked Decisions section produces output byte-identical to a baseline recorded against today's templates. Pass: snapshot test or diff shows no change for the no-baked-decisions case.
+- [ ] **End-to-end smoke (with-vs-without rendering)** — for each of the three builder-prompts (SPIR, ASPIR, AIR), render the template twice against fixture issues: once with a `## Baked Decisions` section and once without. (Amended in iter-4: per the iter-3 unconditional-instruction design, both renders contain the instruction paragraph; the difference is only in the `{{issue.body}}` content, which carries the issue's own Baked Decisions section through verbatim when present.) Pass: both renders contain the top-level instruction `## Baked Decisions` block; the with-fixture render additionally contains the fixture's Baked Decisions content verbatim; the without-fixture render contains no fixture content.
+- [ ] **No regression** — every static markdown file touched by this work (builder-prompts, drafting prompts, reviewer prompts, protocol.md) has a pre-change baseline captured; the post-change file is a pure-addition diff of the baseline (zero removed lines, zero modified lines). This is how no-regression maps to the architect-directed unconditional design: we no longer need a "no `## Baked Decisions` block when absent" assertion (that requirement only applied to the parser-based design); instead, we assert that nothing pre-existing was removed or mangled in any of the 30 touched files.
 
 ## Constraints
 
@@ -349,5 +354,22 @@ Key consolidated feedback addressed in iter-2:
 ---
 
 ## Amendments
+
+### Amendment 1: Unconditional instruction paragraph (2026-05-17, iter-4)
+
+**Summary**: Drop the conditional-rendering requirement from the builder-prompt success criteria. The instruction paragraph is unconditional.
+
+**Problem addressed**: The original spec (iter-3) carried success criteria written against a parser-based design: *"When the section is absent or empty, the rendered prompt has no `## Baked Decisions` block (no empty stub)"*. When the architect's plan-approval feedback (2026-05-17 ~20:34 PDT) directed dropping the parser and replacing the `{{#if baked_decisions}}` block with *"a plain instruction paragraph (uniform across SPIR/ASPIR/AIR)"*, the plan was rewritten — but the spec text was not updated to match. Codex's PR-level CMAP review caught the resulting drift: the implementation (correctly per the architect's direction) puts the `## Baked Decisions` paragraph unconditionally in every builder-prompt render, but the spec text still required absence-of-block when the issue has no section.
+
+**Rationale for the architect-directed design**: An unconditional instruction paragraph teaches the convention to every builder, every time, regardless of whether the current issue uses it. When the issue has no Baked Decisions section, the paragraph is a no-op (the builder reads the instruction, looks at the issue body, finds no section, and proceeds normally). When the issue does have one, the paragraph tells the builder to honor it. This is more robust than conditional rendering — it doesn't depend on a parser detecting the section correctly, and it discoverably documents the convention in every builder session.
+
+**Spec changes**:
+- **Success Criteria** — the "SPIR/ASPIR/AIR builder-prompt" criteria are reworded: instruction paragraph is unconditional and always present; the assertion is that the paragraph exists and that fixture content reaches the builder verbatim when present.
+- **End-to-end smoke / No-regression criteria** — reworded to match: both with-fixture and without-fixture renders contain the instruction; the no-regression mechanism becomes "pure-addition diff against pre-change baselines" rather than "byte-identical when section absent".
+- **Resolved Decisions #5** (empty section = no-op): still applies — but at the *builder-behavior* level, not at the *rendering* level. The builder sees the instruction; the absence of an issue-side Baked Decisions section means the instruction has nothing to act on.
+
+**Plan changes**: None. The iter-3 plan already reflects the architect-directed design; this amendment brings the spec text into alignment with the plan that was approved and implemented.
+
+**Implementation impact**: Zero. The committed implementation already matches the architect-directed unconditional design. The amendment is a documentation-side correction to remove the spec-vs-implementation drift Codex flagged.
 
 <!-- TICK amendments to this specification go here in chronological order -->

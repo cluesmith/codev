@@ -1,8 +1,13 @@
 # Plan: Baked Architectural Decisions in SPIR Issue Body
 
+---
+approved: 2026-05-17
+validated: [gemini, codex, claude]
+---
+
 ## Metadata
 - **ID**: plan-2026-05-17-baked-decisions
-- **Status**: draft (iter-3, post-architect-feedback)
+- **Status**: approved
 - **Specification**: [codev/specs/746-spir-architect-s-baked-archite.md](../specs/746-spir-architect-s-baked-archite.md)
 - **Created**: 2026-05-17
 
