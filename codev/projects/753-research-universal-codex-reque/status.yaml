@@ -11,8 +11,9 @@ gates:
     approved_at: '2026-05-17T20:47:47.425Z'
   research-complete:
     status: pending
+    requested_at: '2026-05-17T21:28:48.064Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-17T20:37:28.133Z'
-updated_at: '2026-05-17T21:17:41.336Z'
+updated_at: '2026-05-17T21:28:48.064Z'
