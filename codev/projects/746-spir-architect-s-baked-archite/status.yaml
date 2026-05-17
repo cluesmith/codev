@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -81,4 +81,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_4-iter1-claude.txt
 started_at: '2026-05-14T20:59:40.415Z'
-updated_at: '2026-05-17T21:08:15.776Z'
+updated_at: '2026-05-17T21:11:53.369Z'
