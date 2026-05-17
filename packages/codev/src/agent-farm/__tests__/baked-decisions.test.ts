@@ -18,6 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { renderTemplate, type TemplateContext } from '../commands/spawn-roles.js';
 
 // ============================================================================
 // Helpers
@@ -652,12 +653,11 @@ describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', (
 // ============================================================================
 
 describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
-  // All files touched across Phases 1-4 (21 total: 6 builder + 6 drafting/4-imp + 12 reviewer + 6 docs … wait, recount).
-  // Phase 1: 3 codev + 3 skeleton builder-prompts = 6
-  // Phase 2: 3 codev + 3 skeleton drafting prompts = 6
-  // Phase 3: 6 codev + 6 skeleton reviewer prompts = 12
-  // Phase 4: 3 codev + 3 skeleton protocol.md = 6
-  // Total: 30 files.
+  // All 30 files touched across Phases 1-4:
+  // - Phase 1: 3 codev + 3 skeleton builder-prompts (6)
+  // - Phase 2: 3 codev + 3 skeleton drafting prompts (6)
+  // - Phase 3: 6 codev + 6 skeleton reviewer prompts (12)
+  // - Phase 4: 3 codev + 3 skeleton protocol.md (6)
   const ALL_TOUCHED_FILES = [
     // Phase 1
     'codev/protocols/spir/builder-prompt.md',
@@ -704,6 +704,104 @@ describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
       it(relPath, () => {
         const content = readRepoFile(relPath);
         expect(content).toContain('Baked Decisions');
+      });
+    }
+  });
+});
+
+// ============================================================================
+// Phase 4 end-to-end smoke: render each builder-prompt against a fixture
+// issue whose body contains a `## Baked Decisions` section. Verify the
+// rendered prompt contains BOTH (1) the Phase 1 instruction paragraph and
+// (2) the issue's baked-decisions content verbatim (via {{issue.body}}).
+//
+// This converts the plan's "manual smoke" deliverable into an automated
+// regression test — strictly better than a one-time check at PR time.
+// Codex Phase 4 iter-1 flagged the missing smoke evidence; this closes it.
+// ============================================================================
+
+describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisions issue', () => {
+  const FIXTURE_ISSUE_BODY = [
+    '## Background',
+    '',
+    'We want a persona harness.',
+    '',
+    '## Baked Decisions',
+    '',
+    '- Language: Python (match shanutil)',
+    '- Framework: minimal stdlib',
+    '',
+    '## Done When',
+    '',
+    'It works.',
+  ].join('\n');
+
+  function makeContext(protocolName: string): TemplateContext {
+    return {
+      protocol_name: protocolName.toUpperCase(),
+      mode: 'strict',
+      mode_soft: false,
+      mode_strict: true,
+      project_id: '999',
+      input_description: 'a test feature',
+      issue: {
+        number: 999,
+        title: 'Test issue with baked decisions',
+        body: FIXTURE_ISSUE_BODY,
+      },
+    };
+  }
+
+  for (const protocol of ['spir', 'aspir', 'air']) {
+    describe(`${protocol} builder-prompt`, () => {
+      const templatePath = path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`);
+      const template = fs.readFileSync(templatePath, 'utf-8');
+      const ctx = makeContext(protocol);
+      const rendered = renderTemplate(template, ctx);
+
+      it('rendered prompt contains the Phase 1 instruction paragraph', () => {
+        expect(rendered).toContain('## Baked Decisions');
+        expect(rendered.toLowerCase()).toContain('do not autonomously override');
+      });
+
+      it('rendered prompt contains the issue body verbatim, including its baked-decisions section', () => {
+        expect(rendered).toContain('## Background');
+        // The issue's own "## Baked Decisions" heading + content reaches the builder.
+        expect(rendered).toContain('Language: Python (match shanutil)');
+        expect(rendered).toContain('Framework: minimal stdlib');
+      });
+
+      it('rendered prompt does NOT contain "{{" handlebars residue (template fully rendered)', () => {
+        expect(rendered).not.toContain('{{');
+        expect(rendered).not.toContain('}}');
+      });
+    });
+  }
+
+  describe('absence default: rendering with an issue that has no baked-decisions section', () => {
+    const PLAIN_ISSUE_BODY = '## Background\n\nA boring feature.\n\n## Done When\n\nIt ships.';
+
+    for (const protocol of ['spir', 'aspir', 'air']) {
+      it(`${protocol} builder-prompt: instruction paragraph is still present (it's unconditional)`, () => {
+        const template = fs.readFileSync(
+          path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`),
+          'utf-8',
+        );
+        const ctx: TemplateContext = {
+          protocol_name: protocol.toUpperCase(),
+          mode: 'strict',
+          mode_soft: false,
+          mode_strict: true,
+          project_id: '999',
+          input_description: 'a test feature',
+          issue: { number: 999, title: 'Plain issue', body: PLAIN_ISSUE_BODY },
+        };
+        const rendered = renderTemplate(template, ctx);
+        // The instruction paragraph fires on EVERY render. Builders see it even
+        // when no baked-decisions section is present — it's a no-op for them.
+        // This is intentional: the prompt teaches the convention.
+        expect(rendered).toContain('## Baked Decisions');
+        expect(rendered).not.toContain('Language: Python'); // no fixture content present
       });
     }
   });
