@@ -55,11 +55,13 @@ Follow the implementation plan at: `{{plan.path}}`
 
 ## PR Strategy
 
-**ONE PR per spec, opened at the end of the implement phase** — not one PR per plan phase.
+**Do not autonomously open a PR per implementation phase.** Plan phases ship as git commits within a single PR, not as separate PRs. The plan's instruction that "each phase commits independently" refers to git commits, not PRs.
 
-All plan phases ship together in a **single PR**. Phase-commits land on the same branch as `[Spec NNNN][Phase: phase-name]` commits, but each phase does **not** get its own PR. The PR is opened during the review phase (after the final implement phase), with all phase-commits already on the branch.
+By default, the PR is opened during/after the final implement phase, with all phase-commits already on the branch.
 
-The plan's instruction that "each phase commits independently" refers to **git commits** within the single PR — not separate PRs. Do not open a per-phase PR unless the architect explicitly asks for one (e.g., a large spec that the architect has decided to split into shippable slices).
+### Architect-requested PRs
+
+The architect MAY request a PR at any point — for spec review, mid-implementation feedback, slicing a large spec into shippable PRs, etc. When the architect explicitly asks for a PR earlier (or for additional PRs), follow that direction. The prohibition is specifically on the *builder* autonomously deciding to open per-phase PRs without architect request.
 
 ## Notifications
 Always use `afx send architect "..."` to notify the architect at key moments:

@@ -1,13 +1,18 @@
 /**
  * Regression test for GitHub Issue #744
  *
- * The SPIR/ASPIR builder-prompt templates did not state the one-PR-per-spec
- * convention explicitly. Builders interpreted "each phase commits independently"
- * as "each phase gets its own PR" and shipped per-phase PRs that the architect
- * then had to close.
+ * The SPIR/ASPIR builder-prompt templates did not state the PR-strategy
+ * convention explicitly. Builders interpreted "each phase commits
+ * independently" as "each phase gets its own PR" and shipped per-phase
+ * PRs that the architect then had to close.
  *
- * This test verifies that all four SPIR/ASPIR builder-prompt files contain
- * explicit guidance that all plan phases ship in a single PR.
+ * This test verifies that all four SPIR/ASPIR builder-prompt files contain:
+ *   1. An explicit prohibition on the builder autonomously opening a PR
+ *      per implementation phase.
+ *   2. The clarification that "each phase commits independently" refers
+ *      to git commits, not PRs.
+ *   3. The architect-override carve-out — the architect may still request
+ *      a PR at any point (spec review, mid-impl feedback, slicing, etc.).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,19 +28,25 @@ const PROMPT_FILES = [
   'codev-skeleton/protocols/aspir/builder-prompt.md',
 ];
 
-describe('bugfix-744: SPIR/ASPIR builder-prompt states one-PR-per-spec', () => {
+describe('bugfix-744: SPIR/ASPIR builder-prompt PR strategy', () => {
   for (const relPath of PROMPT_FILES) {
     const fullPath = path.join(repoRoot, relPath);
 
-    it(`${relPath} — declares one PR per spec`, () => {
+    it(`${relPath} — prohibits builder from autonomously opening per-phase PRs`, () => {
       const content = fs.readFileSync(fullPath, 'utf-8');
-      expect(content).toMatch(/ONE PR per spec/);
+      expect(content).toMatch(/Do not autonomously open a PR per implementation phase/);
     });
 
-    it(`${relPath} — clarifies phase-commits != per-phase PRs`, () => {
+    it(`${relPath} — clarifies phase-commits are git commits, not PRs`, () => {
       const content = fs.readFileSync(fullPath, 'utf-8');
-      // Must clarify that "each phase commits independently" refers to git commits, not PRs
-      expect(content).toMatch(/git commits.*not separate PRs|not separate PRs/);
+      expect(content).toMatch(/refers to git commits, not PRs/);
+    });
+
+    it(`${relPath} — preserves architect-override carve-out`, () => {
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      // The architect must be explicitly allowed to request a PR at any point —
+      // the prohibition is on autonomous builder action, not on PRs themselves.
+      expect(content).toMatch(/architect MAY request a PR/i);
     });
   }
 });
