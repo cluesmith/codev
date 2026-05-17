@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: plan-2026-05-17-baked-decisions
-- **Status**: draft
+- **Status**: draft (iter-2, post-CMAP)
 - **Specification**: [codev/specs/746-spir-architect-s-baked-archite.md](../specs/746-spir-architect-s-baked-archite.md)
 - **Created**: 2026-05-17
 
@@ -65,7 +65,8 @@ Copied verbatim from the spec's Success Criteria — every plan phase must close
 - Output is the raw markdown body of the section (without the heading line itself). Callers prepend `## Baked Decisions` when rendering.
 
 **Files touched**:
-- `packages/codev/src/agent-farm/commands/spawn-roles.ts` (parser + context wiring)
+- `packages/codev/src/agent-farm/commands/spawn-roles.ts` — defines and exports `extractBakedDecisions`; extends `TemplateContext` with `baked_decisions?: string`; enriches the context inside `buildPromptFromTemplate()` (just before `renderTemplate()`) by reading `context.issue?.body` and populating `context.baked_decisions`. **This is the preferred wiring point because it keeps all baked-decision logic colocated in one module and means BUGFIX automatically gets a no-op (its `builder-prompt.md` has no `{{#if baked_decisions}}` block).**
+- `packages/codev/src/agent-farm/commands/spawn.ts` — this is where `TemplateContext` is *constructed* (around lines 405–420; verify on read). The plan defers context wiring to `spawn-roles.ts` (above), so `spawn.ts` should require **no edit** if the `buildPromptFromTemplate()`-side enrichment is used. List `spawn.ts` here as a **read-only verification touchpoint** — confirm that no second context-construction site is missed; if one exists, prefer adding the call there over routing through `buildPromptFromTemplate()`. If implementation reveals a need to edit `spawn.ts` directly (e.g., because the issue body is not present in `context.issue.body` at the `buildPromptFromTemplate()` site for some code path), do so and add a note in the phase review.
 - `codev/protocols/spir/builder-prompt.md`
 - `codev/protocols/aspir/builder-prompt.md`
 - `codev/protocols/air/builder-prompt.md`
@@ -129,10 +130,10 @@ Single-file revert of `spawn-roles.ts` plus three protocol + three skeleton temp
 #### Implementation Details
 
 **Clause text for SPIR/ASPIR `specify.md`** (final wording TBD during implementation):
-> **Baked Decisions.** Before exploring solution approaches, check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, copy its content verbatim into the spec's Constraints section and treat each item as fixed. Do not autonomously relitigate the architect's choices in your Solution Exploration. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than overriding it in the spec.
+> **Baked Decisions.** Before exploring solution approaches, check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, copy its content verbatim into the spec's Constraints section and treat each item as fixed. Do not autonomously relitigate the architect's choices in your Solution Exploration. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than overriding it in the spec. **If two baked decisions contradict each other (e.g., two different language choices), do not pick one — pause, flag the contradiction to the architect via `afx send`, and wait for resolution before drafting.**
 
 **Clause text for AIR `implement.md`**:
-> **Baked Decisions.** Check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, treat each listed decision as fixed during implementation. Do not autonomously substitute alternate languages, frameworks, or dependencies. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than working around it.
+> **Baked Decisions.** Check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, treat each listed decision as fixed during implementation. Do not autonomously substitute alternate languages, frameworks, or dependencies. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than working around it. **If two baked decisions contradict each other, do not pick one — pause, flag the contradiction to the architect via `afx send`, and wait for resolution before implementing.**
 
 **Files touched**:
 - `codev/protocols/spir/prompts/specify.md`
@@ -144,16 +145,20 @@ Single-file revert of `spawn-roles.ts` plus three protocol + three skeleton temp
 - A small regression-grep test (extend an existing test in `packages/codev/src/__tests__/` or add a new one) asserting the clause is present in each file
 
 #### Acceptance Criteria
-Closes spec criteria: *SPIR/ASPIR `prompts/specify.md` instructs the builder...* + *AIR `prompts/implement.md` has an analogous clause*.
+Closes spec criteria: *SPIR/ASPIR `prompts/specify.md` instructs the builder...* + *AIR `prompts/implement.md` has an analogous clause* + *contradiction-handling (spec Resolved Decision #7) for drafting prompts*.
 - [ ] `grep -l "Baked Decisions" codev/protocols/spir/prompts/specify.md` matches
 - [ ] Same for ASPIR
 - [ ] Same for `codev/protocols/air/prompts/implement.md`
 - [ ] All three mirrored to `codev-skeleton/`
 - [ ] The clauses use the carveout framing ("do not autonomously…") — not absolute prohibition
+- [ ] Each clause explicitly addresses contradictions: grep for `contradict` or `pause` plus `flag` in each file
 - [ ] Diff between codev/ and skeleton copies of these files shows no substantive differences
 
 #### Test Plan
-- **Grep regression test**: a vitest test that reads each of the six files and asserts the presence of the literal string `Baked Decisions` plus the carveout phrase (e.g., `do not autonomously`).
+- **Grep regression test**: a vitest test that reads each of the six files and asserts the presence of:
+  - The literal string `Baked Decisions`
+  - The carveout phrase (`do not autonomously`)
+  - Contradiction-handling vocabulary (`contradict` AND `pause` AND `flag`)
 - **Manual reading**: post-edit, read the rendered specify.md and implement.md end-to-end to confirm the clause flows naturally in context.
 
 #### Rollback Strategy
@@ -187,7 +192,7 @@ Single-line-or-paragraph revert per file. No code surface touched.
 #### Implementation Details
 
 **Clause text** (template — adapt per consult-type, final wording TBD during implementation):
-> **Baked Decisions.** If the spec's Constraints section (or the issue body in AIR's case) includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may **`COMMENT`** with concerns about a baked decision (the architect will decide whether to rescind it); reserve **`REQUEST_CHANGES`** for the case where the spec/plan/code **fails to honor** a stated baked decision — that is a real defect.
+> **Baked Decisions.** If the spec's Constraints section (or the issue body in AIR's case) includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may **`COMMENT`** with concerns about a baked decision (the architect will decide whether to rescind it); reserve **`REQUEST_CHANGES`** for the case where the spec/plan/code **fails to honor** a stated baked decision — that is a real defect. **If the baked decisions themselves contain contradictions (e.g., two different language choices), do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.**
 
 For `plan-review.md` specifically, the existing "don't re-litigate spec decisions" line stays; the new paragraph supplements it with explicit baked-decision language.
 
@@ -202,14 +207,15 @@ For `plan-review.md` specifically, the existing "don't re-litigate spec decision
 - One regression-grep test asserting the clause is present in each
 
 #### Acceptance Criteria
-Closes spec criteria: *SPIR/ASPIR `spec-review.md` contains a "do not autonomously override baked decisions" instruction*, *SPIR/ASPIR `plan-review.md` extends its existing language*, *AIR `impl-review.md` / `pr-review.md` have analogous instructions*.
+Closes spec criteria: *SPIR/ASPIR `spec-review.md` contains a "do not autonomously override baked decisions" instruction*, *SPIR/ASPIR `plan-review.md` extends its existing language*, *AIR `impl-review.md` / `pr-review.md` have analogous instructions*, *contradiction-handling (spec Resolved Decision #7) for reviewer prompts*.
 - [ ] All 6 codev + 6 skeleton files contain the literal string `Baked Decisions`
 - [ ] All contain the carveout phrase (`do not autonomously`)
 - [ ] All explicitly distinguish `COMMENT` from `REQUEST_CHANGES`
+- [ ] All explicitly cover contradictions: grep for `contradict` plus a directive verb (`pause` / `clarify`) in each file
 - [ ] Diff between codev/ and skeleton copies shows no substantive differences
 
 #### Test Plan
-- **Grep regression test**: vitest test reads each of the 12 files and asserts the presence of: `"Baked Decisions"`, `"do not autonomously"`, `"COMMENT"`, `"REQUEST_CHANGES"`.
+- **Grep regression test**: vitest test reads each of the 12 files and asserts the presence of: `"Baked Decisions"`, `"do not autonomously"`, `"COMMENT"`, `"REQUEST_CHANGES"`, `"contradict"`.
 - **Read-through**: post-edit, read each file in full to confirm the new paragraph fits the existing structure.
 
 #### Rollback Strategy
@@ -277,6 +283,7 @@ Per-file paragraph revert.
 
 #### Objectives
 - Build the concrete snapshot-diff test that the spec's tightened end-to-end criterion calls for: render each of the three builder-prompts twice against the same fixture issue (once with `## Baked Decisions`, once without) and assert the diff is exactly the new block.
+- For consult-type prompts (which are static markdown, not rendered): assert that the only difference between the pre-change baseline and the post-change file is the newly added baked-decisions paragraph. This is the no-regression check that **closes the spec's "rendering each consult-type prompt against fixtures that do NOT include a Baked Decisions section produces output byte-identical to a baseline" criterion** in the form that actually fits how consult-type prompts work (they are read verbatim, not templated).
 - Run the full grep suite from Phases 2-4 as a final regression sweep.
 - Confirm no unintended changes via a full `diff -r codev/protocols/ codev-skeleton/protocols/`.
 
@@ -284,45 +291,98 @@ Per-file paragraph revert.
 - [ ] Fixture issue bodies committed under `packages/codev/src/agent-farm/__tests__/fixtures/`:
   - `issue-with-baked.md` (containing a `## Baked Decisions` section with 2-3 sample items)
   - `issue-without-baked.md` (same content, section omitted)
-- [ ] Snapshot test: for each of SPIR/ASPIR/AIR builder-prompts, render with and without; compute the diff; assert it equals the expected `## Baked Decisions` block (heading + carveout boilerplate from Phase 1's template + the fixture's section content).
-- [ ] Final grep sweep verifying every file from Phases 2-4 has the expected literal strings.
+- [ ] **Pre-change baselines captured at the start of Phase 1** for:
+  - All three builder-prompts (SPIR/ASPIR/AIR `builder-prompt.md` — rendered output via `renderTemplate` against the no-baked fixture)
+  - All six consult-type prompts touched by Phase 3 (SPIR `spec-review.md` + `plan-review.md`, ASPIR `spec-review.md` + `plan-review.md`, AIR `impl-review.md` + `pr-review.md`) — captured as raw file snapshots (these aren't rendered; the consult tooling reads them verbatim)
+  - All three drafting prompts touched by Phase 2 (SPIR/ASPIR `specify.md`, AIR `implement.md`) — raw file snapshots
+  - All three `protocol.md` files touched by Phase 4 — raw file snapshots
+  - Baselines committed as fixtures under `packages/codev/src/agent-farm/__tests__/fixtures/baselines/`
+- [ ] **Snapshot diff test (builder-prompts)**: for each of SPIR/ASPIR/AIR builder-prompts, render with and without; compute the diff; assert it equals the expected `## Baked Decisions` block (heading + carveout boilerplate from Phase 1's template + the fixture's section content).
+- [ ] **No-regression test (builder-prompts)**: render each builder-prompt against the no-baked fixture; assert byte-identical to the captured baseline.
+- [ ] **No-regression test (consult-type prompts)**: for each of the 6 consult-type prompts in Phase 3 + 3 drafting prompts in Phase 2 + 3 protocol.md files in Phase 4 = 12 files: diff the post-change file against its captured baseline. Assert that every changed line is part of an added paragraph (i.e., the diff consists of pure additions, no deletions or modifications to pre-existing lines). This is the consult-prompt analogue of the builder-prompt snapshot diff and satisfies the spec's no-regression criterion for static markdown files.
+- [ ] Final grep sweep verifying every file from Phases 2-4 has the expected literal strings (single test that re-runs all Phase 2 / 3 / 4 greps).
 - [ ] `diff -r codev/protocols/ codev-skeleton/protocols/` clean for touched files.
-- [ ] No-regression baseline: capture pre-change snapshots of all six prompt files (builder-prompts × 3 + a representative consult-type) early in Phase 1; in Phase 5, assert the without-baked render of builder-prompts is byte-identical to the pre-change baseline.
 
 #### Implementation Details
 
-**Snapshot test shape** (illustrative):
+**Snapshot test shape — builder-prompts** (illustrative):
 ```typescript
-describe('Phase 5: baked-decisions end-to-end snapshot diff', () => {
+describe('Phase 5: baked-decisions end-to-end snapshot diff (builder-prompts)', () => {
   for (const protocol of ['spir', 'aspir', 'air']) {
     it(`${protocol} builder-prompt: with-vs-without diff is exactly the baked block`, () => {
       const ctxWith    = makeContext(protocol, { issue: { body: fixtureWithBaked } });
       const ctxWithout = makeContext(protocol, { issue: { body: fixtureWithoutBaked } });
       const rendered   = renderTemplate(template[protocol], ctxWith);
       const baseline   = renderTemplate(template[protocol], ctxWithout);
-      const diff       = computeDiff(baseline, rendered);
-      expect(diff).toMatch(/^\+## Baked Decisions/m);
-      expect(diff).not.toContain('-'); // no removed lines
+      const diff       = computeUnifiedDiff(baseline, rendered);
       // Every added line is part of the baked block; no other content changed.
+      expect(diff.removedLines).toEqual([]);
+      expect(diff.addedLines.join('\n')).toMatch(/^## Baked Decisions/);
+    });
+
+    it(`${protocol} builder-prompt: no-regression against pre-change baseline`, () => {
+      const ctxWithout = makeContext(protocol, { issue: { body: fixtureWithoutBaked } });
+      const rendered   = renderTemplate(template[protocol], ctxWithout);
+      const baseline   = readBaseline(`${protocol}-builder-prompt-no-baked.txt`);
+      expect(rendered).toEqual(baseline);
     });
   }
 });
 ```
 
+**Snapshot test shape — consult-type + drafting + protocol.md files** (illustrative):
+```typescript
+describe('Phase 5: no-regression for static prompt files', () => {
+  const STATIC_FILES = [
+    // Phase 2 (drafting prompts)
+    'codev/protocols/spir/prompts/specify.md',
+    'codev/protocols/aspir/prompts/specify.md',
+    'codev/protocols/air/prompts/implement.md',
+    // Phase 3 (reviewer prompts)
+    'codev/protocols/spir/consult-types/spec-review.md',
+    'codev/protocols/aspir/consult-types/spec-review.md',
+    'codev/protocols/spir/consult-types/plan-review.md',
+    'codev/protocols/aspir/consult-types/plan-review.md',
+    'codev/protocols/air/consult-types/impl-review.md',
+    'codev/protocols/air/consult-types/pr-review.md',
+    // Phase 4 (docs)
+    'codev/protocols/spir/protocol.md',
+    'codev/protocols/aspir/protocol.md',
+    'codev/protocols/air/protocol.md',
+  ];
+
+  for (const file of STATIC_FILES) {
+    it(`${file}: diff vs baseline is pure-addition (no deletions or modifications)`, () => {
+      const post     = readFileSync(file, 'utf-8');
+      const baseline = readBaseline(file.replace(/\//g, '_') + '.baseline');
+      const diff     = computeUnifiedDiff(baseline, post);
+      expect(diff.removedLines).toEqual([]);
+      // Optional: assert added lines contain "Baked Decisions" so we know the addition is the intended one.
+      expect(diff.addedLines.join('\n')).toContain('Baked Decisions');
+    });
+  }
+});
+```
+
+`computeUnifiedDiff` can use the `diff` npm package (already a common transitive dep) or be hand-rolled with a 30-line line-diff function — both acceptable; the builder picks during implementation.
+
 **Files touched**:
 - `packages/codev/src/agent-farm/__tests__/fixtures/issue-with-baked.md`
 - `packages/codev/src/agent-farm/__tests__/fixtures/issue-without-baked.md`
+- `packages/codev/src/agent-farm/__tests__/fixtures/baselines/*.baseline` — pre-change snapshots of the 12 static files + 3 builder-prompt no-baked renders
 - `packages/codev/src/agent-farm/__tests__/baked-decisions-e2e.test.ts` (new)
 
 #### Acceptance Criteria
-Closes spec criteria: *Snapshot diff (with-vs-without)*, *No regression*, *Skeleton parity*.
-- [ ] The snapshot diff test passes for all three builder-prompts
-- [ ] The without-baked render of each builder-prompt is byte-identical to the pre-change baseline (no regression)
+Closes spec criteria: *Snapshot diff (with-vs-without)*, *No regression* (for both builder-prompts AND static prompt files), *Skeleton parity*.
+- [ ] The snapshot diff test passes for all three builder-prompts (with-vs-without diff = exactly the baked block)
+- [ ] The without-baked render of each builder-prompt is byte-identical to the pre-change baseline (no regression — builder-prompts)
+- [ ] For each of the 12 static files (Phases 2-4), the diff against the pre-change baseline is pure-addition (zero removed lines, zero modified lines) — no regression for consult/drafting/protocol files
 - [ ] All grep regression tests from Phases 2-4 pass in a single test run
 - [ ] `diff -r codev/protocols/ codev-skeleton/protocols/` for touched files is clean
 
 #### Test Plan
-- **Snapshot test** (new): the with-vs-without diff assertion described above.
+- **Builder-prompt snapshot tests** (new): the with-vs-without diff assertion + the no-regression baseline assertion for each of SPIR/ASPIR/AIR.
+- **Static-file no-regression tests** (new): for each of the 12 static prompt/doc files, the pure-addition diff assertion described above.
 - **Regression suite**: re-run all grep tests added in Phases 2-4.
 - **Manual smoke**: run `afx spawn` (or use a dry-render harness if one exists) against a hand-crafted issue with a baked decisions section to visually confirm the rendered prompt looks right.
 
@@ -404,7 +464,23 @@ Not applicable — this is a prompt-and-documentation change with no runtime beh
 
 ## Expert Review
 
-To be populated after the first CMAP plan-review cycle (Gemini / Codex / Claude).
+**Iteration 1 — 2026-05-17**: Reviewed by Gemini, Codex, Claude. Verdicts: Gemini `APPROVE`, Codex `REQUEST_CHANGES`, Claude `APPROVE`.
+
+Key consolidated feedback addressed in this iter-2 update:
+
+- **Phase 1: `spawn.ts` clarification** (all three reviewers flagged). `TemplateContext` is populated in `spawn.ts`, not `spawn-roles.ts`. Phase 1 now explicitly lists both files: the preferred wiring point is `spawn-roles.ts` (inside `buildPromptFromTemplate`, just before `renderTemplate`), keeping all baked-decision logic colocated; `spawn.ts` is listed as a read-only verification touchpoint with a fallback if `buildPromptFromTemplate` doesn't have access to the issue body at the right code path.
+- **Phase 5: no-regression for consult-type prompts** (Codex). The spec requires no-regression on **all** touched files, not just builder-prompts. Phase 5 now includes a 12-file "pure-addition diff" check covering all consult-type, drafting, and protocol.md files — baselines captured early in Phase 1 and asserted in Phase 5.
+- **Contradiction handling (spec Resolved Decision #7)** (Codex). The plan now requires explicit "if baked decisions contradict, pause and flag" language in Phase 2's drafting prompts AND Phase 3's reviewer prompts, with corresponding grep tests asserting the words `contradict` + `pause`/`flag`/`clarify` are present.
+
+Minor observations from Claude (Phase 5's `computeDiff()` not being a standard vitest util) addressed inline by naming the implementation options (`diff` npm package or hand-rolled — both acceptable).
+
+Plan adjustments summary:
+- Phase 1 "Files touched": added `spawn.ts` as read-only verification with fallback edit clause
+- Phase 2 clause text: added contradiction-pause sentence to both SPIR/ASPIR and AIR clauses
+- Phase 2 Acceptance Criteria + Test Plan: added contradiction grep
+- Phase 3 clause text: added contradiction-`REQUEST_CHANGES` sentence
+- Phase 3 Acceptance Criteria + Test Plan: added contradiction grep
+- Phase 5: doubled deliverables to cover 12 static files + 3 builder-prompts, added illustrative static-file test code, explicit baseline-capture timing
 
 ## Approval
 - [ ] Technical Lead Review
@@ -416,6 +492,7 @@ To be populated after the first CMAP plan-review cycle (Gemini / Codex / Claude)
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-05-17 | Initial plan draft | Spec 746 approved by architect | Builder |
+| 2026-05-17 | iter-2: spawn.ts wiring clarification, consult-prompt no-regression, contradiction-handling | CMAP feedback (Codex REQUEST_CHANGES, Gemini + Claude minor) | Builder |
 
 ## Notes
 
