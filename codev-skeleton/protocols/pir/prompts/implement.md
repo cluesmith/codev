@@ -82,6 +82,8 @@ npm test         # or project equivalent
 
 Both MUST pass before signaling phase complete. If a test is flaky (intermittent failure unrelated to your changes), skip it with annotation — you'll document each skipped test in the review file in the next phase.
 
+**Flaky ≠ pre-existing unrelated failure.** If the suite surfaces a *deterministic* failure your diff did not cause (e.g., a stale test broken by another team's earlier refactor, or a type error in an unrelated package), that is **out of scope** — do not fix it, skip it, or quarantine it to force a green. Note it for the review file's Lessons Learned and proceed. Porch's gate `checks` are narrow structural assertions, not a full-suite proof; making an unrelated red go green is scope creep, not diligence.
+
 ### 5. Push Your Branch
 
 ```bash

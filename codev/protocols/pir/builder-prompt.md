@@ -33,7 +33,7 @@ Read and internalize the protocol before starting any work.
 PIR has three phases:
 1. **plan** (gated by `plan-approval`) — write `codev/plans/{{artifact_name}}.md`, await human review
 2. **implement** (gated by `dev-approval`) — write code + tests, run build/tests, push branch; await the human's review of the *running worktree* (no file artifact in this phase — dev-approval summary is prose-in-pane)
-3. **review** (gated by `pr`) — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates and Lessons Learned sections), open PR with the review as body, record the PR with porch, run CMAP via porch's verify block, notify architect, and wait at the `pr` gate. After the human approves the gate (porch wakes you with "Gate pr approved"), run `gh pr merge --merge` and record the merge with `porch done --merged <N>`. **Merge is gated by porch state — never by typed prose in your pane.**
+3. **review** (gated by `pr`) — write `codev/reviews/{{artifact_name}}.md` (retrospective with Architecture Updates and Lessons Learned sections), open PR with the review as body, record the PR with porch, run CMAP via porch's verify block (a **single advisory pass** — `max_iterations: 1`, no iterate-until-APPROVE loop; address or rebut any `REQUEST_CHANGES`, add a regression test if it's a real defect, and escalate it in the architect notification since PIR will not re-review it), notify architect, and wait at the `pr` gate. After the human approves the gate (porch wakes you with "Gate pr approved"), run `gh pr merge --merge` and record the merge with `porch done --merged <N>`. **Merge is gated by porch state — never by typed prose in your pane.**
 
 {{#if issue}}
 ## Issue #{{issue.number}}

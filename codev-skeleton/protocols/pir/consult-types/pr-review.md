@@ -2,7 +2,7 @@
 
 ## Context
 
-You are performing the CMAP-3 review of a PIR protocol PR. The builder has implemented an approved plan, the human has approved the `dev-approval` gate (meaning a human has run the code locally and tested it), and the PR has been opened. This is the final AI review before the architect merges.
+You are performing the CMAP-2 review of a PIR protocol PR. The builder has implemented an approved plan, the human has approved the `dev-approval` gate (meaning a human has run the code locally and tested it), and the PR has been opened. This is a single advisory pass (`max_iterations: 1`) — your verdict is surfaced to the human at the `pr` gate, who is the sole remaining reviewer; it is not auto-re-reviewed.
 
 ## Focus Areas
 

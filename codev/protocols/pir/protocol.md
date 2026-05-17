@@ -101,8 +101,8 @@ The builder:
 2. Updates `codev/resources/arch.md` and/or `codev/resources/lessons-learned.md` if real changes need recording. If not, the review file's sections state "no changes needed" with a one-line explanation (the porch `checks` block enforces section presence, not content).
 3. Commits the review file (and arch / lessons updates if any) and pushes
 4. Opens a PR with `gh pr create`; PR body is the review file content + `Fixes #<N>`. Records the PR with `porch done <id> --pr <M> --branch <name>`.
-5. Runs `porch done <id>` — porch's `verify` block runs CMAP-2 (Gemini + Codex, type=impl); CMAP outputs land in `codev/projects/<id>-*/`. Outcomes are not auto-appended to the PR body; reviewers with the worktree read them from the projects dir.
-6. The `pr` gate fires (pending). Builder notifies the architect once: `afx send architect "PR #<M> ready for review (PIR #<N>), CMAP: gemini=<verdict>, codex=<verdict>. Awaiting human merge + pr gate approval."`
+5. Runs `porch done <id>` — porch's `verify` block runs CMAP-2 (Gemini + Codex, type=impl) as a **single advisory pass** (`max_iterations: 1`); CMAP outputs land in `codev/projects/<id>-*/`. There is no iterate-until-APPROVE loop: whatever the verdicts, porch records them and advances to the `pr` gate. A `REQUEST_CHANGES` is not auto-re-reviewed — the builder addresses or rebuts it, adds a regression test if it's a real defect, and escalates it in the architect notification so the human verifies it at the `pr` gate. Outcomes are not auto-appended to the PR body; reviewers with the worktree read them from the projects dir.
+6. The `pr` gate fires (pending) regardless of verdict. Builder notifies the architect once — leading with any `REQUEST_CHANGES` and its disposition (since PIR will not re-review it) rather than burying it in a flat status line.
 7. Builder waits at the `pr` gate. The human reviews the PR on GitHub, then approves the `pr` gate (Cmd+K G or `porch approve <id> pr --a-human-explicitly-approved-this`). Porch wakes the builder.
 8. Builder verifies the gate is genuinely approved via `porch next` (defensive — typed prose can't trigger this branch, only real porch state does), then runs `gh pr merge --merge`, records via `porch done --merged <M>`, and sends the cleanup-ready notification. Protocol complete (`next: null`).
 
@@ -152,9 +152,13 @@ Without `worktree.devCommand`, `afx dev` won't work and the `dev-approval` gate 
 
 - **plan**: human-only review. No AI consultation.
 - **implement**: no AI consult — the human at the `dev-approval` gate is the sole reviewer of the running code.
-- **review**: CMAP-2 (Gemini + Codex, type=impl) after the PR is opened; appended to PR body. Same pattern as BUGFIX / AIR's PR-creation consult.
+- **review**: CMAP-2 (Gemini + Codex, type=impl) after the PR is opened, as a **single advisory pass** (`max_iterations: 1`). Same pattern as BUGFIX / AIR's PR-creation consult.
+
+CMAP at the PR is a single pass — there is **no iterate-until-APPROVE loop**. A `REQUEST_CHANGES` does not block or re-trigger CMAP; the builder addresses or rebuts it and escalates it to the human at the `pr` gate, who is the sole remaining reviewer of any resulting fix (CMAP does not re-check it).
 
 Net: PIR runs **two model calls per protocol run**, matching its BUGFIX/AIR peers — its distinguishing features are the two human gates (`plan-approval`, `dev-approval`), not AI-consult density.
+
+**The 2-model footprint is a design invariant.** porch's model precedence is *config > protocol* (`porch.consultation.models` in `.codev/config.json` overrides a protocol's declared `verify.models`). A project-wide setting tuned for SPIR (gemini + codex + claude) will silently inflate PIR to a 3-model pass, breaking the BUGFIX/AIR-parity cost story. To keep PIR at CMAP-2, leave `porch.consultation.models` unset or scope it per-protocol.
 
 To disable consultation entirely, say "without multi-agent consultation" when starting work.
 
