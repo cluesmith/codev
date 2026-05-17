@@ -1,7 +1,7 @@
 id: '746'
 title: spir-architect-s-baked-archite
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-14T20:59:40.415Z'
-updated_at: '2026-05-17T19:02:30.948Z'
+updated_at: '2026-05-17T19:02:53.506Z'
