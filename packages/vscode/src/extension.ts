@@ -9,6 +9,7 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
+import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
 import { viewPlanFile } from './commands/view-artifact.js';
@@ -193,7 +194,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		pullRequestsView,
 		backlogView,
 		recentlyClosedView,
-		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager)),
+		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager, terminalManager!)),
 		vscode.window.registerTreeDataProvider('codev.team', new TeamProvider(connectionManager)),
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
 	);
@@ -354,6 +355,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.stopWorktreeDev', () =>
 			stopWorktreeDev(connectionManager!, terminalManager!)),
+		vscode.commands.registerCommand('codev.runWorkspaceDev', () =>
+			runWorkspaceDev(connectionManager!, terminalManager!)),
+		vscode.commands.registerCommand('codev.stopWorkspaceDev', () =>
+			stopWorkspaceDev(connectionManager!, terminalManager!)),
 		vscode.commands.registerCommand('codev.openWorktreeFolder', (arg: vscode.TreeItem | string | undefined) =>
 			openWorktreeFolder(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.runWorktreeSetup', (arg: vscode.TreeItem | string | undefined) =>

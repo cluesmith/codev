@@ -118,6 +118,14 @@
         "title": "Codev: Stop Dev Server"
       },
       {
+        "command": "codev.runWorkspaceDev",
+        "title": "Codev: Start Dev Server (this workspace)"
+      },
+      {
+        "command": "codev.stopWorkspaceDev",
+        "title": "Codev: Stop Dev Server (this workspace)"
+      },
+      {
         "command": "codev.openBuilderById",
         "title": "Codev: Open Builder Terminal"
       },
@@ -232,6 +240,16 @@
           "command": "codev.stopWorktreeDev",
           "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder)-/",
           "group": "3_dev@3"
+        },
+        {
+          "command": "codev.runWorkspaceDev",
+          "when": "view == codev.workspace && viewItem == workspace-dev-start",
+          "group": "1_primary@1"
+        },
+        {
+          "command": "codev.stopWorkspaceDev",
+          "when": "view == codev.workspace && viewItem == workspace-dev-stop",
+          "group": "1_primary@1"
         },
         {
           "command": "codev.viewBacklogIssue",

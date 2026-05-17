@@ -47,10 +47,19 @@ export async function dev(options: DevOptions): Promise<void> {
   }
 
   if (!options.builderId) {
-    throw new Error('Usage: afx dev <builder-id>  (or --stop)');
+    throw new Error('Usage: afx dev <builder-id|main>  (or --stop)');
   }
 
-  const builder = findBuilderById(options.builderId);
+  const config = getConfig();
+
+  // Reserved target: `main` runs the dev server in the main workspace (the
+  // default checkout), making it a Codev-managed, swappable PTY exactly like
+  // a builder worktree. Resolved locally — deliberately NOT via
+  // findBuilderById — so `main` never leaks into afx send/cleanup/status.
+  const isMain = options.builderId.toLowerCase() === 'main';
+  const builder: { id: string; worktree?: string } | null = isMain
+    ? { id: 'main', worktree: config.workspaceRoot }
+    : findBuilderById(options.builderId);
   if (!builder) {
     throw new Error(`No builder found matching "${options.builderId}". Try \`afx status\`.`);
   }
@@ -58,7 +67,6 @@ export async function dev(options: DevOptions): Promise<void> {
     throw new Error(`Builder ${builder.id} has no worktree path on record — cannot start dev.`);
   }
 
-  const config = getConfig();
   const { devCommand } = getWorktreeConfig(config.workspaceRoot);
   if (!devCommand) {
     throw new Error(

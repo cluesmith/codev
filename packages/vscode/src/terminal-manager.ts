@@ -23,6 +23,9 @@ export class TerminalManager {
   private outputChannel: vscode.OutputChannel;
   private connectionManager: ConnectionManager;
   private readonly iconPath: { light: vscode.Uri; dark: vscode.Uri };
+  private readonly _onDidChangeDevTerminals = new vscode.EventEmitter<void>();
+  /** Fires whenever the set of open dev terminals changes (start/stop/swap/cleanup). */
+  readonly onDidChangeDevTerminals = this._onDidChangeDevTerminals.event;
 
   constructor(
     connectionManager: ConnectionManager,
@@ -142,6 +145,7 @@ export class TerminalManager {
     // Tab title matches the builder-tab format (`Codev: <name>`) with a
     // `(dev)` suffix so the pairing is obvious in the tab strip.
     await this.openTerminal(terminalId, 'dev', `Codev: ${builderName} (dev)`, key, focus);
+    this._onDidChangeDevTerminals.fire();
   }
 
   /**
@@ -156,6 +160,7 @@ export class TerminalManager {
     existing.pty.close();
     existing.terminal.dispose();
     this.terminals.delete(key);
+    this._onDidChangeDevTerminals.fire();
   }
 
   /**
@@ -167,13 +172,16 @@ export class TerminalManager {
    * matching the value passed to `openBuilder`.
    */
   closeBuilderTerminal(builderId: string): void {
+    let devClosed = false;
     for (const key of [`builder-${builderId}`, `dev-${builderId}`]) {
       const existing = this.terminals.get(key);
       if (!existing) { continue; }
       existing.pty.close();
       existing.terminal.dispose();
       this.terminals.delete(key);
+      if (key.startsWith('dev-')) { devClosed = true; }
     }
+    if (devClosed) { this._onDidChangeDevTerminals.fire(); }
   }
 
   /**
@@ -287,5 +295,6 @@ export class TerminalManager {
       managed.terminal.dispose();
     }
     this.terminals.clear();
+    this._onDidChangeDevTerminals.dispose();
   }
 }

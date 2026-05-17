@@ -330,7 +330,7 @@ When configured, each builder worktree (`.builders/<id>/`) becomes runnable — 
   "worktree": {
     "symlinks":   ["..."],        // glob patterns of files to symlink from root into each new worktree
     "postSpawn":  ["..."],        // shell commands run inside each new worktree after createWorktree
-    "devCommand": "..."           // consumed by `afx dev <builder-id>`
+    "devCommand": "..."           // consumed by `afx dev <builder-id|main>`
   }
 }
 ```
@@ -345,10 +345,13 @@ When configured, each builder worktree (`.builders/<id>/`) becomes runnable — 
 
 ```bash
 afx dev <builder-id>     # start the dev server in <builder-id>'s worktree
-afx dev --stop           # stop the currently running dev PTY
+afx dev main             # start the dev server in the MAIN workspace (Codev-managed)
+afx dev --stop           # stop the currently running dev PTY (builder or main)
 ```
 
-Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below). Running `afx dev` while another builder's dev is up prompts for swap. Same-builder requests print the existing terminal URL and exit.
+Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below), across **{main + all builders}**. `main` is a reserved target: it runs `worktree.devCommand` in the main checkout as a Codev-managed, swappable PTY, symmetric with builders. Starting any target while another is up prompts for swap (`afx dev <builder>` while `main` runs, or vice-versa); same-target requests print the existing terminal URL and exit. Like builder dev, main dev is a **non-persistent** PTY — a Tower restart (`pnpm -w run local-install`, crash) kills it; re-run to restart.
+
+**Launch main dev via `afx dev main`, not a bare `pnpm dev`.** A manually-run `pnpm dev` at the repo root is invisible to Codev (the deliberate "never kill what it didn't spawn" policy) — start a builder dev while it holds the ports and the builder dev silently fails to bind, or worse serves main's code under the worktree URL. `afx dev main` makes it a managed PTY that swap-detection can cleanly stop first. This only helps if you use it *consistently*; a hand-started `pnpm dev` stays unmanaged.
 
 ### VSCode
 
@@ -361,11 +364,16 @@ The same actions are available via right-click on any builder row in the Codev s
 - **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Codev: <name> (dev)`. If another builder's dev is already running, you get a modal asking whether to swap.
 - **Codev: Stop Dev Server** — kills the running dev PTY and closes its tab.
 
+The Codev sidebar's **Workspace** view also carries a dev server for *whatever folder this VSCode window is rooted at* (it is not "main"-specific):
+
+- **Start Dev Server** — runs `worktree.devCommand` for the current workspace. Target is resolved from the open folder: the main checkout → `main`; a `.builders/<id>/` worktree opened as its own window (e.g. via *Open Worktree as Workspace*) → that builder. Same single-slot swap model as builder dev (prompts if another dev is running). The row tooltip names the resolved target.
+- **Stop Dev Server** — stops this workspace's dev server; the row appears only while it is running. Scoped to the resolved target — it does not touch other devs.
+
 The three commands are also available from the command palette (Cmd+Shift+P). No default keybindings; bind via `keybindings.json` if you use them often.
 
 ### URLs are load-bearing
 
-The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`.
+The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`. Prefer `afx dev main` (or the Workspace view's *Start Dev Server* row) over a hand-run `pnpm dev` so Codev owns the PTY and swap-detection can stop it for you automatically.
 
 ### Cleanup semantics
 

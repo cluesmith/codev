@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
 import type { ConnectionManager } from '../connection-manager.js';
+import type { TerminalManager } from '../terminal-manager.js';
 import { getTowerAddress } from '../workspace-detector.js';
+import { resolveWorkspaceDevTarget } from '../commands/dev-shared.js';
 
 /**
  * Workspace-level entry points: architect terminal, Tower web dashboard,
@@ -12,8 +14,15 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
-  constructor(private connectionManager: ConnectionManager) {
+  constructor(
+    private connectionManager: ConnectionManager,
+    private terminalManager: TerminalManager,
+  ) {
     connectionManager.onStateChange(() => this.changeEmitter.fire());
+    // Re-render when the dev-terminal set changes (start/stop, a swap that
+    // killed this workspace's dev, or cleanup) so the conditional "Stop Dev
+    // Server" row reflects reality across every path.
+    terminalManager.onDidChangeDevTerminals(() => this.changeEmitter.fire());
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -66,6 +75,40 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       title: 'New Shell',
     };
     items.push(shell);
+
+    // Target is whatever folder this VSCode window is rooted at: the main
+    // checkout → `main`, a `.builders/<id>/` worktree → that builder. The
+    // label stays generic; the tooltip names the resolved target.
+    const workspacePath = this.connectionManager.getWorkspacePath();
+    const devTarget = workspacePath ? resolveWorkspaceDevTarget(workspacePath) : null;
+
+    const startDev = new vscode.TreeItem('Start Dev Server');
+    startDev.iconPath = new vscode.ThemeIcon('play');
+    startDev.tooltip = devTarget
+      ? `Run worktree.devCommand for this workspace (target: ${devTarget.id})`
+      : 'Run worktree.devCommand for this workspace';
+    startDev.contextValue = 'workspace-dev-start';
+    startDev.command = {
+      command: 'codev.runWorkspaceDev',
+      title: 'Start Dev Server',
+    };
+    items.push(startDev);
+
+    // Stop row only while a dev PTY for THIS workspace's target is running.
+    const targetDevRunning = !!devTarget && this.terminalManager
+      .listDevTerminals()
+      .some(d => d.builderId === devTarget.id);
+    if (targetDevRunning) {
+      const stopDev = new vscode.TreeItem('Stop Dev Server');
+      stopDev.iconPath = new vscode.ThemeIcon('debug-stop');
+      stopDev.tooltip = `Stop the dev server for this workspace (target: ${devTarget!.id})`;
+      stopDev.contextValue = 'workspace-dev-stop';
+      stopDev.command = {
+        command: 'codev.stopWorkspaceDev',
+        title: 'Stop Dev Server',
+      };
+      items.push(stopDev);
+    }
 
     return items;
   }
