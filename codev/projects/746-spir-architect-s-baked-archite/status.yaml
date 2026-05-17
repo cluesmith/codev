@@ -1,9 +1,21 @@
 id: '746'
 title: spir-architect-s-baked-archite
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Builder-prompt instruction (SPIR/ASPIR/AIR + skeleton)
+    status: in_progress
+  - id: phase_2
+    title: 'Drafting prompts: specify.md (SPIR/ASPIR) + implement.md (AIR) + skeleton'
+    status: pending
+  - id: phase_3
+    title: 'Reviewer prompts: spec-review / plan-review / impl-review / pr-review + skeleton'
+    status: pending
+  - id: phase_4
+    title: Protocol documentation + final regression sweep
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-14T20:59:40.415Z'
-updated_at: '2026-05-17T20:34:01.445Z'
+updated_at: '2026-05-17T20:34:28.205Z'
