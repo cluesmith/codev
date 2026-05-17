@@ -151,4 +151,52 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
     const baseline = readBaseline('spir-builder-prompt.md.baseline');
     expect(baseline).not.toContain('## Baked Decisions');
   });
+
+  // Mirror-parity for the Baked Decisions paragraph specifically.
+  //
+  // The codev/ and codev-skeleton/ copies of each builder-prompt have
+  // pre-existing structural differences outside this work's scope (skeleton
+  // has Multi-PR Workflow / Verify Phase sections that codev/ doesn't, and
+  // a different PR-merged notification string). Those are PRE-EXISTING and
+  // not Phase 1's responsibility to reconcile.
+  //
+  // What IS Phase 1's responsibility: ensure the Baked Decisions paragraph
+  // itself is byte-identical across both copies, so future drift in this
+  // paragraph (e.g., someone edits codev/ but forgets skeleton) is caught.
+  describe('baked-decisions paragraph is byte-identical across codev/ and skeleton', () => {
+    const PROTOCOLS = ['spir', 'aspir', 'air'] as const;
+    const BAKED_HEADER = '## Baked Decisions';
+
+    // Extract the Baked Decisions paragraph from a file's full content.
+    // Returns the heading + body up to (but not including) the next heading
+    // or the end of file. Throws if the heading is not found.
+    function extractBakedSection(label: string, fullContent: string): string {
+      const headerIdx = fullContent.indexOf(BAKED_HEADER);
+      if (headerIdx === -1) {
+        throw new Error(`${label}: "${BAKED_HEADER}" heading not found`);
+      }
+      const rest = fullContent.slice(headerIdx);
+      // Find the next markdown heading line (starts with #, on its own line).
+      const lines = rest.split('\n');
+      const endLine = lines.findIndex(
+        (line, i) => i > 0 && /^#{1,6}\s/.test(line),
+      );
+      const sectionLines = endLine === -1 ? lines : lines.slice(0, endLine);
+      // Trim trailing blank lines so a stray newline doesn't cause false mismatches.
+      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
+        sectionLines.pop();
+      }
+      return sectionLines.join('\n');
+    }
+
+    for (const protocol of PROTOCOLS) {
+      it(`${protocol}: codev/ and skeleton Baked Decisions paragraphs match`, () => {
+        const codevContent = readRepoFile(`codev/protocols/${protocol}/builder-prompt.md`);
+        const skeletonContent = readRepoFile(`codev-skeleton/protocols/${protocol}/builder-prompt.md`);
+        const codevSection = extractBakedSection(`codev ${protocol}`, codevContent);
+        const skeletonSection = extractBakedSection(`skeleton ${protocol}`, skeletonContent);
+        expect(skeletonSection).toEqual(codevSection);
+      });
+    }
+  });
 });
