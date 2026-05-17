@@ -5,17 +5,17 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Builder-prompt instruction (SPIR/ASPIR/AIR + skeleton)
-    status: in_progress
+    status: complete
   - id: phase_2
     title: 'Drafting prompts: specify.md (SPIR/ASPIR) + implement.md (AIR) + skeleton'
-    status: pending
+    status: in_progress
   - id: phase_3
     title: 'Reviewer prompts: spec-review / plan-review / impl-review / pr-review + skeleton'
     status: pending
   - id: phase_4
     title: Protocol documentation + final regression sweep
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -49,4 +49,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_1-iter1-claude.txt
 started_at: '2026-05-14T20:59:40.415Z'
-updated_at: '2026-05-17T20:45:17.339Z'
+updated_at: '2026-05-17T20:45:19.123Z'
