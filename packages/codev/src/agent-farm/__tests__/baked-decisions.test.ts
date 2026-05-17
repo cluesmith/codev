@@ -152,7 +152,7 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
     expect(baseline).not.toContain('## Baked Decisions');
   });
 
-  // Mirror-parity for the Baked Decisions paragraph specifically.
+  // Mirror-parity for the Baked Decisions paragraph specifically (Phase 1).
   //
   // The codev/ and codev-skeleton/ copies of each builder-prompt have
   // pre-existing structural differences outside this work's scope (skeleton
@@ -198,5 +198,149 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
         expect(skeletonSection).toEqual(codevSection);
       });
     }
+  });
+});
+
+// ============================================================================
+// Phase 2: Drafting prompts (SPIR/ASPIR specify.md + AIR implement.md + skeleton)
+// ============================================================================
+
+interface DraftingPromptFile {
+  label: string;
+  relPath: string;
+  baselineName: string | null; // null for skeleton mirrors
+}
+
+const PHASE_2_FILES: DraftingPromptFile[] = [
+  {
+    label: 'codev SPIR specify.md',
+    relPath: 'codev/protocols/spir/prompts/specify.md',
+    baselineName: 'spir-specify.md.baseline',
+  },
+  {
+    label: 'codev ASPIR specify.md',
+    relPath: 'codev/protocols/aspir/prompts/specify.md',
+    baselineName: 'aspir-specify.md.baseline',
+  },
+  {
+    label: 'codev AIR implement.md',
+    relPath: 'codev/protocols/air/prompts/implement.md',
+    baselineName: 'air-implement.md.baseline',
+  },
+  {
+    label: 'skeleton SPIR specify.md',
+    relPath: 'codev-skeleton/protocols/spir/prompts/specify.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton ASPIR specify.md',
+    relPath: 'codev-skeleton/protocols/aspir/prompts/specify.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton AIR implement.md',
+    relPath: 'codev-skeleton/protocols/air/prompts/implement.md',
+    baselineName: null,
+  },
+];
+
+describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
+  describe('grep regression: required strings present in each file', () => {
+    for (const file of PHASE_2_FILES) {
+      describe(file.label, () => {
+        const content = readRepoFile(file.relPath);
+
+        it('contains the literal "Baked Decisions"', () => {
+          expect(content).toContain('Baked Decisions');
+        });
+
+        it('uses the carveout phrasing "do not autonomously"', () => {
+          expect(content.toLowerCase()).toContain('do not autonomously');
+        });
+
+        it('addresses contradictions with "contradict" + "pause" + "flag"', () => {
+          const lower = content.toLowerCase();
+          expect(lower).toContain('contradict');
+          expect(lower).toContain('pause');
+          expect(lower).toContain('flag');
+        });
+
+        it('mentions the `afx send` escalation path', () => {
+          expect(content).toContain('afx send');
+        });
+      });
+    }
+  });
+
+  describe('pure-addition diff: baseline lines preserved in order', () => {
+    for (const file of PHASE_2_FILES) {
+      if (file.baselineName === null) continue;
+      it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
+        const baseline = readBaseline(file.baselineName!);
+        const current = readRepoFile(file.relPath);
+        expectPureAdditionDiff(file.label, baseline, current);
+      });
+    }
+  });
+
+  describe('baked-decisions clause is byte-identical across codev/ and skeleton', () => {
+    interface MirrorPair {
+      protocol: string;
+      codev: string;
+      skeleton: string;
+    }
+    const PAIRS: MirrorPair[] = [
+      {
+        protocol: 'spir specify.md',
+        codev: 'codev/protocols/spir/prompts/specify.md',
+        skeleton: 'codev-skeleton/protocols/spir/prompts/specify.md',
+      },
+      {
+        protocol: 'aspir specify.md',
+        codev: 'codev/protocols/aspir/prompts/specify.md',
+        skeleton: 'codev-skeleton/protocols/aspir/prompts/specify.md',
+      },
+      {
+        protocol: 'air implement.md',
+        codev: 'codev/protocols/air/prompts/implement.md',
+        skeleton: 'codev-skeleton/protocols/air/prompts/implement.md',
+      },
+    ];
+
+    // Extract the paragraph containing "Baked Decisions" — from the first line
+    // matching it up to the next markdown heading. Works whether the heading
+    // is `## Baked Decisions` (AIR), `### 0.5 Baked Decisions` (SPIR/ASPIR),
+    // or any other variant the architect might write.
+    function extractBakedClause(label: string, fullContent: string): string {
+      const lines = fullContent.split('\n');
+      const startIdx = lines.findIndex(line => /Baked Decisions/i.test(line));
+      if (startIdx === -1) {
+        throw new Error(`${label}: no line containing "Baked Decisions" found`);
+      }
+      // Find the next markdown heading after the start line.
+      const endIdx = lines.findIndex(
+        (line, i) => i > startIdx && /^#{1,6}\s/.test(line),
+      );
+      const sectionLines = endIdx === -1 ? lines.slice(startIdx) : lines.slice(startIdx, endIdx);
+      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
+        sectionLines.pop();
+      }
+      return sectionLines.join('\n');
+    }
+
+    for (const pair of PAIRS) {
+      it(`${pair.protocol}: codev/ and skeleton clauses match`, () => {
+        const codevContent = readRepoFile(pair.codev);
+        const skeletonContent = readRepoFile(pair.skeleton);
+        const codevClause = extractBakedClause(`codev ${pair.protocol}`, codevContent);
+        const skeletonClause = extractBakedClause(`skeleton ${pair.protocol}`, skeletonContent);
+        expect(skeletonClause).toEqual(codevClause);
+      });
+    }
+  });
+
+  it('codev SPIR specify.md baseline does NOT contain "Baked Decisions" (pollution check)', () => {
+    const baseline = readBaseline('spir-specify.md.baseline');
+    expect(baseline).not.toContain('Baked Decisions');
   });
 });
