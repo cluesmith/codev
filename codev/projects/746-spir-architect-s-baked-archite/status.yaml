@@ -1,0 +1,85 @@
+id: '746'
+title: spir-architect-s-baked-archite
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Builder-prompt instruction (SPIR/ASPIR/AIR + skeleton)
+    status: complete
+  - id: phase_2
+    title: 'Drafting prompts: specify.md (SPIR/ASPIR) + implement.md (AIR) + skeleton'
+    status: complete
+  - id: phase_3
+    title: 'Reviewer prompts: spec-review / plan-review / impl-review / pr-review + skeleton'
+    status: complete
+  - id: phase_4
+    title: Protocol documentation + final regression sweep
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-05-14T21:09:15.512Z'
+    approved_at: '2026-05-17T19:02:30.947Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-05-17T19:15:07.461Z'
+    approved_at: '2026-05-17T20:34:01.445Z'
+  pr:
+    status: pending
+    requested_at: '2026-05-17T21:18:48.450Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_1-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_3-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-746/codev/projects/746-spir-architect-s-baked-archite/746-phase_4-iter1-claude.txt
+started_at: '2026-05-14T20:59:40.415Z'
+updated_at: '2026-05-17T21:18:48.450Z'

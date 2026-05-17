@@ -121,6 +121,10 @@ SPIR is a structured development protocol that emphasizes specification-driven d
 - Dependency updates
 - Emergency hotfixes (but do a lightweight retrospective after)
 
+## Baked Decisions (Optional)
+
+When filing an issue for SPIR, you can pin architectural decisions you don't want the builder or CMAP reviewers to re-litigate. Include a `## Baked Decisions` section (any heading level is fine) anywhere in the issue body. Useful categories: language, framework, deployment shape, key dependencies, decisions deferred to a later spec. The builder will copy the section verbatim into the spec's Constraints and treat each item as fixed; CMAP reviewers will not propose alternatives unless the spec itself fails to honor a stated decision. Leave the section out for issues where you want the builder to explore freely — absence is the no-op default. You can amend or rescind a baked decision at any time by updating the issue and respawning, or by sending the builder a direct instruction via `afx send`.
+
 ## Protocol Phases
 
 ### S - Specify (Collaborative Design Exploration)

@@ -6,12 +6,6 @@ You are executing the **IMPLEMENT** phase of the AIR protocol.
 
 Read the GitHub issue, implement the feature, and add tests. Keep it focused and under 300 LOC.
 
-## Baked Decisions
-
-Check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, treat each listed decision as fixed during implementation. Do not autonomously substitute alternate languages, frameworks, or dependencies. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than working around it.
-
-If two baked decisions contradict each other, do not pick one — pause, flag the contradiction via `afx send`, and wait for resolution before implementing.
-
 ## Context
 
 - **Issue**: #{{issue.number}} — {{issue.title}}
