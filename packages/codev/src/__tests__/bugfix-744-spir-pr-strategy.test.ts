@@ -48,5 +48,13 @@ describe('bugfix-744: SPIR/ASPIR builder-prompt PR strategy', () => {
       // the prohibition is on autonomous builder action, not on PRs themselves.
       expect(content).toMatch(/architect MAY request a PR/i);
     });
+
+    it(`${relPath} — states the default PR-timing (during/after final implement phase)`, () => {
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      // The new default replaces the old rigid "ONE PR per spec, opened at the end of
+      // the implement phase" wording. Builders need to know *when* the default PR opens
+      // so they don't fall back to per-phase PRs in the absence of architect direction.
+      expect(content).toMatch(/By default, the PR is opened during\/after the final implement phase/);
+    });
   }
 });
