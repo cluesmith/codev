@@ -419,26 +419,56 @@ const PHASE_3_FILES: ReviewerPromptFile[] = [
 ];
 
 describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
-  describe('grep regression: required strings present in each file', () => {
+  // Extract the `## Baked Decisions` section from a reviewer-prompt file so
+  // that the grep assertions below scope to the new paragraph specifically.
+  //
+  // This matters because the pre-existing `## Verdict Format` section in all
+  // 6 reviewer prompts already contains the literal strings `COMMENT` and
+  // `REQUEST_CHANGES`. A file-level `toContain` check would pass even if the
+  // new Baked Decisions paragraph lost those tokens, defeating the regression.
+  //
+  // Fix per Codex Phase 3 iter-1 feedback: extract the section first, assert
+  // against the section only.
+  function extractBakedSection(label: string, fullContent: string): string {
+    const headerIdx = fullContent.indexOf('## Baked Decisions');
+    if (headerIdx === -1) {
+      throw new Error(`${label}: "## Baked Decisions" heading not found`);
+    }
+    const rest = fullContent.slice(headerIdx);
+    const lines = rest.split('\n');
+    const endLine = lines.findIndex(
+      (line, i) => i > 0 && /^#{1,6}\s/.test(line),
+    );
+    const sectionLines = endLine === -1 ? lines : lines.slice(0, endLine);
+    while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
+      sectionLines.pop();
+    }
+    return sectionLines.join('\n');
+  }
+
+  describe('grep regression: required content present in the extracted Baked Decisions section', () => {
     for (const file of PHASE_3_FILES) {
       describe(file.label, () => {
         const content = readRepoFile(file.relPath);
+        const section = extractBakedSection(file.label, content);
 
-        it('contains the literal "Baked Decisions"', () => {
-          expect(content).toContain('Baked Decisions');
+        it('contains the literal "Baked Decisions" heading (file-level)', () => {
+          expect(content).toContain('## Baked Decisions');
         });
 
-        it('uses the carveout phrasing "do not autonomously"', () => {
-          expect(content.toLowerCase()).toContain('do not autonomously');
+        it('section uses the carveout phrasing "do not autonomously"', () => {
+          expect(section.toLowerCase()).toContain('do not autonomously');
         });
 
-        it('distinguishes COMMENT from REQUEST_CHANGES', () => {
-          expect(content).toContain('COMMENT');
-          expect(content).toContain('REQUEST_CHANGES');
+        it('section distinguishes COMMENT from REQUEST_CHANGES (not just the file)', () => {
+          // Both tokens must appear *inside* the Baked Decisions paragraph —
+          // not just in the pre-existing Verdict Format section elsewhere.
+          expect(section).toContain('COMMENT');
+          expect(section).toContain('REQUEST_CHANGES');
         });
 
-        it('addresses contradictions with "contradict" + "clarify"', () => {
-          const lower = content.toLowerCase();
+        it('section addresses contradictions with "contradict" + "clarify"', () => {
+          const lower = section.toLowerCase();
           expect(lower).toContain('contradict');
           expect(lower).toContain('clarify');
         });
@@ -496,27 +526,11 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
       },
     ];
 
-    function extractBakedSection(label: string, fullContent: string): string {
-      const headerIdx = fullContent.indexOf('## Baked Decisions');
-      if (headerIdx === -1) {
-        throw new Error(`${label}: "## Baked Decisions" heading not found`);
-      }
-      const rest = fullContent.slice(headerIdx);
-      const lines = rest.split('\n');
-      const endLine = lines.findIndex(
-        (line, i) => i > 0 && /^#{1,6}\s/.test(line),
-      );
-      const sectionLines = endLine === -1 ? lines : lines.slice(0, endLine);
-      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
-        sectionLines.pop();
-      }
-      return sectionLines.join('\n');
-    }
-
     for (const pair of PAIRS) {
       it(`${pair.protocol}: codev/ and skeleton sections match`, () => {
         const codevContent = readRepoFile(pair.codev);
         const skeletonContent = readRepoFile(pair.skeleton);
+        // Reuse the same extractBakedSection helper defined at the top of this describe.
         const codevSection = extractBakedSection(`codev ${pair.protocol}`, codevContent);
         const skeletonSection = extractBakedSection(`skeleton ${pair.protocol}`, skeletonContent);
         expect(skeletonSection).toEqual(codevSection);
