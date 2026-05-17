@@ -10,6 +10,12 @@ Before requesting changes for missing configuration, incorrect patterns, or fram
 2. **Read the actual config files** (or confirm their deliberate absence) before flagging missing configs
 3. **Do not assume** your training data reflects the version in use — verify against project files
 
+## Baked Decisions
+
+If the issue body includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns about a baked decision (the architect decides whether to rescind it); reserve `REQUEST_CHANGES` for the case where the implementation **fails to honor** a stated baked decision — that is a real defect.
+
+If the baked decisions themselves contain contradictions, do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.
+
 ## Focus Areas
 
 1. **Issue Adherence**

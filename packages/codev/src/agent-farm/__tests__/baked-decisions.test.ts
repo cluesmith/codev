@@ -344,3 +344,188 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
     expect(baseline).not.toContain('Baked Decisions');
   });
 });
+
+// ============================================================================
+// Phase 3: Reviewer prompts (spec-review / plan-review / impl-review / pr-review + skeleton)
+// ============================================================================
+
+interface ReviewerPromptFile {
+  label: string;
+  relPath: string;
+  baselineName: string | null;
+}
+
+const PHASE_3_FILES: ReviewerPromptFile[] = [
+  {
+    label: 'codev SPIR spec-review',
+    relPath: 'codev/protocols/spir/consult-types/spec-review.md',
+    baselineName: 'spir-spec-review.md.baseline',
+  },
+  {
+    label: 'codev ASPIR spec-review',
+    relPath: 'codev/protocols/aspir/consult-types/spec-review.md',
+    baselineName: 'aspir-spec-review.md.baseline',
+  },
+  {
+    label: 'codev SPIR plan-review',
+    relPath: 'codev/protocols/spir/consult-types/plan-review.md',
+    baselineName: 'spir-plan-review.md.baseline',
+  },
+  {
+    label: 'codev ASPIR plan-review',
+    relPath: 'codev/protocols/aspir/consult-types/plan-review.md',
+    baselineName: 'aspir-plan-review.md.baseline',
+  },
+  {
+    label: 'codev AIR impl-review',
+    relPath: 'codev/protocols/air/consult-types/impl-review.md',
+    baselineName: 'air-impl-review.md.baseline',
+  },
+  {
+    label: 'codev AIR pr-review',
+    relPath: 'codev/protocols/air/consult-types/pr-review.md',
+    baselineName: 'air-pr-review.md.baseline',
+  },
+  {
+    label: 'skeleton SPIR spec-review',
+    relPath: 'codev-skeleton/protocols/spir/consult-types/spec-review.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton ASPIR spec-review',
+    relPath: 'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton SPIR plan-review',
+    relPath: 'codev-skeleton/protocols/spir/consult-types/plan-review.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton ASPIR plan-review',
+    relPath: 'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton AIR impl-review',
+    relPath: 'codev-skeleton/protocols/air/consult-types/impl-review.md',
+    baselineName: null,
+  },
+  {
+    label: 'skeleton AIR pr-review',
+    relPath: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
+    baselineName: null,
+  },
+];
+
+describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
+  describe('grep regression: required strings present in each file', () => {
+    for (const file of PHASE_3_FILES) {
+      describe(file.label, () => {
+        const content = readRepoFile(file.relPath);
+
+        it('contains the literal "Baked Decisions"', () => {
+          expect(content).toContain('Baked Decisions');
+        });
+
+        it('uses the carveout phrasing "do not autonomously"', () => {
+          expect(content.toLowerCase()).toContain('do not autonomously');
+        });
+
+        it('distinguishes COMMENT from REQUEST_CHANGES', () => {
+          expect(content).toContain('COMMENT');
+          expect(content).toContain('REQUEST_CHANGES');
+        });
+
+        it('addresses contradictions with "contradict" + "clarify"', () => {
+          const lower = content.toLowerCase();
+          expect(lower).toContain('contradict');
+          expect(lower).toContain('clarify');
+        });
+      });
+    }
+  });
+
+  describe('pure-addition diff: baseline lines preserved in order', () => {
+    for (const file of PHASE_3_FILES) {
+      if (file.baselineName === null) continue;
+      it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
+        const baseline = readBaseline(file.baselineName!);
+        const current = readRepoFile(file.relPath);
+        expectPureAdditionDiff(file.label, baseline, current);
+      });
+    }
+  });
+
+  describe('baked-decisions clause is byte-identical across codev/ and skeleton', () => {
+    interface MirrorPair {
+      protocol: string;
+      codev: string;
+      skeleton: string;
+    }
+    const PAIRS: MirrorPair[] = [
+      {
+        protocol: 'spir spec-review',
+        codev: 'codev/protocols/spir/consult-types/spec-review.md',
+        skeleton: 'codev-skeleton/protocols/spir/consult-types/spec-review.md',
+      },
+      {
+        protocol: 'aspir spec-review',
+        codev: 'codev/protocols/aspir/consult-types/spec-review.md',
+        skeleton: 'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
+      },
+      {
+        protocol: 'spir plan-review',
+        codev: 'codev/protocols/spir/consult-types/plan-review.md',
+        skeleton: 'codev-skeleton/protocols/spir/consult-types/plan-review.md',
+      },
+      {
+        protocol: 'aspir plan-review',
+        codev: 'codev/protocols/aspir/consult-types/plan-review.md',
+        skeleton: 'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
+      },
+      {
+        protocol: 'air impl-review',
+        codev: 'codev/protocols/air/consult-types/impl-review.md',
+        skeleton: 'codev-skeleton/protocols/air/consult-types/impl-review.md',
+      },
+      {
+        protocol: 'air pr-review',
+        codev: 'codev/protocols/air/consult-types/pr-review.md',
+        skeleton: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
+      },
+    ];
+
+    function extractBakedSection(label: string, fullContent: string): string {
+      const headerIdx = fullContent.indexOf('## Baked Decisions');
+      if (headerIdx === -1) {
+        throw new Error(`${label}: "## Baked Decisions" heading not found`);
+      }
+      const rest = fullContent.slice(headerIdx);
+      const lines = rest.split('\n');
+      const endLine = lines.findIndex(
+        (line, i) => i > 0 && /^#{1,6}\s/.test(line),
+      );
+      const sectionLines = endLine === -1 ? lines : lines.slice(0, endLine);
+      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
+        sectionLines.pop();
+      }
+      return sectionLines.join('\n');
+    }
+
+    for (const pair of PAIRS) {
+      it(`${pair.protocol}: codev/ and skeleton sections match`, () => {
+        const codevContent = readRepoFile(pair.codev);
+        const skeletonContent = readRepoFile(pair.skeleton);
+        const codevSection = extractBakedSection(`codev ${pair.protocol}`, codevContent);
+        const skeletonSection = extractBakedSection(`skeleton ${pair.protocol}`, skeletonContent);
+        expect(skeletonSection).toEqual(codevSection);
+      });
+    }
+  });
+
+  it('codev SPIR spec-review baseline does NOT contain "Baked Decisions" (pollution check)', () => {
+    const baseline = readBaseline('spir-spec-review.md.baseline');
+    expect(baseline).not.toContain('Baked Decisions');
+  });
+});
