@@ -37,6 +37,10 @@ AIR is a minimal protocol for implementing small features (< 300 LOC) where the 
 - Architectural changes → use **SPIR**
 - Complex features with multiple phases → use **SPIR** or **ASPIR**
 
+## Baked Decisions (Optional)
+
+When filing an issue for AIR, you can pin architectural decisions you don't want the builder or CMAP reviewers to re-litigate. Include a `## Baked Decisions` section (any heading level is fine) anywhere in the issue body. Useful categories: language, framework, deployment shape, key dependencies, decisions deferred to a later spec. The builder will treat each listed item as fixed during implementation; CMAP reviewers will not propose alternatives unless the implementation itself fails to honor a stated decision. Leave the section out for issues where you want the builder to explore freely — absence is the no-op default. You can amend or rescind a baked decision at any time by updating the issue and respawning, or by sending the builder a direct instruction via `afx send`.
+
 ## Protocol Phases
 
 ### I - Implement

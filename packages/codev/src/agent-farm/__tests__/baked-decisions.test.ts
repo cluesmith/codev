@@ -543,3 +543,168 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
     expect(baseline).not.toContain('Baked Decisions');
   });
 });
+
+// ============================================================================
+// Phase 4: Protocol documentation paragraphs + final regression sweep
+// ============================================================================
+
+interface ProtocolDocFile {
+  label: string;
+  relPath: string;
+}
+
+const PHASE_4_FILES: ProtocolDocFile[] = [
+  { label: 'codev SPIR protocol.md', relPath: 'codev/protocols/spir/protocol.md' },
+  { label: 'codev ASPIR protocol.md', relPath: 'codev/protocols/aspir/protocol.md' },
+  { label: 'codev AIR protocol.md', relPath: 'codev/protocols/air/protocol.md' },
+  { label: 'skeleton SPIR protocol.md', relPath: 'codev-skeleton/protocols/spir/protocol.md' },
+  { label: 'skeleton ASPIR protocol.md', relPath: 'codev-skeleton/protocols/aspir/protocol.md' },
+  { label: 'skeleton AIR protocol.md', relPath: 'codev-skeleton/protocols/air/protocol.md' },
+];
+
+describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', () => {
+  describe('grep regression: required content present in each protocol.md', () => {
+    for (const file of PHASE_4_FILES) {
+      describe(file.label, () => {
+        const content = readRepoFile(file.relPath);
+
+        it('contains the "Baked Decisions" keyword', () => {
+          expect(content).toContain('Baked Decisions');
+        });
+
+        it('mentions category hints (language + framework + dependencies)', () => {
+          const lower = content.toLowerCase();
+          expect(lower).toContain('language');
+          expect(lower).toContain('framework');
+          expect(lower).toContain('dependencies');
+        });
+
+        it('documents the amend/rescind escape hatch', () => {
+          const lower = content.toLowerCase();
+          // Either "amend" or "rescind" + a way to do it ("respawn" or "afx send")
+          expect(lower).toMatch(/amend|rescind/);
+          expect(lower).toMatch(/respawn|afx send/);
+        });
+
+        it('describes the absence default explicitly', () => {
+          expect(content.toLowerCase()).toContain('no-op default');
+        });
+      });
+    }
+  });
+
+  describe('discoverability paragraph is byte-identical across codev/ and skeleton', () => {
+    interface DocPair {
+      protocol: string;
+      codev: string;
+      skeleton: string;
+    }
+    const PAIRS: DocPair[] = [
+      {
+        protocol: 'spir protocol.md',
+        codev: 'codev/protocols/spir/protocol.md',
+        skeleton: 'codev-skeleton/protocols/spir/protocol.md',
+      },
+      {
+        protocol: 'aspir protocol.md',
+        codev: 'codev/protocols/aspir/protocol.md',
+        skeleton: 'codev-skeleton/protocols/aspir/protocol.md',
+      },
+      {
+        protocol: 'air protocol.md',
+        codev: 'codev/protocols/air/protocol.md',
+        skeleton: 'codev-skeleton/protocols/air/protocol.md',
+      },
+    ];
+
+    function extractBakedDocsSection(label: string, fullContent: string): string {
+      const headerIdx = fullContent.indexOf('## Baked Decisions');
+      if (headerIdx === -1) {
+        throw new Error(`${label}: "## Baked Decisions" heading not found`);
+      }
+      const rest = fullContent.slice(headerIdx);
+      const lines = rest.split('\n');
+      const endLine = lines.findIndex(
+        (line, i) => i > 0 && /^#{1,6}\s/.test(line),
+      );
+      const sectionLines = endLine === -1 ? lines : lines.slice(0, endLine);
+      while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
+        sectionLines.pop();
+      }
+      return sectionLines.join('\n');
+    }
+
+    for (const pair of PAIRS) {
+      it(`${pair.protocol}: codev/ and skeleton sections match`, () => {
+        const codevContent = readRepoFile(pair.codev);
+        const skeletonContent = readRepoFile(pair.skeleton);
+        const codevSection = extractBakedDocsSection(`codev ${pair.protocol}`, codevContent);
+        const skeletonSection = extractBakedDocsSection(`skeleton ${pair.protocol}`, skeletonContent);
+        expect(skeletonSection).toEqual(codevSection);
+      });
+    }
+  });
+});
+
+// ============================================================================
+// Phase 4 final sweep: every touched file has the required content,
+// and codev/ ↔ skeleton parity holds for the Baked Decisions sections of all 21 files.
+// ============================================================================
+
+describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
+  // All files touched across Phases 1-4 (21 total: 6 builder + 6 drafting/4-imp + 12 reviewer + 6 docs … wait, recount).
+  // Phase 1: 3 codev + 3 skeleton builder-prompts = 6
+  // Phase 2: 3 codev + 3 skeleton drafting prompts = 6
+  // Phase 3: 6 codev + 6 skeleton reviewer prompts = 12
+  // Phase 4: 3 codev + 3 skeleton protocol.md = 6
+  // Total: 30 files.
+  const ALL_TOUCHED_FILES = [
+    // Phase 1
+    'codev/protocols/spir/builder-prompt.md',
+    'codev/protocols/aspir/builder-prompt.md',
+    'codev/protocols/air/builder-prompt.md',
+    'codev-skeleton/protocols/spir/builder-prompt.md',
+    'codev-skeleton/protocols/aspir/builder-prompt.md',
+    'codev-skeleton/protocols/air/builder-prompt.md',
+    // Phase 2
+    'codev/protocols/spir/prompts/specify.md',
+    'codev/protocols/aspir/prompts/specify.md',
+    'codev/protocols/air/prompts/implement.md',
+    'codev-skeleton/protocols/spir/prompts/specify.md',
+    'codev-skeleton/protocols/aspir/prompts/specify.md',
+    'codev-skeleton/protocols/air/prompts/implement.md',
+    // Phase 3
+    'codev/protocols/spir/consult-types/spec-review.md',
+    'codev/protocols/aspir/consult-types/spec-review.md',
+    'codev/protocols/spir/consult-types/plan-review.md',
+    'codev/protocols/aspir/consult-types/plan-review.md',
+    'codev/protocols/air/consult-types/impl-review.md',
+    'codev/protocols/air/consult-types/pr-review.md',
+    'codev-skeleton/protocols/spir/consult-types/spec-review.md',
+    'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
+    'codev-skeleton/protocols/spir/consult-types/plan-review.md',
+    'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
+    'codev-skeleton/protocols/air/consult-types/impl-review.md',
+    'codev-skeleton/protocols/air/consult-types/pr-review.md',
+    // Phase 4
+    'codev/protocols/spir/protocol.md',
+    'codev/protocols/aspir/protocol.md',
+    'codev/protocols/air/protocol.md',
+    'codev-skeleton/protocols/spir/protocol.md',
+    'codev-skeleton/protocols/aspir/protocol.md',
+    'codev-skeleton/protocols/air/protocol.md',
+  ];
+
+  it('30 files were touched across Phases 1-4 (sanity check on the inventory)', () => {
+    expect(ALL_TOUCHED_FILES.length).toBe(30);
+  });
+
+  describe('cross-phase: every touched file contains "Baked Decisions"', () => {
+    for (const relPath of ALL_TOUCHED_FILES) {
+      it(relPath, () => {
+        const content = readRepoFile(relPath);
+        expect(content).toContain('Baked Decisions');
+      });
+    }
+  });
+});
