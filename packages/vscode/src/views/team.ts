@@ -45,8 +45,11 @@ export class TeamProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 
     if (ghd.assignedIssues?.length) {
       items.push(...ghd.assignedIssues.map((i: any) => {
-        const ti = new vscode.TreeItem(`Working on: #${i.number} ${i.title}`);
+        const ti = new vscode.TreeItem(`Assigned: #${i.number} ${i.title}`);
         ti.iconPath = new vscode.ThemeIcon('issues');
+        if (i.url) {
+          ti.command = { command: 'vscode.open', title: 'Open Issue on GitHub', arguments: [vscode.Uri.parse(i.url)] };
+        }
         return ti;
       }));
     }
@@ -55,6 +58,9 @@ export class TeamProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
       items.push(...ghd.openPRs.map((p: any) => {
         const ti = new vscode.TreeItem(`Open PR: #${p.number} ${p.title}`);
         ti.iconPath = new vscode.ThemeIcon('git-pull-request');
+        if (p.url) {
+          ti.command = { command: 'vscode.open', title: 'Open Pull Request on GitHub', arguments: [vscode.Uri.parse(p.url)] };
+        }
         return ti;
       }));
     }

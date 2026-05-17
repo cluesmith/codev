@@ -85,6 +85,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "codev.refreshTeam",
+        "title": "Codev: Refresh Team",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "codev.reconnect",
         "title": "Codev: Reconnect to Tower",
         "icon": "$(sync)"
@@ -291,6 +296,11 @@
         {
           "command": "codev.refreshOverview",
           "when": "view == codev.recentlyClosed",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.refreshTeam",
+          "when": "view == codev.team",
           "group": "navigation"
         },
         {
