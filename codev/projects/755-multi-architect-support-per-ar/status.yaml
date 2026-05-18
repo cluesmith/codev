@@ -78,9 +78,11 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-755/codev/projects/755-multi-architect-support-per-ar/755-phase_3-iter1-claude.txt
 started_at: '2026-05-17T20:51:15.851Z'
-updated_at: '2026-05-18T20:17:55.497Z'
+updated_at: '2026-05-18T20:18:08.145Z'
 pr_history:
   - phase: review
     pr_number: 757
     branch: builder/spir-755
     created_at: '2026-05-18T20:17:55.496Z'
+    merged: true
+    merged_at: '2026-05-18T20:18:08.144Z'
