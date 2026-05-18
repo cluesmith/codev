@@ -1,7 +1,7 @@
 id: '755'
 title: multi-architect-support-per-ar
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: Storage and Tower data-model relaxation
@@ -29,10 +29,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-17T20:51:15.851Z'
-updated_at: '2026-05-18T20:20:41.447Z'
+updated_at: '2026-05-18T20:21:07.381Z'
 pr_history:
   - phase: review
     pr_number: 757
