@@ -9,6 +9,13 @@
 // --- Dashboard State (GET /workspace/:path/api/state) ---
 
 export interface ArchitectState {
+  /**
+   * The architect's stable name (Spec 755). For single-architect workspaces this is
+   * `'main'`. For sibling-architect workspaces, additional architects are
+   * `'architect-2'`, `'architect-3'`, or whatever custom name was supplied via
+   * `afx workspace add-architect --name <name>`.
+   */
+  name: string;
   port: number;
   pid: number;
   terminalId?: string;
@@ -45,11 +52,30 @@ export interface Annotation {
   file: string;
   port: number;
   pid: number;
-  parent: { type: string; id?: string };
+  /**
+   * Optional parent reference. The Tower `/api/state` handler does not populate
+   * this; the field is reserved for richer client-driven annotation flows that
+   * may emerge later. Treat as informational only.
+   */
+  parent?: { type: string; id?: string };
 }
 
 export interface DashboardState {
+  /**
+   * Backward-compatible scalar pointer to the dashboard's "default" architect.
+   * Populated as the architect named `'main'` if present, else the first
+   * registered architect. Consumers that only need one architect (e.g. older
+   * VSCode-extension builds) should read this field.
+   */
   architect: ArchitectState | null;
+  /**
+   * Full collection of registered architects (Spec 761). The entry whose
+   * `name === 'main'` is always at index 0 when present; remaining entries
+   * follow insertion order from Tower's internal map. Empty array means no
+   * architect is registered. Consumers that need to surface all architects
+   * (e.g. the dashboard tab strip) should read this field.
+   */
+  architects: ArchitectState[];
   builders: Builder[];
   utils: UtilTerminal[];
   annotations: Annotation[];

@@ -27,7 +27,7 @@ import { version } from '../../version.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload } from '@cluesmith/codev-types';
+import type { BuilderSpawnedPayload, DashboardState, ArchitectState } from '@cluesmith/codev-types';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient } from './tower-types.js';
 import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
@@ -1449,17 +1449,11 @@ async function handleWorkspaceState(
   // entry — see getRehydratedTerminalsEntry doc.
   const entry = await getRehydratedTerminalsEntry(workspacePath);
   const manager = getTerminalManager();
-  const state: {
-    architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
-    builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
-    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean; lastDataAt?: number }>;
-    annotations: Array<{ id: string; file: string; port: number; pid: number }>;
-    workspaceName?: string;
-    version?: string;
-    hostname?: string;
-    teamEnabled?: boolean;
-  } = {
+  // Spec 761: type as DashboardState directly to prevent inline-literal drift.
+  // ArchitectState.name (Spec 761) carries the architect's stable identity.
+  const state: DashboardState = {
     architect: null,
+    architects: [],
     builders: [],
     utils: [],
     annotations: [],
@@ -1469,22 +1463,31 @@ async function handleWorkspaceState(
     teamEnabled: await hasTeam(path.join(workspacePath, 'codev', 'team')),
   };
 
-  // Add architect if exists.
-  // Spec 755: /api/state preserves the scalar `state.architect` shape.
-  // Prefer 'main', else first registered architect by name.
-  const architectTerminalId =
-    entry.architects.get('main') ?? entry.architects.values().next().value;
-  if (architectTerminalId) {
-    const session = manager.getSession(architectTerminalId);
-    if (session) {
-      state.architect = {
-        port: 0,
-        pid: session.pid || 0,
-        terminalId: architectTerminalId,
-        persistent: isSessionPersistent(architectTerminalId, session),
-      };
-    }
+  // Spec 761: build the architects collection from entry.architects.
+  // - Skip entries whose session is unavailable (race / stale registration).
+  // - Move 'main' to index 0 when present so consumers can rely on
+  //   architects[0] as the default architect.
+  // Spec 755: the scalar `state.architect` is preserved as a backward-compat
+  // pointer to the same default architect (architects[0] when present).
+  const collectedArchitects: ArchitectState[] = [];
+  for (const [architectName, terminalId] of entry.architects) {
+    const session = manager.getSession(terminalId);
+    if (!session) continue;
+    collectedArchitects.push({
+      name: architectName,
+      port: 0,
+      pid: session.pid || 0,
+      terminalId,
+      persistent: isSessionPersistent(terminalId, session),
+    });
   }
+  const mainIdx = collectedArchitects.findIndex(a => a.name === 'main');
+  if (mainIdx > 0) {
+    const [mainEntry] = collectedArchitects.splice(mainIdx, 1);
+    collectedArchitects.unshift(mainEntry);
+  }
+  state.architects = collectedArchitects;
+  state.architect = collectedArchitects[0] ?? null;
 
   // Add shells from refreshed cache
   for (const [shellId, terminalId] of entry.shells) {
