@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
-import { useTabs } from '../hooks/useTabs.js';
+import { useTabs, type Tab } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { getTerminalWsPath, createFileTab } from '../lib/api.js';
+import { readActiveArchitect, writeActiveArchitect } from '../lib/architectPersistence.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
+import { ArchitectTabStrip } from './ArchitectTabStrip.js';
 import { Terminal } from './Terminal.js';
 import { WorkView } from './WorkView.js';
 import { MobileLayout } from './MobileLayout.js';
@@ -32,6 +34,13 @@ export function App() {
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
   const [collapsedPane, setCollapsedPane] = useState<'left' | 'right' | null>(null);
+  // Spec 761: desktop left-pane architect selection is independent of the
+  // global activeTabId so the right pane keeps its own content while the
+  // user flips between architect terminals on the left. Persisted by name
+  // across reloads via localStorage.
+  const [activeArchitectName, setActiveArchitectName] = useState<string | null>(
+    () => readActiveArchitect(),
+  );
 
   // Bugfix #205: Track which terminal tabs have been visited at least once.
   // Terminals are only mounted on first visit, then kept alive (hidden via CSS)
@@ -107,9 +116,43 @@ export function App() {
     return <FileViewer tabId={tab.annotationId} initialLine={pendingLine ?? tab.initialLine} />;
   };
 
-  // Bugfix #205: Render persistent terminal tabs (kept mounted, shown/hidden via CSS)
-  // plus the active non-terminal content. terminalTypes specifies which tab types
-  // to persist (desktop right panel excludes 'architect' since it's in the left pane).
+  // Bugfix #205: Render persistent terminal tabs (kept mounted, shown/hidden via CSS).
+  //
+  // Spec 761: this is the extracted helper that drives both panes. The left
+  // pane uses it for architect tabs when N > 1, the right pane uses it for
+  // builder+shell tabs as today. The caller passes the `activeId` so the
+  // left pane (architect strip) can drive visibility independently of the
+  // global `activeTabId`. `toolbarExtra` is threaded onto the active terminal
+  // only — passing it to all would render multiple copies of the collapse
+  // buttons.
+  const renderPersistentTerminals = useCallback((
+    tabsToRender: Tab[],
+    activeId: string | null,
+    toolbarExtra?: ReactNode,
+  ) => {
+    return tabsToRender.map(tab => {
+      const wsPath = getTerminalWsPath(tab);
+      const isActive = activeId === tab.id;
+      return (
+        <div
+          key={tab.id}
+          className="terminal-tab-pane"
+          style={{ display: isActive ? undefined : 'none' }}
+        >
+          {wsPath
+            ? <Terminal
+                wsPath={wsPath}
+                onFileOpen={handleFileOpen}
+                persistent={tab.persistent}
+                toolbarExtra={isActive ? toolbarExtra : undefined}
+              />
+            : <div className="no-terminal">No terminal session</div>
+          }
+        </div>
+      );
+    });
+  }, [handleFileOpen]);
+
   const renderPersistentContent = (terminalTypes: string[]) => {
     const persistentTabs = tabs.filter(t =>
       terminalTypes.includes(t.type) && activatedTerminals.has(t.id)
@@ -117,21 +160,7 @@ export function App() {
 
     return (
       <>
-        {persistentTabs.map(tab => {
-          const wsPath = getTerminalWsPath(tab);
-          return (
-            <div
-              key={tab.id}
-              className="terminal-tab-pane"
-              style={{ display: activeTabId === tab.id ? undefined : 'none' }}
-            >
-              {wsPath
-                ? <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} persistent={tab.persistent} />
-                : <div className="no-terminal">No terminal session</div>
-              }
-            </div>
-          );
-        })}
+        {renderPersistentTerminals(persistentTabs, activeTabId)}
         <div style={{ display: activeTab?.type === 'work' ? undefined : 'none', height: '100%' }}>
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
         </div>
@@ -180,8 +209,12 @@ export function App() {
     );
   }
 
-  // Desktop: architect terminal on left, tabbed content on right
-  const architectTab = tabs.find(t => t.type === 'architect');
+  // Desktop: architect terminal(s) on left, tabbed content on right.
+  // Spec 761: multiple architects render as a tab strip inside the left
+  // pane. When N == 1 the strip is omitted and the bare Terminal renders
+  // exactly as before (DOM-snapshot-identical to pre-761).
+  const architectTabs = tabs.filter(t => t.type === 'architect');
+  const architectTab = architectTabs[0];
 
   // Bugfix #524: Tri-state collapse buttons — one button per side that cycles
   // through full-width → 50/50 → collapsed. Uses onPointerDown+preventDefault
@@ -232,10 +265,56 @@ export function App() {
     </>
   );
 
-  const architectWsPath = architectTab ? getTerminalWsPath(architectTab) : null;
-  const leftPane = architectWsPath
-    ? <Terminal wsPath={architectWsPath} onFileOpen={handleFileOpen} persistent={architectTab!.persistent} toolbarExtra={architectToolbarExtra} />
-    : <div className="no-architect">No architect terminal</div>;
+  // Spec 761:
+  //   - N == 0: existing empty-state.
+  //   - N == 1: existing bare Terminal render (DOM-snapshot-identical).
+  //   - N > 1: tab strip + persistent terminals via renderPersistentTerminals,
+  //     so switching tabs flips visibility instead of unmounting WebSockets.
+  //
+  // The "active architect" for the left pane is tracked in `activeArchitectName`
+  // (independent of `activeTabId`), so flipping a builder/work tab on the
+  // right doesn't blank the architect on the left. Defaults to the first
+  // architect (architects[0] === 'main' when present per Phase 1 ordering).
+  let leftPane: ReactNode;
+  if (architectTabs.length === 0) {
+    leftPane = <div className="no-architect">No architect terminal</div>;
+  } else if (architectTabs.length === 1) {
+    const wsPath = getTerminalWsPath(architectTab!);
+    leftPane = wsPath
+      ? <Terminal
+          wsPath={wsPath}
+          onFileOpen={handleFileOpen}
+          persistent={architectTab!.persistent}
+          toolbarExtra={architectToolbarExtra}
+        />
+      : <div className="no-architect">No architect terminal</div>;
+  } else {
+    // Resolve which architect is active on the left pane. Prefer the
+    // persisted name (if it matches an existing architect), else fall back
+    // to architects[0].
+    const activeArchTab =
+      architectTabs.find(t => t.architectName === activeArchitectName)
+      ?? architectTabs[0];
+    const activeArchitectTabId = activeArchTab?.id ?? '';
+    leftPane = (
+      <div className="architect-pane">
+        <ArchitectTabStrip
+          tabs={architectTabs}
+          activeTabId={activeArchitectTabId}
+          onSelectTab={(id) => {
+            const picked = architectTabs.find(t => t.id === id);
+            if (picked?.architectName) {
+              setActiveArchitectName(picked.architectName);
+              writeActiveArchitect(picked.architectName);
+            }
+          }}
+        />
+        <div className="architect-pane-body">
+          {renderPersistentTerminals(architectTabs, activeArchitectTabId, architectToolbarExtra)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
