@@ -1,15 +1,15 @@
 id: '761'
 title: surface-multiple-architects-in
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: 'API state: expose architects collection'
     status: complete
   - id: phase_2
     title: 'Dashboard: per-architect tabs + left-pane persistent rendering'
-    status: in_progress
-current_plan_phase: phase_2
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -24,7 +24,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -59,4 +59,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-761/codev/projects/761-surface-multiple-architects-in/761-phase_2-iter1-claude.txt
 started_at: '2026-05-18T20:34:36.514Z'
-updated_at: '2026-05-18T21:41:03.623Z'
+updated_at: '2026-05-18T21:41:05.937Z'
