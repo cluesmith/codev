@@ -1,7 +1,7 @@
 id: '755'
 title: multi-architect-support-per-ar
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: phase_1
     title: Storage and Tower data-model relaxation
@@ -32,7 +32,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-17T20:51:15.851Z'
-updated_at: '2026-05-18T20:21:07.381Z'
+updated_at: '2026-05-18T20:21:21.913Z'
 pr_history:
   - phase: review
     pr_number: 757
@@ -40,3 +40,8 @@ pr_history:
     created_at: '2026-05-18T20:17:55.496Z'
     merged: true
     merged_at: '2026-05-18T20:18:08.144Z'
+context:
+  verify_skip_reason: >-
+    Architect approval per direct instruction 2026-05-18: PR #757 already merged at commit 1111672b after 5 prior CMAP
+    rounds across 3 phases; manual smoke testing in production deferred to follow-up issues #2-5 from issue #755. Forge
+    tool fix for pr-search merged-PR lookup is filed separately.
