@@ -42,6 +42,17 @@ export function App() {
     () => readActiveArchitect(),
   );
 
+  // Spec 761: when activeTabId (driven by useTabs) lands on an architect —
+  // via deep link (?tab=architect:<name>) or the post-load auto-switch for
+  // a newly-added architect — sync that into the independent left-pane
+  // state so the left pane reflects the selection. (Strip clicks set
+  // activeArchitectName directly without touching activeTabId.)
+  useEffect(() => {
+    if (activeTab?.type === 'architect' && activeTab.architectName) {
+      setActiveArchitectName(activeTab.architectName);
+    }
+  }, [activeTab?.id, activeTab?.type, activeTab?.architectName]);
+
   // Bugfix #205: Track which terminal tabs have been visited at least once.
   // Terminals are only mounted on first visit, then kept alive (hidden via CSS)
   // to avoid WebSocket reconnection and ring-buffer replay on tab switches.

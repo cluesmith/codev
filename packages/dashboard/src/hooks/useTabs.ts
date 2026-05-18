@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { DashboardState, ArchitectState } from '../lib/api.js';
-import { readActiveArchitect, writeActiveArchitect } from '../lib/architectPersistence.js';
 
 export interface Tab {
   id: string;
@@ -41,15 +40,21 @@ function buildArchitectTabs(state: DashboardState | null): Tab[] {
   // window where dashboard.js is newer than the server response.
   const architects: ArchitectState[] = state?.architects
     ?? (state?.architect ? [state.architect] : []);
-  return architects.map((a, index) => ({
-    id: architectTabId(index, a.name),
-    type: 'architect' as const,
-    label: a.name,
-    closable: false,
-    terminalId: a.terminalId,
-    persistent: a.persistent,
-    architectName: a.name,
-  }));
+  return architects.map((a, index) => {
+    // Deploy-window safety: scalar architect from an older server response
+    // may lack `name`. Default to 'main' so the label and architectName are
+    // never undefined.
+    const name = a.name ?? 'main';
+    return {
+      id: architectTabId(index, name),
+      type: 'architect' as const,
+      label: name,
+      closable: false,
+      terminalId: a.terminalId,
+      persistent: a.persistent,
+      architectName: name,
+    };
+  });
 }
 
 function buildTabs(state: DashboardState | null): Tab[] {
@@ -112,8 +117,15 @@ export function useTabs(state: DashboardState | null) {
   const tabs = buildTabs(state);
 
   // Handle URL ?tab= parameter on initial load (for deep linking from tower).
-  // Spec 761: also restore the persisted active architect from localStorage
-  // when no URL parameter is present.
+  //
+  // Spec 761: this hook deliberately does NOT restore the persisted active
+  // architect into `activeTabId`. Restoring it would cause the desktop right
+  // pane to blank on reload (every right-pane content section checks
+  // `activeTab?.type === 'work'`/etc., all of which are false when an
+  // architect tab is active). The desktop left-pane architect selection
+  // lives in App.tsx, which reads localStorage independently. The mobile
+  // tradeoff is small: on reload, the active tab defaults to `'work'`
+  // rather than restoring the previously-viewed architect.
   useEffect(() => {
     if (urlTabHandled.current || state === null) return;
 
@@ -146,17 +158,6 @@ export function useTabs(state: DashboardState | null) {
         window.history.replaceState({}, '', url.toString());
         return;
       }
-      urlTabHandled.current = true;
-      return;
-    }
-
-    // No URL parameter — restore the persisted active architect if there is one.
-    const persisted = readActiveArchitect();
-    if (persisted) {
-      const archTab = tabs.find(t => t.type === 'architect' && t.architectName === persisted);
-      if (archTab) {
-        setActiveTabId(archTab.id);
-      }
     }
     urlTabHandled.current = true;
   }, [tabs, state]);
@@ -188,12 +189,7 @@ export function useTabs(state: DashboardState | null) {
 
   const selectTab = useCallback((id: string) => {
     setActiveTabId(id);
-    // Spec 761: persist active architect name across reloads.
-    const tab = tabs.find(t => t.id === id);
-    if (tab?.type === 'architect' && tab.architectName) {
-      writeActiveArchitect(tab.architectName);
-    }
-  }, [tabs]);
+  }, []);
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
 

@@ -114,14 +114,19 @@ describe('useTabs — architect tabs (Spec 761)', () => {
     expect(archTabs[0].id).toBe('architect');
   });
 
-  it('restores the persisted active architect from localStorage on mount', () => {
+  it('does NOT restore active architect from localStorage into activeTabId', () => {
+    // Spec 761 (post Claude iter-1 review): useTabs deliberately does not
+    // read localStorage. If it did, activeTabId would land on an architect
+    // tab on reload, which blanks the desktop right pane (every section
+    // checks activeTab?.type === 'work'/'analytics'/'team', all false for
+    // an architect tab). Architect restoration is App.tsx's responsibility.
     localStorage.setItem(STORAGE_KEY, 'sibling');
 
     const { result } = renderHook(() => useTabs(makeState({
       architects: [archEntry('main'), archEntry('sibling')],
     })));
 
-    expect(result.current.activeTabId).toBe('architect:sibling');
+    expect(result.current.activeTabId).toBe('work');
   });
 
   it('honors ?tab=architect:<name> deep-link', () => {
@@ -153,29 +158,16 @@ describe('useTabs — architect tabs (Spec 761)', () => {
     expect(result.current.activeTabId).toBe('architect');
   });
 
-  it('writes localStorage when selectTab is called on an architect tab', () => {
+  it('selectTab does NOT write localStorage from useTabs (App.tsx owns architect persistence)', () => {
+    // Spec 761 (post Claude iter-1 review): persistence is App.tsx's
+    // responsibility via the strip handler. useTabs.selectTab is symmetric
+    // for all tab types: it only updates activeTabId.
     const { result } = renderHook(() => useTabs(makeState({
       architects: [archEntry('main'), archEntry('sibling')],
     })));
 
     act(() => {
       result.current.selectTab('architect:sibling');
-    });
-
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('sibling');
-  });
-
-  it('does not write localStorage for non-architect tabs', () => {
-    const { result } = renderHook(() => useTabs(makeState({
-      architects: [archEntry('main')],
-      builders: [{
-        id: 'B1', name: 'builder-1', port: 0, pid: 1,
-        status: 'running', phase: '', worktree: '', branch: '', type: 'spec',
-      }],
-    })));
-
-    act(() => {
-      result.current.selectTab('B1');
     });
 
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();

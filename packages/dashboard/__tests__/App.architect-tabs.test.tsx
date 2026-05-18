@@ -231,4 +231,65 @@ describe('App multi-architect dashboard (Spec 761)', () => {
     expect(siblingTerm.closest('.terminal-tab-pane')!).not.toHaveStyle({ display: 'none' });
     expect(mainTerm.closest('.terminal-tab-pane')!).toHaveStyle({ display: 'none' });
   });
+
+  it('N=2: reload with persisted architect keeps work view active on the right pane (Claude iter-1 bug fix)', () => {
+    // Spec 761 regression guard: previously, useTabs restored the persisted
+    // architect into activeTabId on mount, which blanked the entire right
+    // pane (work/analytics/team all hidden since activeTab.type === 'architect').
+    // The fix removed useTabs's localStorage read; App.tsx handles left-pane
+    // restoration independently.
+    storageMap.set(`codev-active-architect:${window.location.pathname}`, 'sibling');
+    mockUseBuilderStatus.mockReturnValue({
+      state: {
+        architect: archEntry('main', 'term-main'),
+        architects: [
+          archEntry('main', 'term-main'),
+          archEntry('sibling', 'term-sibling'),
+        ],
+        builders: [],
+        utils: [],
+        annotations: [],
+      },
+      refresh: vi.fn(),
+    });
+
+    render(<App />);
+
+    // Right pane: work view should be visible (default activeTabId === 'work').
+    const workView = screen.getByTestId('work-view');
+    expect(workView.parentElement).not.toHaveStyle({ display: 'none' });
+    // Left pane: sibling is still the active architect.
+    const siblingTerm = screen.getByTestId('terminal-/ws/terminal/term-sibling');
+    expect(siblingTerm.closest('.terminal-tab-pane')!).not.toHaveStyle({ display: 'none' });
+  });
+
+  it('N=2: deep-link ?tab=architect:<name> syncs the left pane selection', () => {
+    // Simulate a deep-link by setting the search string before render. Leave
+    // pathname at the default '/' to keep getTerminalWsPath()'s output
+    // matching the existing terminal-/ws/terminal/<id> testids.
+    window.history.replaceState({}, '', '/?tab=architect:sibling');
+    mockUseBuilderStatus.mockReturnValue({
+      state: {
+        architect: archEntry('main', 'term-main'),
+        architects: [
+          archEntry('main', 'term-main'),
+          archEntry('sibling', 'term-sibling'),
+        ],
+        builders: [],
+        utils: [],
+        annotations: [],
+      },
+      refresh: vi.fn(),
+    });
+
+    render(<App />);
+
+    const mainTerm = screen.getByTestId('terminal-/ws/terminal/term-main');
+    const siblingTerm = screen.getByTestId('terminal-/ws/terminal/term-sibling');
+    expect(siblingTerm.closest('.terminal-tab-pane')!).not.toHaveStyle({ display: 'none' });
+    expect(mainTerm.closest('.terminal-tab-pane')!).toHaveStyle({ display: 'none' });
+
+    // Restore the URL for subsequent tests.
+    window.history.replaceState({}, '', '/');
+  });
 });
