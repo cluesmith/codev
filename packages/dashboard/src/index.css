@@ -307,6 +307,21 @@ body {
   font-size: 14px;
 }
 
+/* Bugfix #766: multi-architect left-pane wrapper (Spec 761 N>1 path).
+ * Without these rules the wrappers collapse to intrinsic block height,
+ * leaving the architect terminal at ~1/4 of the SplitPane left side. */
+.architect-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.architect-pane-body {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Virtual keyboard for mobile terminals (Issue #254) */
 .virtual-keyboard {
   display: flex;
