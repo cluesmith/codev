@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.0.6"
+    name: "Ionic"
+    status: released
+    target_date: "2026-05-18"
+    notes: "Multi-architect dashboard tabs (#761) completes the v3.0.5 routing primitive — sibling architects are now clickable in the browser. PIR protocol (#691) lands; VSCode extension workflow round (#737) adds workspace dev runner, gate toasts, plan-review comments, View Issue/Artifact commands."
   - version: "v3.0.5"
     name: "Ionic"
     status: released

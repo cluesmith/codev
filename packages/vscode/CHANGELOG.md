@@ -2,7 +2,7 @@
 
 What's changed in the Codev VS Code extension, version by version, written for the developers who use it.
 
-## [Unreleased]
+## [3.0.6] - 2026-05-18
 
 ### What's new
 
