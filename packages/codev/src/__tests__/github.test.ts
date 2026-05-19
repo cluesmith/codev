@@ -263,7 +263,6 @@ describe('parseLabelDefaults', () => {
   // unlabeled issues, where GitHub always returns []. parseLabelDefaults used
   // to crash with "labels.map is not a function" and 500 the Tower overview.
   it('coerces empty-string labels (Gitea/Forgejo) to no-labels result', () => {
-    // @ts-expect-error — exercising the non-GitHub forge runtime shape
     expect(parseLabelDefaults('', 'Fix login bug')).toEqual({
       type: 'bug',
       priority: 'medium',
@@ -271,7 +270,6 @@ describe('parseLabelDefaults', () => {
   });
 
   it('coerces null labels to no-labels result', () => {
-    // @ts-expect-error — exercising the non-GitHub forge runtime shape
     expect(parseLabelDefaults(null)).toEqual({
       type: 'project',
       priority: 'medium',
@@ -279,7 +277,6 @@ describe('parseLabelDefaults', () => {
   });
 
   it('coerces undefined labels to no-labels result', () => {
-    // @ts-expect-error — exercising the non-GitHub forge runtime shape
     expect(parseLabelDefaults(undefined, 'Add dark mode')).toEqual({
       type: 'project',
       priority: 'medium',
