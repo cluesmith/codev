@@ -1,7 +1,7 @@
 id: bugfix-766
 title: bug-architect-pane-shrinks-to-
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates: {}
@@ -9,4 +9,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-19T00:27:56.031Z'
-updated_at: '2026-05-19T00:38:18.602Z'
+updated_at: '2026-05-19T00:59:00.634Z'
