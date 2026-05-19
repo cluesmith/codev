@@ -73,9 +73,12 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       item.contextValue = isBlocked
         ? `blocked-builder-${b.protocol || 'unknown'}`
         : `builder-${b.protocol || 'unknown'}`;
+      // 'circle-filled' (a solid status dot, like VSCode's running-process /
+      // port indicators) reads as "this is live" — unlike 'play', which
+      // looks like a button you press to start it.
       item.iconPath = isBlocked
         ? new vscode.ThemeIcon('bell', new vscode.ThemeColor('notificationsWarningIcon.foreground'))
-        : new vscode.ThemeIcon('play', new vscode.ThemeColor('testing.iconPassed'));
+        : new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('testing.iconPassed'));
       item.command = {
         command: 'codev.openBuilderById',
         title: 'Open Builder Terminal',
