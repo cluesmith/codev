@@ -89,10 +89,16 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       item.iconPath = isBlocked
         ? new vscode.ThemeIcon('bell', new vscode.ThemeColor('notificationsWarningIcon.foreground'))
         : new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('testing.iconPassed'));
+      // The row click runs `codev.openBuilderRow` — a wrapper that opens the
+      // builder terminal AND expands the row (so single-click matches what
+      // most users expect). Pass the item itself so the handler can call
+      // `buildersView.reveal(...)` against this row. Other callers
+      // (terminal-link clicks, etc.) still use `codev.openBuilderById`
+      // directly with just the id and don't trigger expansion.
       item.command = {
-        command: 'codev.openBuilderById',
+        command: 'codev.openBuilderRow',
         title: 'Open Builder Terminal',
-        arguments: [b.id],
+        arguments: [item],
       };
       return item;
     });

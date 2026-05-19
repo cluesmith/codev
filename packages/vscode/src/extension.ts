@@ -421,6 +421,20 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!roleOrId) { return; }
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
+		vscode.commands.registerCommand('codev.openBuilderRow', async (item: unknown) => {
+			// Builder-row single-click does BOTH: opens the terminal and expands
+			// the row (the file list). Expansion is via reveal(expand:true) which
+			// fires onDidExpandElement — the accordion handler picks that up and
+			// collapses peers when the setting is on. focus:false keeps the
+			// terminal focused, not the tree.
+			if (!(item instanceof BuilderTreeItem)) { return; }
+			await terminalManager?.openBuilderByRoleOrId(item.builderId, true);
+			try {
+				await buildersView!.reveal(item, { expand: true, select: false, focus: false });
+			} catch {
+				// Benign if the row is no longer present (e.g. mid-cleanup).
+			}
+		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
 			spawnBuilder(extractIssueId(arg))),
 		vscode.commands.registerCommand('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {

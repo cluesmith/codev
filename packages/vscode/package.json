@@ -158,6 +158,10 @@
         "title": "Codev: Open Builder Terminal"
       },
       {
+        "command": "codev.openBuilderRow",
+        "title": "Codev: Open Builder Terminal (and expand row)"
+      },
+      {
         "command": "codev.openWorktreeFolder",
         "title": "Codev: Open Worktree Folder"
       },
@@ -196,6 +200,10 @@
       "commandPalette": [
         {
           "command": "codev.openBuilderById",
+          "when": "false"
+        },
+        {
+          "command": "codev.openBuilderRow",
           "when": "false"
         },
         {
