@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.0.7"
+    name: "Ionic"
+    status: released
+    target_date: "2026-05-18"
+    notes: "Bugfix patch — architect pane layout fix for N>1 sibling architects (#766 - missing CSS for new wrappers shipped in v3.0.6); Gitea/Forgejo forge crash + field normalization (#749 + #750 reported by external adopter Chris Dodge)."
   - version: "v3.0.6"
     name: "Ionic"
     status: released
