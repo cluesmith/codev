@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
-import { isIdleWaiting, orderForDisplay } from '../views/builders.js';
+import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
+import { orderForDisplay } from '../views/builders.js';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 const NOW = 1_700_000_000_000;

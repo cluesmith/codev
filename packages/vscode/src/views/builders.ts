@@ -6,12 +6,6 @@ import { BuilderTreeItem } from './builder-tree-item.js';
 import { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 
-// `isIdleWaiting` (and its 5-minute threshold) lives in @cluesmith/codev-core
-// so the dashboard reads the same predicate. Re-export here so downstream
-// users of this view module (and the unit tests under test/) keep a single
-// import path; the canonical source is core.
-export { isIdleWaiting };
-
 /**
  * Order builders for the Builders tree: three buckets, top-down.
  *  1. **blocked** (formal gate awaiting approval) — longest-waiting first.

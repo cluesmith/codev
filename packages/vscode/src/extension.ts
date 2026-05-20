@@ -24,7 +24,8 @@ import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
-import { BuildersProvider, isIdleWaiting } from './views/builders.js';
+import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
+import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
 import { BacklogProvider, spawnableBacklog } from './views/backlog.js';
 import { RecentlyClosedProvider } from './views/recently-closed.js';
@@ -130,8 +131,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Update status bar with builder + needs-attention counts.
 	// Two "needs me" signals: blocked (formal gate) and idle-waiting
 	// (PTY silent past threshold, likely paused at a non-gate question
-	// — see isIdleWaiting in views/builders.ts). Each is shown only
-	// when > 0, with its own icon.
+	// — see isIdleWaiting in @cluesmith/codev-core/builder-helpers).
+	// Each is shown only when > 0, with its own icon.
 	const updateStatusBarCounts = () => {
 		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
 		const data = overviewCache.getData();
