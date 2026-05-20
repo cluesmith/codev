@@ -39,6 +39,8 @@ import {
   serveStaticFile,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
+import { getWorktreeConfig } from '../utils/config.js';
+import { ensureWorktreeConfigWatcher } from './worktree-config-watcher.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
@@ -147,6 +149,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
+  'GET /api/worktree-config': (_req, res, url) => handleWorktreeConfigView(res, url),
   'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
@@ -815,6 +818,42 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(issue));
+}
+
+/**
+ * GET /api/worktree-config — returns the canonical `ResolvedWorktreeConfig`
+ * for the requested workspace (defaults / cache / global / project /
+ * project-local, deep-merged per `lib/config.ts:loadConfig`). This is
+ * the single source of truth for any client that needs to act on
+ * worktree config (currently the VSCode extension's "Open Dev URL"
+ * surface; the dashboard is welcome to use it too).
+ *
+ * Side effect: lazily installs a directory watcher on the workspace's
+ * `.codev/` so any subsequent edit to `config.json` /
+ * `config.local.json` fans out a `worktree-config-updated` SSE event
+ * — clients refetch via this same endpoint and re-render.
+ */
+function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
+  let workspaceRoot = url.searchParams.get('workspace');
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+  if (!workspaceRoot) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing workspace' }));
+    return;
+  }
+  try {
+    const config = getWorktreeConfig(workspaceRoot);
+    ensureWorktreeConfigWatcher(workspaceRoot);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(config));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `Failed to resolve worktree config: ${message}` }));
+  }
 }
 
 function handleOverviewRefresh(res: http.ServerResponse, ctx?: RouteContext): void {

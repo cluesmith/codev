@@ -187,6 +187,36 @@ export interface OverviewData {
   errors?: { prs?: string; issues?: string };
 }
 
+// --- Worktree config (GET /api/worktree-config) ---
+
+/** One row in the VSCode "Open Dev URL" workspace surface. */
+export interface WorktreeDevUrl {
+  label: string;
+  url: string;
+}
+
+/**
+ * Resolved view of the `worktree` config block with defaults applied
+ * across the loadConfig layer chain (defaults / cache / global /
+ * project / project-local). Always has populated fields — unset
+ * scalars collapse to null, unset collections to empty arrays — so
+ * consumers don't have to branch.
+ */
+export interface ResolvedWorktreeConfig {
+  /** Glob patterns to symlink from workspace root into each worktree. `[]` when unset. */
+  symlinks: string[];
+  /** Shell commands to run in each worktree after creation. `[]` when unset. */
+  postSpawn: string[];
+  /** Command for `afx dev <builder-id>`. `null` when unset. */
+  devCommand: string | null;
+  /**
+   * Canonical resolved list of dev URLs for the VSCode "Open Dev URL"
+   * workspace surface. Always an array — `[]` when neither `devUrl`
+   * nor `devUrls` is set in the user config.
+   */
+  devUrls: WorktreeDevUrl[];
+}
+
 // --- Issue view (GET /api/issue) ---
 
 /**

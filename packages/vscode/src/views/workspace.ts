@@ -4,8 +4,7 @@ import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { getTowerAddress } from '../workspace-detector.js';
 import { resolveWorkspaceDevTarget } from '../commands/dev-shared.js';
-import { readWorktreeDevUrls } from '../commands/open-dev-url.js';
-import { watchCodevConfig } from '../watch-codev-config.js';
+import { loadWorktreeDevUrls } from '../commands/open-dev-url.js';
 
 /**
  * Workspace-level entry points: architect terminal, Tower web dashboard,
@@ -19,44 +18,39 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
   constructor(
     private connectionManager: ConnectionManager,
     private terminalManager: TerminalManager,
-    context: vscode.ExtensionContext,
   ) {
-    // The workspace view's rows are config-driven (Open Dev URL entries
-    // from worktree.devUrls, with more to come), so any edit to
-    // .codev/config.json (or its per-engineer .local.json sibling) should
-    // re-render. The watching primitive lives in src/watch-codev-config.ts;
-    // we just wire it up here. Lazy install: workspacePath isn't available
-    // at construction because the Tower connection lands async — attempt
-    // on every state change and pin via `configWatcherInstalled` the first
-    // time we succeed.
-    let configWatcherInstalled = false;
-    const installConfigWatcherIfReady = () => {
-      if (configWatcherInstalled) { return; }
-      const workspacePath = connectionManager.getWorkspacePath();
-      if (!workspacePath) { return; }
-      configWatcherInstalled = true;
-      context.subscriptions.push(
-        watchCodevConfig(workspacePath, () => this.changeEmitter.fire()),
-      );
-    };
-    connectionManager.onStateChange(() => {
-      this.changeEmitter.fire();
-      installConfigWatcherIfReady();
-    });
+    connectionManager.onStateChange(() => this.changeEmitter.fire());
     // Re-render when the dev-terminal set changes (start/stop, a swap that
     // killed this workspace's dev, or cleanup) so the conditional "Stop Dev
     // Server" row reflects reality across every path.
     terminalManager.onDidChangeDevTerminals(() => this.changeEmitter.fire());
-    // Eager attempt in case workspacePath is already set (fast cached
-    // connect path).
-    installConfigWatcherIfReady();
+    // Tower fans out a `worktree-config-updated` SSE event whenever
+    // .codev/config(.local).json changes (server-side file watcher in
+    // worktree-config-watcher.ts). We re-render on that signal so the
+    // config-driven rows (Open Dev URL …) reflect edits live, without
+    // the extension ever needing to read or watch the file itself.
+    //
+    // Tower emits events as a JSON envelope on the SSE `data:` field
+    // with no `event:` name (see builder-spawn-handler.ts for the same
+    // gotcha), so the SSE-client-level `type` is always '' and the
+    // real type sits inside the envelope.
+    connectionManager.onSSEEvent(({ data }) => {
+      try {
+        const envelope = JSON.parse(data) as { type?: unknown };
+        if (envelope.type === 'worktree-config-updated') {
+          this.changeEmitter.fire();
+        }
+      } catch {
+        // benign — malformed envelope
+      }
+    });
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
     return element;
   }
 
-  getChildren(): vscode.TreeItem[] {
+  async getChildren(): Promise<vscode.TreeItem[]> {
     const items: vscode.TreeItem[] = [];
 
     const architect = new vscode.TreeItem('Open Architect');
@@ -166,7 +160,7 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     // state. Opens in the user's default browser (real DevTools, real
     // cookies, real OAuth) — not the embedded Simple Browser webview.
     // Closed the tab? Click the row again for a fresh one.
-    const devUrls = readWorktreeDevUrls(workspacePath);
+    const devUrls = await loadWorktreeDevUrls(this.connectionManager);
     for (const { label, url } of devUrls) {
       const row = new vscode.TreeItem(label);
       // 'link-external' (square + outgoing arrow) — VSCode's conventional

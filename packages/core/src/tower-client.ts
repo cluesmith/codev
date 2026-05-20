@@ -7,7 +7,7 @@
  * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
  */
 
-import type { DashboardState, OverviewData, IssueView } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, ResolvedWorktreeConfig } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { ensureLocalKey } from './auth.js';
 
@@ -270,6 +270,23 @@ export class TowerClient {
     const params = new URLSearchParams({ number: issueNumber });
     if (workspacePath) { params.set('workspace', workspacePath); }
     const result = await this.request<IssueView>(`/api/issue?${params.toString()}`);
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Fetch the canonical resolved worktree config (defaults / cache /
+   * global / project / project-local layers, deep-merged) from Tower's
+   * GET /api/worktree-config. The single source of truth for any client
+   * that needs to act on `.codev/config(.local).json` — e.g. the VSCode
+   * "Open Dev URL" surface — without parsing or merging the files
+   * locally. Tower lazily installs a directory watcher on first call;
+   * subsequent edits fan out a `worktree-config-updated` SSE event so
+   * subscribed clients refetch and re-render. Returns null on failure
+   * so callers can degrade.
+   */
+  async getWorktreeConfig(workspacePath?: string): Promise<ResolvedWorktreeConfig | null> {
+    const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : '';
+    const result = await this.request<ResolvedWorktreeConfig>(`/api/worktree-config${query}`);
     return result.ok ? result.data! : null;
   }
 

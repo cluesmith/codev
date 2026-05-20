@@ -3,7 +3,13 @@
  * in the user's default browser. Surfaced as one workspace-view row
  * per configured URL (label = row text), plus a palette command.
  * Both `label` and `url` are mandatory per schema; entries missing
- * either are silently filtered out.
+ * either are silently filtered out (by the resolver server-side).
+ *
+ * The resolved devUrls list comes from Tower's GET /api/worktree-config,
+ * which applies the full layered config merge (defaults / cache /
+ * global / project / project-local). The extension never parses
+ * `.codev/config.json` directly — Tower is the single source of truth
+ * for "what's configured" so the merge semantics can't drift.
  *
  * Why the default browser over VSCode's Simple Browser: DevTools /
  * Console / Network are dev-loop essentials Simple Browser doesn't
@@ -13,40 +19,23 @@
  */
 
 import * as vscode from 'vscode';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import type { WorktreeDevUrl } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
 
-export interface WorktreeDevUrl {
-  label: string;
-  url: string;
-}
+export type { WorktreeDevUrl };
 
 /**
- * Read the canonical resolved dev-URL list from the workspace's
- * `.codev/config.json`. Filters entries missing either `label` or
- * `url` (both are mandatory per schema). Returns `[]` for
- * missing/malformed config so callers don't have to branch.
+ * Fetch the canonical resolved dev-URL list for the active workspace
+ * from Tower. Returns `[]` when Tower is unreachable, the workspace
+ * isn't activated, or the config has no `devUrls` — callers don't
+ * have to branch.
  */
-export function readWorktreeDevUrls(workspacePath: string | null): WorktreeDevUrl[] {
-  if (!workspacePath) { return []; }
-  try {
-    const raw = fs.readFileSync(path.join(workspacePath, '.codev', 'config.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { worktree?: { devUrls?: unknown } };
-    const devUrls = parsed.worktree?.devUrls;
-    if (!Array.isArray(devUrls)) { return []; }
-    return devUrls
-      .map((e): WorktreeDevUrl => ({
-        label: e && typeof (e as { label?: unknown }).label === 'string'
-          ? ((e as { label: string }).label).trim() : '',
-        url: e && typeof (e as { url?: unknown }).url === 'string'
-          ? ((e as { url: string }).url).trim() : '',
-      }))
-      .filter(e => e.label && e.url);
-  } catch {
-    // benign — fall through to []
-  }
-  return [];
+export async function loadWorktreeDevUrls(connectionManager: ConnectionManager): Promise<WorktreeDevUrl[]> {
+  const client = connectionManager.getClient();
+  const workspacePath = connectionManager.getWorkspacePath();
+  if (!client || !workspacePath || connectionManager.getState() !== 'connected') { return []; }
+  const config = await client.getWorktreeConfig(workspacePath);
+  return config?.devUrls ?? [];
 }
 
 export async function openDevUrl(
@@ -60,8 +49,7 @@ export async function openDevUrl(
   }
 
   // Palette / arg-less invocation: resolve from config and route.
-  const workspacePath = connectionManager.getWorkspacePath();
-  const devUrls = readWorktreeDevUrls(workspacePath);
+  const devUrls = await loadWorktreeDevUrls(connectionManager);
 
   if (devUrls.length === 0) {
     vscode.window.showWarningMessage(

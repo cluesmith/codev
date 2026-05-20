@@ -49,6 +49,7 @@ import {
 } from './tower-websocket.js';
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
+import { setWorktreeConfigNotifier, stopAllWorktreeConfigWatchers } from './worktree-config-watcher.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { validateHost } from '../utils/server-utils.js';
 
@@ -158,6 +159,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 6. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
   shutdownTunnel();
+
+  // 6b. Close per-workspace .codev/config(.local).json watchers.
+  stopAllWorktreeConfigWatchers();
 
   // 7. Tear down instance module (Spec 0105 Phase 3)
   shutdownInstances();
@@ -318,6 +322,12 @@ const routeCtx: RouteContext = {
     }
   },
 };
+
+// Wire the broadcast function into the worktree config watcher so file
+// edits to .codev/config{,.local}.json fan out as
+// `worktree-config-updated` SSE events. The actual watcher is installed
+// lazily by the /api/worktree-config route handler on first request.
+setWorktreeConfigNotifier(broadcastNotification);
 
 // ============================================================================
 // Create server — delegates all HTTP handling to tower-routes.ts

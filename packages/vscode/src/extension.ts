@@ -265,7 +265,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		pullRequestsView,
 		backlogView,
 		recentlyClosedView,
-		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager, terminalManager!, context)),
+		vscode.window.registerTreeDataProvider('codev.workspace', new WorkspaceProvider(connectionManager, terminalManager!)),
 		vscode.window.registerTreeDataProvider('codev.team', teamProvider),
 		vscode.window.registerTreeDataProvider('codev.status', new StatusProvider(connectionManager)),
 	);

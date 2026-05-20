@@ -11,6 +11,12 @@ import { getSkeletonDir } from '../../lib/skeleton.js';
 import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
 import { resolveHarness, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
+import type { ResolvedWorktreeConfig, WorktreeDevUrl } from '@cluesmith/codev-types';
+
+// Re-export so existing internal callers that import the resolved types
+// from this module keep working. The canonical home is now
+// @cluesmith/codev-types (these cross HTTP via /api/worktree-config).
+export type { ResolvedWorktreeConfig, WorktreeDevUrl };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -269,32 +275,10 @@ export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
   );
 }
 
-/**
- * Resolved view of the `worktree` config block with defaults applied.
- * Unset fields collapse to empty / null so callers don't have to branch.
- */
-/** One row in the VSCode "Open Dev URL" workspace surface. */
-export interface WorktreeDevUrl {
-  label: string;
-  url: string;
-}
-
-export interface ResolvedWorktreeConfig {
-  /** Glob patterns to symlink from workspace root into each worktree. `[]` when unset. */
-  symlinks: string[];
-  /** Shell commands to run in each worktree after creation. `[]` when unset. */
-  postSpawn: string[];
-  /** Command for `afx dev <builder-id>`. `null` when unset. */
-  devCommand: string | null;
-  /**
-   * Canonical resolved list of dev URLs for the VSCode "Open Dev URL"
-   * workspace-view row. Always an array — `[]` when neither `devUrl`
-   * nor `devUrls` is set in the user config. A legacy single
-   * `devUrl: "<url>"` is normalized to `[{ label: "Open Dev URL", url }]`
-   * so consumers don't have to branch.
-   */
-  devUrls: WorktreeDevUrl[];
-}
+// ResolvedWorktreeConfig + WorktreeDevUrl now live in
+// @cluesmith/codev-types (they cross HTTP via /api/worktree-config).
+// Re-exported from this module at the top of the file so existing
+// internal callers keep working.
 
 /**
  * Load the `worktree` block from .codev/config.json, applying defaults.
