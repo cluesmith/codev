@@ -145,7 +145,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
-  'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
+  'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
   'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
@@ -737,7 +737,7 @@ async function handleStatus(res: http.ServerResponse): Promise<void> {
   res.end(JSON.stringify({ instances }));
 }
 
-async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverride?: string): Promise<void> {
+async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverride?: string, ctx?: RouteContext): Promise<void> {
   // Accept workspace from: explicit override (workspace-scoped route), ?workspace= param, or first known path.
   let workspaceRoot = workspaceOverride || url.searchParams.get('workspace');
 
@@ -764,6 +764,27 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
   }
 
   const data = await overviewCache.getOverview(workspaceRoot, activeBuilderRoleIds);
+
+  // Enrich each builder with `lastDataAt` — the wall-clock time Tower
+  // last received a DATA frame from that builder's shellper. The UI uses
+  // this to flag builders silent past a threshold as "waiting for input"
+  // (separate from formal porch gates, which `blocked` already covers).
+  //
+  // Pattern mirrors /api/state's builder loop (around line 1572): iterate
+  // `entry.builders` (Map<roleId, PtySession ID>), look up the session,
+  // do the work. Discovery already stamps `roleId` on each builder, so
+  // matching the runtime registry back to the discovery list is a single
+  // `find`. Builders with no attached session keep `lastDataAt = null`
+  // (the discover-time default).
+  const terminalManager = getTerminalManager();
+  for (const [builderId, terminalId] of entry.builders) {
+    const ptySession = terminalManager.getSession(terminalId);
+    if (!ptySession) { continue; }
+    const builder = data.builders.find(b => b.roleId === builderId.toLowerCase());
+    if (!builder) { continue; }
+    builder.lastDataAt = new Date(ptySession.lastDataAt).toISOString();
+  }
+
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
@@ -1422,7 +1443,7 @@ async function handleWorkspaceRoutes(
 
     // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
     if (req.method === 'GET' && apiPath === 'overview') {
-      return handleOverview(res, url, workspacePath);
+      return handleOverview(res, url, workspacePath, ctx);
     }
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)

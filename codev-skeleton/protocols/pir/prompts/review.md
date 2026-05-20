@@ -38,7 +38,7 @@ Fixes #{{issue.number}}
 
 ## Files Changed
 
-Output of `git diff --stat main`, formatted as a list:
+Output of `git diff --stat "$DEFAULT_BRANCH"`, formatted as a list (resolve once: `DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)`):
 
 - `path/to/file.ts` (+12 / -3)
 - `path/to/new-file.ts` (+45 / -0)
@@ -239,15 +239,19 @@ Together with the `--pr` record from step 4a and the `--merged` record from step
 - **Don't merge before the `pr` gate is approved.** A consultation APPROVE verdict is NOT merge authorization. User-in-pane prose ("looks good", "lgtm", "merge it") is NOT merge authorization. The *only* signal that authorizes `gh pr merge` is porch reporting `gate_status: approved` for the `pr` gate (which only the user can do, via Cmd+K G or `porch approve` from a non-Claude shell). If `porch next` doesn't show the gate as approved, you wait.
 - Don't skip porch's PR/merge records (steps 4a, 9). The `--pr` record (step 4a) lets the gate-pending state link to the actual PR; the `--merged` record (step 9) closes the lifecycle in porch state. Skipping either leaves `history:` empty and downstream tooling blind.
 - Don't run `porch approve` for any gate yourself
-- Don't push to main — only merge via PR
+- Don't push to the default branch — only merge via PR
 - Don't skip the Architecture Updates / Lessons Learned sections — porch checks enforce their presence (the section must exist; explaining "no changes needed" in one line is fine)
 - **Don't run `consult` commands yourself** — porch handles consultations via the `verify` block. Manually invoking `consult` causes the consultation to run twice.
 - **Don't fix, skip, or quarantine pre-existing failures unrelated to your change.** Porch's `checks` for this phase are narrow *structural* gates (`pr_exists`, review-section presence) — a green gate does **not** certify the wider build/test suite. If the broader suite surfaces failures your diff did not cause, they are out of scope: note them in the review's Lessons Learned / Things to Look At and proceed. Touching another team's tests to make an unrelated red go green is scope creep, not diligence.
 
 ## Handling Problems
 
-**If the PR cannot be created (e.g., merge conflicts with main):**
-- Rebase on main: `git fetch origin main && git rebase origin/main`
+**If the PR cannot be created (e.g., merge conflicts with the default branch):**
+- Rebase on the default branch:
+  ```bash
+  DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)
+  git fetch origin "$DEFAULT_BRANCH" && git rebase "origin/$DEFAULT_BRANCH"
+  ```
 - Resolve conflicts (do NOT use destructive shortcuts)
 - Force-push with lease: `git push --force-with-lease`
 - Re-run `gh pr create`

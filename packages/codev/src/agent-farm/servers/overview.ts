@@ -40,6 +40,15 @@ export interface BuilderOverview {
   mode: 'strict' | 'soft';
   gates: Record<string, string>;
   worktreePath: string;
+  /**
+   * Canonical role identifier (e.g. `builder-pir-1423`) derived from the
+   * worktree basename via `worktreeNameToRoleId`. The bridge between
+   * filesystem-discovered builders and the runtime terminal registry's
+   * `entry.builders: Map<roleId, ptySessionId>`. `null` if the worktree
+   * name doesn't match any known protocol pattern (soft-mode builders
+   * with arbitrary names).
+   */
+  roleId: string | null;
   protocol: string;
   planPhases: PlanPhase[];
   progress: number;
@@ -54,6 +63,14 @@ export interface BuilderOverview {
   blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;
+  /**
+   * Wall-clock ISO timestamp of the last DATA frame Tower received from
+   * this builder's shellper (`null` when no live session). The UI uses
+   * it to detect builders silent past a threshold — likely waiting for
+   * non-gate human input. Filled by `handleOverview` after this object
+   * is constructed (the parser leaves it `null`).
+   */
+  lastDataAt: string | null;
 }
 
 export interface PROverview {
@@ -543,6 +560,10 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
 
     const worktreePath = path.join(buildersDir, entry.name);
     const projectId = extractProjectIdFromWorktreeName(entry.name);
+    // Compute the canonical roleId once per worktree — used both as a
+    // filter key (against entry.builders.keys()) and as the bridge to
+    // PtySession at request time, so callers don't re-run the regex.
+    const roleId = worktreeNameToRoleId(entry.name);
 
     if (!projectId) {
       // No ID extracted (task-*, worktree-*) → soft mode
@@ -554,6 +575,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         mode: 'soft',
         gates: {},
         worktreePath,
+        roleId,
         protocol: '',
         planPhases: [],
         progress: 0,
@@ -562,6 +584,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         blockedSince: null,
         startedAt: null,
         idleMs: 0,
+        lastDataAt: null,
       });
       continue;
     }
@@ -606,6 +629,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             mode: 'strict',
             gates: parsed.gates,
             worktreePath,
+            roleId,
             protocol: parsed.protocol,
             planPhases: parsed.planPhases,
             progress: calculateProgress(parsed, workspaceRoot),
@@ -614,6 +638,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             blockedSince: detectBlockedSince(parsed),
             startedAt: parsed.startedAt || null,
             idleMs: computeIdleMs(parsed),
+            lastDataAt: null,
           });
           found = true;
           break;
@@ -635,6 +660,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         mode: 'soft',
         gates: {},
         worktreePath,
+        roleId,
         protocol: '',
         planPhases: [],
         progress: 0,
@@ -643,6 +669,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         blockedSince: null,
         startedAt: null,
         idleMs: 0,
+        lastDataAt: null,
       });
     }
   }
@@ -743,10 +770,8 @@ export class OverviewCache {
     // 1. Discover builders from .builders/ directory, then filter to live sessions
     let builders = discoverBuilders(workspaceRoot);
     if (activeBuilderRoleIds) {
-      builders = builders.filter(b => {
-        const roleId = worktreeNameToRoleId(path.basename(b.worktreePath));
-        return roleId !== null && activeBuilderRoleIds.has(roleId);
-      });
+      // roleId is precomputed by discoverBuilders — no regex per call.
+      builders = builders.filter(b => b.roleId !== null && activeBuilderRoleIds.has(b.roleId));
     }
 
     // Enrich issueId from DB issue_number — protocol-agnostic (fixes #664)

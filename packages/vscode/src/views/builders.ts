@@ -1,23 +1,29 @@
 import * as vscode from 'vscode';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
+import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import type { OverviewCache } from './overview-data.js';
 import { BuilderTreeItem } from './builder-tree-item.js';
 import { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 
 /**
- * Order builders for the Builders tree: blocked first with the longest-
- * waiting at the top, then active builders in overview order. Builders
- * with no recorded `blockedSince` sort last within the blocked group
- * (we don't pretend to know their wait time).
+ * Order builders for the Builders tree: three buckets, top-down.
+ *  1. **blocked** (formal gate awaiting approval) — longest-waiting first.
+ *  2. **idle waiting** (`isIdleWaiting`) — agent silent past the threshold,
+ *      likely paused at a clarifying question.
+ *  3. **active** — everything else; overview order.
+ * Blocked rows with no `blockedSince` sort last within the blocked group
+ * (we don't pretend to know their wait time). Idle-waiting and active
+ * rows preserve Tower's source order within each bucket.
  */
-function orderForDisplay(builders: OverviewBuilder[]): OverviewBuilder[] {
+export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.now()): OverviewBuilder[] {
   const ms = (iso: string | null) => iso ? new Date(iso).getTime() : Infinity;
   const blocked = builders
     .filter(b => b.blocked)
     .sort((a, b) => ms(a.blockedSince) - ms(b.blockedSince));
-  const active = builders.filter(b => !b.blocked);
-  return [...blocked, ...active];
+  const idleWaiting = builders.filter(b => !b.blocked && isIdleWaiting(b, now));
+  const active = builders.filter(b => !b.blocked && !isIdleWaiting(b, now));
+  return [...blocked, ...idleWaiting, ...active];
 }
 
 /**
@@ -62,11 +68,16 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     const data = this.cache.getData();
     if (!data) { return []; }
 
-    return orderForDisplay(data.builders).map(b => {
+    const now = Date.now();
+    return orderForDisplay(data.builders, now).map(b => {
       const isBlocked = !!b.blocked;
+      const isIdle = !isBlocked && isIdleWaiting(b, now);
       const waitTime = isBlocked && b.blockedSince ? ` [${timeSince(b.blockedSince)}]` : '';
+      const idleTime = isIdle && b.lastDataAt ? ` [${timeSince(b.lastDataAt)} silent]` : '';
       const phaseLabel = isBlocked
         ? `blocked on ${b.blocked}${waitTime}`
+        : isIdle
+        ? `waiting on input${idleTime}`
         : `[${b.phase}]`;
       const item = new BuilderTreeItem(b.id, `#${b.issueId ?? b.id} ${b.issueTitle ?? ''} ${phaseLabel}`);
       // Stable id (not the churning label) so VSCode persists expansion across
@@ -78,21 +89,31 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       // toggles the file list.
       item.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
       item.tooltip = `Protocol: ${b.protocol} | Mode: ${b.mode} | Progress: ${b.progress}%`;
-      // contextValue encodes both blocked-state and protocol so menus can
-      // scope by either (e.g., inline Approve only on blocked-builder-*).
+      // contextValue encodes the row's state-family + protocol so menus can
+      // scope by either (Approve Gate inline only on blocked-builder-*;
+      // everything else applies to all three families).
       item.contextValue = isBlocked
         ? `blocked-builder-${b.protocol || 'unknown'}`
+        : isIdle
+        ? `awaiting-builder-${b.protocol || 'unknown'}`
         : `builder-${b.protocol || 'unknown'}`;
-      // 'circle-filled' (a solid status dot, like VSCode's running-process /
-      // port indicators) reads as "this is live" — unlike 'play', which
-      // looks like a button you press to start it.
+      // Three icons for three states: bell (gate), comment-discussion
+      // (silent, likely waiting on a question), circle-filled (live/active).
       item.iconPath = isBlocked
         ? new vscode.ThemeIcon('bell', new vscode.ThemeColor('notificationsWarningIcon.foreground'))
+        : isIdle
+        ? new vscode.ThemeIcon('comment-discussion', new vscode.ThemeColor('notificationsInfoIcon.foreground'))
         : new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('testing.iconPassed'));
+      // The row click runs `codev.openBuilderRow` — a wrapper that opens the
+      // builder terminal AND expands the row (so single-click matches what
+      // most users expect). Pass the item itself so the handler can call
+      // `buildersView.reveal(...)` against this row. Other callers
+      // (terminal-link clicks, etc.) still use `codev.openBuilderById`
+      // directly with just the id and don't trigger expansion.
       item.command = {
-        command: 'codev.openBuilderById',
+        command: 'codev.openBuilderRow',
         title: 'Open Builder Terminal',
-        arguments: [b.id],
+        arguments: [item],
       };
       return item;
     });

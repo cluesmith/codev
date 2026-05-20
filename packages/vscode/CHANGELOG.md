@@ -6,6 +6,16 @@ What's changed in the Codev VS Code extension, version by version, written for t
 
 ### What's new
 
+- **Count badge on the Codev activity-bar icon.** The sidebar icon now carries a numeric badge for builders that need your attention.
+- **Builders waiting silently for input now surface as "waiting on input."** A builder whose terminal has been idle for more than 5 minutes, and isn't blocked at a gate or finished, gets a chat-bubble icon in the Builders tree and an `N waiting` segment in the status bar.
+- **Single-click a builder row to expand its file list.** Clicking a builder row now opens its terminal *and* expands the file list underneath — previously the expand chevron was a separate click.
+- **Send a backlog issue to the architect inline.** Each backlog row has a new inline button that pastes the issue's `#<id>` reference straight into the architect input, no copy-paste step.
+- **Issue markdown previews update live.** Leave an issue preview open and it refreshes in place when the underlying issue changes (new comment, label edit, etc.) instead of going stale.
+
+## [3.0.7] - 2026-05-20
+
+### What's new
+
 - **Per-builder changed files, inline.** A builder row in the Builders view is now expandable to the list of files it changed vs the default branch; clicking a file opens its 2-way diff (read-only merge-base base ↔ worktree file). Rows use VSCode's native Source Control look — the file-type icon plus a colored one-letter status badge (A/M/D/R/C/T, plus `!` for unmerged) and tinted label, driven by your theme's `gitDecoration.*` tokens (the built-in Git decorator can't see the gitignored `.builders/` worktrees, so Codev supplies its own). Git is throttled to ~1 spawn / 15s per expanded builder; collapsed builders never run git.
 - **Codev: View Diff** — a command + builder right-click that opens a builder worktree's whole delta vs the default branch in VSCode's Multi Diff Editor. Base content is served by a read-only `codev-diff:` provider running `git -C <worktree>` directly, so it works for the gitignored `.builders/` worktrees the Git extension can't discover; handles add/modify/delete/rename/copy and binary files. Coexists with Open Worktree in New Window.
 - **Accordion mode for the Builders tree** — expanding one builder auto-collapses the others, so a reviewer never has diffs from unrelated worktrees open at once. Toggle via the new `codev.buildersAutoCollapse` setting (default on), a Builders title-bar button (fold/unfold icon reflects state), or the Command Palette. Builder rows now carry a stable id, fixing expansion being reset on every overview poll.

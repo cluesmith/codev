@@ -17,12 +17,18 @@ Implement the approved plan, write tests, and pause at the `dev-approval` gate s
 
 Run `porch next {{project_id}}`. If the response is `gate_pending` on `dev-approval`, the code is already written and you're awaiting review. In that case:
 
-1. Check for feedback:
-   - `git diff main` — has the reviewer made any direct edits to your code?
+1. Resolve your repo's default branch (falls back to `main` if `origin/HEAD` isn't set):
+
+   ```bash
+   DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)
+   ```
+
+2. Check for feedback:
+   - `git diff "$DEFAULT_BRANCH"` — has the reviewer made any direct edits to your code?
    - `gh issue view {{issue.number}} --comments`
    - `afx send` queue messages
-2. If feedback requires code changes: make them, re-run build + tests, recommit.
-3. If feedback is a discussion question: respond and stay in the session.
+3. If feedback requires code changes: make them, re-run build + tests, recommit.
+4. If feedback is a discussion question: respond and stay in the session.
 
 Otherwise (`tasks` response — first run), continue below.
 
@@ -107,7 +113,7 @@ When the gate goes pending, output a short prose summary in the pane to orient t
 
 > **What changed**: 2–3 sentence summary.
 >
-> **Files**: `git diff --stat main` style list — paths and +/-.
+> **Files**: `git diff --stat "$DEFAULT_BRANCH"` style list — paths and +/-. (Resolve `$DEFAULT_BRANCH` once per session: `DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)`.)
 >
 > **Test results**: `npm run build` ✓, `npm test` ✓ (X tests, Y new).
 >
@@ -133,7 +139,7 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 - **Don't write `codev/reviews/<id>-<slug>.md` in this phase** — it's the next phase's artifact, with a different shape (retrospective with arch + lessons updates)
 - Don't add features not in the plan — scope creep is a `BLOCKED` signal, not a free expansion
 - Don't run `porch approve` yourself
-- Don't push to main — only to your builder branch
+- Don't push to the default branch — only to your builder branch
 - Don't squash commits — let the merge commit preserve history
 - Don't use `git add .` or `git add -A`
 - Don't open the PR yet — that's the `review` phase

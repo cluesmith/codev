@@ -22,7 +22,7 @@ You are performing the 3-way review of a PIR protocol PR. The builder has implem
    - Any `// REVIEW:` markers that weren't addressed?
 
 4. **Branch Hygiene**
-   - Is the branch up to date with main? (If not, suggest a rebase.)
+   - Is the branch up to date with the default branch? (If not, suggest a rebase. The default branch is whatever `git symbolic-ref --short refs/remotes/origin/HEAD` reports — typically `main`, but may be `dev`, `ci`, etc.)
    - Are commits atomic and well-described?
    - Is the change diff a reasonable size for the issue scope?
 

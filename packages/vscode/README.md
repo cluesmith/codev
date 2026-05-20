@@ -31,8 +31,8 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 
 ```
 +------------+----------------+----------------+
-| Codev      | Architect      | [#42] [#43]    |
-| (sidebar)  | (terminal)     | Builder #42    |
+| Codev      | Architect      | [42] [43]      |
+| (sidebar)  | (terminal)     | Builder 42     |
 |            |                | (terminal)     |
 | - Workspace|                |                |
 | - Builders | Left editor    | Right editor   |
@@ -42,6 +42,8 @@ Bring Codev's Agent Farm into VS Code — monitor builders, open terminals, appr
 | - Team     |                |                |
 | - Status   |                |                |
 +------------+----------------+----------------+
+| Bottom panel: dev server (when running)      |
++----------------------------------------------+
 ```
 
 ## Commands

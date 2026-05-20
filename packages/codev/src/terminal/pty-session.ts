@@ -121,6 +121,11 @@ export class PtySession extends EventEmitter {
     this.shellperClient = client;
     this.shellperPid = shellperPid;
     this._shellperSessionId = shellperSessionId ?? null;
+    // Hydrate Spec 467's lastDataAt from the shellper's own tracker if
+    // it has a value (WELCOME-side hydration carries genuine activity
+    // history across Tower restart). The data-frame subscription below
+    // keeps it bumped going forward via onPtyData.
+    this._lastDataAt = client.lastDataAt;
 
     // Ensure log directory exists
     if (this.diskLogEnabled) {
@@ -200,6 +205,7 @@ export class PtySession extends EventEmitter {
   get shellperSessionId(): string | null {
     return this._shellperSessionId;
   }
+
 
   /**
    * Whether this session should suppress exit cleanup because the process

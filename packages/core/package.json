@@ -27,6 +27,10 @@
     "./agent-names": {
       "types": "./dist/agent-names.d.ts",
       "default": "./dist/agent-names.js"
+    },
+    "./builder-helpers": {
+      "types": "./dist/builder-helpers.d.ts",
+      "default": "./dist/builder-helpers.js"
     }
   },
   "files": [

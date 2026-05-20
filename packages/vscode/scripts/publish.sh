@@ -3,8 +3,10 @@
 # .vsix — keeps VS Code Marketplace and Open VSX byte-identical.
 #
 # Usage:
-#   scripts/publish-vscode.sh                # stable, both registries
-#   scripts/publish-vscode.sh --pre-release  # pre-release channel, both registries
+#   pnpm vscode:publish        # stable, both registries
+#   pnpm vscode:publish:pre    # pre-release channel, both registries
+#
+# (Or invoke directly: `sh packages/vscode/scripts/publish.sh [--pre-release]`.)
 #
 # Auth:
 #   VSCE_PAT  — VS Code Marketplace token, or run `vsce login cluesmith` once
@@ -24,7 +26,11 @@
 
 set -e
 
-cd packages/vscode
+# Resolve to the package root (one level up from this scripts/ dir) regardless
+# of cwd, so direct invocation from anywhere works too — not just the
+# `pnpm vscode:publish` wrapper.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
 PRE=""
 if [ "$1" = "--pre-release" ]; then
@@ -57,4 +63,6 @@ echo "▶ publishing to Open VSX..."
 ovsx publish $PRE "$VSIX"
 
 echo ""
-echo "✓ Published $VSIX to Marketplace + Open VSX"
+echo "✓ Published $VSIX to:"
+echo "  • VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=cluesmith.codev-vscode"
+echo "  • Open VSX:            https://open-vsx.org/extension/cluesmith/codev-vscode"

@@ -45,12 +45,38 @@ export interface IShellperClient extends EventEmitter {
   getReplayData(): Buffer | null;
   waitForReplay(timeoutMs?: number): Promise<Buffer>;
   readonly connected: boolean;
+  /**
+   * Epoch (ms) of the last PTY byte the shellper has seen.
+   * Hydrated from the shellper's own tracker on WELCOME, then bumped on
+   * every DATA frame. Falls back to construct time only if the shellper
+   * is an older one that doesn't send the field.
+   */
+  readonly lastDataAt: number;
 }
 
 export class ShellperClient extends EventEmitter implements IShellperClient {
   private socket: net.Socket | null = null;
   private _connected = false;
   private replayData: Buffer | null = null;
+  // Wall-clock epoch (ms) of the last PTY byte the shellper has seen.
+  //
+  // Lifecycle:
+  //   - Construct: initialised to `Date.now()` (a sane fallback for the
+  //     window before WELCOME arrives, plus the path for legacy shellpers
+  //     that don't yet send the field).
+  //   - WELCOME handshake: overwritten with the shellper's own
+  //     `lastDataAt` if present. This is the critical step — the
+  //     shellper process survives Tower restart and keeps tracking, so
+  //     hydrating from its value here gives Tower a reading that's
+  //     accurate from the moment of connect, with no 5-minute warm-up
+  //     window after a Tower restart against a long-silent builder.
+  //   - DATA frame: bumped to `Date.now()` on every byte burst (the
+  //     in-memory live update path; matches what the shellper does on
+  //     its side).
+  // PtySession reads this once at attachShellper to hydrate Spec 467's
+  // own `lastDataAt`; from there, PtySession owns the read side and
+  // /api/overview enrichment uses ptySession.lastDataAt.
+  private _lastDataAt: number = Date.now();
 
   constructor(
     private readonly socketPath: string,
@@ -72,6 +98,16 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
 
   get connected(): boolean {
     return this._connected;
+  }
+
+  /**
+   * Epoch (ms) of the last DATA frame received from the shellper. Updated
+   * on every data frame; initialised to construction time so a fresh
+   * client is treated as "just heard from" rather than stale. Used by
+   * PtySession at attach time to hydrate Spec 467's own lastDataAt.
+   */
+  get lastDataAt(): number {
+    return this._lastDataAt;
   }
 
   /**
@@ -153,6 +189,14 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
 
               handshakeResolved = true;
               this._connected = true;
+              // Hydrate lastDataAt from the shellper's own tracker if it
+              // sent one. Old shellpers omit the field (it's optional in
+              // the protocol) — leave the construct-time fallback in
+              // place for those. New shellpers send the genuine last-PTY
+              // moment, including across Tower restarts.
+              if (typeof welcome.lastDataAt === 'number') {
+                this._lastDataAt = welcome.lastDataAt;
+              }
               // Replay any buffered frames received before WELCOME
               for (const buffered of preWelcomeBuffer) {
                 this.handleFrame(buffered);
@@ -183,6 +227,7 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
 
     switch (frame.type) {
       case FrameType.DATA:
+        this._lastDataAt = Date.now();
         this.emit('data', frame.payload);
         break;
       case FrameType.EXIT: {

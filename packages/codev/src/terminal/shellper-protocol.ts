@@ -71,6 +71,18 @@ export interface WelcomeMessage {
   cols: number;
   rows: number;
   startTime: number;
+  /**
+   * Epoch (ms) of the most recent PTY byte the shellper has seen.
+   *
+   * Optional for backward compatibility: a Tower talking to an older
+   * shellper that doesn't send the field treats it as missing and falls
+   * back to construct-time `Date.now()`. The new shellper sends it on
+   * every WELCOME, including reconnects — so Tower hydrates its own
+   * `lastDataAt` to the genuine last-activity moment across Tower
+   * restarts (which discard the in-memory value but leave the shellper
+   * process running and still tracking).
+   */
+  lastDataAt?: number;
 }
 
 export interface SpawnMessage {

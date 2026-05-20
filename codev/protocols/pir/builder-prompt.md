@@ -82,7 +82,7 @@ If you encounter **pre-existing flaky tests** (intermittent failures unrelated t
 If your Claude session crashes mid-flow, Tower's `while true` loop will relaunch you with the same prompt. On startup:
 
 1. Run `porch next {{project_id}}` to learn what phase you're in
-2. If `gate_pending`: read the latest plan file (plan-approval) or `git diff main` (dev-approval) plus any new GitHub issue comments; check `afx send` queue. Decide whether to revise or just announce you're back.
+2. If `gate_pending`: read the latest plan file (plan-approval) or `git diff "$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)"` (dev-approval) plus any new GitHub issue comments; check `afx send` queue. Decide whether to revise or just announce you're back.
 3. Otherwise: pick up where you left off
 
 ## Getting Started

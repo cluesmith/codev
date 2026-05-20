@@ -105,6 +105,14 @@ export interface OverviewBuilder {
   mode: 'strict' | 'soft';
   gates: Record<string, string>;
   worktreePath: string;
+  /**
+   * Canonical role identifier (e.g. `builder-pir-1423`) derived from the
+   * worktree basename. Stable across requests for a given builder while
+   * its worktree exists, and the key by which Tower's runtime terminal
+   * registry indexes the live session. `null` for soft-mode builders
+   * whose worktree name doesn't match a known protocol pattern.
+   */
+  roleId: string | null;
   protocol: string;
   planPhases: Array<{ id: string; title: string; status: string }>;
   progress: number;
@@ -119,6 +127,14 @@ export interface OverviewBuilder {
   blockedSince: string | null;
   startedAt: string | null;
   idleMs: number;
+  /**
+   * Wall-clock ISO timestamp of the last DATA frame Tower received from
+   * this builder's shellper, or `null` when no live session exists.
+   * Clients use it to flag builders that have been silent for a threshold
+   * — likely waiting for non-gate human input. Distinct from `idleMs`,
+   * which sums time spent at formal porch gates.
+   */
+  lastDataAt: string | null;
 }
 
 export interface OverviewPR {

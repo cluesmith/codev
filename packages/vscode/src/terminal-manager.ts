@@ -102,6 +102,25 @@ export class TerminalManager {
   }
 
   /**
+   * Type `text` into the architect terminal's input *without* a trailing
+   * newline (no submit). Returns false if the architect terminal isn't
+   * registered in this window — callers should ensure it's open first (via
+   * `codev.openArchitectTerminal`) before injecting.
+   *
+   * `sendText(text, false)` flows through the Pseudoterminal's `handleInput`
+   * exactly like a user keystroke; visibility/focus of the tab is not
+   * required, but we `.show()` so the user can see what they queued and
+   * keep typing.
+   */
+  injectArchitectText(text: string): boolean {
+    const entry = this.terminals.get('architect');
+    if (!entry) { return false; }
+    entry.terminal.show();
+    entry.terminal.sendText(text, false);
+    return true;
+  }
+
+  /**
    * Open a builder terminal. If a terminal already exists for this builder
    * but points at a different (stale) Tower session, dispose it before
    * opening a new one — happens when a builder is re-spawned and Tower

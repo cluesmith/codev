@@ -79,6 +79,12 @@ export class ShellperProcess extends EventEmitter {
   private cols = DEFAULT_COLS;
   private rows = DEFAULT_ROWS;
   private startTime: number = Date.now();
+  // Wall-clock epoch (ms) of the last PTY byte received. Sent in every
+  // WELCOME so Tower (which loses its own in-memory tracker on restart)
+  // can hydrate to the genuine last-activity moment instead of treating
+  // reconnect as fresh activity. Initialised to startTime so a brand-new
+  // shellper that has emitted nothing yet still reports a sane value.
+  private lastDataAt: number = Date.now();
   private exited = false;
 
   constructor(
@@ -135,6 +141,7 @@ export class ShellperProcess extends EventEmitter {
 
       const buf = Buffer.from(data, 'utf-8');
       this.replayBuffer.append(buf);
+      this.lastDataAt = Date.now();
 
       this.broadcast(encodeData(buf));
     });
@@ -357,6 +364,7 @@ export class ShellperProcess extends EventEmitter {
       cols: this.cols,
       rows: this.rows,
       startTime: this.startTime,
+      lastDataAt: this.lastDataAt,
     });
     socket.write(welcome);
     this.log(`WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}`);

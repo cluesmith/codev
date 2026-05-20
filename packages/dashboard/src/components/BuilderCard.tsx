@@ -1,3 +1,4 @@
+import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import type { OverviewBuilder } from '../lib/api.js';
 
 interface BuilderCardProps {
@@ -7,6 +8,7 @@ interface BuilderCardProps {
 
 function stateLabel(builder: OverviewBuilder): string {
   if (builder.blocked) return `Blocked: ${builder.blocked}`;
+  if (isIdleWaiting(builder)) return 'Waiting on input';
   if (builder.mode === 'soft') return 'running';
   if (!builder.phase) return 'starting';
   const phases = builder.planPhases;
@@ -40,21 +42,28 @@ export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
   const displayId = builder.issueId ? `#${builder.issueId}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
   const isBlocked = builder.blocked !== null && builder.blocked !== '';
+  const isWaiting = !isBlocked && isIdleWaiting(builder);
   const pct = Math.min(100, Math.max(0, Math.round(builder.progress ?? 0)));
 
+  // Reuse the blocked visual treatment for waiting rows in v1 — both are
+  // "needs me" states. Splitting CSS into a distinct `--waiting` modifier
+  // is a follow-up refinement once we see how the signal behaves in practice.
+  const rowMod = isBlocked ? ' builder-row--blocked' : isWaiting ? ' builder-row--waiting' : '';
+  const fillMod = isBlocked ? ' progress-fill--blocked' : isWaiting ? ' progress-fill--waiting' : '';
+
   return (
-    <tr className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
+    <tr className={`builder-row${rowMod}`}>
       <td className="builder-col-id">{displayId}</td>
       <td className="builder-col-title">{displayTitle}</td>
       <td className="builder-col-state">
-        <span className={isBlocked ? 'builder-state-blocked' : 'builder-state-active'}>
+        <span className={isBlocked || isWaiting ? 'builder-state-blocked' : 'builder-state-active'}>
           {stateLabel(builder)}
         </span>
       </td>
       <td className="builder-col-progress">
         <div className="progress-bar">
           <div
-            className={`progress-fill${isBlocked ? ' progress-fill--blocked' : ''}`}
+            className={`progress-fill${fillMod}`}
             style={{ width: `${pct}%` }}
           />
         </div>

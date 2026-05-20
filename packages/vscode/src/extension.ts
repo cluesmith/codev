@@ -24,6 +24,7 @@ import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider } from './terminal-link-provider.js';
+import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import { BuildersProvider } from './views/builders.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
 import { BacklogProvider, spawnableBacklog } from './views/backlog.js';
@@ -127,16 +128,23 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.onDidChangeActiveTerminal(syncTerminalFocusContext));
 	syncTerminalFocusContext(); // seed initial state
 
-	// Update status bar with builder/gate counts
+	// Update status bar with builder + needs-attention counts.
+	// Two "needs me" signals: blocked (formal gate) and idle-waiting
+	// (PTY silent past threshold, likely paused at a non-gate question
+	// — see isIdleWaiting in @cluesmith/codev-core/builder-helpers).
+	// Each is shown only when > 0, with its own icon.
 	const updateStatusBarCounts = () => {
 		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
 		const data = overviewCache.getData();
 		if (!data) { return; }
 		const builderCount = data.builders.length;
+		const now = Date.now();
 		const blockedCount = data.builders.filter(b => b.blocked).length;
-		statusBarItem.text = blockedCount > 0
-			? `$(server) Codev: ${builderCount} builders · $(bell) ${blockedCount} blocked`
-			: `$(server) Codev: ${builderCount} builders`;
+		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+		let text = `$(server) Codev: ${builderCount} builders`;
+		if (blockedCount > 0) { text += ` · $(bell) ${blockedCount} blocked`; }
+		if (idleCount > 0) { text += ` · $(comment-discussion) ${idleCount} waiting`; }
+		statusBarItem.text = text;
 	};
 
 	// List views show their item count in the title: "Builders (3)".
@@ -155,6 +163,36 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (pullRequestsView) { pullRequestsView.title = withCount('Pull Requests', data?.pendingPRs.length); }
 		if (backlogView) { backlogView.title = withCount('Backlog', data ? spawnableBacklog(data.backlog).length : undefined); }
 		if (recentlyClosedView) { recentlyClosedView.title = withCount('Recently Closed', data?.recentlyClosed.length); }
+	};
+
+	// Activity-bar badge — paint the "needs me" count on the Codev icon.
+	// Combines both signals: blocked (formal gate) + idle-waiting (PTY
+	// silent past threshold). VSCode has no container-level badge API;
+	// per-view `TreeView.badge` bubbles up to the activity-bar icon
+	// when the sidebar is hidden, so badging `buildersView` is how
+	// we paint the icon. Badge only set when there's at least one
+	// item needing the user.
+	const updateActivityBadge = () => {
+		if (!buildersView) { return; }
+		const data = overviewCache.getData();
+		if (connectionManager?.getState() !== 'connected' || !data) {
+			buildersView.badge = undefined;
+			return;
+		}
+		const now = Date.now();
+		const blockedCount = data.builders.filter(b => b.blocked).length;
+		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+		const total = blockedCount + idleCount;
+		if (total === 0) {
+			buildersView.badge = undefined;
+			return;
+		}
+		const tooltip = (blockedCount > 0 && idleCount > 0)
+			? `${blockedCount} blocked, ${idleCount} waiting on input`
+			: blockedCount > 0
+				? (blockedCount === 1 ? '1 builder blocked at a human-approval gate' : `${blockedCount} builders blocked at human-approval gates`)
+				: (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`);
+		buildersView.badge = { value: total, tooltip };
 	};
 
 	// Close builder/dev terminal tabs when their builder disappears from Tower
@@ -200,6 +238,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		updateStatusBarCounts();
 		pruneClosedBuilderTerminals();
 		updateListViewTitles();
+		updateActivityBadge();
 	});
 
 	// Shared across the Builders tree (second-level changed files) and the
@@ -216,6 +255,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: new BacklogProvider(overviewCache) });
 	recentlyClosedView = vscode.window.createTreeView('codev.recentlyClosed', { treeDataProvider: new RecentlyClosedProvider(overviewCache) });
+	// Seed the badge so it's correct immediately if overview data is already
+	// cached, instead of waiting for the next onDidChange tick.
+	updateActivityBadge();
 	const teamProvider = new TeamProvider(connectionManager);
 	context.subscriptions.push(
 		buildersView,
@@ -396,6 +438,20 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!roleOrId) { return; }
 			await terminalManager?.openBuilderByRoleOrId(roleOrId, true);
 		}),
+		vscode.commands.registerCommand('codev.openBuilderRow', async (item: unknown) => {
+			// Builder-row single-click does BOTH: opens the terminal and expands
+			// the row (the file list). Expansion is via reveal(expand:true) which
+			// fires onDidExpandElement — the accordion handler picks that up and
+			// collapses peers when the setting is on. focus:false keeps the
+			// terminal focused, not the tree.
+			if (!(item instanceof BuilderTreeItem)) { return; }
+			await terminalManager?.openBuilderByRoleOrId(item.builderId, true);
+			try {
+				await buildersView!.reveal(item, { expand: true, select: false, focus: false });
+			} catch {
+				// Benign if the row is no longer present (e.g. mid-cleanup).
+			}
+		}),
 		vscode.commands.registerCommand('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
 			spawnBuilder(extractIssueId(arg))),
 		vscode.commands.registerCommand('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {
@@ -411,6 +467,18 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codev.viewBacklogIssue', (arg: vscode.TreeItem | string | undefined) =>
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
+		vscode.commands.registerCommand('codev.referenceIssueInArchitect', async (arg: vscode.TreeItem | string | undefined) => {
+			// Inline-button action on a backlog row: open + focus the architect
+			// terminal, then type `#<id> ` into its prompt without submitting,
+			// so the user can keep typing their context before hitting Enter.
+			const issueId = extractIssueId(arg);
+			if (!issueId) { return; }
+			await vscode.commands.executeCommand('codev.openArchitectTerminal');
+			const ok = terminalManager?.injectArchitectText(`#${issueId} `);
+			if (!ok) {
+				vscode.window.showWarningMessage('Codev: Architect terminal not available');
+			}
+		}),
 		vscode.commands.registerCommand('codev.sendMessage', () => sendMessage(connectionManager!)),
 		vscode.commands.registerCommand('codev.approveGate', (arg: vscode.TreeItem | string | undefined, options?: { skipConfirmation?: boolean }) =>
 			approveGate(connectionManager!, overviewCache, extractBuilderId(arg), options)),
@@ -456,7 +524,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Read-only `codev-issue:` content provider backing the "View Issue"
 	// backlog action — renders issue body + comments as markdown preview.
-	activateIssueView(context);
+	// Reuses overviewCache's existing 60s + SSE heartbeat to passively
+	// refresh open previews; no new timer.
+	activateIssueView(context, connectionManager, overviewCache);
 
 	// Read-only `codev-diff:` content provider backing the "View Diff"
 	// builder action — serves base-branch blob content for the diff editor
