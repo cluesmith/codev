@@ -13,10 +13,10 @@ plan_phases:
     title: >-
       Graceful-stop persistence (exit-handler distinction, stopInstance preserve, launchInstance reconcile, stop.ts use
       registration-preserving clear)
-    status: in_progress
+    status: complete
   - id: phase_4_remove_and_ux
     title: 'remove-architect CLI/RPC + dashboard close affordance + active-tab fallback + #764 solo-architect label fix'
-    status: pending
+    status: in_progress
   - id: phase_5_surface_parity
     title: >-
       Surface enumeration (v1 collapse removal, per-architect /status emission, loadState collection-aware, afx status
@@ -30,7 +30,7 @@ plan_phases:
   - id: phase_7_docs_and_verify
     title: Documentation updates (agent-farm.md, arch.md, --help, CHANGELOG) + manual verify scenario scaffolding
     status: pending
-current_plan_phase: phase_3_graceful_stop
+current_plan_phase: phase_4_remove_and_ux
 gates:
   spec-approval:
     status: approved
@@ -45,7 +45,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2_identity_restart
@@ -80,4 +80,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-786/codev/projects/786-multi-architect-feature-is-und/786-phase_3_graceful_stop-iter1-claude.txt
 started_at: '2026-05-20T19:52:41.566Z'
-updated_at: '2026-05-22T17:56:38.621Z'
+updated_at: '2026-05-22T17:56:40.663Z'
