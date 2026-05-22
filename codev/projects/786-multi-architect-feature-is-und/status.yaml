@@ -1,7 +1,7 @@
 id: '786'
 title: multi-architect-feature-is-und
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1_foundation
     title: Foundation utilities (validateArchitectName reserved-name, removeArchitect helper, clearState split)
@@ -47,7 +47,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2_identity_restart
@@ -146,4 +146,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-786/codev/projects/786-multi-architect-feature-is-und/786-phase_7_docs_and_verify-iter1-claude.txt
 started_at: '2026-05-20T19:52:41.566Z'
-updated_at: '2026-05-22T23:32:03.703Z'
+updated_at: '2026-05-22T23:35:28.321Z'
