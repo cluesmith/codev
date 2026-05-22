@@ -55,6 +55,11 @@
         "title": "Codev: Open Architect Terminal"
       },
       {
+        "command": "codev.removeArchitect",
+        "title": "Codev: Remove Architect",
+        "category": "Codev"
+      },
+      {
         "command": "codev.openBuilderTerminal",
         "title": "Codev: Open Builder Terminal"
       },
@@ -234,6 +239,10 @@
           "when": "false"
         },
         {
+          "command": "codev.removeArchitect",
+          "when": "false"
+        },
+        {
           "command": "codev.openBacklogIssue",
           "when": "false"
         },
@@ -259,6 +268,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "codev.removeArchitect",
+          "when": "view == codev.workspace && viewItem == workspace-architect-sibling",
+          "group": "1_primary@1"
+        },
         {
           "command": "codev.approveGate",
           "when": "view == codev.builders && viewItem =~ /^blocked-builder-/",

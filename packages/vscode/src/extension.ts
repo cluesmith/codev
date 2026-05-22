@@ -397,22 +397,75 @@ export async function activate(context: vscode.ExtensionContext) {
 			const workspace = connectionManager?.getWorkspacePath() ?? 'none';
 			vscode.window.showInformationMessage(`Codev: ${state} | Workspace: ${workspace}`);
 		}),
-		vscode.commands.registerCommand('codev.openArchitectTerminal', async () => {
+		vscode.commands.registerCommand('codev.openArchitectTerminal', async (architectName?: string) => {
+			// Spec 786 Phase 6: the command accepts an optional architect name.
+			// Sidebar children pass their architect name via `command.arguments`.
+			// Existing palette / no-arg invocations default to `main`.
 			const client = connectionManager?.getClient();
 			const workspacePath = connectionManager?.getWorkspacePath();
 			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
 				vscode.window.showErrorMessage('Codev: Not connected to Tower');
 				return;
 			}
+			const targetName = architectName ?? 'main';
 			try {
 				const state = await client.getWorkspaceState(workspacePath);
-				if (state?.architect?.terminalId) {
-					await terminalManager?.openArchitect(state.architect.terminalId, true);
+				// Resolve the terminal id for the requested architect. Prefer
+				// the new `architects` collection (Spec 786 Phase 5); fall back
+				// to the scalar `architect` for older Tower versions.
+				const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
+				const match = architects.find(a => a.name === targetName);
+				const fallback = targetName === 'main' ? architects[0] : undefined;
+				const target = match ?? fallback;
+				if (target?.terminalId) {
+					await terminalManager?.openArchitect(target.terminalId, targetName, true);
 				} else {
-					vscode.window.showWarningMessage('Codev: No architect terminal found — is the workspace activated?');
+					vscode.window.showWarningMessage(`Codev: No '${targetName}' architect found — is the workspace activated?`);
 				}
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get workspace state');
+			}
+		}),
+		// Spec 786 Phase 6: remove a sibling architect via the REST endpoint
+		// from Phase 4. Wired to the right-click context menu on sibling
+		// entries (`viewItem == workspace-architect-sibling`) — see
+		// package.json's menus contribution. Refuses to remove `main`.
+		vscode.commands.registerCommand('codev.removeArchitect', async (arg: vscode.TreeItem | string | undefined) => {
+			let name: string | undefined;
+			if (typeof arg === 'string') {
+				name = arg;
+			} else if (arg instanceof vscode.TreeItem && typeof arg.label === 'string') {
+				name = arg.label;
+			}
+			if (!name) {
+				vscode.window.showErrorMessage('Codev: Could not determine which architect to remove.');
+				return;
+			}
+			if (name === 'main') {
+				vscode.window.showErrorMessage("Codev: Cannot remove the default 'main' architect.");
+				return;
+			}
+			const client = connectionManager?.getClient();
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
+				vscode.window.showErrorMessage('Codev: Not connected to Tower');
+				return;
+			}
+			const confirm = await vscode.window.showInformationMessage(
+				`Remove architect '${name}'?`,
+				{ modal: true, detail: `The terminal will be closed and the architect will be deregistered. Any in-flight builders spawned by '${name}' will fall back to 'main' for messaging.` },
+				'Remove',
+			);
+			if (confirm !== 'Remove') { return; }
+			try {
+				const result = await client.removeArchitect(workspacePath, name);
+				if (result.ok) {
+					vscode.window.showInformationMessage(`Codev: Removed architect '${name}'.`);
+				} else {
+					vscode.window.showErrorMessage(`Codev: ${result.error ?? `Failed to remove architect '${name}'.`}`);
+				}
+			} catch (err) {
+				vscode.window.showErrorMessage(`Codev: Failed to remove architect '${name}': ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}),
 		vscode.commands.registerCommand('codev.openBuilderTerminal', async () => {

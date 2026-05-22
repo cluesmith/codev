@@ -50,18 +50,28 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     return element;
   }
 
-  async getChildren(): Promise<vscode.TreeItem[]> {
+  async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    // Spec 786 Phase 6: when expanding the "Architects" parent, return one
+    // child per registered architect. The parent is identified by its id so
+    // we don't need a sentinel field on every other TreeItem.
+    if (element?.id === 'workspace-architects-root') {
+      return this.getArchitectChildren();
+    }
+
     const items: vscode.TreeItem[] = [];
 
-    const architect = new vscode.TreeItem('Open Architect');
-    architect.iconPath = new vscode.ThemeIcon('person');
-    architect.tooltip = 'Open the architect terminal';
-    architect.contextValue = 'workspace-architect';
-    architect.command = {
-      command: 'codev.openArchitectTerminal',
-      title: 'Open Architect Terminal',
-    };
-    items.push(architect);
+    // Spec 786 Phase 6: expandable "Architects" tree section, replacing the
+    // pre-786 singleton "Open Architect" row. Collapsed = "Architects" only;
+    // expanded = "Architects > main" (and any siblings).
+    const architectsRoot = new vscode.TreeItem(
+      'Architects',
+      vscode.TreeItemCollapsibleState.Expanded,
+    );
+    architectsRoot.id = 'workspace-architects-root';
+    architectsRoot.iconPath = new vscode.ThemeIcon('person');
+    architectsRoot.tooltip = 'Workspace architect terminals (main + any siblings)';
+    architectsRoot.contextValue = 'workspace-architects-root';
+    items.push(architectsRoot);
 
     const webUrl = this.buildDashboardUrl();
     if (webUrl) {
@@ -202,5 +212,56 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     if (!workspacePath) { return null; }
     const { host, port } = getTowerAddress();
     return `http://${host}:${port}/workspace/${encodeWorkspacePath(workspacePath)}/`;
+  }
+
+  /**
+   * Spec 786 Phase 6: fetch architects from Tower and emit one TreeItem per
+   * architect.
+   *
+   * `main` always appears first (per Spec 786 Phase 5's main-first ordering
+   * in `getTerminalsForWorkspace`). Sibling entries get
+   * `contextValue: 'workspace-architect-sibling'` which gates the right-click
+   * "Remove Architect" menu item (per Spec 786 Phase 6 — `package.json`'s
+   * `menus['view/item/context']` checks this).
+   *
+   * If Tower isn't reachable or the workspace has no architects, returns a
+   * single "main" entry as a fallback so users see the same baseline UX as
+   * pre-786. The fallback is intentional: it never produces a sibling
+   * (removing main is forbidden), so right-click remove can't fire on it.
+   */
+  private async getArchitectChildren(): Promise<vscode.TreeItem[]> {
+    const workspacePath = this.connectionManager.getWorkspacePath();
+    const client = this.connectionManager.getClient();
+
+    let names: string[] = ['main'];
+    if (client && workspacePath) {
+      try {
+        const status = await client.getWorkspaceStatus(workspacePath);
+        if (status && Array.isArray(status.terminals)) {
+          const archTerminals = status.terminals.filter(t => t.type === 'architect');
+          if (archTerminals.length > 0) {
+            names = archTerminals.map(t => t.architectName ?? t.label ?? 'main');
+          }
+        }
+      } catch {
+        // Tower unreachable / API error — fall back to default 'main' entry.
+      }
+    }
+
+    return names.map(name => {
+      const item = new vscode.TreeItem(name);
+      item.iconPath = new vscode.ThemeIcon('person');
+      item.tooltip = `Open the ${name} architect terminal`;
+      // Spec 786 Phase 6: contextValue gates the right-click context menu.
+      // `main` is workspace-defining and undeletable; siblings get the
+      // "Remove Architect" action via the package.json menus contribution.
+      item.contextValue = name === 'main' ? 'workspace-architect-main' : 'workspace-architect-sibling';
+      item.command = {
+        command: 'codev.openArchitectTerminal',
+        title: `Open ${name} terminal`,
+        arguments: [name],
+      };
+      return item;
+    });
   }
 }

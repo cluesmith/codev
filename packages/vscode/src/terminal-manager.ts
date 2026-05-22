@@ -91,29 +91,40 @@ export class TerminalManager {
   /**
    * Open the architect terminal. `focus` defaults to false so background
    * paths don't steal focus; click paths pass true.
+   *
+   * Spec 786 Phase 6: keyed by architect name (`'main'` or a sibling) so
+   * each architect gets its own VSCode terminal slot. The previous singleton
+   * `'architect'` key meant clicking different architects in the sidebar
+   * routed to the same terminal — now each gets its own. Opening the same
+   * architect twice reuses its existing slot.
    */
-  async openArchitect(terminalId: string, focus = false): Promise<void> {
-    const existing = this.terminals.get('architect');
+  async openArchitect(terminalId: string, architectName: string = 'main', focus = false): Promise<void> {
+    const key = `architect:${architectName}`;
+    const existing = this.terminals.get(key);
     if (existing) {
       existing.terminal.show(!focus);
       return;
     }
-    await this.openTerminal(terminalId, 'architect', 'Codev: Architect', undefined, focus);
+    const label = architectName === 'main' ? 'Codev: Architect' : `Codev: Architect (${architectName})`;
+    await this.openTerminal(terminalId, 'architect', label, key, focus);
   }
 
   /**
-   * Type `text` into the architect terminal's input *without* a trailing
-   * newline (no submit). Returns false if the architect terminal isn't
+   * Type `text` into an architect terminal's input *without* a trailing
+   * newline (no submit). Returns false if the named architect terminal isn't
    * registered in this window — callers should ensure it's open first (via
    * `codev.openArchitectTerminal`) before injecting.
    *
-   * `sendText(text, false)` flows through the Pseudoterminal's `handleInput`
-   * exactly like a user keystroke; visibility/focus of the tab is not
-   * required, but we `.show()` so the user can see what they queued and
-   * keep typing.
+   * Spec 786 Phase 6: defaults `architectName` to `'main'` so existing
+   * callers (notably `codev.referenceIssueInArchitect` — the Backlog inline
+   * button) keep targeting main without modification. This is the
+   * conservative call documented in the Phase 6 plan deliverable: the
+   * Backlog button always targets `main` regardless of how many sibling
+   * architects exist.
    */
-  injectArchitectText(text: string): boolean {
-    const entry = this.terminals.get('architect');
+  injectArchitectText(text: string, architectName: string = 'main'): boolean {
+    const key = `architect:${architectName}`;
+    const entry = this.terminals.get(key);
     if (!entry) { return false; }
     entry.terminal.show();
     entry.terminal.sendText(text, false);
