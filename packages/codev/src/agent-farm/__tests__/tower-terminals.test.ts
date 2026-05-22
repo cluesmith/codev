@@ -725,6 +725,49 @@ describe('tower-terminals', () => {
         expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('main');
       });
 
+      it('injects CODEV_ARCHITECT_NAME on the on-the-fly reconnect path (getTerminalsForWorkspace)', async () => {
+        // Site 2 (workspace-status reconnect at tower-terminals.ts:777-798)
+        // is structurally identical to site 1 but lives in a different
+        // function. The plan explicitly requires "Tests assert env contents
+        // on each path", so this test exercises getTerminalsForWorkspace
+        // directly rather than reconcileTerminalSessions.
+        let capturedRestartOptions: any = null;
+        const mockReconnectSession = vi.fn(async (_id, _socket, _pid, _start, restartOptions) => {
+          capturedRestartOptions = restartOptions;
+          return null; // stale — phase 2 cares only about restartOptions construction
+        });
+
+        const deps = makeDeps({ shellperManager: { reconnectSession: mockReconnectSession } as any });
+        initTerminals(deps);
+
+        // getTerminalSessionsForWorkspace queries via mockDbAll. Return a
+        // sibling architect session whose runtime PTY is gone (so the on-the-
+        // fly reconnect path is triggered).
+        mockDbAll.mockReturnValue([{
+          id: 'arch-sibling-onthefly',
+          workspace_path: '/real/project',
+          type: 'architect',
+          role_id: 'team-a',
+          pid: 7000,
+          shellper_socket: '/tmp/shellper-team-a.sock',
+          shellper_pid: 8000,
+          shellper_start_time: Date.now(),
+          created_at: new Date().toISOString(),
+        }]);
+
+        vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+          if (String(p) === '/real/project') return true;
+          return false;
+        });
+
+        const { getTerminalsForWorkspace } = await import('../servers/tower-terminals.js');
+        await getTerminalsForWorkspace('/real/project', 'http://example.test');
+
+        expect(mockReconnectSession).toHaveBeenCalledTimes(1);
+        expect(capturedRestartOptions).not.toBeNull();
+        expect(capturedRestartOptions.env.CODEV_ARCHITECT_NAME).toBe('team-a');
+      });
+
       it('does not set CODEV_ARCHITECT_NAME for non-architect sessions (builders/shells)', async () => {
         let capturedRestartOptions: any = null;
         const mockReconnectSession = vi.fn(async (_id, _socket, _pid, _start, restartOptions) => {

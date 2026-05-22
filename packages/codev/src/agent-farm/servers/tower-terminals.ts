@@ -577,7 +577,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         };
       } catch (err) {
         _deps.log('WARN', `Harness resolution failed for workspace ${workspacePath}: ${err instanceof Error ? err.message : err}`);
-        // Fall back to plain command without role injection so the session can still reconnect
+        // Fall back to plain command without harness role-prompt args so the
+        // session can still reconnect. `cleanEnv` still carries
+        // CODEV_ARCHITECT_NAME (set above for Spec 786 Phase 2), so identity
+        // is preserved even on harness failure.
         restartOptions = {
           command: cmdParts[0],
           args: cmdParts.slice(1),
