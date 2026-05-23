@@ -468,6 +468,15 @@ None as of draft time. The issue body is unusually well-scoped — most of what 
   - **C-4.1** (Item 2 scope contradiction): MUST said "No code changes outside the three markdown files" but listed five markdown files. Tightened to "No new behavior is introduced and no code changes are required. Item 2's full scope is markdown edits to five files: `CLAUDE.md`, `AGENTS.md`, `codev/resources/commands/agent-farm.md`, `codev-skeleton/templates/CLAUDE.md`, `codev-skeleton/templates/AGENTS.md`."
   - **C-4.2** (Item 3 behavior contradiction): Desired State said thread files land on `main` after merge (definite), but the success criteria's commit/retention rule allowed builders to intentionally omit committing. Reconciled by making the default disposition COMMIT (MUST) and the strip-before-PR path a rare opt-out exception — both Desired State and the MUST sub-bullet now agree that post-merge presence is the definite default outcome with rare, explicit exceptions.
 
+**Iter-5 verdicts (unanimous APPROVE — convergence)**:
+
+- **Gemini**: APPROVE. Codebase verification reconfirmed. Notes that `NeedsAttentionList` does NOT directly render `BuilderCard` — it maps builders to its own `AttentionItem`s and renders them natively, so `BuilderCard`'s prop signature change is isolated to `WorkView` (correcting the iter-4 Claude observation Cl-4.2). No spec changes required.
+- **Codex**: APPROVE. No key issues; remaining questions are plan-level, not spec blockers.
+- **Claude**: APPROVE with three non-blocking COMMENT-level notes:
+  - The iter-4 Claude observation Cl-4.2 ("BuilderCard is also rendered by NeedsAttentionList") was factually wrong. Confirmed via direct inspection: `NeedsAttentionList.tsx` builds `AttentionItem`s natively (`buildItems` at `:42-59`), does not import or render `BuilderCard`. Non-blocking since it was a plan-phase note, not a MUST criterion. Noted here for the plan phase so it doesn't chase the false trail.
+  - `SSEEventType` union doesn't include `worktree-config-updated` either — the `notification`-channel recommendation is consistent with this informal precedent, but plan author should be aware (already covered by the iter-2 Dependencies / Item 4 entry).
+  - Pre-823 `BuilderCard` snapshot baseline may not exist yet — plan phase should budget for establishing it before adding the `architectCount=1` regression assertion.
+
 ## Approval
 
 - [ ] Architect Review (spec-approval gate)
@@ -475,6 +484,7 @@ None as of draft time. The issue body is unusually well-scoped — most of what 
 - [x] Expert AI Consultation iter-2 complete (Gemini APPROVE; Codex REQUEST_CHANGES — Item 3 path semantics + skeleton MUST + strict-mode rationale — addressed; Claude APPROVE with COMMENT-level dependency-list additions)
 - [x] Expert AI Consultation iter-3 complete (Gemini APPROVE with architectural affirmations; Codex REQUEST_CHANGES — skeleton templates MUST for item 2 + thread commit/retention rule for item 3 + removeArchitect wording hedge — addressed; Claude APPROVE with plan-phase observations)
 - [x] Expert AI Consultation iter-4 complete (Gemini APPROVE with file-path-typo correction; Codex REQUEST_CHANGES — narrow internal-contradiction fixes for item 2 scope wording + item 3 commit-default reconciliation — addressed; Claude APPROVE with two plan-phase observations on null-safety and NeedsAttentionList)
+- [x] **Expert AI Consultation iter-5 complete — UNANIMOUS APPROVE.** Gemini APPROVE (no key issues). Codex APPROVE (no key issues; remaining questions are plan-level not spec blockers). Claude APPROVE (three non-blocking COMMENT-level notes — `NeedsAttentionList` factual correction to my own iter-4 observation, `SSEEventType` union note, and pre-823 snapshot baseline note). Spec ready for spec-approval gate.
 
 ## Notes
 
