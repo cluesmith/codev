@@ -5,12 +5,12 @@ phase: implement
 plan_phases:
   - id: phase_1_attribution
     title: Dashboard builder attribution (type + SQL + BuilderCard + WorkView prop threading + tests + Playwright)
-    status: in_progress
+    status: complete
   - id: phase_2_thread_file
     title: >-
       Per-builder thread file (codev-skeleton/roles/builder.md + codev/roles/builder.md updates; lazy create on first
       write)
-    status: pending
+    status: in_progress
   - id: phase_3_messaging_docs
     title: >-
       Inter-agent messaging documentation (five markdown files: CLAUDE.md, AGENTS.md, agent-farm.md, two skeleton
@@ -19,7 +19,7 @@ plan_phases:
   - id: phase_4_vscode_refresh
     title: VSCode Architects tree auto-refresh on add (#786-dependent — Tower SSE emit + VSCode subscribe)
     status: pending
-current_plan_phase: phase_1_attribution
+current_plan_phase: phase_2_thread_file
 gates:
   spec-approval:
     status: approved
@@ -34,7 +34,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_attribution
@@ -53,4 +53,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-823/codev/projects/823-multi-architect-coordination-b/823-phase_1_attribution-iter1-claude.txt
 started_at: '2026-05-22T23:32:46.651Z'
-updated_at: '2026-05-23T06:15:46.416Z'
+updated_at: '2026-05-23T06:15:48.269Z'
