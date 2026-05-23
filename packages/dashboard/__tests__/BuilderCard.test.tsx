@@ -52,6 +52,16 @@ describe('BuilderCard — Spec 823 attribution rendering', () => {
     // span — the dashboard with one architect looks identical to pre-823.
     expect(document.querySelector('.builder-attribution')).toBeNull();
     expect(screen.getByText('#823')).toBeInTheDocument();
+
+    // Strong N=1 baseline: the ID cell's text content is exactly '#823' — no
+    // extra whitespace, no separator, no trailing architect-name (per iter-1
+    // Codex finding: the absence-of-attribution check alone is weaker than the
+    // baseline parity the plan calls for).
+    const idCell = document.querySelector('.builder-col-id');
+    expect(idCell).not.toBeNull();
+    expect(idCell!.textContent).toBe('#823');
+    // ID cell has no child element beyond the text — no <span> introduced.
+    expect(idCell!.children.length).toBe(0);
   });
 
   it('does NOT render attribution span when architectCount is omitted (default 0)', () => {
