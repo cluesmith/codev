@@ -1,7 +1,7 @@
 id: bugfix-826
 title: critical-sibling-architects-le
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates: {}
@@ -9,4 +9,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-23T15:09:40.916Z'
-updated_at: '2026-05-23T15:09:40.917Z'
+updated_at: '2026-05-23T15:25:38.706Z'
