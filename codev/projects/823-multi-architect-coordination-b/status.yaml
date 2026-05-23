@@ -1,7 +1,7 @@
 id: '823'
 title: multi-architect-coordination-b
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1_attribution
     title: Dashboard builder attribution (type + SQL + BuilderCard + WorkView prop threading + tests + Playwright)
@@ -36,7 +36,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_attribution
@@ -87,4 +87,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-823/codev/projects/823-multi-architect-coordination-b/823-phase_4_vscode_refresh-iter1-claude.txt
 started_at: '2026-05-22T23:32:46.651Z'
-updated_at: '2026-05-23T10:18:40.490Z'
+updated_at: '2026-05-23T10:19:31.266Z'
