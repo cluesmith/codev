@@ -15,11 +15,11 @@ plan_phases:
     title: >-
       Inter-agent messaging documentation (five markdown files: CLAUDE.md, AGENTS.md, agent-farm.md, two skeleton
       templates)
-    status: in_progress
+    status: complete
   - id: phase_4_vscode_refresh
     title: VSCode Architects tree auto-refresh on add (#786-dependent — Tower SSE emit + VSCode subscribe)
-    status: pending
-current_plan_phase: phase_3_messaging_docs
+    status: in_progress
+current_plan_phase: phase_4_vscode_refresh
 gates:
   spec-approval:
     status: approved
@@ -34,7 +34,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_attribution
@@ -69,4 +69,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-823/codev/projects/823-multi-architect-coordination-b/823-phase_3_messaging_docs-iter1-claude.txt
 started_at: '2026-05-22T23:32:46.651Z'
-updated_at: '2026-05-23T06:29:36.406Z'
+updated_at: '2026-05-23T06:29:38.259Z'
