@@ -334,7 +334,11 @@ export async function workspaceRecover(options: WorkspaceRecoverOptions = {}): P
       r.eligibility.eligible && r.builderInfo !== null,
   );
   logger.blank();
-  logger.kv('Eligible', `${eligible.length} / ${allRows.length}`);
+  if (hiddenStaleCount > 0) {
+    logger.kv('Eligible', `${eligible.length} / ${visibleRows.length} visible (${allRows.length} scanned)`);
+  } else {
+    logger.kv('Eligible', `${eligible.length} / ${allRows.length}`);
+  }
 
   if (eligible.length === 0) {
     logger.info(apply ? 'Nothing to revive.' : 'Nothing would be revived.');

@@ -462,9 +462,6 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         // for this workspace cwd, resume it instead of starting fresh. Role
         // injection is skipped on the resume path — the saved conversation
         // already contains the role/system prompt.
-        // Named sibling architects (Spec 755) sharing the same cwd would
-        // collide on the newest-jsonl heuristic; addArchitect deliberately
-        // does NOT use this resume path.
         //
         // Lookup is unconditional here (unlike builders, where spawn.ts gates
         // discovery behind `options.resume`). The asymmetry is intentional:
@@ -472,7 +469,32 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         // implicit intent is always "spawn the missing main; resume its
         // prior conversation if one exists." There is no equivalent user
         // intent surface (no flag) on the workspace-start path.
-        const resumeSessionId = findLatestSessionId(workspacePath);
+        //
+        // Multi-architect collision guard (Codex / Gemini cmap-3 round 2):
+        // Named sibling architects (Spec 755) share `cwd = workspacePath` and
+        // write their jsonls into the same encoded-cwd directory as main. The
+        // newest-jsonl heuristic can't distinguish which jsonl belongs to
+        // which architect — so if any sibling has ever existed in this
+        // workspace, main risks resuming a sibling's conversation instead of
+        // its own. Until #832 lands per-architect session UUIDs, the
+        // conservative behavior is: if siblings are persisted, skip resume
+        // for main and spawn fresh with role injection. Single-architect
+        // workspaces (the common case) keep conversation resume.
+        let safeToResume: boolean;
+        try {
+          // Single architect (main only, or empty before first spawn) → safe.
+          // Multiple → unsafe (sibling jsonls collide with main's in the same cwd).
+          safeToResume = getArchitects().length <= 1;
+        } catch {
+          // state.db read should never fail here, but if it does the safe
+          // default is to skip resume rather than risk attaching main to
+          // an unrelated jsonl.
+          safeToResume = false;
+        }
+        const resumeSessionId = safeToResume ? findLatestSessionId(workspacePath) : null;
+        if (!safeToResume) {
+          _deps.log('WARN', `Skipping main architect conversation resume for ${workspacePath}: sibling architects detected (or state.db unreadable); cannot disambiguate jsonl by cwd. See #832.`);
+        }
         let cmdArgs: string[];
         let harnessEnv: Record<string, string>;
         if (resumeSessionId) {

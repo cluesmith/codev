@@ -37,7 +37,8 @@ export function getClaudeProjectDir(absolutePath: string): string {
  * Return the session UUID of the most-recently-modified jsonl in the Claude
  * project dir for the given cwd, or null if none exists.
  *
- * Optionally accepts `now` and a `homeDir` override so tests can pin both.
+ * `opts.homeDir` lets tests pin the home directory; otherwise resolves via
+ * `os.homedir()`.
  */
 export function findLatestSessionId(
   absolutePath: string,
