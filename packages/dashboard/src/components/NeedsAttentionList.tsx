@@ -39,11 +39,31 @@ function timeAgo(dateStr: string): string {
   return `${days}d`;
 }
 
-function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionItem[] {
+export function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionItem[] {
   const items: AttentionItem[] = [];
 
-  // PRs needing review
+  // A PR is genuinely waiting on a human only after the builder finishes CMAP
+  // and reaches the porch `pr` gate. Surfacing PRs before that means the
+  // reviewer arrives ahead of the AI review comments. Cross-reference each
+  // PR against the builder's gate state via `linkedIssue` → `issueId`.
+  const prGateIssueIds = new Set<string>();
+  const builderIssueIds = new Set<string>();
+  for (const b of builders) {
+    if (b.issueId) {
+      builderIssueIds.add(b.issueId);
+      if (b.blocked === 'PR review') prGateIssueIds.add(b.issueId);
+    }
+  }
+
   for (const pr of prs) {
+    const hasBuilder = pr.linkedIssue !== null && builderIssueIds.has(pr.linkedIssue);
+    const builderAtPrGate = pr.linkedIssue !== null && prGateIssueIds.has(pr.linkedIssue);
+    // Human-authored / externally opened PRs have no porch gate to wait on —
+    // fall back to GitHub's reviewDecision and only surface when a review is
+    // actually outstanding.
+    const unaffiliatedNeedsReview = !hasBuilder && pr.reviewStatus === 'REVIEW_REQUIRED';
+    if (!builderAtPrGate && !unaffiliatedNeedsReview) continue;
+
     items.push({
       key: `pr-${pr.id}`,
       issueOrPR: `#${pr.id}`,
@@ -58,7 +78,8 @@ function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionIt
   // Builders blocked on gate approvals
   for (const b of builders) {
     if (!b.blocked || !b.blockedSince) continue;
-    // Skip "PR review" — those are already covered by the PRs list
+    // Skip "PR review" — those are emitted by the PR loop above. Without this
+    // skip, builders at the pr gate would be counted twice (once per loop).
     if (b.blocked === 'PR review') continue;
     const label = b.issueId ? `#${b.issueId}` : b.id;
     items.push({
