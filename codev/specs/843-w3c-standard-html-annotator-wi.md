@@ -3,7 +3,7 @@
 ## Metadata
 - **ID**: spec-2026-05-24-w3c-html-annotator
 - **Issue**: #843
-- **Status**: draft
+- **Status**: draft (revision 2 — incorporates Gemini, Codex, Claude review feedback)
 - **Created**: 2026-05-24
 
 ## Problem Statement
@@ -54,11 +54,15 @@ The file remains a single source of truth — anyone with a text editor can read
 ### Functional
 - [ ] Opening an HTML file with `afx open` and switching to Preview mode reveals an "Annotate prose" toggle.
 - [ ] With the toggle on, selecting text in the iframe and entering a comment writes a W3C-compliant annotation into the file's `<script type="application/ld+json" id="codev-annotations">` block.
-- [ ] The block validates against the W3C Web Annotation Data Model (a single `AnnotationCollection` with `items` of type `Annotation`, each carrying a `TextQuoteSelector` and a `TextPositionSelector`).
+- [ ] The block validates against the W3C Web Annotation Data Model (a single `AnnotationCollection` with `items` of type `Annotation`, each carrying a `TextQuoteSelector` and a `TextPositionSelector`). See **JSON-LD Contract** below for the exact shape.
 - [ ] Closing and reopening the file re-anchors annotations using `@apache-annotator/dom` matchers and re-applies `<mark>` highlights.
 - [ ] Editing the surrounding HTML in a text editor (insert/delete a few sentences nearby) and reopening: annotations whose `prefix`/`suffix` still matches anchor cleanly; annotations whose anchor text was modified appear in the panel as **orphaned** with the captured quote shown.
 - [ ] An annotation can be deleted via the annotations panel; deletion rewrites the JSON-LD block and saves the file.
 - [ ] Triple-Enter to submit (current dialog behavior) works in the new mode.
+- [ ] Switching from Preview back to source view (annotate mode) after a prose-annotation save re-renders the source grid from the updated `currentContent` (existing `togglePreviewMode` only toggles CSS display today — `renderFile()` must be called when toggling away from Preview if `currentContent` changed). **Required, not optional.**
+- [ ] Clicking a prose annotation in the panel: if in Preview mode, scrolls the iframe to the highlight and pulses it; if in source mode, scrolls the source grid to the `<script id="codev-annotations">` line and visually flags the entry by its `id` field.
+- [ ] Saved files round-trip correctly: the saved HTML on disk does NOT contain the injected vendor script tags (Apache Annotator + bridge), only the user's original markup plus the updated `<script type="application/ld+json" id="codev-annotations">` block.
+- [ ] When the existing JSON-LD block is malformed, the "Annotate prose" toggle is disabled with a tooltip ("Annotations block is malformed — fix in source view to re-enable") and no save path touches the block.
 
 ### Non-Functional
 - [ ] Iframe sandbox is NOT weakened: `sandbox="allow-scripts"` (null origin) is preserved. Selection capture, highlighting, and parent communication use `postMessage` from an injected script inside the iframe.
@@ -87,6 +91,80 @@ The file remains a single source of truth — anyone with a text editor can read
 - Ship within the Codev v3.x line (no major version bump required). Additive feature; backward-compatible with all existing annotator workflows.
 - Apache Annotator is Apache-2.0 licensed — compatible with Codev. Vendor copy must preserve the NOTICE / LICENSE files in `packages/codev/templates/vendor/` per Apache-2.0 §4(d).
 
+## JSON-LD Contract
+
+The annotation block is exactly one `<script type="application/ld+json" id="codev-annotations">` element. It contains a single JSON object — a W3C `AnnotationCollection` with an explicit `@context` and an `items` array.
+
+```json
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    { "codev": "https://codev.dev/ns/annotation#" }
+  ],
+  "type": "AnnotationCollection",
+  "codev:schemaVersion": 1,
+  "items": [
+    {
+      "id": "urn:uuid:6f1a3d2c-...-...",
+      "type": "Annotation",
+      "created": "2026-05-24T15:32:01Z",
+      "modified": "2026-05-24T15:32:01Z",
+      "creator": {
+        "type": "Person",
+        "name": "M Waleed Kadous",
+        "nickname": "admin@cluesmith.com"
+      },
+      "body": [
+        { "type": "TextualBody", "value": "this is a classic pangram", "format": "text/plain", "purpose": "commenting" }
+      ],
+      "target": {
+        "source": "self",
+        "selector": [
+          { "type": "TextQuoteSelector", "exact": "the quick brown fox", "prefix": "...", "suffix": "..." },
+          { "type": "TextPositionSelector", "start": 142, "end": 161 }
+        ]
+      }
+    }
+  ]
+}
+```
+
+**Required fields per annotation**: `id` (UUID urn), `type` (`"Annotation"`), `created` (ISO 8601 UTC), `modified` (ISO 8601 UTC), `creator`, `body` (array with at least one `TextualBody`), `target.selector` (array containing exactly one `TextQuoteSelector` AND one `TextPositionSelector`).
+
+**Codev-specific extensions** live under the `codev:` prefix declared in `@context`. Currently only `codev:schemaVersion` (integer). Future extensions (per-author colors, threads, etc.) extend this namespace without breaking W3C validation.
+
+**Schema-version policy**: Current is `1`. If a file on load has `codev:schemaVersion` greater than what this build understands, surface a warning ("Annotations created by a newer Codev version — read-only for now"), render no highlights, and DO NOT overwrite the block. If the field is absent, treat as version `1` for backward compat.
+
+**The block contains no Codev runtime state.** Selectors are pure data per the W3C model; external tools can read and validate the file without any Codev-specific code.
+
+## Save / Persistence Model
+
+The save endpoint (`POST /api/annotate/:tabId/save`) is and remains a dumb pipe: it writes `req.body.content` to disk verbatim. No server-side parsing, no author injection at save time, no JSON-LD mutation. All serialization is performed in the iframe bridge before posting.
+
+**Author info** is resolved at **template render time**, not at save time. The existing tower route at `tower-routes.ts:2480+` already template-substitutes `{{FILE_PATH}}`, `{{LANG}}`, etc. into `open.html`. Add `{{GIT_USER_NAME}}` and `{{GIT_USER_EMAIL}}` to that substitution (resolving via `git config user.name` / `git config user.email` from the file's containing repo, with `name=anonymous, email=""` fallback when git config returns nothing or the file is outside a git repo). The client uses these injected values to build the `creator` object before posting. Zero new server endpoints.
+
+**Iframe-to-disk round-trip — script-leak prevention**: The iframe bridge MUST construct the saved HTML by:
+1. Holding the original HTML (as fetched from disk and passed in via `srcdoc`) in a string variable inside the bridge.
+2. On any annotation mutation, computing the new JSON-LD block string.
+3. Splicing the new block into the original HTML string (replacing the existing `<script id="codev-annotations">…</script>` element if present, else appending before `</body>` or at end-of-document if no `</body>`).
+4. Posting that spliced string back to the parent via `postMessage`. The parent does NOT serialize the iframe's live DOM — that DOM contains the injected vendor script tags and Apache Annotator's `<mark>` wrappers, and would corrupt the file on save.
+
+**Block stability**: All write paths (preview-mode save, source-mode save when the user has edited the JSON-LD by hand, annotation deletion) honor a single invariant: if `parse(existing block) === error`, the block is preserved byte-for-byte; the new annotation path is refused with a UI message. This applies uniformly — there is no save path that may overwrite a malformed block.
+
+## postMessage Protocol
+
+Parent ↔ iframe communication uses `postMessage`. All messages carry `__codevAnnotator: true` for origin validation. Parent rejects any `message` event whose `source !== iframe.contentWindow` or whose `data.__codevAnnotator !== true`.
+
+| # | Type | Direction | Payload | Purpose |
+|---|------|-----------|---------|---------|
+| 1 | `ready` | iframe → parent | `{ annotationCount, malformed: boolean }` | Iframe finished loading + parsing existing block. Parent enables/disables the "Annotate prose" toggle based on `malformed`. |
+| 2 | `selection` | iframe → parent | `{ selector: { quote, position }, rangeText }` | User completed a text selection. Parent opens the comment dialog at iframe-coordinate-converted screen position. |
+| 3 | `persist-annotation` | parent → iframe | `{ id?, body: string, creator: {name, nickname} }` | User submitted the dialog. If `id` is present, update; else create. Iframe writes the JSON-LD entry, applies the highlight, then sends `content-changed`. |
+| 4 | `delete-annotation` | parent → iframe | `{ id }` | User clicked delete in the panel. Iframe removes the entry, removes the highlight, sends `content-changed`. |
+| 5 | `focus-annotation` | parent → iframe | `{ id }` | User clicked a panel item. Iframe scrolls the highlight into view and pulses it. |
+| 6 | `content-changed` | iframe → parent | `{ html, annotations: [{id, body, creator, anchored: boolean}] }` | Authoritative new HTML and annotation list. Parent updates `currentContent`, refreshes the panel, calls `saveFile()`. |
+| 7 | `error` | iframe → parent | `{ code, message }` | Unrecoverable iframe-side error (malformed block on parse, cross-iframe selection rejected, etc.). Parent surfaces via toast. |
+
 ## Assumptions
 
 - Apache Annotator (`@apache-annotator/dom@^0.3.0`) bundles successfully as a single ESM/UMD file with its transitive deps (`@apache-annotator/selector`, `@medv/finder`, `@babel/runtime-corejs3`). The bundled file is expected to be in the ~50–150KB minified range. If bundling produces something disproportionately large (>500KB), this becomes a discussion point at plan time (vendor a subset, use a different matching library, etc.) — not a spec change.
@@ -101,7 +179,8 @@ The file remains a single source of truth — anyone with a text editor can read
 - On load, reads `<script type="application/ld+json" id="codev-annotations">` from the iframe's own document, parses annotations, and applies highlights via Apache Annotator's `highlightText`.
 - Listens to `selectionchange`/`mouseup` in the iframe, computes selectors via Apache Annotator's `describe` functions, and `postMessage`s the candidate selection to the parent.
 - Receives `postMessage` instructions from the parent ("show comment dialog response: persist this annotation with id=X / delete annotation X") and updates highlights + the JSON-LD block accordingly.
-- Reports the updated full HTML (with refreshed JSON-LD block) back to the parent via `postMessage` whenever the annotation set changes; the parent treats this as the new `currentContent` and triggers the existing `saveFile()` path.
+- **Holds the pristine source HTML in a string variable** at iframe load (separate from the live DOM, which gets mutated by the bridge and Apache Annotator) and uses **string splicing** — not live-DOM serialization — to produce the saved HTML. This is critical: serializing the live iframe DOM would include the injected vendor script tags and Apache Annotator's `<mark>` wrappers in the saved file, corrupting it on every save.
+- Posts the spliced HTML back to the parent via `postMessage`; the parent treats this as the new `currentContent` and triggers the existing `saveFile()` path.
 
 **Pros**:
 - Preserves `sandbox="allow-scripts"` — no weakening of isolation.
@@ -170,21 +249,25 @@ Orphaned annotations are NOT auto-deleted. They persist in the JSON-LD block; th
 
 **Q3 (from issue): JSON-LD author info — pull from `git config user.name`?**
 
-**Proposed answer**: Yes, with a fallback. The W3C model allows a `creator` field on each annotation. We populate it with `{ type: "Person", name: <git config user.name>, nickname: <git config user.email> }`. If `git config` returns nothing, fall back to `{ type: "Person", name: "anonymous" }`. We do this in the existing `getAuthor()` style used by line-based annotations (which embed `(@architect)` / `(@<name>)` in the comment prefix). Author resolution happens **server-side** in the save route (where git config is already accessible), not in the iframe.
+**Proposed answer**: Yes, with a fallback. The W3C model allows a `creator` field on each annotation. We populate it with `{ type: "Person", name: <git config user.name>, nickname: <git config user.email> }`. If `git config` returns nothing or the file is outside a git repo, fall back to `{ type: "Person", name: "anonymous" }`.
 
-### New (raised by this spec; need architect input)
+**Resolution mechanism (revised after consultation)**: Author info is resolved **at template render time**, not at save time. The existing tower route at `tower-routes.ts:2480+` already template-substitutes `{{FILE_PATH}}`, `{{LANG}}`, `{{IS_HTML}}`, etc. into `open.html`. Add `{{GIT_USER_NAME}}` and `{{GIT_USER_EMAIL}}` to that same substitution. The client uses these values to build the `creator` object before posting. This honors the "no new server endpoints" constraint and matches the existing template pattern.
 
-**Q4 (Critical)**: When the user has the source view open and saves a prose annotation via Preview mode, the source view shows stale content. Two options:
-  - **(a)** Source view auto-refreshes after a save initiated by Preview mode (re-renders syntax-highlighted source from the new content).
-  - **(b)** Source view shows a "Reload to see changes" banner; user clicks to refresh.
+Note: the existing line-based annotator (`open.html:1072`) hardcodes `(@architect)` for HTML/MD comments — it does NOT consult git config today. Pulling git config for the new prose mode is therefore strictly an improvement; it does not align with a pre-existing pattern (because that pattern is "hardcoded `@architect`" rather than "resolve from git"). The hardcoded `@architect` behavior in line mode is out of scope for this spec.
 
-  Proposed default: **(a)** auto-refresh, because the save is initiated by the user's own action in the same tab — there's no risk of conflicting unsaved edits in source view (saving from Preview while source view has dirty edits is already blocked by the existing `hasUnsavedChanges` check, which we will extend).
+### Resolved by this revision (promoted from open question to requirement)
 
-**Q5 (Important)**: Should the new annotator support **annotating across iframe boundaries** (e.g., a selection that starts in one paragraph and ends in another that's inside a nested iframe)? Proposed: **no.** Apache Annotator handles single-document ranges. Nested iframes in user HTML are out of scope; selections that cross them are rejected with a toast ("Selection crosses an iframe boundary — please select within a single frame.").
+**Q4 (was Critical, now baked in)**: Source-view auto-refresh after a Preview-mode save is now a hard **Functional success criterion** (see above). When `togglePreviewMode()` switches from Preview back to source AND `currentContent` has changed since the last `renderFile()` call, `renderFile()` is re-invoked. This addresses Gemini's observation that today's toggle is purely a CSS `display` flip and does not re-render. Note the subtle edge case Claude raised: a user who added an unsaved line-based REVIEW comment in source mode, then switched to Preview and added a prose annotation, would have both changes saved together in `currentContent`. This is correct behavior — `currentContent` is the canonical in-memory state — and we surface it in the dialog confirmation text ("Save changes including unsaved source edits?") if the source view also has pending changes detected by the existing `hasUnsavedChanges` mechanism.
 
-**Q6 (Important)**: How do we handle HTML files that already contain a `<script type="application/ld+json" id="codev-annotations">` block from a previous version of the annotator (forward compatibility)? Proposed: Annotations carry a `codev:schemaVersion` field. Current spec is `1`. On read, unknown future versions: surface a warning, render no highlights, do not overwrite the block on save. This makes the format extensible without painting future selves into a corner.
+**Q5 (Important)**: Should the new annotator support **annotating across iframe boundaries** (e.g., a selection that starts in one paragraph and ends in another that's inside a nested iframe)? **Resolved: no.** Apache Annotator handles single-document ranges. Nested iframes in user HTML are out of scope; selections that cross them are rejected with a toast ("Please select text within a single section.").
+
+**Q6 (Important)**: How do we handle HTML files that already contain a `<script type="application/ld+json" id="codev-annotations">` block from a previous version of the annotator? **Resolved**: per the JSON-LD Contract section, annotations carry `codev:schemaVersion`. On read, unknown future versions surface a warning, render no highlights, and never overwrite the block. The `codev:` prefix is properly declared in `@context` to keep the document JSON-LD-valid.
+
+### Still open (need architect input)
 
 **Q7 (Nice-to-know)**: Should highlights be visually distinct between "your" annotations (current git user) and "others"? The W3C model carries `creator`, so we have the data. Proposed: **defer to a follow-up.** Ship visual parity first; per-author color is a UX refinement that doesn't block the primitive.
+
+**Q8 (Important — raised by Codex review)**: Panel interaction in source view. The Functional criterion says "click a prose annotation in source mode scrolls to the JSON-LD line and flags it by `id`." But the JSON-LD is a single multi-line block — Prism's syntax-highlighted output may render it as one collapsed area. **Proposed**: scroll to the *start* of the JSON-LD `<script>` tag (one line address) and toast the annotation `id` and `exact` quote so the user can find it via Ctrl-F. If this proves clunky in practice (plan-phase feedback), we can refine to pretty-print the JSON-LD on output so each annotation is on its own line and we can scroll to a specific sub-line. Punt to plan unless the architect has a strong preference now.
 
 ## Performance Requirements
 
@@ -234,7 +317,9 @@ Orphaned annotations are NOT auto-deleted. They persist in the JSON-LD block; th
 ## Dependencies
 
 ### External Libraries (vendored)
-- **`@apache-annotator/dom@^0.3.0`** + transitive deps: bundled into a single file at `packages/codev/templates/vendor/apache-annotator.min.js`. Apache-2.0; LICENSE + NOTICE copied to the vendor directory.
+- **`@apache-annotator/dom`** + transitive deps (`@apache-annotator/selector`, `@medv/finder`, `@babel/runtime-corejs3`): bundled into a single file at `packages/codev/templates/vendor/apache-annotator.min.js`. Apache-2.0; LICENSE + NOTICE files copied to the vendor directory.
+
+  **Version**: pin to `0.2.0` (latest stable on npm as of 2026-05-24). The `0.3.0-dev.*` prerelease line exists but is not flagged stable; do not use `^0.3.0` (resolves to zero packages under standard semver). If the plan-phase investigation finds a required API in `0.3.0-dev.23` that's missing in `0.2.0`, document the swap to the explicit dev pin in the plan and surface to the architect for sign-off.
 
 ### Internal Systems
 - `packages/codev/templates/open.html` — extended (annotator dialog, panel, save path reused; new toggle button, new preview-mode wiring).
@@ -267,8 +352,28 @@ Orphaned annotations are NOT auto-deleted. They persist in the JSON-LD block; th
 ## Expert Consultation
 
 **Date**: 2026-05-24
-**Models Consulted**: TBD (will run consult -m gemini, codex, claude in parallel after this draft commits)
-**Sections Updated**: TBD
+**Models Consulted**: Gemini Pro, GPT-5 Codex, Claude Opus (3-way parallel review)
+
+**Verdicts**:
+- Gemini: REQUEST_CHANGES (2 sharp catches: hallucinated server-side `getAuthor()`, vendor-script leak on save)
+- Codex: REQUEST_CHANGES (5 findings: author/save-route contradiction, panel-interaction gaps, JSON-LD contract under-specified, malformed-block write policy, Q4 should be a requirement)
+- Claude: COMMENT (4 findings: wrong Apache Annotator version pin, Q3/save-route contradiction, malformed-block + new-annotation flow, postMessage protocol under-specified)
+
+**Sections Updated based on consultation**:
+- **JSON-LD Contract** (new section): exact shape, required fields, `@context` declaration, `codev:` namespace, schema-version policy. Addresses Codex#3, Claude#11.
+- **Save / Persistence Model** (new section): clarifies the save endpoint is a dumb pipe; author resolution via template substitution at render time (`{{GIT_USER_NAME}}` / `{{GIT_USER_EMAIL}}`), not save-time mutation; iframe bridge uses **string splicing** on the pristine source HTML, never live-DOM serialization. Addresses Gemini#1, Gemini#2, Codex#1, Codex#4, Claude#8.
+- **postMessage Protocol** (new section): 7-entry table of message types with direction and payload. Addresses Claude#12.
+- **Success Criteria** (added 4 new bullets): source-view re-render on toggle, panel-click semantics, script-leak-free saves, disabled toggle on malformed block. Addresses Codex#2, Codex#5, Gemini#2, Gemini#3, Claude#9.
+- **Q3** (revised): switched to template-substitution mechanism; explicitly notes the existing `@architect` hardcode is unchanged. Addresses Gemini#1, Claude#8.
+- **Q4** (promoted from open question to baked-in requirement). Addresses Codex#5, Claude#13.
+- **Q6** (resolved via `@context` design in JSON-LD Contract section).
+- **Q8** (new — Codex#2 derivative — source-mode panel-click behavior).
+- **Dependencies**: version pin corrected to `0.2.0` with explicit note that `^0.3.0` resolves to zero packages. Addresses Claude#7.
+- **Approach 1**: added explicit string-splicing requirement. Addresses Gemini#2.
+
+**Findings NOT incorporated as spec changes (deferred to plan)**:
+- Claude#2 (`open.html` is 1843 lines — modularity concern). This is a plan-phase architecture call. Plan should consider whether to split the iframe bridge into a separate vendored module (`packages/codev/templates/vendor/codev-annotator-bridge.js`) bundled at build time, vs inlining in `open.html`. The spec just requires it to work; how to organize the code is a plan concern.
+- Claude#10 (`highlightText` vs `highlightRange` API name): verified — `highlightText` is correct (confirmed against `apache/incubator-annotator` source at `packages/dom/src/highlight-text.ts`).
 
 ## Approval
 
