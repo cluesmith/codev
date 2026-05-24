@@ -1,7 +1,7 @@
 id: '846'
 title: remove-codev-afx-codev-agent-f
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,4 +13,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-24T19:11:38.472Z'
-updated_at: '2026-05-24T19:45:30.925Z'
+updated_at: '2026-05-24T19:45:46.540Z'
