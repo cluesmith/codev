@@ -1,0 +1,20 @@
+id: '843'
+title: w3c-standard-html-annotator-wi
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-24T12:52:12.812Z'
+updated_at: '2026-05-24T12:52:12.813Z'
