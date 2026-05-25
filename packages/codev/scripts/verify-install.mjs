@@ -32,7 +32,7 @@ try {
   console.log(`Installing ${targets.join(', ')} into ${prefix}...`);
   execSync(`npm install -g --prefix "${prefix}" ${quoted}`, { stdio: 'inherit' });
 
-  const bins = ['codev', 'af', 'porch', 'consult'];
+  const bins = ['codev', 'afx', 'porch', 'consult'];
   for (const bin of bins) {
     try {
       execSync(`"${join(prefix, 'bin', bin)}" --help`, { stdio: 'pipe' });
