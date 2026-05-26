@@ -211,12 +211,12 @@
       },
       {
         "command": "codev.submitReviewComment",
-        "title": "Submit review comment",
+        "title": "Codev: Submit Review Comment",
         "enablement": "!commentIsEmpty"
       },
       {
         "command": "codev.deleteReviewComment",
-        "title": "Delete review comment",
+        "title": "Codev: Delete Review Comment",
         "icon": "$(trash)"
       }
     ],
