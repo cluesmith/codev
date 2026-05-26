@@ -61,7 +61,7 @@
       },
       {
         "command": "codev.openBuilderTerminal",
-        "title": "Codev: Open Builder Terminal"
+        "title": "Codev: Open Builder Terminal..."
       },
       {
         "command": "codev.newShell",
@@ -174,7 +174,7 @@
       },
       {
         "command": "codev.openBuilderById",
-        "title": "Codev (internal): Open Builder Terminal by ID"
+        "title": "Codev: Open Builder Terminal"
       },
       {
         "command": "codev.openBuilderRow",
