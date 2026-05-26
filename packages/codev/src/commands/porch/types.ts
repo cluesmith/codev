@@ -49,14 +49,19 @@ export interface ProtocolPhase {
   checks?: string[];             // Check names to run (keys into protocol.checks)
   next?: string | null;          // Next phase id, or null if terminal
   /**
-   * Whether the phase definition carries a `consultation` block in protocol.json.
-   * Used to identify the PR-creating phase for BUGFIX-style protocols where the
-   * once-phase runs CMAP via prompted builder steps rather than the build_verify
-   * cycle and has no `pr` gate to key off. Combined with `gate === 'pr'`, this
-   * is how `isPrCreatingPhase` classifies the CMAP-emitting PR phase across all
-   * five protocols.
+   * Whether the phase definition carries a `consultation` block with
+   * `on: "review"` in protocol.json — the marker that distinguishes a
+   * PR-creating once-phase (BUGFIX/AIR `pr`) from other CMAP-emitting
+   * once-phases (e.g. RESEARCH `investigate` / `critique`, which run
+   * consultation for non-PR purposes).
+   *
+   * `consultation.on === 'review'` exists today on both BUGFIX and AIR `pr`
+   * phases and is absent on RESEARCH's investigation/critique phases. Used by
+   * `isPrCreatingPhase` together with `gate === 'pr'` to classify the
+   * PR-creating phase across all five PR-emitting protocols without
+   * misclassifying RESEARCH or any future non-PR consultation phases.
    */
-  hasConsultation?: boolean;
+  hasPrConsultation?: boolean;
 }
 
 /**

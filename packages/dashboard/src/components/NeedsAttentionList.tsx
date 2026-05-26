@@ -92,14 +92,34 @@ export function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): Atte
     });
   }
 
-  // Builders blocked on gate approvals
+  // Surface prReady builders and gate-blocked builders. Two independent
+  // signals — they share a loop but the prReady check must come BEFORE the
+  // gate-blocked early-out, otherwise BUGFIX builders (blocked = null,
+  // blockedSince = null) are filtered out before the prReady path fires and
+  // the missing-PR defense quietly drops them.
   for (const b of builders) {
-    if (!b.blocked || !b.blockedSince) continue;
-    // Skip pr-ready builders only when their PR was actually emitted above.
-    // Without this guard the same builder would be double-counted; with an
-    // unconditional skip a stuck builder whose PR is missing from `prs`
-    // would disappear entirely.
+    // Already surfaced as a PR row above — skip to avoid double-counting.
     if (b.prReady && b.issueId && emittedPrReadyIssueIds.has(b.issueId)) continue;
+
+    // prReady builder whose PR didn't appear in `prs` (cache miss, pagination,
+    // transient API failure). Surface anyway so we don't silently drop a real
+    // human-action signal. blockedSince may be absent for gateless protocols
+    // (BUGFIX) — fall back to startedAt so the waiting chip still renders.
+    if (b.prReady) {
+      const label = b.issueId ? `#${b.issueId}` : b.id;
+      items.push({
+        key: `gate-${b.id}`,
+        issueOrPR: label,
+        title: b.issueTitle || b.id,
+        kind: 'PR review',
+        kindClass: 'attention-kind--pr',
+        waitingSince: b.blockedSince || b.startedAt || new Date().toISOString(),
+      });
+      continue;
+    }
+
+    // Gate-blocked (non-PR) builders.
+    if (!b.blocked || !b.blockedSince) continue;
     const label = b.issueId ? `#${b.issueId}` : b.id;
     items.push({
       key: `gate-${b.id}`,
