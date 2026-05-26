@@ -1,0 +1,12 @@
+id: bugfix-840
+title: codev-telemetry-setting-descri
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-26T05:44:36.920Z'
+updated_at: '2026-05-26T05:53:44.759Z'

@@ -531,11 +531,6 @@
           "default": true,
           "description": "Auto-start Tower if not running on activation"
         },
-        "codev.telemetry": {
-          "type": "boolean",
-          "default": false,
-          "description": "No telemetry collected"
-        },
         "codev.autoOpenBuilderTerminal": {
           "type": "string",
           "enum": ["off", "notify", "auto"],
