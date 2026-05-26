@@ -30,6 +30,7 @@ import {
   getPhaseGate,
   isPhased,
   isBuildVerify,
+  isPrCreatingPhase,
   getVerifyConfig,
 } from './protocol.js';
 import {
@@ -483,6 +484,13 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     }
     if (!state.gates[gate].requested_at) {
       state.gates[gate].requested_at = new Date().toISOString();
+      // Issue #872: AIR pr (once-phase, gate=pr) reaches the human-review
+      // bottleneck here — done auto-requests the `pr` gate. Set the canonical
+      // pr-ready signal in the same write so consumers don't have to wait for
+      // a subsequent state mutation to learn the PR is ready for a reviewer.
+      if (gate === 'pr' || isPrCreatingPhase(protocol, state.phase)) {
+        state.pr_ready_for_human = true;
+      }
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gate} gate-requested`);
     }
     console.log('');
@@ -510,10 +518,16 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
 }
 
 async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, protocol: Protocol, statusPath: string, resolver?: ArtifactResolver): Promise<void> {
+  // Issue #872: BUGFIX runs CMAP on a once-phase with no gate. Calling `done`
+  // on its `pr` phase advances directly to `verified`, and the human is now
+  // the reviewer bottleneck. Snapshot this before mutating state.phase so the
+  // pr-ready signal fires in the same write that records the advance.
+  const advancingFromPrPhase = isPrCreatingPhase(protocol, state.phase);
   const nextPhase = getNextPhase(protocol, state.phase);
 
   if (!nextPhase) {
     state.phase = 'verified';
+    if (advancingFromPrPhase) state.pr_ready_for_human = true;
     await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} protocol complete`);
     console.log('');
     console.log(chalk.green.bold('🎉 PROTOCOL COMPLETE'));
@@ -524,6 +538,7 @@ async function advanceProtocolPhase(workspaceRoot: string, state: ProjectState, 
   state.phase = nextPhase.id;
   state.build_complete = false;
   state.iteration = 1;
+  if (advancingFromPrPhase) state.pr_ready_for_human = true;
 
   // If entering a phased phase (implement), extract plan phases
   if (isPhased(protocol, nextPhase.id)) {
@@ -728,6 +743,14 @@ export async function approve(
 
   state.gates[gateName].status = 'approved';
   state.gates[gateName].approved_at = new Date().toISOString();
+  // Issue #872: human approving the pr gate means they've acted — the PR is no
+  // longer waiting on a reviewer, so the pr-ready signal must go false in the
+  // same write that records the approval. Clearing on gate-approval covers all
+  // four protocols with an explicit `pr` gate; BUGFIX has no gate and stays
+  // true until the architect cleans up the worktree (cleanup deletes status).
+  if (gateName === 'pr') {
+    state.pr_ready_for_human = false;
+  }
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${gateName} gate-approved`);
 
   // Wake the builder iff porch was invoked from OUTSIDE the builder's
@@ -819,6 +842,10 @@ export async function rollback(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
+  // Issue #872: rolling back past the PR-creating phase invalidates the
+  // pr-ready signal — work is going backwards, so any previously-emitted
+  // "ready for human" state no longer reflects reality.
+  state.pr_ready_for_human = false;
 
   // If rolling back to a phased phase, re-extract plan phases
   if (isPhased(protocol, targetPhase)) {

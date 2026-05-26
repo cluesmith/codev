@@ -27,6 +27,7 @@ function makeBuilder(overrides: Partial<OverviewBuilder> = {}): OverviewBuilder 
     idleMs: 0,
     lastDataAt: null,
     spawnedByArchitect: null,
+    prReady: false,
     ...overrides,
   };
 }

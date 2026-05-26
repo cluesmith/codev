@@ -48,6 +48,20 @@ export interface ProtocolPhase {
   gate?: string;                 // Gate name that blocks after this phase
   checks?: string[];             // Check names to run (keys into protocol.checks)
   next?: string | null;          // Next phase id, or null if terminal
+  /**
+   * Whether the phase definition carries a `consultation` block with
+   * `on: "review"` in protocol.json — the marker that distinguishes a
+   * PR-creating once-phase (BUGFIX/AIR `pr`) from other CMAP-emitting
+   * once-phases (e.g. RESEARCH `investigate` / `critique`, which run
+   * consultation for non-PR purposes).
+   *
+   * `consultation.on === 'review'` exists today on both BUGFIX and AIR `pr`
+   * phases and is absent on RESEARCH's investigation/critique phases. Used by
+   * `isPrCreatingPhase` together with `gate === 'pr'` to classify the
+   * PR-creating phase across all five PR-emitting protocols without
+   * misclassifying RESEARCH or any future non-PR consultation phases.
+   */
+  hasPrConsultation?: boolean;
 }
 
 /**
@@ -164,6 +178,19 @@ export interface ProjectState {
     merged?: boolean;
     merged_at?: string;
   }>;
+  /**
+   * Canonical signal that CMAP for the PR-creating phase has completed and a
+   * human reviewer is now the bottleneck. Set true the moment porch transitions
+   * out of the CMAP-emitting state (gate-pending for protocols with a `pr` gate,
+   * phase advance for protocols without one — currently BUGFIX). Reset to false
+   * when the rebuttal cycle re-enters CMAP after REQUEST_CHANGES.
+   *
+   * Consumers (dashboard NeedsAttentionList, VSCode tree, future surfaces) read
+   * this single boolean instead of deriving "is the PR waiting?" from the
+   * protocol-specific shape of state. Optional so legacy status files that
+   * pre-date this field stay parseable.
+   */
+  pr_ready_for_human?: boolean;
   started_at: string;
   updated_at: string;
 }

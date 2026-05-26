@@ -172,6 +172,19 @@ export interface OverviewBuilder {
    * hosts more than one architect.
    */
   spawnedByArchitect: string | null;
+  /**
+   * Canonical "PR is waiting on a human reviewer" signal (Issue #872). True the
+   * moment porch transitions out of the CMAP-emitting state for the PR-creating
+   * phase, for ALL bundled protocols. Computed from `pr_ready_for_human` in
+   * status.yaml when present; otherwise falls back to the v3.1.3 derived logic
+   * (`blocked === 'PR review'` || BUGFIX `phase === 'verified'`) so in-flight
+   * projects from before this field shipped continue to surface correctly.
+   *
+   * Consumers gate on this single boolean instead of deriving from the
+   * protocol-specific gate shape (the v3.1.3 derivation silently dropped
+   * BUGFIX PRs because BUGFIX has no `pr` gate).
+   */
+  prReady: boolean;
 }
 
 export interface OverviewPR {
