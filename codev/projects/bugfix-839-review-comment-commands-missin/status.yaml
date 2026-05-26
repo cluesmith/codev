@@ -1,7 +1,7 @@
 id: bugfix-839
 title: review-comment-commands-missin
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates: {}
@@ -9,4 +9,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-26T05:44:32.129Z'
-updated_at: '2026-05-26T05:45:35.500Z'
+updated_at: '2026-05-26T05:48:15.926Z'
