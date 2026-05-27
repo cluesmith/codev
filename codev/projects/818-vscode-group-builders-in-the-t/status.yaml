@@ -1,7 +1,7 @@
 id: '818'
 title: vscode-group-builders-in-the-t
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-27T10:37:01.231Z'
-updated_at: '2026-05-27T21:49:35.967Z'
+updated_at: '2026-05-27T21:49:58.606Z'
