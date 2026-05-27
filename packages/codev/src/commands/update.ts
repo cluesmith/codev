@@ -25,9 +25,11 @@ import {
 import {
   copySkills,
   copyRootFiles,
+} from '../lib/scaffold.js';
+import {
   backfillGitignore,
   CODEV_GITIGNORE_ENTRIES,
-} from '../lib/scaffold.js';
+} from '../lib/gitignore.js';
 
 export interface UpdateOptions {
   dryRun?: boolean;

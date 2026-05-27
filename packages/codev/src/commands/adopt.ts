@@ -16,8 +16,8 @@ import {
   createProjectsDir,
   copySkills,
   copyRootFiles,
-  updateGitignore,
 } from '../lib/scaffold.js';
+import { updateGitignore } from '../lib/gitignore.js';
 
 interface AdoptOptions {
   yes?: boolean;
