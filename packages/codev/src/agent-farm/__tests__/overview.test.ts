@@ -22,6 +22,7 @@ import {
   detectBlocked,
   detectBlockedSince,
   computeIdleMs,
+  derivePrReady,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -696,6 +697,79 @@ describe('overview', () => {
   // ==========================================================================
   // computeIdleMs (Bugfix #405)
   // ==========================================================================
+
+  // ==========================================================================
+  // derivePrReady (Issue #872) — canonical pr_ready_for_human signal
+  // ==========================================================================
+
+  describe('derivePrReady', () => {
+    function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {
+      return {
+        id: '0100',
+        title: 'test',
+        protocol: 'spir',
+        phase: 'specify',
+        currentPlanPhase: '',
+        gates: {},
+        gateRequestedAt: {},
+        gateApprovedAt: {},
+        planPhases: [],
+        startedAt: '2026-05-26T00:00:00.000Z',
+        prReadyForHuman: null,
+        ...overrides,
+      };
+    }
+
+    it('returns true when status.yaml explicitly says pr_ready_for_human: true', () => {
+      // Explicit field wins, regardless of protocol or gate shape.
+      expect(derivePrReady(makeParsed({ prReadyForHuman: true }))).toBe(true);
+    });
+
+    it('returns false when status.yaml explicitly says pr_ready_for_human: false', () => {
+      // Explicit false (e.g., after pr gate approved) trumps any fallback.
+      expect(derivePrReady(makeParsed({
+        prReadyForHuman: false,
+        gates: { pr: 'pending' },
+        gateRequestedAt: { pr: '2026-05-26T12:00:00Z' },
+      }))).toBe(false);
+    });
+
+    it('falls back to pr gate pending+requested for legacy state files (SPIR/AIR shape)', () => {
+      // Pre-#872 state.yaml has no field — fall back to v3.1.3 derivation.
+      expect(derivePrReady(makeParsed({
+        protocol: 'air',
+        gates: { pr: 'pending' },
+        gateRequestedAt: { pr: '2026-05-26T12:00:00Z' },
+      }))).toBe(true);
+    });
+
+    it('falls back to BUGFIX phase=verified for legacy state files (the #872 regression case)', () => {
+      // BUGFIX has no pr gate — the v3.1.3 NeedsAttentionList silently dropped
+      // these. The fallback closes that gap until porch writes the explicit
+      // field on the in-flight builder.
+      expect(derivePrReady(makeParsed({
+        protocol: 'bugfix',
+        phase: 'verified',
+      }))).toBe(true);
+    });
+
+    it('does NOT fall back to phase=verified for non-BUGFIX protocols', () => {
+      // SPIR/ASPIR `verified` means the verify-approval gate was approved post-merge
+      // — the PR is already merged and reviewed, not waiting.
+      expect(derivePrReady(makeParsed({
+        protocol: 'spir',
+        phase: 'verified',
+      }))).toBe(false);
+      expect(derivePrReady(makeParsed({
+        protocol: 'aspir',
+        phase: 'verified',
+      }))).toBe(false);
+    });
+
+    it('returns false when no signal is present', () => {
+      expect(derivePrReady(makeParsed({ protocol: 'spir', phase: 'implement' }))).toBe(false);
+    });
+  });
 
   describe('computeIdleMs', () => {
     function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {

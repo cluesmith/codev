@@ -78,6 +78,7 @@ function makeBuilder(
     idleMs: 0,
     lastDataAt: null,
     spawnedByArchitect,
+    prReady: false,
   };
 }
 

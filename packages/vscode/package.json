@@ -61,7 +61,7 @@
       },
       {
         "command": "codev.openBuilderTerminal",
-        "title": "Codev: Open Builder Terminal"
+        "title": "Codev: Open Builder Terminal..."
       },
       {
         "command": "codev.newShell",
@@ -178,7 +178,7 @@
       },
       {
         "command": "codev.openBuilderRow",
-        "title": "Codev: Open Builder Terminal (and expand row)"
+        "title": "Codev (internal): Open Builder Terminal and Expand Row"
       },
       {
         "command": "codev.openWorktreeFolder",
@@ -211,12 +211,12 @@
       },
       {
         "command": "codev.submitReviewComment",
-        "title": "Submit review comment",
+        "title": "Codev: Submit Review Comment",
         "enablement": "!commentIsEmpty"
       },
       {
         "command": "codev.deleteReviewComment",
-        "title": "Delete review comment",
+        "title": "Codev: Delete Review Comment",
         "icon": "$(trash)"
       }
     ],
@@ -530,11 +530,6 @@
           "type": "boolean",
           "default": true,
           "description": "Auto-start Tower if not running on activation"
-        },
-        "codev.telemetry": {
-          "type": "boolean",
-          "default": false,
-          "description": "No telemetry collected"
         },
         "codev.autoOpenBuilderTerminal": {
           "type": "string",

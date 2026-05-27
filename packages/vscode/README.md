@@ -215,7 +215,6 @@ When a builder reaches a human-approval gate, a toast surfaces it with the issue
 | `codev.gateToasts.enabled` | `true` | Show a toast when a builder reaches a human-approval gate |
 | `codev.buildersAutoCollapse` | `true` | Builders view accordion — expanding one builder auto-collapses the others |
 | `codev.buildersFileViewAsTree` | `true` | Render a builder's changed-files list as a folder tree (`false` for a flat list) |
-| `codev.telemetry` | `false` | No telemetry collected |
 
 ## Advanced
 

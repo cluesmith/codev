@@ -219,6 +219,17 @@ function normalizePhase(p: unknown): ProtocolPhase {
     };
   }
 
+  // A phase carries a "PR consultation" iff its consultation block has
+  // `on: "review"`. The bare presence of a consultation block is NOT
+  // sufficient — RESEARCH's investigate / critique phases carry consultation
+  // for non-PR purposes (type: "investigation" / "critique"), and matching
+  // those would mis-set pr_ready_for_human in `isPrCreatingPhase`.
+  let hasPrConsultation = false;
+  if (phase.consultation && typeof phase.consultation === 'object') {
+    const consultationObj = phase.consultation as Record<string, unknown>;
+    hasPrConsultation = consultationObj.on === 'review';
+  }
+
   return {
     id: phase.id as string,
     name: (phase.name as string) || phase.id as string,
@@ -230,6 +241,7 @@ function normalizePhase(p: unknown): ProtocolPhase {
     gate: gateName,
     checks: checks.length > 0 ? checks : undefined,
     next,
+    hasPrConsultation,
   };
 }
 
@@ -415,4 +427,29 @@ export function getMaxIterations(protocol: Protocol, phaseId: string): number {
 export function getOnCompleteConfig(protocol: Protocol, phaseId: string): OnCompleteConfig | null {
   const phase = getPhaseConfig(protocol, phaseId);
   return phase?.on_complete || null;
+}
+
+/**
+ * Is this phase the one that creates the PR and runs CMAP at PR time?
+ *
+ * Two markers identify the PR-creating phase across the bundled protocols:
+ *   - `gate === 'pr'` — SPIR/ASPIR/PIR review, AIR pr (covers protocols with
+ *     an explicit PR-review gate).
+ *   - `consultation.on === 'review'` — BUGFIX pr (once-phase that runs CMAP
+ *     via prompted builder steps and has no gate). The narrow `on === 'review'`
+ *     check matters: RESEARCH's `investigate` and `critique` phases also carry
+ *     consultation blocks but for non-PR purposes (`type: "investigation"` /
+ *     `"critique"`). Matching bare consultation presence would mis-flag those
+ *     phases as PR-creating and leak `pr_ready_for_human: true` into research
+ *     state.
+ *
+ * Used by porch to set `pr_ready_for_human` on transitions out of this phase's
+ * CMAP-emitting state. Adding a new protocol with a CMAP-emitting PR phase
+ * means landing either marker (preferred: a `consultation` block with
+ * `on: "review"` for once-phases, or `gate: "pr"` for build_verify phases).
+ */
+export function isPrCreatingPhase(protocol: Protocol, phaseId: string): boolean {
+  const phase = getPhaseConfig(protocol, phaseId);
+  if (!phase) return false;
+  return phase.gate === 'pr' || !!phase.hasPrConsultation;
 }

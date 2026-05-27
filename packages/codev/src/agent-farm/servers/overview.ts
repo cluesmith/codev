@@ -80,6 +80,18 @@ export interface BuilderOverview {
    * an inline attribution tag when the workspace hosts more than one architect.
    */
   spawnedByArchitect: string | null;
+  /**
+   * Canonical "PR is waiting on a human reviewer" signal (Issue #872). True the
+   * moment porch transitions out of the CMAP-emitting state for the PR-creating
+   * phase, for ALL bundled protocols. Computed from `pr_ready_for_human` in
+   * status.yaml when present; otherwise falls back to the v3.1.3 derived logic
+   * (`blocked === 'PR review'` || BUGFIX `phase === 'verified'`) so in-flight
+   * projects from before this field shipped continue to surface correctly.
+   *
+   * Consumers (dashboard NeedsAttentionList, VSCode tree) gate on this flag
+   * instead of deriving from the protocol-specific gate shape themselves.
+   */
+  prReady: boolean;
 }
 
 export interface PROverview {
@@ -147,6 +159,13 @@ interface ParsedStatus {
   gateApprovedAt: Record<string, string>;
   planPhases: PlanPhase[];
   startedAt: string;
+  /**
+   * Mirror of porch's `pr_ready_for_human` status.yaml field (Issue #872).
+   * `null` when the field is absent in the yaml (legacy state from before
+   * the field shipped) so `derivePrReady` can choose between the explicit
+   * value and the v3.1.3 fallback derivation.
+   */
+  prReadyForHuman: boolean | null;
 }
 
 /**
@@ -165,6 +184,7 @@ export function parseStatusYaml(content: string): ParsedStatus {
     gateApprovedAt: {},
     planPhases: [],
     startedAt: '',
+    prReadyForHuman: null,
   };
 
   const lines = content.split('\n');
@@ -191,6 +211,13 @@ export function parseStatusYaml(content: string): ParsedStatus {
 
     const startedMatch = line.match(/^started_at:\s*'?(.+?)'?\s*$/);
     if (startedMatch) { result.startedAt = startedMatch[1]; section = 'none'; continue; }
+
+    const prReadyMatch = line.match(/^pr_ready_for_human:\s*(true|false)\s*$/);
+    if (prReadyMatch) {
+      result.prReadyForHuman = prReadyMatch[1] === 'true';
+      section = 'none';
+      continue;
+    }
 
     // Section headers
     if (/^gates:\s*$/.test(line)) {
@@ -421,6 +448,33 @@ export function detectBlockedSince(parsed: ParsedStatus): string | null {
 }
 
 /**
+ * Compute the canonical "PR ready for human review" signal for a builder
+ * (Issue #872). Prefers porch's explicit `pr_ready_for_human` field in
+ * status.yaml when present; otherwise falls back to the v3.1.3 derivation so
+ * builders whose state.yaml pre-dates the field continue to surface.
+ *
+ * Fallback derivation:
+ *   - `blocked === 'PR review'` — protocols with a `pr` gate (AIR/SPIR/ASPIR/PIR)
+ *     that reached the human-bottleneck state under v3.1.3 logic.
+ *   - BUGFIX `phase === 'verified'` — the v3.1.3 gap this canonical signal
+ *     closes. BUGFIX has no `pr` gate, so its post-CMAP state is `verified`
+ *     with no gate-pending signal; the fallback adds this case so in-flight
+ *     BUGFIX builders aren't dropped from Needs Attention.
+ *
+ * Once porch has written `pr_ready_for_human` to status.yaml the fallback no
+ * longer fires for that project — the explicit field is authoritative.
+ */
+export function derivePrReady(parsed: ParsedStatus): boolean {
+  if (parsed.prReadyForHuman !== null) return parsed.prReadyForHuman;
+  // Fallback: v3.1.3 logic + BUGFIX case.
+  const prGatePending =
+    parsed.gates['pr'] === 'pending' && !!parsed.gateRequestedAt['pr'];
+  if (prGatePending) return true;
+  if (parsed.protocol === 'bugfix' && parsed.phase === 'verified') return true;
+  return false;
+}
+
+/**
  * Compute total idle time (ms) from gate wait periods.
  * Includes completed gate waits (requested_at → approved_at) and
  * any currently-pending gate wait (requested_at → now).
@@ -595,6 +649,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         idleMs: 0,
         lastDataAt: null,
         spawnedByArchitect: null,
+        prReady: false,
       });
       continue;
     }
@@ -650,6 +705,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             idleMs: computeIdleMs(parsed),
             lastDataAt: null,
             spawnedByArchitect: null,
+            prReady: derivePrReady(parsed),
           });
           found = true;
           break;
@@ -682,6 +738,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         idleMs: 0,
         lastDataAt: null,
         spawnedByArchitect: null,
+        prReady: false,
       });
     }
   }

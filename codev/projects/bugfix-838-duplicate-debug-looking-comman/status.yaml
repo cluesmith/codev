@@ -1,0 +1,12 @@
+id: bugfix-838
+title: duplicate-debug-looking-comman
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-26T05:44:03.993Z'
+updated_at: '2026-05-26T05:50:32.842Z'

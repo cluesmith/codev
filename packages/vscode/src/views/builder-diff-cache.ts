@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'node:path';
 import {
   getBuilderChanges,
   planResources,
@@ -7,6 +6,7 @@ import {
   type ChangeStatus,
   type ResourcePlan,
 } from '../commands/view-diff.js';
+import { builderFileResourceUri } from './builder-file-tree-item.js';
 
 /**
  * A changed file paired with its diff plan. `planResources` maps
@@ -28,7 +28,7 @@ export interface BuilderDiffResult {
 
 /**
  * TTL cache around `getBuilderChanges` keyed by builder id, plus a global
- * `fsPath → git status` registry that backs the SCM-style file decorations
+ * `uri → git status` registry that backs the SCM-style file decorations
  * (colored status letter on each changed-file row).
  *
  * Why the TTL: VSCode re-queries an *expanded* tree node's children on
@@ -40,10 +40,10 @@ export interface BuilderDiffResult {
 export class BuilderDiffCache {
   private readonly cache = new Map<string, { ts: number; result: BuilderDiffResult }>();
 
-  /** fsPath → status for every file currently shown across builders. */
+  /** uri.toString() → status for every file currently shown across builders. */
   private readonly decorations = new Map<string, ChangeStatus>();
-  /** builderId → the fsPaths it contributed, so a recompute can replace them. */
-  private readonly builderPaths = new Map<string, string[]>();
+  /** builderId → the URIs it contributed, so a recompute can replace them. */
+  private readonly builderUris = new Map<string, vscode.Uri[]>();
 
   private readonly _onDidChangeDecorations = new vscode.EventEmitter<vscode.Uri[]>();
   /** Fires the affected file URIs whenever the decoration map changes. */
@@ -53,7 +53,7 @@ export class BuilderDiffCache {
 
   /** Status for a file URI, or undefined if it isn't a tracked change. */
   decorationFor(uri: vscode.Uri): ChangeStatus | undefined {
-    return this.decorations.get(uri.fsPath);
+    return this.decorations.get(uri.toString());
   }
 
   async getDiff(builderId: string, worktreePath: string): Promise<BuilderDiffResult> {
@@ -92,22 +92,34 @@ export class BuilderDiffCache {
   /**
    * Replace this builder's contribution to the decoration map and notify
    * listeners of every affected URI (old ∪ new) so VSCode re-queries them.
+   *
+   * URIs are constructed via the same helper `BuilderFileTreeItem` uses,
+   * so the scheme/path match exactly — VSCode keys decoration cache
+   * entries by the full URI, not by fsPath, so a scheme mismatch would
+   * leave stale decorations on screen after a file list change.
    */
   private syncDecorations(builderId: string, worktreePath: string, result: BuilderDiffResult): void {
-    const oldPaths = this.builderPaths.get(builderId) ?? [];
-    for (const p of oldPaths) { this.decorations.delete(p); }
+    const oldUris = this.builderUris.get(builderId) ?? [];
+    for (const u of oldUris) { this.decorations.delete(u.toString()); }
 
-    const newPaths: string[] = [];
+    const newUris: vscode.Uri[] = [];
     for (const f of result.files) {
-      const fsPath = vscode.Uri.file(path.join(worktreePath, f.change.path)).fsPath;
-      this.decorations.set(fsPath, f.change.status);
-      newPaths.push(fsPath);
+      const uri = builderFileResourceUri(worktreePath, f.change.path);
+      this.decorations.set(uri.toString(), f.change.status);
+      newUris.push(uri);
     }
-    this.builderPaths.set(builderId, newPaths);
+    this.builderUris.set(builderId, newUris);
 
-    const affected = [...new Set([...oldPaths, ...newPaths])];
+    const seen = new Set<string>();
+    const affected: vscode.Uri[] = [];
+    for (const u of [...oldUris, ...newUris]) {
+      const key = u.toString();
+      if (seen.has(key)) { continue; }
+      seen.add(key);
+      affected.push(u);
+    }
     if (affected.length > 0) {
-      this._onDidChangeDecorations.fire(affected.map(p => vscode.Uri.file(p)));
+      this._onDidChangeDecorations.fire(affected);
     }
   }
 
