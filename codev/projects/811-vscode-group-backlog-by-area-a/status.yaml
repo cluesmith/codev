@@ -1,0 +1,30 @@
+id: '811'
+title: vscode-group-backlog-by-area-a
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-05-27T10:42:56.460Z'
+    approved_at: '2026-05-27T10:46:09.873Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-05-27T10:53:58.839Z'
+    approved_at: '2026-05-27T11:39:37.781Z'
+  pr:
+    status: approved
+    requested_at: '2026-05-27T11:48:15.308Z'
+    approved_at: '2026-05-27T21:15:46.780Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-05-27T10:36:54.820Z'
+updated_at: '2026-05-27T21:26:41.774Z'
+pr_history:
+  - phase: review
+    pr_number: 886
+    branch: builder/pir-811
+    created_at: '2026-05-27T11:43:05.641Z'
+pr_ready_for_human: false
