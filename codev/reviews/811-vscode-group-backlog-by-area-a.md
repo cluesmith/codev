@@ -10,16 +10,16 @@ The vscode Backlog tree is now grouped by `area/*` label. Group ordering is pure
 
 Computed via `git diff --stat origin/main...HEAD`:
 
-- `codev/plans/811-vscode-group-backlog-by-area.md` (+TBD / -TBD)
-- `codev/projects/811-vscode-group-backlog-by-area-a/status.yaml` — porch-managed
-- `codev/reviews/811-vscode-group-backlog-by-area-a.md` (+TBD / -0) — this file
-- `codev/state/pir-811_thread.md` (+TBD / -0)
-- `packages/vscode/src/extension.ts` (+13 / -1) — wire workspaceState + expand/collapse listeners
-- `packages/vscode/src/test/backlog.test.ts` (+59 / -11) — 6 new `groupBacklogByArea` tests
+- `codev/plans/811-vscode-group-backlog-by-area.md` (+73 / -0)
+- `codev/projects/811-vscode-group-backlog-by-area-a/status.yaml` (+29 / -0) — porch-managed
+- `codev/reviews/811-vscode-group-backlog-by-area-a.md` (+93 / -0) — this file
+- `codev/state/pir-811_thread.md` (+68 / -0)
+- `packages/vscode/src/extension.ts` (+13 / -4) — wire workspaceState + expand/collapse listeners
+- `packages/vscode/src/test/backlog.test.ts` (+59 / -6) — 6 new `groupBacklogByArea` tests
 - `packages/vscode/src/views/backlog-tree-item.ts` (+22 / -0) — `BacklogGroupTreeItem` class
-- `packages/vscode/src/views/backlog.ts` (+140 / -21) — pure `groupBacklogByArea` helper + two-level `BacklogProvider` + single-Uncategorized flatten optimization
+- `packages/vscode/src/views/backlog.ts` (+154 / -19) — pure `groupBacklogByArea` helper + two-level `BacklogProvider` + single-Uncategorized flatten optimization
 
-Final stat in PR description.
+Total: 8 files, +511 / -29.
 
 ## Commits
 
@@ -32,7 +32,8 @@ f736c3cc [PIR #811] Plan + thread: revise to user-configurable priority areas
 87fbf75b [PIR #811] Flatten single-Uncategorized backlog to row list (no header)
 a235d422 [PIR #811] Review + retrospective
 9ace0fcb [PIR #811] Address Claude COMMENT: drop void prefix on fire-and-forget update
-<sha>     [PIR #811] Drop codev.backlog.priorityAreas mechanism per architect reconsideration
+6183fba6 [PIR #811] Thread: log review-phase consult verdicts and pr gate
+f1c30975 [PIR #811] Drop codev.backlog.priorityAreas mechanism per architect reconsideration
 ```
 
 ## Test Results
