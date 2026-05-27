@@ -44,3 +44,20 @@ Wired into `packages/codev/src/commands/update.ts`:
 
 Full suite (`vitest run --exclude '**/e2e/**'`): **3185 passed | 13 skipped (3198)**. `tsc` clean. `porch check` passes both build and tests.
 
+## PR + CMAP (2026-05-27)
+
+PR #881 opened against `main`.
+
+CMAP verdicts:
+- gemini: **APPROVE**
+- codex: **REQUEST_CHANGES** — legitimate gap: `updateGitignore()` short-circuited on `.agent-farm/` as a sentinel, so `codev adopt` on a project that already had a partial Codev block (e.g. `.agent-farm/` ignored but not yet `.architect-role.md`) would skip without backfilling. Bug not fully closed via the adopt path alone — required user to know they needed to also run `codev update`.
+- claude: **APPROVE**
+
+## Iteration: address codex feedback (2026-05-27)
+
+Replaced the `.agent-farm/` sentinel short-circuit in `updateGitignore()` with a delegation to `backfillGitignore()`. Result: adopt now does line-level backfill against existing `.gitignore` files — partial Codev blocks self-heal, no duplicates, existing user entries untouched. The `alreadyPresent: true` return value now means *all* managed entries are present, not just `.agent-farm/`.
+
+Updated the existing `scaffold.test.ts` "should not duplicate entries if already present" — it was encoding the buggy short-circuit (only `.agent-farm/` present, expected `alreadyPresent: true`). Replaced with a test that loads the *full* `CODEV_GITIGNORE_ENTRIES` block and expects `alreadyPresent: true`. Added new regression tests in both `scaffold.test.ts` and `adopt.test.ts` for the partial-block scenario.
+
+Full suite still green: **3179 passed | 21 skipped (3200)** (two new tests; skip count fluctuates with conditional-skip tests). `tsc` clean.
+

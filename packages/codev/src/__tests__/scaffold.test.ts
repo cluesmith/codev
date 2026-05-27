@@ -313,15 +313,40 @@ describe('Scaffold Utilities', () => {
       expect(content).toContain('.agent-farm/');
     });
 
-    it('should not duplicate entries if already present', () => {
+    it('should report alreadyPresent when the full block is already present', () => {
       const targetDir = path.join(tempDir, 'project');
       fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, '.gitignore'), '.agent-farm/\n');
+      fs.writeFileSync(path.join(targetDir, '.gitignore'), CODEV_GITIGNORE_ENTRIES);
 
       const result = updateGitignore(targetDir);
 
       expect(result.updated).toBe(false);
       expect(result.alreadyPresent).toBe(true);
+    });
+
+    // Regression for issue #880: adopt against a partial Codev block must self-heal.
+    // Previously, updateGitignore short-circuited on a `.agent-farm/` sentinel, which
+    // meant projects that ignored `.agent-farm/` but lacked `.architect-role.md` were
+    // left unhealed.
+    it('should backfill missing entries when block is partial (issue #880)', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(targetDir, '.gitignore'),
+        'node_modules/\n.agent-farm/\n.consult/\n'
+      );
+
+      const result = updateGitignore(targetDir);
+
+      expect(result.updated).toBe(true);
+      expect(result.alreadyPresent).toBe(false);
+      const content = fs.readFileSync(path.join(targetDir, '.gitignore'), 'utf-8');
+      expect(content).toContain('.architect-role.md');
+      expect(content).toContain('.builders/');
+      // Existing entries preserved, no duplicates
+      expect(content).toContain('node_modules/');
+      expect((content.match(/\.agent-farm\//g) || []).length).toBe(1);
+      expect((content.match(/\.consult\//g) || []).length).toBe(1);
     });
 
     it('should create .gitignore if it does not exist', () => {

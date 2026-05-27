@@ -148,6 +148,29 @@ describe('adopt command', () => {
       // Regression for issue #880
       expect(gitignore).toContain('.architect-role.md');
     });
+
+    // Regression for issue #880: adopt must self-heal a partial Codev block.
+    // Earlier behavior short-circuited on a `.agent-farm/` sentinel and left
+    // newer entries (like `.architect-role.md`) missing.
+    it('should backfill .architect-role.md when partial Codev block already present (issue #880)', async () => {
+      const projectDir = path.join(testBaseDir, 'partial-gitignore');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(projectDir, '.gitignore'),
+        'node_modules/\n.agent-farm/\n.consult/\n.builders/\n'
+      );
+
+      process.chdir(projectDir);
+
+      const { adopt } = await import('../commands/adopt.js');
+      await adopt({ yes: true });
+
+      const gitignore = fs.readFileSync(path.join(projectDir, '.gitignore'), 'utf-8');
+      expect(gitignore).toContain('.architect-role.md');
+      expect(gitignore).toContain('node_modules/');
+      expect((gitignore.match(/\.agent-farm\//g) || []).length).toBe(1);
+    });
   });
 
   describe('conflict detection', () => {

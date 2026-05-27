@@ -234,7 +234,13 @@ interface UpdateGitignoreResult {
 }
 
 /**
- * Update existing .gitignore or create if not exists (for adopt)
+ * Update existing .gitignore or create if not exists (for adopt).
+ *
+ * If .gitignore is absent, creates it with the full managed block.
+ * Otherwise, performs a line-level backfill — appends only the entries that
+ * are missing. This means adopt is self-healing against partial Codev blocks
+ * (e.g. a project that ignored `.agent-farm/` but not later additions like
+ * `.architect-role.md`).
  */
 export function updateGitignore(targetDir: string): UpdateGitignoreResult {
   const gitignorePath = path.join(targetDir, '.gitignore');
@@ -244,12 +250,10 @@ export function updateGitignore(targetDir: string): UpdateGitignoreResult {
     return { updated: false, created: true, alreadyPresent: false };
   }
 
-  const existing = fs.readFileSync(gitignorePath, 'utf-8');
-  if (existing.includes('.agent-farm/')) {
+  const result = backfillGitignore(targetDir, CODEV_GITIGNORE_ENTRIES);
+  if (result.added.length === 0) {
     return { updated: false, created: false, alreadyPresent: true };
   }
-
-  fs.appendFileSync(gitignorePath, '\n' + CODEV_GITIGNORE_ENTRIES);
   return { updated: true, created: false, alreadyPresent: false };
 }
 
