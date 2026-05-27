@@ -15,7 +15,7 @@ import { openDevUrl } from './commands/open-dev-url.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
-import { viewPlanFile } from './commands/view-artifact.js';
+import { viewPlanFile, viewSpecFile, viewReviewFile } from './commands/view-artifact.js';
 import { activateIssueView, viewBacklogIssue } from './commands/view-issue.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
@@ -601,6 +601,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			runWorktreeSetup(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.viewPlanFile', (arg: vscode.TreeItem | string | undefined) =>
 			viewPlanFile(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.viewSpecFile', (arg: vscode.TreeItem | string | undefined) =>
+			viewSpecFile(connectionManager!, extractBuilderId(arg))),
+		vscode.commands.registerCommand('codev.viewReviewFile', (arg: vscode.TreeItem | string | undefined) =>
+			viewReviewFile(connectionManager!, extractBuilderId(arg))),
 		vscode.commands.registerCommand('codev.refreshOverview', () => overviewCache.refresh()),
 		vscode.commands.registerCommand('codev.enableBuildersAutoCollapse', () =>
 			vscode.workspace.getConfiguration('codev').update('buildersAutoCollapse', true, vscode.ConfigurationTarget.Global)),

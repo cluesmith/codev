@@ -1,18 +1,22 @@
 /**
- * Codev: View Plan File — open the plan markdown a gated PIR builder is
- * waiting on directly in a VSCode editor tab.
+ * Codev: View {Spec,Plan,Review} File — open the on-disk markdown
+ * artifact a builder has produced (or is about to produce) directly in
+ * a VSCode editor tab.
  *
- * Right-click a builder row → "View Plan File".
+ * Right-click a builder row → "View Spec/Plan/Review File".
  *
- * Strategy: locate `<worktree>/codev/plans/`, filter to files prefixed
- * with the builder ID, and:
+ * Strategy: locate `<worktree>/codev/<subdir>/`, filter to files
+ * prefixed with the builder ID, and:
  *   - 0 files  → friendly message ("no file yet — the builder hasn't written one")
  *   - 1 file   → open it
  *   - 2+ files → quick-pick (newer files float to the top)
  *
- * View Review File was intentionally not added: the review file is the
- * PR body in PIR's review phase, so reviewers read it on GitHub when
- * it matters.
+ * This dispatcher is protocol-agnostic. Per-protocol menu visibility
+ * (e.g. PIR review entries hide when the review file isn't on disk) is
+ * controlled by the row's `contextValue` (composed in
+ * `views/builders.ts`) and the matching `view/item/context` `when`
+ * clauses in `package.json`. The "missing file" case here only fires
+ * for non-PIR protocols where the menu doesn't hide.
  */
 
 import * as vscode from 'vscode';
@@ -20,14 +24,24 @@ import { resolve } from 'node:path';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { ConnectionManager } from '../connection-manager.js';
 
-type ArtifactKind = 'plan';
+type ArtifactKind = 'plan' | 'spec' | 'review';
 
 const ARTIFACT_SUBDIR: Record<ArtifactKind, string> = {
   plan: 'codev/plans',
+  spec: 'codev/specs',
+  review: 'codev/reviews',
 };
 
 export function viewPlanFile(connectionManager: ConnectionManager, builderIdArg: string | undefined) {
   return viewArtifact(connectionManager, builderIdArg, 'plan');
+}
+
+export function viewSpecFile(connectionManager: ConnectionManager, builderIdArg: string | undefined) {
+  return viewArtifact(connectionManager, builderIdArg, 'spec');
+}
+
+export function viewReviewFile(connectionManager: ConnectionManager, builderIdArg: string | undefined) {
+  return viewArtifact(connectionManager, builderIdArg, 'review');
 }
 
 async function viewArtifact(

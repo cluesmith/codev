@@ -193,6 +193,14 @@
         "title": "Codev: View Plan File"
       },
       {
+        "command": "codev.viewSpecFile",
+        "title": "Codev: View Spec File"
+      },
+      {
+        "command": "codev.viewReviewFile",
+        "title": "Codev: View Review File"
+      },
+      {
         "command": "codev.viewBacklogIssue",
         "title": "Codev: View Issue"
       },
@@ -289,9 +297,19 @@
           "group": "1_primary@2"
         },
         {
-          "command": "codev.viewPlanFile",
-          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-pir$/",
+          "command": "codev.viewSpecFile",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-(spir|aspir)(-review)?$/",
           "group": "1_primary@3"
+        },
+        {
+          "command": "codev.viewPlanFile",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-(spir|aspir|pir)(-review)?$/",
+          "group": "1_primary@4"
+        },
+        {
+          "command": "codev.viewReviewFile",
+          "when": "view == codev.builders && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-((spir|aspir|air)(-review)?|pir-review)$/",
+          "group": "1_primary@5"
         },
         {
           "command": "codev.viewDiff",
