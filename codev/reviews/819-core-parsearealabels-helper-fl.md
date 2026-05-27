@@ -8,8 +8,11 @@ Adds the `parseArea` helper (in `packages/codev/src/lib/github.ts`) that extract
 
 ## Files Changed
 
+Computed via `git diff --stat origin/main...HEAD` (branch-only — excludes commits picked up from main during a mid-PIR merge):
+
 - `codev/plans/819-core-parsearealabels-helper-fl.md` (+279 / -0)
-- `codev/projects/819-core-parsearealabels-helper-fl/status.yaml` (+22 / -0) — porch-managed, not hand-edited
+- `codev/projects/819-core-parsearealabels-helper-fl/status.yaml` (+27 / -0) — porch-managed, not hand-edited
+- `codev/reviews/819-core-parsearealabels-helper-fl.md` (+90 / -0) — this file
 - `codev/state/pir-819_thread.md` (+79 / -0)
 - `packages/codev/src/__tests__/github.test.ts` (+66 / -0)
 - `packages/codev/src/agent-farm/servers/overview.ts` (+38 / -5)
@@ -18,7 +21,7 @@ Adds the `parseArea` helper (in `packages/codev/src/lib/github.ts`) that extract
 - `packages/types/src/api.ts` (+15 / -0)
 - `packages/vscode/src/test/builders.test.ts` (+1 / -0)
 
-Total: 9 files, +533 / -5.
+Total: 10 files, +628 / -5.
 
 ## Commits
 
@@ -76,6 +79,16 @@ No additions to `codev/resources/lessons-learned.md`, but two durable principles
 
 5. **`parseArea` projection rule**: first-alphabetical wins, no label name is privileged, `'Uncategorized'` fallback. The no-privilege test explicitly uses `area/cross-cutting` as fixture data to prove the parser doesn't treat it specially — that's intentional and is the regression guard against re-introducing the privilege.
 
+## 3-Way Consultation Dispositions
+
+Single advisory pass (PIR's `max_iterations: 1`). Verdicts:
+
+- **Claude**: APPROVE.
+- **Codex**: COMMENT. Two accuracy findings on this review file: (1) the Files Changed list underreported (was 9, actually 10 — review file itself was missing); (2) the local-test instruction recommended `import { parseArea } from '@cluesmith/codev'` but `parseArea` isn't exported from the package root. **Both addressed** in this same review file revision — see the corrected Files Changed list and the updated "How to Test Locally" section.
+- **Gemini**: failed to produce a verdict (`consult` exited code 1 with opaque `[object Object]` error on three attempts; no output file written). Surfaced to the architect; no model verdict obtained for this PR.
+
+No `REQUEST_CHANGES` findings. Codex's COMMENT findings were minor accuracy issues on the review file (not on the code) and were corrected in place.
+
 ## How to Test Locally
 
 For reviewers pulling the branch:
@@ -87,4 +100,4 @@ For reviewers pulling the branch:
   - `pnpm --filter @cluesmith/codev test src/__tests__/github.test.ts` — 66 tests pass, including the new `parseArea` block.
   - Hit `/api/overview` on the running dev server: `curl http://localhost:<port>/api/overview | jq '.backlog[0] | {id, area}'`. Every backlog entry should have a populated `area` string. This issue (#819) is labeled `area/core`, so its entry should show `"area": "core"`.
   - Same for builders: `curl http://localhost:<port>/api/overview | jq '.builders[] | {id, issueId, area}'`. Builders with an `issueId` matching a labeled issue inherit that issue's area; builders without an issue (soft-mode / task-mode) show `"area": "Uncategorized"`.
-  - Optional: in a TypeScript REPL or quick test file, `import { parseArea } from '@cluesmith/codev'` and exercise the edge cases — `null`, `''`, `[{name: 'area/auth'}, {name: 'area/cross-cutting'}]` should return `'auth'` (first alphabetical, cross-cutting not privileged).
+  - `parseArea` is currently internal to the codev server (no public re-export from the package root). To exercise edge cases directly, the cleanest path is the unit test file at `packages/codev/src/__tests__/github.test.ts` — run `pnpm --filter @cluesmith/codev test src/__tests__/github.test.ts`, or add a temporary case there. The 10 included cases already cover `null`, `''`, `[{name: 'area/auth'}, {name: 'area/cross-cutting'}]` (returns `'auth'` — first alphabetical, cross-cutting not privileged), and the other defensive paths.
