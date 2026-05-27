@@ -17,7 +17,7 @@ import {
   fetchCurrentUser,
   parseLinkedIssue,
   parseLabelDefaults,
-  parseAreaLabels,
+  parseArea,
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem } from '../../lib/github.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
@@ -82,14 +82,16 @@ export interface BuilderOverview {
    */
   spawnedByArchitect: string | null;
   /**
-   * `area/*` label values for this builder's issue (sorted, deduplicated,
-   * prefix stripped). `[]` when the builder has no issue or the issue has
-   * no `area/*` labels. Populated by `getOverview` via the issue-cache join
-   * after `discoverBuilders` returns — `discoverBuilders` itself sets it
-   * to `[]` since it has no access to the issue payload. Consumed by the
-   * builders-tree grouping in #818 and the equivalent dashboard view.
+   * Single `area/*` value for this builder's issue (Codev convention: one
+   * `area/` per issue; `area/cross-cutting` is the multi-area marker — see
+   * `parseArea`). `'Uncategorized'` when the builder has no issue or the
+   * issue has no `area/*` labels. Populated by `getOverview` via the
+   * issue-cache join after `discoverBuilders` returns — `discoverBuilders`
+   * itself sets it to `'Uncategorized'` since it has no access to the issue
+   * payload. Consumed by the builders-tree grouping in #818 and the
+   * equivalent dashboard view.
    */
-  areas: string[];
+  area: string;
 }
 
 export interface PROverview {
@@ -109,11 +111,12 @@ export interface BacklogItem {
   type: string;
   priority: string;
   /**
-   * `area/*` label values for this issue (sorted, deduplicated, prefix
-   * stripped). `[]` when the issue has no `area/*` labels. Consumed by
-   * the backlog grouping in #811 and the equivalent vscode view.
+   * Single `area/*` value for this issue (Codev convention: one `area/`
+   * per issue; `area/cross-cutting` is the multi-area marker — see
+   * `parseArea`). `'Uncategorized'` when the issue has no `area/*` labels.
+   * Consumed by the backlog grouping in #811 and the equivalent vscode view.
    */
-  areas: string[];
+  area: string;
   hasSpec: boolean;
   hasPlan: boolean;
   hasReview: boolean;
@@ -611,7 +614,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         idleMs: 0,
         lastDataAt: null,
         spawnedByArchitect: null,
-        areas: [],
+        area: 'Uncategorized',
       });
       continue;
     }
@@ -667,7 +670,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             idleMs: computeIdleMs(parsed),
             lastDataAt: null,
             spawnedByArchitect: null,
-            areas: [],
+            area: 'Uncategorized',
           });
           found = true;
           break;
@@ -700,7 +703,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         idleMs: 0,
         lastDataAt: null,
         spawnedByArchitect: null,
-        areas: [],
+        area: 'Uncategorized',
       });
     }
   }
@@ -758,7 +761,7 @@ export function deriveBacklog(
         url: issue.url,
         type,
         priority,
-        areas: parseAreaLabels(issue.labels),
+        area: parseArea(issue.labels),
         hasSpec: !!specFile,
         hasPlan: !!planFile,
         hasReview: !!reviewFile,
@@ -881,18 +884,18 @@ export class OverviewCache {
     } else {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
 
-      // Enrich builder titles + areas from the cached issue list.
+      // Enrich builder titles + area from the cached issue list.
       // (status.yaml stores a slug, not the human-readable title; and
-      // discoverBuilders has no access to the issue payload, so areas
-      // start as [] and get filled here.)
+      // discoverBuilders has no access to the issue payload, so area
+      // starts as 'Uncategorized' and gets filled here.)
       const issueTitleMap = new Map(issues.map(i => [String(i.number), i.title]));
-      const issueAreasMap = new Map(issues.map(i => [String(i.number), parseAreaLabels(i.labels)]));
+      const issueAreaMap = new Map(issues.map(i => [String(i.number), parseArea(i.labels)]));
       for (const b of builders) {
         if (b.issueId === null) continue;
         const title = issueTitleMap.get(b.issueId);
         if (title) b.issueTitle = title;
-        const areas = issueAreasMap.get(b.issueId);
-        if (areas) b.areas = areas;
+        const area = issueAreaMap.get(b.issueId);
+        if (area) b.area = area;
       }
     }
 
