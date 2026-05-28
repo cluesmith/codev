@@ -13,3 +13,26 @@ Key design positions worth flagging to anyone who looks in:
 - Known risk flagged for dev-approval: VSCode has no public `WebviewView.hide()` API, so the 🔍-toggle-collapse half is a slightly awkward focus-shift workaround. The dev-approval gate is the right place to feel out whether it's acceptable.
 
 Estimated scope: ~290 production LOC + ~210 test LOC (issue's 150+50 estimate was light — gap is the webview HTML scaffold + per-provider hide-empty-groups handling).
+
+## 2026-05-28 — plan revised; mode toggles dropped
+
+After plan-approval discussion, four decisions baked in:
+1. Include `labels[]` in filter scope → adds `labels: string[]` to OverviewBacklogItem/OverviewBuilder, threads through `packages/types` + `packages/codev`
+2. Mode toggles (Aa/ab/.*) dropped for v1 → plain case-insensitive substring only; SearchState is just `{query}`
+3. Toggle via conditional view rendering — `when: "codev.searchVisible"` context key + workspaceState persistence (mirrors the existing `codev.team` view pattern)
+4. `retainContextWhenHidden: true` (preserve query across pane clicks)
+
+Net scope drops to ~180 production LOC + ~140 test LOC + ~25 LOC wire-format. Closer to the issue's original estimate.
+
+## 2026-05-28 — implement phase complete, awaiting dev-approval
+
+All checks green:
+- `pnpm --filter codev-vscode package` clean (type check + lint + esbuild bundle)
+- `pnpm test:unit` 91 tests pass (4 new test files: search-state, search-view-html, backlog-search, builders-search)
+- `pnpm --filter @cluesmith/codev test` 3188 tests pass — confirms the wire-format change to overview.ts doesn't break server-side tests
+
+Two commits:
+- `5538edfa` — wire-format only (types + overview server)
+- `1ec09c76` — VSCode extension implementation (search-state, webview, provider wiring, package.json contributions, tests)
+
+**Known dev-approval risk:** the `codev.search` view is placed as the FIRST entry in `contributes.views.codev` (pushing Workspace below it). The issue mockup didn't show Workspace at all so it was ambiguous. If the reviewer prefers Search ABOVE Backlog specifically (rather than at the very top), it's a one-line config change to reorder. Calling this out so it doesn't get missed during the running-worktree check.
