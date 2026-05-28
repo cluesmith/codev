@@ -46,3 +46,27 @@ Coerced both sites with `Array.isArray(x) ? x : []` per the canonical pattern in
 Added two regression tests in each of `backlog-search.test.ts` and `builders-search.test.ts` (4 total) that delete/null the `labels` field on a fixture and assert `getChildren()` doesn't throw. Confirmed the tests FAIL without the guard (reproduced the exact "is not iterable" error via `git stash` of the fix) and PASS with it. 95 tests total now (was 91).
 
 **Lesson worth recording in review:** type contracts are not runtime guarantees across upgrade boundaries. The new `labels: string[]` is required in the type, but a VSCode extension built with the new type can be loaded against a Tower serving the old wire shape — the type system doesn't catch this. Defensive coercion at the consumer is the right call, matching the existing `Array.isArray(...) ? ...` pattern the project already uses for forge-variant label payloads.
+
+## 2026-05-28 — design revision: split into per-view independent searches (commit d6ceb8fb)
+
+Architect flagged that the single-shared-input shape is the wrong UX. Refactored to two independent inputs:
+- `codev.backlogSearch` (above Backlog) → filters only the Backlog
+- `codev.buildersSearch` (above Builders) → filters only the Builders
+- Each has its own SearchState, placeholder, and title-bar toggle command on its OWNING view
+
+Structural changes:
+- `CodevSearchViewProvider` parameterized (viewType, state, getCounts, placeholder), instantiated twice
+- `renderSearchHtml` takes a `placeholder` option (and HTML-escapes it)
+- Sidebar order rewritten in `contributes.views.codev`: Workspace, Search Backlog (collapsed), Backlog, Search Builders (collapsed), Builders, Pull Requests, Recently Closed, Team, Status — note Backlog now precedes Builders
+- Two search views have `"visibility": "collapsed"` so they don't crowd the sidebar; the 🔍 toggle on each owning view's title bar expands+focuses its corresponding input via `<viewType>.focus`
+- Dropped the `codev.searchVisible` context key + workspaceState plumbing — the visibility-collapsed contribution + focus-only toggle makes them unnecessary
+- "Hidden filter footgun" mitigated naturally: section headers always visible, TreeView's `(N of M)` suffix always shows active filter
+- `extension.ts`'s `updateSearchChrome` now updates BOTH search providers' summaries and BOTH TreeViews' banners independently
+
+Tests:
+- backlog-search.test.ts and builders-search.test.ts already used independent SearchState per provider — no changes needed
+- search-view-html.test.ts updated for the `{nonce, placeholder}` options bag + HTML-escape sanity test
+- search-state.test.ts unchanged (single-instance behavior unchanged)
+- 97 tests pass (was 95; +2 from HTML-escape and second-placeholder assertions)
+
+Labels iteration fix (527c8f59) is preserved — separate concern, still in the branch.
