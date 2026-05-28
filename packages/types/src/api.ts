@@ -181,6 +181,14 @@ export interface OverviewBuilder {
    */
   area: string;
   /**
+   * Full list of label names on this builder's issue (e.g. `['area/vscode',
+   * 'priority:high']`). Empty when the builder has no resolvable issue or
+   * the issue has no labels. Required-with-default — never `undefined`.
+   * Consumed by the sidebar search filter (#891) so users can match against
+   * the full label set, not just the resolved single `area`.
+   */
+  labels: string[];
+  /**
    * Canonical "PR is waiting on a human reviewer" signal (Issue #872). True the
    * moment porch transitions out of the CMAP-emitting state for the PR-creating
    * phase, for ALL bundled protocols. Computed from `pr_ready_for_human` in
@@ -218,6 +226,14 @@ export interface OverviewBacklogItem {
    * by the backlog grouping in #811 and the equivalent vscode view.
    */
   area: string;
+  /**
+   * Full list of label names on this issue (e.g. `['area/vscode',
+   * 'priority:high']`). Empty when the issue has no labels.
+   * Required-with-default — never `undefined`. Consumed by the sidebar
+   * search filter (#891) so users can match against the full label set,
+   * not just the resolved single `area`.
+   */
+  labels: string[];
   hasSpec: boolean;
   hasPlan: boolean;
   hasReview: boolean;

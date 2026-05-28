@@ -93,6 +93,14 @@ export interface BuilderOverview {
    */
   area: string;
   /**
+   * Full list of label names on this builder's issue. Empty when there's no
+   * resolvable issue or the issue has no labels. Populated by `getOverview`
+   * via the same issue-cache join that fills `area`. Consumed by the
+   * sidebar search filter (#891) so users can match against the full label
+   * set, not just the resolved single `area`.
+   */
+  labels: string[];
+  /**
    * Canonical "PR is waiting on a human reviewer" signal (Issue #872). True the
    * moment porch transitions out of the CMAP-emitting state for the PR-creating
    * phase, for ALL bundled protocols. Computed from `pr_ready_for_human` in
@@ -129,6 +137,12 @@ export interface BacklogItem {
    * equivalent vscode view.
    */
   area: string;
+  /**
+   * Full list of label names on this issue. Empty when the issue has no
+   * labels. Consumed by the sidebar search filter (#891) so users can
+   * match against the full label set, not just the resolved single `area`.
+   */
+  labels: string[];
   hasSpec: boolean;
   hasPlan: boolean;
   hasReview: boolean;
@@ -669,6 +683,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         lastDataAt: null,
         spawnedByArchitect: null,
         area: UNCATEGORIZED_AREA,
+        labels: [],
         prReady: false,
       });
       continue;
@@ -726,6 +741,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             lastDataAt: null,
             spawnedByArchitect: null,
             area: UNCATEGORIZED_AREA,
+            labels: [],
             prReady: derivePrReady(parsed),
           });
           found = true;
@@ -760,6 +776,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         lastDataAt: null,
         spawnedByArchitect: null,
         area: UNCATEGORIZED_AREA,
+        labels: [],
         prReady: false,
       });
     }
@@ -819,6 +836,7 @@ export function deriveBacklog(
         type,
         priority,
         area: parseArea(issue.labels),
+        labels: (issue.labels ?? []).map(l => l.name),
         hasSpec: !!specFile,
         hasPlan: !!planFile,
         hasReview: !!reviewFile,
@@ -947,12 +965,15 @@ export class OverviewCache {
       // starts as 'Uncategorized' and gets filled here.)
       const issueTitleMap = new Map(issues.map(i => [String(i.number), i.title]));
       const issueAreaMap = new Map(issues.map(i => [String(i.number), parseArea(i.labels)]));
+      const issueLabelsMap = new Map(issues.map(i => [String(i.number), (i.labels ?? []).map(l => l.name)]));
       for (const b of builders) {
         if (b.issueId === null) continue;
         const title = issueTitleMap.get(b.issueId);
         if (title) b.issueTitle = title;
         const area = issueAreaMap.get(b.issueId);
         if (area) b.area = area;
+        const labels = issueLabelsMap.get(b.issueId);
+        if (labels) b.labels = labels;
       }
     }
 
