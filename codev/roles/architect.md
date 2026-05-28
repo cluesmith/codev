@@ -260,7 +260,7 @@ Update status as projects progress:
 
 `area/*` is the **primary axis** for organizing GitHub Issues in this repo. When users ask to group, edit, audit, or bulk-move issues, treat `area/*` as the grouping dimension first — not `type:*` (we don't use them), not milestones, not assignees.
 
-**Live vocabulary** (run `gh label list --search area/` to confirm):
+**Labels**:
 
 | Label | Scope |
 |---|---|
@@ -288,6 +288,9 @@ Update status as projects progress:
 **Operational recipes:**
 
 ```bash
+# Confirm the current label vocabulary (use before any label op to catch drift)
+gh label list --search area/
+
 # Group: tally open issues by area
 gh issue list --state open --limit 500 --json number,title,labels --jq \
   'group_by([.labels[].name | select(startswith("area/"))]) | .[] | "\(.[0].labels[] | select(.name | startswith("area/")).name): \(length)"'
@@ -304,8 +307,6 @@ for n in $(gh issue list --state open --limit 500 --label area/old --json number
   gh issue edit "$n" --remove-label area/old --add-label area/new
 done
 ```
-
-When in doubt, run `gh label list --search area/` — it is the source of truth.
 
 ## Handling Blocked Builders
 

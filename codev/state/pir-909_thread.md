@@ -75,3 +75,34 @@ Why two layers: the forge concept set is read-mostly (`issue-view`, `issue-list`
 User confirmed: keep new section consistent with existing `gh` pattern. Localized forge-CLI awareness in one section would create inconsistency vs. neighboring sections (and the rest of the skeleton). Wholesale forge-agnostic skeleton refactor is a separate, much larger concern — file as a follow-up if/when wanted.
 
 No edits to the codebase. Recorded the pattern as memory ([feedback-skeleton-gh-direct]) so future sessions don't re-litigate.
+
+## 2026-05-28 — scope expansion: area-label restructure at dev-approval
+
+Reviewer audit during the dev-approval gate surfaced gaps the original plan missed. After discussion, scope expanded beyond what #909's "out of scope" section listed.
+
+**Label restructure (executed via gh CLI):**
+- Created: area/dashboard, area/web, area/release, area/scaffold, area/protocols
+- Relabeled 4 panel-tab issues (#812, #813, #814, #815) from area/panel → area/vscode (they're VSCode work, all titled "vscode: migrate ...")
+- Deleted: area/panel
+
+**Critical correction caught mid-flight:**
+`area/panel` does NOT cover the React dashboard package. The dashboard package (`packages/dashboard/`, `@cluesmith/codev-dashboard`) is served by Tower over HTTP and opened in a browser via "Open Tower dashboard in browser". `area/panel` covered VSCode bottom-panel-area UI work (issues #812-815). I had conflated the two earlier; user clarification + grep over `tower-routes.ts:1406` ("Serve React dashboard static files directly") disambiguated. The reviewer was about to authorize a rename that would've tagged VSCode UX issues with a dashboard-package label.
+
+**Doc edits:**
+- Updated 14-row area table in CLAUDE.md/AGENTS.md/codev/roles/architect.md
+- Removed `--assignee @me` policy line (user correction: "reporting an issue doesn't mean the user wants it to be assigned to him")
+- Removed synonym-alert paragraph and inline synonym alerts
+- Removed Kubernetes/Terraform parenthetical
+- Updated plan file with "Scope Expansion" section documenting the post-plan-approval changes
+- Memory file `feedback_assign_issues_to_user.md` updated to scope the self-assign rule to actual user-take-on intent
+- Memory file `reference_area_labels.md` updated to reflect the new 14-label set
+
+**Final label set (14):**
+docs, vscode, dashboard, consult, tower, cross-cutting, porch, protocols, config, terminal, scaffold, release, web, core.
+
+All verification checks still green:
+- diff CLAUDE.md AGENTS.md → empty
+- diff skeleton CLAUDE.md AGENTS.md → only the 4-line preamble
+- grep -rE "area/(...)" codev-skeleton/ → no leaks
+- grep "--assignee @me" across all 6 doc files → no hits
+- npm run build → ✓ (in progress: tests)
