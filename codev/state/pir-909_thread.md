@@ -40,3 +40,24 @@ Plan revision:
 - Added "Synonym alert" line + bolded "dashboard" in the `area/panel` scope hint.
 - Added `area/tower` "no separate area/agent-farm" callout to the table.
 - Added "Areas Not Currently Labeled" section listing release / scaffold as follow-up candidates, plus a "what's not missing" subsection for the user's specific terms.
+
+## 2026-05-28 — implement phase
+
+Plan approved (`plan-approval` gate). Applied the 6 edits per plan:
+
+- `CLAUDE.md` + `AGENTS.md` (root) — codev-specific `### Area Labels` subsection after `### Project Tracking`.
+- `codev/roles/architect.md` — codev-specific `## Working with Area Labels` after `## Project Tracking`.
+- `codev-skeleton/templates/CLAUDE.md` + `AGENTS.md` — framework-neutral `## Working with Project Labels` between `## Key Locations` and `## Quick Start`.
+- `codev-skeleton/roles/architect.md` — framework-neutral `## Working with Project Labels` after `## Project Tracking`.
+
+Mid-implementation tweak: discovered `gh issue list` defaults to 30 results, which silently truncated the group recipe (showed only 5 of 9 areas with open issues). Added `--limit 500` to all list-based recipes (group, audit, bulk-move) across all 6 files. Not in the original plan but a usability defect worth fixing before code lands. Documented here so the dev-approval reviewer knows why the recipes have `--limit 500`.
+
+All 4 verification checks pass:
+- `diff CLAUDE.md AGENTS.md` → empty (byte-identical)
+- `diff codev-skeleton/templates/{CLAUDE,AGENTS}.md` → only the 4-line preamble differs (intentional)
+- `grep -rE "area/(docs|vscode|panel|consult|tower|cross-cutting|porch|config|terminal|core)" codev-skeleton/` → no output (no vocab leak)
+- `npm run build` → green (✓ built in 1.43s)
+- Group/audit recipes smoke-tested against the live repo — produce sensible output
+- `npm test` running in background; will report on completion
+
+Worktree had no `node_modules` (no postSpawn hook configured), so I ran `pnpm install` once before the build/test cycle. Recorded so a future spawn doesn't repeat the dead-end.
