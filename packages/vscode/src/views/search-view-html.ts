@@ -47,8 +47,11 @@ export function renderSearchHtml(webview: vscode.Webview, opts: SearchHtmlOption
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <title>Codev Search</title>
   <style>
+    /* Option i goal: webview reads as a near-headerless input strip
+       directly above the Backlog TreeView. Minimal padding so the input
+       hugs the section divider above and the Backlog header below. */
     body {
-      padding: 4px 8px 8px;
+      padding: 2px 8px 4px;
       margin: 0;
       color: var(--vscode-foreground);
       font-family: var(--vscode-font-family);
@@ -57,7 +60,7 @@ export function renderSearchHtml(webview: vscode.Webview, opts: SearchHtmlOption
     #q {
       width: 100%;
       box-sizing: border-box;
-      padding: 4px 6px;
+      padding: 3px 6px;
       background: var(--vscode-input-background);
       color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, transparent));
@@ -72,11 +75,17 @@ export function renderSearchHtml(webview: vscode.Webview, opts: SearchHtmlOption
     #q:focus {
       border-color: var(--vscode-focusBorder);
     }
+    /* Summary only takes vertical space when it has text. min-height:0
+       means an empty summary collapses to a single newline gap; on
+       active filter it expands to its content line. */
     #summary {
-      margin-top: 4px;
-      min-height: 1.2em;
+      margin-top: 3px;
+      min-height: 0;
       color: var(--vscode-descriptionForeground);
       font-size: calc(var(--vscode-font-size) - 1px);
+    }
+    #summary:empty {
+      display: none;
     }
   </style>
 </head>

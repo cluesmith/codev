@@ -161,21 +161,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	let pullRequestsView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let backlogView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let recentlyClosedView: vscode.TreeView<vscode.TreeItem> | undefined;
-	// Forward-declared so `updateListViewTitles` can pick up per-view
-	// filter state via closure. Assigned below once the providers are
-	// constructed; `updateListViewTitles` is only called from event
+	// Forward-declared so `updateListViewTitles` can pick up the Backlog
+	// search's filter state via closure. Assigned below once the providers
+	// are constructed; `updateListViewTitles` is only called from event
 	// handlers that fire after activation completes, so the lazy reads
-	// are always populated when they run. Two independent SearchStates —
-	// the Backlog and Builders searches don't share text or affect each
-	// other (#891 design revision: per-view inputs, not a shared one).
+	// are always populated when they run. Builders has no search of its
+	// own — the cost of webview-replacing Builders (loses the per-builder
+	// changed-files tree, SCM decorations, context menus, accordion) isn't
+	// justified by the benefit (users typically have <10 active builders).
 	let backlogSearchState: SearchState | undefined;
-	let buildersSearchState: SearchState | undefined;
 	let backlogProvider: BacklogProvider | undefined;
-	let buildersProvider: BuildersProvider | undefined;
 	const updateListViewTitles = () => {
 		const data = overviewCache.getData();
 		const backlogActive = (backlogSearchState?.query.trim() ?? '') !== '';
-		const buildersActive = (buildersSearchState?.query.trim() ?? '') !== '';
 		const withCount = (base: string, n: number | undefined) =>
 			typeof n === 'number' ? `${base} (${n})` : base;
 		const withFilteredCount = (
@@ -188,7 +186,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				? `${base} (${counts.shown} of ${counts.total})`
 				: `${base} (${counts.total})`;
 		};
-		if (buildersView) { buildersView.title = withFilteredCount('Builders', buildersProvider?.getCounts(), buildersActive); }
+		if (buildersView) { buildersView.title = withCount('Builders', data?.builders.length); }
 		if (pullRequestsView) { pullRequestsView.title = withCount('Pull Requests', data?.pendingPRs.length); }
 		if (backlogView) { backlogView.title = withFilteredCount('Backlog', backlogProvider?.getCounts(), backlogActive); }
 		if (recentlyClosedView) { recentlyClosedView.title = withCount('Recently Closed', data?.recentlyClosed.length); }
@@ -270,21 +268,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerFileDecorationProvider(new BuilderFileDecorationProvider(builderDiffCache)),
 	);
 
-	// Per-view filter state (#891). One SearchState per TreeView — the
-	// Backlog and Builders searches don't share text or affect each
-	// other. Query is transient (cleared on workspace reload).
+	// Backlog filter state (#891). Single SearchState — there is no
+	// Builders search; users typically have <10 active builders and the
+	// cost of webview-replacing Builders isn't justified.
 	backlogSearchState = new SearchState();
-	buildersSearchState = new SearchState();
 	const backlogSearchRef = backlogSearchState;
-	const buildersSearchRef = buildersSearchState;
-	context.subscriptions.push(
-		{ dispose: () => backlogSearchRef.dispose() },
-		{ dispose: () => buildersSearchRef.dispose() },
-	);
+	context.subscriptions.push({ dispose: () => backlogSearchRef.dispose() });
 
 	// List views use createTreeView so their title can carry a live item
 	// count; the rest stay on registerTreeDataProvider.
-	buildersProvider = new BuildersProvider(overviewCache, builderDiffCache, context.workspaceState, buildersSearchState);
+	const buildersProvider = new BuildersProvider(overviewCache, builderDiffCache, context.workspaceState);
 	buildersView = vscode.window.createTreeView('codev.builders', { treeDataProvider: buildersProvider });
 	context.subscriptions.push(...persistAreaGroupExpansion(
 		buildersView, BuilderGroupTreeItem, buildersProvider.expansion,
@@ -297,22 +290,20 @@ export async function activate(context: vscode.ExtensionContext) {
 	));
 	recentlyClosedView = vscode.window.createTreeView('codev.recentlyClosed', { treeDataProvider: new RecentlyClosedProvider(overviewCache) });
 
-	// Local non-undefined refs for the closures below. The let-vars are
+	// Local non-undefined ref for the closures below. The let-var is
 	// forward-declared as possibly-undefined to satisfy
 	// `updateListViewTitles`'s lazy reads (the function is created
-	// before the providers are constructed), but every closure below
+	// before the provider is constructed), but every closure below
 	// runs strictly after assignment — so capturing a narrowed ref
 	// keeps the type-checker happy without `!` non-null assertions.
 	const backlogProviderRef = backlogProvider;
-	const buildersProviderRef = buildersProvider;
 
-	// Two independent search webview providers (#891). Each sits
-	// directly above its owning TreeView in the sidebar (declared in
-	// package.json's contributes.views.codev order) with
-	// `"visibility": "collapsed"` so the section starts collapsed
-	// — the matching toggle command on the owning view's title bar
-	// expands+focuses the input via `<viewType>.focus`.
-	// retainContextWhenHidden so the typed query survives the
+	// Backlog search webview (#891 / Option i). Contributed directly
+	// above the Backlog TreeView with `name: " "` and
+	// `"visibility": "visible"` so it renders as a near-headerless input
+	// strip — visually merged with the Backlog section beneath. The
+	// title-bar 🔍 button on the Backlog header focuses this view's
+	// input. retainContextWhenHidden so the typed query survives the
 	// section being collapsed and re-expanded.
 	const backlogSearchProvider = new CodevSearchViewProvider({
 		viewType: CodevSearchViewProvider.BACKLOG_VIEW_TYPE,
@@ -320,49 +311,30 @@ export async function activate(context: vscode.ExtensionContext) {
 		getCounts: () => backlogProviderRef.getCounts(),
 		placeholder: 'Search backlog...',
 	});
-	const buildersSearchProvider = new CodevSearchViewProvider({
-		viewType: CodevSearchViewProvider.BUILDERS_VIEW_TYPE,
-		searchState: buildersSearchState,
-		getCounts: () => buildersProviderRef.getCounts(),
-		placeholder: 'Search builders...',
-	});
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			CodevSearchViewProvider.BACKLOG_VIEW_TYPE,
 			backlogSearchProvider,
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
-		vscode.window.registerWebviewViewProvider(
-			CodevSearchViewProvider.BUILDERS_VIEW_TYPE,
-			buildersSearchProvider,
-			{ webviewOptions: { retainContextWhenHidden: true } },
-		),
 	);
 
-	// Per-view filter chrome: the `(N of M)` title suffix, `.message`
-	// no-match banner, and webview summary push. Assigned into the
-	// forward-declared let-var so the overview-cache subscription above
-	// drives it too — single subscription per event source.
+	// Filter chrome: the `(N of M)` title suffix on Backlog, the
+	// `.message` no-match banner, and the webview summary push.
+	// Assigned into the forward-declared let-var so the overview-cache
+	// subscription above drives it too — single subscription per event
+	// source.
 	updateSearchChrome = (): void => {
 		const noMatchMsg = 'No matches. Clear the filter to see all items.';
 		const backlogActive = backlogSearchRef.query.trim() !== '';
-		const buildersActive = buildersSearchRef.query.trim() !== '';
 		if (backlogView) {
 			const c = backlogProviderRef.getCounts();
 			backlogView.message = backlogActive && c.shown === 0 ? noMatchMsg : undefined;
 		}
-		if (buildersView) {
-			const c = buildersProviderRef.getCounts();
-			buildersView.message = buildersActive && c.shown === 0 ? noMatchMsg : undefined;
-		}
 		updateListViewTitles();
 		backlogSearchProvider.pushSummary();
-		buildersSearchProvider.pushSummary();
 	};
-	context.subscriptions.push(
-		backlogSearchRef.onDidChange(updateSearchChrome),
-		buildersSearchRef.onDidChange(updateSearchChrome),
-	);
+	context.subscriptions.push(backlogSearchRef.onDidChange(updateSearchChrome));
 	// Seed the badge so it's correct immediately if overview data is already
 	// cached, instead of waiting for the next onDidChange tick.
 	updateActivityBadge();
@@ -722,18 +694,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
 		vscode.commands.registerCommand('codev.addReviewComment', () => addReviewComment()),
 		vscode.commands.registerCommand('codev.toggleBacklogSearch', async () => {
-			// #891: focus the Backlog search input (which expands the
-			// section if collapsed). The search view is contributed
-			// unconditionally with `"visibility": "collapsed"`, so there's
-			// no hide-entirely affordance — users collapse via the
-			// section chevron in the usual VSCode way. The `(N of M)`
-			// suffix on the Backlog title surfaces any active filter
-			// even when the section is collapsed, so no footgun.
+			// #891 / Option i: focus the Backlog search input. The view
+			// is contributed with `"visibility": "visible"` so it's
+			// always expanded — `.focus` just moves the caret into the
+			// input. The Backlog title-bar 🔍 button uses this as a
+			// keyboard-friendly entry point.
 			await vscode.commands.executeCommand(`${CodevSearchViewProvider.BACKLOG_VIEW_TYPE}.focus`);
-		}),
-		vscode.commands.registerCommand('codev.toggleBuildersSearch', async () => {
-			// #891: symmetric with codev.toggleBacklogSearch.
-			await vscode.commands.executeCommand(`${CodevSearchViewProvider.BUILDERS_VIEW_TYPE}.focus`);
 		}),
 	);
 

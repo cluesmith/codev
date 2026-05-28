@@ -47,9 +47,8 @@ export interface SearchViewOptions {
  * clause, no context key — the section is always contributed.
  */
 export class CodevSearchViewProvider implements vscode.WebviewViewProvider {
-  /** Convenience constants so the two view ids live in one place. */
+  /** Convenience constant so the view id lives in one place. */
   static readonly BACKLOG_VIEW_TYPE = 'codev.backlogSearch';
-  static readonly BUILDERS_VIEW_TYPE = 'codev.buildersSearch';
 
   readonly viewType: string;
   private readonly searchState: SearchState;

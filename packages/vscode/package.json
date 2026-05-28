@@ -223,11 +223,6 @@
         "command": "codev.toggleBacklogSearch",
         "title": "Codev: Search Backlog",
         "icon": "$(search)"
-      },
-      {
-        "command": "codev.toggleBuildersSearch",
-        "title": "Codev: Search Builders",
-        "icon": "$(search)"
       }
     ],
     "menus": {
@@ -424,11 +419,6 @@
           "command": "codev.toggleBacklogSearch",
           "when": "view == codev.backlog",
           "group": "navigation"
-        },
-        {
-          "command": "codev.toggleBuildersSearch",
-          "when": "view == codev.builders",
-          "group": "navigation"
         }
       ],
       "comments/commentThread/context": [
@@ -509,9 +499,8 @@
     "views": {
       "codev": [
         { "id": "codev.workspace", "name": "Workspace" },
-        { "id": "codev.backlogSearch", "name": "Search Backlog", "type": "webview", "visibility": "collapsed" },
+        { "id": "codev.backlogSearch", "name": " ", "type": "webview", "visibility": "visible" },
         { "id": "codev.backlog", "name": "Backlog" },
-        { "id": "codev.buildersSearch", "name": "Search Builders", "type": "webview", "visibility": "collapsed" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },
         { "id": "codev.recentlyClosed", "name": "Recently Closed" },
