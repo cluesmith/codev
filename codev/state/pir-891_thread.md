@@ -36,3 +36,13 @@ Two commits:
 - `1ec09c76` — VSCode extension implementation (search-state, webview, provider wiring, package.json contributions, tests)
 
 **Known dev-approval risk:** the `codev.search` view is placed as the FIRST entry in `contributes.views.codev` (pushing Workspace below it). The issue mockup didn't show Workspace at all so it was ambiguous. If the reviewer prefers Search ABOVE Backlog specifically (rather than at the very top), it's a one-line config change to reorder. Calling this out so it doesn't get missed during the running-worktree check.
+
+## 2026-05-28 — dev-approval regression fix (commit 527c8f59)
+
+Architect reported `e.labels is not iterable` crash blocking Backlog and Builders tree render. Confirmed and fixed: unguarded `...item.labels` / `...b.labels` in `backlog.ts:itemMatches` / `builders.ts:builderMatches` crashed when wire payload omitted the new field (stale Tower not rebuilt with the matching overview.ts).
+
+Coerced both sites with `Array.isArray(x) ? x : []` per the canonical pattern in `packages/codev/src/lib/github.ts:480,529` (`parseLabelDefaults` / `parseArea`). Also tightened `assignees` from `?? []` to `Array.isArray(...) ? ... : []` for consistency — previously guarded against undefined but not against non-array shapes.
+
+Added two regression tests in each of `backlog-search.test.ts` and `builders-search.test.ts` (4 total) that delete/null the `labels` field on a fixture and assert `getChildren()` doesn't throw. Confirmed the tests FAIL without the guard (reproduced the exact "is not iterable" error via `git stash` of the fix) and PASS with it. 95 tests total now (was 91).
+
+**Lesson worth recording in review:** type contracts are not runtime guarantees across upgrade boundaries. The new `labels: string[]` is required in the type, but a VSCode extension built with the new type can be loaded against a Tower serving the old wire shape — the type system doesn't catch this. Defensive coercion at the consumer is the right call, matching the existing `Array.isArray(...) ? ...` pattern the project already uses for forge-variant label payloads.
