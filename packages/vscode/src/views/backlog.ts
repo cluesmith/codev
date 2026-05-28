@@ -116,13 +116,18 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
   }
 
   private itemMatches(item: OverviewBacklogItem): boolean {
+    // `labels` and `assignees` come over the wire — coerce non-arrays
+    // to `[]` defensively so a stale Tower (one that pre-dates this
+    // PR's wire-format change to OverviewBacklogItem) can't crash
+    // `getChildren()` with "e.labels is not iterable". Same pattern
+    // `parseLabelDefaults` / `parseArea` use in lib/github.ts.
     return this.searchState.matches([
       item.id,
       item.title,
       item.area,
       formatAreaForDisplay(item.area),
-      ...item.labels,
-      ...(item.assignees ?? []),
+      ...(Array.isArray(item.labels) ? item.labels : []),
+      ...(Array.isArray(item.assignees) ? item.assignees : []),
       item.author,
     ]);
   }

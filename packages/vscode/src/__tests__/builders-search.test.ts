@@ -178,4 +178,35 @@ describe('BuildersProvider × SearchState', () => {
       expect(provider.getCounts()).toEqual({ total: 3, shown: 0 });
     });
   });
+
+  describe('wire-mismatch defensiveness', () => {
+    // Regression: a stale Tower built before this PR's wire-format change
+    // serves OverviewBuilder objects without `labels`. The type says
+    // `labels: string[]` is required, but trusting that at the consumer
+    // crashed `getChildren` with "e.labels is not iterable" in production
+    // (architect-reported, dev-approval). Guard with Array.isArray.
+    it('does not crash when a builder is missing the labels field entirely', async () => {
+      const b = builder({ id: 'builder-pir-999', issueId: '999', issueTitle: 'No labels' });
+       
+      delete (b as any).labels;
+      cache = makeCache([b]);
+       
+      provider = new BuildersProvider(cache as any, fakeDiffCache as any, makeWorkspaceState() as any, state);
+      state.setQuery('No');
+      await expect(provider.getChildren()).resolves.not.toThrow();
+      expect(provider.getCounts()).toEqual({ total: 1, shown: 1 });
+    });
+
+    it('does not crash when labels is null', async () => {
+      const b = builder({ id: 'builder-pir-999', issueId: '999', issueTitle: 'Null labels' });
+       
+      (b as any).labels = null;
+      cache = makeCache([b]);
+       
+      provider = new BuildersProvider(cache as any, fakeDiffCache as any, makeWorkspaceState() as any, state);
+      state.setQuery('Null');
+      await expect(provider.getChildren()).resolves.not.toThrow();
+      expect(provider.getCounts()).toEqual({ total: 1, shown: 1 });
+    });
+  });
 });

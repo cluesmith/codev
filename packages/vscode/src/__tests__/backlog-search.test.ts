@@ -199,4 +199,36 @@ describe('BacklogProvider × SearchState', () => {
       expect(provider.getCounts()).toEqual({ total: 4, shown: 0 });
     });
   });
+
+  describe('wire-mismatch defensiveness', () => {
+    // Regression: a stale Tower built before this PR's wire-format change
+    // serves OverviewBacklogItem objects without `labels`. The type says
+    // `labels: string[]` is required, but trusting that at the consumer
+    // crashed `getChildren` with "e.labels is not iterable" in production
+    // (architect-reported, dev-approval). Guard with Array.isArray.
+    it('does not crash when an item is missing the labels field entirely', () => {
+      const item = backlogItem({ id: '999', title: 'No labels' });
+      // Simulate stale wire payload: delete the field rather than set to [].
+       
+      delete (item as any).labels;
+      cache = makeCache([item]);
+       
+      provider = new BacklogProvider(cache as any, makeWorkspaceState() as any, state);
+      state.setQuery('No');
+      expect(() => provider.getChildren()).not.toThrow();
+      expect(provider.getCounts()).toEqual({ total: 1, shown: 1 });
+    });
+
+    it('does not crash when labels is null', () => {
+      const item = backlogItem({ id: '999', title: 'Null labels' });
+       
+      (item as any).labels = null;
+      cache = makeCache([item]);
+       
+      provider = new BacklogProvider(cache as any, makeWorkspaceState() as any, state);
+      state.setQuery('Null');
+      expect(() => provider.getChildren()).not.toThrow();
+      expect(provider.getCounts()).toEqual({ total: 1, shown: 1 });
+    });
+  });
 });

@@ -176,12 +176,17 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
   }
 
   private builderMatches(b: OverviewBuilder): boolean {
+    // `labels` comes over the wire — coerce non-arrays to `[]` defensively
+    // so a stale Tower (one that pre-dates this PR's wire-format change to
+    // OverviewBuilder) can't crash `getChildren()` with "e.labels is not
+    // iterable". Same pattern `parseLabelDefaults` / `parseArea` use in
+    // lib/github.ts.
     return this.searchState.matches([
       b.issueId,
       b.issueTitle,
       b.area,
       formatAreaForDisplay(b.area),
-      ...b.labels,
+      ...(Array.isArray(b.labels) ? b.labels : []),
       b.spawnedByArchitect,
     ]);
   }
