@@ -4,48 +4,73 @@ import { makeNonce, renderSearchHtml } from './search-view-html.js';
 
 /**
  * Counts shape returned by BacklogProvider / BuildersProvider so the
- * search webview can render `"N of M backlog · K of L builders"`. The
- * "shown" field always reflects the post-filter row count.
+ * search webview can render its `"N of M"` summary line. The `shown`
+ * field always reflects the post-filter row count.
  */
 export interface SearchCounts {
   total: number;
   shown: number;
 }
 
+export interface SearchViewOptions {
+  /** Webview view id — `codev.backlogSearch` or `codev.buildersSearch`. */
+  viewType: string;
+  /** State this view owns and writes into on input. */
+  searchState: SearchState;
+  /** Pull current `{total, shown}` from the owning TreeView's provider. */
+  getCounts: () => SearchCounts;
+  /** Input placeholder copy. E.g. `"Search backlog..."`. */
+  placeholder: string;
+}
+
 /**
- * WebviewViewProvider for the `codev.search` view (#891). Renders a
- * single text input + summary line at the top of the Codev sidebar.
+ * WebviewViewProvider for a per-view sidebar search input (#891).
  *
- * Wiring (set up by `extension.ts`):
+ * `extension.ts` instantiates this class twice — one for the Backlog,
+ * one for the Builders — each with its own `SearchState`, `getCounts`,
+ * and view id. The two are fully independent: typing in one input
+ * does not affect the other view's tree.
+ *
+ * Wiring (per instance):
  * - Webview → extension: `{type:'query', value}` from input keystrokes
  *   (debounced 150ms client-side) flow into `searchState.setQuery`.
  * - Extension → webview: `{type:'summary', text}` updates the summary
- *   line below the input. Pushed whenever EITHER provider's tree-data
- *   event fires (which happens when the query changes OR when fresh
- *   overview data arrives), so the summary always matches what the
- *   user sees in the trees.
+ *   line below the input. Pushed whenever the owning provider's
+ *   tree-data event fires (query change OR fresh overview data) so
+ *   the summary always matches what the user sees in the tree.
  *
- * The view is contributed with `when: "codev.searchVisible"` in
- * package.json — toggling that context key adds/removes the view
- * entirely. When the view is hidden the webview is disposed; on
- * re-show, `resolveWebviewView` is called again with a fresh webview
- * instance, which is why we don't try to cache `view` across hides.
+ * View visibility is governed by VSCode's standard collapse-section
+ * mechanism — the view contribution in package.json sets
+ * `"visibility": "collapsed"` so each search section starts collapsed.
+ * The matching toggle command on the owning view's title bar focuses
+ * this view's input (which also expands the section). No `when:`
+ * clause, no context key — the section is always contributed.
  */
 export class CodevSearchViewProvider implements vscode.WebviewViewProvider {
-  static readonly viewType = 'codev.search';
+  /** Convenience constants so the two view ids live in one place. */
+  static readonly BACKLOG_VIEW_TYPE = 'codev.backlogSearch';
+  static readonly BUILDERS_VIEW_TYPE = 'codev.buildersSearch';
 
+  readonly viewType: string;
+  private readonly searchState: SearchState;
+  private readonly getCounts: () => SearchCounts;
+  private readonly placeholder: string;
   private view: vscode.WebviewView | undefined;
 
-  constructor(
-    private readonly searchState: SearchState,
-    private readonly getBacklogCounts: () => SearchCounts,
-    private readonly getBuildersCounts: () => SearchCounts,
-  ) {}
+  constructor(opts: SearchViewOptions) {
+    this.viewType = opts.viewType;
+    this.searchState = opts.searchState;
+    this.getCounts = opts.getCounts;
+    this.placeholder = opts.placeholder;
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = renderSearchHtml(webviewView.webview, makeNonce());
+    webviewView.webview.html = renderSearchHtml(webviewView.webview, {
+      nonce: makeNonce(),
+      placeholder: this.placeholder,
+    });
 
     webviewView.webview.onDidReceiveMessage((msg: unknown) => {
       if (!msg || typeof msg !== 'object') {return;}
@@ -65,7 +90,7 @@ export class CodevSearchViewProvider implements vscode.WebviewViewProvider {
   /**
    * Push the current summary text into the webview. Safe to call when
    * the view isn't resolved — it just no-ops. Called by `extension.ts`
-   * whenever either provider's onDidChangeTreeData fires.
+   * whenever the owning provider's onDidChangeTreeData fires.
    */
   pushSummary(): void {
     if (!this.view) {return;}
@@ -74,8 +99,7 @@ export class CodevSearchViewProvider implements vscode.WebviewViewProvider {
 
   private summaryText(): string {
     if (this.searchState.query.trim() === '') {return '';}
-    const b = this.getBacklogCounts();
-    const w = this.getBuildersCounts();
-    return `${b.shown} of ${b.total} backlog · ${w.shown} of ${w.total} builders`;
+    const c = this.getCounts();
+    return `${c.shown} of ${c.total}`;
   }
 }

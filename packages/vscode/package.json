@@ -220,8 +220,13 @@
         "icon": "$(trash)"
       },
       {
-        "command": "codev.toggleSearchView",
-        "title": "Codev: Toggle Search",
+        "command": "codev.toggleBacklogSearch",
+        "title": "Codev: Search Backlog",
+        "icon": "$(search)"
+      },
+      {
+        "command": "codev.toggleBuildersSearch",
+        "title": "Codev: Search Builders",
         "icon": "$(search)"
       }
     ],
@@ -416,12 +421,12 @@
           "group": "navigation"
         },
         {
-          "command": "codev.toggleSearchView",
+          "command": "codev.toggleBacklogSearch",
           "when": "view == codev.backlog",
           "group": "navigation"
         },
         {
-          "command": "codev.toggleSearchView",
+          "command": "codev.toggleBuildersSearch",
           "when": "view == codev.builders",
           "group": "navigation"
         }
@@ -503,11 +508,12 @@
     },
     "views": {
       "codev": [
-        { "id": "codev.search", "name": "Search", "type": "webview", "when": "codev.searchVisible" },
         { "id": "codev.workspace", "name": "Workspace" },
+        { "id": "codev.backlogSearch", "name": "Search Backlog", "type": "webview", "visibility": "collapsed" },
+        { "id": "codev.backlog", "name": "Backlog" },
+        { "id": "codev.buildersSearch", "name": "Search Builders", "type": "webview", "visibility": "collapsed" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },
-        { "id": "codev.backlog", "name": "Backlog" },
         { "id": "codev.recentlyClosed", "name": "Recently Closed" },
         { "id": "codev.team", "name": "Team", "when": "codev.teamEnabled" },
         { "id": "codev.status", "name": "Status" }

@@ -7,11 +7,18 @@ import type * as vscode from 'vscode';
  */
 export const SEARCH_DEBOUNCE_MS = 150;
 
+export interface SearchHtmlOptions {
+  /** Per-instance nonce so the CSP can disable inline scripts globally. */
+  nonce: string;
+  /** Placeholder copy inside the input. E.g. `"Search backlog..."`. */
+  placeholder: string;
+}
+
 /**
- * Render the HTML document for the sidebar Search webview (#891).
+ * Render the HTML document for an embedded sidebar search webview (#891).
  *
- * Pure function — takes the `Webview` (for `cspSource`) and a per-instance
- * nonce, returns the full document string. Kept separate from
+ * Pure function — takes the `Webview` (for `cspSource`) and an options
+ * bag, returns the full document string. Kept separate from
  * `search-view.ts` so unit tests can assert the rendered shape (CSP,
  * theme variables, debounce constant, message handlers) without
  * mocking the entire `vscode` namespace.
@@ -20,8 +27,13 @@ export const SEARCH_DEBOUNCE_MS = 150;
  * nonce + `--vscode-input-*` theme-variable scaffold here is intended
  * to be the template later webviews (#807 Reader View, #861-#863
  * preview-pane enhancements) copy from.
+ *
+ * One renderer covers both the backlog and builders search views (#891
+ * landed two independent per-view inputs, not a shared one) — only the
+ * placeholder copy differs, which `placeholder` parameterizes.
  */
-export function renderSearchHtml(webview: vscode.Webview, nonce: string): string {
+export function renderSearchHtml(webview: vscode.Webview, opts: SearchHtmlOptions): string {
+  const { nonce, placeholder } = opts;
   const csp = [
     `default-src 'none'`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
@@ -69,7 +81,7 @@ export function renderSearchHtml(webview: vscode.Webview, nonce: string): string
   </style>
 </head>
 <body>
-  <input id="q" type="text" placeholder="Search backlog and builders..." autocomplete="off" spellcheck="false" />
+  <input id="q" type="text" placeholder="${escapeHtml(placeholder)}" autocomplete="off" spellcheck="false" />
   <div id="summary"></div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -106,4 +118,13 @@ export function makeNonce(): string {
     out += chars[Math.floor(Math.random() * chars.length)];
   }
   return out;
+}
+
+/** Escape an attribute value (placeholder) to keep injection out of the HTML. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
