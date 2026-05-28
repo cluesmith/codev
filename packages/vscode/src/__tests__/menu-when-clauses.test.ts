@@ -95,3 +95,31 @@ describe('view/item/context when-clause visibility for view{Spec,Plan,Review}Fil
     }
   });
 });
+
+/**
+ * commandPalette hiding for the three artifact commands.
+ *
+ * All three need a tree-item argument (a builder id) to do anything
+ * useful — invoking them from the global Cmd+Shift+P palette without
+ * that argument falls through to the missing-builder picker / toast.
+ * To match every other builder-row command (`openBuilderById`,
+ * `openBuilderRow`, `viewBacklogIssue`, `openBuilderFileDiff`, etc.)
+ * we register them in `contributes.menus.commandPalette` with
+ * `when: "false"` so they never surface in the palette UI.
+ *
+ * This test pins that decision: drift would silently restore the
+ * palette entries (a UX regression — palette-invoking them does the
+ * wrong thing).
+ */
+describe('commandPalette hiding for view{Spec,Plan,Review}File', () => {
+  const paletteEntries: Array<{ command: string; when?: string }> =
+    PKG.contributes.menus.commandPalette;
+
+  for (const cmd of ['codev.viewSpecFile', 'codev.viewPlanFile', 'codev.viewReviewFile']) {
+    it(`${cmd} is hidden from the command palette (when: false)`, () => {
+      const entry = paletteEntries.find(e => e.command === cmd);
+      expect(entry, `commandPalette entry for ${cmd}`).toBeDefined();
+      expect(entry!.when, `${cmd} when-clause`).toBe('false');
+    });
+  }
+});

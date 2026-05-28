@@ -263,6 +263,18 @@
           "when": "false"
         },
         {
+          "command": "codev.viewSpecFile",
+          "when": "false"
+        },
+        {
+          "command": "codev.viewPlanFile",
+          "when": "false"
+        },
+        {
+          "command": "codev.viewReviewFile",
+          "when": "false"
+        },
+        {
           "command": "codev.addReviewComment",
           "when": "editorLangId == 'markdown'"
         },

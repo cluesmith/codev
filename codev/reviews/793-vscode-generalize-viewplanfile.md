@@ -1,77 +1,77 @@
----
-issue: 793
-protocol: pir
----
+# PIR Review: vscode — generalize viewPlanFile to viewSpecFile + viewReviewFile
 
-# Review: vscode generalize viewPlanFile to viewSpecFile + viewReviewFile
+Fixes #793
 
 ## Summary
 
-Generalised the existing `codev.viewPlanFile` command (previously PIR-only) into a sibling trio (`viewSpecFile` / `viewPlanFile` / `viewReviewFile`) with protocol-aware right-click menu visibility on the Builders tree. The dispatcher in `view-artifact.ts` was already kind-generic — most of the change is declarative (`ArtifactKind` widened, two thin wrappers, two new command registrations, three `view/item/context` `when` clauses). The one piece of real new logic is a `-review` suffix on the row's `contextValue` driven by a `readdirSync` against `<worktree>/codev/reviews/`, which the `viewReviewFile` `when` clause keys off to hide the entry on PIR rows until the review phase produces the file. Unblocks downstream issue #792.
+Generalised the existing `codev.viewPlanFile` command (previously PIR-only) into a sibling trio (`viewSpecFile` / `viewPlanFile` / `viewReviewFile`) with protocol-aware right-click menu visibility on the Builders tree. The dispatcher in `view-artifact.ts` was already kind-generic, so most of the change is declarative; the only piece of real new logic is a `-review` suffix on the row's `contextValue` driven by `readdirSync` against `<worktree>/codev/reviews/`, which the `viewReviewFile` `when`-clause keys off to hide the menu entry on PIR rows until a review file is committed. Unblocks downstream issue #792.
 
-## Spec Compliance (against issue #793)
+## Files Changed
 
-- [x] `ArtifactKind` widened to `'plan' | 'spec' | 'review'`
-- [x] `codev.viewSpecFile` and `codev.viewReviewFile` registered alongside the existing `viewPlanFile`
-- [x] `view/item/context` `when` clauses encode the visibility table from the issue (SPIR/ASPIR: all three; AIR: review only; PIR: plan always, review only when on-disk file exists; BUGFIX/TICK: none)
-- [x] `contextValue` extended with a `-review` suffix when the builder has a committed review file
-- [x] Stale "View Review File was intentionally not added" comment at the top of `view-artifact.ts` removed
-- [x] No PR-URL fallback for PIR — the issue explicitly rejected that approach
+`git diff --stat $(git merge-base main HEAD)`:
 
-## Key Metrics
+- `codev/plans/793-vscode-generalize-viewplanfile.md` (+168 / -0, new)
+- `codev/reviews/793-vscode-generalize-viewplanfile.md` (+ this file)
+- `packages/vscode/package.json` (+34 / -3) — two command declarations, three `view/item/context` entries, three `commandPalette: when: false` entries
+- `packages/vscode/src/__tests__/menu-when-clauses.test.ts` (+125 / -0, new) — visibility matrix + commandPalette-hiding tests
+- `packages/vscode/src/commands/view-artifact.ts` (+18 / -14) — widened `ArtifactKind`, added `viewSpecFile` / `viewReviewFile` wrappers, rewrote docblock
+- `packages/vscode/src/extension.ts` (+5 / -1) — registered the two new commands
+- `packages/vscode/src/views/builders.ts` (+50 / -7) — `-review` suffix wiring, `builderHasReviewFile` helper
 
-- **Commits**: 3 implementation commits on `builder/pir-793` (plan draft, generalise dispatcher, encode `contextValue` + tests, plus a follow-up ternary refactor)
-- **Tests**: 75/75 vitest in `packages/vscode/` passing, including **38 new** menu-when-clauses matrix cases (protocol × family × has-review-file)
-- **Files changed**: 5 in `packages/vscode/`
-  - `package.json` (+22 / -3) — two new command declarations, three new menu entries replacing one
-  - `src/__tests__/menu-when-clauses.test.ts` (+97 new) — visibility-matrix unit test
-  - `src/commands/view-artifact.ts` (+18 / -14) — widened `ArtifactKind`, added two wrappers, rewrote docblock
-  - `src/extension.ts` (+5 / -1) — registered two new commands
-  - `src/views/builders.ts` (+50 / -7) — `-review` suffix wiring, `builderHasReviewFile` helper
-- **Net LOC impact**: +190 (most of which is the new test file)
+## Commits
 
-## Deviations from Plan
+`git log main..HEAD --oneline` (implementation commits — porch's chore commits omitted):
 
-- **Refactor in dev-approval**: nested ternary `isBlocked ? 'blocked-builder' : isIdle ? 'awaiting-builder' : 'builder'` flagged by reviewer, replaced with an `if`/`else if`/`else` chain plus an explicit 3-value union type annotation on `family`. Scope kept surgical — the two other nested ternaries in the same file (`phaseLabel`, `iconPath`) were left alone since they were pre-existing.
+- `af42f45c` [PIR #793] Plan draft
+- `7917ed0a` [PIR #793] Generalize viewPlanFile to viewSpecFile + viewReviewFile
+- `c67cc3b6` [PIR #793] Encode review-file presence in contextValue, gate PIR review menu
+- `39d2720a` [PIR #793] Replace nested ternary in family assignment with if/else chain
+- `cd76e38f` [PIR #793] Review file
+- (follow-up commit adding the `commandPalette` hiding + restructured review file — sha lands on push)
 
-## Consultation Iteration Summary
+## Test Results
 
-CMAP-2 at the PR is the only consultation round in PIR (a single advisory pass, `max_iterations: 1`). Filled in once `porch verify` returns.
-
-| Phase | Iters | Who Blocked | What They Caught |
-|-------|-------|-------------|------------------|
-| Review | 1 | — | TBD (filled in post-CMAP) |
-
-## Lessons Learned
-
-### What Went Well
-
-- **`view-artifact.ts` was already kind-generic.** The original Spec 786 / 791 implementation parameterised on `ArtifactKind` even though only `'plan'` was needed at the time. Widening it cost almost no code — most of the diff is declarative (`package.json` menu entries, command registrations, test matrix). The pattern of "build the generic shape even when only one variant is shipped" paid off cleanly here.
-- **Vitest matrix on `when` clauses** is high-leverage for VSCode contributes-based menus. The regex is the *only* gate on whether a row's right-click menu shows an entry; no compile-time or runtime error catches a drift between the three regexes. The 38-case matrix (protocol × family × has-review-file) pins all three regexes in sync as the source of truth for future protocol additions.
-
-### Challenges Encountered
-
-- **Per-row VSCode menu gating has only one signal**: `viewItem` (the row's `contextValue` string). VSCode's `when`-clause language has no access to per-row data beyond that. Encoding "this PIR row has a review file on disk" required reading the disk during tree-row construction and baking the answer into `contextValue` as a `-review` suffix, then encoding the optional suffix in the regex. `setContext` is global and can't express per-row state. The plan's chosen design (sync `readdirSync` per builder per render) is cheap enough given the reviews dir is small and local, and the tree already does heavier work on row expansion.
-- **23 pre-existing test failures in `packages/codev/`** (`adopt.test.ts`, `update.test.ts`, `consult.test.ts`, `session-manager.test.ts` real-shellper integration). None touch any file in this diff and none have failure traces through `packages/vscode/`. Surfaced once during local verification, confirmed out-of-scope, left alone per protocol guidance.
-
-### What Would Be Done Differently
-
-- Nothing material. The one minor friction — initial vitest run failed with `Cannot find module '@cluesmith/codev-core/...'` because deps weren't built — is a pre-existing local-setup gotcha (resolved by `pnpm --filter @cluesmith/codev-types --filter @cluesmith/codev-core build`), not something this PR introduces.
+- `pnpm check-types` (vscode package): ✓ pass
+- `pnpm test:unit` (vscode vitest suite): ✓ pass — **78 / 78**, of which 41 are new (38 visibility-matrix cases + 3 commandPalette-hiding cases)
+- `pnpm build` (vscode package, during porch's implement-phase check): ✓ pass
+- **Manual verification at `dev-approval`**: reviewer exercised the worktree's VSCode extension via the architect's gate-approval flow. Approval was followed by a one-line refactor request (nested-ternary → `if`/`else if`/`else`) which was addressed in `39d2720a` and re-validated by `porch done`'s build+tests pass.
+- Pre-existing failures in the broader `packages/codev/` test suite (`adopt.test.ts`, `update.test.ts`, `consult.test.ts`, `session-manager.test.ts`, real-shellper integration) — 23 tests — are **out of scope**: none of them touch any file in this diff, and per PIR protocol I do not fix unrelated red.
 
 ## Architecture Updates
 
-No `codev/resources/arch.md` updates needed. This is an extension to the existing per-row context-value menu pattern (already documented in arch and exercised by `gate-toast.ts`, `approve.ts`, etc.) — no new architectural concept, no new module boundary, no change to how the Builders tree or `view-artifact.ts` dispatches.
+No `codev/resources/arch.md` updates needed. This is an extension to the existing per-row `contextValue` menu-gating pattern (already documented in arch and exercised by `gate-toast.ts`, `approve.ts`, the existing `viewPlanFile` plumbing, etc.). No new module boundary, no new concept, no shift in how the Builders tree or `view-artifact.ts` dispatches.
 
 ## Lessons Learned Updates
 
-No `codev/resources/lessons-learned.md` updates needed. The "vitest matrix as the source of truth for `when`-clause regexes" point is worth surfacing but is one example, not yet a recurring pattern across builders — premature to lift it into shared lessons. Re-evaluate once a second feature lands that uses the same pattern.
+No `codev/resources/lessons-learned.md` updates needed. There is one *candidate* lesson worth flagging — that a vitest matrix asserting the package.json `viewItem =~ /…/` regexes is the only structural defence against silent menu-visibility drift — but it's one data point, not yet a recurring pattern across builders. Worth re-evaluating once a second feature lands using the same pattern; premature to lift into shared lessons now.
 
-## Technical Debt
+## Things to Look At During PR Review
 
-- **`builderHasReviewFile` does sync I/O on every tree render.** Mitigations in place: the reviews dir is local, small, and only inspected when overview data changes. The diff cache already does heavier work on row expansion. If profiling later shows this is a hot path (it isn't expected to be), the result could be cached on the overview-data refresh boundary.
-- **The `viewReviewFile` `when` clause regex** uses an alternation (`(spir|aspir|air)(-review)?|pir-review`) that's slightly fiddly to read. The unit-test matrix is the readable source of truth; the regex is the machine encoding. Acceptable; not worth a refactor.
+CMAP-2 returned **REQUEST_CHANGES** from both Gemini and Codex. Disposition below — please verify these at the `pr` gate, since PIR is single-pass and the consultation will not be re-run.
 
-## Follow-up Items
+1. **Plan drift: `commandPalette` entries were missing (both reviewers).** The approved plan says: *"add three `commandPalette` entries to hide these from the command palette: they're builder-row commands and need a tree-item arg. Match the existing `codev.openBuilderRow` pattern (`when: false`)."* I deliberately deviated during implementation, thinking it matched the existing `viewPlanFile` (which is *also* missing from `commandPalette` — i.e. the existing `viewPlanFile` was itself a pre-existing drift from this convention). The deviation was unjustified — the plan is the contract, and `openBuilderById` / `openBuilderRow` / `viewBacklogIssue` / `openBuilderFileDiff` / etc. all have `when: false` palette entries for the same builder-row-arg reason.
+   - **Fixed**: added three `when: false` palette entries (`package.json:265-276`) and a pinning test (`menu-when-clauses.test.ts:106-125`) that asserts each of the three commands has a palette entry with `when === 'false'`. The test would have failed before the fix; vitest now 78/78 pass.
+   - **Note**: I did not separately fix the *existing* `codev.viewPlanFile` drift (which has never had a palette entry) because that pre-dates this PR and falls under the same pre-existing-state rule as the unrelated test failures. The new test only pins the three commands this PR owns.
 
-- **Issue #792**: this PR was a prerequisite for it. With the three commands and protocol-aware visibility in place, #792 can now build on top.
-- **Pre-existing codev-package test failures**: separate bugfix project. Out of scope here.
+2. **Review file completeness (codex).** Codex flagged the review file as missing PIR-required sections (Files Changed, Commits, Test Results, Things to Look At, How to Test Locally) and carrying a `TBD` placeholder for the CMAP table. The original draft was templated off `codev/protocols/spir/templates/review.md` rather than `codev/protocols/pir/prompts/review.md` — the latter is the actual section contract for PIR.
+   - **Fixed**: this version of the file follows the PIR review prompt's section list and replaces the SPIR-shaped scaffold.
+
+3. **Per-row `readdirSync` cost.** `builderHasReviewFile` does a sync `readdirSync` on `<worktree>/codev/reviews/` on every Builders-tree render. The reviews dir is small and local, and the tree already does heavier work (diff cache) on row expansion. Acceptable, but worth a glance during real-tree refreshes to confirm no perceptible lag. If profiling later shows it's a hot path, cache on the overview-data refresh boundary.
+
+4. **Three regex `when` clauses kept in sync by hand.** The `viewReviewFile` clause uses a slightly fiddly alternation: `^(builder|blocked-builder|awaiting-builder)-((spir|aspir|air)(-review)?|pir-review)$`. The unit-test matrix is the readable source of truth; the regex is the machine encoding. Adding a fourth protocol means extending three regexes; the matrix test will catch one missed.
+
+## How to Test Locally
+
+For reviewers pulling the branch:
+
+- **View diff**: VSCode sidebar → right-click builder `pir-793` → **View Diff** (auto-detects default branch).
+- **Run dev server**: VSCode sidebar → builder `pir-793` row → **Run Dev Server**, or `afx dev pir-793` from the main checkout root.
+- **What to verify** (mapped to the plan's Test Plan + the visibility matrix in the issue):
+  - In a workspace with builders across multiple protocols, right-click each builder row:
+    - **SPIR / ASPIR**: all three menu entries visible (`View Spec File`, `View Plan File`, `View Review File`).
+    - **PIR without a committed review file** (e.g. this very branch before the review commit, or any PIR builder still in `implement`): only `View Plan File` visible.
+    - **PIR with a committed review file** (touch `codev/reviews/<pir-id>-anything.md` on a PIR builder branch, push, wait for the overview poll to pick it up): `View Plan File` + `View Review File` both visible.
+    - **AIR**: only `View Review File` visible.
+    - **BUGFIX / TICK**: none of the three visible.
+  - **Command palette (Cmd+Shift+P)**: type `Codev: View` — none of the three commands should appear (they're all hidden via `when: false`).
+  - Click each visible entry: the corresponding `.md` file opens in a preview tab (or the missing-file toast fires if it doesn't exist for the non-PIR protocols, per the existing `view-artifact.ts` behaviour).
