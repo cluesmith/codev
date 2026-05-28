@@ -218,6 +218,11 @@
         "command": "codev.deleteReviewComment",
         "title": "Codev: Delete Review Comment",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codev.toggleSearchView",
+        "title": "Codev: Toggle Search",
+        "icon": "$(search)"
       }
     ],
     "menus": {
@@ -409,6 +414,16 @@
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
+        },
+        {
+          "command": "codev.toggleSearchView",
+          "when": "view == codev.backlog",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.toggleSearchView",
+          "when": "view == codev.builders",
+          "group": "navigation"
         }
       ],
       "comments/commentThread/context": [
@@ -488,6 +503,7 @@
     },
     "views": {
       "codev": [
+        { "id": "codev.search", "name": "Search", "type": "webview", "when": "codev.searchVisible" },
         { "id": "codev.workspace", "name": "Workspace" },
         { "id": "codev.builders", "name": "Builders" },
         { "id": "codev.pullRequests", "name": "Pull Requests" },

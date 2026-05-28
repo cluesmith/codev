@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
-import { groupByArea } from '@cluesmith/codev-core/area-grouping';
+import { formatAreaForDisplay, groupByArea } from '@cluesmith/codev-core/area-grouping';
 import type { OverviewCache } from './overview-data.js';
 import { BuilderGroupTreeItem, BuilderTreeItem } from './builder-tree-item.js';
 import { BuilderFileTreeItem } from './builder-file-tree-item.js';
@@ -10,6 +10,8 @@ import { BuilderFolderTreeItem } from './builder-folder-tree-item.js';
 import { buildFilePathTree, type FilePathNode } from './file-path-tree.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 import { AreaGroupExpansionStore } from './area-group-expansion.js';
+import type { SearchState } from './search-state.js';
+import type { SearchCounts } from './search-view.js';
 
 /**
  * Order builders for the Builders tree: three buckets, top-down.
@@ -61,9 +63,11 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     private cache: OverviewCache,
     private readonly diffCache: BuilderDiffCache,
     workspaceState: vscode.Memento,
+    private readonly searchState: SearchState,
   ) {
     this.expansion = new AreaGroupExpansionStore(workspaceState, 'codev.buildersGroupExpansion');
     cache.onDidChange(() => this.changeEmitter.fire());
+    searchState.onDidChange(() => this.changeEmitter.fire());
   }
 
   /**
@@ -122,7 +126,7 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     }
 
     const now = Date.now();
-    const ordered = orderForDisplay(data.builders, now);
+    const ordered = this.filteredOrdered(data.builders, now);
     const groups = groupByArea(ordered, b => b.area);
 
     // Degenerate case: a repo that doesn't use `area/*` labels yields a
@@ -154,11 +158,50 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     if (!data) { return []; }
 
     const now = Date.now();
-    const ordered = orderForDisplay(data.builders, now);
+    const ordered = this.filteredOrdered(data.builders, now);
     const group = groupByArea(ordered, b => b.area).find(g => g.area === areaName);
     if (!group) { return []; }
 
     return group.items.map(b => this.makeBuilderRow(b, now));
+  }
+
+  /**
+   * Apply the canonical display ordering, then intersect with the active
+   * search filter. When the filter is empty the predicate is a no-op
+   * (matches() returns true on empty query), so this stays byte-identical
+   * to `orderForDisplay(data.builders, now)` whenever no filter is set.
+   */
+  private filteredOrdered(builders: OverviewBuilder[], now: number): OverviewBuilder[] {
+    return orderForDisplay(builders, now).filter(b => this.builderMatches(b));
+  }
+
+  private builderMatches(b: OverviewBuilder): boolean {
+    return this.searchState.matches([
+      b.issueId,
+      b.issueTitle,
+      b.area,
+      formatAreaForDisplay(b.area),
+      ...b.labels,
+      b.spawnedByArchitect,
+    ]);
+  }
+
+  /**
+   * Current builder counts under the active filter — `shown` is the
+   * post-filter count, `total` is the full set. Consumed by the search
+   * webview's summary line and by `extension.ts` for the `(N of M)`
+   * title suffix and the no-match `.message` banner.
+   */
+  getCounts(): SearchCounts {
+    const data = this.cache.getData();
+    if (!data) {return { total: 0, shown: 0 };}
+    if (this.searchState.query.trim() === '') {
+      return { total: data.builders.length, shown: data.builders.length };
+    }
+    return {
+      total: data.builders.length,
+      shown: data.builders.filter(b => this.builderMatches(b)).length,
+    };
   }
 
   private makeBuilderRow(b: OverviewBuilder, now: number): BuilderTreeItem {

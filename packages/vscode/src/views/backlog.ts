@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import type { OverviewBacklogItem } from '@cluesmith/codev-types';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
-import { groupByArea } from '@cluesmith/codev-core/area-grouping';
+import { formatAreaForDisplay, groupByArea } from '@cluesmith/codev-core/area-grouping';
 import type { OverviewCache } from './overview-data.js';
 import { BacklogGroupTreeItem, BacklogTreeItem } from './backlog-tree-item.js';
 import { AreaGroupExpansionStore } from './area-group-expansion.js';
+import type { SearchState } from './search-state.js';
+import type { SearchCounts } from './search-view.js';
 
 /**
  * Backlog rows the user can act on — exclude issues that already have an
@@ -40,9 +42,11 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
   constructor(
     private readonly cache: OverviewCache,
     workspaceState: vscode.Memento,
+    private readonly searchState: SearchState,
   ) {
     this.expansion = new AreaGroupExpansionStore(workspaceState, 'codev.backlogGroupExpansion');
     cache.onDidChange(() => this.changeEmitter.fire());
+    searchState.onDidChange(() => this.changeEmitter.fire());
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -95,6 +99,34 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
     return group.items.map(item => this.makeRow(item, data));
   }
 
+  /**
+   * Current row counts under the active filter — `shown` is the post-
+   * filter count, `total` is the full spawnable backlog size. Consumed by
+   * the search webview's summary line and by `extension.ts` for the
+   * `(N of M)` title suffix and the no-match `.message` banner.
+   */
+  getCounts(): SearchCounts {
+    const data = this.cache.getData();
+    if (!data) {return { total: 0, shown: 0 };}
+    const all = spawnableBacklog(data.backlog);
+    if (this.searchState.query.trim() === '') {
+      return { total: all.length, shown: all.length };
+    }
+    return { total: all.length, shown: all.filter(i => this.itemMatches(i)).length };
+  }
+
+  private itemMatches(item: OverviewBacklogItem): boolean {
+    return this.searchState.matches([
+      item.id,
+      item.title,
+      item.area,
+      formatAreaForDisplay(item.area),
+      ...item.labels,
+      ...(item.assignees ?? []),
+      item.author,
+    ]);
+  }
+
   private makeRow(
     item: OverviewBacklogItem,
     data: NonNullable<ReturnType<OverviewCache['getData']>>,
@@ -118,14 +150,17 @@ export class BacklogProvider implements vscode.TreeDataProvider<vscode.TreeItem>
   /**
    * Spawnable items in display order (mine-first, then rest), preserving
    * Tower's order within each segment. Identical to the pre-grouping
-   * behavior so within-group ordering matches the old flat list.
+   * behavior so within-group ordering matches the old flat list. The
+   * active search filter (if any) is applied here — by intersecting at
+   * this single chokepoint, both root-level group counts and the
+   * per-group rows stay consistent without duplicate filter logic.
    */
   private orderedSpawnable(data: NonNullable<ReturnType<OverviewCache['getData']>>): OverviewBacklogItem[] {
     const me = data.currentUser?.toLowerCase();
     const isMine = (item: OverviewBacklogItem) =>
       !!me && !!item.assignees?.some(a => a.toLowerCase() === me);
 
-    const items = spawnableBacklog(data.backlog);
+    const items = spawnableBacklog(data.backlog).filter(i => this.itemMatches(i));
     const mine = items.filter(isMine);
     const rest = items.filter(item => !isMine(item));
     return [...mine, ...rest];

@@ -30,7 +30,9 @@ import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import { BuildersProvider } from './views/builders.js';
 import { BuilderGroupTreeItem } from './views/builder-tree-item.js';
 import { PullRequestsProvider } from './views/pull-requests.js';
-import { BacklogProvider, spawnableBacklog } from './views/backlog.js';
+import { BacklogProvider } from './views/backlog.js';
+import { SearchState } from './views/search-state.js';
+import { CodevSearchViewProvider } from './views/search-view.js';
 import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
@@ -159,13 +161,31 @@ export async function activate(context: vscode.ExtensionContext) {
 	let pullRequestsView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let backlogView: vscode.TreeView<vscode.TreeItem> | undefined;
 	let recentlyClosedView: vscode.TreeView<vscode.TreeItem> | undefined;
+	// Forward-declared so `updateListViewTitles` can pick up filter
+	// state via closure. Assigned below once the providers are
+	// constructed; `updateListViewTitles` is only called from event
+	// handlers that fire after activation completes, so the lazy
+	// reads are always populated when they run.
+	let searchState: SearchState | undefined;
+	let backlogProvider: BacklogProvider | undefined;
+	let buildersProvider: BuildersProvider | undefined;
 	const updateListViewTitles = () => {
 		const data = overviewCache.getData();
+		const filterActive = (searchState?.query.trim() ?? '') !== '';
 		const withCount = (base: string, n: number | undefined) =>
 			typeof n === 'number' ? `${base} (${n})` : base;
-		if (buildersView) { buildersView.title = withCount('Builders', data?.builders.length); }
+		const withFilteredCount = (
+			base: string,
+			counts: { total: number; shown: number } | undefined,
+		) => {
+			if (!counts) {return base;}
+			return filterActive
+				? `${base} (${counts.shown} of ${counts.total})`
+				: `${base} (${counts.total})`;
+		};
+		if (buildersView) { buildersView.title = withFilteredCount('Builders', buildersProvider?.getCounts()); }
 		if (pullRequestsView) { pullRequestsView.title = withCount('Pull Requests', data?.pendingPRs.length); }
-		if (backlogView) { backlogView.title = withCount('Backlog', data ? spawnableBacklog(data.backlog).length : undefined); }
+		if (backlogView) { backlogView.title = withFilteredCount('Backlog', backlogProvider?.getCounts()); }
 		if (recentlyClosedView) { recentlyClosedView.title = withCount('Recently Closed', data?.recentlyClosed.length); }
 	};
 
@@ -222,13 +242,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		prevRoleIds = currRoleIds;
 	};
 
-	// Sidebar TreeViews (overviewCache created above, before TerminalManager)
+	// Sidebar TreeViews (overviewCache created above, before TerminalManager).
+	// `updateSearchChrome` is assigned later, after the providers and the
+	// search webview provider are constructed — kept as a possibly-undefined
+	// callable here so this single subscription is the only one driven by
+	// the overview cache (avoids duplicate listeners).
+	let updateSearchChrome: (() => void) | undefined;
 	context.subscriptions.push({ dispose: () => overviewCache.dispose() });
 	overviewCache.onDidChange(() => {
 		updateStatusBarCounts();
 		pruneClosedBuilderTerminals();
 		updateListViewTitles();
 		updateActivityBadge();
+		updateSearchChrome?.();
 	});
 
 	// Shared across the Builders tree (second-level changed files) and the
@@ -239,20 +265,85 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerFileDecorationProvider(new BuilderFileDecorationProvider(builderDiffCache)),
 	);
 
+	// Shared search filter state (#891). Constructed before the providers
+	// so it can be injected into both. Query is transient (cleared on
+	// workspace reload); the 🔍 toggle's show/hide preference IS
+	// persisted, but in `workspaceState` keyed by `codev.searchVisible`
+	// below — not on the SearchState object itself.
+	searchState = new SearchState();
+	const searchStateRef = searchState;
+	context.subscriptions.push({ dispose: () => searchStateRef.dispose() });
+
 	// List views use createTreeView so their title can carry a live item
 	// count; the rest stay on registerTreeDataProvider.
-	const buildersProvider = new BuildersProvider(overviewCache, builderDiffCache, context.workspaceState);
+	buildersProvider = new BuildersProvider(overviewCache, builderDiffCache, context.workspaceState, searchState);
 	buildersView = vscode.window.createTreeView('codev.builders', { treeDataProvider: buildersProvider });
 	context.subscriptions.push(...persistAreaGroupExpansion(
 		buildersView, BuilderGroupTreeItem, buildersProvider.expansion,
 	));
 	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
-	const backlogProvider = new BacklogProvider(overviewCache, context.workspaceState);
+	backlogProvider = new BacklogProvider(overviewCache, context.workspaceState, searchState);
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: backlogProvider });
 	context.subscriptions.push(...persistAreaGroupExpansion(
 		backlogView, BacklogGroupTreeItem, backlogProvider.expansion,
 	));
 	recentlyClosedView = vscode.window.createTreeView('codev.recentlyClosed', { treeDataProvider: new RecentlyClosedProvider(overviewCache) });
+
+	// Local non-undefined refs for the closures below. The let-vars are
+	// forward-declared as possibly-undefined to satisfy
+	// `updateListViewTitles`'s lazy reads (the function is created
+	// before the providers are constructed), but every closure below
+	// runs strictly after assignment — so capturing a narrowed ref
+	// keeps the type-checker happy without `!` non-null assertions.
+	const backlogProviderRef = backlogProvider;
+	const buildersProviderRef = buildersProvider;
+
+	// Sidebar search webview (#891). Sits at the top of the Codev
+	// container, gated by the `codev.searchVisible` context key so the
+	// 🔍 toggle on Backlog / Builders title bars can add/remove it.
+	// retainContextWhenHidden so a brief click-away doesn't dump the
+	// typed query (only an explicit toggle-off clears it).
+	const searchViewProvider = new CodevSearchViewProvider(
+		searchState,
+		() => backlogProviderRef.getCounts(),
+		() => buildersProviderRef.getCounts(),
+	);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			CodevSearchViewProvider.viewType,
+			searchViewProvider,
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
+	);
+
+	// Apply the filter-state to TreeView chrome: title suffix `(N of M)`,
+	// the `.message` no-match banner, and a fresh summary push to the
+	// search webview. Assigned into the forward-declared let-var so the
+	// overview-cache subscription above drives it too — single subscription
+	// per event source, no duplicate listeners.
+	updateSearchChrome = (): void => {
+		const active = searchStateRef.query.trim() !== '';
+		const noMatchMsg = 'No matches. Clear filter to see all items.';
+		if (backlogView) {
+			const c = backlogProviderRef.getCounts();
+			backlogView.message = active && c.shown === 0 ? noMatchMsg : undefined;
+		}
+		if (buildersView) {
+			const c = buildersProviderRef.getCounts();
+			buildersView.message = active && c.shown === 0 ? noMatchMsg : undefined;
+		}
+		updateListViewTitles();
+		searchViewProvider.pushSummary();
+	};
+	context.subscriptions.push(searchStateRef.onDidChange(updateSearchChrome));
+
+	// Seed the show/hide context key from workspaceState (default: visible).
+	// Toggling flips the key, persists, and clears the query when hiding
+	// — the conditional-render approach (view contribution gated by the
+	// context key) means a hidden filter would be a footgun.
+	const SEARCH_VISIBLE_KEY = 'codev.searchVisible';
+	const initialVisible = context.workspaceState.get<boolean>(SEARCH_VISIBLE_KEY, true);
+	vscode.commands.executeCommand('setContext', SEARCH_VISIBLE_KEY, initialVisible);
 	// Seed the badge so it's correct immediately if overview data is already
 	// cached, instead of waiting for the next onDidChange tick.
 	updateActivityBadge();
@@ -611,6 +702,22 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('codev.disconnectTunnel', () => disconnectTunnel(connectionManager!)),
 		vscode.commands.registerCommand('codev.cronTasks', () => listCronTasks(connectionManager!)),
 		vscode.commands.registerCommand('codev.addReviewComment', () => addReviewComment()),
+		vscode.commands.registerCommand('codev.toggleSearchView', async () => {
+			// #891: flip the `codev.searchVisible` context key. The view
+			// contribution is gated on it via `when:`, so toggling adds or
+			// removes the webview from the sidebar entirely. When hiding
+			// while a query is active, clear the query — a hidden filter
+			// is a footgun (empty backlog with no visible cause).
+			const current = context.workspaceState.get<boolean>(SEARCH_VISIBLE_KEY, true);
+			const next = !current;
+			await context.workspaceState.update(SEARCH_VISIBLE_KEY, next);
+			await vscode.commands.executeCommand('setContext', SEARCH_VISIBLE_KEY, next);
+			if (!next) { searchStateRef.clear(); }
+			if (next) {
+				// Re-show: focus the input so the user can type immediately.
+				await vscode.commands.executeCommand(`${CodevSearchViewProvider.viewType}.focus`);
+			}
+		}),
 	);
 
 	// Read-only `codev-issue:` content provider backing the "View Issue"
