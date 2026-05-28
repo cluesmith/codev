@@ -80,4 +80,17 @@ Most consequential additions to rev-3 from this consult round:
 
 Full disposition in `codev/projects/843-w3c-standard-html-annotator-wi/843-specify-iter2-architect-rebuttal.md`.
 
-Spec now ready for `spec-approval` gate signaling. Notifying architect.
+Spec now ready for `spec-approval` gate signaling.
+
+### afx send architect — NOT_FOUND from this worktree
+
+Tried `afx send architect`, `afx send architect:main`, and `afx send codev:architect` — all return `NOT_FOUND`. From inside the worktree, `afx status` reports "Workspace: not active in tower" even though Tower itself is running with 4 active workspaces. The worktree cannot resolve its spawning architect via Tower's address book in this state. Did not `cd` to the main workspace root to retry (auto-mode classifier and the user's documented `afx-from-worktree` prohibition both correctly block that path).
+
+**Architect discovery hints** (from the main workspace, the architect can find this rev-3 work via):
+- `porch status 843` — confirms gate is still `spec-approval` / pending.
+- `git log builder/spir-843` — rev-3 commit is `f88a5e03`.
+- `cat .builders/spir-843/codev/state/spir-843_thread.md` — this thread, with both iterations.
+- `cat .builders/spir-843/codev/projects/843-w3c-standard-html-annotator-wi/843-specify-iter2-architect-rebuttal.md` — full per-finding disposition.
+- The four inline `<!-- REVIEW(@architect): ... -->` comments have all been removed from `codev/specs/843-w3c-standard-html-annotator-wi.md` and replaced with corresponding spec text changes.
+
+If the architect was relying on `afx send` for the gate-ready notification, that channel is silent. Pending gate is visible via `porch pending` and via this thread.
