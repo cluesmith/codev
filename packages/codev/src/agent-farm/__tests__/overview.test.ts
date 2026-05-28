@@ -1878,6 +1878,23 @@ describe('overview', () => {
 
       expect(data.recentlyClosed).toHaveLength(1);
       expect(data.recentlyClosed[0].prUrl).toBeUndefined();
+      // Issue #901: null merged-PR fetch should still yield an empty array,
+      // not undefined, so NeedsAttentionList's `?? []` doesn't have to absorb
+      // an inconsistent shape.
+      expect(data.recentlyMergedIssueIds).toEqual([]);
+    });
+
+    it('exposes recentlyMergedIssueIds for merged-PR consumers (Issue #901)', async () => {
+      mockFetchMergedPRs.mockResolvedValue([
+        { number: 150, title: '[Bugfix #100] Fix the bug', url: 'https://github.com/org/repo/pull/150', body: 'Fixes #100', createdAt: '2026-01-02T00:00:00Z', mergedAt: new Date().toISOString() },
+        { number: 151, title: '[Spec 200] Add feature', url: 'https://github.com/org/repo/pull/151', body: 'Closes #200', createdAt: '2026-01-02T00:00:00Z', mergedAt: new Date().toISOString() },
+        { number: 152, title: 'No linked issue', url: 'https://github.com/org/repo/pull/152', body: 'Cleanup', createdAt: '2026-01-02T00:00:00Z', mergedAt: new Date().toISOString() },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(new Set(data.recentlyMergedIssueIds)).toEqual(new Set(['100', '200']));
     });
 
     it('enriches issueId from DB issue_number for unknown protocols (#664)', async () => {

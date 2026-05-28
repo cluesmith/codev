@@ -3,6 +3,14 @@ import type { OverviewPR, OverviewBuilder } from '../lib/api.js';
 interface NeedsAttentionListProps {
   prs: OverviewPR[];
   builders: OverviewBuilder[];
+  /**
+   * Issue IDs of recently-merged PRs (Issue #901). Used to distinguish
+   * "PR missing from `prs` because of cache miss / pagination" (surface
+   * the defensive row) from "PR missing because it has been merged"
+   * (skip — there is nothing left for the human to do). Defaults to an
+   * empty array for callers that haven't been wired up yet.
+   */
+  recentlyMergedIssueIds?: readonly string[];
 }
 
 interface AttentionItem {
@@ -40,8 +48,13 @@ function timeAgo(dateStr: string): string {
   return `${days}d`;
 }
 
-export function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): AttentionItem[] {
+export function buildItems(
+  prs: OverviewPR[],
+  builders: OverviewBuilder[],
+  recentlyMergedIssueIds: readonly string[] = [],
+): AttentionItem[] {
   const items: AttentionItem[] = [];
+  const mergedIssueIdSet = new Set(recentlyMergedIssueIds);
 
   // A PR is genuinely waiting on a human only after the builder finishes CMAP
   // for the PR-creating phase. Issue #872 made this a canonical `prReady`
@@ -105,7 +118,15 @@ export function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): Atte
     // transient API failure). Surface anyway so we don't silently drop a real
     // human-action signal. blockedSince may be absent for gateless protocols
     // (BUGFIX) — fall back to startedAt so the waiting chip still renders.
+    //
+    // Skip when the builder's PR has been MERGED (Issue #901): pendingPRs
+    // lists open PRs only, so a merged PR is correctly absent — emitting the
+    // defensive row would surface a stale "PR review" item for work that's
+    // already shipped. The data hazard from v3.1.4 → v3.1.5 left some
+    // in-flight builders with stale `pr_ready_for_human: true` in
+    // status.yaml; this filter masks them without a one-shot migration.
     if (b.prReady) {
+      if (b.issueId && mergedIssueIdSet.has(b.issueId)) continue;
       const label = b.issueId ? `#${b.issueId}` : b.id;
       items.push({
         key: `gate-${b.id}`,
@@ -139,8 +160,8 @@ export function buildItems(prs: OverviewPR[], builders: OverviewBuilder[]): Atte
   return items;
 }
 
-export function NeedsAttentionList({ prs, builders }: NeedsAttentionListProps) {
-  const items = buildItems(prs, builders);
+export function NeedsAttentionList({ prs, builders, recentlyMergedIssueIds }: NeedsAttentionListProps) {
+  const items = buildItems(prs, builders, recentlyMergedIssueIds);
 
   if (items.length === 0) {
     return <p className="work-empty">Nothing needs attention</p>;

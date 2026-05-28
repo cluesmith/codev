@@ -189,6 +189,11 @@ describe('NeedsAttentionList buildItems — PR gating (issue #844)', () => {
     // the realistic shape, the original gate-loop early-out filtered the
     // builder before the prReady check could fire. Architect-side CMAP
     // caught this; the loop now checks prReady BEFORE the !b.blocked skip.
+    //
+    // Issue #901: the defensive emit is only correct when the PR is missing
+    // for a "still open" reason (cache / pagination / transient failure).
+    // recentlyMergedIssueIds is the merged-PR-issue set; this test must NOT
+    // include the builder's issueId there, or the row is correctly skipped.
     const prs: OverviewPR[] = [];
     const startedAt = new Date('2026-01-05T12:00:00Z').toISOString();
     const builders = [
@@ -205,13 +210,44 @@ describe('NeedsAttentionList buildItems — PR gating (issue #844)', () => {
       }),
     ];
 
-    const items = buildItems(prs, builders);
+    const items = buildItems(prs, builders, []);
     const row = items.find(i => i.key === 'gate-bugfix-42');
 
     expect(row).toBeDefined();
     expect(row!.kind).toBe('PR review');
     // Falls back to startedAt when no gate gives us blockedSince.
     expect(row!.waitingSince).toBe(startedAt);
+  });
+
+  it('does NOT surface a prReady builder whose PR has been merged (Issue #901)', () => {
+    // After PR merge, the PR is correctly absent from `prs` (open-only) and
+    // the builder may still carry stale `prReady: true` in status.yaml — the
+    // v3.1.4 line-453 setter wrote it on terminal `pr → verified` advance;
+    // PR #888 fixed that but in-flight builders that crossed the v3.1.4 →
+    // v3.1.5 boundary keep the stale value. Cross-referencing the builder's
+    // issueId against recentlyMergedIssueIds suppresses the stale row
+    // without a one-shot migration.
+    const prs: OverviewPR[] = [];
+    const builders = [
+      makeBuilder({
+        id: 'spir-1842',
+        issueId: '1842',
+        protocol: 'spir',
+        phase: 'verified',
+        blocked: null,
+        blockedGate: null,
+        blockedSince: null,
+        startedAt: new Date('2026-01-05T12:00:00Z').toISOString(),
+        prReady: true,
+      }),
+    ];
+
+    // Merged-PR set includes 1842 — its PR is gone for a reason (merged),
+    // not for a transient failure.
+    const items = buildItems(prs, builders, ['1842']);
+
+    expect(items.find(i => i.key === 'gate-spir-1842')).toBeUndefined();
+    expect(items).toHaveLength(0);
   });
 
   it('still surfaces a prReady gated builder (AIR/SPIR shape) when its PR is missing from prs', () => {

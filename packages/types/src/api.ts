@@ -247,6 +247,16 @@ export interface OverviewData {
   pendingPRs: OverviewPR[];
   backlog: OverviewBacklogItem[];
   recentlyClosed: OverviewRecentlyClosed[];
+  /**
+   * Issue IDs of PRs merged in the recent window (matches the
+   * `fetchRecentMergedPRs` 24h window in the overview server). Consumers
+   * cross-reference this against a builder's `issueId` to detect post-merge
+   * builders whose status.yaml may still carry stale `prReady: true` — used
+   * by `NeedsAttentionList` to skip the cache-miss defensive emit when the
+   * PR is correctly absent from `pendingPRs` because it has been merged
+   * (Issue #901). Empty array when the forge call fails or returns no rows.
+   */
+  recentlyMergedIssueIds: string[];
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
   errors?: { prs?: string; issues?: string };
