@@ -32,8 +32,12 @@ The issue lists seven decisions with recommendations. I'm taking these positions
 
 **Match scope adjustment (decision 4):** the issue's wording lists "title + issue number + `area/*` labels + label list + assignees". The actual `OverviewBacklogItem` type (`packages/types/src/api.ts:208-230`) exposes `id, title, area, assignees, author` — there is no separate `labels: string[]` field, only the single resolved `area`. `OverviewBuilder` has `id, issueId, issueTitle, area, spawnedByArchitect` and no assignees at all. So the filter scope I'll implement is:
 
-- **Backlog rows:** `id` (issue number) + `title` + `area` + `assignees[]` + `author`
-- **Builder rows:** `issueId` + `issueTitle` + `area` + `spawnedByArchitect` (architect attribution doubles as a useful filter for multi-architect workspaces — search "ob-refine" to see only that architect's builders)
+- **Backlog rows:** `id` (issue number) + `title` + `area` (raw + `formatAreaForDisplay(area)`) + `assignees[]` + `author`
+- **Builder rows:** `issueId` + `issueTitle` + `area` (raw + formatted) + `spawnedByArchitect` (architect attribution doubles as a useful filter for multi-architect workspaces — search "ob-refine" to see only that architect's builders)
+
+**Raw + formatted area:** since #885 merged, group labels are rendered via `formatAreaForDisplay` ("vscode" → "Vscode", "agent-farm" → "Agent Farm") while the raw lowercase value is kept for matchers. The filter searches against *both* so an Aa-ON search for "Vscode" (what the user sees) still matches raw "vscode" (what the data is). Without this, the case-sensitive path silently misses what the user typed.
+
+**No `area/` prefix.** Users type "vscode", not "area/vscode" — the raw `area` field has the prefix stripped on the server (see `parseArea`). Typing "area/vscode" yields zero matches and an empty-state banner; we don't need explicit handling.
 
 If the reviewer wants the literal labels list (the issue's "label list" phrase), that requires adding `labels: string[]` to `OverviewBacklogItem` and threading it through `OverviewData` collection in `packages/core` / `packages/codev` — a small but separate change. I'll do that *inside this PR if approved at the plan-approval gate*, but won't do it as a default since it touches three packages and isn't strictly required for the use cases described.
 
