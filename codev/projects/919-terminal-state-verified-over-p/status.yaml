@@ -1,7 +1,7 @@
 id: '919'
 title: terminal-state-verified-over-p
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-29T04:08:00.398Z'
-updated_at: '2026-05-29T04:59:59.439Z'
+updated_at: '2026-05-29T05:00:50.667Z'
