@@ -92,6 +92,8 @@ the conflation:
   (`calculateEvenProgress` — both terminal names → 100%)
 - `packages/codev/src/agent-farm/commands/workspace-recover.ts:19` —
   `TERMINAL_PHASES = new Set(['verified', 'complete'])`
+- `packages/codev/src/agent-farm/commands/status.ts` — treats `complete`/`verified` as terminal for
+  display color (already handles both; listed for completeness)
 - `packages/core/src/builder-helpers.ts:32` — idle-waiting terminal check
 
 **Two independent status readers.** `readState()` (`state.ts`) is the porch-side reader and is the only
@@ -142,7 +144,10 @@ Two distinct, honest terminal states:
      write-and-commit path.
    - **Both readers apply this identically.** `readState()` and the overview's `parseStatusYaml()` must
      produce the same terminal name for the same file. This requires teaching `parseStatusYaml()` to
-     read `context.verify_skip_reason` (it currently parses only `phase` and `gates`).
+     read `context.verify_skip_reason` (it currently parses only `phase` and `gates`). Because
+     `parseStatusYaml()` is a line parser, it only needs to **detect the presence** of
+     `verify_skip_reason` (a boolean), not fully deserialize arbitrary `context` values — keeping the
+     implementation scope and its tests narrow.
 
 4. **Read sites stay correct.** Every site that currently treats `{verified, complete}` as "terminal"
    must continue to treat **both** as terminal (workspace-recover, idle-waiting, both progress paths,
@@ -357,6 +362,11 @@ batch migration, then drop the load-time migration entirely.
 1. No measurable change to `readState` performance (migration is a couple of field reads).
 2. No reduction in overall coverage.
 
+## Security Considerations
+This change introduces no new trust boundary. It is internal state-name logic that reads only existing
+local `status.yaml` fields (`phase`, `gates`, `context.verify_skip_reason`); no new user input parsing,
+authentication, authorization, or network surface is added.
+
 ## Dependencies
 - **Internal Systems**: porch state machine (`porch/state.ts`, `next.ts`, `index.ts`), the agent-farm
   overview server (`overview.ts`), `workspace-recover`, `core/builder-helpers`.
@@ -391,6 +401,11 @@ batch migration, then drop the load-time migration entirely.
   protocol has a verify phase, not when verify actually passed. Resolved: added to Current State blast
   radius, Desired State req. 4 (user-facing messages), and a success criterion.
   Gemini and Claude both APPROVE'd round 2 with no new issues.
+
+**Porch-driven round (specify iter1)**: Gemini APPROVE, Claude APPROVE, Codex COMMENT (non-blocking).
+Codex's three minor completeness notes were folded in: `status.ts` added to the read-sites list;
+clarified `parseStatusYaml()` only needs to *detect presence* of `verify_skip_reason`; added a Security
+Considerations section stating no new trust boundary.
 
 **Round 1 feedback and resolution**:
 - **Codex (REQUEST_CHANGES)** — (1) `overview.ts` reads status via its own `parseStatusYaml()`, not
