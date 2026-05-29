@@ -39,3 +39,29 @@ builder row we're deleting.
 2. Remove `recentlyMergedIssueIds` end-to-end (recommended) vs leave vestigial.
 3. `derivePrReady` form: gate-authoritative (recommended, kills #919 sticky-field hazard) vs field-first-minus-fallback.
 4. EXPERIMENT/MAINTAIN completion-gate surfacing: documented as out-of-scope (not regressions of this work).
+
+## 2026-05-29 — 3-way consultation done (spec iter-1)
+
+Verdicts: **Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES** (Codex just wanted two things pinned
+down explicitly — now resolved). All three converged on Approach 1. Incorporated:
+
+- **Shared-infra decision (Codex #1)**: keep `pr` in `GATE_LABELS`/`detectBlocked*` (VSCode bell +
+  PR-row waiting-since depend on it). "No builder stand-in" is **dashboard-local** → `if (b.prReady) continue;`
+  in buildItems (Gemini's clean one-liner).
+- **`requested_at` invariant (my catch, NOT a reviewer's)**: a bare `gates['pr']==='pending'` check (Gemini's
+  suggested simplification) is WRONG — porch inits ALL gates to `pending` with no `requested_at` (verified in
+  927's own status.yaml). The predicate MUST be `pending && requested_at present`. Pinned in spec.
+- **`fetchRecentMergedPRs` retention (my catch)**: Gemini said delete the helper. WRONG — `mergedPRs` has a
+  second consumer at overview.ts:971 (issueToPrUrl for recentlyClosed). Helper stays; only the
+  `recentlyMergedIssueIds` projection is removed. Corrected in spec.
+- **verify-approval label (Codex #2 / Claude #3)**: pinned to `"verify review"` + gateKindClass +
+  `.attention-kind--verify` CSS.
+- **detectBlockedSince sync point (Gemini/Claude)**: separate hardcoded array; recommend unifying on
+  `Object.keys(GATE_LABELS)`.
+- **Tests (Claude #5)**: THREE existing NeedsAttentionList tests to invert/remove (lines ~183, ~253 invert;
+  ~222 merged-suppression removed).
+
+Lesson reinforced: scrutinized reviewer suggestions before applying — caught two over-confident Gemini
+recommendations (bare gate check; delete helper) that would have introduced bugs.
+
+Committing reviewed spec, then `porch next` → should hit spec-approval gate (STOP, notify architect).

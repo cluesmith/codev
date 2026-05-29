@@ -35,6 +35,7 @@ These exist solely to cope with **one deviation**: a *gateless* bugfix variant (
 - **Porch** writes `pr_ready_for_human: true` to `status.yaml` exactly when it auto-requests the `pr` gate (sets the gate `pending`), and clears it to `false` on `pr`-gate approval and on rollback past the PR-creating phase. Every upstream PR-producing protocol — BUGFIX, AIR, SPIR, ASPIR, PIR — now carries a `pr` gate on its PR-creating phase (#887 closed the BUGFIX gap). Therefore, **for every upstream protocol, `pr_ready_for_human === true` is coincident with the `pr` gate being `pending`** (written in the same commit).
 - **`derivePrReady(parsed)`** (overview.ts) returns the explicit `pr_ready_for_human` field when present; otherwise it falls back to: `pr` gate pending **OR** `bugfix && phase === 'verified'`. The builder object's `prReady` boolean is set from this.
 - **`detectBlocked` / `GATE_LABELS`** (overview.ts) map pending gates to labels: `spec-approval → "spec review"`, `plan-approval → "plan review"`, `dev-approval → "dev review"`, `pr → "PR review"`. **`verify-approval` is absent from this map**, so a pending `verify-approval` gate produces `blocked = null` and surfaces nowhere.
+- **Three sibling functions hold the gate list redundantly**: `detectBlocked` and `detectBlockedGate` iterate `Object.keys(GATE_LABELS)`, but **`detectBlockedSince` keeps its own hardcoded array** `['spec-approval', 'plan-approval', 'dev-approval', 'pr']` (with a "keep in sync" comment). This is a separate sync point: adding `verify-approval` to `GATE_LABELS` without also adding it to `detectBlockedSince` would yield `blocked = "verify review"` but `blockedSince = null`, and `buildItems`' `if (!b.blocked || !b.blockedSince) continue;` would then silently drop the row. The clean fix is to make `detectBlockedSince` iterate `Object.keys(GATE_LABELS)` too, so the gate set lives in exactly one place.
 
 ### How `NeedsAttentionList.buildItems` assembles rows today
 
@@ -47,6 +48,7 @@ These exist solely to cope with **one deviation**: a *gateless* bugfix variant (
 ### Supporting state
 
 - **`recentlyMergedIssueIds`** (`OverviewData`, #902): computed in `overview.ts` from recently-merged PRs and threaded through `WorkView` into `NeedsAttentionList`. Its **only** consumer is the builder-emit branch's merged-suppression check.
+- **`fetchRecentMergedPRs`** (`packages/codev/src/lib/github.ts`) is the helper that fetches the merged-PR window. **It is NOT exclusive to `recentlyMergedIssueIds`**: its result (`mergedPRs`) is *also* used in `overview.ts` (~line 971) to build the `issueToPrUrl` map that enriches the **recentlyClosed** section with PR links. (Confirmed: `overview.ts` is the helper's only non-test caller, but it uses `mergedPRs` twice.) Therefore removing `recentlyMergedIssueIds` must **keep** `fetchRecentMergedPRs` and the `mergedPRs` fetch intact — only the `recentlyMergedIssueIds` projection (and its consumers) is removed. *(This corrects a consultation suggestion to delete the helper outright.)*
 - **`pendingPRs`** lists **open PRs only** — a merged PR is correctly absent.
 
 ### Why it's wrong
@@ -63,6 +65,35 @@ These exist solely to cope with **one deviation**: a *gateless* bugfix variant (
 - **Plus** the existing fallback for **unaffiliated / human-authored PRs**: surface when `reviewDecision === 'REVIEW_REQUIRED'` and there is no matching builder.
 
 A **builder never stands in for a PR.** The `pr` gate surfaces **only** as a PR row (via the open-PR set), never as a builder/gate row.
+
+### Scope of the "no builder stand-in" rule: dashboard-local (resolves consultation)
+
+The rule **"a builder never stands in for a PR"** is **dashboard-local** to `NeedsAttentionList`. It is *not* a change to the shared blocked-detection infrastructure:
+
+- **Keep `pr` in `GATE_LABELS` / `detectBlocked` / `detectBlockedGate` / `detectBlockedSince`** (the shared `overview.ts` derivation). VSCode's Needs Attention tree, gate toast, and status-bar counter are builder-centric surfaces (they have no PR list to render a proper PR row), so a pr-gate-pending builder *should* keep surfacing there as a blocked builder with the bell icon — that is existing, correct behavior and must not regress.
+- The dashboard alone has the open-PR set (`pendingPRs`) needed to render a real PR row, so the dashboard alone enforces "PR-as-PR-row, never as builder-row." It does this in `buildItems` by **excluding PR-ready builders from the builder/gate-row loop entirely** (an early `if (b.prReady) continue;`), so a pr-gate builder can only ever appear via the PR loop. This single guard replaces the deleted builder-emit branch *and* prevents the gate-row catch-all from emitting a stand-in row.
+
+**Consequence for waiting-time (resolves "gate-requested time" criterion):** because `pr` stays in `detectBlockedSince`, a pr-gate-pending builder still carries `blockedSince = gateRequestedAt['pr']`. The PR row continues to use that value for its waiting-since chip ("how long the human has been the bottleneck"), preserving *gate-requested time* — not PR-creation time. The `pr.createdAt` fallback remains only for the unaffiliated/human-PR case (no builder, no gate timestamp).
+
+### The "pending gate" predicate (correctness invariant)
+
+A gate counts as genuinely pending **only when it has both `status: pending` AND a `requested_at` timestamp**. Porch initializes *every* gate to `status: pending` with no `requested_at` at project creation (verified in this project's own `status.yaml`: `pr`, `spec-approval`, `plan-approval`, `verify-approval` all start `pending` with no `requested_at`). A gate is "really pending" only once porch *requests* it (writes `requested_at`).
+
+Therefore the PR-surfacing predicate is:
+
+```
+gates['pr'] === 'pending'  AND  gateRequestedAt['pr'] is present
+```
+
+and likewise for every gate-row gate. A simplification to `gates['pr'] === 'pending'` alone is **incorrect** — it would mark every freshly-initialized project as PR-ready. (The existing `detectBlocked` / `detectBlockedGate` / `detectBlockedSince` already use the `requested_at`-aware predicate; `derivePrReady` must keep it too.)
+
+### Human-facing label contract for `verify-approval`
+
+`verify-approval` surfaces with the label **`"verify review"`** (mirroring `spec-approval → "spec review"`, `plan-approval → "plan review"`). Consumers render `blocked` directly, so the string is a contract:
+
+- `GATE_LABELS['verify-approval'] = 'verify review'`.
+- Dashboard `gateKindClass` gains a `'verify review' → 'attention-kind--verify'` case, and a new `.attention-kind--verify` CSS rule is added to `packages/dashboard/src/index.css` (today only `--pr`, `--spec`, `--plan`, `--code-review` exist; an unmapped label falls back to `--plan`, which is merely a styling smell, not a functional break).
+- VSCode gate-toast `GATE_ACTIONS` has no `verify-approval` entry; it uses the generic fallback ("Review" → open builder terminal), which is acceptable and need not change.
 
 ### The universal contract
 
@@ -85,10 +116,11 @@ EXPERIMENT and MAINTAIN do **not** follow the CMAP→PR pattern and do **not** p
 - [ ] **PR-surfacing keys on the `pr` gate.** An open PR whose linked builder has a pending `pr` gate surfaces as exactly one **PR row** (linking to the PR URL).
 - [ ] **No builder-stand-in.** When a pr-gated builder's PR is absent from the open-PR set (cache miss), **no row** is emitted for it. The `derivePrReady` `bugfix && phase === 'verified'` fallback and the `NeedsAttentionList.buildItems` builder-emit branch are **deleted**.
 - [ ] **Merged PRs drop automatically.** A merged PR (absent from `pendingPRs`) produces no Needs Attention row, with no reliance on a recently-merged suppression list.
-- [ ] **Gate rows preserved** for `spec-approval`, `plan-approval`, `dev-approval`, and `verify-approval`. (`verify-approval` is **added** to the gate-row path; it is currently missing.)
-- [ ] **`pr` gate excluded from the gate-row path** — it surfaces only as a PR row, so a cache-missed pr-gate builder cannot fall through to a builder/gate row.
+- [ ] **Gate rows preserved** for `spec-approval`, `plan-approval`, `dev-approval`, and `verify-approval`. (`verify-approval` is **added** to `GATE_LABELS` with label `"verify review"`; it is currently missing. Add the matching `gateKindClass` case + `.attention-kind--verify` CSS rule.)
+- [ ] **`pr` gate excluded from the dashboard gate-row path** — it surfaces only as a PR row. The exclusion is dashboard-local (`if (b.prReady) continue;` in `buildItems`); `pr` **remains** in the shared `GATE_LABELS`/`detectBlocked*` so VSCode surfaces are unaffected.
+- [ ] **Gate-pending predicate is `requested_at`-aware** — `derivePrReady` (and any new surfacing check) treats a gate as pending only when `status: pending` **and** `requested_at` is present, so freshly-initialized projects are not mis-flagged.
 - [ ] **Unaffiliated/human-PR fallback preserved** (`reviewDecision === 'REVIEW_REQUIRED'`, no matching builder).
-- [ ] **`recentlyMergedIssueIds` reconciled** — assessed and (recommended) removed end-to-end since its only consumer (the builder-emit branch) is deleted; OR an explicit justification is recorded for keeping it.
+- [ ] **`recentlyMergedIssueIds` removed end-to-end** — the field (`OverviewData`/`api.ts`), its computation block in `overview.ts`, and its prop threading (`WorkView` → `NeedsAttentionList`) are deleted. **`fetchRecentMergedPRs` and the `mergedPRs` fetch are kept** (still needed for the recentlyClosed `issueToPrUrl` map).
 - [ ] **#919 reconciled** — this spec supersedes #919's Needs-Attention / `derivePrReady` parts; the `verified → complete` terminal-state rename is **not** performed here and is documented as independent.
 - [ ] All affected unit tests updated; new tests cover the contract (below). No reduction in coverage.
 - [ ] No regression in the VSCode Needs Attention tree / toast / status-bar counter that share `detectBlocked` (verified, since `GATE_LABELS` is shared infrastructure).
@@ -111,7 +143,7 @@ EXPERIMENT and MAINTAIN do **not** follow the CMAP→PR pattern and do **not** p
 
 ## Solution Approaches
 
-### Approach 1 (recommended): Gate-authoritative surfacing
+### Approach 1 (SELECTED — unanimous consultation): Gate-authoritative surfacing
 
 **Description**: Make the **`pr` gate `pending`** the single source of truth for PR-surfacing.
 
@@ -151,14 +183,15 @@ Explicitly **out of scope** per the issue — the `pr` gate is the universal sig
 ### Critical (Blocks Progress)
 - [ ] **None.** The issue's direction is unambiguous on the core mechanism.
 
-### Important (Affects Design)
-- [ ] **Add `verify-approval` to the gate-row path?** Desired-behavior (B) lists it, but it is currently absent from `GATE_LABELS`/`detectBlocked`, so "keep" cannot be satisfied literally — it must be **added**. Recommendation: **add it** (rounds out "every genuine human gate surfaces; the `pr` gate surfaces as a PR row"). Note the shared-consumer impact (VSCode tree/toast/status bar).
-- [ ] **Remove `recentlyMergedIssueIds` end-to-end, or leave it vestigial?** Recommendation: **remove** (its only consumer is deleted; #902 becomes unnecessary). Confirm no other consumer exists before removal.
-- [ ] **`derivePrReady` form**: gate-authoritative (recommended — kills #919 sticky-field hazard) vs field-first-minus-bugfix-branch (smaller diff). Functionally equivalent for correctly-gated builders.
+### Resolved by consultation (3-way unanimous)
+- [x] **Add `verify-approval`?** **YES.** Add to `GATE_LABELS` as `"verify review"` + `gateKindClass` case + `.attention-kind--verify` CSS. Shared-consumer impact verified manageable (VSCode toast uses a generic fallback for unknown gates; no breakage).
+- [x] **Remove `recentlyMergedIssueIds`?** **YES, end-to-end** — but **keep** `fetchRecentMergedPRs`/`mergedPRs` (still needed for recentlyClosed `issueToPrUrl`). (Builder verified the helper has a second consumer; the consultation suggestion to delete the helper was incorrect.)
+- [x] **`derivePrReady` form?** **Gate-authoritative** — reduce to the `requested_at`-aware `pr`-gate-pending check and drop the `pr_ready_for_human` field dependency, killing the #919 sticky-field hazard. (Keep the `requested_at` guard — see correctness invariant.)
+- [x] **Scope of "no builder stand-in"?** **Dashboard-local.** Keep `pr` in shared blocked-detection (VSCode bell + PR-row waiting-since timestamp depend on it); enforce PR-as-PR-row only in `buildItems`.
 
 ### Nice-to-Know (Optimization)
 - [ ] Should EXPERIMENT/MAINTAIN `experiment-complete` / `maintain-complete` gates surface as gate rows in the dashboard? Currently they surface nowhere. Recommendation: **out of scope** for #927 (not a regression of this work); track separately if desired.
-- [ ] Should porch eventually stop writing `pr_ready_for_human` entirely (becomes vestigial under gate-authoritative surfacing)? Recommendation: **out of scope** (porch-side; the dashboard simply stops depending on it).
+- [ ] Should porch eventually stop writing `pr_ready_for_human` entirely (becomes vestigial under gate-authoritative surfacing)? Recommendation: **out of scope** (porch-side; the dashboard simply stops depending on it). The field stays written; the dashboard simply ignores it.
 
 ## Performance Requirements
 - No new network calls or heavy computation; this is presentational/derivation logic over already-fetched `OverviewData`. No measurable performance impact expected. (Removing `recentlyMergedIssueIds` removes a small amount of per-refresh work.)
@@ -174,15 +207,22 @@ Explicitly **out of scope** per the issue — the `pr` gate is the universal sig
 3. **Merged PR ⇒ nothing** — builder's PR merged (absent from `pendingPRs`) ⇒ **no row**, with no reliance on `recentlyMergedIssueIds`.
 4. **Pre-CMAP PR excluded** — open PR whose builder has NOT yet reached the `pr` gate ⇒ no row.
 5. **Gate rows preserved** — builder pending on `spec-approval` / `plan-approval` / `dev-approval` ⇒ a gate row with the correct kind/label and waiting-since.
-6. **`verify-approval` surfaces** (if Approach 1 adopted) — builder pending on `verify-approval` ⇒ a gate row.
-7. **`pr` gate never a gate row** — builder with `pr` gate `pending` whose PR is missing does NOT produce a "PR review" gate/builder row (intersection of #2 and the exclusion rule).
-8. **Unaffiliated/human PR** — open PR with no matching builder surfaces only when `reviewDecision === 'REVIEW_REQUIRED'`.
-9. **No double-emit** — PR present AND builder present ⇒ exactly one PR row.
-10. **Gateless variant ⇒ nothing** — a builder on a gateless PR-producing protocol does not surface a PR row (documents the universal contract).
+6. **`verify-approval` surfaces** — builder pending on `verify-approval` ⇒ a gate row labeled `"verify review"`.
+7. **`pr` gate never a builder/gate row** — builder with `pr` gate `pending` whose PR is missing from `pendingPRs` produces NO row at all (intersection of #2 and the dashboard-local exclusion).
+8. **Freshly-initialized project ⇒ nothing** — a builder whose `pr` gate is `status: pending` but has **no `requested_at`** is NOT treated as PR-ready (guards the `requested_at` invariant).
+9. **Unaffiliated/human PR** — open PR with no matching builder surfaces only when `reviewDecision === 'REVIEW_REQUIRED'`.
+10. **No double-emit** — PR present AND builder present ⇒ exactly one PR row.
+11. **Gateless variant ⇒ nothing** — a builder on a gateless PR-producing protocol does not surface a PR row (documents the universal contract).
+
+### Existing tests to update (enumerated)
+`packages/dashboard/__tests__/NeedsAttentionList.test.tsx` has three tests that lock in the deleted behavior and must be **inverted or removed**:
+- "still surfaces a prReady BUGFIX builder when its PR is missing from prs" (~lines 183–219) → **invert** (assert no row).
+- "still surfaces a prReady gated builder (AIR/SPIR shape) when its PR is missing" (~lines 253–275) → **invert** (assert no row).
+- "does NOT surface a prReady builder whose PR has been merged (Issue #901)" (~lines 222–251) → **remove** (the `recentlyMergedIssueIds` mechanism it exercises is deleted; covered now by "missing PR ⇒ no row").
 
 ### Non-Functional Tests
 1. **Shared-consumer regression check** — adding `verify-approval` to `GATE_LABELS` does not break the VSCode Needs Attention tree / toast / status-bar counter (build + existing tests pass).
-2. **Dead-code removal** — `recentlyMergedIssueIds` removed cleanly (type, computation, prop threading) with TypeScript build green.
+2. **Dead-code removal** — `recentlyMergedIssueIds` removed cleanly (type, computation, prop threading) with TypeScript build green; `fetchRecentMergedPRs` retained and the recentlyClosed PR-link enrichment still works.
 
 ## Dependencies
 - **External Services**: GitHub/forge PR listing (already used to build `pendingPRs`); no new calls.
@@ -202,11 +242,21 @@ Explicitly **out of scope** per the issue — the `pr` gate is the universal sig
 | Inverting the "cache-miss surfaces a row" tests masks a genuine cache-miss UX gap | Low | Low | Accept by design (issue req 1); the next refresh surfaces the PR once `pendingPRs` includes it. Document the tradeoff. |
 
 ## Expert Consultation
-**Date**: (pending)
-**Models Consulted**: Gemini, Codex, Claude (3-way, run by porch after this draft)
-**Sections Updated**: (to be filled after consultation)
+**Date**: 2026-05-29
+**Models Consulted**: Gemini (APPROVE), Codex (REQUEST_CHANGES), Claude (APPROVE) — 3-way, run by porch.
 
-Note: All consultation feedback will be incorporated directly into the relevant sections above.
+**Verdicts**: 2 APPROVE / 1 REQUEST_CHANGES. Codex's REQUEST_CHANGES asked for two ambiguities to be pinned down explicitly (shared `blocked` semantics for the `pr` gate; the `verify-approval` label string) — both now resolved in the spec. All three converged on the same design (Approach 1).
+
+**Sections Updated from consultation**:
+- **Desired State → "Scope of the no-builder-stand-in rule"** (new): resolves Codex #1 — keep `pr` in shared `GATE_LABELS`/`detectBlocked*` (VSCode bell + PR-row timestamp depend on it); enforce PR-as-PR-row only in the dashboard `buildItems`. Implemented via `if (b.prReady) continue;` (per Gemini).
+- **Desired State → "pending gate predicate" invariant** (new): the builder caught that the gate-pending check must be `requested_at`-aware — a bare `gates['pr'] === 'pending'` (as one consultation suggested) would mis-flag every freshly-initialized project, since porch starts all gates `pending` with no `requested_at`. Verified against this project's own `status.yaml`.
+- **Desired State → `verify-approval` label contract** (new): resolves Codex #2 / Claude #3 — label `"verify review"`, `gateKindClass` case, `.attention-kind--verify` CSS.
+- **Current State**: flagged `detectBlockedSince`'s separate hardcoded gate array as a distinct sync point (Gemini's "implementation trap" / Claude #1); recommend unifying on `Object.keys(GATE_LABELS)`.
+- **Current State**: documented that `fetchRecentMergedPRs`/`mergedPRs` has a *second* consumer (recentlyClosed `issueToPrUrl`), so the helper is **retained** — correcting Gemini's suggestion to delete it (builder verified against `overview.ts:971`).
+- **Test Scenarios**: dropped the conditional on the `verify-approval` test; enumerated the **three** existing `NeedsAttentionList.test.tsx` tests that need inversion/removal (Claude #5); added the freshly-initialized-project guard test.
+- **Open Questions**: the three "Important" design questions are now **resolved** with the consultation's recommendations.
+
+Note: All consultation feedback has been incorporated directly into the relevant sections above.
 
 ## Approval
 - [ ] Technical Lead Review (architect — `spec-approval` gate)
@@ -214,7 +264,7 @@ Note: All consultation feedback will be incorporated directly into the relevant 
 
 ## Notes
 
-- **Net effect is deletion**: two fallbacks (`derivePrReady` bugfix branch, `buildItems` builder-emit branch) and one data field (`recentlyMergedIssueIds`) go away; one gate (`verify-approval`) is added to the human-gate allowlist; the `pr` gate is excluded from the gate-row path. The signal everything keys on already exists — the `pr` gate.
+- **Net effect is deletion**: two fallbacks (`derivePrReady` bugfix branch, `buildItems` builder-emit branch), the `pr_ready_for_human` field *dependency*, and one data projection (`recentlyMergedIssueIds`) go away; one gate (`verify-approval`) is added to the human-gate allowlist; the `pr` gate is excluded from the *dashboard* gate-row path. The signal everything keys on already exists — the `pr` gate. `fetchRecentMergedPRs` is **retained** (second consumer: recentlyClosed PR links).
 - **Scope discipline**: no new markers (req: out of scope), no change to pre-PR gate semantics (req: out of scope), no `verified → complete` rename (belongs to #919).
 
 ---
