@@ -1,0 +1,18 @@
+id: '918'
+title: vscode-quick-pick-command-for-
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-29T23:07:43.963Z'
+updated_at: '2026-05-29T23:07:43.963Z'
