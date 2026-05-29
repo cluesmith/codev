@@ -19,6 +19,8 @@ import {
   getStatusPath,
   stripIdPrefix,
   resolveArtifactBaseName,
+  isGenuinelyVerified,
+  isStateGenuinelyVerified,
   PROJECTS_DIR,
 } from '../state.js';
 import type { ProjectState, Protocol } from '../types.js';
@@ -643,6 +645,50 @@ updated_at: "${state.updated_at}"
       expect(written.phase).toBe('specify');
       // Git operations are skipped in VITEST env — state file still exists
       expect(fs.existsSync(statusPath)).toBe(true);
+    });
+  });
+});
+
+describe('#919 genuine-verified predicate', () => {
+  describe('isGenuinelyVerified (raw values)', () => {
+    it('true when verify-approval is approved', () => {
+      expect(isGenuinelyVerified(true, false)).toBe(true);
+    });
+    it('true when a verify-skip reason is present', () => {
+      expect(isGenuinelyVerified(false, true)).toBe(true);
+    });
+    it('true when both signals are present', () => {
+      expect(isGenuinelyVerified(true, true)).toBe(true);
+    });
+    it('false when neither signal is present', () => {
+      expect(isGenuinelyVerified(false, false)).toBe(false);
+    });
+  });
+
+  describe('isStateGenuinelyVerified (ProjectState)', () => {
+    function state(overrides: Partial<ProjectState> = {}): ProjectState {
+      return {
+        id: '0001', title: 't', protocol: 'spir', phase: 'verified',
+        plan_phases: [], current_plan_phase: null, gates: {}, iteration: 1,
+        build_complete: true, history: [],
+        started_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        ...overrides,
+      };
+    }
+    it('true when verify-approval gate approved', () => {
+      expect(isStateGenuinelyVerified(state({ gates: { 'verify-approval': { status: 'approved' } } }))).toBe(true);
+    });
+    it('true when context.verify_skip_reason set', () => {
+      expect(isStateGenuinelyVerified(state({ context: { verify_skip_reason: 'r' } }))).toBe(true);
+    });
+    it('false when verify-approval merely pending', () => {
+      expect(isStateGenuinelyVerified(state({ gates: { 'verify-approval': { status: 'pending' } } }))).toBe(false);
+    });
+    it('false when only the pr gate is approved (no verify signal)', () => {
+      expect(isStateGenuinelyVerified(state({ gates: { 'pr': { status: 'approved' } } }))).toBe(false);
+    });
+    it('false when gates/context absent', () => {
+      expect(isStateGenuinelyVerified(state())).toBe(false);
     });
   });
 });

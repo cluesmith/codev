@@ -421,6 +421,9 @@ describe('porch done — verification enforcement', () => {
         'spec-approval': { status: 'approved' as const },
         'plan-approval': { status: 'approved' as const },
         'pr': { status: 'approved' as const },
+        // #919: a terminal `verified` must be genuinely earned (verify-approval
+        // passed), else readState demotes it to `complete`.
+        'verify-approval': { status: 'approved' as const },
       },
     });
     setupState(testDir, state);
@@ -448,6 +451,8 @@ describe('porch done — verification enforcement', () => {
         'spec-approval': { status: 'approved' as const },
         'plan-approval': { status: 'approved' as const },
         'pr': { status: 'approved' as const },
+        // #919: genuinely-verified so readState preserves the `verified` terminal.
+        'verify-approval': { status: 'approved' as const },
       },
     });
     setupState(testDir, state);
@@ -460,13 +465,58 @@ describe('porch done — verification enforcement', () => {
     expect(updated.phase).toBe('verified');
   });
 
-  it('readState migrates phase complete to verified (backward compat)', () => {
-    const state = makeState({ phase: 'complete' as string });
-    const statusPath = getStatusPath(testDir, '0001', 'test-feature');
-    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
-    writeState(statusPath, state);
+  // --------------------------------------------------------------------------
+  // #919: readState terminal-state normalization (split complete vs verified)
+  // --------------------------------------------------------------------------
 
-    const loaded = readState(statusPath);
-    expect(loaded.phase).toBe('verified');
+  describe('#919 readState terminal-state normalization', () => {
+    function writeAndRead(state: ProjectState): ProjectState {
+      const statusPath = getStatusPath(testDir, '0001', 'test-feature');
+      fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+      writeState(statusPath, state);
+      return readState(statusPath);
+    }
+
+    it('keeps legacy `complete` as `complete` (no universal rename)', () => {
+      const loaded = writeAndRead(makeState({ phase: 'complete' as string }));
+      expect(loaded.phase).toBe('complete');
+    });
+
+    it('keeps `verified` when the verify-approval gate is approved (genuine)', () => {
+      const loaded = writeAndRead(makeState({
+        phase: 'verified' as string,
+        gates: { 'verify-approval': { status: 'approved' as const } },
+      }));
+      expect(loaded.phase).toBe('verified');
+    });
+
+    it('keeps `verified` when a verify-skip reason is recorded (genuine)', () => {
+      const loaded = writeAndRead(makeState({
+        phase: 'verified' as string,
+        gates: {},
+        context: { verify_skip_reason: 'no runtime to verify against' },
+      }));
+      expect(loaded.phase).toBe('verified');
+    });
+
+    it('demotes spurious `verified` (no approved gate, no skip reason) to `complete`', () => {
+      const loaded = writeAndRead(makeState({
+        phase: 'verified' as string,
+        gates: { 'pr': { status: 'approved' as const } },
+      }));
+      expect(loaded.phase).toBe('complete');
+    });
+
+    it('does not write to disk during normalization (readState is pure)', () => {
+      const statusPath = getStatusPath(testDir, '0001', 'test-feature');
+      fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+      writeState(statusPath, makeState({
+        phase: 'verified' as string,
+        gates: { 'pr': { status: 'approved' as const } },
+      }));
+      const before = fs.readFileSync(statusPath, 'utf-8');
+      readState(statusPath);
+      expect(fs.readFileSync(statusPath, 'utf-8')).toBe(before);
+    });
   });
 });

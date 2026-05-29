@@ -108,6 +108,37 @@ export function getArtifactRoot(statusPath: string): string {
 }
 
 // ============================================================================
+// Terminal-state predicate (#919)
+// ============================================================================
+
+/**
+ * Single source of truth for "is this project GENUINELY verified?" (#919).
+ *
+ * A project is genuinely verified only when a human passed the post-merge
+ * `verify-approval` gate, or explicitly skipped it with a reason
+ * (`porch verify --skip <reason>`). Phase exhaustion alone does NOT make a
+ * project verified — that honest terminal state is `complete`.
+ *
+ * Takes RAW values rather than a `ProjectState` so it can be reused by readers
+ * with a different shape — notably the agent-farm overview parser, which parses
+ * status.yaml itself instead of calling `readState` (dual-reader invariant).
+ */
+export function isGenuinelyVerified(verifyApprovalApproved: boolean, hasSkipReason: boolean): boolean {
+  return verifyApprovalApproved || hasSkipReason;
+}
+
+/**
+ * Convenience wrapper computing {@link isGenuinelyVerified} from a full
+ * `ProjectState` (the inputs the predicate needs already live in status.yaml).
+ */
+export function isStateGenuinelyVerified(state: ProjectState): boolean {
+  return isGenuinelyVerified(
+    state.gates?.['verify-approval']?.status === 'approved',
+    !!state.context?.verify_skip_reason,
+  );
+}
+
+// ============================================================================
 // State Operations
 // ============================================================================
 
@@ -132,12 +163,19 @@ export function readState(statusPath: string): ProjectState {
       throw new Error('Invalid state file: missing required fields (id, protocol, phase)');
     }
 
-    // Spec 653: backward compat migration — rename 'complete' → 'verified'
-    // Universal: applies to ALL protocols, not just those with a verify phase.
-    // readState is pure — it migrates in-memory but does NOT write to disk.
-    // Callers that mutate state will commit the migrated value via writeStateAndCommit.
-    if (state.phase === 'complete') {
-      state.phase = 'verified';
+    // Terminal-state normalization (#919): split the conflated terminal state
+    // back into honest `complete` (phases exhausted) vs earned `verified`.
+    // - `complete` on disk is the honest terminal — keep it as-is (this reverses
+    //   spec 653's universal `complete` → `verified` rename).
+    // - `verified` must be EARNED: keep it only when the project genuinely passed
+    //   (or `--skip`'d) the verify-approval gate; otherwise it was spuriously
+    //   named by the pre-#919 universal terminal write and is demoted to
+    //   `complete`. This preserves 653's real merged-vs-verified-working
+    //   distinction for SPIR/ASPIR while dropping the false claim everywhere else.
+    // readState stays pure — it normalizes in-memory but does NOT write to disk.
+    // Callers that mutate state persist the corrected value via writeStateAndCommit.
+    if (state.phase === 'verified' && !isStateGenuinelyVerified(state)) {
+      state.phase = 'complete';
     }
 
     return state;

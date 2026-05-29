@@ -376,9 +376,11 @@ describe('Issue #872 — pr_ready_for_human lifecycle', () => {
   // --------------------------------------------------------------------------
   // BUGFIX: once-phase pr with gate=pr (post-#887 — same shape as AIR).
   // The original #872 set-point (`advanceProtocolPhase` terminal-exit) is now
-  // unreachable: BUGFIX no longer transitions to `verified` until after the
+  // unreachable: BUGFIX does not reach its terminal state until after the
   // gate-request → approve cycle. These tests pin the gate-request path so
   // future refactors can't silently regress the timing.
+  // #919: BUGFIX has no verify phase, so its terminal state is `complete`
+  // (not `verified`).
   // --------------------------------------------------------------------------
 
   describe('BUGFIX pr (once-phase, gate=pr — #887)', () => {
@@ -403,7 +405,7 @@ describe('Issue #872 — pr_ready_for_human lifecycle', () => {
       expect(after.gates['pr']?.requested_at).toBeTruthy();
     });
 
-    it('advances pr → verified after gate approval + done, leaving gates.pr approved', async () => {
+    it('advances pr → complete after gate approval + done, leaving gates.pr approved', async () => {
       setupProtocol(testDir, 'bugfix', bugfixProtocol);
 
       // Builder ran CMAP + porch done, architect approved the gate.
@@ -425,7 +427,10 @@ describe('Issue #872 — pr_ready_for_human lifecycle', () => {
       await done(testDir, 'bugfix-0001');
 
       const after = readStateFor(testDir, state);
-      expect(after.phase).toBe('verified');
+      // #919: BUGFIX has no verify phase, so its honest terminal state is
+      // `complete` (not `verified` — that name is reserved for projects that
+      // passed verify-approval). readState normalizes the terminal name.
+      expect(after.phase).toBe('complete');
       // The approved gate is preserved on the terminal state (no longer `{}`).
       expect(after.gates['pr']?.status).toBe('approved');
       expect(after.gates['pr']?.requested_at).toBeTruthy();
