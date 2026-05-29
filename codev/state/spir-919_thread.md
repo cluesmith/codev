@@ -40,7 +40,13 @@ Migration on load: `verified` + approved verify-approval (or skip reason) → ke
 ## Status
 - [x] Specify — spec drafted, 3-way consult unanimous APPROVE
 - [x] Porch-driven consult (specify iter1): Gemini APPROVE, Claude APPROVE, Codex COMMENT → all approved
-- [ ] spec-approval gate REQUESTED — STOPPED, awaiting human `porch approve 919 spec-approval`
+- [x] spec-approval gate APPROVED by human (2026-05-29). Architect: centralize behind one predicate,
+      audit every comparison site, don't patch piecemeal.
+- [x] Plan — 4 phases. Porch consult: Gemini/Claude APPROVE, Codex REQUEST_CHANGES (Phase 3 not
+      independent of Phase 2; Phase 4 read-site test ownership underspecified). Both accepted & fixed;
+      rebuttal written. Plan: (1) predicate+migration, (2) terminal writes+CLI strings, (3) rollback
+      clearing [now deps on P2], (4) overview parser+derivePrReady+read-site audit+docs.
+- [ ] plan-approval gate REQUESTED — STOPPED, awaiting human `porch approve 919 plan-approval`
 - [ ] Plan
 - [ ] Implement
 - [ ] Review
