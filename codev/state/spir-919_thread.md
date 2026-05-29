@@ -66,7 +66,18 @@ Migration on load: `verified` + approved verify-approval (or skip reason) → ke
 - [x] Re-consult plan: iter2 Gemini/Claude APPROVE, Codex REQUEST_CHANGES (status.ts test-backed;
       Phase 2 verify-capable-complete criterion) → fixed. iter3 Codex COMMENT (exec-summary contradiction;
       builder-helpers test home) → fixed (builder-helpers ALREADY covered in vscode builders.test.ts).
-- [ ] amended plan committed; awaiting human RE-APPROVAL. Do NOT implement/advance.
+- [x] plan-approval RE-APPROVED by human; force-with-lease pushed rebased+amended history to origin (in sync).
+- [~] IMPLEMENT Phase 1 (predicate_and_migration) DONE:
+      - state.ts: added isGenuinelyVerified(verifyApprovalApproved, hasSkipReason) + isStateGenuinelyVerified(state).
+      - readState: dropped universal complete→verified; now demotes spurious verified→complete (keeps
+        genuine verified + legacy complete). Pure/in-memory.
+      - Tests: state.test.ts predicate truth-table + done-verification.test.ts #919 normalization suite
+        (4 cases + purity); updated #903 fixtures to be genuinely-verified; pr-ready-872 BUGFIX terminal
+        now expects 'complete' (was 'verified').
+      - Worktree had NO node_modules — ran pnpm install; built core + codev (tsc) + copy-skeleton.
+        Full non-e2e suite GREEN: 151 files, 3205 passed, 13 skipped, 0 fail. (All earlier failures were
+        build-order/skeleton-missing, not the change.)
+- [ ] porch done Phase 1 → consult → next phase.
 - [ ] Plan
 - [ ] Implement
 - [ ] Review
