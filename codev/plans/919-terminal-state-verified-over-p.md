@@ -176,7 +176,12 @@ Revert the phase commit; write sites revert to prior hard-coded behavior (predic
 ---
 
 ### Phase 3: Rollback clears stale verify metadata
-**Dependencies**: Phase 1 (the predicate makes stale metadata hazardous)
+**Dependencies**: Phase 1 (the predicate) **and** Phase 2 (the predicate-derived terminal write)
+
+> Note: Phase 3's metadata-clearing deliverable is testable on its own, but its end-to-end acceptance
+> case ("rollback → re-run to terminal → lands in `complete`") only holds once Phase 2's gate-derived
+> terminal write is in place (today the terminal write is still hard-coded `verified`). Phase 3
+> therefore sequences after Phase 2.
 
 #### Objectives
 - Ensure `porch rollback` past the `verify` phase / terminal state cannot leave behind a
@@ -263,13 +268,25 @@ Revert the phase commit; rollback reverts to clearing only downstream gates (pre
 - [ ] No doc claims a non-verify protocol ends in `verified`.
 
 #### Test Plan
-- **Unit Tests** (`agent-farm/__tests__/overview.test.ts`): parser demotion for the four cases;
-  `derivePrReady` updated cases (BUGFIX `complete` → true; SPIR `verified` → false; explicit
-  `pr_ready_for_human` precedence).
-- **Update existing**: `overview.test.ts` cases that asserted BUGFIX `phase=verified` fallback;
-  `workspace-recover.test.ts` terminal-phase cases (add `complete`).
+Explicit test ownership per audited read site (the spec requires *all* read sites verified by tests, not
+just the two that change):
+- **`overview.ts` parser** (`agent-farm/__tests__/overview.test.ts`): parser demotion for the four
+  cases.
+- **`derivePrReady`** (`overview.test.ts`): updated cases — BUGFIX `complete` → true; SPIR/ASPIR
+  `verified` → false; explicit `pr_ready_for_human` precedence over fallback.
+- **Progress paths** (`overview.test.ts`): `:373` SPIR progress and `:386` `calculateEvenProgress` →
+  100% for both `complete` and `verified`.
+- **`workspace-recover.ts`** (`agent-farm/__tests__/workspace-recover.test.ts`): terminal-phase
+  skip for both `complete` and `verified` (add the `complete` case).
+- **`next.ts` terminal short-circuit** (`porch/__tests__/`): a `complete` project and a `verified`
+  project both hit the "already done" path (no re-drive) — own this test here in Phase 4 even though the
+  short-circuit also exercises Phase 2 logic.
+- **`builder-helpers.ts` idle-waiting** (`core` tests, e.g. `packages/core/src/__tests__/` or the
+  existing builder-helpers test): `isIdleWaiting`/equivalent returns false for both terminal names.
+- **`status.ts` display color**: covered by an assertion if a status-display test exists; otherwise note
+  it is a pure display branch already handling both names (no behavior change) and rely on the audit.
 - **Cross-reader test**: same fixture file through `readState` and `parseStatusYaml` → identical
-  terminal name (spec test scenario 11).
+  terminal name, for each of the four cases (spec test scenario 11).
 
 #### Rollback Strategy
 Revert the phase commit; overview reverts to prior parsing/derivation.
@@ -283,12 +300,11 @@ Revert the phase commit; overview reverts to prior parsing/derivation.
 ## Dependency Map
 ```
 Phase 1 (predicate + migration)
-   ├──→ Phase 2 (terminal writes + CLI strings)
-   ├──→ Phase 3 (rollback clearing)
+   ├──→ Phase 2 (terminal writes + CLI strings) ──→ Phase 3 (rollback clearing)
    └──→ Phase 4 (overview parser + derivePrReady + audit + docs)
 ```
-Phases 2, 3, 4 are mutually independent and could land in any order after Phase 1; they will be
-committed in numeric order for a clean history.
+Phase 3 sequences after Phase 2 (its end-to-end re-completion assertion needs the gate-derived terminal
+write). Phase 4 depends only on Phase 1 and is independent of Phases 2–3. Phases commit in numeric order.
 
 ## Risk Analysis
 ### Technical Risks
@@ -312,11 +328,18 @@ committed in numeric order for a clean history.
 - [ ] Spec/plan final-status frontmatter (Review phase).
 
 ## Expert Review
-**Date**: 2026-05-29 (to be run by porch after PLAN_DRAFTED)
-**Model**: Gemini, Codex, Claude (porch-driven)
-**Key Feedback**: (to be incorporated)
+**Date**: 2026-05-29 (porch-driven, plan iter1)
+**Model**: Gemini (APPROVE), Claude (APPROVE), Codex (REQUEST_CHANGES → addressed)
+**Key Feedback**:
+- Codex: Phase 3 was not truly independent of Phase 2 — its re-completion assertion needs Phase 2's
+  gate-derived terminal write. Resolved: Phase 3 now depends on Phase 2; dependency map updated.
+- Codex: Phase 4's "audit all read sites" lacked per-site test ownership. Resolved: Phase 4 test plan
+  now names explicit tests for `next.ts` short-circuit, `builder-helpers.ts` idle-waiting, both progress
+  paths, and `status.ts`, in addition to overview/workspace-recover.
+- Gemini & Claude: APPROVE, no changes requested.
 
-**Plan Adjustments**: (to be filled after consultation)
+**Plan Adjustments**: Phase 3 dependency tightened; Phase 4 test plan expanded to explicit per-site
+ownership.
 
 ## Approval
 - [ ] Technical Lead Review
