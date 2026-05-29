@@ -15,11 +15,13 @@ shared predicate** so write-time and read-time decisions cannot drift.
 
 The architect's directive frames the phase ordering: **centralize first, then audit every comparison
 site**. Phase 1 lands the predicate + the load-time migration (the foundation everything else imports).
-Phases 2–4 each depend only on Phase 1 and are independent of one another:
+Phases 2–4 all depend on Phase 1; **Phase 3 additionally depends on Phase 2** (its end-to-end
+re-completion assertion needs the gate-derived terminal write). Phase 4 is independent of Phases 2–3.
+The authoritative ordering is the Dependency Map below; phases commit in numeric order.
 - Phase 2 — porch *write* sites derive the terminal name from the predicate (incl. the user-facing
-  "(verified)" string).
+  "(verified)" string and the terminal re-derivation of `pr_ready_for_human`).
 - Phase 3 — `porch rollback` clears stale verify metadata so a re-completed project isn't falsely
-  re-promoted.
+  re-promoted (depends on Phase 2).
 - Phase 4 — the second status reader (overview `parseStatusYaml`) + `derivePrReady` + an audit of every
   remaining terminal-comparison read site, plus the doc sweep.
 
@@ -311,7 +313,11 @@ Revert the phase commit; rollback reverts to clearing only downstream gates (pre
     both, but is module-private with no existing test. **Export `getStatusColor`** and add a focused
     unit test asserting both `verified` and `complete` return green (satisfies the spec's "all read
     sites verified by tests" requirement rather than audit-only).
-  - `core/src/builder-helpers.ts:32` idle-waiting check (already handles both — audit + test).
+  - `core/src/builder-helpers.ts:32` `isIdleWaiting` idle-waiting check — already handles both names
+    **and is already test-backed**: `packages/vscode/src/test/builders.test.ts` (the `isIdleWaiting`
+    suite) already asserts `false when phase is complete` and `false when phase is verified`. No code
+    change and no new test needed (audit-confirmed + covered). `packages/core` itself has no test
+    harness, which is why coverage lives in the vscode package that consumes the helper.
 - [ ] Docs sweep: update any CLI/protocol/resource docs stating a non-verify protocol ends in
       `verified`. (arch.md / lessons-learned.md updates are handled in the Review phase via the
       `update-arch-docs` skill, not here.)
@@ -346,8 +352,9 @@ just the two that change):
 - **`next.ts` terminal short-circuit** (`porch/__tests__/`): a `complete` project and a `verified`
   project both hit the "already done" path (no re-drive) — own this test here in Phase 4 even though the
   short-circuit also exercises Phase 2 logic.
-- **`builder-helpers.ts` idle-waiting** (`core` tests, e.g. `packages/core/src/__tests__/` or the
-  existing builder-helpers test): `isIdleWaiting`/equivalent returns false for both terminal names.
+- **`builder-helpers.ts` idle-waiting**: **already covered** — `packages/vscode/src/test/builders.test.ts`
+  `isIdleWaiting` suite asserts both `complete` and `verified` → false. No new test required (the helper
+  is unchanged by this work). Listed here for audit completeness.
 - **`status.ts` display color** (`agent-farm/__tests__/`): export `getStatusColor` and unit-test that
   both `verified` and `complete` map to green (no existing status test in-tree, so this adds one).
 - **Cross-reader test**: same fixture file through `readState` and `parseStatusYaml` → identical
@@ -405,6 +412,17 @@ write). Phase 4 depends only on Phase 1 and is independent of Phases 2–3. Phas
 
 **Plan Adjustments**: Phase 3 dependency tightened; Phase 4 test plan expanded to explicit per-site
 ownership.
+
+**Post-amendment re-consult (plan iter2/iter3, after architect req. 8)**:
+- iter2: Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES — (a) `status.ts` left audit-only;
+  (b) tighten Phase 2 acceptance for the verify-capable terminal-`complete` case. Both fixed: export
+  `getStatusColor` + unit test it; added the SPIR/ASPIR terminal-`complete` acceptance criterion + the
+  `pr_ready_for_human` re-derivation criterion.
+- iter3: Codex COMMENT (non-blocking) — (a) Executive Summary contradicted the Dependency Map on phase
+  independence; (b) `builder-helpers.ts` test home vague given `packages/core` has no harness. Both
+  fixed: Executive Summary now states Phase 3 depends on Phase 2 and defers to the Dependency Map;
+  builder-helpers confirmed already test-backed in `packages/vscode/src/test/builders.test.ts` (both
+  terminal names), so no new test/harness needed.
 
 ## Approval
 - [ ] Technical Lead Review

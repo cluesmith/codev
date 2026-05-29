@@ -57,7 +57,16 @@ Migration on load: `verified` + approved verify-approval (or skip reason) → ke
         gate-clear loop 833-838, progress 380-393, status.ts 241-243, parseStatusYaml 201-323.
       - rollback: gate loop already resets verify-approval gate; the gap is clearing context.verify_skip_reason.
       - new tests in scope: pr-ready-872.test.ts, done-verification.test.ts #903 idempotency companion.
-- [ ] plan corrected & committed; awaiting human RE-APPROVAL of corrected plan. Do NOT implement/advance.
+- [x] plan corrected & committed (rebase pass).
+- [x] ARCHITECT SPEC AMENDMENT (req 8): second instance #1895 reframed root cause → terminal write must
+      RE-DERIVE pr_ready_for_human (don't trust rollback's stale false). Added spec req 8, out-of-scope
+      (no write-time merge detection), success criterion, test scenario 13, risk rows. Phase 2 deliverable
+      + #1895 regression test added. Rule: pr-gate-approved→false; else PR-created→true; #902 suppresses
+      post-merge.
+- [x] Re-consult plan: iter2 Gemini/Claude APPROVE, Codex REQUEST_CHANGES (status.ts test-backed;
+      Phase 2 verify-capable-complete criterion) → fixed. iter3 Codex COMMENT (exec-summary contradiction;
+      builder-helpers test home) → fixed (builder-helpers ALREADY covered in vscode builders.test.ts).
+- [ ] amended plan committed; awaiting human RE-APPROVAL. Do NOT implement/advance.
 - [ ] Plan
 - [ ] Implement
 - [ ] Review
