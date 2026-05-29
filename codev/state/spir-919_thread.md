@@ -46,7 +46,18 @@ Migration on load: `verified` + approved verify-approval (or skip reason) → ke
       independent of Phase 2; Phase 4 read-site test ownership underspecified). Both accepted & fixed;
       rebuttal written. Plan: (1) predicate+migration, (2) terminal writes+CLI strings, (3) rollback
       clearing [now deps on P2], (4) overview parser+derivePrReady+read-site audit+docs.
-- [ ] plan-approval gate REQUESTED — STOPPED, awaiting human `porch approve 919 plan-approval`
+- [~] plan-approval gate was requested, but architect found branch 259 commits STALE before approving.
+- [x] REBASED onto origin/main (merge-base now #923), clean (only my 5 doc commits, no code).
+- [x] Re-verified blast radius against rebased base. New/changed sites:
+      - `done()` #903 idempotency early-exit `index.ts:368-373` (keyed on 'verified') → must accept
+        'complete' too. Added to Phase 2.
+      - `derivePrReady` now at `overview.ts:493-501`, fallback at `:499`. #902's recentlyMergedIssueIds
+        is SEPARATE (getOverview ~1011-1023, in OverviewData) — my change layers on top, doesn't touch it.
+      - corrected line nums: advanceProtocolPhase 530-532, verify --skip 1196, rollback guard 821,
+        gate-clear loop 833-838, progress 380-393, status.ts 241-243, parseStatusYaml 201-323.
+      - rollback: gate loop already resets verify-approval gate; the gap is clearing context.verify_skip_reason.
+      - new tests in scope: pr-ready-872.test.ts, done-verification.test.ts #903 idempotency companion.
+- [ ] plan corrected & committed; awaiting human RE-APPROVAL of corrected plan. Do NOT implement/advance.
 - [ ] Plan
 - [ ] Implement
 - [ ] Review

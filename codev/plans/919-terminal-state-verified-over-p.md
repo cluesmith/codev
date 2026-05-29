@@ -27,6 +27,21 @@ This is a behavior-preserving refactor for every already-`complete`/already-genu
 project; the only intended behavior *changes* are: (a) non-verify protocols now terminate at `complete`,
 and (b) spuriously-named `verified` files are demoted to `complete` on load.
 
+### Base verification (post-rebase, 2026-05-29)
+This branch was rebased onto `origin/main` (merge-base now #923) before planning the implementation.
+**All line numbers below were re-verified against the rebased tree.** The rebase surfaced two sites that
+did not exist on the original (stale) base and are now incorporated:
+- **`done()` idempotency early-exit (#903)** at `index.ts:368-373`, keyed on `state.phase === 'verified'`
+  — a new terminal-recognition site that must also accept `complete` (else re-running `porch done` on a
+  `complete` project would no longer be a silent no-op). Folded into **Phase 2**.
+- **`derivePrReady` + #902's `recentlyMergedIssueIds`**: `derivePrReady` (`overview.ts:493-501`) does
+  **not** itself reference `recentlyMergedIssueIds`; #902 computes that separately in `getOverview`
+  (~`overview.ts:1011-1023`) and returns it in `OverviewData` for frontend suppression. The Phase 4
+  one-line fallback change (`verified` → `complete` at `overview.ts:499`) therefore **layers on top of
+  #902 and must not touch the `recentlyMergedIssueIds` machinery.** Folded into **Phase 4**.
+New test files on the rebased base also in scope: `pr-ready-872.test.ts` (Phase 4) and the `#903`
+idempotency test in `done-verification.test.ts` (Phase 2).
+
 ## Success Metrics
 - [ ] All spec success criteria met (terminal-write split, four-case migration, dual-reader agreement,
       `derivePrReady`, rollback clearing, honest user-facing strings, read-site terminality).
@@ -98,8 +113,9 @@ and (b) spuriously-named `verified` files are demoted to `complete` on load.
 #### Test Plan
 - **Unit Tests** (`packages/codev/src/commands/porch/__tests__/`): the four migration cases above; a
   direct unit test of `isGenuinelyVerified` truth table.
-- **Update existing**: `done-verification.test.ts` currently asserts `readState migrates phase complete
-  to verified` — rewrite to assert `complete` stays `complete`, plus add the demotion case.
+- **Update existing**: `done-verification.test.ts:463` (`readState migrates phase complete to verified
+  (backward compat)`) — rewrite to assert `complete` stays `complete`, plus add the spurious-`verified`
+  demotion case and the genuine-`verified` preservation cases.
 - **Integration**: round-trip a `verified`-no-gate file through `readState` and confirm `complete`.
 
 #### Rollback Strategy
@@ -120,23 +136,28 @@ Revert the phase commit; the predicate is additive and the migration change is l
   not by hard-coding `verified` on phase exhaustion.
 - The user-facing completion summary reflects the actual terminal state.
 
-#### Deliverables
-- [ ] `advanceProtocolPhase` (`index.ts:519-529`): when `getNextPhase` returns nothing, set the
+#### Deliverables (line numbers verified against rebased base)
+- [ ] `advanceProtocolPhase` (`index.ts:530-532`): when `getNextPhase` returns nothing, set the
       terminal phase from the predicate over `state` (so the verify-approval approval path → `verified`;
       generic exhaustion → `complete`). Update the "PROTOCOL COMPLETE" log to match.
-- [ ] `next.ts:340-348` and `next.ts:774-777`: replace hard-coded `state.phase = 'verified'` with the
+- [ ] `next.ts:348` and `next.ts:777`: replace hard-coded `state.phase = 'verified'` with the
       predicate-derived terminal name.
-- [ ] `next.ts:246-282` completion summary: emit the "(verified)" qualifier based on the actual
-      terminal phase (`state.phase === 'verified'`) rather than `hasVerifyPhase`. A merged-but-unverified
-      SPIR/ASPIR project (terminal `complete`) must still hit the merge-task branch correctly — confirm
-      the `hasVerifyPhase` branching for the *merge task* still does the right thing (merge already
-      happened for verify-capable protocols only when verify ran; re-examine and adjust so a `complete`
-      SPIR/ASPIR does not skip a needed merge task or double-merge). Document the resolved logic in the
+- [ ] `next.ts:249-282` completion summary: emit the "(verified)" qualifier (line 258) based on the
+      actual terminal phase (`state.phase === 'verified'`) rather than `hasVerifyPhase` (line 252). A
+      merged-but-unverified SPIR/ASPIR project (terminal `complete`) must still hit the merge-task branch
+      correctly — re-examine the `hasVerifyPhase` branching for the *merge task* so a `complete`
+      SPIR/ASPIR does not skip a needed merge task or double-merge. Document the resolved logic in the
       phase commit.
-- [ ] `porch verify --skip` (`index.ts:1188`): continue to land `verified`; route it through the same
-      terminal-write helper after setting `verify_skip_reason` (so there is one write path), or leave the
-      explicit `verified` write but add a comment that the predicate would agree. Prefer routing through
-      the helper.
+- [ ] **NEW (post-rebase) — `done()` idempotency early-exit (`index.ts:368-373`, #903)**: currently
+      `if (state.phase === 'verified')` → silent no-op. Change to also recognize `complete` (e.g.
+      `if (state.phase === 'verified' || state.phase === 'complete')`) so re-running `porch done` on a
+      terminal `complete` project stays a no-op. Update the log wording to not assert "verified" for a
+      `complete` project.
+- [ ] `porch verify --skip` (`index.ts:1196-1197`): continue to land `verified`; route it through the
+      same terminal-write helper after setting `verify_skip_reason` (so there is one write path), or
+      leave the explicit `verified` write with a comment that the predicate would agree. Prefer routing
+      through the helper.
+- [ ] Status glyph (`index.ts:200-201`) already handles both names — audit only, no change expected.
 - [ ] Tests.
 
 #### Implementation Details
@@ -162,7 +183,10 @@ Revert the phase commit; the predicate is additive and the migration change is l
 - **Unit/Integration** (porch `__tests__`): drive a fake protocol with no verify phase to terminal →
   assert `complete`; drive verify-approval approval → assert `verified`; assert summary string for both;
   assert merge task still emitted where expected.
-- **Update existing**: any test asserting terminal `verified` for a non-verify protocol.
+- **`done()` idempotency** (`done-verification.test.ts:416`, the #903 test `is a no-op when state.phase
+  is already verified`): add a companion test asserting the same no-op for `state.phase === 'complete'`.
+- **Update existing**: `next.test.ts` completion assertions and any test asserting terminal `verified`
+  for a non-verify protocol.
 
 #### Rollback Strategy
 Revert the phase commit; write sites revert to prior hard-coded behavior (predicate from Phase 1 stays).
@@ -187,21 +211,26 @@ Revert the phase commit; write sites revert to prior hard-coded behavior (predic
 - Ensure `porch rollback` past the `verify` phase / terminal state cannot leave behind a
   verify-approval approval or `verify_skip_reason` that would falsely re-promote a re-completed project.
 
-#### Deliverables
-- [ ] In `rollback()` (`index.ts`, around the existing downstream-gate-clearing logic ~`:813`+): when the
-      rollback target is at or before the `verify` phase (or rewinding from a terminal state), reset
-      `gates['verify-approval']` to `{ status: 'pending' }` (drop `approved_at`/`requested_at`) **and**
-      delete `context.verify_skip_reason`.
-- [ ] Confirm the existing rollback guard that treats `verified`/`complete` as terminal still functions
-      (now both names may appear).
+#### Deliverables (line numbers verified against rebased base)
+- [ ] In `rollback()` (`index.ts`): the existing "Clear gates at or after the target phase" loop
+      (~`index.ts:833-838`) **already** resets `gates['verify-approval']` to `{ status: 'pending' }` when
+      the `verify` phase index is `>= targetIndex`. The gap is `context.verify_skip_reason`, which is
+      **not** cleared. Add: when `verify` is at/after `targetIndex` (i.e. being rewound past), delete
+      `state.context.verify_skip_reason`. Implement alongside the gate-clearing loop so the two stay
+      together.
+- [ ] Confirm the rollback terminal guard (`index.ts:821`, `state.phase === 'verified' || === 'complete'`)
+      still functions now that both names can appear as the pre-rollback phase. (Already handles both —
+      audit; note `rollback` from a `complete` terminal must compute `targetIndex` correctly since
+      `complete`/`verified` are not in `protocol.phases`.)
 - [ ] Tests.
 
 #### Implementation Details
 - Files:
   - `packages/codev/src/commands/porch/index.ts`
-- Reuse the protocol's phase list to determine whether `verify` is downstream of the rollback target
-  (consistent with how downstream gates are already cleared). Only clear the skip reason when `verify`
-  is actually being rewound past, to avoid clobbering it on unrelated rollbacks.
+- Determine "is `verify` downstream of target" via `protocol.phases.findIndex(p => p.id === 'verify') >= targetIndex`
+  (mirrors the gate-clearing loop). Only clear the skip reason in that case, to avoid clobbering it on
+  unrelated rollbacks. Guard for protocols that have no `verify` phase (`findIndex` returns -1 → never
+  clear, which is correct since they can't have a skip reason).
 
 #### Acceptance Criteria
 - [ ] A verify-skipped project rolled back to an earlier phase has `verify_skip_reason` cleared and
@@ -234,21 +263,28 @@ Revert the phase commit; rollback reverts to clearing only downstream gates (pre
   `verified` are treated as terminal.
 - Sweep docs that assert a non-verify protocol ends in `verified`.
 
-#### Deliverables
-- [ ] `parseStatusYaml` (`overview.ts`): detect presence of `context.verify_skip_reason` (boolean; the
-      line parser only needs presence, not full deserialization) and the `verify-approval` gate status
-      it already parses; apply the same demotion as `readState` using the shared predicate — so a parsed
-      legacy spurious-`verified` file becomes `complete` in the parsed shape.
-- [ ] `derivePrReady` (`overview.ts:486-494`): change the BUGFIX fallback to
-      `parsed.protocol === 'bugfix' && parsed.phase === 'complete'` (legacy BUGFIX files are now parsed
-      as `complete`); genuinely-`verified` SPIR/ASPIR remain excluded (fail the `bugfix` guard).
-      Preserve the `pr_ready_for_human`-authoritative precedence.
+#### Deliverables (line numbers verified against rebased base)
+- [ ] `parseStatusYaml` (`overview.ts:201-323`): currently parses `phase` (`:232`), `pr_ready_for_human`
+      (`:241`), and the `gates` block (`:268-293`) but **not** `context`. Add detection of the *presence*
+      of `context.verify_skip_reason` (boolean; the line parser needs presence only, not full
+      deserialization) and apply the same demotion as `readState` using the shared predicate — so a
+      parsed legacy spurious-`verified` file becomes `complete` in the parsed shape.
+- [ ] `derivePrReady` (`overview.ts:493-501`): change the BUGFIX fallback at **`:499`** from
+      `parsed.phase === 'verified'` to `parsed.phase === 'complete'` (legacy BUGFIX files are now parsed
+      as `complete`); genuinely-`verified` SPIR/ASPIR remain excluded (fail the `bugfix` guard). Preserve
+      the `pr_ready_for_human`-authoritative precedence (`:494`). **Do NOT touch #902's
+      `recentlyMergedIssueIds`** — it is computed in `getOverview` (~`:1011-1023`) and returned in
+      `OverviewData`, entirely separate from `derivePrReady`; this change layers on top of it. Update the
+      `derivePrReady` doc-comment (`:476-491`) and the `BuilderOverview` comment (`:100`) which still say
+      BUGFIX terminal is `verified`.
 - [ ] Audit and confirm these treat both terminal names correctly (fix only if a gap is found):
-  - `overview.ts:373` (SPIR progress) and `:386` (`calculateEvenProgress`) → 100% for both.
-  - `index.ts:200-201` status glyph; `next.ts:249` "already done" short-circuit.
-  - `agent-farm/commands/workspace-recover.ts:19` `TERMINAL_PHASES` set.
-  - `agent-farm/commands/status.ts` display color.
-  - `core/src/builder-helpers.ts:32` idle-waiting check.
+  - `overview.ts:380-382` (`calculateSpirProgress`) and `:393` (`calculateEvenProgress`) → 100% for both
+    (already handle both — audit).
+  - `index.ts:200-201` status glyph (handled in Phase 2 audit); `next.ts:249` "already done"
+    short-circuit (already handles both — audit + test here).
+  - `agent-farm/commands/workspace-recover.ts:19` `TERMINAL_PHASES` set + `:109` check (already both).
+  - `agent-farm/commands/status.ts:241-243` display color (already handles both — audit).
+  - `core/src/builder-helpers.ts:32` idle-waiting check (already handles both — audit + test).
 - [ ] Docs sweep: update any CLI/protocol/resource docs stating a non-verify protocol ends in
       `verified`. (arch.md / lessons-learned.md updates are handled in the Review phase via the
       `update-arch-docs` skill, not here.)
@@ -272,8 +308,10 @@ Explicit test ownership per audited read site (the spec requires *all* read site
 just the two that change):
 - **`overview.ts` parser** (`agent-farm/__tests__/overview.test.ts`): parser demotion for the four
   cases.
-- **`derivePrReady`** (`overview.test.ts`): updated cases — BUGFIX `complete` → true; SPIR/ASPIR
-  `verified` → false; explicit `pr_ready_for_human` precedence over fallback.
+- **`derivePrReady`** (`overview.test.ts` **and** `porch/__tests__/pr-ready-872.test.ts`): updated
+  cases — BUGFIX `complete` → true; SPIR/ASPIR `verified` → false; explicit `pr_ready_for_human`
+  precedence over fallback. `pr-ready-872.test.ts` already asserts the BUGFIX terminal behavior and must
+  be updated for the `verified` → `complete` rename.
 - **Progress paths** (`overview.test.ts`): `:373` SPIR progress and `:386` `calculateEvenProgress` →
   100% for both `complete` and `verified`.
 - **`workspace-recover.ts`** (`agent-farm/__tests__/workspace-recover.test.ts`): terminal-phase
@@ -349,6 +387,8 @@ ownership.
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-05-29 | Initial plan | Spec approved | builder spir-919 |
+| 2026-05-29 | Plan iter1 review fixes (Phase 3 dep on Phase 2; explicit read-site test ownership) | Codex REQUEST_CHANGES | builder spir-919 |
+| 2026-05-29 | **Rebase onto origin/main (#923); re-verified all line numbers; added `done()` #903 early-exit (Phase 2) and #902 `recentlyMergedIssueIds` layering note (Phase 4)** | Architect: branch was 259 commits stale | builder spir-919 |
 
 ## Notes
 The architect's two standing directives are encoded structurally: **(1) centralize** — Phase 1 lands the
