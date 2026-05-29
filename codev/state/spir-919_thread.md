@@ -39,7 +39,8 @@ Migration on load: `verified` + approved verify-approval (or skip reason) → ke
 
 ## Status
 - [x] Specify — spec drafted, 3-way consult unanimous APPROVE
-- [ ] spec-approval gate (awaiting human)
+- [x] Porch-driven consult (specify iter1): Gemini APPROVE, Claude APPROVE, Codex COMMENT → all approved
+- [ ] spec-approval gate REQUESTED — STOPPED, awaiting human `porch approve 919 spec-approval`
 - [ ] Plan
 - [ ] Implement
 - [ ] Review
