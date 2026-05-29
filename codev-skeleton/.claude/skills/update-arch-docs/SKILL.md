@@ -1,6 +1,6 @@
 ---
 name: update-arch-docs
-description: Audit, prune, and update the project's architecture documentation — `codev/resources/arch.md` and `codev/resources/lessons-learned.md`. Use this skill when running MAINTAIN's arch-doc step, or when asked to update / audit / prune `codev/resources/arch.md` or `codev/resources/lessons-learned.md`. The skill is opinionated about what NOT to include in these files (per-spec changelogs, exhaustive enumerations, aspirational state, duplicate meta-spec content) and ships two operating modes: diff-mode (apply a specific change) and audit-mode (propose cuts with reasons). It edits files directly via normal file-edit tooling and does not invoke destructive shell commands.
+description: "Audit, prune, and update the project's architecture documentation — `codev/resources/arch.md` and `codev/resources/lessons-learned.md`. Use this skill when running MAINTAIN's arch-doc step, or when asked to update / audit / prune `codev/resources/arch.md` or `codev/resources/lessons-learned.md`. The skill is opinionated about what NOT to include in these files (per-spec changelogs, exhaustive enumerations, aspirational state, duplicate meta-spec content) and ships two operating modes: diff-mode (apply a specific change) and audit-mode (propose cuts with reasons). It edits files directly via normal file-edit tooling and does not invoke destructive shell commands."
 ---
 
 # update-arch-docs
