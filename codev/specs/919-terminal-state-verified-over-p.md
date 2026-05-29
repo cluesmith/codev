@@ -37,7 +37,9 @@ Spec 653 renamed the terminal project state `complete → verified` **universall
 just those with a verify phase"). But 653 only added the `verify` phase and `verify-approval` gate to
 **SPIR and ASPIR**.
 
-The consequence: every protocol *without* a verify phase — **BUGFIX, AIR, MAINTAIN, EXPERIMENT** —
+The consequence: every protocol *without* a verify phase — **BUGFIX, AIR, PIR, MAINTAIN, EXPERIMENT**
+(only SPIR and ASPIR define a `verify` phase + `verify-approval` gate; PIR's phases are
+`plan/implement/review` with gates `plan-approval, dev-approval, pr` and no verify) —
 reaches a terminal state literally named `verified` without any verification ever occurring. The name
 asserts "a human verified this works in the environment"; for those protocols it only means "porch
 exhausted the phase graph." The terminal state lies.
@@ -74,6 +76,10 @@ Terminal state is *written* as `'verified'` at every phase-exhaustion site, rega
 - `packages/codev/src/commands/porch/index.ts:523` (`advanceProtocolPhase`, when `getNextPhase`
   returns nothing) and `:1188` (`porch verify --skip`)
 
+A user-facing string also leaks the conflation: `next.ts:258` appends "(verified)" to the completion
+summary whenever the protocol defines a verify phase (`hasVerifyPhase`), regardless of whether
+verify-approval actually passed.
+
 `advanceProtocolPhase` is **shared** between two callers: the `verify-approval` gate approval path
 (`index.ts:775`, genuine verification) and generic phase advancement (spurious). Both currently produce
 `verified`.
@@ -106,7 +112,7 @@ On-disk reality after 653:
 Two distinct, honest terminal states:
 
 - **`complete`** — phases exhausted. Makes **no** verification claim. The terminal state for BUGFIX,
-  AIR, MAINTAIN, EXPERIMENT, and for SPIR/ASPIR projects that have not (yet) passed verify-approval.
+  AIR, PIR, MAINTAIN, EXPERIMENT, and for SPIR/ASPIR projects that have not (yet) passed verify-approval.
 - **`verified`** — the project passed the `verify-approval` gate (approved) **or** was explicitly
   skipped with a reason (`porch verify --skip <reason>`). A genuine claim that a human verified the
   feature in the environment. Reachable only by SPIR/ASPIR (the only protocols with a verify phase).
@@ -142,6 +148,13 @@ Two distinct, honest terminal states:
    must continue to treat **both** as terminal (workspace-recover, idle-waiting, both progress paths,
    status glyph, rollback guard, the `next` "already done" short-circuit). Splitting the name must not
    cause a `complete` project to be re-driven, re-progressed, or mis-glyphed.
+
+   **User-facing terminal messages must reflect the actual terminal state, not the protocol shape.**
+   `next.ts`'s completion summary currently appends "(verified)" whenever the protocol *has* a verify
+   phase (`hasVerifyPhase`), regardless of whether verify-approval actually passed — so a merged-but-
+   unverified SPIR/ASPIR project (terminal `complete`) would still print "(verified)". The qualifier
+   must instead be driven by the genuine-verified predicate / the actual terminal phase. Any other
+   hardcoded "verified" CLI string in a terminal path must likewise reflect the real state.
 
 5. **`derivePrReady` disambiguates correctly.** The BUGFIX "PR ready" fallback must continue to surface
    in-flight BUGFIX builders that pre-date the explicit `pr_ready_for_human` field. Because the overview
@@ -202,8 +215,11 @@ Two distinct, honest terminal states:
 - [ ] `porch rollback` past the `verify` phase / terminal state resets the `verify-approval` gate to
       `pending` and clears `context.verify_skip_reason`, so a re-completed project is not falsely
       re-promoted to `verified` — verified by a test.
-- [ ] A BUGFIX/AIR/MAINTAIN/EXPERIMENT project run to completion ends in `complete` (new), and a
+- [ ] A BUGFIX/AIR/PIR/MAINTAIN/EXPERIMENT project run to completion ends in `complete` (new), and a
       SPIR/ASPIR project that passes verify-approval ends in `verified` — verified by tests.
+- [ ] User-facing terminal messages reflect the actual terminal state: the `next.ts` completion summary
+      emits the "(verified)" qualifier only when the project is genuinely `verified`, not merely because
+      the protocol defines a verify phase — verified by a test.
 - [ ] Migration is covered by tests for all four on-disk cases (legacy `complete`, genuine `verified`,
       spurious `verified`, verify-skipped `verified`).
 - [ ] No reduction in overall test coverage; all existing tests pass (updated where they asserted the
@@ -365,7 +381,16 @@ batch migration, then drop the load-time migration entirely.
 
 ## Expert Consultation
 **Date**: 2026-05-29
-**Models Consulted**: Gemini (APPROVE), Claude (APPROVE), Codex (REQUEST_CHANGES → addressed)
+**Models Consulted**: Gemini (APPROVE), Claude (APPROVE), Codex (R1 + R2 REQUEST_CHANGES → all addressed)
+
+**Round 2 feedback and resolution** (Codex):
+- **PIR omitted from the affected set.** PIR (`plan/implement/review`, gates `plan-approval/dev-approval/pr`)
+  has no verify phase, so it too reaches `verified` spuriously. Resolved: PIR added to every affected-
+  protocol enumeration (Problem Statement, Desired State, success criteria).
+- **Hardcoded user-facing "(verified)" string.** `next.ts:258` appends "(verified)" whenever the
+  protocol has a verify phase, not when verify actually passed. Resolved: added to Current State blast
+  radius, Desired State req. 4 (user-facing messages), and a success criterion.
+  Gemini and Claude both APPROVE'd round 2 with no new issues.
 
 **Round 1 feedback and resolution**:
 - **Codex (REQUEST_CHANGES)** — (1) `overview.ts` reads status via its own `parseStatusYaml()`, not
