@@ -1,7 +1,7 @@
 id: bugfix-931
 title: dashboard-gatekindclass-missin
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-29T23:50:15.664Z'
-updated_at: '2026-05-29T23:52:17.272Z'
+updated_at: '2026-05-29T23:59:53.091Z'
