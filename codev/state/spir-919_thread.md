@@ -28,9 +28,18 @@ verified) and generic phase-exhaustion (spurious verified). Terminal name must b
 Migration on load: `verified` + approved verify-approval (or skip reason) → keep `verified`;
 `verified` without it → migrate to `complete`; `complete` → leave as `complete` (drop universal rename).
 
+## Consultation (spec)
+- R1: Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES (overview parser uses own parseStatusYaml
+  not readState → both readers must normalize; stale verify_skip_reason survives rollback).
+- R2: Gemini/Claude APPROVE; Codex REQUEST_CHANGES (PIR also lacks verify phase → affected;
+  next.ts:258 "(verified)" string keyed on hasVerifyPhase not actual state).
+- R3: Codex APPROVE. All three APPROVE. Spec ready for gate.
+- Added shared raw-value predicate `isGenuinelyVerified(verifyApprovalApproved, hasSkipReason)`,
+  dual-reader normalization, rollback-clears-skip-reason, PIR in affected set, honest user-facing strings.
+
 ## Status
-- [x] Specify — spec drafted
-- [ ] spec-approval gate
+- [x] Specify — spec drafted, 3-way consult unanimous APPROVE
+- [ ] spec-approval gate (awaiting human)
 - [ ] Plan
 - [ ] Implement
 - [ ] Review
