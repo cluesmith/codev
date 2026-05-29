@@ -1,0 +1,14 @@
+id: bugfix-931
+title: dashboard-gatekindclass-missin
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-05-29T23:50:15.664Z'
+updated_at: '2026-05-29T23:50:15.665Z'
