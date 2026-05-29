@@ -46,12 +46,16 @@ exhausted the phase graph." The terminal state lies.
 
 ### Concrete harm
 
-1. **Display ambiguity** (surfaced via Shannon PR #1879). `derivePrReady`
-   (`packages/codev/src/agent-farm/servers/overview.ts:486`) keys its "PR ready for human" fallback on
-   `parsed.protocol === 'bugfix' && parsed.phase === 'verified'`. Because the terminal name conflates
-   "done" with "verified," a mid-CMAP `porch rollback` that writes a sticky `pr_ready_for_human: false`
-   can suppress a post-CMAP PR — the state name carries no signal to disambiguate "really verified"
-   from "just ran off the end."
+1. **Display ambiguity / PR suppression** (surfaced via Shannon PR #1879, then **confirmed a second
+   time by Shannon bugfix-1894 / PR #1895** — same shape: gateless BUGFIX, multiple CMAP-driven
+   `rollback pr → verify` cycles, each writing `pr_ready_for_human=false`, ending at terminal with a
+   sticky `false`). `derivePrReady` (`overview.ts:493`) keys its "PR ready for human" fallback on
+   `parsed.protocol === 'bugfix' && parsed.phase === 'verified'`, but its explicit-value short-circuit
+   (`overview.ts:494`) returns the stale `false` before the fallback can fire. Two intertwined defects:
+   (a) the terminal name conflates "done" with "verified," carrying no signal to disambiguate "really
+   verified" from "just ran off the end"; and (b) the terminal-state write trusts a `pr_ready_for_human`
+   that a rollback set `false` instead of re-deriving it (see requirement 8). The second instance proves
+   this is **not an outlier** — it recurs whenever a gateless protocol rolls back during CMAP.
 
 2. **Lexical collision.** Customized BUGFIX variants (e.g. Shannon's) define a *pre-PR* `verify`
    **phase** (a reproduction step) — a completely different concept from 653's *post-merge* verify.
@@ -182,6 +186,31 @@ Two distinct, honest terminal states:
    `porch verify --skip` continue to land the project in `verified`. The real merged-vs-verified-working
    distinction that 653 introduced is preserved.
 
+8. **Terminal write re-derives `pr_ready_for_human` (the rollback-sticky-false fix).** *(Architect
+   amendment, 2026-05-29 — reopened by a second confirmed instance, Shannon bugfix-1894 / PR #1895,
+   matching #1879.)* The root cause of the suppression bug is not "gateless BUGFIX": it is that the
+   **terminal-state write trusts a stale `pr_ready_for_human`** that a prior `porch rollback` set to
+   `false` (`index.ts:849`), instead of re-deriving it. During CMAP, a gateless protocol can
+   `rollback pr → verify` one or more times — each rollback writes `pr_ready_for_human=false` — then
+   advance forward to terminal, where the stale `false` survives. `derivePrReady`'s explicit-value
+   short-circuit (`overview.ts:494`: `if (parsed.prReadyForHuman !== null) return parsed.prReadyForHuman`)
+   then returns that `false` and suppresses an open, unmerged PR from "Needs Attention". Gated protocols
+   self-heal only *by accident* (re-requesting the `pr` gate re-arms the signal to `true`).
+
+   Therefore, **when porch writes the terminal state, it must re-derive `pr_ready_for_human` rather than
+   leave whatever a rollback left.** Invariant: *a project reaching terminal with an open, unmerged PR
+   and no approved human gate must end with `pr_ready_for_human = true`* — a rollback's stale `false`
+   must not survive forward progress to terminal. Constraints:
+   - **Preserve the human-acted case.** Where a human already approved the `pr` gate (which already sets
+     `false` at `index.ts:753`), the terminal write must keep `false`. Do not regress that.
+   - **Compose with #902; no write-time merge detection.** Post-merge suppression remains the
+     consumer's responsibility via `recentlyMergedIssueIds` (computed in `getOverview`, separate from
+     `derivePrReady`). The terminal write sets `true` for the *awaiting-merge* case and lets #902
+     suppress once the PR is actually merged. The terminal write must **not** attempt to detect merge
+     state.
+   - This lives in the **same terminal-write path** that requirement 1 already rewrites — it is not new
+     surface area.
+
 ### Out of scope
 
 - Changing the SPIR/ASPIR `verify` phase or `verify-approval` gate semantics, or adding a verify phase
@@ -191,6 +220,10 @@ Two distinct, honest terminal states:
 - Renaming or reworking the pre-PR `verify` *phase* in customized BUGFIX variants. The lexical
   collision is mitigated by making the terminal state honest; the customized phase name is the
   adopter's choice.
+- **Write-time merge detection.** The terminal write re-derives `pr_ready_for_human` (req. 8) but must
+  not query or infer whether the PR is merged; that stays with the consumer via #902's
+  `recentlyMergedIssueIds`. *(Note: the gateless pr-ready re-derivation itself was previously deferred to
+  "upstream gated-BUGFIX self-heal" — the second instance (#1895) brought it INTO scope as req. 8.)*
 - Any GitHub Issue label or external-tracking changes.
 
 ## Stakeholders
@@ -220,6 +253,11 @@ Two distinct, honest terminal states:
 - [ ] `porch rollback` past the `verify` phase / terminal state resets the `verify-approval` gate to
       `pending` and clears `context.verify_skip_reason`, so a re-completed project is not falsely
       re-promoted to `verified` — verified by a test.
+- [ ] The terminal-state write re-derives `pr_ready_for_human`: a project reaching terminal with an
+      open, unmerged PR and no approved human gate ends with `pr_ready_for_human=true` (a rollback's
+      stale `false` does not survive), while a project whose `pr` gate was approved keeps `false`; the
+      write performs no merge detection (post-merge suppression left to #902) — verified by a regression
+      test reproducing the #1895 shape.
 - [ ] A BUGFIX/AIR/PIR/MAINTAIN/EXPERIMENT project run to completion ends in `complete` (new), and a
       SPIR/ASPIR project that passes verify-approval ends in `verified` — verified by tests.
 - [ ] User-facing terminal messages reflect the actual terminal state: the `next.ts` completion summary
@@ -357,6 +395,10 @@ batch migration, then drop the load-time migration entirely.
 12. **Rollback clears verify metadata**: a verify-skipped (or verify-approved) project rolled back past
     `verify` has its `verify-approval` gate reset to pending and `verify_skip_reason` cleared; on
     re-completion without re-verifying it lands in `complete`, not `verified`.
+13. **Terminal write re-derives pr-ready (#1895 regression)**: a gateless BUGFIX that creates a PR, then
+    rolls back during CMAP (`pr_ready_for_human` written `false`), then advances forward to terminal,
+    ends with `pr_ready_for_human=true` **and** `derivePrReady` surfaces it. Conversely, a project whose
+    `pr` gate was approved before terminal keeps `pr_ready_for_human=false`.
 
 ### Non-Functional Tests
 1. No measurable change to `readState` performance (migration is a couple of field reads).
@@ -387,6 +429,8 @@ authentication, authorization, or network surface is added.
 | Migration mis-classifies a genuine verified project as `complete` (data loss of the claim) | Low | High | Key on the durable gate record + skip reason already in status.yaml; cover all four cases with tests |
 | Overview parser diverges from `readState`, leaving the dashboard showing stale `verified` | Medium | Medium | Single shared raw-value predicate imported by both; teach `parseStatusYaml` to read `verify_skip_reason`; test both readers agree |
 | Stale `verify_skip_reason` after rollback falsely re-promotes a re-completed project to `verified` | Low | Medium | Rollback past `verify`/terminal clears the gate and the skip reason; covered by a dedicated test |
+| Stale `pr_ready_for_human=false` from a CMAP rollback suppresses an open PR at terminal (#1879/#1895) | Medium | High | Terminal write re-derives the signal (req. 8); preserve human-acted `false`; #1895 regression test |
+| Re-derivation wrongly flags a PR-less terminal project as PR-ready | Low | Medium | Re-derive `true` only when a PR was created (e.g. `pr_history` present) and no `pr` gate approved; no write-time merge detection |
 | Lexical collision with adopters' pre-PR `verify` phase persists | Low | Low | Out of scope by design; honest terminal name reduces the confusion surface |
 
 ## Expert Consultation
@@ -401,6 +445,12 @@ authentication, authorization, or network surface is added.
   protocol has a verify phase, not when verify actually passed. Resolved: added to Current State blast
   radius, Desired State req. 4 (user-facing messages), and a success criterion.
   Gemini and Claude both APPROVE'd round 2 with no new issues.
+
+**Architect amendment (2026-05-29, post spec-approval)**: A second confirmed instance of the PR-
+suppression bug (Shannon #1895, matching #1879) reframed the root cause as "terminal write trusts a
+stale `pr_ready_for_human`" and reopened the previously-deferred gateless re-derivation. Added
+requirement 8, an Out-of-Scope clarification (no write-time merge detection), a success criterion, test
+scenario 13, and risk rows. Re-consult to follow.
 
 **Porch-driven round (specify iter1)**: Gemini APPROVE, Claude APPROVE, Codex COMMENT (non-blocking).
 Codex's three minor completeness notes were folded in: `status.ts` added to the read-sites list;

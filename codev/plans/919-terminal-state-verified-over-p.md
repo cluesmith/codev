@@ -157,6 +157,19 @@ Revert the phase commit; the predicate is additive and the migration change is l
       same terminal-write helper after setting `verify_skip_reason` (so there is one write path), or
       leave the explicit `verified` write with a comment that the predicate would agree. Prefer routing
       through the helper.
+- [ ] **NEW (architect amendment, spec req. 8) — re-derive `pr_ready_for_human` at terminal write**:
+      in the same terminal-write path (`advanceProtocolPhase` `index.ts:530-532`, and the `next.ts:348`/
+      `:777` terminal writes), stop trusting the existing `pr_ready_for_human` (a rollback may have set
+      it `false` at `index.ts:849`). Re-derive:
+      - if the `pr` gate was approved (`state.gates['pr']?.status === 'approved'`) → `false` (human
+        acted; matches `index.ts:753`).
+      - else, if a PR was created (guard on `state.pr_history?.length` so PR-less terminals aren't
+        flagged) → `true` (awaiting-merge case).
+      - Do **not** detect merge state; #902's `recentlyMergedIssueIds` (separate, in `getOverview`)
+        suppresses once merged.
+      Centralize this in the same terminal-write helper that decides `verified` vs `complete`, so one
+      function owns the terminal write. Existing `pr_ready_for_human=true` writes at gate-request
+      (`index.ts:499`, `next.ts:757`) are unaffected.
 - [ ] Status glyph (`index.ts:200-201`) already handles both names — audit only, no change expected.
 - [ ] Tests.
 
@@ -185,6 +198,11 @@ Revert the phase commit; the predicate is additive and the migration change is l
   assert merge task still emitted where expected.
 - **`done()` idempotency** (`done-verification.test.ts:416`, the #903 test `is a no-op when state.phase
   is already verified`): add a companion test asserting the same no-op for `state.phase === 'complete'`.
+- **pr-ready re-derivation regression (spec req. 8 / #1895)**: in porch `__tests__` (alongside
+  `pr-ready-872.test.ts`), reproduce the #1895 shape — a gateless BUGFIX that creates a PR, rolls back
+  during CMAP (driving `pr_ready_for_human=false`), then advances to terminal — and assert the terminal
+  state ends with `pr_ready_for_human=true` **and** `derivePrReady` surfaces it. Plus the inverse:
+  a project whose `pr` gate was approved before terminal keeps `false`; a PR-less terminal stays `false`.
 - **Update existing**: `next.test.ts` completion assertions and any test asserting terminal `verified`
   for a non-verify protocol.
 
@@ -389,6 +407,7 @@ ownership.
 | 2026-05-29 | Initial plan | Spec approved | builder spir-919 |
 | 2026-05-29 | Plan iter1 review fixes (Phase 3 dep on Phase 2; explicit read-site test ownership) | Codex REQUEST_CHANGES | builder spir-919 |
 | 2026-05-29 | **Rebase onto origin/main (#923); re-verified all line numbers; added `done()` #903 early-exit (Phase 2) and #902 `recentlyMergedIssueIds` layering note (Phase 4)** | Architect: branch was 259 commits stale | builder spir-919 |
+| 2026-05-29 | **Architect amendment: spec req. 8 — terminal write re-derives `pr_ready_for_human` (rollback-sticky-false fix); added Phase 2 deliverable + #1895 regression test** | Second instance (#1895) reopened gateless re-derivation | builder spir-919 |
 
 ## Notes
 The architect's two standing directives are encoded structurally: **(1) centralize** — Phase 1 lands the
