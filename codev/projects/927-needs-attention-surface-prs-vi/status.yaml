@@ -5,14 +5,14 @@ phase: implement
 plan_phases:
   - id: server-derivation
     title: Gate-authoritative pr signal + verify-approval label (overview server + types)
-    status: in_progress
+    status: complete
   - id: dashboard-surfacing
     title: PR-rows-only Needs Attention + verify styling (dashboard)
-    status: pending
+    status: in_progress
   - id: remove-dead-projection
     title: Delete recentlyMergedIssueIds end-to-end (retain fetchRecentMergedPRs)
     status: pending
-current_plan_phase: server-derivation
+current_plan_phase: dashboard-surfacing
 gates:
   spec-approval:
     status: approved
@@ -27,7 +27,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-29T16:47:35.190Z'
-updated_at: '2026-05-29T17:37:51.426Z'
+updated_at: '2026-05-29T17:41:14.314Z'
