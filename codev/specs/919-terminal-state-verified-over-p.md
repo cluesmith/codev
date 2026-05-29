@@ -82,10 +82,18 @@ Numerous read sites treat `verified` and `complete` as interchangeable terminal 
 the conflation:
 - `packages/codev/src/commands/porch/next.ts:249` — `phase === 'verified' || phase === 'complete'`
 - `packages/codev/src/commands/porch/index.ts:200-201` (status glyph), `:813` (rollback guard)
-- `packages/codev/src/agent-farm/servers/overview.ts:373-386` (progress %, both treated as 100%)
+- `packages/codev/src/agent-farm/servers/overview.ts:373` (SPIR progress path) and `:386`
+  (`calculateEvenProgress` — both terminal names → 100%)
 - `packages/codev/src/agent-farm/commands/workspace-recover.ts:19` —
   `TERMINAL_PHASES = new Set(['verified', 'complete'])`
 - `packages/core/src/builder-helpers.ts:32` — idle-waiting terminal check
+
+**Two independent status readers.** `readState()` (`state.ts`) is the porch-side reader and is the only
+one that performs the load-time migration. The agent-farm overview server reads `status.yaml` via its
+own line-based `parseStatusYaml()` (`overview.ts`), which **does not** call `readState()` and currently
+parses `phase` and the `gates` block but **not** `context` (so it cannot see `verify_skip_reason`). Any
+load-time normalization must therefore be applied — identically — in **both** readers, or the overview
+will keep showing legacy spuriously-`verified` files as `verified`.
 
 On-disk reality after 653:
 - SPIR/ASPIR projects that passed verify: `phase: verified` **with** an approved `verify-approval` gate.
@@ -110,32 +118,49 @@ Two distinct, honest terminal states:
    a verify-skip reason is recorded); otherwise `complete`. The shared `advanceProtocolPhase` must make
    this decision rather than hard-coding `verified`.
 
-2. **Load-time migration distinguishes the two** (the issue's central requirement — "use
+2. **A single genuine-verified predicate.** There must be one shared definition of "this project is
+   genuinely verified": the `verify-approval` gate is approved **OR** a verify-skip reason is recorded.
+   To serve both readers (porch's full `ProjectState` and the overview's simplified parsed shape), the
+   predicate must accept **raw values** — e.g. `isGenuinelyVerified(verifyApprovalApproved: boolean,
+   hasSkipReason: boolean)` — rather than a full `ProjectState`, so it can be reused without coupling
+   to either reader's type.
+
+3. **Load-time migration distinguishes the two** (the issue's central requirement — "use
    `gates['verify-approval']`, not blanket-rename"):
    - `phase: 'complete'` on disk → **kept as `complete`** (the universal `complete → verified` rename
      is removed).
-   - `phase: 'verified'` on disk **with** an approved `verify-approval` gate (or recorded verify-skip
-     reason) → **kept as `verified`** (genuine).
-   - `phase: 'verified'` on disk **without** an approved `verify-approval` gate and **without** a
-     verify-skip reason → **migrated to `complete`** (it was spuriously named).
+   - `phase: 'verified'` on disk and genuine-verified predicate true → **kept as `verified`**.
+   - `phase: 'verified'` on disk and predicate false → **migrated to `complete`** (spuriously named).
    - Migration remains pure/in-memory at read time (no disk write from `readState`), consistent with
      653's existing design; mutating callers persist the corrected value via the normal
      write-and-commit path.
+   - **Both readers apply this identically.** `readState()` and the overview's `parseStatusYaml()` must
+     produce the same terminal name for the same file. This requires teaching `parseStatusYaml()` to
+     read `context.verify_skip_reason` (it currently parses only `phase` and `gates`).
 
-3. **Read sites stay correct.** Every site that currently treats `{verified, complete}` as "terminal"
-   must continue to treat **both** as terminal (workspace-recover, idle-waiting, progress=100%, status
-   glyph, rollback guard, the `next` "already done" short-circuit). Splitting the name must not cause a
-   `complete` project to be re-driven, re-progressed, or mis-glyphed.
+4. **Read sites stay correct.** Every site that currently treats `{verified, complete}` as "terminal"
+   must continue to treat **both** as terminal (workspace-recover, idle-waiting, both progress paths,
+   status glyph, rollback guard, the `next` "already done" short-circuit). Splitting the name must not
+   cause a `complete` project to be re-driven, re-progressed, or mis-glyphed.
 
-4. **`derivePrReady` disambiguates correctly.** The BUGFIX "PR ready" fallback must continue to surface
-   in-flight BUGFIX builders that pre-date the explicit `pr_ready_for_human` field. After the split, a
-   BUGFIX project that has run off the end is `complete`, so the fallback condition must reference the
-   post-split terminal name(s) such that the #872 regression case (legacy BUGFIX state files without
-   `pr_ready_for_human`) still surfaces, while genuinely-`verified` SPIR/ASPIR projects (already merged
-   and reviewed) still do **not** surface as "PR ready." The explicit `pr_ready_for_human` field, when
-   present, remains authoritative ahead of any fallback.
+5. **`derivePrReady` disambiguates correctly.** The BUGFIX "PR ready" fallback must continue to surface
+   in-flight BUGFIX builders that pre-date the explicit `pr_ready_for_human` field. Because the overview
+   parser applies the load-time demotion (req. 3), a legacy BUGFIX state file that ran off the end is
+   now parsed as `complete`; therefore the fallback must key on **`parsed.protocol === 'bugfix' &&
+   parsed.phase === 'complete'`**. Genuinely-`verified` SPIR/ASPIR projects are excluded both because
+   they fail the `protocol === 'bugfix'` guard and because they are already merged and reviewed. The
+   explicit `pr_ready_for_human` field, when present, remains authoritative ahead of any fallback.
 
-5. **Genuine-verified paths unchanged in meaning.** `verify-approval` gate approval and
+6. **Rollback clears stale verify metadata.** `porch verify --skip` persists `context.verify_skip_reason`
+   and the verify-approval approval sets the gate. The genuine-verified predicate keys on both, so a
+   project that was verified (or skipped) and then `porch rollback`'d to an earlier phase must have its
+   verify signal cleared — otherwise it could re-reach the terminal state and be falsely re-promoted to
+   `verified` on the next cycle. Rollback that rewinds at/past the `verify` phase (or the terminal
+   state) must reset the `verify-approval` gate to `pending` **and** clear `context.verify_skip_reason`,
+   so a later completion is re-evaluated honestly. (Today `rollback()` clears downstream gates but does
+   not clear the skip reason — this must be fixed as part of this work.)
+
+7. **Genuine-verified paths unchanged in meaning.** `verify-approval` gate approval and
    `porch verify --skip` continue to land the project in `verified`. The real merged-vs-verified-working
    distinction that 653 introduced is preserved.
 
@@ -167,11 +192,16 @@ Two distinct, honest terminal states:
 - [ ] `readState` no longer performs a universal `complete → verified` rename; it keeps `complete` as
       `complete` and demotes spuriously-named `verified` (no approved verify-approval gate / no skip
       reason) to `complete`, while preserving genuinely-`verified` projects.
-- [ ] All existing terminal-state read sites (workspace-recover, idle-waiting, progress %, status
-      glyph, rollback guard, `next` short-circuit) treat both `complete` and `verified` as terminal —
-      verified by tests.
-- [ ] `derivePrReady` still surfaces the #872 legacy-BUGFIX regression case and still excludes
-      genuinely-`verified` SPIR/ASPIR projects — verified by tests.
+- [ ] Both status readers (`readState` and the overview's `parseStatusYaml`) apply the same load-time
+      normalization and yield the same terminal name for the same file — verified by tests.
+- [ ] All existing terminal-state read sites (workspace-recover, idle-waiting, both progress paths,
+      status glyph, rollback guard, `next` short-circuit) treat both `complete` and `verified` as
+      terminal — verified by tests.
+- [ ] `derivePrReady` still surfaces the #872 legacy-BUGFIX regression case (now keyed on `complete`)
+      and still excludes genuinely-`verified` SPIR/ASPIR projects — verified by tests.
+- [ ] `porch rollback` past the `verify` phase / terminal state resets the `verify-approval` gate to
+      `pending` and clears `context.verify_skip_reason`, so a re-completed project is not falsely
+      re-promoted to `verified` — verified by a test.
 - [ ] A BUGFIX/AIR/MAINTAIN/EXPERIMENT project run to completion ends in `complete` (new), and a
       SPIR/ASPIR project that passes verify-approval ends in `verified` — verified by tests.
 - [ ] Migration is covered by tests for all four on-disk cases (legacy `complete`, genuine `verified`,
@@ -270,10 +300,10 @@ batch migration, then drop the load-time migration entirely.
 - [ ] None. The issue's "Proposed direction" resolves the design.
 
 ### Important (Affects Design)
-- [ ] Should the genuine-verified predicate live in `state.ts` (next to `readState`) or in a shared
-      helper importable by both porch and the overview parser? (Plan-level decision; both porch and
-      `overview.ts` need the concept. Leaning: a small exported helper in the porch state module,
-      with `overview.ts` applying the equivalent check against its already-parsed gates.)
+- [ ] **(Resolved by consultation)** Where does the shared genuine-verified predicate live? Decision:
+      a small raw-value helper (`isGenuinelyVerified(verifyApprovalApproved, hasSkipReason)`) exported
+      from the porch state module and imported by both `readState` and the overview parser, so the two
+      readers cannot drift. Exact module placement is a plan-level detail.
 
 ### Nice-to-Know (Optimization)
 - [ ] Whether to emit a one-line `porch status` note when a project is `complete` for a
@@ -297,10 +327,15 @@ batch migration, then drop the load-time migration entirely.
 7. **`derivePrReady` #872 case**: legacy BUGFIX state (no `pr_ready_for_human`) that has run off the end
    still surfaces as PR-ready under the post-split terminal name.
 8. **`derivePrReady` exclusion**: genuinely-`verified` SPIR/ASPIR project does not surface as PR-ready.
-9. **Read-site terminality**: workspace-recover skips, idle-waiting returns false, progress=100%, and
-   status glyph render correctly for both `complete` and `verified`.
+9. **Read-site terminality**: workspace-recover skips, idle-waiting returns false, both progress paths
+   return 100%, and status glyph render correctly for both `complete` and `verified`.
 10. **Rollback guard**: rollback from a terminal state behaves identically for `complete` and
     `verified` as it did for the old conflated `verified`.
+11. **Both readers agree**: the same on-disk file (each of the four cases) yields the same terminal
+    name through `readState` and through the overview's `parseStatusYaml`.
+12. **Rollback clears verify metadata**: a verify-skipped (or verify-approved) project rolled back past
+    `verify` has its `verify-approval` gate reset to pending and `verify_skip_reason` cleared; on
+    re-completion without re-verifying it lands in `complete`, not `verified`.
 
 ### Non-Functional Tests
 1. No measurable change to `readState` performance (migration is a couple of field reads).
@@ -324,15 +359,28 @@ batch migration, then drop the load-time migration entirely.
 | A read site is missed and re-drives or mis-renders a `complete` project | Medium | High | Exhaustive blast-radius map (done); test every terminal read site for both names |
 | A future code path writes `verified` without the gate/skip invariant, then gets demoted on reload | Low | Medium | Centralize the terminal-write decision behind one predicate so there is a single write site to audit |
 | Migration mis-classifies a genuine verified project as `complete` (data loss of the claim) | Low | High | Key on the durable gate record + skip reason already in status.yaml; cover all four cases with tests |
-| `overview.ts` parser lacks gate data needed to replicate the predicate | Low | Medium | Confirmed parser already reads `gates` and `phase`; verify in plan |
+| Overview parser diverges from `readState`, leaving the dashboard showing stale `verified` | Medium | Medium | Single shared raw-value predicate imported by both; teach `parseStatusYaml` to read `verify_skip_reason`; test both readers agree |
+| Stale `verify_skip_reason` after rollback falsely re-promotes a re-completed project to `verified` | Low | Medium | Rollback past `verify`/terminal clears the gate and the skip reason; covered by a dedicated test |
 | Lexical collision with adopters' pre-PR `verify` phase persists | Low | Low | Out of scope by design; honest terminal name reduces the confusion surface |
 
 ## Expert Consultation
 **Date**: 2026-05-29
-**Models Consulted**: Gemini, Codex, Claude (pending — to be run after initial draft per SPIR)
-**Sections Updated**: (to be filled after consultation)
+**Models Consulted**: Gemini (APPROVE), Claude (APPROVE), Codex (REQUEST_CHANGES → addressed)
 
-Note: Consultation feedback will be incorporated directly into the relevant sections above.
+**Round 1 feedback and resolution**:
+- **Codex (REQUEST_CHANGES)** — (1) `overview.ts` reads status via its own `parseStatusYaml()`, not
+  `readState()`, so the migration would not reach the dashboard. Resolved: added a shared raw-value
+  predicate and an explicit requirement that both readers normalize identically (Current State + Desired
+  State req. 2–3, success criteria, test scenario 11). (2) Stale `context.verify_skip_reason` survives
+  `rollback()`, risking false re-verification. Resolved: added Desired State req. 6, success criterion,
+  test scenario 12, and a risk-table row.
+- **Gemini (APPROVE)** — `parseStatusYaml` does not currently parse `context`/`verify_skip_reason`
+  (folded into req. 3); shared predicate should take raw values, not `ProjectState` (folded into req. 2);
+  with overview-side demotion, `derivePrReady` can simply key BUGFIX on `complete` (folded into req. 5).
+- **Claude (APPROVE)** — list `calculateEvenProgress` (`overview.ts:386`) in the blast radius (added);
+  make req. 5 explicit that the BUGFIX fallback keys on `complete` post-split (done).
+
+Note: All consultation feedback has been incorporated directly into the relevant sections above.
 
 ## Approval
 - [ ] Technical Lead Review
