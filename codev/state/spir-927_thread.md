@@ -254,3 +254,24 @@ e2e_tests[soft-skip]). PR-level CMAP: **Gemini APPROVE, Claude APPROVE, Codex RE
 - C2 (REBUTTED): `dev review` gateKindClass styling gap — architect EXPLICITLY ruled this OUT of scope at
   plan-approval. Rebutted citing that decision; tracked as a follow-up. Not a #927 correctness issue (Codex agrees).
 Committed + pushed (PR auto-updates). porch done → re-consult iter-2.
+
+## 2026-05-29 — pr gate APPROVED → MERGED → verify phase
+
+Architect approved the pr gate and authorized merge. Merged PR #928 via `gh pr merge 928 --merge --admin`
+(branch protection needs admin override this cycle — no second same-identity reviewer; regular merge commit
+0e300f3c, NOT squash). porch done → review checks ✓ → advanced to optional **verify** phase.
+
+**Post-merge integration verification (done):**
+- Merge clean, no conflicts.
+- None of my 8 touched files were modified by the other PRs that merged this cycle (#902/#904/#923/#924) —
+  checked `git log 94df5d75..origin/main` per file.
+- No dangling `recentlyMergedIssueIds` consumer introduced by any parallel PR (`git grep` on origin/main →
+  only the explanatory comment in NeedsAttentionList.test.tsx).
+- ⇒ integrated main's #927 behavior == my verified branch state (unit tests + headless-chromium render-verify
+  all passed pre-merge). No separate rebuild needed — identical code.
+
+Per architect: this PR **retires #902's recentlyMergedIssueIds mechanism** and **reconciles the now-closed #919**
+(#919's NA/derivePrReady parts superseded; terminal-rename was its remaining scope, architect closed it). The
+**dev-review gateKindClass styling** stays a separate issue (architect will file).
+
+Running `porch done` → requests verify-approval gate (HUMAN approves). I will NOT approve it.
