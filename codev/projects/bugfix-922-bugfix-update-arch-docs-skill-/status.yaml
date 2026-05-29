@@ -1,7 +1,7 @@
 id: bugfix-922
 title: bugfix-update-arch-docs-skill-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-29T02:53:38.613Z'
-updated_at: '2026-05-29T02:54:08.495Z'
+updated_at: '2026-05-29T03:07:27.107Z'
