@@ -65,3 +65,37 @@ Lesson reinforced: scrutinized reviewer suggestions before applying — caught t
 recommendations (bare gate check; delete helper) that would have introduced bugs.
 
 Committing reviewed spec, then `porch next` → should hit spec-approval gate (STOP, notify architect).
+
+## 2026-05-29 — spec-approval APPROVED by architect → Plan phase
+
+Architect approved spec-approval. **Coordination note from architect (load-bearing for the plan):**
+the change touches SHARED infra — keeping `pr` in detectBlocked/GATE_LABELS AND adding `verify-approval`
+to GATE_LABELS affects **VSCode** (Needs Attention tree, gate toast, status-bar counter), not just the
+dashboard. **Amr (owns area/vscode) is looped in on #927.** Plan MUST:
+- treat VSCode consumers of detectBlocked/GATE_LABELS as an explicit **blast-radius item with their own
+  test coverage**;
+- flag anything needing Amr's eyes.
+Do NOT advance past plan-approval without the human.
+
+## 2026-05-29 — Plan drafted (3 phases)
+
+Plan at `codev/plans/927-...md`, checks pass (plan_exists, has_phases_json, 3 phase ids). Phasing chosen so
+every commit type-checks + tests green in BOTH packages, and the VSCode blast radius is concentrated in Phase 1:
+
+1. **server-derivation** (`packages/codev` overview.ts + `packages/types`): gate-authoritative `derivePrReady`
+   (requested_at-aware, drop bugfix branch + field dependency); add `verify-approval`→`"verify review"` to
+   GATE_LABELS; unify `detectBlockedSince` on `Object.keys(GATE_LABELS)`. **Does NOT remove
+   recentlyMergedIssueIds** (keeps dashboard green). ← shared infra / VSCode blast radius lives here.
+2. **dashboard-surfacing** (`packages/dashboard`): delete builder-emit branch; `if (b.prReady) continue;`;
+   add verify gateKindClass + `.attention-kind--verify` CSS; stop consuming recentlyMergedIssueIds (drop prop +
+   WorkView pass); invert 2 tests, remove 1.
+3. **remove-dead-projection** (`packages/codev` + types): delete recentlyMergedIssueIds field+computation;
+   **RETAIN fetchRecentMergedPRs** (issueToPrUrl/recentlyClosed).
+
+VSCode blast radius (architect's coordination note) is an explicit cross-cutting section: consumers verified
+(`views/builders.ts`, `notifications/gate-toast.ts`, `commands/approve.ts`, `extension.ts` status bar; tests
+`test/builders.test.ts`, `__tests__/menu-when-clauses.test.ts`). `pr` stays in GATE_LABELS → no VSCode regression
+by construction. New: verify-approval surfaces as a blocked builder in VSCode (intended; flagged for **Amr** at
+plan-approval — open Q: does VSCode want a GATE_ACTIONS "Verify" entry? additive follow-up, not a blocker).
+
+Next: commit plan draft → `porch done` → 3-way consult.
