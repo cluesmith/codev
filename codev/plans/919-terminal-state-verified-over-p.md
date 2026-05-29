@@ -189,8 +189,14 @@ Revert the phase commit; the predicate is additive and the migration change is l
 - [ ] BUGFIX/AIR/PIR/MAINTAIN/EXPERIMENT run to phase-exhaustion → terminal `complete`.
 - [ ] SPIR/ASPIR verify-approval approval → terminal `verified`; `porch verify --skip <reason>` →
       `verified`.
+- [ ] **Verify-capable terminal-`complete` case**: a SPIR/ASPIR project that reaches terminal *without*
+      verify-approval (merged but not verified) lands in `complete`, the summary does **not** print
+      "(verified)", and the merge-task / `hasVerifyPhase` branching still behaves correctly (no skipped
+      or double merge) — covered by a test, not just the non-verify protocols.
 - [ ] Completion summary prints "(verified)" only when `state.phase === 'verified'`.
 - [ ] No regression in the merge-task emission for non-verify protocols.
+- [ ] `pr_ready_for_human` re-derived at terminal: stale rollback `false` → `true` for awaiting-merge;
+      `pr`-gate-approved → stays `false`; PR-less terminal → not flagged.
 
 #### Test Plan
 - **Unit/Integration** (porch `__tests__`): drive a fake protocol with no verify phase to terminal →
@@ -301,7 +307,10 @@ Revert the phase commit; rollback reverts to clearing only downstream gates (pre
   - `index.ts:200-201` status glyph (handled in Phase 2 audit); `next.ts:249` "already done"
     short-circuit (already handles both — audit + test here).
   - `agent-farm/commands/workspace-recover.ts:19` `TERMINAL_PHASES` set + `:109` check (already both).
-  - `agent-farm/commands/status.ts:241-243` display color (already handles both — audit).
+  - `agent-farm/commands/status.ts:241-243` display color (`getStatusColor`, `:227`) — already handles
+    both, but is module-private with no existing test. **Export `getStatusColor`** and add a focused
+    unit test asserting both `verified` and `complete` return green (satisfies the spec's "all read
+    sites verified by tests" requirement rather than audit-only).
   - `core/src/builder-helpers.ts:32` idle-waiting check (already handles both — audit + test).
 - [ ] Docs sweep: update any CLI/protocol/resource docs stating a non-verify protocol ends in
       `verified`. (arch.md / lessons-learned.md updates are handled in the Review phase via the
@@ -339,8 +348,8 @@ just the two that change):
   short-circuit also exercises Phase 2 logic.
 - **`builder-helpers.ts` idle-waiting** (`core` tests, e.g. `packages/core/src/__tests__/` or the
   existing builder-helpers test): `isIdleWaiting`/equivalent returns false for both terminal names.
-- **`status.ts` display color**: covered by an assertion if a status-display test exists; otherwise note
-  it is a pure display branch already handling both names (no behavior change) and rely on the audit.
+- **`status.ts` display color** (`agent-farm/__tests__/`): export `getStatusColor` and unit-test that
+  both `verified` and `complete` map to green (no existing status test in-tree, so this adds one).
 - **Cross-reader test**: same fixture file through `readState` and `parseStatusYaml` → identical
   terminal name, for each of the four cases (spec test scenario 11).
 
