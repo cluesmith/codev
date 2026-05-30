@@ -1,7 +1,7 @@
 id: '925'
 title: vscode-open-builder-terminal-a
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-29T23:08:23.164Z'
-updated_at: '2026-05-30T00:06:13.896Z'
+updated_at: '2026-05-30T00:06:35.151Z'
