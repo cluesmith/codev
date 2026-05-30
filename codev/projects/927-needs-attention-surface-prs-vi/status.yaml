@@ -30,7 +30,7 @@ gates:
     status: pending
     requested_at: '2026-05-29T22:27:54.363Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: dashboard-surfacing
@@ -49,5 +49,5 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-927/codev/projects/927-needs-attention-surface-prs-vi/927-dashboard-surfacing-iter1-claude.txt
 started_at: '2026-05-29T16:47:35.190Z'
-updated_at: '2026-05-29T22:27:54.363Z'
+updated_at: '2026-05-30T00:56:33.592Z'
 pr_ready_for_human: false
