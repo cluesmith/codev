@@ -31,3 +31,14 @@ in the spec: the **package stays serialization-agnostic** (MarkerAdapter is an i
 the host owns on-disk format). The VSCode host preserves the positional #857 form; the
 explicit `line=N` form is an optional host enhancement, and `lineRange` is reserved for
 future region anchors. Will surface this to the architect at the spec-approval gate.
+
+## 2026-05-31 — Spec iter-1 consultation done
+
+3-way consult (Gemini / Codex / Claude) all returned **APPROVE WITH SUGGESTIONS**, no
+blockers. All three affirmed D3 (serialization-agnostic package) as the keystone and praised
+the marker-format catch. Folded six convergent refinements into the spec: adapter error
+semantics, 0-based `data-line`, subscription lifecycle (idempotent Disposable via useEffect),
+change-coalescing is host's job, `examples/` excluded from published files, package source
+avoids React-19-only APIs. See the spec's Consultation Log. Committing, then `porch next` to
+advance toward the spec-approval gate — where I'll STOP and notify the architect (and raise
+the marker-format wording fix).

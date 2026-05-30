@@ -140,6 +140,11 @@ stated as architect decisions and are carried here as fixed constraints:
 - pnpm workspace member under `packages/*`; version-aligned with the monorepo (`3.1.x`).
 - `react` / `react-dom` as **peer dependencies** (range `^18 || ^19` — the dashboard is on
   React 19; VSCode webviews and mobile wrappers may pin 18). `markdown-it` as a direct dep.
+  To honor the React 18 floor, **package source avoids React-19-only APIs** (no `use()`, no
+  `useFormStatus`, no `useOptimistic`) — an iter-1 Claude refinement.
+- **Packaging hygiene (iter-1 Codex/Claude):** the smoke-test host and any dev-only deps it
+  pulls (`examples/`) are **excluded from the published package** (`files` array / build
+  output) so they never ship to consumers.
 - No Node-only or VSCode-only API may appear in shipped package source (enforceable by an
   import-boundary test and by the package having no `vscode`/`fs`/`node:*` imports).
 - Must build to both CJS and ESM with type declarations and an importable default stylesheet.
@@ -163,6 +168,21 @@ scale. Revisit only if an independent consumer needs the renderer without React.
   are cheap, cached values read during render. Theme changes are delivered **push-style** via
   `ThemeAdapter.onChange(handler)` so the canvas re-renders on host theme switches.
 - `watch` / `onChange` return a `Disposable` (`{ dispose(): void }`) for teardown.
+- **Subscription lifecycle ownership (iter-1 Gemini/Claude):** the React component owns
+  every subscription via `useEffect` cleanup — it calls `Disposable.dispose()` on unmount and
+  on dependency change (e.g. `uri` change). The host's `Disposable` **must be idempotent**
+  (calling `dispose()` more than once is a safe no-op).
+- **Change coalescing (iter-1 Codex/Claude):** the package re-renders on *each* `watch` /
+  `onChange` callback; it does **not** internally debounce. If a host fires high-frequency
+  change events (e.g. a noisy file watcher), debouncing/coalescing is the host's
+  responsibility before invoking the callback.
+- **Error semantics (iter-1 all three):** adapter rejections are the **host's** concern in
+  v1. The package `await`s adapter calls inside a guard: a rejected `MarkerAdapter.add` /
+  `FileAdapter.read` is caught, logged via an injectable logger (defaulting to `console`),
+  and surfaces to an **optional** host-provided `onError(err: unknown)` callback on the
+  component; the package never throws out of an event handler and never silently corrupts
+  state (a failed `add` leaves the rendered markers unchanged). There is no built-in retry in
+  v1 — retry/toast UX is the host's call.
 
 ### D3 — The package is serialization-agnostic; the host owns on-disk marker format
 The package defines the **in-memory** `ReviewMarker` shape and calls `MarkerAdapter.add(...)`;
@@ -182,11 +202,17 @@ or dashboard design tokens on the dashboard. No CSS-in-JS, no CSS Modules; a sin
 stylesheet keeps it consumable from both a webview `<link>`/inline-style and a Vite import.
 
 ### D5 — Renderer emits `data-line` on block tokens
-The markdown-it instance carries a source-mapping rule that stamps `data-line="<n>"`
-(0-based source line of the block's opening token) on rendered block elements: paragraphs,
-headings, list items, code blocks, blockquotes, tables. This is the single source of truth
-the comment overlay uses to map a hovered block back to a source line. Inline-level mapping
-is out of scope for v1 (block granularity matches the comment model).
+The markdown-it instance carries a source-mapping rule that stamps `data-line="<n>"` on
+rendered block elements: paragraphs, headings, list items, code blocks, blockquotes, tables.
+This is the single source of truth the comment overlay uses to map a hovered block back to a
+source line. Inline-level mapping is out of scope for v1 (block granularity matches the
+comment model).
+
+**Line base is 0-based (iter-1 all three).** `data-line` and the overlay callback's
+`{ line }` are **0-based**, derived from markdown-it's `token.map[0]` (0-based at the AST).
+This matches the existing #857 host, which reads/writes via VSCode's 0-based
+`document.lineAt`. Hosts whose native API is 1-based convert at the adapter boundary. This
+base is part of the contract and is documented in the README.
 
 ### D6 — Comment overlay is presentation + intent only
 The hover-`+` overlay renders the affordance and, on click, invokes a host-supplied callback
@@ -204,7 +230,8 @@ issue's skeleton with the D2/D3 semantics above. Exact field names are part of t
 the plan may add JSDoc but must not change shapes without re-approval.
 
 ```ts
-/** Disposable handle returned by subscriptions; mirrors VSCode's Disposable shape. */
+/** Disposable handle returned by subscriptions; mirrors VSCode's Disposable shape.
+ *  Implementations MUST make dispose() idempotent (calling it twice is a safe no-op). */
 interface Disposable {
   dispose(): void;
 }
@@ -396,6 +423,34 @@ Non-functional (MUST):
 | Marker-format mismatch silently regresses #857 | Low | High | D3 keeps the package serialization-agnostic; explicit "#857 untouched" AC + open-question raised at the gate. |
 | Scope creep into #860–#863 features | Med | Med | Non-Goals fence the implemented surface to renderer + comment overlay + adapters; later folders may be stubbed but not built. |
 | React peer-version skew (dashboard 19 vs webview 18) | Low | Med | Peer range `^18 || ^19`; avoid React-19-only APIs in package source. |
+
+## Consultation Log
+
+### Iteration 1 — Specify (2026-05-31)
+**Models:** Gemini (gemini-3.1-pro-preview), Codex (gpt-5.4-codex), Claude (claude-opus).
+**Verdict:** all three **APPROVE WITH SUGGESTIONS** — no blockers; cleared to proceed to
+planning. All three independently affirmed D3 (serialization-agnostic package) as the
+keystone decision and praised the marker-format catch (Open Q §1).
+
+Refinements folded into the spec from the convergent feedback:
+- **Adapter error semantics** (all three) → added to D2: host owns errors in v1; package
+  guards adapter calls, logs via injectable logger, surfaces to an optional `onError`
+  callback, never throws out of a handler, no built-in retry.
+- **`data-line` line base** (all three) → D5 now states 0-based explicitly (from
+  `token.map[0]`), consistent with #857's `document.lineAt`; hosts convert at the boundary.
+- **Subscription lifecycle ownership** (Gemini, Claude) → D2: React `useEffect` owns
+  disposal; `Disposable.dispose()` must be idempotent (also noted on the interface).
+- **Change coalescing** (Codex, Claude) → D2: package re-renders per callback, does not
+  debounce; coalescing is the host's responsibility.
+- **Packaging hygiene** (Codex, Claude) → Technical Constraints: `examples/` smoke host
+  excluded from the published `files`/build output.
+- **React 18 floor** (Claude) → Technical Constraints: package source avoids React-19-only
+  APIs (`use()`, `useFormStatus`, `useOptimistic`).
+
+Open Questions §3 (build tool) and §4 (default-theme import path) remain plan-level
+decisions, as the reviewers agreed. Open Question §1 (REVIEW marker format) remains flagged
+for the architect at the spec-approval gate — the D3 resolution stands regardless of the
+wording fix.
 
 ## Notes
 This spec deliberately includes the adapter interface signatures verbatim because, for this
