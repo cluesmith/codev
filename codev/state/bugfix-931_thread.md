@@ -59,3 +59,22 @@ fails **consistently** (3/3 runs), 1 test. It concerns terminal scroll-to-top wa
 and imports nothing from the attention-row path. Not flaky, not caused by #931. Per BUGFIX
 protocol (unrelated test failures are out of scope) I am leaving it untouched and surfacing it
 to the architect rather than modifying an unrelated test file.
+
+## PR + CMAP (2026-05-29)
+
+Opened **PR #935**. First 3-way CMAP (`--type pr`):
+- **Claude**: APPROVE (HIGH) — full review with worktree file access.
+- **Codex**: REQUEST_CHANGES (HIGH) — *valid, substantive*: I'd set `.attention-kind--dev`
+  to `var(--status-error)`, the SAME color as `.attention-kind--plan`. So renaming the class
+  left dev rows visually identical to plan rows — the user-visible symptom of #931 ("renders
+  with the plan color instead of their own") was NOT resolved by the rename alone.
+- **Gemini**: blind APPROVE — could not read the diff (`Path not in workspace`: consult wrote
+  the diff to `/tmp/...`, outside Gemini's sandbox `~/.gemini/tmp/bugfix-931`). Known consult/
+  Gemini lane environmental bug, not a real review. Flagging to architect.
+
+**Resolution (commit 8c666c2):** changed `.attention-kind--dev` to `var(--status-implementing)`
+(orange). Rationale: dev-approval is PIR's gate at the END of the implement phase, so the orange
+"implementing" palette color is semantically apt AND makes dev rows visually distinct — a 3-tier
+design(red spec/plan) → implement(orange dev) → review(yellow PR/verify) progression. This
+directly resolves Codex's finding. Strengthened the regression test to also assert dev never
+maps to the plan class. Re-running the 3-way CMAP to confirm Codex flips to APPROVE.
