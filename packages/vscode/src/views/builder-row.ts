@@ -26,7 +26,7 @@ import type { OverviewBuilder } from '@cluesmith/codev-types';
 const GATE_ICONS: Record<string, string> = {
   'spec-approval': 'book',
   'plan-approval': 'checklist',
-  'dev-approval': 'play',
+  'dev-approval': 'code',
   'pr': 'git-pull-request',
   'verify-approval': 'verified',
 };

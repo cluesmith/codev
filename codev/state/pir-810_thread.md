@@ -62,6 +62,12 @@ Reviewer asked for `[<phase>] #<id> <title>` (phase first, right after the icon)
 - `builder-row.test.ts` — all label assertions flipped to phase-first order.
 - vscode `test:unit` ✓ 123, `lint` ✓, `esbuild` ✓.
 
+## Post-PR tweak: dev-approval gate icon play → code
+
+Reviewer asked for an icon reflecting "coding" rather than "run". Switched `dev-approval` → `code` (`</>` glyph) — more consistent with the other phase-reflecting icons (book=spec, checklist=plan, git-pull-request=pr). Lost the `play` "run-and-verify" hint, accepted. Updated test + review file. vscode unit ✓ 123, lint ✓, esbuild ✓. (Made during the pr-gate consult window; PR updates automatically.)
+
+---
+
 ## Review phase
 
 dev-approval approved. Wrote `codev/reviews/810-vscode-builder-row-legibility.md` (PR body). Added one lessons-learned entry (dual BuilderOverview/OverviewBuilder type + codev-no-check-types footgun). No arch.md change (overview projection shape isn't documented there). Opening PR next, then porch's single-pass 3-way consult, then `pr` gate.

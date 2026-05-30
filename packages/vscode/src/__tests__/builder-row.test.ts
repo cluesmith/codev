@@ -110,7 +110,7 @@ describe('gateIconFor', () => {
   it('maps each canonical gate name to its codicon', () => {
     expect(gateIconFor('spec-approval')).toBe('book');
     expect(gateIconFor('plan-approval')).toBe('checklist');
-    expect(gateIconFor('dev-approval')).toBe('play');
+    expect(gateIconFor('dev-approval')).toBe('code');
     expect(gateIconFor('pr')).toBe('git-pull-request');
     expect(gateIconFor('verify-approval')).toBe('verified');
   });

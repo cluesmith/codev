@@ -4,7 +4,7 @@ Fixes #810
 
 ## Summary
 
-The Builders tree now leads each row with the coarse protocol phase (`[plan]` / `[implement]` / `[review]`) immediately after the icon, and dispatches a gate-specific codicon for blocked builders (book / checklist / play / git-pull-request / verified, with a `bell` fallback) while keeping the warning-yellow color uniform. Both changes make protocol state legible at a glance — phase across all three row states (not just active rows, where it was previously a truncation-prone trailing suffix), and gate type via icon shape (previously a single generic bell for every gate). A new `protocolPhase` wire field was added so the prefix shows the true high-level phase instead of the low-level plan sub-phase id that the collapsed `phase` field carries.
+The Builders tree now leads each row with the coarse protocol phase (`[plan]` / `[implement]` / `[review]`) immediately after the icon, and dispatches a gate-specific codicon for blocked builders (book / checklist / code / git-pull-request / verified, with a `bell` fallback) while keeping the warning-yellow color uniform. Both changes make protocol state legible at a glance — phase across all three row states (not just active rows, where it was previously a truncation-prone trailing suffix), and gate type via icon shape (previously a single generic bell for every gate). A new `protocolPhase` wire field was added so the prefix shows the true high-level phase instead of the low-level plan sub-phase id that the collapsed `phase` field carries.
 
 ## Files Changed
 
@@ -55,7 +55,7 @@ Added one entry to `codev/resources/lessons-learned.md` (Architecture): the buil
 - **What to verify** (maps to the plan's Test Plan):
   - Every row shows `[<protocol-phase>]` right after the icon — `plan` / `implement` / `review`, never a `phase_*` slug
   - Narrowing the sidebar clips the title tail, not the phase
-  - Blocked rows show gate-specific glyphs (checklist=plan, play=dev, git-pull-request=pr), all warning-yellow; idle (`comment-discussion`) and active (`circle-filled`) icons unchanged
+  - Blocked rows show gate-specific glyphs (checklist=plan, code=dev, git-pull-request=pr), all warning-yellow; idle (`comment-discussion`) and active (`circle-filled`) icons unchanged
   - Empty-phase rows render `#<id> <title>` with no stray `[]`
   - Dashboard builder cards still show sub-phase progress `(n/m)` (the `phase` field is untouched)
 
