@@ -32,6 +32,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private lastDimensions: { cols: number; rows: number } | null = null;
   private queuedBytes = 0;
   private disposed = false;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 10;
+  private readonly maxReconnectDelay = 30000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private wsUrl: string,
@@ -53,6 +57,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
   close(): void {
     this.disposed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -103,6 +111,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
     this.ws.on('open', () => {
       this.log('INFO', 'WebSocket connected');
+      this.reconnectAttempts = 0;
       // Send auth via control message (not query param)
       if (this.authKey) {
         this.sendControl({ type: 'ping', payload: { auth: this.authKey } });
@@ -137,8 +146,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.ws.on('close', () => {
       if (!this.disposed) {
         this.log('WARN', 'WebSocket closed');
-        this.writeEmitter.fire('\x1b[33m[Codev: Connection lost, reconnecting...]\x1b[0m\r\n');
-        // Reconnection handled by terminal-manager
+        this.scheduleReconnect();
       }
     });
 
@@ -149,6 +157,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
   reconnect(wsUrl?: string): void {
     if (wsUrl) { this.wsUrl = wsUrl; }
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -156,6 +169,26 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.decoder = new TextDecoder('utf-8', { fatal: false });
     this.escapeBuffer = new EscapeBuffer();
     this.connect();
+  }
+
+  // ── Reconnection ─────────────────────────────────────────────
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnectTimer) { return; }
+
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      this.writeEmitter.fire('\x1b[31m[Codev: Connection lost — max reconnect attempts reached]\x1b[0m\r\n');
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), this.maxReconnectDelay);
+    this.writeEmitter.fire(`\x1b[33m[Codev: Connection lost, reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})]\x1b[0m\r\n`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   // ── Data handling ────────────────────────────────────────────
