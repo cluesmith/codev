@@ -143,8 +143,14 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       }
     });
 
+    // Capture reference for the close-handler identity check below
+    const closedWs = this.ws;
     this.ws.on('close', () => {
-      if (!this.disposed) {
+      // Guard against stale close events: if reconnect() was called while
+      // this socket was still closing, this.ws now points at a healthy new
+      // connection. Only schedule a reconnect if we're still looking at the
+      // same socket instance that just closed.
+      if (!this.disposed && this.ws === closedWs) {
         this.log('WARN', 'WebSocket closed');
         this.scheduleReconnect();
       }
@@ -187,6 +193,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      // Reset decoder and escape buffer before reconnecting — stale bytes
+      // from the dead connection would otherwise get prepended to the first
+      // replay chunk, garbling output (same reset as reconnect() at L169-170).
+      this.decoder = new TextDecoder('utf-8', { fatal: false });
+      this.escapeBuffer = new EscapeBuffer();
       this.connect();
     }, delay);
   }
