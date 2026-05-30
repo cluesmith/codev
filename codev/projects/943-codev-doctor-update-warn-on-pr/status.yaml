@@ -1,7 +1,7 @@
 id: '943'
 title: codev-doctor-update-warn-on-pr
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-30T03:51:33.844Z'
-updated_at: '2026-05-30T17:43:37.607Z'
+updated_at: '2026-05-30T17:46:20.644Z'
 pr_ready_for_human: false
