@@ -1,7 +1,7 @@
 id: '927'
 title: needs-attention-surface-prs-vi
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: server-derivation
     title: Gate-authoritative pr signal + verify-approval label (overview server + types)
@@ -50,5 +50,5 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-927/codev/projects/927-needs-attention-surface-prs-vi/927-dashboard-surfacing-iter1-claude.txt
 started_at: '2026-05-29T16:47:35.190Z'
-updated_at: '2026-05-30T00:56:35.848Z'
+updated_at: '2026-05-30T00:56:38.177Z'
 pr_ready_for_human: false
