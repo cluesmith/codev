@@ -1,7 +1,7 @@
 id: '805'
 title: allow-directory-entries-in-wor
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-31T03:14:03.261Z'
-updated_at: '2026-05-31T04:11:34.592Z'
+updated_at: '2026-05-31T04:11:43.163Z'
 pr_history:
   - phase: review
     pr_number: 947
