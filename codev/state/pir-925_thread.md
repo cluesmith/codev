@@ -24,3 +24,11 @@ plan-approval approved. Implemented:
 Env note: worktree shipped without `node_modules` and without `codev-core`/`codev-types` `dist/`. Ran `pnpm install`, built core + types — needed for vitest subpath resolution and esbuild. (Not a code change; flag for Lessons.)
 
 Checks: tsc ✓, eslint ✓, esbuild ✓, vitest 119/119 ✓. Awaiting `dev-approval`.
+
+## Review phase
+
+dev-approval approved. Wrote `codev/reviews/925-…md`, opened PR #951, recorded with porch. 3-way consult (single pass): gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES. Codex's only finding: plan lacked approved-plan YAML frontmatter (impl itself confirmed sound). Fixed by adding `approved:/validated:` frontmatter (matches #927 precedent); wrote rebuttal doc; escalated to architect. `pr` gate fired.
+
+## Complete
+
+Architect approved pr gate + explicitly cleared `--admin` merge (branch protection: REVIEW_REQUIRED + CI pending). PR #951 merged 2026-05-31. `porch done --merged 951` recorded. Issue #925 auto-closes via `Fixes #925`. Architect handling vscode CHANGELOG + UNRELEASED.md post-merge. Ready for cleanup.
