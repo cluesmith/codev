@@ -387,6 +387,39 @@ describe('ShellperProcess', () => {
       mockPty.simulateExit(1);
       expect(shellper.hasExited).toBe(true);
     });
+
+    it('replays EXIT frame to a client that connects after the PTY already exited (Bugfix #905)', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // PTY exits BEFORE any client connects — the original EXIT broadcast
+      // reaches nobody. A late-connecting client must still be told.
+      mockPty.simulateExit(1);
+      expect(shellper.hasExited).toBe(true);
+
+      const socket = net.createConnection(socketPath);
+      const parser = createFrameParser();
+      socket.pipe(parser);
+
+      const framesPromise = collectFramesFor(parser, 300);
+      await new Promise<void>((resolve, reject) => {
+        socket.on('error', reject);
+        socket.on('connect', () => {
+          socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
+          resolve();
+        });
+      });
+
+      const frames = await framesPromise;
+      const exitFrame = frames.find((f) => f.type === FrameType.EXIT);
+      expect(exitFrame).toBeDefined();
+      if (exitFrame) {
+        const msg = parseJsonPayload<ExitMessage>(exitFrame.payload);
+        expect(msg.code).toBe(1);
+      }
+
+      socket.destroy();
+    });
   });
 
   describe('SPAWN handling', () => {

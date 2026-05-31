@@ -86,6 +86,12 @@ export class ShellperProcess extends EventEmitter {
   // shellper that has emitted nothing yet still reports a sane value.
   private lastDataAt: number = Date.now();
   private exited = false;
+  // Exit info retained after the PTY exits so clients that connect *after*
+  // exit still learn the session ended. Without this, a fast-exiting command
+  // (e.g. `exit 1`) can finish before the manager connects its client, the
+  // EXIT broadcast reaches nobody, and the client hangs forever waiting for an
+  // EXIT frame that already went out (Bugfix #905).
+  private exitInfo: { code: number; signal: string | null } | null = null;
 
   constructor(
     private readonly ptyFactory: () => IShellperPty,
@@ -125,6 +131,7 @@ export class ShellperProcess extends EventEmitter {
     rows: number,
   ): void {
     this.exited = false;
+    this.exitInfo = null;
     const pty = this.ptyFactory();
     this.pty = pty;
     pty.spawn(command, args, {
@@ -155,10 +162,11 @@ export class ShellperProcess extends EventEmitter {
       this.log(`PTY exited: code=${exitInfo.exitCode}, signal=${exitInfo.signal ?? null}`);
 
       this.exited = true;
-      const exitFrame = encodeExit({
+      this.exitInfo = {
         code: exitInfo.exitCode,
         signal: exitInfo.signal != null ? String(exitInfo.signal) : null,
-      });
+      };
+      const exitFrame = encodeExit(this.exitInfo);
 
       this.broadcast(exitFrame);
 
@@ -373,6 +381,14 @@ export class ShellperProcess extends EventEmitter {
     const replayData = this.replayBuffer.getReplayData();
     if (replayData.length > 0) {
       socket.write(encodeReplay(replayData));
+    }
+
+    // If the PTY already exited before this client connected, the original
+    // EXIT broadcast missed it. Replay the retained EXIT frame so the client
+    // doesn't hang waiting for an event that already fired (Bugfix #905).
+    if (this.exited && this.exitInfo) {
+      socket.write(encodeExit(this.exitInfo));
+      this.log(`EXIT replayed to late connection ${connectionId}: code=${this.exitInfo.code}`);
     }
 
     return connectionId;
