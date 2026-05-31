@@ -67,3 +67,12 @@ recognized it as gate-approved. Real kernel = plan↔code drift. Disposition: no
 code change; reconciled the plan to the shipped `[new] #id` order, and tightened
 the review's "How to Test Locally" with concrete EDH steps (codex's 2nd point).
 Escalating to human at pr gate.
+
+### Merged
+
+pr gate approved by architect (override accepted — both CMAP RCs were comparing
+against pre-reconciliation plan; dev-approval override 5ff73ac4 + plan
+reconciliation 16cb365c both legitimate PIR mechanisms). Merged PR #949 with
+--merge --admin (branch protection BLOCKED), recorded via `porch done --merged`.
+Protocol complete (phase: verified). Architect handling vscode CHANGELOG +
+UNRELEASED.md post-merge.
