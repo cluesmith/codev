@@ -1,7 +1,7 @@
 id: '791'
 title: vscode-startup-preflight-verif
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-05-30T23:16:57.708Z'
-updated_at: '2026-06-01T11:51:04.035Z'
+updated_at: '2026-06-01T11:51:09.744Z'
 pr_history:
   - phase: review
     pr_number: 955
