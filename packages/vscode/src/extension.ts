@@ -17,6 +17,7 @@ import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
 import { viewPlanFile, viewSpecFile, viewReviewFile } from './commands/view-artifact.js';
 import { activateIssueView, viewBacklogIssue } from './commands/view-issue.js';
+import { BacklogSearchPanel } from './webviews/backlog-search-panel.js';
 import { searchBacklog } from './commands/search-backlog.js';
 import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
@@ -74,9 +75,22 @@ function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | u
  * BacklogTreeItem itself; command-palette invocations pass nothing →
  * undefined → spawnBuilder falls back to its full quick-pick flow.
  */
-function extractIssueId(arg: vscode.TreeItem | string | undefined): string | undefined {
+/**
+ * Argument shape accepted by the backlog issue commands. Beyond the sidebar's
+ * `TreeItem` and the row-click `string`, the Search Backlog webview (#920)
+ * passes a plain `{ issueId, issueTitle }` object so its inline "reference in
+ * architect" action can carry the title (which a bare id string can't).
+ */
+type IssueCommandArg =
+	| vscode.TreeItem
+	| string
+	| { issueId: string; issueTitle?: string }
+	| undefined;
+
+function extractIssueId(arg: IssueCommandArg): string | undefined {
 	if (typeof arg === 'string') { return arg; }
 	if (arg instanceof BacklogTreeItem) { return arg.issueId; }
+	if (arg && typeof arg === 'object' && 'issueId' in arg) { return arg.issueId; }
 	return undefined;
 }
 
@@ -88,8 +102,11 @@ function extractIssueId(arg: vscode.TreeItem | string | undefined): string | und
  * fall back. An empty title is normalised to undefined so the fallback
  * branch handles it identically to a missing title.
  */
-function extractIssueTitle(arg: vscode.TreeItem | string | undefined): string | undefined {
+function extractIssueTitle(arg: IssueCommandArg): string | undefined {
 	if (arg instanceof BacklogTreeItem) {
+		return arg.issueTitle || undefined;
+	}
+	if (arg && typeof arg === 'object' && 'issueId' in arg) {
 		return arg.issueTitle || undefined;
 	}
 	return undefined;
@@ -630,14 +647,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		reg('codev.viewBacklogIssue', (arg: vscode.TreeItem | string | undefined) =>
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
-			reg('codev.searchBacklog', () => searchBacklog(overviewCache)),
-		regCli('codev.referenceIssueInArchitect', async (arg: vscode.TreeItem | string | undefined) => {
+		reg('codev.openBacklogSearch', () =>
+			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
+		reg('codev.searchBacklog', () => searchBacklog(overviewCache)),
+		regCli('codev.referenceIssueInArchitect', async (arg: IssueCommandArg) => {
 			// Inline-button action on a backlog row: open + focus the architect
 			// terminal, then type `#<id> "<title>" ` into its prompt without
 			// submitting, so the user can keep typing their context before
 			// hitting Enter. Falls back to `#<id> ` when the title isn't
 			// available (e.g. row-click path that passes only the id string).
-				const issueId = extractIssueId(arg);
+			const issueId = extractIssueId(arg);
 			if (!issueId) { return; }
 			const title = extractIssueTitle(arg);
 			await vscode.commands.executeCommand('codev.openArchitectTerminal');

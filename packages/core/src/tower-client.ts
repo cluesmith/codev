@@ -7,7 +7,7 @@
  * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
  */
 
-import type { DashboardState, OverviewData, IssueView, ResolvedWorktreeConfig } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { ensureLocalKey } from './auth.js';
 
@@ -326,6 +326,27 @@ export class TowerClient {
     const params = new URLSearchParams({ number: issueNumber });
     if (workspacePath) { params.set('workspace', workspacePath); }
     const result = await this.request<IssueView>(`/api/issue?${params.toString()}`);
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Fetch the searchable issue dataset (incl. body) from Tower's
+   * GET /api/issue-search. Powers the VSCode "Search Backlog" panel,
+   * which filters/sorts the returned rows host-side. `state` selects the
+   * issue set (default `open` = the sidebar backlog; `closed`/`all` lift
+   * the PR-exclusion). Returns null on transport failure so callers degrade.
+   */
+  async searchIssues(
+    workspacePath?: string,
+    state?: 'open' | 'closed' | 'all',
+  ): Promise<IssueSearchResponse | null> {
+    const params = new URLSearchParams();
+    if (workspacePath) { params.set('workspace', workspacePath); }
+    if (state) { params.set('state', state); }
+    const qs = params.toString();
+    const result = await this.request<IssueSearchResponse>(
+      `/api/issue-search${qs ? `?${qs}` : ''}`,
+    );
     return result.ok ? result.data! : null;
   }
 

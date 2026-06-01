@@ -24,6 +24,8 @@ export {
   type OverviewRecentlyClosed,
   type OverviewData,
   type IssueView,
+  type IssueSearchItem,
+  type IssueSearchResponse,
   type WorktreeDevUrl,
   type ResolvedWorktreeConfig,
   type TeamMemberGitHubData,

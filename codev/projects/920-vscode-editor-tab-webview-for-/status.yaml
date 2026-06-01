@@ -1,0 +1,30 @@
+id: '920'
+title: vscode-editor-tab-webview-for-
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-05-29T23:13:52.523Z'
+    approved_at: '2026-05-30T00:30:38.273Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-05-30T00:45:09.185Z'
+    approved_at: '2026-06-01T12:10:36.344Z'
+  pr:
+    status: approved
+    requested_at: '2026-06-01T12:28:05.634Z'
+    approved_at: '2026-06-01T12:30:46.727Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-05-29T23:07:49.040Z'
+updated_at: '2026-06-01T12:30:46.728Z'
+pr_history:
+  - phase: review
+    pr_number: 957
+    branch: builder/pir-920
+    created_at: '2026-06-01T12:17:39.413Z'
+pr_ready_for_human: false

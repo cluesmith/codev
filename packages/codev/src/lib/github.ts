@@ -117,6 +117,32 @@ export async function fetchIssueList(
 }
 
 /**
+ * Search-oriented issue fetch for the backlog-search webview (#920).
+ * Routes through the dedicated `issue-search` concept — distinct from
+ * `issue-list` so the always-on overview path stays lean: `issue-search`
+ * always includes `body` (for title+body matching) and honors a requested
+ * `state`. Returns null on failure (forge unavailable, or a forge whose
+ * preset has no `issue-search` script) so the panel degrades to a clear
+ * "search unavailable" rather than silently-wrong results.
+ *
+ * @param state - open | closed | all (default open). Passed to the concept
+ *   via `CODEV_ISSUE_STATE`, mirroring how `issue-view` takes `CODEV_ISSUE_ID`.
+ */
+export async function searchIssues(
+  cwd?: string,
+  state: 'open' | 'closed' | 'all' = 'open',
+  forgeConfig?: ForgeConfig | null,
+): Promise<ForgeIssueListItem[] | null> {
+  const result = await executeForgeCommand('issue-search', {
+    CODEV_ISSUE_STATE: state,
+  }, {
+    cwd,
+    forgeConfig,
+  });
+  return result as ForgeIssueListItem[] | null;
+}
+
+/**
  * Resolve the current user's forge login.
  * Routes through the `user-identity` concept command (default:
  * `gh api user --jq .login`). The concept emits a bare string, not JSON,

@@ -9,12 +9,18 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { OverviewBacklogItem, OverviewData } from '@cluesmith/codev-types';
+import type { OverviewBacklogItem, OverviewData, IssueSearchItem } from '@cluesmith/codev-types';
 import {
   filterMine,
   spawnableBacklog,
   visibleBacklogCount,
   formatBacklogTitle,
+  searchBacklog,
+  clampCriteriaToDataset,
+  formatAge,
+  ASSIGNEE_ME,
+  ASSIGNEE_UNASSIGNED,
+  AUTHOR_ME,
 } from '../views/backlog-filter.js';
 
 function assignedItem(id: string, assignees: string[]): OverviewBacklogItem {
@@ -169,5 +175,172 @@ describe('formatBacklogTitle', () => {
   it('treats partial undefined counts as the no-data case', () => {
     expect(formatBacklogTitle(undefined, 5)).toBe('Backlog');
     expect(formatBacklogTitle(5, undefined)).toBe('Backlog');
+  });
+});
+
+// --- Backlog search (#920) ---
+
+function searchItem(over: Partial<IssueSearchItem> & { id: string }): IssueSearchItem {
+  return {
+    title: `Issue ${over.id}`,
+    url: `https://example.test/${over.id}`,
+    area: 'Uncategorized',
+    createdAt: '2026-05-01T00:00:00Z',
+    body: '',
+    ...over,
+  };
+}
+
+describe('searchBacklog — text', () => {
+  const items = [
+    searchItem({ id: '1', title: 'Add webview panel', body: 'rich search UI' }),
+    searchItem({ id: '2', title: 'Fix tree toggle', body: 'mentions WEBVIEW in body' }),
+    searchItem({ id: '3', title: 'Unrelated', body: 'nothing here' }),
+  ];
+
+  it('matches title substring, case-insensitively', () => {
+    expect(searchBacklog(items, { text: 'PANEL' }).map(i => i.id)).toEqual(['1']);
+  });
+
+  it('matches body substring', () => {
+    expect(searchBacklog(items, { text: 'webview' }).map(i => i.id).sort()).toEqual(['1', '2']);
+  });
+
+  it('empty text returns everything', () => {
+    expect(searchBacklog(items, { text: '' })).toHaveLength(3);
+    expect(searchBacklog(items, {})).toHaveLength(3);
+  });
+
+  it('whitespace-only text is treated as empty', () => {
+    expect(searchBacklog(items, { text: '   ' })).toHaveLength(3);
+  });
+});
+
+describe('searchBacklog — scopes AND together', () => {
+  const items = [
+    searchItem({ id: '1', area: 'area/vscode', assignees: ['alice'], author: 'bob' }),
+    searchItem({ id: '2', area: 'area/vscode', assignees: ['carol'], author: 'alice' }),
+    searchItem({ id: '3', area: 'area/tower', assignees: ['alice'], author: 'alice' }),
+    searchItem({ id: '4', area: 'area/vscode', assignees: [], author: 'dave' }),
+  ];
+
+  it('filters by exact area', () => {
+    expect(searchBacklog(items, { area: 'area/tower' }).map(i => i.id)).toEqual(['3']);
+  });
+
+  it('resolves the "me" assignee sentinel via currentUser', () => {
+    expect(searchBacklog(items, { assignee: ASSIGNEE_ME, currentUser: 'alice' }).map(i => i.id).sort())
+      .toEqual(['1', '3']);
+  });
+
+  it('resolves the "unassigned" sentinel', () => {
+    expect(searchBacklog(items, { assignee: ASSIGNEE_UNASSIGNED }).map(i => i.id)).toEqual(['4']);
+  });
+
+  it('filters by author "me"', () => {
+    expect(searchBacklog(items, { author: AUTHOR_ME, currentUser: 'alice' }).map(i => i.id).sort())
+      .toEqual(['2', '3']);
+  });
+
+  it('ANDs area + assignee', () => {
+    expect(searchBacklog(items, { area: 'area/vscode', assignee: 'alice' }).map(i => i.id)).toEqual(['1']);
+  });
+
+  it('"me" sentinel with unknown currentUser is a no-op (does not hide everything)', () => {
+    expect(searchBacklog(items, { assignee: ASSIGNEE_ME }).map(i => i.id)).toEqual(['1', '2', '3', '4']);
+  });
+});
+
+describe('searchBacklog — sort', () => {
+  const items = [
+    searchItem({ id: '10', title: 'Beta', area: 'area/tower', createdAt: '2026-05-20T00:00:00Z' }),
+    searchItem({ id: '2', title: 'alpha', area: 'area/vscode', createdAt: '2026-05-01T00:00:00Z' }),
+    searchItem({ id: '7', title: 'Gamma', area: 'area/docs', createdAt: '2026-05-10T00:00:00Z' }),
+  ];
+
+  it('sorts by id numerically (asc)', () => {
+    expect(searchBacklog(items, { sort: 'id', direction: 'asc' }).map(i => i.id)).toEqual(['2', '7', '10']);
+  });
+
+  it('sorts by title case-insensitively (asc)', () => {
+    expect(searchBacklog(items, { sort: 'title', direction: 'asc' }).map(i => i.title))
+      .toEqual(['alpha', 'Beta', 'Gamma']);
+  });
+
+  it('default sort is age desc — oldest first', () => {
+    expect(searchBacklog(items, {}).map(i => i.id)).toEqual(['2', '7', '10']);
+  });
+
+  it('age asc surfaces newest first', () => {
+    expect(searchBacklog(items, { sort: 'age', direction: 'asc' }).map(i => i.id)).toEqual(['10', '7', '2']);
+  });
+
+  it('does not mutate the input array', () => {
+    const before = items.map(i => i.id);
+    searchBacklog(items, { sort: 'id', direction: 'asc' });
+    expect(items.map(i => i.id)).toEqual(before);
+  });
+});
+
+describe('clampCriteriaToDataset', () => {
+  // Regression for the #920 Codex finding: a refresh/Status change that drops a
+  // selected facet value must clear it from criteria, so the host's filter
+  // matches the dropdown (which resets the vanished option to "All").
+  const items = [
+    searchItem({ id: '1', area: 'area/vscode', assignees: ['alice'], author: 'bob' }),
+  ];
+
+  it('clears an area no longer present in the dataset', () => {
+    expect(clampCriteriaToDataset({ area: 'area/tower' }, items).area).toBe('');
+  });
+
+  it('keeps an area still present', () => {
+    expect(clampCriteriaToDataset({ area: 'area/vscode' }, items).area).toBe('area/vscode');
+  });
+
+  it('clears a vanished assignee login but keeps the me / unassigned sentinels', () => {
+    expect(clampCriteriaToDataset({ assignee: 'carol' }, items).assignee).toBe('');
+    expect(clampCriteriaToDataset({ assignee: ASSIGNEE_ME }, items).assignee).toBe(ASSIGNEE_ME);
+    expect(clampCriteriaToDataset({ assignee: ASSIGNEE_UNASSIGNED }, items).assignee).toBe(ASSIGNEE_UNASSIGNED);
+  });
+
+  it('clears a vanished author but keeps the me sentinel', () => {
+    expect(clampCriteriaToDataset({ author: 'dave' }, items).author).toBe('');
+    expect(clampCriteriaToDataset({ author: AUTHOR_ME }, items).author).toBe(AUTHOR_ME);
+  });
+
+  it('keeps a present assignee/author and does not mutate the input', () => {
+    const crit = { area: 'area/vscode', assignee: 'alice', author: 'bob' };
+    const out = clampCriteriaToDataset(crit, items);
+    expect(out).toEqual({ area: 'area/vscode', assignee: 'alice', author: 'bob' });
+    expect(crit.assignee).toBe('alice'); // input untouched
+  });
+});
+
+describe('formatAge', () => {
+  const now = Date.parse('2026-05-30T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const H = 3600_000, D = 86_400_000;
+
+  it('renders "today" for under an hour', () => {
+    expect(formatAge(ago(30 * 60_000), now)).toBe('today');
+  });
+  it('renders hours under a day', () => {
+    expect(formatAge(ago(5 * H), now)).toBe('5h');
+  });
+  it('renders days under a week', () => {
+    expect(formatAge(ago(3 * D), now)).toBe('3d');
+  });
+  it('renders weeks under a month', () => {
+    expect(formatAge(ago(14 * D), now)).toBe('2w');
+  });
+  it('renders months under a year', () => {
+    expect(formatAge(ago(70 * D), now)).toBe('2mo');
+  });
+  it('renders years', () => {
+    expect(formatAge(ago(400 * D), now)).toBe('1y');
+  });
+  it('returns empty string for an unparseable date', () => {
+    expect(formatAge('not-a-date', now)).toBe('');
   });
 });

@@ -61,7 +61,15 @@ import {
   removeArchitect,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
-import { fetchIssue } from '../../lib/github.js';
+import {
+  fetchIssue,
+  searchIssues,
+  fetchPRList,
+  fetchCurrentUser,
+  parseLinkedIssue,
+  parseArea,
+} from '../../lib/github.js';
+import type { IssueSearchItem, IssueSearchResponse } from '@cluesmith/codev-types';
 import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
@@ -151,6 +159,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
+  'GET /api/issue-search': (_req, res, url) => handleIssueSearch(res, url),
   'GET /api/worktree-config': (_req, res, url) => handleWorktreeConfigView(res, url),
   'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
@@ -896,6 +905,87 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(issue));
+}
+
+/**
+ * GET /api/issue-search — the data source for the VSCode "Search Backlog"
+ * editor-tab webview (#920). Returns the issue set for the requested
+ * `state`, each row carrying its `body` so the panel can substring-match
+ * title + body host-side.
+ *
+ * Deliberately separate from /api/overview: this does a *fresh* fetch with
+ * `body` opted in, so the always-on overview payload stays body-free. The
+ * panel hits this on open, on refresh, and when the Status dropdown changes.
+ *
+ * - `state=open` (default): reproduces the sidebar backlog — open issues
+ *   minus those already linked to a PR ("no PR yet"). Matches `deriveBacklog`.
+ * - `state=closed|all`: lifts the PR-exclusion (a closed issue usually *has*
+ *   a merged PR, so excluding would empty the list) and returns the raw set.
+ */
+async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<void> {
+  let workspaceRoot = url.searchParams.get('workspace');
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+  if (!workspaceRoot) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing workspace' }));
+    return;
+  }
+
+  const rawState = url.searchParams.get('state');
+  const state: 'open' | 'closed' | 'all' =
+    rawState === 'closed' || rawState === 'all' ? rawState : 'open';
+
+  const issues = await searchIssues(workspaceRoot, state);
+  if (issues === null) {
+    const body: IssueSearchResponse = {
+      items: [],
+      error: 'Forge unavailable — could not fetch issues',
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+    return;
+  }
+
+  // Only the open backlog excludes PR-linked issues (the "no PR yet" set the
+  // sidebar shows). Closed/all return the raw set — see the doc comment.
+  let prLinkedIssues = new Set<string>();
+  if (state === 'open') {
+    const prs = await fetchPRList(workspaceRoot);
+    if (prs) {
+      prLinkedIssues = new Set(
+        prs
+          .map(pr => parseLinkedIssue(pr.body || '', pr.title))
+          .filter((id): id is string => id !== null),
+      );
+    }
+  }
+
+  const items: IssueSearchItem[] = issues
+    .filter(issue => !prLinkedIssues.has(String(issue.number)))
+    .map(issue => {
+      const item: IssueSearchItem = {
+        id: String(issue.number),
+        title: issue.title,
+        url: issue.url,
+        area: parseArea(issue.labels),
+        createdAt: issue.createdAt,
+        body: issue.body ?? '',
+      };
+      if (issue.author?.login) { item.author = issue.author.login; }
+      const assignees = issue.assignees?.map(a => a.login) ?? [];
+      if (assignees.length > 0) { item.assignees = assignees; }
+      return item;
+    });
+
+  const response: IssueSearchResponse = { items };
+  const currentUser = await fetchCurrentUser(workspaceRoot);
+  if (currentUser) { response.currentUser = currentUser; }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(response));
 }
 
 /**

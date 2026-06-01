@@ -110,6 +110,11 @@
         "icon": "$(list-flat)"
       },
       {
+        "command": "codev.openBacklogSearch",
+        "title": "Codev: Search Backlog",
+        "icon": "$(search)"
+      },
+      {
         "command": "codev.showBacklogAll",
         "title": "Codev: Show All Backlog Items",
         "icon": "$(eye)"
@@ -444,6 +449,11 @@
           "command": "codev.refreshOverview",
           "when": "view == codev.pullRequests",
           "group": "navigation"
+        },
+        {
+          "command": "codev.openBacklogSearch",
+          "when": "view == codev.backlog",
+          "group": "navigation@0"
         },
         {
           "command": "codev.refreshOverview",
