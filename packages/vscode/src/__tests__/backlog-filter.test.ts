@@ -16,6 +16,7 @@ import {
   visibleBacklogCount,
   formatBacklogTitle,
   searchBacklog,
+  clampCriteriaToDataset,
   formatAge,
   ASSIGNEE_ME,
   ASSIGNEE_UNASSIGNED,
@@ -278,6 +279,41 @@ describe('searchBacklog — sort', () => {
     const before = items.map(i => i.id);
     searchBacklog(items, { sort: 'id', direction: 'asc' });
     expect(items.map(i => i.id)).toEqual(before);
+  });
+});
+
+describe('clampCriteriaToDataset', () => {
+  // Regression for the #920 Codex finding: a refresh/Status change that drops a
+  // selected facet value must clear it from criteria, so the host's filter
+  // matches the dropdown (which resets the vanished option to "All").
+  const items = [
+    searchItem({ id: '1', area: 'area/vscode', assignees: ['alice'], author: 'bob' }),
+  ];
+
+  it('clears an area no longer present in the dataset', () => {
+    expect(clampCriteriaToDataset({ area: 'area/tower' }, items).area).toBe('');
+  });
+
+  it('keeps an area still present', () => {
+    expect(clampCriteriaToDataset({ area: 'area/vscode' }, items).area).toBe('area/vscode');
+  });
+
+  it('clears a vanished assignee login but keeps the me / unassigned sentinels', () => {
+    expect(clampCriteriaToDataset({ assignee: 'carol' }, items).assignee).toBe('');
+    expect(clampCriteriaToDataset({ assignee: ASSIGNEE_ME }, items).assignee).toBe(ASSIGNEE_ME);
+    expect(clampCriteriaToDataset({ assignee: ASSIGNEE_UNASSIGNED }, items).assignee).toBe(ASSIGNEE_UNASSIGNED);
+  });
+
+  it('clears a vanished author but keeps the me sentinel', () => {
+    expect(clampCriteriaToDataset({ author: 'dave' }, items).author).toBe('');
+    expect(clampCriteriaToDataset({ author: AUTHOR_ME }, items).author).toBe(AUTHOR_ME);
+  });
+
+  it('keeps a present assignee/author and does not mutate the input', () => {
+    const crit = { area: 'area/vscode', assignee: 'alice', author: 'bob' };
+    const out = clampCriteriaToDataset(crit, items);
+    expect(out).toEqual({ area: 'area/vscode', assignee: 'alice', author: 'bob' });
+    expect(crit.assignee).toBe('alice'); // input untouched
   });
 });
 

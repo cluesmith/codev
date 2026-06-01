@@ -25,6 +25,7 @@ import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
 import {
   searchBacklog,
+  clampCriteriaToDataset,
   formatAge,
   type BacklogSearchCriteria,
 } from '../views/backlog-filter.js';
@@ -94,7 +95,7 @@ export class BacklogSearchPanel {
     // SSE/poll burst the same way view-issue.ts does.
     this.overviewCache.onDidChange(() => this.refreshThrottled(), null, this.disposables);
 
-    void this.fetchAndRender();
+    this.fetchAndRender();
   }
 
   private async refreshThrottled(): Promise<void> {
@@ -126,6 +127,10 @@ export class BacklogSearchPanel {
       this.dataset = response.items;
       this.currentUser = response.currentUser;
     }
+    // A refresh / Status change can drop a facet value the user had selected;
+    // clamp criteria to the new dataset so the rendered rows stay consistent
+    // with the dropdowns (which reset a vanished option to its default). #920.
+    this.criteria = clampCriteriaToDataset(this.criteria, this.dataset);
     this.postDataset();
     this.postResults();
   }
@@ -140,20 +145,20 @@ export class BacklogSearchPanel {
         return;
       case 'state':
         this.state = m.state === 'closed' || m.state === 'all' ? m.state : 'open';
-        void this.fetchAndRender();
+        this.fetchAndRender();
         return;
       case 'refresh':
-        void this.fetchAndRender();
+        this.fetchAndRender();
         return;
       case 'open':
-        if (m.id) { void vscode.commands.executeCommand('codev.viewBacklogIssue', m.id); }
+        if (m.id) { vscode.commands.executeCommand('codev.viewBacklogIssue', m.id); }
         return;
       case 'reference':
         // Same inline action as the sidebar row: open + focus the architect
         // terminal and inject `#<id> "<title>" ` (without submitting). Passing
         // the object form carries the title, which a bare id string can't.
         if (m.id) {
-          void vscode.commands.executeCommand('codev.referenceIssueInArchitect', {
+          vscode.commands.executeCommand('codev.referenceIssueInArchitect', {
             issueId: m.id,
             issueTitle: m.title,
           });
@@ -169,7 +174,7 @@ export class BacklogSearchPanel {
       .sort((a, b) => a.localeCompare(b));
     const authors = [...new Set(this.dataset.map(i => i.author).filter((a): a is string => !!a))]
       .sort((a, b) => a.localeCompare(b));
-    void this.panel.webview.postMessage({
+    this.panel.webview.postMessage({
       type: 'dataset',
       areas,
       assignees,
@@ -192,7 +197,7 @@ export class BacklogSearchPanel {
       assignee: i.assignees?.[0] ?? '',
       age: formatAge(i.createdAt, now),
     }));
-    void this.panel.webview.postMessage({ type: 'results', rows });
+    this.panel.webview.postMessage({ type: 'results', rows });
   }
 
   private dispose(): void {

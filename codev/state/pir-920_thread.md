@@ -37,6 +37,12 @@ Reviewer iterated on the implementation at the gate; addressed each:
 
 Green after all three: full codev suite 3192 passed / 13 pre-existing skips ✓; vscode check-types ✓ / lint ✓ / esbuild ✓ / 135 unit ✓.
 
+### Review phase: PR #957 + 3-way consultation (2026-06-01)
+Wrote review + arch/lessons updates, opened PR #957 (`Fixes #920`). 3-way consult: **Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES** (2 findings).
+- #1 stale-criteria desync (real bug, missed by the other two): FIXED — added pure `clampCriteriaToDataset()` + wired into `fetchAndRender()`; 5 regression tests. vscode 197 tests now.
+- #2 Open omits active-builder exclusion: REBUTTED — plan's explicit Open def is "no active PR" (implemented); Gemini concurred it's fine for exploratory search; issue says "every open issue". Flagged for human decision at pr gate (small follow-up if they want sidebar-strict).
+- Applied Claude's note: removed `void` prefixes (project preference). Documented all in review "3-Way Consultation Outcome". Escalating the REQUEST_CHANGES to the human since PIR is single-pass.
+
 ### main merged + dev-approval approved → review phase (2026-06-01)
 Merged `origin/main` (202 commits behind: v3.1.6 + merged builders incl. #918 Quick Pick). One conflict (`extension.ts`): kept both search imports, adapted my command to main's new `reg()`/`regCli()` registration wrappers, preserved `IssueCommandArg` widening on `referenceIssueInArchitect`. Verified no double-icon (only `openBacklogSearch` in title bar; #918 Quick Pick palette-only). Post-merge green: vscode 192, codev 3210. `extension.ts` left tab-indented (pre-existing file style; no repo formatter). dev-approval gate approved by human; advanced to review.
 

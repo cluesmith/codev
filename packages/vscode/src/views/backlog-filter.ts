@@ -167,6 +167,37 @@ function sortBacklog(
 }
 
 /**
+ * Clear any facet selection (area / assignee / author) that references a value
+ * no longer present in `items`. When a refresh or Status change drops the
+ * previously-selected option, the webview's `<select>` silently falls back to
+ * its default ("All"); clamping the host's criteria the same way keeps the
+ * rendered rows consistent with what the dropdowns show — otherwise the table
+ * stays filtered by a now-hidden value while the dropdown reads "All" (#920
+ * Codex review). The `''` / `me` / `unassigned` sentinels are always valid and
+ * never cleared.
+ */
+export function clampCriteriaToDataset(
+  criteria: BacklogSearchCriteria,
+  items: IssueSearchItem[],
+): BacklogSearchCriteria {
+  const areas = new Set(items.map(i => i.area));
+  const assignees = new Set(items.flatMap(i => i.assignees ?? []));
+  const authors = new Set(items.map(i => i.author).filter((a): a is string => !!a));
+  const out = { ...criteria };
+  if (out.area && !areas.has(out.area)) { out.area = ''; }
+  if (out.assignee
+    && out.assignee !== ASSIGNEE_ME
+    && out.assignee !== ASSIGNEE_UNASSIGNED
+    && !assignees.has(out.assignee)) {
+    out.assignee = '';
+  }
+  if (out.author && out.author !== AUTHOR_ME && !authors.has(out.author)) {
+    out.author = '';
+  }
+  return out;
+}
+
+/**
  * Filter + sort a backlog-search dataset by the panel's criteria. Scopes
  * (text / area / assignee / author) AND together; sorting is applied last.
  * Empty criteria → every item, sorted. Pure and synchronous.

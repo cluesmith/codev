@@ -59,6 +59,16 @@ Added two entries to `codev/resources/lessons-learned.md` → **Architecture**:
 1. Prefer a **dedicated forge concept** over parameterizing a shared one when a feature needs extra data/queries — parameterizing couples the shared primitive and (here) would have silently returned wrong results on non-GitHub forges; a dedicated concept degrades honestly to "unavailable". Extends the #909 forge-agnostic-layer lesson.
 2. **Name by layer**: route/concept/lib = resource (`issue-search`), UI = feature ("Search Backlog"); don't mix vocabularies across the same data path.
 
+## 3-Way Consultation Outcome (PIR single advisory pass)
+
+- **Gemini: APPROVE** · **Claude: APPROVE** · **Codex: REQUEST_CHANGES** (2 findings).
+- PIR's consultation is single-pass — these dispositions were **not** independently re-reviewed, so the `pr`-gate human is the final check on them:
+
+1. **Codex #1 — stale-criteria desync (real bug): FIXED + regression test.** On a refresh / Status change that drops a previously-selected facet value, the webview's dropdown silently reset to "All" while the host kept filtering by the now-hidden value — table and dropdown could disagree. Fixed host-side with a pure, tested `clampCriteriaToDataset()` (`views/backlog-filter.ts`) called in `fetchAndRender()` before re-render; 5 regression cases added. Neither Gemini nor Claude caught this — worth a careful look.
+2. **Codex #2 — Open omits active-builder exclusion: REBUTTED (human decision flagged).** The plan's explicit Open definition is *"open issues with no active PR"* — exactly what's implemented; the builder-exclusion only appears in the plan's parenthetical about the "available work" concept. **Gemini explicitly judged this an acceptable deviation for an exploratory search surface**, and issue #920 frames the use case as *"every open `area/vscode` issue, assigned to anyone"* — i.e. builder-attached issues should be findable (the sidebar hides them only to prevent double-spawn, which doesn't apply to search; "All" shows everything regardless). I left Open as PR-exclusion-only. **If you'd prefer Open to mirror the sidebar's displayed set exactly (also hide active-builder issues), that's a small follow-up** — say so at the gate.
+- Also applied Claude's note: removed `void` prefixes on fire-and-forget calls in `backlog-search-panel.ts` (project preference = bare call).
+- Full verdict text: `codev/projects/920-*/920-review-iter1-{gemini,codex,claude}.txt`.
+
 ## Things to Look At During PR Review
 
 - **The three unverified forge scripts** (`gitlab`/`gitea`/`linear` `issue-search.sh`). Only `github` was empirically exercised (this repo's forge). The others are faithful mirrors of their `issue-list.sh` siblings + `body` + a state mapping, each with a `⚠️ UNVERIFIED` header naming exactly what to smoke-test (glab's `--closed`/`--all`, tea's `--state`/`body` field, Linear's `state.type` filter). They degrade safely — a forge whose concept errors returns null → "search unavailable" — so they can't silently misbehave, but they need a smoke-test by someone with those CLIs before being trusted.
