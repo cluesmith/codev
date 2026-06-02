@@ -117,3 +117,21 @@ row + header). Refactor:
   blocked still overrides the glyph with `gateIconFor` (gate-specific) over the
   shared color. Removes the duplicated literals + its own nested ternary.
 - +4 `worstBuilderState` unit tests. All green (211 tests).
+
+## Review phase → pr gate
+
+Wrote retrospective `codev/reviews/926-...md`, opened **PR #959** (Fixes #926),
+recorded with porch. 3-way consult (single advisory pass):
+- Gemini APPROVE (first run looped/no-verdict; re-ran → APPROVE).
+- Claude APPROVE.
+- Codex REQUEST_CHANGES — two bookkeeping findings, no code defect:
+  1. Backlog grey-vs-plan-green → ADDRESSED by syncing the plan to the shipped
+     grey (grey was the explicit dev-approval-gate request; gate approved with
+     it). Commit 939ed56d.
+  2. Plan missing approved/validated frontmatter → REBUTTED (architect-
+     pre-approval convention; PIR builder plans 920/930/932 carry none; approval
+     is in status.yaml; `validated:[3 models]` would be false — PIR plan phase
+     runs no consult).
+Rebuttal at `codev/projects/926-*/926-review-iter1-rebuttals.md`. Architect
+notified leading with the REQUEST_CHANGES + disposition. **At `pr` gate —
+awaiting human approval; merge is gated by porch state, not pane prose.**
