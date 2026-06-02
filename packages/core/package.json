@@ -35,6 +35,10 @@
     "./area-grouping": {
       "types": "./dist/area-grouping.d.ts",
       "default": "./dist/area-grouping.js"
+    },
+    "./phase-grouping": {
+      "types": "./dist/phase-grouping.d.ts",
+      "default": "./dist/phase-grouping.js"
     }
   },
   "files": [
