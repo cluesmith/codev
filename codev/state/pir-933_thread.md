@@ -21,3 +21,10 @@ gate-specific (gateIconFor) and untouched.
 
 Plan rewritten → `codev/plans/933-afx-tower-ui-gate-action-butto.md`. Awaiting
 `plan-approval`.
+
+## Implement (2026-06-02) — icon-only
+
+Plan approved. One-line change: `codev.approveGate` icon `$(check)` →
+`$(arrow-right)` in `packages/vscode/package.json`. No code, no behavior change.
+Checks (worktree): check-types ✓, lint ✓, test:unit 197/197 ✓.
+Committed, pushed. `porch done` → awaiting `dev-approval`.
