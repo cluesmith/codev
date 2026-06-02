@@ -41,3 +41,11 @@ Distinct buckets possible ≈ 19 (17 authored ids + verified + unknown, complete
 ## IMPLEMENT phase (plan-approval APPROVED 2026-06-02)
 
 Building per approved plan. Harness notes: core has no test runner (build/check-types only); pure phase-grouping helper goes in core, tested via vitest in vscode `src/__tests__/` (mirrors builder-row.test.ts, resolves `@cluesmith/codev-core/phase-grouping` via exports→dist, so build core first).
+
+First swap landed + green (root build/test, vscode check-types, 255 vscode tests, lint). Dev-approval gate reached.
+
+## Scope expansion at dev-approval gate (architect-directed): add phase/area TOGGLE
+
+Architect: some users prefer area-grouping. Keep BOTH, default stage, add a view-header toggle. (Issue #952 listed this exact toggle as a potential follow-up under Out-of-scope.) Bundling into #952 per architect choice.
+Mirror the `buildersFileViewAsTree` house pattern: config setting `codev.buildersGroupBy` (enum stage|area, default stage) + two paired view/title commands gated on a `codev.buildersGroupBy` context key.
+Key design: the ROW PREFIX flips with mode — area-mode shows `[<phase>]` (restores #810), stage-mode shows `[<area>]`. Per-mode expansion stores (stage key + reuse original area key `codev.buildersGroupExpansion`). Area-mode keeps the single-Uncategorized flatten; stage-mode doesn't.
