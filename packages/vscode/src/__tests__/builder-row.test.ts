@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
-import { builderRowLabel, gateIconFor } from '../views/builder-row.js';
+import { builderRowLabel, gateIconFor, rollupGroupState } from '../views/builder-row.js';
 
 // A fixed clock so elapsed-time suffixes are deterministic.
 const NOW = new Date('2026-05-30T12:00:00Z').getTime();
@@ -130,5 +130,38 @@ describe('gateIconFor', () => {
     expect(gateIconFor('plan review')).toBe('bell');
     expect(gateIconFor('dev review')).toBe('bell');
     expect(gateIconFor('PR review')).toBe('bell');
+  });
+});
+
+describe('rollupGroupState', () => {
+  const blockedBuilder = () => builder({ blocked: 'plan review', blockedGate: 'plan-approval' });
+  const idleBuilder = () => builder({ blocked: null, lastDataAt: SIX_MIN_AGO });
+  const activeBuilder = () => builder({ blocked: null, lastDataAt: TWELVE_MIN_AGO, phase: 'verified' });
+
+  it('all active → only the active count', () => {
+    // `verified` phase makes isIdleWaiting false regardless of silence.
+    const state = rollupGroupState([activeBuilder(), activeBuilder(), activeBuilder()], NOW);
+    expect(state).toEqual({ blocked: 0, idle: 0, active: 3 });
+  });
+
+  it('one idle among actives → idle counted (idle beats active in the worst-of)', () => {
+    const state = rollupGroupState([activeBuilder(), idleBuilder(), activeBuilder()], NOW);
+    expect(state).toEqual({ blocked: 0, idle: 1, active: 2 });
+  });
+
+  it('one blocked → blocked counted (blocked beats idle + active)', () => {
+    const state = rollupGroupState([activeBuilder(), idleBuilder(), blockedBuilder()], NOW);
+    expect(state).toEqual({ blocked: 1, idle: 1, active: 1 });
+  });
+
+  it('blocked takes precedence over idle for the SAME builder', () => {
+    // A builder that is both blocked AND silent past the threshold counts as
+    // blocked only — mirrors the row classification (`!isBlocked && isIdle`).
+    const both = builder({ blocked: 'plan review', blockedGate: 'plan-approval', lastDataAt: SIX_MIN_AGO });
+    expect(rollupGroupState([both], NOW)).toEqual({ blocked: 1, idle: 0, active: 0 });
+  });
+
+  it('empty group → all zero', () => {
+    expect(rollupGroupState([], NOW)).toEqual({ blocked: 0, idle: 0, active: 0 });
   });
 });

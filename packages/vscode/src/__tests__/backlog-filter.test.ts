@@ -9,10 +9,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { OverviewBacklogItem, OverviewData, IssueSearchItem } from '@cluesmith/codev-types';
+import type { OverviewBacklogItem, OverviewBuilder, OverviewData, IssueSearchItem } from '@cluesmith/codev-types';
 import {
   filterMine,
   spawnableBacklog,
+  activeBuilderCountByArea,
   visibleBacklogCount,
   formatBacklogTitle,
   searchBacklog,
@@ -342,5 +343,40 @@ describe('formatAge', () => {
   });
   it('returns empty string for an unparseable date', () => {
     expect(formatAge('not-a-date', now)).toBe('');
+  });
+});
+
+describe('activeBuilderCountByArea', () => {
+  // The helper reads only `.area`; the rest of the shape is irrelevant.
+  const builderIn = (area: string): OverviewBuilder => ({ area } as unknown as OverviewBuilder);
+
+  it('empty builders → empty map', () => {
+    expect(activeBuilderCountByArea([]).size).toBe(0);
+  });
+
+  it('counts one builder under its area', () => {
+    const counts = activeBuilderCountByArea([builderIn('vscode')]);
+    expect(counts.get('vscode')).toBe(1);
+    expect(counts.get('tower')).toBeUndefined();
+  });
+
+  it('sums multiple builders in the same area', () => {
+    const counts = activeBuilderCountByArea([builderIn('vscode'), builderIn('vscode'), builderIn('vscode')]);
+    expect(counts.get('vscode')).toBe(3);
+  });
+
+  it('keeps per-area counts separate across areas', () => {
+    const counts = activeBuilderCountByArea([
+      builderIn('vscode'),
+      builderIn('tower'),
+      builderIn('vscode'),
+    ]);
+    expect(counts.get('vscode')).toBe(2);
+    expect(counts.get('tower')).toBe(1);
+  });
+
+  it('counts Uncategorized builders under the raw area value', () => {
+    const counts = activeBuilderCountByArea([builderIn('Uncategorized'), builderIn('Uncategorized')]);
+    expect(counts.get('Uncategorized')).toBe(2);
   });
 });
