@@ -1,7 +1,7 @@
 id: '936'
 title: terminal-adapter-websocket-clo
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-02T00:02:56.637Z'
-updated_at: '2026-06-02T01:43:45.055Z'
+updated_at: '2026-06-02T01:44:55.215Z'
