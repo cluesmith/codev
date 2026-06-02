@@ -1,0 +1,18 @@
+id: '916'
+title: vscode-sidebar-data-builders-b
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-02T22:53:54.850Z'
+updated_at: '2026-06-02T22:53:54.851Z'
