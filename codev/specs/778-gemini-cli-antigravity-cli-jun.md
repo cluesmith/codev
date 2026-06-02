@@ -62,9 +62,16 @@ All of the following was confirmed by installing and running the real CLI on mac
   auth code; the token then persists (under `~/Library/Application Support/Antigravity`) and
   subsequent `--print` runs need no re-auth. No API key. **Caveat:** the first-run auth wait is short
   (~30s) and **interactive** — it cannot be completed head-less in CI.
-- **No `--model` flag.** Model is tier/config-based (binary exposes `GetModelTier`/`GetPlanModel`/
-  `GetFlashLite`/`customModels`), not a CLI argument. → **Pinning Pro is an open question** (below).
-  A self-identification probe **timed out**, so model id is not reliably introspectable via `--print`.
+- **No `--model` flag, and the DEFAULT is Flash — not Pro.** Per Antigravity docs, the CLI defaults
+  to **Gemini 3.5 Flash (High)**; the **Pro** class is selected via the interactive **`/model`**
+  slash command (offering e.g. Gemini 3.1 Pro High/Low, 3.5 Flash variants; the `-preview` suffix is
+  dropped post-Antigravity-2.0, so the id is now `gemini-3.1-pro`-class). **Consequence:** a naïve
+  `agy --print` would silently use **Flash**, violating architect priority #2 — so Pro selection is
+  mandatory, not optional. How to make a *non-interactive* `--print` run use Pro (a persisted
+  `/model` choice vs. a config file vs. subscription default) is the critical open question (below).
+  Binary internals corroborate a model-tier system (`GetModelTier`/`GetPlanModel`/`GetFlashLite`/
+  `customModels`). A self-id probe **timed out**, so the model id is not reliably introspectable via
+  `--print`.
 - **No JSON / usage output.** `--print` returns plain text only — no token-usage stats. → cost rows
   must degrade gracefully.
 - **No system-prompt/role flag** (no `GEMINI_SYSTEM_MD` equivalent). → fold the reviewer role into
@@ -147,11 +154,15 @@ All of the following was confirmed by installing and running the real CLI on mac
 
 ## Open Questions
 ### Critical (architect decides)
-- [ ] **Pro-pinning mechanism.** `agy` has no `--model` flag. How do we guarantee the lane uses the
-      Pro class, not flash? Candidates to investigate in Plan: (a) the subscription tier (AI Ultra)
-      defaults `--print` to Pro server-side; (b) an `agy`/Antigravity settings file or plugin that
-      sets the model; (c) an env var. **Architect input wanted** (AI Ultra + product knowledge).
-      Acceptance must include a way to *confirm* Pro is in use.
+- [ ] **Pro-pinning mechanism — and the default is Flash, so "do nothing" = wrong model.** Antigravity
+      defaults to Gemini 3.5 **Flash**; Pro is chosen via the interactive **`/model`** slash command,
+      which has no obvious `--print` (non-interactive) equivalent (no `--model` flag). The Plan must
+      establish how a headless `--print` run uses **Pro**, candidates: (a) `/model` selection
+      **persists** to config and is honored by later `--print` runs (set once at setup); (b) a
+      writable `agy`/Antigravity settings/config file with a model field; (c) an env var; (d) the AI
+      Ultra subscription default. **Architect input wanted** (product knowledge). Acceptance MUST
+      include a positive *confirmation* that Pro (not Flash) served the review (e.g. via `agy` logs or
+      a model-tier check), since the default silently degrades to Flash.
 ### Important
 - [ ] **Binary resolution strategy:** pin `~/.local/bin/agy`, or search PATH then verify the binary
       is the CLI (reject the IDE symlink)? Recommended: prefer the known install path, fall back to a
@@ -205,7 +216,7 @@ All of the following was confirmed by installing and running the real CLI on mac
 ## Risks and Mitigation
 | Risk | P | I | Mitigation |
 |---|---|---|---|
-| Can't guarantee Pro (no `--model`) | Med | High | Resolve Pro-pinning in Plan w/ architect; acceptance requires confirming Pro is used. |
+| Default model is **Flash**, not Pro (no `--model` flag) | High | High | Pro selection is mandatory; resolve the `--print` Pro-pinning mechanism in Plan w/ architect; acceptance requires positively confirming Pro served the review (default silently degrades to Flash). |
 | Codev launches IDE symlink instead of CLI | Med | High | Pin/verify the real binary; binary-resolution test (#5). |
 | Unauthed users block porch | Med | High | Non-blocking skip (C1/C2); doctor + docs guide one-time `agy` login. |
 | First-run auth can't run in CI | Med | Med | Treat as one-time user setup; doctor detects "needs login" fast; skip in CI. |
