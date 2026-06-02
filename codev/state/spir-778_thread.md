@@ -34,6 +34,29 @@ Antigravity-CLI adoption is risky right now (agentic mismatch, unconfirmed headl
 The issue *title* literally says "Gemini CLI > Antigravity CLI" — flagging the divergence to the
 architect since my research says the literal Antigravity path is the higher-risk one.
 
+## Iteration-1 consultation (2026-06-01)
+- **Gemini: REQUEST_CHANGES** (fatal): consult prompt builders rely on FILESYSTEM ACCESS
+  (buildPRQuery writes diff to temp file → "Read the diff file from ${diffPath}"; impl review →
+  "Explore the filesystem"). A single-shot Gemini API call can't read files. Fix: inline content
+  (A1) or tool-use loop (A2). Also: enterprise contradiction; decide default-list.
+- **Codex: REQUEST_CHANGES** (fatal): porch graceful-skip underspecified — `verdict.ts:27,46-47`
+  defaults missing/short/error to REQUEST_CHANGES (blocks). Must define non-blocking skip (drop
+  lane from effective set OR neutral skipped-artifact). Also: enterprise contradiction; doctor
+  can't locally detect unrestricted keys (relax); scope other gemini surfaces.
+- **Claude: APPROVE** with notes: `@google/genai ^1.0.0` ALREADY a dependency (lowers cost);
+  clarify CLI-keep-vs-remove; `hermes` in VALID_MODELS but not schema enum (divergence precedent);
+  add `pro` alias test; check Gemini API input-size limit for >500KB diffs.
+
+## Decisions made in revision
+- API is DEFAULT gemini backend; **keep legacy CLI as optional backend** (enterprise not regressed).
+- API lane gets **inlined review content** (A1); drop "read from disk" instructions for that backend.
+  Tool-use loop (A2) = future fidelity upgrade.
+- **Keep `gemini` in default lists** + porch-safe graceful skip when uncredentialed (non-blocking).
+- Doctor: report presence/reachability + June-19 guidance; no proactive unrestricted-key detection.
+- harness.ts Gemini *builder* path = out-of-scope-but-acknowledged; generate-image already API
+  (unaffected); bench = naming only.
+
 ## Status
 - [x] Specify: research + ground-truth map done
-- [ ] Specify: spec drafted → `porch done` → 3-way consult → spec-approval gate (HUMAN)
+- [x] Specify: spec drafted, 3-way consult iter-1, REVISED addressing all REQUEST_CHANGES
+- [ ] Specify: re-consult (iter-2) → spec-approval gate (HUMAN)
