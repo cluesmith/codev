@@ -2,7 +2,8 @@
 
 ## Metadata
 - **ID**: spec-2026-06-01-778-gemini-antigravity-cli
-- **Status**: draft (rewritten to Approach B per architect directive 2026-06-02)
+- **Status**: APPROVED 2026-06-02 (spec-approval gate; Approach B) · **Amendment A1** added same day
+  (Gemini Developer API as co-equal backend) — combined design to be reviewed by the Plan's consult
 - **Created**: 2026-06-01
 - **Issue**: #778
 - **Deadline**: 2026-06-18 (Gemini CLI subscription serving retires)
@@ -101,9 +102,14 @@ All of the following was confirmed by installing and running the real CLI on mac
   `consultation-models.test.ts`, `doctor.test.ts`, `config.test.ts`.
 
 ## Desired State
-- The Gemini consult lane invokes **`agy --print --sandbox --add-dir <repoRoot>`** (role folded into
-  the prompt), reaching Gemini via the user's **subscription/OAuth** auth, with the reviewer still
-  **reading the diff/repo from disk** (agentic behavior preserved).
+> **AMENDED 2026-06-02:** the Gemini lane supports **two co-equal backends** selected by config +
+> auto-detect (see **Amendment A1**): **`agy`** (below) and the **Gemini Developer API**. The bullets
+> below describe the `agy` backend; the API backend's desired behavior is in Amendment A1. Both must
+> satisfy the non-blocking-skip, graceful-degradation, and "model id stays `gemini`" requirements.
+
+- The Gemini consult lane (agy backend) invokes **`agy --print --sandbox --add-dir <repoRoot>`** (role
+  folded into the prompt), reaching Gemini via the user's **subscription/OAuth** auth, with the
+  reviewer still **reading the diff/repo from disk** (agentic behavior preserved).
 - The lane uses `agy`'s **default** model (no pinning, per architect decision — currently Gemini 3.5
   Flash). The **model identifier stays `gemini`** everywhere (`MODEL_CONFIGS` key, `VALID_MODELS`,
   `protocol-schema.json` enum, default model lists, user-facing config, the `pro` alias) — only the
@@ -171,6 +177,13 @@ REQUEST_CHANGES). These keep scope lean while removing ambiguity:
 - [ ] Existing consult/doctor/config/porch tests pass; new tests cover the `agy` dispatch, the
       non-blocking skip, the `pro` alias, and graceful cost degradation. Coverage does not regress.
 - [ ] No regression to the Codex/Claude lanes.
+- [ ] **(Amended) API backend works:** with `GEMINI_API_KEY` set and the backend = `api`, the lane
+      returns a real review using a **Pro-class** model (`gemini-3.1-pro-preview`), parses
+      `usageMetadata` into **real cost rows**, needs **no interactive login** (CI-friendly), and works
+      with **inlined review content** (no filesystem dependency).
+- [ ] **(Amended) Selector works:** `consult.gemini.backend` = `agy | api | auto` routes to the
+      correct backend; `auto` resolves deterministically per the documented precedence; both backends
+      honor the non-blocking skip and "model id stays `gemini`" rules.
 
 ## Constraints
 - **Deadline 2026-06-18.** `agy` is available and verified today (v1.0.4), so the swap is buildable now.
@@ -182,8 +195,10 @@ REQUEST_CHANGES). These keep scope lean while removing ambiguity:
 - Keep skeleton ↔ `codev/` copies consistent across the four-tier resolver.
 
 ## Out of Scope
-- **The Gemini Developer API pivot (former Approach A) — rejected by the architect.**
-- A generic multi-provider gateway / model-router.
+- ~~The Gemini Developer API pivot — rejected.~~ **AMENDED 2026-06-02 (post-approval): the Gemini
+  Developer API is now IN scope as a co-equal backend alongside `agy`.** See **Amendment A1**.
+- A generic multi-provider gateway / model-router (the two Gemini backends + a selector is **not**
+  a generic gateway — it is scoped to this one lane).
 - The `harness.ts` Gemini-CLI **builder** path: out-of-scope-but-acknowledged (a *builder* using the
   `gemini` CLI as its coding agent also breaks for affected tiers; recommend a docs note + follow-up
   issue, not a rebuild here).
@@ -232,6 +247,12 @@ REQUEST_CHANGES). These keep scope lean while removing ambiguity:
    the lane uses agy's default model, not necessarily "Pro").
 4. **Binary resolution:** with the IDE symlink first on PATH, Codev still invokes the real CLI.
 5. **End-to-end headline path:** run on a spec, a plan, and a real PR.
+6. **(Amended) API backend happy path:** backend = `api` + `GEMINI_API_KEY` → real review via
+   `gemini-3.1-pro-preview`, with real cost rows from `usageMetadata`, no interactive login.
+7. **(Amended) Selector:** `agy | api | auto` each route correctly; `auto` precedence is deterministic
+   and matches the documented (architect-approved) rule.
+8. **(Amended) API CI-friendliness:** the `api` backend completes in a non-interactive/CI context
+   (env-var auth only, no OAuth prompt).
 ### Non-Functional
 1. Cost/usage degradation (no `NaN`; clear "no per-token data").
 2. `doctor` reports agy presence + auth (authed / needs-login) without hanging.
@@ -288,4 +309,50 @@ skeleton/`codev` in lockstep.
 ---
 
 ## Amendments
-<!-- TICK amendments, if any, recorded here. -->
+
+### Amendment A1: Gemini Developer API as a co-equal second backend (2026-06-02)
+
+**Status:** Added by the architect at spec-approval (the gate was approved *with* this requirement).
+Reverses the earlier "API out of scope" decision.
+
+**Summary:** The Gemini consult lane supports **two co-equal backends**, chosen by a config knob +
+auto-detect. Each environment picks the tradeoff that fits it.
+
+**Backend 1 — `agy` / OAuth subscription** (the body of this spec): agentic file-reading
+(`--print --sandbox --add-dir`), `agy`'s **default** model (currently Flash), cheap (subscription,
+~3× cheaper for our volume). Keeps all Iteration-2 work: `COMMENT`-verdict non-blocking skip, fast
+auth-skip, binary-resolution rejection rule, `hermes` precedent, graceful (no-per-token) cost
+degradation. Strength: cheap + agentic context. One-time interactive login (not CI-friendly).
+
+**Backend 2 — Gemini Developer API / `GEMINI_API_KEY`** (the former Approach A1, now in scope):
+- **Inlined review content** — a single API `generateContent` call **cannot read files
+  agentically**, so the lane feeds the diff + spec/plan + relevant changed-file text into the request
+  and drops the "read from disk / explore filesystem" instructions for this backend (reuses the
+  iter-1 A1 design). Large content uses the existing temp-file/size handling.
+- **Pro-class model:** this backend *can* select a model → use **`gemini-3.1-pro-preview`** (Pro ≫
+  Flash for review quality). This is the path to Pro-quality reviews.
+- **Real cost rows:** parse the API response `usageMetadata` (prompt/candidates tokens) into the
+  existing usage/cost pipeline (no degradation — full token data).
+- **CI-friendly:** env-var auth (`GEMINI_API_KEY`, fallback `GOOGLE_API_KEY`), **no interactive
+  login** → works headless/CI.
+- Role → API `systemInstruction`. `@google/genai` is already a dependency.
+
+**Backend selection (DESIGN IN PLAN — do not hard-code silently):**
+- Config knob **`consult.gemini.backend: agy | api | auto`** (exact name/shape is a Plan decision).
+- **`auto`** must resolve deterministically, but its **precedence is a real cost-vs-quality
+  tradeoff** (agy = cheap/Flash/agentic vs api = pricier/Pro/full-usage/CI). The Plan must **propose**
+  the auto precedence and **flag it explicitly for the architect** — it is NOT to be silently
+  hard-coded. (E.g. candidate: prefer `api` when `GEMINI_API_KEY` is present (Pro+usage+CI), else
+  `agy` if authed, else skip — but this is exactly the call to surface, not assume.)
+- Both backends share: the `gemini` model identifier (no rename), the non-blocking `COMMENT` skip
+  when their backend is unavailable, and the existing prompt/role plumbing where applicable.
+
+**Net:** `api` = Pro + CI + full usage data; `agy` = cheap subscription + agentic reading — each
+environment picks. Combined design (both dispatch paths + the selector) is reviewed by the **Plan's**
+3-way consult, per the architect.
+
+**Spec sections updated:** Out of Scope (un-scoped API), Desired State (dual-backend note),
+Success Criteria (+API backend, +selector, +CI), Test Scenarios (#6 API happy path, #7 selector,
+#8 CI-friendliness). HOW (dispatch + selector mechanism) is deferred to the Plan.
+
+<!-- Further TICK amendments, if any, recorded below. -->

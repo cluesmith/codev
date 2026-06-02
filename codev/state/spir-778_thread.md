@@ -116,6 +116,19 @@ hermes (CLI/role-inlined/temp-file) before encoding.
 fast auth-skip; extractReviewText adaptation; hermes precedent; pro-alias kept; harness distinct;
 porch-orchestrated test 2b). Rebuttal: 778-specify-iter2-rebuttals.md. Committed.
 
-## ⏸ AWAITING ARCHITECT — gate decision after iter2
-Spec re-reviewed (iter2) + addressed. Porch still parked at unapproved spec-approval gate. Architect
-to decide: approve, or another round. I won't self-approve / touch porch state.
+## ✅ spec-approval APPROVED by human (2026-06-02) + Amendment A1 added
+Architect approved the gate (verified via porch: 778 no longer pending; status shows normal specify).
+I did NOT self-approve.
+
+**Amendment A1 (architect-added at approval): API as CO-EQUAL second backend** (reverses
+API-out-of-scope). Gemini lane now supports TWO backends + a selector:
+- **agy/OAuth**: agentic file-reading, default model (Flash), cheap. (keeps all iter-2 work)
+- **Gemini Developer API/GEMINI_API_KEY** (former A1): inline content, Pro model
+  (gemini-3.1-pro-preview), parse usageMetadata for REAL cost rows, CI-friendly (env-var, no login).
+- **Selector** `consult.gemini.backend: agy|api|auto` — DESIGN in Plan; auto-precedence is a
+  cost-vs-quality tradeoff → PROPOSE + flag for architect, don't hard-code silently.
+Spec amended (Out-of-Scope/Desired/Success/Tests + Amendment A1 section). Committed.
+
+## NOW: Plan phase
+Advance via `porch done 778`. Design both dispatch paths + selector. Plan's 3-way consult covers the
+combined design. Keep lean ("two backends + a selector").
