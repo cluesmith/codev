@@ -30,6 +30,11 @@ plan-approval.
 
 ## Implement phase (iteration 1)
 
+> **Superseded** — the render-path mechanism described in this section was
+> reverted in the Review phase (consult REQUEST_CHANGES). Final implementation
+> uses the global `onStateChange` + `worktree-config-updated` SSE listener in
+> extension.ts. See the Review-phase section below for the final state.
+
 Plan approved. Implemented the `codev.hasDevCommand` context-key gate.
 
 Design evolved during pre-commit review with the architect:

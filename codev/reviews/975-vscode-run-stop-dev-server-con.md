@@ -4,12 +4,10 @@ Fixes #975
 
 ## Summary
 
-The builder-row **Run/Stop Dev Server** context-menu entries used to show on every builder row regardless of whether `worktree.devCommand` was configured, so picking one ran against a missing command (error toast or no-op). This PR gates those entries — plus the dev keybindings and the workspace-dev command-palette entries — on a new `codev.hasDevCommand` context key. The key is refreshed from `BuildersProvider`'s render path (no dedicated config-file listener), and a shared `hasRunnableDevCommand()` helper now backs both the key and the Workspace view's Start-row gate, also fixing a latent empty-string bug.
+The builder-row **Run/Stop Dev Server** context-menu entries used to show on every builder row regardless of whether `worktree.devCommand` was configured, so picking one ran against a missing command (error toast or no-op). This PR gates those entries — plus the dev keybindings and the workspace-dev command-palette entries — on a new `codev.hasDevCommand` context key. The key is refreshed by global signals in `extension.ts` (`onStateChange` + the `worktree-config-updated` SSE), mirroring the Workspace view's own dev-row gate, so all three gated surfaces stay live — including the keybindings/palette, which are invokable independent of the Builders tree's visibility. A shared `hasRunnableDevCommand()` helper backs both the key and the Workspace view's Start-row gate, also fixing a latent empty-string bug.
 
 ## Files Changed
 
-- `packages/vscode/package.json` (+22 / -4) — `&& codev.hasDevCommand` on the two builder-row dev `when` clauses; `when` gating on the two dev keybindings; commandPalette entries (workspace-dev → `codev.hasDevCommand`, builder-row dev → `false`)
-- `packages/vscode/src/load-worktree-config.ts` (+18 / -0) — `hasRunnableDevCommand()` helper (single source of truth)
 - `packages/vscode/src/extension.ts` (+32 / -0) — `syncHasDevCommandContext()` refreshing the context key on `onStateChange` + the `worktree-config-updated` SSE envelope, plus an initial seed
 - `packages/vscode/src/load-worktree-config.ts` (+18 / -0) — `hasRunnableDevCommand()` helper (single source of truth)
 - `packages/vscode/src/views/workspace.ts` (+~12 / -~11) — Start-row gate switched from `devCommand !== null` to `hasRunnableDevCommand(worktreeConfig)`
