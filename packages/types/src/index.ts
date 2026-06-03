@@ -18,6 +18,7 @@ export {
   type Annotation,
   type DashboardState,
   type TerminalEntry,
+  type PlanPhase,
   type OverviewBuilder,
   type OverviewPR,
   type OverviewBacklogItem,

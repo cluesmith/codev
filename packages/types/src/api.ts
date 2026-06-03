@@ -126,6 +126,18 @@ export interface TerminalEntry {
 
 // --- Overview (GET /api/overview) ---
 
+/**
+ * A single plan sub-phase as surfaced in the overview payload. `status` is a
+ * free-form string (not the narrower porch `PlanPhaseStatus` union) because the
+ * overview parser reads it verbatim out of `status.yaml`. Named shape so both
+ * the server and `OverviewBuilder.planPhases` reference one declaration.
+ */
+export interface PlanPhase {
+  id: string;
+  title: string;
+  status: string;
+}
+
 export interface OverviewBuilder {
   id: string;
   issueId: string | null;
@@ -158,7 +170,7 @@ export interface OverviewBuilder {
    */
   roleId: string | null;
   protocol: string;
-  planPhases: Array<{ id: string; title: string; status: string }>;
+  planPhases: PlanPhase[];
   progress: number;
   /** Human-readable label for the gate the builder is blocked on (e.g. "plan review"). */
   blocked: string | null;
