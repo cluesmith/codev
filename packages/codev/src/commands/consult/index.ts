@@ -626,17 +626,36 @@ export function isRealAgyCli(p: string): boolean {
  * official installer path, then a PATH `agy` verified not to be the IDE.
  * Returns null if no valid headless CLI is found.
  */
+/**
+ * Positively verify a candidate behaves like the real headless agy CLI by
+ * running `--version` (read-only, fast). `isRealAgyCli` rejects the IDE launcher
+ * by realpath; this adds behavioral verification for an *untrusted* PATH
+ * candidate so we only run a binary proven to be the CLI.
+ */
+export function agyRespondsToVersion(bin: string): boolean {
+  try {
+    const out = execSync(`"${bin}" --version 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+    return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveAgyBin(): string | null {
   // Explicit override (advanced users / tests): use it if valid, never silently
   // fall back to a different binary the user didn't ask for.
   const override = process.env.CODEV_AGY_BIN;
   if (override) return isRealAgyCli(override) ? override : null;
 
+  // Canonical install path — trusted location; realpath-reject the IDE only.
   const preferred = path.join(homedir(), '.local', 'bin', 'agy');
   if (isRealAgyCli(preferred)) return preferred;
+
+  // A bare PATH `agy` is untrusted: require it to NOT be the IDE (realpath) AND
+  // to behave like the headless CLI (`--version`) before we'll run it.
   try {
     const found = execSync('command -v agy 2>/dev/null', { encoding: 'utf-8' }).trim();
-    if (found && isRealAgyCli(found)) return found;
+    if (found && isRealAgyCli(found) && agyRespondsToVersion(found)) return found;
   } catch {
     // not on PATH
   }
@@ -704,8 +723,9 @@ async function runAgyConsultation(
   const bin = resolveAgyBin();
   if (!bin) {
     const reason = 'agy CLI not found (install: https://antigravity.google/cli/install.sh)';
-    process.stdout.write(agySkipContent(reason));
-    writeConsultOutput(outputPath, agySkipContent(reason));
+    const content = agySkipContent(reason);
+    process.stdout.write(content);
+    writeConsultOutput(outputPath, content);
     recordAgyMetrics(metricsCtx, startTime, 0, reason);
     console.error(`\n[gemini (agy) skipped: ${reason}]`);
     return;

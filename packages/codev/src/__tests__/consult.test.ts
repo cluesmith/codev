@@ -96,24 +96,18 @@ describe('consult command', () => {
       expect(aliases['opus']).toBe('claude');
     });
 
-    it('should have correct CLI configuration for each model', () => {
-      // Note: Codex now uses model_instructions_file config flag
-      // The args are built dynamically in runConsultation, not stored in MODEL_CONFIGS
-      // Claude uses Agent SDK (not CLI) — see 'Claude Agent SDK integration' tests
-      // Hermes is invoked via `hermes chat -q` in MODEL_CONFIGS
-      // Bugfix #370: --yolo removed from MODEL_CONFIGS; added conditionally in
-      // runConsultation only for protocol mode (not general mode)
-      const configs: Record<string, { cli: string; args: string[] }> = {
-        gemini: { cli: 'gemini', args: [] },
-        codex: { cli: 'codex', args: ['exec', '--full-auto'] },
-        hermes: { cli: 'hermes', args: ['chat', '-q'] },
-      };
-
-      expect(configs.gemini.cli).toBe('gemini');
-      expect(configs.gemini.args).toEqual([]);
-      expect(configs.codex.args).toContain('--full-auto');
-      expect(configs.hermes.cli).toBe('hermes');
-      expect(configs.hermes.args).toEqual(['chat', '-q']);
+    it('should have correct CLI configuration for each model', async () => {
+      // Assert the REAL exported config (not a hardcoded fake), so a backend
+      // change is caught. Claude/Codex use SDKs (not MODEL_CONFIGS).
+      const { _MODEL_CONFIGS } = await import('../commands/consult/index.js');
+      // gemini lane dispatches to the Antigravity CLI (agy) via runAgyConsultation
+      // (#778): cli marker 'agy', no pinned --model, no system-prompt env var.
+      expect(_MODEL_CONFIGS.gemini.cli).toBe('agy');
+      expect(_MODEL_CONFIGS.gemini.args).not.toContain('--model');
+      expect(_MODEL_CONFIGS.gemini.envVar).toBeNull();
+      // hermes unchanged.
+      expect(_MODEL_CONFIGS.hermes.cli).toBe('hermes');
+      expect(_MODEL_CONFIGS.hermes.args).toEqual(['chat', '-q']);
     });
 
     it('should use model_instructions_file for codex (not env var)', () => {
@@ -878,6 +872,20 @@ describe('consult command', () => {
       expect(resolveAgyBin()).toBe(real);
       process.env.CODEV_AGY_BIN = path.join(testBaseDir, 'missing-agy');
       expect(resolveAgyBin()).toBeNull();
+    });
+
+    it('agyRespondsToVersion behaviorally verifies a PATH candidate (--version)', async () => {
+      // A bare PATH `agy` is only accepted if it behaves like the headless CLI.
+      const { execSync } = await import('node:child_process');
+      const { agyRespondsToVersion } = await import('../commands/consult/index.js');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('good-agy')) return '1.0.4\n' as unknown as Buffer; // prints a version
+        if (cmd.includes('bad-agy')) return '' as unknown as Buffer;          // no version output
+        throw new Error('not a known command');
+      });
+      expect(agyRespondsToVersion('good-agy')).toBe(true);
+      expect(agyRespondsToVersion('bad-agy')).toBe(false);
+      expect(agyRespondsToVersion('throws-agy')).toBe(false);
     });
   });
 

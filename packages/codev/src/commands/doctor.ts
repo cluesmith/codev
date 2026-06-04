@@ -4,7 +4,7 @@
  * Port of codev/bin/codev-doctor to TypeScript
  */
 
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync, spawnSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -254,16 +254,8 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     successCheck: (r) => r.status === 0,
     authHint: 'Run "opencode --version" to verify installation',
   },
-  // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below
-  'Gemini': {
-    // gemini --version verifies the CLI works, but not auth
-    // A minimal query is needed to verify API connectivity
-    command: 'gemini',
-    args: ['--yolo', 'Reply with just OK'],
-    timeout: 30000,
-    successCheck: (r) => r.status === 0,
-    authHint: 'Run: gemini (interactive) then /auth, or set GOOGLE_API_KEY',
-  },
+  // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below.
+  // The gemini lane (Antigravity `agy`) is verified via verifyAgy() — not here.
 };
 
 /**
@@ -385,32 +377,57 @@ function checkAgy(): CheckResult {
 
 /**
  * Verify agy is authenticated via a tiny non-interactive --print probe.
- * An unauthenticated agy prints an OAuth URL and waits; we detect that and
- * report "needs login" rather than reporting it as broken.
+ * Streams output and detects the OAuth URL on the *early* stream so an
+ * unauthenticated agy reports "needs login" promptly (it would otherwise print
+ * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
+ * auth wait. Always resolves (never throws).
  */
-function verifyAgy(): CheckResult {
+function verifyAgy(): Promise<CheckResult> {
   const bin = resolveAgyBin();
-  if (!bin) return { status: 'skip', version: 'not installed', note: AGY_INSTALL_HINT };
-  try {
-    const result = spawnSync(bin, ['--print', '--print-timeout', '25s', 'Reply with just OK'], {
-      encoding: 'utf-8',
-      timeout: 35000,
-      stdio: 'pipe',
+  if (!bin) return Promise.resolve({ status: 'skip', version: 'not installed', note: AGY_INSTALL_HINT });
+
+  return new Promise<CheckResult>((resolve) => {
+    const proc = spawn(bin, ['--print', '--print-timeout', '20s', 'Reply with just OK'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const combined = (result.stdout || '') + (result.stderr || '');
-    if (AGY_OAUTH_MARKERS.some((m) => combined.includes(m))) {
-      return { status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' };
-    }
-    if (result.signal === 'SIGTERM' || result.signal === 'SIGKILL') {
-      return { status: 'fail', version: 'timeout', note: 'check network connection / run `agy` to verify sign-in' };
-    }
-    if (result.status === 0 && combined.trim().length > 0) {
-      return { status: 'ok', version: 'operational' };
-    }
-    return { status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' };
-  } catch {
-    return { status: 'fail', version: 'error', note: 'run `agy` to verify sign-in' };
-  }
+    let settled = false;
+    let scan = '';
+    const out: string[] = [];
+    let timer: ReturnType<typeof setTimeout>;
+
+    const finish = (r: CheckResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { proc.kill('SIGTERM'); } catch { /* already gone */ }
+      resolve(r);
+    };
+
+    timer = setTimeout(
+      () => finish({ status: 'fail', version: 'timeout', note: 'check network connection / run `agy` to verify sign-in' }),
+      30000,
+    );
+
+    const watch = (buf: Buffer, isStdout: boolean) => {
+      const s = buf.toString('utf-8');
+      if (isStdout) out.push(s);
+      if (scan.length < 8192) {
+        scan += s;
+        // Fast path: OAuth URL appears immediately on an unauthenticated run.
+        if (AGY_OAUTH_MARKERS.some((m) => scan.includes(m))) {
+          finish({ status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' });
+        }
+      }
+    };
+    proc.stdout?.on('data', (b: Buffer) => watch(b, true));
+    proc.stderr?.on('data', (b: Buffer) => watch(b, false));
+    proc.on('error', () => finish({ status: 'fail', version: 'error', note: 'run `agy` to verify sign-in' }));
+    proc.on('close', (code) => {
+      const text = out.join('').trim();
+      if (code === 0 && text.length > 0) finish({ status: 'ok', version: 'operational' });
+      else finish({ status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' });
+    });
+  });
 }
 
 /**
@@ -632,7 +649,7 @@ export async function doctor(): Promise<number> {
   if (installedAiClis.includes('Gemini (agy)')) {
     console.log(chalk.blue(`  ⋯ ${'Gemini (agy)'.padEnd(12)} verifying...`));
     process.stdout.write('\x1b[1A\x1b[2K');
-    const agyVerify = verifyAgy();
+    const agyVerify = await verifyAgy();
     printStatus('Gemini (agy)', agyVerify);
     if (agyVerify.status === 'ok') {
       aiCliCount++;

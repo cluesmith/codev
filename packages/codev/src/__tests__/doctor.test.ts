@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync, spawnSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -34,10 +34,32 @@ vi.mock('../lib/forge.js', () => ({
   resolveAllConcepts: resolveAllConceptsMock,
 }));
 
+// A minimal fake child process for the async `spawn`-based agy auth probe.
+// verifyAgy streams stdout/stderr and kills on the OAuth marker.
+const makeFakeChild = vi.hoisted(() => (opts: { stdout?: string; stderr?: string; code?: number | null }) => {
+  const procH: Record<string, (arg?: unknown) => void> = {};
+  const outH: Record<string, (b: Buffer) => void> = {};
+  const errH: Record<string, (b: Buffer) => void> = {};
+  const child = {
+    stdout: { on: (ev: string, cb: (b: Buffer) => void) => { outH[ev] = cb; } },
+    stderr: { on: (ev: string, cb: (b: Buffer) => void) => { errH[ev] = cb; } },
+    on: (ev: string, cb: (arg?: unknown) => void) => { procH[ev] = cb; },
+    kill: () => {},
+  };
+  setImmediate(() => {
+    if (opts.stdout) outH['data']?.(Buffer.from(opts.stdout));
+    if (opts.stderr) errH['data']?.(Buffer.from(opts.stderr));
+    procH['close']?.(opts.code ?? 0);
+  });
+  return child;
+});
+
 // Mock child_process
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
   spawnSync: vi.fn(),
+  // Default for the async agy auth probe: reply "OK" → operational.
+  spawn: vi.fn(() => makeFakeChild({ stdout: 'OK', code: 0 })),
 }));
 
 // Mock Claude Agent SDK - returns success by default
@@ -184,6 +206,7 @@ describe('doctor command', () => {
           output: [null, 'working', ''],
           pid: 0,
         })),
+        spawn: vi.fn(() => makeFakeChild({ stdout: 'OK', code: 0 })),
       }));
 
       const { doctor } = await import('../commands/doctor.js');
@@ -193,7 +216,8 @@ describe('doctor command', () => {
     });
 
     it('should return 1 when no AI CLI is available', async () => {
-      // Mock all core deps present but no AI CLIs
+      // Mock all core deps present but no AI CLIs (incl. agy unavailable).
+      process.env.CODEV_AGY_BIN = path.join(tmpdir(), `no-such-agy-${Date.now()}`);
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which claude') || cmd.includes('which gemini') || cmd.includes('which codex')) {
           throw new Error('not found');
@@ -233,7 +257,12 @@ describe('doctor command', () => {
         })()
       );
 
-      const result = await doctor();
+      let result: number;
+      try {
+        result = await doctor();
+      } finally {
+        delete process.env.CODEV_AGY_BIN;
+      }
       expect(result).toBe(1);
     });
   });
@@ -795,9 +824,10 @@ describe('doctor command', () => {
       expect(hasAuthError).toBe(true);
     });
 
-    it('should show timeout message for network issues (gemini lane / agy)', async () => {
-      // The gemini lane now verifies via the Antigravity CLI (agy). A hung agy
-      // --print probe (SIGTERM) should surface a timeout/network hint.
+    it('reports "needs login" promptly when agy is unauthenticated (fast OAuth detection)', async () => {
+      // The gemini lane verifies via agy. An unauthenticated agy prints an OAuth
+      // URL and waits; verifyAgy streams the output and must detect it on the
+      // early stream (not stall for the full timeout), reporting "needs login".
       const agyBin = path.join(testBaseDir, 'agy-fake');
       fs.writeFileSync(agyBin, '#!/bin/sh\n');
       process.env.CODEV_AGY_BIN = agyBin;
@@ -812,33 +842,11 @@ describe('doctor command', () => {
         return Buffer.from('');
       });
 
-      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
-        // agy --print probe times out (no OAuth marker, SIGTERM).
-        if (cmd === agyBin) {
-          return {
-            status: null,
-            stdout: '',
-            stderr: '',
-            signal: 'SIGTERM',
-            output: [null, '', ''],
-            pid: 0,
-          };
-        }
-
-        const responses: Record<string, string> = {
-          'node': 'v20.0.0',
-          'tmux': 'tmux 3.4',
-          'git': 'git version 2.40.0',
-        };
-        return {
-          status: 0,
-          stdout: responses[cmd] || 'working',
-          stderr: '',
-          signal: null,
-          output: [null, responses[cmd] || 'working', ''],
-          pid: 0,
-        };
-      });
+      // agy --print emits the OAuth URL on stderr (then would hang) → fast skip.
+      vi.mocked(spawn).mockReturnValue(makeFakeChild({
+        stderr: 'Authentication required. Please visit the URL to log in:\nhttps://accounts.google.com/o/oauth2/auth?client_id=x',
+        code: null,
+      }) as unknown as ReturnType<typeof spawn>);
 
       vi.resetModules();
 
@@ -852,13 +860,14 @@ describe('doctor command', () => {
         const { doctor } = await import('../commands/doctor.js');
         await doctor();
 
-        // Should show timeout with network hint on the Gemini (agy) line.
-        const hasTimeoutHint = logOutput.some(line =>
-          line.includes('Gemini') && (line.includes('timeout') || line.includes('network'))
+        // The Gemini (agy) line should report "needs login".
+        const hasNeedsLogin = logOutput.some(line =>
+          line.includes('Gemini') && line.includes('needs login')
         );
-        expect(hasTimeoutHint).toBe(true);
+        expect(hasNeedsLogin).toBe(true);
       } finally {
         delete process.env.CODEV_AGY_BIN;
+        vi.mocked(spawn).mockReset();
       }
     });
 
