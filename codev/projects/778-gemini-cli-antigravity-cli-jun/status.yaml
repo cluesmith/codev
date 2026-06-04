@@ -1,15 +1,15 @@
 id: '778'
 title: gemini-cli-antigravity-cli-jun
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: agy_backend
     title: 'Phase 1: agy backend dispatch (OAuth, agentic file-reading, non-blocking skip)'
     status: complete
   - id: docs_skeleton_e2e
     title: 'Phase 2: Doctor + docs + skeleton consistency + e2e verification'
-    status: in_progress
-current_plan_phase: docs_skeleton_e2e
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -23,8 +23,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: agy_backend
@@ -91,4 +91,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-778/codev/projects/778-gemini-cli-antigravity-cli-jun/778-docs_skeleton_e2e-iter2-claude.txt
 started_at: '2026-06-02T01:16:31.004Z'
-updated_at: '2026-06-04T18:14:00.139Z'
+updated_at: '2026-06-04T18:17:16.515Z'
