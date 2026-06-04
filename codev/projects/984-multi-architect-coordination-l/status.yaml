@@ -1,7 +1,7 @@
 id: '984'
 title: multi-architect-coordination-l
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-06-04T04:10:24.406Z'
-updated_at: '2026-06-04T05:54:59.350Z'
+updated_at: '2026-06-04T05:59:09.855Z'
