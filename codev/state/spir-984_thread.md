@@ -32,4 +32,6 @@ Writing spec now with recommended defaults + explicit Open Questions for: #6 che
 - **Consult verdicts**: Gemini REQUEST_CHANGES, Codex REQUEST_CHANGES, Claude COMMENT (all HIGH conf; Claude verified codebase claims accurate).
 - Incorporated everything → committed d7e17715. Key resolutions: state file at `codev/state/architects/<name>.md`; `--override-owner` w/ release-and-reinsert + `override_of`; partial unique index for atomic dedup; rotation via `<!-- ARCHIVE BOUNDARY -->` whole-entry moves (loss-free); `.architects/<name>/` gitignored worktrees, main=main checkout, new architects isolated by default, pre-existing migrate explicitly; dirty-worktree retire aborts unless --force; roster open/closed via overview cache (unknown on outage); who-owes-next total function; CODEV_ARCHITECT_NAME required in N>1.
 - **Left for architect at gate**: #6 PR-slicing (all 3 recommend own PR), pre-existing-architect migration ergonomics, 2 nice-to-knows.
-- Running `porch next` to see if porch wants iter2 consult or moves to spec-approval gate.
+- Wrote rebuttal (984-specify-iter1-rebuttals.md, committed) documenting how each REQUEST_CHANGES point was addressed.
+- **GATE: spec-approval reached.** Registered via `porch gate 984`; notified architect via `afx send`. STOPPED, awaiting human `porch approve 984 spec-approval`. Not calling approve myself (strict mode).
+- Architect decisions pending at gate: (1) #6 PR-slicing (own PR recommended by all 3), (2) pre-existing-architect migration ergonomics.
