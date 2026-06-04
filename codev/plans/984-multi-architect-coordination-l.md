@@ -57,17 +57,19 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - Block a second architect from spawning on an issue already owned by a different architect, unless explicitly overridden.
 
 #### Files
-- `packages/codev/src/agent-farm/db/schema.ts` — add `issue_ownership` table to `LOCAL_SCHEMA` (`CREATE TABLE IF NOT EXISTS`) with a **partial unique index** on `(workspace_path, issue_number) WHERE released = 0`.
-- `packages/codev/src/agent-farm/db/index.ts` — add a versioned migration in `ensureLocalDatabase()` so existing DBs gain the table + index.
+- `packages/codev/src/agent-farm/db/schema.ts` — add `issue_ownership` table to `LOCAL_SCHEMA` (`CREATE TABLE IF NOT EXISTS`) **plus** the partial unique index `CREATE UNIQUE INDEX IF NOT EXISTS … WHERE released = 0`. Because `db.exec(LOCAL_SCHEMA)` runs on every DB init (confirmed — Gemini/Claude), this auto-applies to existing DBs; a discrete numbered migration in `db/index.ts` is **optional** (only needed if we later alter columns/backfill) — note it but don't require it.
 - `packages/codev/src/agent-farm/state.ts` — ledger CRUD: `recordOwnership`, `getOwner`, `releaseOwnership`, `listOwnershipForArchitect`, `overrideOwnership` (release-and-reinsert with `override_of`).
-- `packages/codev/src/agent-farm/commands/spawn.ts` — resolve the spawning architect (with `--override-owner`), validate `CODEV_ARCHITECT_NAME` in N>1, run the dedup check, write the ledger entry after `upsertBuilder`.
-- `packages/codev/src/agent-farm/cli.ts` — add `--override-owner` to the `spawn` command.
-- `packages/codev/src/agent-farm/__tests__/state.test.ts` (+ a focused `ledger.test.ts`) — CRUD + dedup + atomicity tests.
+- `packages/codev/src/agent-farm/commands/spawn.ts` — **claim ownership *before* worktree/session creation** (see Implementation Details); resolve the spawning architect (with `--override-owner`), validate `CODEV_ARCHITECT_NAME` in N>1, run the dedup check. Touches **only the numbered-issue spawn paths** (`spawnSpec` and `spawnIssueDrivenBuilder`), **not** `spawnTask`/`spawnShell`/`spawnWorktree`/`spawnProtocol` (those have no issue number — Claude 3b).
+- `packages/codev/src/agent-farm/types.ts` — add `overrideOwner?` / `base?` to `SpawnOptions` (Codex — required plumbing for the new flags).
+- `packages/codev/src/agent-farm/cli.ts` — add `--override-owner <name>` to the `spawn` command.
+- `packages/codev/src/agent-farm/__tests__/state.test.ts` (+ a focused `ledger.test.ts`) — CRUD + dedup + atomicity tests; **`__tests__/spawn.test.ts`** — extend the existing spawn-validation tests for `--override-owner` (Codex).
 
 #### Implementation Details
-- **Schema**: columns `workspace_path TEXT NOT NULL, issue_number TEXT NOT NULL, architect TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')), released INTEGER NOT NULL DEFAULT 0, released_at TEXT, override_of TEXT`. Partial unique index `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_ownership_live ON issue_ownership(workspace_path, issue_number) WHERE released = 0` — this makes the dedup check-then-insert **atomic** (a concurrent double-spawn loses on the constraint; surface that as the dedup warning).
-- **Architect resolution at spawn**: `SPAWNING_ARCHITECT_NAME` currently = `process.env.CODEV_ARCHITECT_NAME || 'main'` (module-scope, `spawn.ts:36`). Make it resolvable per-invocation so `--override-owner` can supersede it. **N>1 validation**: if more than one architect is registered for the workspace and the resolved name is not a registered architect, fail loud (do not default to `main`). N=1 keeps the `main` fallback.
-- **Dedup gate**: before/at the ledger write, look up the live owner for `issue_number`; if it exists and differs from the spawning architect, print a clear warning naming the owner and **refuse** unless `--override-owner` was passed. `--resume` and same-architect spawns never trip. Override = `releaseOwnership(prior)` + `recordOwnership(new, override_of=prior)`.
+- **Schema**: columns `workspace_path TEXT NOT NULL, issue_number TEXT NOT NULL, architect TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')), released INTEGER NOT NULL DEFAULT 0, released_at TEXT, override_of TEXT`. Partial unique index `CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_ownership_live ON issue_ownership(workspace_path, issue_number) WHERE released = 0` — makes the dedup check-then-insert **atomic** (a concurrent double-spawn loses on the constraint; surface that as the dedup warning).
+- **Ownership is claimed BEFORE side effects (Codex — important).** Today `spawnSpec` creates the worktree/session *before* `upsertBuilder`. If the ledger write/check happened after `upsertBuilder`, a duplicate would only be refused *after* the worktree/session already exist. Therefore: run the dedup check **and** insert the live ledger row (atomically, via the unique index) **first**, before `createWorktree`/session creation. The `builder_id` may not exist yet at claim time — claim with `architect` + `issue_number` (nullable `builder_id`, backfilled on success). **Rollback**: if a later spawn step fails, release the just-claimed ledger row (or mark it released) so a failed spawn does not leave a phantom owner. This makes the dedup gate actually preventive.
+- **Architect resolution at spawn**: `SPAWNING_ARCHITECT_NAME` currently = `process.env.CODEV_ARCHITECT_NAME || 'main'` (module-scope, `spawn.ts:36`). Replace with a **per-invocation resolver helper** (so `--override-owner` can supersede it and N>1 validation runs). **N>1 validation**: if more than one architect is registered and the resolved name is not a registered architect, fail loud (no `main` default). N=1 keeps the `main` fallback.
+- **Dedup gate**: look up the live owner for `issue_number`; if it exists and differs from the spawning architect, print a clear warning naming the owner and **refuse** unless `--override-owner` was passed. `--resume` and same-architect spawns never trip. Override = `releaseOwnership(prior)` + `recordOwnership(new, override_of=prior)`.
+- **Closed-issue dedup (resolves spec nice-to-know OQ)**: for now, **treat a closed prior-owned issue the same as open** (block + `--override-owner`). Revisit only if feedback says warn-but-not-block is preferable; documented so the gate logic is unambiguous for the builder.
 - **Ledger durability**: builder `cleanup` and issue close do **not** release entries (per spec); release happens only via override, `remove-architect` (Phase 4), or a future explicit command.
 
 #### Acceptance Criteria
@@ -133,7 +135,7 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - `codev/state/` template assets — an **architect-state template** and the **boundary marker** convention; mirror into `codev-skeleton/` where adopters need it.
 - `codev/roles/builder.md` + `codev-skeleton/roles/builder.md` — teach the head/`<!-- ARCHIVE BOUNDARY -->`/history structure for builder `*_thread.md` (extends the #823 thread-file section).
 - `codev/roles/architect.md` + `codev-skeleton/roles/architect.md` — same structure for the architect state file.
-- `packages/core/src/state-rotation.ts` (or `packages/codev/src/lib/`) — pure rotation function: parse below the boundary, move oldest **whole entries** into `codev/state/archive/<id>-<date>.md`, never split a fenced code block.
+- `packages/codev/src/lib/state-rotation.ts` — pure rotation function (committed home: codev-specific, not a cross-package `packages/core` utility — Claude 3a): parse below the boundary, move oldest **whole entries** into `codev/state/archive/<id>-<date>.md`, never split a fenced code block. Creates `codev/state/archive/` (`mkdir -p` equivalent) on first archive.
 - `packages/codev/src/agent-farm/commands/state-rotate.ts` + `cli.ts` — `afx state rotate <id>` (and an internal entry point for opportunistic triggers).
 - `.gitignore` — ensure `codev/state/archive/` retention is handled per project convention (commit vs ignore — follow existing `codev/state/` disposition; archives are history, default commit).
 - Tests — rotation correctness + loss-free reconstruction.
@@ -167,7 +169,7 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - Add-architect always yields a state file (from template, idempotent); remove-architect archives it and releases owned builders/issues — no hand-renaming, no orphans.
 
 #### Files
-- `packages/codev/src/agent-farm/servers/tower-instances.ts` — in `addArchitect` (after `setArchitectByName`, ~L987): create `codev/state/architects/<name>.md` from the Phase 3 template if absent (never clobber). In `removeArchitect` (around `setArchitectByName(...,null)` ~L1161): archive the state file → `codev/state/archive/architects/<name>-<date>.md`, release ledger entries, re-home builders.
+- `packages/codev/src/agent-farm/servers/tower-instances.ts` — hook into `addArchitect` (function ~L868; the `setArchitectByName` call within is ~L987) and `removeArchitect` (function ~L1100; the `setArchitectByName(...,null)` call within is ~L1161) — line numbers per Claude 3c. **On add**: create `codev/state/architects/<name>.md` from the Phase 3 template if absent (never clobber), creating the `codev/state/architects/` directory if missing (`mkdir -p` equivalent). **On remove**: archive the state file → `codev/state/archive/architects/<name>-<date>.md` (create dir if missing), release ledger entries, re-home builders.
 - `packages/codev/src/agent-farm/state.ts` — `releaseOwnershipForArchitect(name)` and `rehomeBuildersToMain(name)` (`UPDATE builders SET spawned_by_architect='main' WHERE spawned_by_architect=name`).
 - (Possibly) `commands/workspace-add-architect.ts` / `workspace-remove-architect.ts` — only if any client-side messaging needs updating; the substantive work is server-side.
 - Tests — add creates file (idempotent); remove archives + releases + re-homes.
@@ -187,7 +189,7 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - **Integration**: route-level add then remove, asserting filesystem + DB + SSE side effects (reuse the `architects-updated` SSE from #823).
 
 #### Risks
-- **Workspace-relative path resolution** (state dir lives under the workspace, not the Tower cwd) → resolve from the workspace path the handler already has.
+- **Workspace-relative path resolution (Claude — elevated to a risk)**: these filesystem ops run inside Tower route handlers (`tower-instances.ts`), so a relative-vs-absolute path mistake puts the state file in the wrong place. Resolve `codev/state/architects/` from the **workspace path the handler already has** (the same one passed to `setArchitectByName`), and `mkdir -p` the new subdirectories (`codev/state/architects/`, `codev/state/archive/architects/`) since they don't pre-exist.
 - **Filesystem race with a live AI writing the file** → archive is a move of the file as-is; the AI re-creates on next write if needed (acceptable; documented).
 
 ---
@@ -199,15 +201,17 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - The dashboard Work view can group open threads by owning architect, each with a deterministic who-owes-next signal; optional CLI text digest.
 
 #### Files
-- `packages/codev/src/agent-farm/servers/overview.ts` — add the who-owes-next derivation (a **total function** over already-parsed porch/overview state) and architect-grouping data to the overview payload.
-- `packages/types/src/api.ts` — extend the overview shape with who-owes-next + grouping fields (additive, optional).
-- `packages/dashboard/src/components/WorkView.tsx` (+ CSS) — group by `spawnedByArchitect` and render who-owes-next **only when `architectCount > 1`** (reuse `architectCount` + `OverviewBuilder.spawnedByArchitect` from #823 — **no new dashboard deps**).
+- `packages/codev/src/agent-farm/servers/overview.ts` — add the who-owes-next derivation (a **total function** over already-parsed porch/overview state) and architect-grouping data to the overview payload. **Crucially, join the ownership ledger (Phase 1)** so that *owned-but-unspawned* issues appear: for a live ledger entry with no active builder, **synthesize an overview item** (a minimal `OverviewBuilder`-shaped row, or a dedicated `OverviewOwnedIssue` entry in the payload) so the board can render it (Codex + Gemini — the board data model is the ledger ⋈ builders, not builders alone).
+- `packages/types/src/api.ts` — extend the overview shape with who-owes-next + grouping fields, and the synthesized owned-issue shape (additive, optional).
+- `packages/dashboard/src/components/WorkView.tsx` (+ CSS) — group by owning architect and render who-owes-next **only when `architectCount > 1`** (reuse `architectCount` + `OverviewBuilder.spawnedByArchitect` from #823 for the live-builder rows; render synthesized owned-issue rows alongside — **no new dashboard deps**).
 - `packages/codev/src/agent-farm/commands/architects.ts` — optional `--board` text digest (nice-to-know; may defer).
-- Tests — who-owes-next unit tests (all cases incl. `unknown`); Playwright N=1-identical + N>1 grouping.
+- Tests — who-owes-next unit tests (all cases incl. `unknown` and owned-unspawned); Playwright N=1-identical + N>1 grouping.
 
 #### Implementation Details
+- **Board data model**: the board groups by owning architect over the union of (a) live builders enriched with `spawnedByArchitect` and (b) **ledger-owned issues with no active builder** (synthesized from the Phase 1 ledger join in `overview.ts`). Without (b), the "owned-but-unspawned" who-owes-next case has no row to attach to.
 - **who-owes-next** (total, with `unknown` fallback): pending human gate → architect; mid-phase progressing → builder; review-complete / PR-open-awaiting-merge → architect; ledger entry with no active builder → architect; idle/stuck builder → builder (stalled); else → `unknown`.
 - **N=1 invariant**: grouping/who-owes-next render is gated behind `architectCount > 1`; N=1 Work view renders byte-identically to today.
+- **Live-update (optional, noted by Claude)**: the roster/board refresh on the existing overview poll. A dedicated SSE event for ledger writes is a possible nice-to-have but is **not required** (the poll already picks up changes); left out of scope unless requested.
 
 #### Acceptance Criteria
 - [ ] Work view groups open threads by owning architect at N>1, each showing item, state/phase, who-owes-next.
@@ -231,15 +235,17 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - Every builder branches from a fresh, known-good integration-branch-tip SHA captured at spawn — never the shared checkout's stale live HEAD.
 
 #### Files
-- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — in `createWorktree()` (and `createWorktreeFromBranch()` where relevant), resolve the base: fetch the integration ref + `rev-parse` to a SHA, then `git worktree add <path> <sha>` (instead of branching from live HEAD).
-- `packages/codev/src/agent-farm/commands/spawn.ts` — thread a resolved `--base` through; pass the default-branch/base to `createWorktree`.
+- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — modify **`createWorktree()` only** (the fresh-spawn path at ~L158). **Do NOT** modify `createWorktreeFromBranch()` (~L297) — it already fetches and handles existing remote branches for `--resume`/fork PRs; touching it would double-fetch and break resume (Claude 3d).
+- `packages/codev/src/agent-farm/commands/spawn.ts` — thread a resolved `--base` through to `createWorktree`; resolve the default branch (helper).
+- `packages/codev/src/agent-farm/types.ts` — `base?` already added in Phase 1's `SpawnOptions` change; ensure it reaches `createWorktree`.
 - `packages/codev/src/agent-farm/cli.ts` — add `--base <ref|sha>` to `spawn`.
-- (Read) default-branch source — derive from git (`git symbolic-ref refs/remotes/origin/HEAD`) and/or config; **do not hardcode `main`**.
 - Tests — base-pin from a deliberately-stale checkout; fail-fast on fetch error; `--base` override; non-`main` default branch.
 
 #### Implementation Details
-- **Resolution**: (1) determine the integration/default branch (config/forge default, falling back to `origin/HEAD`); (2) `git fetch <remote> <branch>`; (3) `git rev-parse <remote>/<branch>` → base SHA; (4) `git branch <builder-branch> <sha>` + `git worktree add <path> <sha>`.
-- **Fail-fast**: if the fetch fails, **error loudly**; do **not** silently fall back to stale local HEAD (that would reintroduce the hazard). `--base <ref|sha>` lets the architect pin an explicit base deliberately.
+- **Attached-branch flow (Codex — the original sketch would detach):** `git branch <builder-branch> <sha>` followed by `git worktree add <path> <sha>` would leave the worktree **detached**. Correct sequence: (1) resolve base SHA (below); (2) `git branch <builder-branch> <base-sha>` to create the branch *pointing at the pinned SHA*; (3) `git worktree add <path> <builder-branch>` to attach the worktree to that branch. The builder ends up on a named branch whose tip is the fresh base — not detached HEAD.
+- **Base SHA resolution**: (1) determine the integration/default branch via a **fallback chain** (Claude 3e): workspace config → `git symbolic-ref refs/remotes/origin/HEAD` → `git remote show origin` (heavier but reliable) → **fail loud** (never assume `main`); (2) `git fetch <remote> <branch>`; (3) `git rev-parse <remote>/<branch>` → base SHA.
+- **Fail-fast**: if the fetch fails, **error loudly**; do **not** silently fall back to stale local HEAD. `--base <ref|sha>` lets the architect pin an explicit base deliberately (incl. `--base HEAD` for an intentional offline spawn — Gemini's offline note).
+- **Interaction with `--branch`/resume**: when an explicit `--branch`/existing-branch/resume path is taken (i.e. `createWorktreeFromBranch`), SHA-pin does **not** apply — that path already targets a specific branch; `--base` is for the fresh-spawn path only.
 - **Backward compat**: common case resolves to a fresh `origin/main` — what operators already expect; no new directories/config.
 
 #### Acceptance Criteria
@@ -248,7 +254,8 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - [ ] Default branch is read, not hardcoded (a workspace defaulting to `ci` pins `origin/ci`).
 
 #### Test Plan
-- **Unit/Integration**: spawn against a fixture repo with a stale local HEAD → builder branches from origin tip; simulate fetch failure → loud error; `--base` override path; non-`main` default.
+- **Integration fixture setup (Claude)**: create a temp git repo where the local checkout's HEAD is deliberately **behind** `origin/<default>` (e.g. init a bare "origin", clone, add commits to origin, leave the local behind), then spawn → assert the builder branch's tip == origin's tip (merge-base check), **not** the stale local HEAD.
+- **Unit/Integration**: simulate fetch failure → loud error (no silent fallback); `--base <sha>` override path; non-`main` default branch (workspace defaulting to `ci`); assert the worktree is **attached** to a named branch (not detached).
 
 #### Risks
 - **Wrong base / silent stale fallback** → read the real default branch; fail-fast (no silent fallback); `--base` escape hatch — all tested.
@@ -291,10 +298,17 @@ All phases ship as commits within a **single PR** (per the builder PR strategy a
 - **Privacy** → no source-workspace identifiers in code/tests/fixtures/docs (generalized fixtures only).
 
 ## Consultation Log
-<!-- Populated by porch-orchestrated 3-way plan consultation. -->
-**Date**: TBD
-**Models Consulted**: TBD (gemini, codex, claude)
-**Sections Updated**: TBD
+
+### Iteration 1 (2026-06-04) — Gemini APPROVE · Claude APPROVE · Codex REQUEST_CHANGES (all HIGH)
+Strong consensus; Codex's REQUEST_CHANGES + the two APPROVERs' notes were all incorporated:
+- **Phase 1 — ownership claimed before side effects (Codex)**: the ledger check+write now happens *before* `createWorktree`/session creation (the old "after `upsertBuilder`" order couldn't refuse a duplicate before the worktree existed), with rollback-on-failure so a failed spawn leaves no phantom owner. Scoped to numbered spawns only (`spawnSpec`/`spawnIssueDrivenBuilder`) per Claude 3b. Added `types.ts` `SpawnOptions` + `__tests__/spawn.test.ts` plumbing per Codex. Closed-issue dedup default resolved (treat same as open) per Claude.
+- **Phase 6 — attached-branch flow (Codex)**: corrected the git sequence so the worktree is **attached** to a named branch pointing at the pinned SHA (the original `worktree add <sha>` would detach). Modify `createWorktree()` only, not `createWorktreeFromBranch()` (already fetches) per Claude 3d. Added the default-branch fallback chain (config → `origin/HEAD` → `git remote show origin` → fail) per Claude 3e, and a concrete stale-HEAD fixture for the test.
+- **Phase 5 — board needs a ledger join (Codex + Gemini)**: who-owes-next's "owned-but-unspawned" case requires synthesizing overview rows from the ledger (not just `architectCount`+`spawnedByArchitect`); `overview.ts` now joins the Phase 1 ledger and the payload/types carry the synthesized owned-issue shape.
+- **Minor/trivial**: `state-rotation` committed to `packages/codev/src/lib/` (codev-specific, not `packages/core`) per Claude 3a; `addArchitect`/`removeArchitect` function line numbers corrected (~L868/~L1100) per Claude 3c; `mkdir -p` for new `codev/state/architects/` and `codev/state/archive/` dirs called out (Phase 3/4); workspace-relative path resolution elevated to a Phase 4 risk; optional ledger-write SSE noted as out-of-scope (poll suffices).
+- **Migration note (Gemini)**: clarified that `db.exec(LOCAL_SCHEMA)` auto-applies `CREATE TABLE/INDEX IF NOT EXISTS` to existing DBs, so a discrete numbered migration is optional.
+
+**Date**: 2026-06-04
+**Models Consulted**: gemini, codex, claude
 
 ## Phase Status Tracking
 - [ ] Phase 1 — Ledger + dedup (`pending`)
