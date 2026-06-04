@@ -27,3 +27,9 @@ Issue #984 (SPIR, area/tower). Six coordinated points:
 The issue's "architect state files" description comes from the private source workspace (markdown working-memory files). In OUR repo that convention doesn't formally exist — so #4 must *introduce* it, and #5 bounds both builder thread files and the new architect state file. Surfacing this in the spec's Current State + Open Questions rather than blocking.
 
 Writing spec now with recommended defaults + explicit Open Questions for: #6 checkout-isolation approach (worktree vs clone vs pin-base) and whether it ships as its own PR; #5 rotation mechanism; architect state-file convention/location.
+
+- Spec drafted + committed (37b1987a). Ran porch-orchestrated 3-way consult (iter1).
+- **Consult verdicts**: Gemini REQUEST_CHANGES, Codex REQUEST_CHANGES, Claude COMMENT (all HIGH conf; Claude verified codebase claims accurate).
+- Incorporated everything → committed d7e17715. Key resolutions: state file at `codev/state/architects/<name>.md`; `--override-owner` w/ release-and-reinsert + `override_of`; partial unique index for atomic dedup; rotation via `<!-- ARCHIVE BOUNDARY -->` whole-entry moves (loss-free); `.architects/<name>/` gitignored worktrees, main=main checkout, new architects isolated by default, pre-existing migrate explicitly; dirty-worktree retire aborts unless --force; roster open/closed via overview cache (unknown on outage); who-owes-next total function; CODEV_ARCHITECT_NAME required in N>1.
+- **Left for architect at gate**: #6 PR-slicing (all 3 recommend own PR), pre-existing-architect migration ergonomics, 2 nice-to-knows.
+- Running `porch next` to see if porch wants iter2 consult or moves to spec-approval gate.
