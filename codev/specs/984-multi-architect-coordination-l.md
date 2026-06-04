@@ -1,4 +1,4 @@
-# Specification: Multi-Architect Coordination Layer (roster · board · dedup-at-spawn · lifecycle · bounded state · checkout isolation)
+# Specification: Multi-Architect Coordination Layer (roster · board · dedup-at-spawn · lifecycle · bounded state · builder-base SHA-pin)
 
 ## Metadata
 - **ID**: spec-2026-06-03-984-multi-architect-coordination-l
@@ -47,7 +47,7 @@ The unifying diagnosis: **the coordination layer that a second operator would pr
 - **No issue-ownership ledger.** `builders.spawned_by_architect` records *builder*→architect affinity, but it is per-builder and lifecycle-bound (it disappears semantics-wise once a builder is cleaned up). There is no durable *issue*→architect record, and therefore no dedup-at-spawn check.
 - **No architect state-file convention.** Architect identity is in SQLite; there is no per-architect markdown working-memory file, no template for one, and no lifecycle that creates/archives it.
 - **No bounded-state mechanism.** Builder thread files (and any future architect state file) are free-text markdown an AI appends to; nothing caps the head or rotates the history. Cold-resume cost is unbounded.
-- **No per-architect checkout.** All architects operate in the single main checkout; builders `git worktree add` from its shared HEAD. There is no per-architect working tree, and the "never switch branches" rule is the only thing preventing the fleet from yanking each other's trees.
+- **No pinned builder base.** Builders `git worktree add` from the shared checkout's **live HEAD**, so a builder inherits whatever commit (possibly badly stale, possibly the wrong branch) the shared checkout happens to be on. Observed in practice: builders branched from a `main` that was ~145 commits behind. There is no capture of a fresh known-good base SHA at spawn.
 
 ## Desired State
 
@@ -58,13 +58,13 @@ A workspace operator running N architects can:
 3. Have **issue ownership recorded automatically at spawn**, and be **warned (and required to override)** when spawning a second architect onto an issue already owned by a *different* architect — catching the duplicate-investigation failure before the work is done, not after.
 4. **Add** an architect and have its state file created from a template automatically; **retire** an architect and have its state file archived and its owned builders/issues released — no hand-renaming, no orphaned or missing state files.
 5. Trust that state files stay **bounded**: a capped "current state" head with older history auto-rotated into an archive, so a cold resume reads a predictable, small amount.
-6. Give each architect its **own checkout** so that one architect switching branches never disturbs a sibling, and a builder always branches from a fresh, architect-local base — retiring the "never switch branches" discipline rule.
+6. Trust that every builder branches from a **fresh, known-good base SHA** captured at spawn (the integration/default branch tip), never from whatever stale commit the shared checkout happens to be sitting on — eliminating the stale/wrong-base-builder hazard without restructuring how architects share the checkout.
 
-Backward compatibility is a hard requirement: a workspace with a single `main` architect (the overwhelmingly common case) must see **zero behavior change** unless it opts into the new surfaces. N=1 dashboards render identically; `afx architects` works but is trivially a one-row table; checkout isolation degenerates to "main architect uses the main checkout" exactly as today.
+Backward compatibility is a hard requirement: a workspace with a single `main` architect (the overwhelmingly common case) must see **zero behavior change** unless it opts into the new surfaces. N=1 dashboards render identically; `afx architects` works but is trivially a one-row table; builder-base SHA-pinning degenerates to "branch from a fresh `origin/main`," which is what operators already expect.
 
 ## Stakeholders
 - **Primary Users**: Workspace operators running multi-architect fleets (today: the private source workspace; Shannon as the concrete external N>1 adopter).
-- **Secondary Users**: Single-architect operators (must be unaffected); architect AI sessions (consume the roster/board, write bounded state files); builder AI sessions (branch from architect-local checkouts).
+- **Secondary Users**: Single-architect operators (must be unaffected); architect AI sessions (consume the roster/board, write bounded state files); builder AI sessions (branch from a pinned known-good base SHA).
 - **Technical Team**: Codev maintainers (Tower, afx CLI, dashboard).
 - **Business Owners**: M Waleed Kadous (architect / approver).
 
@@ -75,7 +75,8 @@ Backward compatibility is a hard requirement: a workspace with a single `main` a
 - [ ] **#3 Ledger + dedup** — Every numbered spawn records an issue→architect ownership entry keyed by the spawning architect (via existing affinity). A spawn onto an issue already owned by a *different* architect prints a clear warning and **refuses** unless an override flag is passed. Same-architect re-spawn (e.g. `--resume`) is never blocked. Issue-level dedup only (no fuzzy symptom matching).
 - [ ] **#4 Lifecycle** — `workspace add-architect` creates the architect's state file from a template if absent (idempotent: never clobbers an existing file). `workspace remove-architect` archives the state file and releases the retiring architect's owned issues and live builders per a defined, documented policy. No state file is ever silently missing for a live architect.
 - [ ] **#5 Bounded state** — A defined mechanism caps the "current state" head of a state file and rotates older history to an archive, keeping cold-resume cost predictable. Applies to `codev/state/<id>_thread.md` (builders) and the architect state file from #4. The mechanism does not corrupt or lose history (it relocates, not deletes).
-- [ ] **#6 Checkout isolation** — Each architect operates against an isolated checkout: `main` maps to the existing main checkout, and every architect added after this feature ships gets its own `.architects/<name>/` worktree by default (pre-existing non-`main` architects migrate via an explicit documented command). A branch switch by one architect does not disturb a sibling. Builders spawned by an architect branch from that architect's checkout HEAD. Removing an architect with a dirty worktree aborts unless `--force`. The "never switch branches" rule is no longer required.
+- [ ] **#6 Builder-base SHA-pin** — At spawn, the builder's base is a fresh SHA captured by fetching + `rev-parse`-ing the integration/default branch tip (e.g. `origin/main`, or the workspace's configured default), and the builder branch is created from that SHA — not from the shared checkout's live HEAD. A fetch failure fails the spawn loud (no silent fallback to stale local HEAD). A `--base <ref|sha>` override allows a deliberate non-default base. The common case (fresh `origin/main`) matches existing operator expectations. (Architects continue to share the main checkout; per the architect's decision, no per-architect worktrees and no `.architects/` directories are introduced.)
+<!-- REVIEW(@architect): This one I'm not quite so sure about because architects have to interact with builders and if they're started in a subdir they may not be able to do that directly. -->
 - [ ] **Backward compat** — A single-`main`-architect workspace exhibits no behavioral or visual change without opt-in.
 - [ ] All new tests pass; no reduction in existing coverage; the existing afx/Tower/dashboard suites stay green.
 - [ ] Documentation updated (`CLAUDE.md`/`AGENTS.md`, `codev/resources/commands/agent-farm.md`, role docs) for every new surface.
@@ -86,8 +87,9 @@ Backward compatibility is a hard requirement: a workspace with a single `main` a
 - **Tooling is fixed** (baked by repo conventions): TypeScript; Commander.js for the afx CLI; the Tower HTTP server + REST client (`packages/core/tower-client.ts`); SQLite via the existing `db/schema.ts` for persisted state; React/Vite for the dashboard; **Vitest** for tests. New persisted state (e.g. the ownership ledger) must use the existing SQLite database and the established `(workspace_path, …)` scoping pattern — no new datastore.
 - **Forge abstraction**: any issue metadata (open/closed, title) must go through the existing forge concept layer (`lib/forge.ts`), not a hardcoded `gh` call, so non-GitHub providers degrade gracefully.
 - **Architect identity is SQLite-backed** (`architect` table, PK `(workspace_path, id)`); the roster, ledger, and lifecycle build on this, not a parallel store.
-- **Worktrees share one object store**: per-architect checkout isolation must use git worktrees (or an equivalent that shares the object store), not full clones, to keep disk cost bounded — unless the design review explicitly justifies otherwise.
-- **`main` is reserved** and maps to the main checkout (symmetric with the existing `afx dev main` reserved-target pattern).
+- **Builder-base SHA-pin must read the workspace's real default branch**, not hardcode `main` (some workspaces default to `ci`). It must capture the base via a fresh fetch + `rev-parse` of the remote integration ref, and **fail loud** on fetch error rather than silently using a stale local HEAD.
+- **No new checkout topology**: per the architect's decision, #6 introduces no per-architect worktrees, no `.architects/` directories, and no Tower checkout-root changes — it is a localized change to the spawn base-resolution path only.
+- **`main` is reserved** as an architect identity (symmetric with the existing `afx dev main` reserved-target pattern).
 - **No new always-on background process**: rotation/bounding must be triggered (on a lifecycle/digest event or by an explicit command), not a new daemon.
 
 ### Business Constraints
@@ -99,7 +101,7 @@ Backward compatibility is a hard requirement: a workspace with a single `main` a
 - The spawning architect is reliably known at spawn time via `CODEV_ARCHITECT_NAME` (established by #774); ownership recording can rely on it.
 - The architect-state-file convention is new and owned by this spec; no external tool depends on a prior format.
 - Live builders spawned by a retiring architect should continue running (not be killed); "release" means re-homing ownership, not termination (consistent with the #823 observation that such builders keep running and route to `main`).
-- Git worktrees are available (they already back the builder model), so per-architect worktrees are mechanically feasible.
+- The workspace's integration/default branch tip (e.g. `origin/main`, or `origin/ci`) is the correct known-good base for new builders, and is reachable via a fetch at spawn time; its name is discoverable from config/forge defaults rather than assumed.
 
 ## Solution Approaches
 
@@ -164,11 +166,10 @@ The six points are interdependent but separable. The cheapest/highest-leverage p
   1. **Archive the state file**: move `codev/state/architects/<name>.md` → `codev/state/archive/architects/<name>-<date>.md` (recoverable; not deleted).
   2. **Release ledger entries**: mark every unreleased `issue_ownership` row owned by `<name>` as `released` (with `released_at`); the issues become re-claimable.
   3. **Re-home live builders**: `UPDATE builders SET spawned_by_architect = 'main'` for that architect's live builders — builders **keep running**; this is the concrete meaning of "re-home," and it makes `afx send architect` from those builders route to `main` (which the post-#774 routing in `tower-messages.ts` already does as a fallback, so no routing-code change is required — but the column update makes the new home explicit rather than implicit).
-  4. **Remove the architect row** (existing behavior) and, if #6 shipped, remove the architect's worktree per the dirty-worktree policy in #6.
-- **Dirty-worktree guard:** removing an architect that has uncommitted/untracked work in its worktree (when #6 is in play) must **abort with a clear error** and require `--force` to proceed (never silently destroy work — resolving Gemini's data-loss concern). See #6.
+  4. **Remove the architect row** (existing behavior). (No worktree to remove — #6 is SHA-pin, not per-architect checkouts.)
 
 - **Pros**: Eliminates hand-renaming, missing files, and orphaned ownership in one pass; builds directly on #3's ledger; release steps are explicit and ordered.
-- **Cons**: "Re-home to main" is a deliberate policy (documented); couples to #3 and #6.
+- **Cons**: "Re-home to main" is a deliberate policy (documented); couples to #3.
 - **Alternatives**: Keep lifecycle hand-managed (status quo) — rejected, it is the source of failure mode #4.
 
 **Complexity**: Medium. **Risk**: Low–Medium.
@@ -197,24 +198,29 @@ The six points are interdependent but separable. The cheapest/highest-leverage p
 
 **Complexity**: Medium. **Risk**: Medium (correctness of rotation; must not lose history or split markdown).
 
-### Point #6 — Per-architect checkout isolation  (largest / riskiest)
+### Point #6 — Builder-base SHA-pinning  (architect-directed: fallback B chosen over worktree isolation)
 
-**Recommended — per-architect git worktree, with `main` mapped to the main checkout.** Give each non-`main` architect its own git worktree (sharing the object store, cheap on disk — the same mechanism that backs builders). The architect's terminal runs in its worktree; builders it spawns branch from *that* worktree's HEAD/base rather than the shared main checkout. `main` continues to use the main checkout. This eliminates the shared-tree coupling and the stale-HEAD→stale-builder hazard, and retires the "never switch branches" rule.
+> **Post-approval architect decision (2026-06-04):** At the spec-approval gate the architect **replaced full per-architect checkout isolation with the documented fallback (B): builder-base SHA-pinning.** Rationale: the damaging failure mode observed in practice is the *stale/wrong-base builder* (builders repeatedly branched from a `main` that was ~145 commits behind), which SHA-pinning fixes directly and cheaply — without the high-risk Tower/spawn refactor that per-architect worktrees require. Architects continue to share the main checkout; the "never switch branches" discipline rule **stays** for architects (accepted — architects sit on the integration branch and rarely need independent branches). This resolves both former Open Questions (PR-slicing and migration ergonomics) — see below.
 
-- **Worktree location (resolved, per Gemini):** `.architects/<name>/` at the workspace root (symmetric with `.builders/<id>/`). This path is added to `.gitignore` (and any AI-context ignore files, e.g. `.geminiignore`) so the nested worktrees never pollute the main checkout or AI context.
-- **Spawn base-resolution mechanism (sketch, per Claude/Codex):** today `createWorktree()` runs `git branch` + `git worktree add` from the current working directory's HEAD. Under isolation, `spawn.ts` resolves the **spawning architect's** worktree path from the `architect` table (keyed by `CODEV_ARCHITECT_NAME`) and runs the git worktree-add **against that worktree** (i.e. the new builder branches from the spawning architect's checkout HEAD, not main's). For `main` the resolved path is the main checkout, so the existing path is unchanged. The exact git invocation (run-from-dir vs. `git -C <path>` vs. `--detach` from a resolved SHA) is a plan-level decision, but the *resolution* — "which checkout does this builder branch from" = "the spawning architect's worktree" — is fixed here.
-- **Dirty-worktree on retire (resolved, per Gemini):** `remove-architect` must inspect the architect's worktree; if it has uncommitted tracked changes, staged changes, or untracked files, it **aborts with a clear error listing the dirty paths** and requires an explicit `--force` to proceed. `--force` removal still archives the state file (#4) first; it never silently destroys committed-but-unpushed branches without surfacing them.
-- **Compatibility — resolving the Codex-flagged contradiction:** the invariant is *"no architect's branch switch disturbs a sibling,"* not *"every architect must physically have a worktree."* For `main` and any pre-existing architect operating in the shared checkout, that invariant already holds when they are the sole occupant of that checkout. Therefore: **`main` always maps to the main checkout; every architect *added after this feature ships* gets a `.architects/<name>/` worktree by default; pre-existing non-`main` architects keep the main checkout until explicitly migrated** via a documented `afx workspace migrate-architect <name>` (or `--migrate` flag) that creates their worktree and moves their terminal cwd. This is the least-disruptive path and is internally consistent — the success criterion (below) is worded as "each architect *operates against an isolated checkout*, with `main` = main checkout and new architects isolated by default," not "every architect is force-migrated on upgrade."
+**Approach — capture a fresh known-good base SHA at spawn and branch the builder from it.** Today `createWorktree()` runs `git branch` + `git worktree add` from the shared checkout's **live HEAD**, so a builder inherits whatever (possibly stale, possibly wrong-branch) commit the shared checkout happens to be sitting on. Instead, at spawn:
+1. **Resolve the integration/default branch** for the workspace — the repo's default branch tip, e.g. `origin/main` (or `origin/ci` in workspaces whose default branch is `ci`). The branch name is read from existing config/forge defaults, not hardcoded.
+2. **Fetch + `rev-parse`** that remote ref to capture a fresh, explicit base SHA (`git fetch <remote> <branch>` then `git rev-parse <remote>/<branch>`).
+3. **Branch the new builder from that SHA** (`git branch <builder-branch> <sha>` / `git worktree add <path> <sha>`), not from the shared checkout's working HEAD.
 
-- **Pros**: Architects gain independent branch state; builder bases become architect-local and fresh; reuses the proven worktree model; disk cost bounded (shared objects).
-- **Cons**: Largest blast radius — touches Tower (must know each architect's checkout root), the spawn base-resolution path, lifecycle (create the worktree on add, remove it on retire), and disk layout. Needs careful 3-way review.
-- **Alternatives**: (a) *Separate full clone per architect* — rejected: heavy disk, divergent object stores, slower. (b) *Keep shared checkout but pin each builder's base to a SHA captured at spawn (not live HEAD)* — partially mitigates the stale-builder hazard but does **not** let architects switch branches independently, so it fails the explicit "retire the never-switch-branches rule" goal. **Retained as the documented fallback** if worktree isolation proves too invasive for one PR.
+This eliminates the stale/wrong-base hazard regardless of what state any architect left the shared checkout in, and it is a localized change to the spawn base-resolution path — **no Tower refactor, no per-architect worktrees, no `.architects/<name>/` directories, no lifecycle/migration surface.**
 
-**Complexity**: High. **Risk**: High.
+- **Edge / failure handling:** if the fetch fails (offline / forge unreachable), spawn must **fail loud** with a clear error rather than silently falling back to the stale local HEAD (fail-fast — a silent fallback would reintroduce exactly the hazard this fixes). A `--base <ref|sha>` escape hatch lets the architect pin an explicit base when they deliberately want a non-default base (e.g. stacking on an unmerged branch).
+- **Backward compatibility:** for the common case the captured SHA *is* `origin/main`'s tip, so behavior is "branch from a fresh main" — what operators already expect. No new directories, no gitignore changes, no dashboard/Tower changes.
+
+- **Pros**: Directly kills the observed stale-base failure; small, localized diff in the spawn path; low blast radius; ships inside the main PR; no migration story needed.
+- **Cons**: Does **not** give architects independent branch state — so the "never switch branches" rule remains for architects (explicitly accepted by the architect; architects rarely need it). Adds a fetch to the spawn path (small latency; acceptable, and correctness-critical).
+- **Alternatives (now historical):** (a) *Per-architect git worktrees* — the spec's original recommendation; **rejected by the architect** as too high-risk (Tower/spawn refactor) for the benefit, given architects rarely switch branches. (b) *Separate full clone per architect* — rejected (heavy disk). (c) *Branch from live shared HEAD* — the status quo that causes the hazard.
+
+**Complexity**: Low–Medium. **Risk**: Low–Medium (must fail-fast on fetch error; must read the correct default branch, not hardcode `main`).
 
 ### Cross-cutting: PR sequencing
 
-The issue suggests sequencing #3+#1 (cheap, high-leverage) first, then #5 (contained), then #4/#2 (enhancements), with #6 designed carefully and staged last. Per the builder PR strategy, all phases ship as commits within a single PR by default. **#6's size and risk may justify slicing it into its own PR** — this is an architect decision flagged in Open Questions; the plan will be structured so #6 is the final, independently sliceable phase.
+The issue suggests sequencing #3+#1 (cheap, high-leverage) first, then #5 (contained), then #4/#2 (enhancements), with #6 last. Per the builder PR strategy, all phases ship as commits within a single PR. With the architect's decision to make #6 a small SHA-pin change (not worktree isolation), **all six points ship in one PR** — there is no longer any blast-radius reason to slice #6 out.
 
 ## Resolved Design Decisions
 
@@ -223,30 +229,28 @@ The first consultation pushed (Gemini + Codex REQUEST_CHANGES) to resolve the ac
 - **Architect state-file convention** → `codev/state/architects/<name>.md` (dedicated subdir; no collision with builder `*_thread.md`).
 - **Dedup override flag** → `--override-owner` (distinct from git-dirty `--force`); overrides are recorded in the ledger (`override_of`), never silent.
 - **Ledger atomicity** → partial unique index on `(workspace_path, issue_number) WHERE released = 0`, making check-then-insert atomic (closes the concurrent-spawn race).
-- **Retire / re-home policy** → builders keep running; their `spawned_by_architect` is updated to `main`; ledger entries marked `released`; state file archived. Dirty architect worktree aborts removal unless `--force`.
+- **Retire / re-home policy** → builders keep running; their `spawned_by_architect` is updated to `main`; ledger entries marked `released`; state file archived. (No architect worktree to remove under SHA-pin.)
 - **Roster last-activity** → max(terminal-session ts, most-recent owned-builder `updated_at`).
 - **Roster open/closed source** → intersect ledger ids against the existing overview/issue cache; `unknown` when forge data is unavailable (never blocks).
 - **State rotation** → machine-parseable `<!-- ARCHIVE BOUNDARY -->` delimiter; rotate only complete history entries below it into `codev/state/archive/…`; explicit command + opportunistic on lifecycle/digest events; no daemon.
 - **`CODEV_ARCHITECT_NAME` validation** → in N>1 workspaces spawn requires a registered architect name (no silent fallback to `main`); N=1 fallback unchanged.
-- **#6 worktree location** → `.architects/<name>/`, gitignored; `main` = main checkout; new architects isolated by default; pre-existing architects migrate via an explicit command.
+- **#6 approach (architect-directed, post-approval)** → **builder-base SHA-pin**, not per-architect worktrees. Capture a fresh integration-branch-tip SHA (fetch + `rev-parse`) at spawn and branch the builder from it; fail-fast on fetch error; `--base` override available. Architects keep sharing the main checkout; "never switch branches" stays for architects. Ships inside the main PR; no migration surface.
 
 ## Open Questions
 
-### Critical (Architect decision at the gate)
-- [ ] **#6 PR slicing.** Should checkout isolation (#6) ship in the same PR as #1–#5, or as its own follow-up PR? All three reviewers recommend **slicing #6 into its own final PR** given its blast radius. Recommendation: structure the plan so #6 is the last, independently-sliceable phase; architect makes the call at the gate.
+### Resolved at the spec-approval gate (2026-06-04)
+- ✅ **#6 approach** — architect chose **builder-base SHA-pin** over per-architect worktree isolation. *Consequence:* **#6 PR-slicing is moot** (SHA-pin is small/low-risk → ships in the main PR), and **pre-existing-architect migration ergonomics is moot** (no worktrees to migrate into; the `migrate-architect` surface is dropped entirely).
+- ✅ **Resolved defaults confirmed** — `codev/state/architects/<name>.md` location, `--override-owner` release-and-reinsert semantics, and the re-home-to-`main` retire policy all stand as written (architect: "all other resolved decisions stand").
 
-### Important (Confirm the resolved defaults)
-- [ ] Confirm the resolved decisions above are acceptable — especially the **`codev/state/architects/<name>.md` location**, the **`--override-owner` semantics** (release-and-reinsert, not silent transfer), and the **re-home-to-`main`** retire policy.
-- [ ] **Pre-existing-architect migration ergonomics** — is an explicit `afx workspace migrate-architect <name>` the right surface, or should `add-architect`-on-an-existing-name perform the migration?
-
-### Nice-to-Know (Optimization)
+### Nice-to-Know (Optimization — defer to plan/implementation)
 - [ ] Should `afx architects` ship a `--board` text digest (#2 in the terminal) in this spec, or defer to dashboard-only?
 - [ ] Should the dedup check **warn-but-not-block** on a *closed/merged* prior-owned issue (vs. block the same as an open one)?
+- [ ] Exact name/source of the integration branch for SHA-pin per workspace (config key vs. forge default) — a plan-level detail; the constraint (read it, don't hardcode `main`) is fixed.
 
 ## Performance Requirements
 - `afx architects` and the overview/board endpoint must remain interactive (well under ~1s for a realistic fleet of ≤ ~10 architects / ~20 builders); they are read joins over local SQLite + cached forge data, so no heavy queries.
 - State-file rotation operates on small markdown files; it must be fast enough to run inline on a lifecycle event without a perceptible stall.
-- Per-architect worktree creation reuses the existing builder-worktree cost profile (object store shared); no new heavy I/O beyond a worktree add per architect.
+- Builder-base SHA-pin adds one `git fetch` of the integration ref to the spawn path (small, bounded latency); it is correctness-critical and acceptable. No new background or per-architect disk cost.
 
 ## Security Considerations
 - **No new auth surface.** All new commands/endpoints are workspace-local, consistent with existing afx/Tower scope. The ownership ledger and roster expose only data already visible within the workspace.
@@ -266,17 +270,17 @@ The first consultation pushed (Gemini + Codex REQUEST_CHANGES) to resolve the ac
 7. **Remove-architect archives + releases**: retire `b` → its state file is archived (recoverable), its ledger entries marked released, its live builders keep running with attribution re-homed to `main`.
 8. **Rotation is loss-free**: a state file whose history exceeds the cap → head stays bounded, overflow relocated to an archive, total history preserved (concatenation reconstructs the original).
 9. **Board / who-owes-next**: an issue at a pending human gate shows "owed by architect"; an issue mid-phase shows "owed by builder"; grouping by architect is correct.
-10. **Checkout isolation**: architect `b` (worktree) switches branches → `main`'s working tree is unaffected; a builder spawned by `b` branches from `b`'s base, not main's HEAD.
-11. **Backward compat**: single-`main` workspace — dashboard Work view renders byte-identically; no worktree created for `main`; all commands behave as before.
+10. **Builder-base SHA-pin**: with the shared checkout deliberately left on a stale commit (or a different branch), spawning a builder branches it from the freshly-fetched integration-branch-tip SHA — **not** the stale local HEAD. The resulting builder branch's merge-base with `origin/main` is `origin/main`'s tip.
+11. **Backward compat**: single-`main` workspace — dashboard Work view renders byte-identically; SHA-pin resolves to a fresh `origin/main`; no new directories/config; all commands behave as before.
 12. **Concurrent-spawn race**: two architects spawn on the same unowned issue near-simultaneously → exactly one wins the ledger (partial unique index), the other gets the dedup warning; no double live-owner.
 13. **Env-var validation (N>1)**: spawn with `CODEV_ARCHITECT_NAME` unset/unknown in a >1-architect workspace → refused (no silent `main` ownership). At N=1, unchanged fallback to `main`.
-14. **Dirty-worktree retire**: `remove-architect` on an architect whose `.architects/<name>/` has uncommitted/untracked work → aborts listing dirty paths; `--force` proceeds after archiving the state file.
+14. **SHA-pin fail-fast**: with the integration ref unreachable (fetch fails), spawn **errors loudly** and does not silently branch from a stale local HEAD. A `--base <sha>` override branches from the explicit SHA instead.
 15. **Rotation boundary safety**: a state file whose history region contains a fenced code block → rotation moves only whole entries below `<!-- ARCHIVE BOUNDARY -->`, never splitting the code block; head untouched.
 16. **Override is auditable**: `--override-owner` releases the prior entry and inserts a new one with `override_of` set; the ledger shows the transfer history.
 
 ### Non-Functional Tests
 1. **Performance**: roster/board endpoints return within budget for a ≤10-architect/≤20-builder fleet, including when forge data is stale (must not shell out per issue).
-2. **Migration safety (#6)**: applying isolation to a new architect (or migrating a pre-existing one) does not disturb existing architects' checkouts or running builders.
+2. **SHA-pin isolation from shared-checkout state**: the captured base SHA is independent of the shared checkout's current branch/HEAD, so a builder's base is correct no matter what state any architect left the shared checkout in.
 3. **No-daemon check**: rotation runs only on triggers/commands; no new always-on process is introduced.
 4. **Loss-free rotation invariant**: archive file + live file concatenated reconstructs the original pre-rotation content.
 
@@ -293,11 +297,11 @@ The first consultation pushed (Gemini + Codex REQUEST_CHANGES) to resolve the ac
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
-| #6 checkout isolation destabilizes Tower / spawn base resolution | Med | High | Stage #6 last and sliceable; 3-way review the design; provide the "pin base to SHA" fallback; `main`→main-checkout keeps the common path untouched |
+| #6 SHA-pin reads the wrong base (hardcoded `main`) or silently falls back to stale HEAD on fetch failure | Med | High | Read the workspace's real default branch from config/forge, never hardcode; **fail-fast** on fetch error (no silent fallback); `--base` override; common case = fresh `origin/main` (unchanged expectation) |
 | Dashboard N>1 grouping regresses N=1 rendering | Med | Med | Gate all grouping behind `architectCount > 1`; visual-verify N=1 identical (per UI-verification discipline) |
 | State rotation loses history | Low | High | Relocate-not-delete; test that concatenation reconstructs the original; never operate in place destructively |
 | Ledger semantics confuse same-architect resume / closed issues | Med | Med | Explicit "same-architect never blocks" rule; Open Question on closed-issue behavior resolved before coding |
-| Scope creep across six interdependent points in one PR | High | Med | Phase the plan by leverage (#3+#1 → #5 → #4+#2 → #6); each phase independently committable; #6 sliceable |
+| Scope creep across six interdependent points in one PR | High | Med | Phase the plan by leverage (#3+#1 → #5 → #4+#2 → #6); each phase independently committable; #6 is now a small SHA-pin change, reducing total risk |
 | Source-workspace details leak into the public repo | Low | Med | Generalized fixtures only; scrub names/ids/terminology |
 
 ## Expert Consultation
@@ -316,7 +320,9 @@ The first consultation pushed (Gemini + Codex REQUEST_CHANGES) to resolve the ac
 - **`CODEV_ARCHITECT_NAME` fallback in N>1** (Claude) → spawn now requires a registered name in multi-architect workspaces; added security note + test.
 - **No new dashboard deps for #2** (Claude) → confirmed; grouping reuses existing components + `architectCount`/`spawnedByArchitect` from #823.
 
-**Remaining open (deferred to architect at the gate):** #6 PR-slicing (all three recommend its own PR), pre-existing-architect migration ergonomics, and two nice-to-knows (`--board` text digest; closed-issue dedup behavior).
+**Remaining open (deferred to architect at the gate):** #6 PR-slicing, pre-existing-architect migration ergonomics, and two nice-to-knows (`--board` text digest; closed-issue dedup behavior).
+
+> **Post-gate note:** the architect resolved #6 by switching to **builder-base SHA-pin** (see Amendment 1), which dissolved both the PR-slicing and migration-ergonomics questions. The iter-1 consultation analysis above is preserved as the historical record of the *worktree-isolation* design that was considered and then superseded.
 
 **Date**: 2026-06-03
 **Models Consulted**: gemini, codex, claude
@@ -326,11 +332,21 @@ The first consultation pushed (Gemini + Codex REQUEST_CHANGES) to resolve the ac
 - [ ] Expert AI Consultation Complete (3-way)
 
 ## Notes
-- This spec deliberately ships recommended defaults with explicitly-flagged Open Questions rather than guessing the consequential forks (architect-state-file convention, rotation mechanism, #6 approach/slicing). These are the right things for the architect to decide at the gate.
-- "Build all six as one coherent SPIR" is honored: the points share a data foundation (the ledger) and a presentation (roster/board), and lifecycle/state/checkout all hang off the same architect identity. The plan will phase them by leverage and keep #6 sliceable.
+- This spec shipped recommended defaults with explicitly-flagged Open Questions for the consequential forks; at the spec-approval gate the architect confirmed the defaults and **redirected #6 from per-architect worktree isolation to builder-base SHA-pin** (see the Amendment below).
+- "Build all six as one coherent SPIR" is honored: the points share a data foundation (the ledger) and a presentation (roster/board), and lifecycle/state/SHA-pin all hang off the same architect identity. All six ship in one PR.
 
 ---
 
 ## Amendments
 
-<!-- TICK amendments, if any, are appended here in chronological order. -->
+### Amendment 1 — #6 redirected to builder-base SHA-pin (2026-06-04, at spec-approval)
+
+**Summary**: The architect approved the spec at the spec-approval gate with one change: **Point #6 becomes builder-base SHA-pinning (the spec's documented fallback B), replacing per-architect checkout isolation (`.architects/<name>/` worktrees).**
+
+**Why**: The damaging failure mode in practice is the *stale/wrong-base builder* (builders repeatedly branched from a `main` ~145 commits behind), which SHA-pin fixes directly and cheaply. Per-architect worktrees carry a high-risk Tower/spawn refactor whose main benefit — independent architect branch state — is rarely needed, since architects sit on the integration branch. Architects continue sharing the main checkout; the "never switch branches" discipline rule stays for architects (accepted).
+
+**Spec changes** (applied throughout, not deferred): Point #6 section rewritten to SHA-pin (capture a fresh integration-branch-tip SHA via fetch + `rev-parse`, branch the builder from it, fail-fast on fetch error, `--base` override); Desired State point 6, Success Criterion #6, Current State gap, Constraints, Assumptions, Performance, Risks, Test Scenarios 10/11/14 + non-functional #2 all updated to match. The `migrate-architect` surface and the dirty-worktree retire guard are **dropped** (no architect worktrees to migrate or clean). #4's retire steps simplified accordingly.
+
+**Resolved consequences**: #6 PR-slicing → **moot** (ships in the main PR); pre-existing-architect migration ergonomics → **moot** (no worktrees). All #1–#5 resolved decisions stand unchanged.
+
+**Plan impact**: #6 becomes a small, low-risk phase in the spawn base-resolution path; the plan should still order it last but no longer treat it as a sliceable high-blast-radius piece.
