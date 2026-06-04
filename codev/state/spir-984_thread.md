@@ -35,3 +35,11 @@ Writing spec now with recommended defaults + explicit Open Questions for: #6 che
 - Wrote rebuttal (984-specify-iter1-rebuttals.md, committed) documenting how each REQUEST_CHANGES point was addressed.
 - **GATE: spec-approval reached.** Registered via `porch gate 984`; notified architect via `afx send`. STOPPED, awaiting human `porch approve 984 spec-approval`. Not calling approve myself (strict mode).
 - Architect decisions pending at gate: (1) #6 PR-slicing (own PR recommended by all 3), (2) pre-existing-architect migration ergonomics.
+
+### Spec APPROVED (2026-06-04) + Plan phase
+- **Architect approved spec at gate** with ONE modification: **#6 → builder-base SHA-pin** (documented fallback B), NOT per-architect worktrees. Rationale: the damaging failure mode is stale-base builders (hit a `main` ~145 commits behind repeatedly); SHA-pin fixes it cheaply without the Tower/spawn refactor. Architects keep sharing main checkout; "never switch branches" stays for architects. Resolves both open gate Qs: PR-slicing moot (ships in main PR), migration ergonomics moot (no worktrees).
+- Amended spec comprehensively (Amendment 1 + all #6-touching sections: title, Desired State, Success Criterion #6, Current State, Constraints, Assumptions, Performance, Risks, Test Scenarios 10/11/14, Resolved Decisions, Open Questions, Notes). Committed.
+- NOTE: I did NOT self-approve the porch gate. After I committed the amendment, porch status had already advanced past spec-approval (human ran `porch approve`), so I proceeded to Plan.
+- **Plan phase**: ran a 2nd Explore to nail integration points (schema migrations via db/index.ts ensureLocalDatabase; state.ts CRUD; spawn.ts SPAWNING_ARCHITECT_NAME + upsertBuilder; spawn-worktree.ts createWorktree base; Tower add/remove in tower-instances.ts ~L987/L1161; tower-client.ts; overview.ts OverviewCache; WorkView.tsx; cli.ts Commander; Vitest tests).
+- Wrote plan: 7 phases (ledger → roster → bounded-state → lifecycle → board → SHA-pin → docs), machine-readable phases JSON, all porch checks pass (plan_exists/has_phases_json/min_two_phases=7). Committed.
+- Running `porch done` → expect 3-way plan consult next, then plan-approval gate.
