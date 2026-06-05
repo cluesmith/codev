@@ -58,3 +58,42 @@ isolation (67/67), and the re-run full suite is fully green. Pre-existing flakin
 not caused by this change.
 
 Builds: core ✓, codev ✓, dashboard ✓ (tsc + vite).
+
+## dev-approval feedback: rehydration question (resolved, no code change)
+
+Architect asked whether immediate give-up degrades UX vs blind retry, and whether
+to fold a server-side rehydration check into the upgrade handler so 4404 only
+fires for truly-gone sessions.
+
+Investigation conclusion: a rehydration-before-4404 check would be DEAD CODE.
+Both rehydration paths reassign the terminal id:
+- startup reconcile: `tower-terminals.ts:646` createSessionRaw (new id) + `:669-672`
+  delete old SQLite row, save under new id.
+- on-the-fly reconnect: `:832` + `:868-872` deleteTerminalSession(oldId) → new id.
+So after a Tower restart a persistent session returns under a NEW id; the OLD id
+in the browser's WS URL is permanently dead. `getSession(oldId)` stays null
+regardless of rehydration → 4404 is always truthful. Immediate give-up never
+loses a recoverable connection. Recovery for the persistent case is a dashboard
+state re-fetch (new id) + remount (Terminal effect keyed on wsPath), independent
+of this change; 4404 makes it FASTER, not slower.
+
+Decision (architect): ship as-is, no rehydration check. File a follow-up issue
+for the genuine gap and tag it in the PR.
+
+### TODO during PR (review) phase — file this issue, then reference it in the PR
+Draft:
+- Title: "terminal: stale tab on a pre-restart terminal id can't self-recover
+  without a manual state re-fetch"
+- Body: After a Tower restart, persistent (shellper-backed) sessions return under
+  a NEW terminal id (reconnect paths reassign ids: tower-terminals.ts:646/669-672
+  and :832/868-872). A browser/VSCode tab still holding the OLD id's WS URL gets
+  a permanent close (4404, #971) / 404 and gives up correctly — but it can only
+  reconnect once something re-fetches /api/state to learn the successor id and
+  remounts the terminal. Today that relies on a user-driven refresh / incidental
+  state poll. Follow-up: on a permanent terminal close, have the dashboard
+  proactively re-fetch state and auto-remount onto the successor session id
+  (and consider the same affordance for the VSCode terminal). Deferred from #971.
+- Label: decide at filing — likely `area/dashboard` (dashboard-side fix), or
+  `area/cross-cutting` if the VSCode-terminal affordance is folded in (single
+  area/* per issue; cross-cutting used alone).
+- Tag: reference the new issue number in the #971 PR body.
