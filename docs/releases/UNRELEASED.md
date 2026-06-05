@@ -35,9 +35,7 @@
 
 ## Polish
 
-<!-- Small vscode items as bullets:
-       - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
-     Move out to its own ## section if the entry grows past ~3 sentences. -->
+- **New `Codev` tab in the bottom panel** (#812, PR #990). A second view container joins the existing activitybar Codev sidebar, this time docked alongside Problems / Output / Terminal in the bottom panel area. It opens once on first activation for discoverability, then stays out of the way. Initially shows a single placeholder row signposting the upcoming view migrations (Recently Closed, Team, Status) that will populate the panel in follow-up PRs. The activitybar sidebar is unchanged. Constraint worth noting: VS Code provides no positional control for panel view containers, so a new tab lands last and would otherwise spill into the `…` overflow; the one-time globalState-guarded reveal is the only discoverability lever available.
 
 ## Other fixes (dashboard, porch, infrastructure)
 

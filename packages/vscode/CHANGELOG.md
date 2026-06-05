@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### What's new
+
+- **Codev tab in the bottom panel.** A new `Codev` tab joins the bottom panel (alongside Problems / Output / Terminal) as a scaffold for upcoming view migrations (Recently Closed, Team, Status). Opens once on first activation for discoverability, then stays out of the way. The activitybar Codev sidebar is unchanged; this is purely additive. Currently shows a single placeholder row that hides itself automatically once real panel-side views start landing.
+
 ## [3.1.7] - 2026-06-03
 
 ### What's new
