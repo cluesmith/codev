@@ -27,6 +27,12 @@ export class TerminalManager {
   private readonly _onDidChangeDevTerminals = new vscode.EventEmitter<void>();
   /** Fires whenever the set of open dev terminals changes (start/stop/swap/cleanup). */
   readonly onDidChangeDevTerminals = this._onDidChangeDevTerminals.event;
+  /**
+   * When each dev terminal began running, keyed by builderId. `listDevTerminals`
+   * carries only ids, so the Codev Dev surface (#921) reads start times here to
+   * render uptime. Set on a fresh open (not a refocus), cleared on close.
+   */
+  private readonly devStartedAt = new Map<string, number>();
   private readonly overviewCache: OverviewCache;
 
   constructor(
@@ -233,7 +239,20 @@ export class TerminalManager {
     // Tab title matches the builder-tab format (`Codev: <name>`) with a
     // `(dev)` suffix so the pairing is obvious in the tab strip.
     await this.openTerminal(terminalId, 'dev', `Codev: ${builderName} (dev)`, key, focus);
+    // Fresh open (the refocus path returned above), so stamp the start time for
+    // uptime. A re-spawn that replaced a stale terminal lands here too and
+    // correctly resets the clock.
+    this.devStartedAt.set(builderId, Date.now());
     this._onDidChangeDevTerminals.fire();
+  }
+
+  /**
+   * Wall-clock ms (epoch) when the dev terminal for `builderId` started, or
+   * undefined if no dev is tracked for it (e.g. a dev that predates this
+   * extension activation). Read by the Codev Dev surface (#921) for uptime.
+   */
+  getDevStartedAt(builderId: string): number | undefined {
+    return this.devStartedAt.get(builderId);
   }
 
   /**
@@ -248,6 +267,7 @@ export class TerminalManager {
     existing.pty.close();
     existing.terminal.dispose();
     this.terminals.delete(key);
+    this.devStartedAt.delete(builderId);
     this._onDidChangeDevTerminals.fire();
   }
 
@@ -269,7 +289,10 @@ export class TerminalManager {
       this.terminals.delete(key);
       if (key.startsWith('dev-')) { devClosed = true; }
     }
-    if (devClosed) { this._onDidChangeDevTerminals.fire(); }
+    if (devClosed) {
+      this.devStartedAt.delete(builderId);
+      this._onDidChangeDevTerminals.fire();
+    }
   }
 
   /**
