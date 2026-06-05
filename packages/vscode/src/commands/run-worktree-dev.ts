@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
@@ -55,7 +56,11 @@ export async function runWorktreeDev(
   const builderName = namedBuilder?.name ?? builder.id;
 
   await startDevForTarget(connectionManager, terminalManager, {
-    id: builder.id,
+    // Key the dev slot on the worktree basename (e.g. `pir-809`), not the raw
+    // overview id (which can be the numeric status.yaml id like `921`), so the
+    // dev surfaces (#921) show a friendly target and the id matches the
+    // afx-dev / Workspace-view / Switch-Target convention.
+    id: path.basename(builder.worktreePath),
     cwd: builder.worktreePath,
     name: builderName,
   });

@@ -1,0 +1,32 @@
+id: '921'
+title: vscode-codev-dev-surface-botto
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-03T23:34:35.312Z'
+    approved_at: '2026-06-05T09:09:55.929Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-05T09:26:47.546Z'
+    approved_at: '2026-06-05T10:38:40.588Z'
+  pr:
+    status: approved
+    requested_at: '2026-06-05T10:51:58.152Z'
+    approved_at: '2026-06-05T10:54:29.963Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-03T21:40:33.254Z'
+updated_at: '2026-06-05T10:54:52.060Z'
+pr_history:
+  - phase: review
+    pr_number: 996
+    branch: builder/pir-921
+    created_at: '2026-06-05T10:41:44.212Z'
+    merged: true
+    merged_at: '2026-06-05T10:54:52.059Z'
+pr_ready_for_human: false

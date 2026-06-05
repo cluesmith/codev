@@ -2,10 +2,15 @@
  * Invariants for the Codev panel container scaffolding (#812):
  * - a `panel` viewsContainer `codevPanel` is declared with the Codev icon;
  * - the activitybar container is untouched;
- * - the panel hosts exactly one placeholder view, gated by the
+ * - the panel hosts the placeholder view, gated by the
  *   `codev.panelContainerEmpty` context key and collapsed by default;
  * - the existing sidebar views are unchanged (regression guard);
  * - extension.ts wires the placeholder provider and the context key.
+ *
+ * Note: once #921 added the real `codev.devServer` view, the panel is no longer
+ * empty — the context key is seeded `false` and a second view is present. Those
+ * invariants are covered in contributes-dev-server.test.ts; this file keeps the
+ * #812 scaffolding guards (placeholder shape, sidebar regression).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -39,10 +44,10 @@ describe('codevPanel viewsContainer (#812)', () => {
 });
 
 describe('codevPanel placeholder view (#812)', () => {
-  it('registers exactly one placeholder view, gated and collapsed', () => {
+  it('registers the placeholder view, gated and collapsed', () => {
     const panelViews = views.codevPanel ?? [];
-    expect(panelViews).toHaveLength(1);
-    expect(panelViews[0]).toMatchObject({
+    const placeholder = panelViews.find((v) => v.id === 'codev.placeholder');
+    expect(placeholder).toMatchObject({
       id: 'codev.placeholder',
       name: 'Codev',
       when: 'codev.panelContainerEmpty',
@@ -71,9 +76,9 @@ describe('extension.ts wiring (#812)', () => {
     );
   });
 
-  it('seeds the panelContainerEmpty context key true', () => {
+  it('seeds the panelContainerEmpty context key false (a real panel view is registered, #921)', () => {
     expect(EXT_SRC).toMatch(
-      /setContext['"],\s*['"]codev\.panelContainerEmpty['"],\s*true/,
+      /setContext['"],\s*['"]codev\.panelContainerEmpty['"],\s*false/,
     );
   });
 

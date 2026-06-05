@@ -143,6 +143,92 @@ export async function startDevForTarget(
   vscode.window.showInformationMessage(`Codev: Dev server started for ${target.name}`);
 }
 
+/**
+ * Restart the dev for `target`: stop it (if running) and start it again, with
+ * the same kill→wait→grace sequencing a swap uses so the OS has released the
+ * port before the respawn binds it. Reuses startDevForTarget for the spawn.
+ */
+export async function restartDevForTarget(
+  connectionManager: ConnectionManager,
+  terminalManager: TerminalManager,
+  target: DevTarget,
+): Promise<void> {
+  const client = connectionManager.getClient();
+  if (!client || connectionManager.getState() !== 'connected') {
+    vscode.window.showErrorMessage('Codev: Not connected to Tower');
+    return;
+  }
+  const found = terminalManager.listDevTerminals().find(d => d.builderId === target.id);
+  if (found) {
+    await client.killTerminal(found.terminalId);
+    terminalManager.closeDevTerminal(target.id);
+    try {
+      await waitForTerminalGone(client, found.terminalId);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Codev: ${(err as Error).message}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, SWAP_GRACE_MS));
+  }
+  await startDevForTarget(connectionManager, terminalManager, target);
+}
+
+/** The main checkout root for the active window. In a builder worktree
+ *  (`<root>/.builders/<id>`) that's two levels up; otherwise the window root. */
+function mainRootOf(workspacePath: string): string {
+  if (path.basename(path.dirname(workspacePath)) === '.builders') {
+    return path.dirname(path.dirname(workspacePath));
+  }
+  return workspacePath;
+}
+
+/**
+ * Every target a dev can run for: `main` plus each builder that has a worktree.
+ * Builder ids/names use the worktree basename (e.g. `pir-809`), matching the
+ * `afx dev` / Workspace-view convention and the chip's display.
+ */
+export async function listSwitchTargets(connectionManager: ConnectionManager): Promise<DevTarget[]> {
+  const client = connectionManager.getClient();
+  const workspacePath = connectionManager.getWorkspacePath();
+  if (!client || !workspacePath) { return []; }
+  const targets: DevTarget[] = [{ id: 'main', cwd: mainRootOf(workspacePath), name: 'main' }];
+  const overview = await client.getOverview(workspacePath);
+  for (const b of overview?.builders ?? []) {
+    if (!b.worktreePath) { continue; }
+    const name = path.basename(b.worktreePath);
+    targets.push({ id: name, cwd: b.worktreePath, name });
+  }
+  return targets;
+}
+
+/**
+ * Resolve a full DevTarget from a running dev's builderId (which carries no
+ * cwd), so Restart can respawn it. Checks `main`, then this window's own target,
+ * then the builder overview (matched by worktree basename or overview id).
+ */
+export async function resolveDevTargetById(
+  connectionManager: ConnectionManager,
+  builderId: string,
+): Promise<DevTarget | null> {
+  const workspacePath = connectionManager.getWorkspacePath();
+  if (!workspacePath) { return null; }
+  if (builderId === 'main') {
+    return { id: 'main', cwd: mainRootOf(workspacePath), name: 'main' };
+  }
+  const local = resolveWorkspaceDevTarget(workspacePath);
+  if (local.id === builderId) { return local; }
+  const client = connectionManager.getClient();
+  const overview = client ? await client.getOverview(workspacePath) : null;
+  for (const b of overview?.builders ?? []) {
+    if (!b.worktreePath) { continue; }
+    const name = path.basename(b.worktreePath);
+    if (name === builderId || b.id === builderId) {
+      return { id: name, cwd: b.worktreePath, name };
+    }
+  }
+  return null;
+}
+
 /** Stop the dev PTY for a single target id (scoped — does not touch others). */
 export async function stopDevForTarget(
   connectionManager: ConnectionManager,

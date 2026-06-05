@@ -116,3 +116,22 @@ describe('#991 — successor-session recovery wiring', () => {
     expect(TM_SRC).toMatch(/void this\.recoverSuccessor\(mapKey\)/);
   });
 });
+
+describe('#921 — dev surface refresh on manual terminal close', () => {
+  // Regression guard: a dev terminal closed via the generic onDidCloseTerminal
+  // path (tab ✕ / process exit) must clear devStartedAt AND re-fire
+  // onDidChangeDevTerminals, or the chip / Codev Dev tab / devServerRunning
+  // context strand as "running". The explicit close paths fired the event; the
+  // generic path previously only unmapped. Source-level per this file's harness
+  // rationale (constructing TerminalManager needs heavy vscode mocking).
+  const closeHandler = TM_SRC.split('onDidCloseTerminal((t)')[1]?.split('terminal.show')[0] ?? '';
+
+  it('clears devStartedAt for a dev terminal closed via the generic path', () => {
+    expect(closeHandler).toMatch(/mapKey\.startsWith\(['"]dev-['"]\)/);
+    expect(closeHandler).toMatch(/devStartedAt\.delete\(/);
+  });
+
+  it('re-fires the dev-terminal change event from the generic close path', () => {
+    expect(closeHandler).toMatch(/_onDidChangeDevTerminals\.fire\(\)/);
+  });
+});
