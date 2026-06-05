@@ -20,3 +20,15 @@ Plan decisions: fold both into the existing `unit` job (suites are <2s; reuse in
 add one types-build step). No coverage thresholds (match core's no-threshold precedent). Plain `vitest run`.
 
 Plan written, committed, awaiting plan-approval gate.
+
+## Implement phase (2026-06-05)
+
+Rebased onto origin/main first (18 commits; none touched the workflows or relevant packages). Plan re-verified accurate.
+
+Edited `.github/workflows/test.yml` `unit` job only:
+- Added "Build types package" step (pnpm build in packages/types) after the core build — required by vscode suite.
+- Added "Run dashboard unit tests" (packages/dashboard, `pnpm test`) and "Run vscode unit tests" (packages/vscode, `pnpm test:unit`) after the codev coverage step.
+
+Verified locally (reproducing the CI steps): core+types build, dashboard 317 passed/1 skipped exit 0, vscode 284 passed exit 0. YAML validated. No source/test changes.
+
+Committed + pushed. Awaiting dev-approval gate.
