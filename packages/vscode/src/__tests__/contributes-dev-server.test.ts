@@ -49,7 +49,7 @@ describe('codev.devServer title-bar actions (#921)', () => {
   it('pairs Reveal / Hide as a sidebar toggle on the Codev viewlet visibility', () => {
     const codevSidebarShown = "sideBarVisible && activeViewlet == 'workbench.view.extension.codev'";
     // Reveal shows when the Codev sidebar is NOT the active, visible viewlet.
-    expect(action('codev.devServer.revealInWorkspace')?.when)
+    expect(action('codev.devServer.showSidebar')?.when)
       .toBe(`view == codev.devServer && !(${codevSidebarShown})`);
     // Hide shows when it is — the complementary half of the toggle.
     expect(action('codev.devServer.hideSidebar')?.when)
@@ -61,7 +61,7 @@ describe('codev.devServer title-bar actions (#921)', () => {
     expect(byId['codev.devServer.stop']?.icon).toBe('$(debug-stop)');
     expect(byId['codev.devServer.restart']?.icon).toBe('$(debug-restart)');
     expect(byId['codev.devServer.switchTarget']?.icon).toBe('$(arrow-swap)');
-    expect(byId['codev.devServer.revealInWorkspace']?.icon).toBe('$(eye)');
+    expect(byId['codev.devServer.showSidebar']?.icon).toBe('$(eye)');
     expect(byId['codev.devServer.hideSidebar']?.icon).toBe('$(eye-closed)');
   });
 });

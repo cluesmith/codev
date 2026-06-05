@@ -11,7 +11,7 @@ import { viewDiff, activateDiffView, diffUrisForChange } from './commands/view-d
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
-import { stopDevServer, restartDevServer, switchDevTarget, revealDevInWorkspace, hideCodevSidebar } from './commands/dev-server-actions.js';
+import { stopDevServer, restartDevServer, switchDevTarget, showCodevSidebar, hideCodevSidebar } from './commands/dev-server-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
@@ -804,8 +804,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			restartDevServer(connectionManager!, terminalManager!)),
 		regCli('codev.devServer.switchTarget', () =>
 			switchDevTarget(connectionManager!, terminalManager!)),
-		reg('codev.devServer.revealInWorkspace', () =>
-			revealDevInWorkspace()),
+		reg('codev.devServer.showSidebar', () =>
+			showCodevSidebar()),
 		reg('codev.devServer.hideSidebar', () =>
 			hideCodevSidebar()),
 		reg('codev.openDevUrl', (urlArg?: unknown) =>

@@ -217,7 +217,7 @@
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "codev.devServer.revealInWorkspace",
+        "command": "codev.devServer.showSidebar",
         "title": "Show Codev Sidebar",
         "category": "Codev",
         "icon": "$(eye)"
@@ -380,7 +380,7 @@
           "when": "codev.hasDevCommand"
         },
         {
-          "command": "codev.devServer.revealInWorkspace",
+          "command": "codev.devServer.showSidebar",
           "when": "false"
         },
         {
@@ -587,7 +587,7 @@
           "group": "navigation@3"
         },
         {
-          "command": "codev.devServer.revealInWorkspace",
+          "command": "codev.devServer.showSidebar",
           "when": "view == codev.devServer && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
           "group": "navigation@4"
         },

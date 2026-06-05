@@ -72,7 +72,7 @@ export async function switchDevTarget(
  * title bar (the two `view/title` entries swap on the sidebar-visibility context
  * keys, mirroring the Backlog view's show-all / mine-only toggle).
  */
-export async function revealDevInWorkspace(): Promise<void> {
+export async function showCodevSidebar(): Promise<void> {
   await vscode.commands.executeCommand('codev.workspace.focus');
 }
 
