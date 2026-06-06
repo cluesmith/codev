@@ -18,3 +18,15 @@ Issue: vscode + tower "No active terminal for X" toast is unactionable. Label: `
 Toast button pattern reference: `notifications/gate-toast.ts:109-139`. Tests extend `packages/vscode/src/__tests__/terminal-manager.test.ts` (vitest, `pnpm --filter codev-vscode test:unit`).
 
 Plan written to `codev/plans/982-vscode-tower-no-active-termina.md`. Committed, pushed. Sitting at `plan-approval` gate.
+
+## Plan check vs main + rebase (still at plan-approval)
+
+Branch was 88 commits behind `origin/main` (based on `66144d90`; main at `586a2fcb`). Checked plan validity against main:
+- Warning code at `terminal-manager.ts:206-209` is **byte-identical on main** — bug untouched, same lines.
+- None of the plan's targeted files changed since the old base (terminal-manager, builder-row, builders, types/api.ts, run-worktree-setup, gate-toast, the test).
+- Only adjacent change intersecting the plan: `overview.ts` got PIR #907's enrichment cache (for `area`) — did NOT add any `terminalId`/liveness field, and `OverviewBuilder` (api.ts) is unchanged. So the Option-3 deferral reasoning ("no liveness signal on OverviewBuilder") still holds.
+- No merged PR references #982 — no duplicate fix shipped.
+
+Rebased onto `origin/main` (586a2fcb) cleanly (no conflicts), force-pushed. Porch state intact (still gate_pending / plan / iter 1). Post-rebase line refs re-verified: warning at `:207`, `run-worktree-setup.ts:51-56` pattern present.
+
+**Deep-dive on Tower-up causes (answered to reviewer):** `/api/state` (opener) omits a builder whose live `PtySession` is gone from `TerminalManager.sessions` (`tower-routes.ts:1834-1855` — included only `if (session)`); `/api/overview` (sidebar) is disk-sourced so still lists it. Tower-up triggers: non-shellper 5-min idle reap (`pty-session.ts:368-379`, shellper-exempt), PTY exit past 30s grace (`pty-manager.ts:97-101`), spawn race, explicit kill. For shellper-backed afx builders the dominant cause is the **shellper process dying** while Tower lives (what `afx workspace recover` targets) + the spawn race. Implication flagged: plan's toast wording "most likely Tower restarted" is too narrow — offered to broaden it.
