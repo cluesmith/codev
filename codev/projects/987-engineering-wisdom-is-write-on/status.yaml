@@ -1,7 +1,7 @@
 id: '987'
 title: engineering-wisdom-is-write-on
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-06-04T15:42:17.225Z'
-updated_at: '2026-06-06T14:48:28.494Z'
+updated_at: '2026-06-06T14:48:46.728Z'
