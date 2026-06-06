@@ -174,6 +174,16 @@ async function performPreflight(): Promise<PreflightStatus> {
   } else if (status === 'outdated') {
     showOutdatedNotification(cliVersion, extVersion);
   }
+
+  // #983: the Tower-divergence comparison needs the installed-CLI version this
+  // check just resolved. If a Tower probe already ran (Tower connected before
+  // this ~400ms CLI check finished), it saw `installedCli = null` and reported
+  // `ok`; re-run it now with the resolved version so the divergence isn't lost
+  // to that startup race. No-op until the first probe sets `lastTowerClient`.
+  if (lastTowerClient) {
+    await probeTowerVersion(lastTowerClient);
+  }
+
   return status;
 }
 
