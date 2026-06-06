@@ -1,7 +1,7 @@
 id: '1001'
 title: vscode-terminal-adapter-reconn
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-06-06T05:49:17.984Z'
-updated_at: '2026-06-06T06:14:45.002Z'
+updated_at: '2026-06-06T06:14:52.341Z'
 pr_history:
   - phase: review
     pr_number: 1002
