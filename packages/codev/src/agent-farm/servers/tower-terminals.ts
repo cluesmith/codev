@@ -83,6 +83,77 @@ export function isReconciling(): boolean {
   return _reconciling;
 }
 
+// ============================================================================
+// Startup-readiness barrier (#997)
+// ============================================================================
+//
+// On a Tower restart the HTTP server begins serving before
+// reconcileTerminalSessions() has re-registered persistent (shellper-backed)
+// sessions in the workspaceTerminals map. During that window /api/state,
+// /api/overview, and WS upgrades see a half-populated role→terminalId map and
+// a client cannot distinguish "successor not registered yet" from "session
+// gone". This barrier lets the readers of reconcile's output wait until the
+// startup reconcile has settled exactly once.
+//
+// Unlike isReconciling() (false both before and after reconcile), this is a
+// monotonic "has the startup reconcile completed" signal: it flips false→true
+// once and stays true (outside test resets). It is resolved in
+// reconcileTerminalSessions()'s finally — including the early !_deps return and
+// a thrown reconcile — so a failed or skipped reconcile can never wedge serving
+// forever (non-blocking-on-failure).
+
+let _startupReconcileSettled = false;
+let _resolveStartupReady!: () => void;
+let _startupReadyPromise = new Promise<void>((resolve) => { _resolveStartupReady = resolve; });
+
+/** Defensive cap on how long a request waits for the barrier (env-overridable). */
+const STARTUP_READY_TIMEOUT_MS = Math.max(
+  parseInt(process.env.CODEV_STARTUP_READY_TIMEOUT_MS || '10000', 10) || 10000,
+  0,
+);
+
+/** Mark the startup reconcile as settled (idempotent); releases any waiters. */
+export function markStartupReconcileSettled(): void {
+  if (_startupReconcileSettled) return;
+  _startupReconcileSettled = true;
+  _resolveStartupReady();
+}
+
+/** Synchronous readiness check — true once the startup reconcile completed (#997). Served by GET /health. */
+export function isStartupReconcileSettled(): boolean {
+  return _startupReconcileSettled;
+}
+
+/**
+ * Await completion of the startup reconcile (#997). Resolves immediately once
+ * settled. Bounded by `timeoutMs` (default {@link STARTUP_READY_TIMEOUT_MS}) as
+ * defense against a pathological reconcile that never returns: on timeout it
+ * logs and resolves anyway, so a single request degrades to possibly-incomplete
+ * state rather than hanging forever. Pass 0 to wait indefinitely.
+ */
+export function whenStartupReconcileSettled(timeoutMs: number = STARTUP_READY_TIMEOUT_MS): Promise<void> {
+  if (_startupReconcileSettled) return Promise.resolve();
+  if (timeoutMs <= 0) return _startupReadyPromise;
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      _deps?.log('WARN', `Startup reconcile not settled within ${timeoutMs}ms — serving possibly-incomplete terminal state`);
+      resolve();
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    _startupReadyPromise.then(finish);
+  });
+}
+
+/** Test-only: reset the barrier to its pre-reconcile pending state. */
+export function __resetStartupReconcileSettledForTest(): void {
+  _startupReconcileSettled = false;
+  _startupReadyPromise = new Promise<void>((resolve) => { _resolveStartupReady = resolve; });
+}
+
 /** Tear down the terminal module */
 export function shutdownTerminals(): void {
   if (terminalManager) {
@@ -162,6 +233,10 @@ export function getWorkspaceTerminalsEntry(workspacePath: string): WorkspaceTerm
  * future endpoint consistent without each having to remember to opt in.
  */
 export async function getRehydratedTerminalsEntry(workspacePath: string): Promise<WorkspaceTerminals> {
+  // #997: wait for the startup reconcile to finish re-registering persistent
+  // sessions before reading the map, so /api/state and /api/overview return a
+  // complete role→terminalId mapping on the first post-restart read.
+  await whenStartupReconcileSettled();
   const proxyUrl = `/workspace/${encodeWorkspacePath(workspacePath)}/`;
   await getTerminalsForWorkspace(workspacePath, proxyUrl);
   return getWorkspaceTerminalsEntry(workspacePath);
@@ -474,13 +549,22 @@ export function processExists(pid: number): boolean {
  * the sole source of truth for their persistence (see file_tabs table).
  */
 export async function reconcileTerminalSessions(): Promise<void> {
-  if (!_deps) return;
+  if (!_deps) {
+    // Nothing to reconcile (e.g. a non-server context). Still release the
+    // readiness barrier so handlers gating on it don't wait forever (#997).
+    markStartupReconcileSettled();
+    return;
+  }
 
   _reconciling = true;
   try {
     await _reconcileTerminalSessionsInner();
   } finally {
     _reconciling = false;
+    // #997: the startup reconcile has completed (or failed) — release request
+    // handlers waiting on the readiness barrier. Idempotent: a later reconcile
+    // call (none today, but defensively) is harmless.
+    markStartupReconcileSettled();
   }
 }
 
