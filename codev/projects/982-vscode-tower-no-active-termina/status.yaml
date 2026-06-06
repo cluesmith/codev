@@ -1,7 +1,7 @@
 id: '982'
 title: vscode-tower-no-active-termina
 protocol: pir
-phase: review
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -12,11 +12,11 @@ gates:
   dev-approval:
     status: approved
     requested_at: '2026-06-06T12:11:59.157Z'
-    approved_at: '2026-06-06T12:14:42.426Z'
+    approved_at: '2026-06-06T12:15:06.203Z'
   pr:
     status: pending
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-06T05:49:39.607Z'
-updated_at: '2026-06-06T12:14:50.534Z'
+updated_at: '2026-06-06T12:15:06.204Z'
