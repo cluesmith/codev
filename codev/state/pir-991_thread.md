@@ -65,6 +65,24 @@ Spun-off #997 (Tower reconcile-before-serving) remains the deterministic root-ca
 
 Pending reviewer re-test with a freshly-built vsix (reload window once, then restart Tower only): expect Codev output `Tower reconnected — re-syncing N terminal(s)` → `recoverSuccessor(...): poll 1/5 → successor=...` → `Recovered ... onto successor session ...`.
 
+## Pivot: close-on-stop + reopen-on-reconnect (reviewer-directed)
+
+Multiple rounds of in-place successor-reconnect (recoverSuccessor / onSessionGone / resyncAllTerminals) did NOT reliably revive the VSCode pane on a Tower restart in the reviewer's environment. Reviewer directed a simpler approach: when Tower stops, CLOSE the terminals; reopen them when Tower returns. Confirmed decisions via AskUserQuestion: keep the dashboard self-heal; do close + auto-reopen.
+
+**Removed (no value after pivot):**
+- Core `@cluesmith/codev-core/session-successor` (resolveSuccessorTerminalId + SessionRef) + its export + tests.
+- VSCode `recoverSuccessor`, `resyncAllTerminals`, `onSessionGone` (adapter param + marker), bounded poll, recovery logging, `sessionRefFromMapKey`/`session-ref.ts`, `reconnectByTerminal` routing.
+- Reverted terminal-adapter.ts / terminal-manager.ts / extension.ts to the clean #921 base (origin/main e6747d8f), then layered the new approach.
+
+**Added (VSCode):**
+- `TerminalManager.closeAllTerminals()` — on Tower stop, capture open builder/architect terminals into `pendingReopen`, dispose all tabs, clear map. (shell/dev not reopened — not restart-persistent.)
+- `TerminalManager.reopenAfterReconnect()` — on Tower reconnect, fetch state, resolve each pending terminal's current id (builders via existing `resolveAgentName`, architects via `state.architects.find`), reopen via existing `openBuilder`/`openArchitect` (the proven dispose+reopen path = what manual reopen does). Bounded retry (REOPEN_MAX_ATTEMPTS=5 × REOPEN_RETRY_MS=1000) rides out the reconcile race.
+- extension.ts wiring on `connectionManager.onStateChange`: close on connected→disconnected edge, reopen on reconnected edge (two flags so each fires once; initial activation connect skipped).
+
+**Kept:** dashboard self-heal (Terminal.tsx onPermanentClose → App refresh → reactive remount) — independent of the removed core helper.
+
+All green: core 19, dashboard 322 (+1 pre-existing skip), vscode 324; check-types + lint clean. #997 (deterministic reconcile) still the proper root-cause for the reopen race; the bounded retry covers it meanwhile.
+
 ## Merged main (at dev-approval gate)
 
 Merged origin/main (35 commits, dominated by PIR #921 — VSCode dev-server surface). True file overlap: `terminal-manager.ts` + its test.

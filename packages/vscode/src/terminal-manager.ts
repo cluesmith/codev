@@ -8,12 +8,33 @@ import type { TerminalType } from '@cluesmith/codev-core/tower-client';
 
 const MAX_TERMINALS = 10;
 
+/**
+ * Reopen-after-reconnect poll budget (#991). When Tower comes back its server
+ * may accept connections before startup reconcile has re-registered the
+ * persistent sessions, so a session's new id isn't in `/api/state` the instant
+ * we reconnect. Retry the unresolved reopens a few times so a terminal isn't
+ * left closed. ~5 × 1s ≈ 5s comfortably spans a normal reconcile.
+ */
+const REOPEN_MAX_ATTEMPTS = 5;
+const REOPEN_RETRY_MS = 1000;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface ManagedTerminal {
   terminal: vscode.Terminal;
   pty: CodevPseudoterminal;
   type: TerminalType;
   id: string;
 }
+
+/**
+ * A persistent terminal to reopen onto its new session after a Tower restart
+ * (#991). Only builder/architect terminals survive a restart; shell/dev don't,
+ * so they're closed but not reopened.
+ */
+type ReopenDescriptor =
+  | { kind: 'builder'; builderId: string; label: string }
+  | { kind: 'architect'; name: string };
 
 /**
  * Manages VS Code terminal instances backed by Tower PTY sessions.
@@ -33,6 +54,11 @@ export class TerminalManager {
    * render uptime. Set on a fresh open (not a refocus), cleared on close.
    */
   private readonly devStartedAt = new Map<string, number>();
+  /**
+   * Persistent terminals captured by {@link closeAllTerminals} when Tower goes
+   * down, to be reopened by {@link reopenAfterReconnect} once it returns (#991).
+   */
+  private pendingReopen: ReopenDescriptor[] = [];
   private readonly overviewCache: OverviewCache;
 
   constructor(
@@ -415,6 +441,84 @@ export class TerminalManager {
     });
 
     terminal.show(!focus);
+  }
+
+  /**
+   * Close every managed terminal because Tower stopped (#991). A dropped Tower
+   * leaves terminals as dead, unresponsive panes; closing them is cleaner than
+   * letting them linger. Builder/architect terminals (the restart-persistent
+   * ones) are remembered in {@link pendingReopen} so {@link reopenAfterReconnect}
+   * can re-open them onto their new sessions when Tower returns. Shell/dev
+   * terminals don't survive a restart, so they're closed but not remembered.
+   */
+  closeAllTerminals(): void {
+    if (this.terminals.size === 0) { return; }
+    this.pendingReopen = [];
+    for (const [mapKey, entry] of this.terminals) {
+      if (mapKey.startsWith('builder-')) {
+        this.pendingReopen.push({ kind: 'builder', builderId: mapKey.slice('builder-'.length), label: entry.terminal.name });
+      } else if (mapKey.startsWith('architect:')) {
+        this.pendingReopen.push({ kind: 'architect', name: mapKey.slice('architect:'.length) });
+      }
+    }
+    this.log('INFO', `Tower disconnected — closing ${this.terminals.size} terminal(s) (${this.pendingReopen.length} to reopen on reconnect)`);
+    for (const entry of [...this.terminals.values()]) {
+      entry.pty.close();
+      entry.terminal.dispose();
+    }
+    this.terminals.clear();
+    this.devStartedAt.clear();
+    this._onDidChangeDevTerminals.fire();
+  }
+
+  /**
+   * Reopen the persistent terminals {@link closeAllTerminals} captured, onto
+   * their new session ids, after Tower comes back (#991). Resolves each
+   * terminal's current id from fresh workspace state and re-opens via the
+   * existing `openBuilder`/`openArchitect` (the same dispose+reopen path a
+   * manual reopen uses). Retries the unresolved ones a few times to ride out
+   * the restart reconcile race (Tower can serve before reconcile re-registers
+   * sessions).
+   */
+  async reopenAfterReconnect(): Promise<void> {
+    let pending = this.pendingReopen;
+    this.pendingReopen = [];
+    if (pending.length === 0) { return; }
+
+    const client = this.connectionManager.getClient();
+    const workspacePath = this.connectionManager.getWorkspacePath();
+    if (!client || !workspacePath) { return; }
+
+    this.log('INFO', `Tower reconnected — reopening ${pending.length} terminal(s)`);
+    for (let attempt = 0; attempt < REOPEN_MAX_ATTEMPTS && pending.length > 0; attempt++) {
+      let state;
+      try {
+        state = await client.getWorkspaceState(workspacePath);
+      } catch (err) {
+        this.log('ERROR', `reopenAfterReconnect state fetch failed: ${(err as Error).message}`);
+        return;
+      }
+
+      const stillPending: ReopenDescriptor[] = [];
+      for (const d of pending) {
+        if (d.kind === 'builder') {
+          const { builder } = resolveAgentName(d.builderId, state?.builders ?? []);
+          if (builder?.terminalId) { await this.openBuilder(builder.terminalId, builder.id, d.label); }
+          else { stillPending.push(d); }
+        } else {
+          const arch = (state?.architects ?? []).find((a) => a.name === d.name);
+          if (arch?.terminalId) { await this.openArchitect(arch.terminalId, d.name); }
+          else { stillPending.push(d); }
+        }
+      }
+
+      pending = stillPending;
+      if (pending.length > 0 && attempt < REOPEN_MAX_ATTEMPTS - 1) { await delay(REOPEN_RETRY_MS); }
+    }
+
+    if (pending.length > 0) {
+      this.log('WARN', `reopenAfterReconnect: ${pending.length} terminal(s) had no live session — reopen them manually`);
+    }
   }
 
   /**

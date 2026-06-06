@@ -168,6 +168,27 @@ export async function activate(context: vscode.ExtensionContext) {
 	terminalManager = new TerminalManager(connectionManager, outputChannel, context.extensionUri, overviewCache);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
 
+	// #991: handle Tower restarts cleanly. When the connection drops (Tower
+	// stopped), close all terminals so they don't linger as dead, unresponsive
+	// panes; when it comes back, reopen the persistent ones onto their new
+	// sessions. Tracked via two flags so close fires once on the
+	// connected→disconnected edge and reopen once on the reconnected edge
+	// (the initial activation 'connected' has nothing to reopen).
+	let towerConnected = false;
+	let hasConnectedToTower = false;
+	context.subscriptions.push(
+		connectionManager.onStateChange((state) => {
+			const nowConnected = state === 'connected';
+			if (nowConnected && !towerConnected) {
+				if (hasConnectedToTower) { void terminalManager?.reopenAfterReconnect(); }
+				hasConnectedToTower = true;
+			} else if (!nowConnected && towerConnected) {
+				terminalManager?.closeAllTerminals();
+			}
+			towerConnected = nowConnected;
+		}),
+	);
+
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
 	// paste binding (#736) only applies when a Codev terminal is focused —
 	// it must never shadow Cmd+V anywhere else.

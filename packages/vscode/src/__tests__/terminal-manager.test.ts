@@ -84,3 +84,48 @@ describe('#921 — dev surface refresh on manual terminal close', () => {
     expect(closeHandler).toMatch(/_onDidChangeDevTerminals\.fire\(\)/);
   });
 });
+
+describe('#991 — close on Tower stop, reopen on reconnect', () => {
+  it('closeAllTerminals disposes every terminal and clears the map', () => {
+    const body = TM_SRC.split('closeAllTerminals()')[1] ?? '';
+    expect(body).toMatch(/entry\.pty\.close\(\)/);
+    expect(body).toMatch(/entry\.terminal\.dispose\(\)/);
+    expect(body).toMatch(/this\.terminals\.clear\(\)/);
+  });
+
+  it('closeAllTerminals remembers builder/architect terminals for reopen (not shell/dev)', () => {
+    const body = TM_SRC.split('closeAllTerminals()')[1]?.split('reopenAfterReconnect')[0] ?? '';
+    expect(body).toMatch(/mapKey\.startsWith\(['"]builder-['"]\)/);
+    expect(body).toMatch(/mapKey\.startsWith\(['"]architect:['"]\)/);
+    expect(body).toMatch(/this\.pendingReopen\.push/);
+  });
+
+  it('reopenAfterReconnect resolves successors from fresh state and re-opens via openBuilder/openArchitect', () => {
+    const body = TM_SRC.split('async reopenAfterReconnect')[1] ?? '';
+    expect(body).toMatch(/getWorkspaceState\(workspacePath\)/);
+    expect(body).toMatch(/resolveAgentName\(d\.builderId/);
+    expect(body).toMatch(/this\.openBuilder\(builder\.terminalId/);
+    expect(body).toMatch(/this\.openArchitect\(arch\.terminalId/);
+  });
+
+  it('reopenAfterReconnect retries the reconcile race a bounded number of times', () => {
+    const body = TM_SRC.split('async reopenAfterReconnect')[1] ?? '';
+    expect(body).toMatch(/attempt < REOPEN_MAX_ATTEMPTS/);
+    expect(body).toMatch(/await delay\(REOPEN_RETRY_MS\)/);
+    expect(body).toMatch(/stillPending/);
+  });
+});
+
+describe('#991 — wiring: close on disconnect, reopen on reconnect', () => {
+  const EXT_SRC = readFileSync(resolve(__dirname, '../extension.ts'), 'utf8');
+
+  it('extension closes terminals when Tower disconnects and reopens when it reconnects', () => {
+    expect(EXT_SRC).toMatch(/connectionManager\.onStateChange\(\(state\) =>/);
+    expect(EXT_SRC).toMatch(/terminalManager\?\.closeAllTerminals\(\)/);
+    expect(EXT_SRC).toMatch(/terminalManager\?\.reopenAfterReconnect\(\)/);
+  });
+
+  it("reopen is gated on a prior connect (skips the initial activation 'connected')", () => {
+    expect(EXT_SRC).toMatch(/hasConnectedToTower/);
+  });
+});
