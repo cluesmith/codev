@@ -52,6 +52,7 @@ import type { RouteContext } from './tower-routes.js';
 import { setWorktreeConfigNotifier, stopAllWorktreeConfigWatchers } from './worktree-config-watcher.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { validateHost } from '../utils/server-utils.js';
+import { version } from '../../version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,6 +78,10 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_TOWER_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
+
+// #983: stamped once at process boot so `GET /api/version` reports when *this*
+// running Tower started — distinguishing it from a freshly-installed binary.
+const startedAt = new Date().toISOString();
 
 // Bridge mode: Tower binds to non-localhost when explicitly enabled.
 // BRIDGE_MODE=1 is the opt-in flag; without it, no non-localhost bind is possible.
@@ -296,6 +301,8 @@ if (hasReactDashboard) {
 const routeCtx: RouteContext = {
   log,
   port,
+  version,
+  startedAt,
   templatePath,
   reactDashboardPath,
   hasReactDashboard,

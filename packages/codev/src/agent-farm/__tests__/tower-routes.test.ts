@@ -128,6 +128,8 @@ function makeCtx(overrides: Partial<RouteContext> = {}): RouteContext {
   return {
     log: vi.fn(),
     port: 4100,
+    version: '9.9.9',
+    startedAt: '2026-01-01T00:00:00.000Z',
     templatePath: '/tmp/tower.html',
     reactDashboardPath: '/tmp/dashboard/dist',
     hasReactDashboard: false,
@@ -264,6 +266,22 @@ describe('tower-routes', () => {
       expect(parsed.status).toBe('healthy');
       expect(parsed.activeWorkspaces).toBe(1);
       expect(parsed.totalWorkspaces).toBe(2);
+    });
+  });
+
+  // =========================================================================
+  // Version probe (#983)
+  // =========================================================================
+
+  describe('GET /api/version', () => {
+    it('returns the running Tower version and start time from context', async () => {
+      const req = makeReq('GET', '/api/version');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx({ version: '3.2.1', startedAt: '2026-06-06T12:00:00.000Z' }));
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed).toEqual({ version: '3.2.1', startedAt: '2026-06-06T12:00:00.000Z' });
     });
   });
 

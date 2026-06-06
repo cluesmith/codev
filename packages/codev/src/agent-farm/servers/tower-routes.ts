@@ -27,7 +27,7 @@ import { version } from '../../version.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload, DashboardState, ArchitectState } from '@cluesmith/codev-types';
+import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo } from '@cluesmith/codev-types';
 import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient } from './tower-types.js';
@@ -131,6 +131,10 @@ export function stopSendBuffer(): void {
 export interface RouteContext {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   port: number;
+  /** Version of the running Tower process — served by `GET /api/version` (#983). */
+  version: string;
+  /** ISO-8601 timestamp of when this Tower process started — served by `GET /api/version` (#983). */
+  startedAt: string;
   templatePath: string | null;
   reactDashboardPath: string;
   hasReactDashboard: boolean;
@@ -157,6 +161,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
+  'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
   'GET /api/issue-search': (_req, res, url) => handleIssueSearch(res, url),
@@ -292,6 +297,21 @@ async function handleHealthCheck(res: http.ServerResponse): Promise<void> {
       timestamp: new Date().toISOString(),
     })
   );
+}
+
+/**
+ * GET /api/version (#983) — report the version of the *running* Tower process.
+ *
+ * `ctx.version` is read from this process's in-memory `package.json` at boot,
+ * so it reflects the code Tower is actually executing — not the on-disk binary
+ * `codev --version` inspects. After an `npm install -g` upgrade without a Tower
+ * restart, the two diverge; the VS Code preflight probes this to detect that.
+ * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
+ */
+function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {
+  const body: TowerVersionInfo = { version: ctx.version, startedAt: ctx.startedAt };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
 }
 
 async function handleListWorkspaces(res: http.ServerResponse): Promise<void> {

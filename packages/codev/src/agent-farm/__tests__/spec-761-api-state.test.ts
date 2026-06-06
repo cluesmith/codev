@@ -108,6 +108,8 @@ function makeCtx(overrides: Partial<RouteContext> = {}): RouteContext {
   return {
     log: vi.fn(),
     port: 4100,
+    version: '9.9.9',
+    startedAt: '2026-01-01T00:00:00.000Z',
     templatePath: '/tmp/tower.html',
     reactDashboardPath: '/tmp/dashboard/dist',
     hasReactDashboard: false,
