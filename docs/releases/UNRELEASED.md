@@ -33,6 +33,25 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Tower version preflight: warn when running Tower is behind installed CLI (#983, PR #1000)
+
+The v3.1.7 #791 CLI preflight verified that the installed `codev` CLI was at least as new as the VS Code extension. That check inspects the binary on disk. It does not, and could not, tell whether the running Tower process is executing that same code. After an `npm install -g @cluesmith/codev` upgrade without a Tower restart, the two diverge silently: the installed binary is the new version, the running Tower is still serving stale handlers from whatever code was loaded when it last started. The user hits 404s on new routes, stale wire shapes, and bug fixes that don't seem to apply, with no signal anywhere that an upgrade hasn't fully taken effect.
+
+This release closes that gap with three coordinated pieces:
+
+1. **Tower exposes its in-memory version.** A new read-only `GET /api/version` endpoint returns the version of the currently running Tower process plus the boot timestamp. The value is whatever code Tower actually loaded, not the disk binary.
+
+2. **The VS Code extension probes it alongside the existing CLI preflight.** On every successful connection to Tower, the extension fetches `/api/version` and compares the running Tower's version against the installed CLI's version. When the running Tower is behind, a divergence toast surfaces with a `Restart Tower` action. One click runs `afx tower stop && afx tower start`, polls `/health` until Tower comes back up, and re-probes to confirm the restart loaded the newer code.
+
+3. **The healthy path stays silent.** When running matches installed, no toast appears. The CLI-row tooltip in the Status view surfaces both versions side by side, so the up-to-date state is visible at a glance without being noisy.
+
+Two design calls worth a conscious nod:
+
+- **The divergence rule is `running < installedCLI`, not `running < extension`.** Comparing against the extension version would produce a futile restart prompt naming a version that isn't installed (a restart can't load code that isn't on disk). The "CLI is behind the extension" condition stays as #791's existing concern, with its existing "update CLI via npm" toast.
+- **The 404 path (Tower too old to even report its version) is gated on the installed CLI itself being current.** When the installed CLI is itself the source of the running Tower's old code (the extension updated ahead of the CLI), restarting Tower would just reload the same code that still lacks the endpoint. In that scenario the prompt is suppressed and #791's "update CLI" toast handles the recovery instead. The remedy fires only when the remedy actually fixes the condition.
+
+The in-extension restart action depends on the just-shipped #991 Tower fix: before that fix, the unfiltered `lsof` in `afx tower stop` would have killed the extension host's own sockets when the extension self-triggered a restart. With #991's `-sTCP:LISTEN` scoping, the stop targets only Tower's listener, so the extension self-restarting Tower is now safe.
+
 ## Terminals survive Tower restarts (#991, PR #999)
 
 `afx tower stop && afx tower start` used to be disruptive in two distinct, compounding ways. Open builder and architect terminals would drop their connections; the VSCode extension host itself would restart; recovery code that was supposed to reconnect the terminals never got a chance to run because the very process running it was being killed. This release fixes both layers at the source. After a restart, open terminals reconnect to the same session within the normal backoff window, replaying any buffered output, with no dead pane, no manual reopen, and no new window.
