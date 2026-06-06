@@ -1,9 +1,27 @@
 id: '987'
 title: engineering-wisdom-is-write-on
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: 'Hot files: curation, cap, placement'
+    status: in_progress
+  - id: phase_2
+    title: Porch runtime injection (always-on, every phase)
+    status: pending
+  - id: phase_3
+    title: Interactive managed block in CLAUDE.md/AGENTS.md
+    status: pending
+  - id: phase_4
+    title: 'Project materialization: hot-file creation in init/adopt/update'
+    status: pending
+  - id: phase_5
+    title: Producer routing (review prompts, both trees)
+    status: pending
+  - id: phase_6
+    title: MAINTAIN + skill policing, docs sweep, consistency
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +36,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-06-04T15:42:17.225Z'
-updated_at: '2026-06-06T17:04:58.441Z'
+updated_at: '2026-06-06T17:05:16.760Z'
