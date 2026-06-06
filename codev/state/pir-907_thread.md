@@ -41,3 +41,9 @@ Renamed field/comments/test wording off "last-known" → "resolved". Added 6 dir
 ## Implement phase — extract to own module (2026-06-06)
 
 Architect: move the enrichment cache out of overview.ts. Extracted `ResolvedEnrichment` + `ResolvedEnrichmentCache` to `packages/codev/src/agent-farm/servers/resolved-enrichment-cache.ts` (overview.ts now imports it); moved its 6 unit tests to a co-located `__tests__/resolved-enrichment-cache.test.ts`. Integration tests (through `getOverview`) stay in overview.test.ts. Build ✓; full suite 155 files / 3239 passed / 13 skipped.
+
+## Implement phase — root build fix (2026-06-06)
+
+VSCode extension crashed on start: esbuild "Could not resolve @cluesmith/codev-types". Root cause (environment, not the #907 code): `@cluesmith/codev-types` was never built in the worktree. `types`' `exports` has `types → ./src/index.ts` (so tsc + the codev/vite build resolve fine from source) but `default → ./dist/index.js`; esbuild (the extension bundler) uses the runtime `default` condition and needs `dist`. The root `pnpm build` is a hand-picked chain (core → codev) that omitted `types`, so a fresh worktree had no `types/dist`.
+
+Architect directed: make types part of the main build. Added `pnpm --filter @cluesmith/codev-types build` to the front of the root `build` script (types → core → codev; both core and codev depend on types). Verified full `pnpm build` runs end-to-end and the extension `compile` passes. Tooling fix bundled into #907 at architect request; will note in review's Architecture Updates.
