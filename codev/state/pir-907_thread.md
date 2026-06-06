@@ -27,3 +27,13 @@ Plan written to `codev/plans/907-vscode-builder-briefly-appears.md`. Awaiting `p
 **Verification:** overview suite 162/162 green (4 new); `pnpm --filter @cluesmith/codev build` ✓; full codev suite 3233 passed / 13 skipped (skips pre-existing). Live VSCode visual verification is the dev-approval reviewer's step (criterion #4).
 
 Awaiting `dev-approval`.
+
+## Implement phase — generalization (2026-06-06)
+
+Architect feedback at the gate: (1) "last-known" is the wrong term — a builder maps to one issue with one fixed area, so the value is a stable fact being *cached across a source outage*, not a changing value being tracked; (2) generalize the backup-value mechanism before closing out, so other issue-derived fields can reuse it.
+
+**Refactor:** extracted `ResolvedEnrichmentCache` (keyed by `worktreePath`, holding a `ResolvedEnrichment` snapshot per builder). `resolve(builderKey, field, sourceAvailable, freshValue)` write-through on reachable / replay-cached on unreachable; `prune(liveKeys)`. The load-bearing contract — gate on issue *reachability*, never value-emptiness — is encoded in the signature so a reachable-but-unlabeled issue still caches a genuine `Uncategorized` and a stale entry can't mask a live label change. Adding a new sticky field = extend the `ResolvedEnrichment` interface + one `resolve(...)` call at the enrichment site. `area` is the sole field today; `issueTitle` deliberately opts out (it has a local slug fallback).
+
+Renamed field/comments/test wording off "last-known" → "resolved". Added 6 direct unit tests for the generic cache contract (availability-gate, sentinel caching, no-mask-on-change, per-builder isolation, prune).
+
+**Verification:** overview suite 168/168; build ✓; full codev suite 3239 passed / 13 skipped.
