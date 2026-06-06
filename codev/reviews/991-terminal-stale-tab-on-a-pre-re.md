@@ -58,6 +58,10 @@ The branch history captures the full exploration — client-side recovery built 
 
 ## Things to Look At During PR Review
 
+- **Consultation disposition (Codex `REQUEST_CHANGES`, addressed):** the 3-way pass returned Gemini `APPROVE`, Claude `APPROVE`, Codex `REQUEST_CHANGES`. Codex's two findings were both legitimate coverage gaps for the load-bearing fixes, and both are now closed with regression tests:
+  1. *No test for the `lsof -sTCP:LISTEN` host-kill fix* → added `packages/codev/src/agent-farm/__tests__/tower-stop.test.ts` (fast unit test, mocked `execSync`) pinning that `getProcessesOnPort` queries with `-sTCP:LISTEN`. Fails if the filter is dropped.
+  2. *id-preservation only tested at `createSessionRaw`, not through reconcile* → added an assertion to `tower-reconnect.e2e.test.ts` that re-fetches the **original** terminal id after a real Tower stop/start and asserts it's still valid (same shellper PID). Catches a future regression where reconcile stops threading `dbSession.id`. (E2E-gated — runs via `pnpm test:e2e`, not the fast suite.)
+  Note: PIR consultation is single-pass, so these fixes were **not** independently re-reviewed — the `pr`-gate human review is the remaining check on them.
 - **The reconcile-gap edge:** a client reconnect that lands after Tower accepts connections but before startup reconcile re-registers the session could 404 once and recover on the next retry/click. Rare in practice; **#997 (reconcile-before-serving)** is the deterministic follow-up.
 - **Scope/area:** this PR is primarily an `area/tower` server fix, a pivot from the issue's cross-cutting client framing. The kept dashboard self-heal is the only remaining client-side piece.
 - **Deploy ordering:** the host-kill fix lives in `afx tower stop`; the id-preservation lives in the Tower server. Both ship via `local-install`, which restarts Tower using the freshly-installed `afx`.

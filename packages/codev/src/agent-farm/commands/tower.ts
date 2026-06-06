@@ -102,7 +102,7 @@ async function waitForServer(port: number): Promise<boolean> {
  * unfiltered form would kill the editor's extension host (and every open
  * terminal with it), not just the Tower server.
  */
-function getProcessesOnPort(port: number): number[] {
+export function getProcessesOnPort(port: number): number[] {
   try {
     const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
     return result

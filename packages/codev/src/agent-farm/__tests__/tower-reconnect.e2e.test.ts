@@ -225,13 +225,25 @@ describe('Tower stop/start reconnection (Spec 0122)', () => {
     const { terminals } = await termList.json();
     expect(terminals.length).toBeGreaterThanOrEqual(1);
 
-    // Find our reconnected terminal — it will have a new ID after reconnection
-    // but should have the same shellper PID
+    // Find our reconnected terminal by its surviving shellper PID.
     const reconnected = terminals.find(
       (t: { pid: number; persistent: boolean }) => t.pid === shellperPid && t.persistent,
     );
     expect(reconnected).toBeDefined();
     expect(reconnected.pid).toBe(shellperPid);
     expect(reconnected.persistent).toBe(true);
+
+    // #991 regression: the terminal id is PRESERVED across the restart —
+    // reconcile reuses the persisted `dbSession.id` instead of minting a new
+    // one, so the ORIGINAL id is still valid and the client's
+    // `/ws/terminal/<id>` reconnects to the same url. Before the fix, reconcile
+    // reassigned the id and this lookup would 404. This catches a future
+    // regression where reconcile stops threading `dbSession.id` through.
+    const preservedRes = await fetch(
+      `http://localhost:${TEST_TOWER_PORT}/api/terminals/${shellTerminalId}`,
+    );
+    expect(preservedRes.ok).toBe(true);
+    const preservedInfo = await preservedRes.json();
+    expect(preservedInfo.pid).toBe(shellperPid);
   }, 45000);
 });
