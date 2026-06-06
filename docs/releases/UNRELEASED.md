@@ -79,6 +79,18 @@ Worth carrying forward to anyone building recovery layers on top of distributed 
 - **Confirm the runtime survives the event before building recovery on top of it.** Many iterations of client-side terminal recovery had to be reverted before checking the single most important precondition (does the extension host even survive `afx tower stop`?). It did not. A one-line check at `lsof -ti :PORT` would have redirected the entire effort on day one.
 - **Fix the source, not the symptom.** Multiple cycles of work across this codebase were tracking consequences of the terminal id changing on restart. The cheapest fix is often well upstream of where the symptom shows.
 
+## Tower readiness barrier: terminal reads no longer race startup reconcile (#997, PR #1004)
+
+#991 closed the dominant Tower-restart bugs but explicitly deferred one rare edge case: a client reconnect that landed after Tower accepted connections but before `reconcileTerminalSessions()` had re-registered persistent (shellper-backed) sessions could 404 once and recover on the next retry or click. This release closes that window.
+
+Tower now uses a startup-readiness barrier as an internal ordering signal. The HTTP listener still binds immediately (preserving liveness, so any supervisor's wait-for-port check is unchanged), but the readers of reconcile's output (`getRehydratedTerminalsEntry`, the `/ws/terminal/:id` upgrade routes) await the barrier before responding. The first reachable `/api/state` and `/api/overview` after restart now sees a complete `role → terminalId` mapping with no client-side polling.
+
+The `/health` endpoint adds an optional `ready: boolean` field exposing the same signal explicitly, so an external supervisor that wants readiness (not just liveness) can check it without inferring. `status: 'healthy'` stays pure liveness, which matters for `restartTower`'s existing wait-for-`/health` logic.
+
+Three independent barrier-release paths ensure serving can never wedge: `reconcileTerminalSessions()`'s `finally` block (success or throw), its early-return path when `shellperManager` is absent, and a defensive timeout (`CODEV_STARTUP_READY_TIMEOUT_MS`, default 10s). On the defensive timeout the individual request proceeds; the barrier itself stays unsettled until reconcile genuinely finishes, so `/health.ready` doesn't lie.
+
+One durable lesson recorded with this release: process-liveness is not readiness. `server.listen()` firing (and `/health` returning `healthy`) means the process accepts connections, not that async startup work is done. Gate consumers of startup-reconcile output on an explicit completion barrier, and keep the liveness signal separate from the readiness signal so a slow reconcile can't make Tower look dead to a supervisor.
+
 ## Web terminal stops on dead sessions almost instantly (#971, PR #992)
 
 When Tower restarts or otherwise loses a session, the dashboard's web terminal used to spend the full 6-attempt backoff (~60s) blindly retrying before giving up, because a browser can't read a failed WebSocket upgrade's HTTP status (it only sees close `1006`). v3.1.7's #961 narrowed the retry budget from 50 to 6 attempts but left the underlying mismatch in place. This release closes the gap: the web terminal now matches VSCode's near-instant give-up behavior.
