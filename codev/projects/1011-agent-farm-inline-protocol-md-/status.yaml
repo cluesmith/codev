@@ -1,0 +1,18 @@
+id: '1011'
+title: agent-farm-inline-protocol-md-
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-08T02:27:23.467Z'
+updated_at: '2026-06-08T02:27:23.468Z'
