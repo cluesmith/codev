@@ -1,148 +1,153 @@
-# PIR Plan: Inline `protocol.md` into the builder prompt at spawn
+# PIR Plan: Deliver framework files via resolver-aware channels (fresh-install class fix)
+
+> **Scope note (2026-06-08):** Issue #1011 was expanded mid-plan from "inline protocol.md
+> at spawn" to the whole class of framework-file literal-path references reachable from
+> builder-side consumers (sub-cases A.1 / A.2 / A.3). This plan supersedes the original
+> narrow version. Patch 1 (A.1) is already implemented and sitting at the `dev-approval`
+> gate; this revision adds Patch 2 (A.2) and the A.3 disposition. The project-bootstrap gap
+> (`codev/resources/` not created on init) is explicitly **out of scope** (separate issue).
 
 ## Understanding
 
-Spec 618 correctly moved framework files (protocols, roles, resources) out of user
-projects and into the embedded package skeleton, resolved at runtime via the four-tier
-resolver (`.codev/` → `codev/` → cache → skeleton). The resolver works.
+Spec 618 moved framework files into the package skeleton (resolver tier 4). The resolver
+(`resolveCodevFile`, `skeleton.ts:63`) reaches them correctly. The bug is **consumer-side**:
+prompts, role docs, and protocol docs reference framework files by **literal path**, which a
+raw shell `cat`/`cp` cannot resolve when the file lives only in the embedded skeleton (fresh
+post-618 installs). The builder hits "No such file" and wastes turns hunting.
 
-The remaining bug is **consumer-side**: every protocol's `builder-prompt.md` tells the
-builder to read `codev/protocols/<name>/protocol.md` — a literal path that does not exist
-on disk in a fresh post-618 install (the file lives only in the embedded skeleton, reachable
-through the resolver but *not* through a raw `cat`). So a freshly-spawned builder runs the
-`cat`, gets "No such file", and wastes 1–3 minutes hunting before proceeding without the
-protocol meta-doc (workflow overview, gate semantics, when-to-use guidance).
+Three observed sub-instances:
 
-The per-phase prompts (delivered via `porch next` JSON, resolver-mediated) already cover the
-actionable per-phase work, so they are *not* affected. The gap is purely the one-time meta-doc.
+- **A.1 — protocol meta-doc.** All 9 `builder-prompt.md` files instruct `codev/protocols/<name>/protocol.md`; `roles/builder.md:83` has a literal `cat codev/protocols/spir/protocol.md`.
+- **A.2 — template references.** 4 references to `codev/protocols/<name>/templates/<file>`:
+  - `spir/prompts/plan.md:79`, `aspir/prompts/plan.md:79` — "Use the plan template … if available"
+  - `experiment/protocol.md:40` — `cp codev/protocols/experiment/templates/notes.md notes.md`
+  - `spike/protocol.md:55` — "Use the template: `…/templates/findings.md`"
+- **A.3 — workflow-reference.** `spir/protocol.md:7` (`> Quick Reference: See codev/resources/workflow-reference.md …`). Once A.1 delivers protocol.md inline, this pointer rides along and itself bypasses the resolver.
 
-Verified in this worktree:
+### Key investigation finding (drives decision #2)
 
-- `codev-skeleton/protocols/*/builder-prompt.md` contain literal `codev/protocols/<name>/protocol.md`
-  instructions — confirmed in all 10 protocol templates (e.g. `spir/builder-prompt.md:30`,
-  `pir/builder-prompt.md:30` and `:90`).
-- `loadBuilderPromptTemplate()` at `packages/codev/src/agent-farm/commands/spawn-roles.ts:99-108`
-  loads `builder-prompt.md` via `resolveCodevFile()` but never reads `protocol.md`.
-- `resolveCodevFile()` (`packages/codev/src/lib/skeleton.ts`) reaches the embedded skeleton
-  correctly. The resolver is not the bug.
+The 4 A.2 references are **heterogeneous**:
+- `spir`/`aspir` plan prompts **already embed** a self-contained `### Plan Structure` block
+  (`spir/prompts/plan.md:81+`) — a *different, simpler* layout than the 184-line canonical
+  `templates/plan.md`. The "if available" pointer is **redundant chrome**, not load-bearing.
+- `experiment` (`notes.md`, 97 lines) and `spike` (`findings.md`, 67 lines) reference
+  **genuine content** with no inline equivalent in their protocol.md.
+
+This is why **explicit-embed (B) is correct and auto-detect (A) is wrong**: an auto-inliner
+would deliver the 184-line canonical plan template *on top of* the prompt's existing
+`### Plan Structure`, giving the builder two conflicting plan layouts. A human embedder drops
+the redundant pointer and embeds only genuine content; a regex cannot make that distinction.
+
+## Locked Decisions (the 5 plan-gate decisions)
+
+**1 — Delimiter / heading format.**
+- Patch 1 (protocol.md): `\n\n---\n\n## Protocol Reference (full text)\n\n<contents>` (already implemented).
+- Patch 2 embeds (experiment/spike): under a clearly fenced sub-section adjacent to the
+  reworded instruction, e.g.:
+  ```
+  > The following is the embedded copy of the <name> template, delivered inline so you do
+  > not need to fetch a file. Recreate the target file from this content.
+
+  <!-- BEGIN EMBEDDED TEMPLATE: protocols/<name>/templates/<file> -->
+  <template contents>
+  <!-- END EMBEDDED TEMPLATE: protocols/<name>/templates/<file> -->
+  ```
+  The `BEGIN/END … <path>` sentinels double as the anchor for the drift-guard test (below).
+
+**2 — A.2 mechanism: Option B (explicit-embed). [agree with architect, strengthened]**
+Sub-handled by reference kind (per the investigation finding):
+- `spir/prompts/plan.md:79` + `aspir/prompts/plan.md:79` → **drop the redundant pointer line**
+  (the prompt's `### Plan Structure` is already self-contained). No embed.
+- `experiment/protocol.md:40` → reword the `cp` step to "create `notes.md` from the embedded
+  template below" + embed `notes.md` content under the sentinel block.
+- `spike/protocol.md:55` → reword to "use the embedded template below" + embed `findings.md`.
+Rationale beyond the architect's (static refs / simple runtime / readable prompts): auto-detect
+would double-deliver a conflicting plan layout for spir/aspir. B also turns out *cheaper* than
+the 40–100-line estimate feared — the 184-line plan template is dropped, not duplicated; only
+`notes.md` (97) + `findings.md` (67) are embedded.
+
+**3 — A.3 disposition: Option 2 (strip). [agree with architect]**
+Remove the `> Quick Reference: See codev/resources/workflow-reference.md …` line from
+`spir/protocol.md`. Informational chrome the protocol works fine without; stripping removes a
+known fail-source at zero risk. The `roles/architect.md:5` reference (architect-side consumer)
+stays out of scope.
+
+**4 — Resolve-failure behavior: silently skip + `logger.debug` (no stderr warn).**
+Rationale: (a) `validateProtocol()` already `fatal()`s earlier if both `protocol.json` and
+`protocol.md` are absent, so the Patch-1 inline never silently no-ops in practice; (b) A.2 is
+explicit-embed (no runtime resolution to fail); (c) the A.2 source phrasing is literally
+"if available" — absence is a *normal, expected* state there, so a warning would be noise.
+
+**5 — Inline is always-on, not config-gated.** No scenario wants a builder without its own
+protocol doc; a flag would be dead configuration. State it; no flag added.
 
 ## Proposed Change
 
-Extend `loadBuilderPromptTemplate()` to additionally resolve `protocols/<name>/protocol.md`
-via `resolveCodevFile()` and append its full text to the returned template under a clearly
-delimited heading. The builder then has the meta-doc in its initial prompt context for the
-whole session — read once, never re-shipped per phase, and the builder never runs a shell
-command that bypasses the resolver.
+### Patch 1 — Spawn-time protocol.md inline (A.1) — DONE, at dev-approval
 
-Concretely, after loading the `builder-prompt.md` template and before returning it:
+`loadBuilderPromptTemplate()` (`spawn-roles.ts`) resolves `protocols/${protocolName}/protocol.md`
+via `resolveCodevFile` and appends it under the Protocol Reference delimiter; `logger.debug`
++ skip when absent. Protocol-agnostic — covers all 9 `builder-prompt.md` refs and the
+`roles/builder.md:83` cat (the builder already holds the content when it would have cat'd; per
+decision, the illustrative cat line in the role doc is left as-is, not edited).
 
-```ts
-let template = readFileSync(templatePath, 'utf-8');
+### Patch 2 — Template embeds (A.2) — explicit-embed, markdown-only (0 LOC code)
 
-const protocolDocPath = resolveCodevFile(
-  `protocols/${protocolName}/protocol.md`,
-  config.workspaceRoot,
-);
-if (protocolDocPath) {
-  template +=
-    `\n\n---\n\n## Protocol Reference (full text)\n\n` +
-    readFileSync(protocolDocPath, 'utf-8');
-} else {
-  logger.debug(`No protocol.md found for ${protocolName}; spawning without inlined reference`);
-}
-return template;
-```
+- Drop the redundant template pointer in `spir/prompts/plan.md` and `aspir/prompts/plan.md`.
+- Embed `notes.md` into `experiment/protocol.md` (reword the `cp` step).
+- Embed `findings.md` into `spike/protocol.md` (reword the use-template step).
 
-### Locked plan-gate decisions
+### A.3 — strip the workflow-reference pointer from `spir/protocol.md`.
 
-1. **Delimiter / heading.** Append after a horizontal rule under an H2:
-   `\n\n---\n\n## Protocol Reference (full text)\n\n<contents>`. The `---` + distinct heading
-   keeps the meta-doc visually separate from the per-phase instructions above it, so the two
-   don't blur in the builder's context. (Matches the issue's proposed wording.)
-
-2. **Missing `protocol.md` → silently skip, no error**, with a `logger.debug` note. This is
-   safe because `validateProtocol()` runs *earlier* in the spawn flow and already `fatal()`s
-   if **both** `protocol.json` and `protocol.md` are absent. So reaching `loadBuilderPromptTemplate`
-   with a missing `protocol.md` implies `protocol.json` exists — a malformed-but-registered
-   protocol, not a typo. Spawning without the inline (rather than aborting) is the right
-   degradation. (Satisfies acceptance criterion #2.)
-
-3. **Unconditional — no config flag.** The inline cost is ~90–660 lines of markdown delivered
-   once at spawn; there is no scenario where a user wants the builder to *not* have its own
-   protocol doc. A flag would be dead configuration.
-
-### Where the inline happens relative to `renderTemplate()`
-
-`buildPromptFromTemplate()` passes the returned template through `renderTemplate()`, which does
-handlebars substitution, collapses `\n{3,}` → `\n\n`, and trims. Inlining inside
-`loadBuilderPromptTemplate()` (per the issue and acceptance criterion #1) means the appended
-`protocol.md` also passes through `renderTemplate()`. This is **verified safe today**: a grep
-confirms **zero `{{` occurrences across all 8 skeleton `protocol.md` files**, so the substitution
-pass is a no-op on the appended text. The only transformation is the newline-collapse, which is
-harmless for markdown (single blank lines between blocks are preserved). See Risks for the
-forward-looking consideration.
+### Tree scope: edit **both** `codev-skeleton/` (the shipped source, required for the
+fresh-install fix + the repro test) **and** the local `codev/` copies (this repo dogfoods;
+its `codev/` shadows the skeleton, so leaving it stale would drift our own instance). Patch 1
+needs no markdown edits in either tree (resolver-mediated code).
 
 ## Files to Change
 
-- `packages/codev/src/agent-farm/commands/spawn-roles.ts:99-108` — extend
-  `loadBuilderPromptTemplate()` to resolve and append `protocol.md` under the
-  `## Protocol Reference (full text)` delimiter; `logger.debug` when absent. (~12 LOC.)
-- `packages/codev/src/agent-farm/__tests__/spawn-roles.test.ts` — in the skeleton-fallback
-  `describe` block (which already builds a temp skeleton with `spir/builder-prompt.md`), add a
-  `protocol.md` to the temp skeleton and assert that `buildPromptFromTemplate(...)` output
-  contains both the rendered template text **and** the `## Protocol Reference (full text)`
-  heading plus the protocol.md body. Add a second assertion: when no `protocol.md` exists in
-  the skeleton, the prompt still builds and simply omits the reference section (covers criterion
-  #2). (~25 LOC of test.)
-
-No changes to: the resolver, porch, any CLI surface, per-phase prompts, or the
-`builder-prompt.md` templates themselves (the literal `cat` instruction can stay — the inlined
-copy makes it redundant rather than wrong, and rewriting 10 templates is out of scope per the
-issue).
+- `packages/codev/src/agent-farm/commands/spawn-roles.ts` — Patch 1 (done).
+- `packages/codev/src/agent-farm/__tests__/spawn-roles.test.ts` — Patch 1 tests (done) + no new code path for Patch 2.
+- `{codev-skeleton,codev}/protocols/spir/prompts/plan.md` — drop redundant template pointer.
+- `{codev-skeleton,codev}/protocols/aspir/prompts/plan.md` — drop redundant template pointer.
+- `{codev-skeleton,codev}/protocols/experiment/protocol.md` — embed `notes.md`, reword `cp`.
+- `{codev-skeleton,codev}/protocols/spike/protocol.md` — embed `findings.md`, reword.
+- `{codev-skeleton,codev}/protocols/spir/protocol.md` — strip workflow-reference line (A.3).
+- `packages/codev/src/.../__tests__/` — new content-guard test (see Test Plan).
 
 ## Risks & Alternatives Considered
 
-- **Risk: a future `protocol.md` containing `{{...}}`** (e.g. a protocol doc that documents the
-  prompt-templating syntax) would be mangled by `renderTemplate()`.
-  *Mitigation / chosen position:* none of the 8 current docs contain handlebars (verified), and
-  this is a documented invariant. If a protocol doc ever needs literal `{{`, the one-line fix is
-  to move the append from `loadBuilderPromptTemplate()` (pre-render) into
-  `buildPromptFromTemplate()` (post-render), delivering `protocol.md` verbatim. I am *not* doing
-  that now to keep the change minimal and matching acceptance criterion #1, but flagging it as
-  the known escape hatch.
-- **Alternative: append post-render in `buildPromptFromTemplate()`.** More future-proof against
-  the handlebars risk, but spreads the prompt-assembly logic across two functions and diverges
-  from the issue's stated design (criterion #1 names `loadBuilderPromptTemplate`). Rejected as
-  premature; the escape hatch above covers it if ever needed.
-- **Risk: prompt bloat.** SPIR's `protocol.md` is 657 lines (~2K tokens). Delivered once at
-  spawn, not per phase — acceptable, and far cheaper than the per-phase re-injection the issue
-  explicitly rejected.
-- **Alternative: restore framework file copying on init/update** (the #738 "Option 2"). Out of
-  scope by the issue's own framing; reverses Spec 618. Not considered here.
+- **Risk: embedded template drifts from canonical `templates/*.md`.** Mitigation: a unit test
+  asserts the embedded block (between the `BEGIN/END EMBEDDED TEMPLATE` sentinels) byte-matches
+  the canonical template file. Drift fails CI. Applies to `notes.md` and `findings.md`.
+- **Alternative: A.2 = auto-detect (Option A).** Rejected — would double-deliver a conflicting
+  plan layout for spir/aspir (see finding) and needs traversal in two channels (porch
+  `loadPromptFile` + spawn inline). B is simpler, correct, and human-discriminating.
+- **Risk: residual single failed `cat`.** With Patch 1 leaving the builder-prompt's "read
+  protocol.md" instruction intact (per the rejected-alternative "drop the instructions" —
+  ruled out for per-protocol audit cost), an eager builder *could* still `cat` once before
+  noticing the inlined copy. Accepted: the content's presence prevents the multi-minute *hunt*
+  (the actual symptom); the clear `## Protocol Reference` delimiter (decision #1) mitigates
+  "louder than the per-phase prompt" confusion. Flagged for the dev-approval check.
+- **Observed but out of scope:** additional *relative-path* template refs inside protocol.md
+  (`spir/protocol.md:215` `templates/spec.md`, `:301` `templates/plan.md`,
+  `experiment/protocol.md:90` `templates/notes.md`). Relative + informational; not in the
+  architect's enumerated A.2 set. Left as-is unless you want them folded in.
 
 ## Test Plan
 
-**Unit (automated, runs in `npm test` → `@cluesmith/codev`):**
+**Automated (in `npm test` → `@cluesmith/codev`):**
+- Patch 1 (exist): protocol.md inlined under the delimiter; omitted without error when absent.
+- A.2 content guard (new): load `spir/prompts/plan.md` + `aspir/prompts/plan.md` from the
+  skeleton; assert the dead template-path pointer is **absent** and the self-contained
+  `### Plan Structure` is **present**. Load `experiment/protocol.md` + `spike/protocol.md`;
+  assert the embedded template block is present **and byte-matches** the canonical
+  `templates/notes.md` / `templates/findings.md` (drift guard).
+- A.3 guard (new): assert `spir/protocol.md` no longer references `workflow-reference.md`.
 
-- New test in `spawn-roles.test.ts` skeleton-fallback block: temp skeleton gets a
-  `spir/protocol.md` with sentinel content; assert `buildPromptFromTemplate()` output contains
-  the rendered template, the `## Protocol Reference (full text)` heading, and the sentinel.
-- New test: temp skeleton with **no** `spir/protocol.md`; assert the prompt builds without error
-  and does **not** contain the `## Protocol Reference` heading (covers criterion #2).
-- All existing `spawn-roles.test.ts` cases continue to pass unchanged.
+**Build:** `npm run build` from worktree root.
 
-**Build / typecheck:** `npm run build` from the worktree root (routes to
-`pnpm --filter @cluesmith/codev build`).
-
-**Manual (for the human at the `dev-approval` gate):**
-
-- Inspect the generated prompt directly. Quickest path: run the new unit test and read the
-  asserted output, or add a throwaway `console.log` of `buildPromptFromTemplate(...)` for a
-  protocol and confirm the protocol meta-doc is appended under the delimiter.
-- Optional end-to-end: in a scratch `codev init` project (no local `codev/protocols/`), spawn a
-  builder and confirm its initial prompt contains the protocol meta-doc — i.e. the builder no
-  longer needs to `cat` a non-existent file. (This is the symptom the fix exists for.)
-
-Note: `.codev/config.json` here has no `worktree.devCommand`, so `afx dev` is not applicable —
-this is a spawn-time prompt-assembly change, not a running-app change. The `dev-approval` review
-is "read the diff + run the unit test", which is appropriate for this class of change.
+**Manual (dev-approval, load-bearing — repro from issue):** fresh `codev init` in a tmp dir,
+spawn a test PIR builder, run through plan + implement; confirm (a) no file-hunting for
+protocol.md OR templates, (b) the builder still follows per-phase prompts (inlined material
+not "louder"), (c) per-phase templates land in the right phase. PR-diff review can't catch these.
