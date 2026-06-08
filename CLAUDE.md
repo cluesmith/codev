@@ -88,15 +88,13 @@ Codev resolves protocol files, prompts, agent definitions, and roles through a f
 
 **Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol (e.g., PIR), do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes the protocol from the user's available-protocol list while it's still callable from the CLI.
 
-### Framework files: never shell-fetch them by literal path
+### Framework files in prompts: deliver, don't shell-fetch
 
-Framework files (protocol docs, role docs, and the framework resources under `codev/resources/` such as `workflow-reference.md`, `risk-triage.md`, and `commands/`) ship in the package skeleton and resolve through the four-tier lookup above. They are **not guaranteed to exist on disk** in a user project, so:
+Protocol docs, role docs, and the shipped `codev/resources/` reference docs (`workflow-reference.md`, `risk-triage.md`, `commands/`) resolve through the four-tier lookup above and **default to the package skeleton**. A project may override any of them by checking a copy into `codev/...` (tier 2), but a fresh project won't have them on disk, so don't rely on it.
 
-- **Never instruct a shell read of a framework file by literal path** — no `cat codev/protocols/<x>/protocol.md`, no `cp codev/protocols/<x>/templates/<f>`. Shell commands bypass the resolver and fail in fresh installs. Builders receive framework content through resolver-backed channels instead: `protocol.md` is inlined into the spawn prompt, and per-phase prompts plus their templates arrive via porch (`porch next`) or embedded directly in the prompt.
-- **Documentation may still mention a `codev/...` framework path** for orientation (e.g. the protocol list above) — that is fine; it resolves via the skeleton and stays callable from the CLI. The rule is about *fetching*, not *referencing*.
-- `codev/resources/arch.md` and `codev/resources/lessons-learned.md` are **user-project files** (you read and write them), not framework files — referencing them by path is correct.
+So in any prompt, role doc, or instruction that drives a builder, don't `cat`/`cp` a framework file by literal `codev/...` path: a shell read bypasses the resolver and fails in fresh installs. Deliver the content instead (`protocol.md` is inlined into the spawn prompt; per-phase prompts and their templates arrive via porch). Mentioning a `codev/...` path in prose for orientation is fine; the rule is about *fetching*, not *referencing*. `codev/resources/arch.md` and `codev/resources/lessons-learned.md` are user-evolved project files, not framework files, so referencing those by path is correct too.
 
-`codev doctor` audits the skeleton for shell-fetch violations of this rule.
+`codev doctor` audits the skeleton for this.
 
 ### Protocol Verification (When You Don't Recognize a Protocol Name)
 
