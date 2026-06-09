@@ -26,3 +26,7 @@ Tests: `pull-requests-sort.test.ts` (7, all pass) covers bucket order, mine-beat
 **Note on test runs:** an ad-hoc `vitest run` initially showed 24 failures in adopt/consult/update/cron-cli, but these were **stale build artifacts** (codev-core/types dist out of date in the worktree), not real breakage — porch's `build` check rebuilds core/types first, after which the full `npm test` (`tests` check) passed clean in 20.3s. Both porch checks green: build ✓ (7.2s), tests ✓ (20.3s).
 
 dev-approval gate now pending — awaiting human review of the running worktree.
+
+## gitlab refinement (2026-06-09)
+
+User installed glab; verified the gitlab script against a live public project (`gitlab-org/cli`). Found glab's `mr list --output json` actually exposes `draft` (bool) and `reviewers[].username` — so the original `reviewRequests: []` / `isDraft: false` stub was discarding real data. Replaced with `reviewRequests: [.reviewers[]?.username]`, `isDraft: (.draft // false)`. Verified live (drafts + reviewers extracted correctly) and on null/missing edge cases. Pre-existing base-shape non-conformance (glab uses `iid`/`web_url`/`created_at`/`author.username` vs GitHub-style `number`/`url`/`createdAt`/`author.login`) left untouched — separate pre-existing concern, worth a follow-up issue if gitlab support is to be made first-class. gitea still defaults both (tea not installed, unverifiable).
