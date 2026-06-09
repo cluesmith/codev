@@ -101,18 +101,20 @@ phase that closes it.
         package gets its **own** `test` script (Vitest) and is run in CI via the next bullet —
         matching the repo's per-package convention. (iter-3 Codex/Claude — removes the iter-3
         self-contradiction between this deliverable and the acceptance criterion.)
-  - [ ] **`.github/workflows/test.yml`** — add a dedicated artifact-canvas build+test step
-        alongside the existing per-package steps (core / codev / dashboard / vscode). This is the
-        repo's actual CI mechanism — *not* the root `test` script. (iter-3 Codex/Claude.)
+  - [ ] **`.github/workflows/test.yml`** — add a dedicated artifact-canvas build+test step in the
+        `unit` job alongside the existing per-package steps. Placement: it has **no** core/types
+        dependency, so the step can run right after `pnpm install` (no need to wait for the
+        core/types builds). (iter-3 Codex/Claude; placement note iter-4 Claude.)
   - [ ] **`scripts/bump-all.sh`** — add `@cluesmith/codev-artifact-canvas` at the monorepo
         version (`3.1.x`, like the published packages — NOT the dashboard's private `0.0.0`).
   - [ ] **`codev/protocols/release/protocol.md`** — the release process still enumerates only
         codev/core/types (+ vscode) for version bump/publish. Add the new package to its
         version-bump enumeration. **Publish decision:** in v1 the package is consumed by hosts via
-        `workspace:*` and bundled by them (mirroring `@cluesmith/codev-core`, which is
-        packed/bundled and not on the public npm registry) — so it is **not independently
-        npm-published in v1**; add it to the publish list only when a consumer needs it
-        standalone. State this finding explicitly in the release doc. (iter-3 Codex.)
+        `workspace:*` and bundled by them, so it is **not independently npm-published in v1**; add
+        it to the publish list only when a consumer needs it standalone. (Note: unlike
+        `@cluesmith/codev-core`, it is *not* even packed for `local-install.sh` — the parallel is
+        only "workspace-consumed, not independently published", iter-4 Claude.) State this finding
+        explicitly in the release doc. (iter-3 Codex.)
   - [ ] Confirm `local-install.sh` needs no change (package not consumed by a host or published
         standalone yet) — note the finding either way.
 - [ ] `vitest.config.ts` uses a **DOM environment** (jsdom/happy-dom) so the renderer,
@@ -209,10 +211,22 @@ Revert the renderer module; Phase 1 surface remains intact.
       theme-driven re-render to v1.)
 - [ ] **v1 marker rendering (deferred #4):** minimal line-level indicator for lines bearing a
       `ReviewMarker`, author + text via the overlay; no inline bubbles / minimap (those = #863).
+- [ ] **Adapter error semantics (spec D2 — locked; iter-4 Codex):** the component guards every
+      adapter call it makes (`FileAdapter.read`/`.watch`, `MarkerAdapter.list`,
+      `ThemeAdapter.resolve`/`.onChange`): a rejection/throw is caught, logged to `console`, and
+      surfaced via the optional `onError?` prop; the component never throws out of an event
+      handler. A failed `MarkerAdapter.list()` **leaves the prior rendered markers in place** (no
+      clear/corrupt). (`MarkerAdapter.add` is host-invoked, so its errors are host-side.)
+- [ ] **Out-of-range-marker policy (spec deferred → resolved here; iter-4 Codex):** a
+      `ReviewMarker` whose `line` is ≥ the document's current line count (e.g. a stale marker
+      after truncation) is **ignored** (not rendered, not mis-anchored) and reported once via
+      `onError?`/`console.warn`. Chosen over *clamp* (would mis-anchor) and *hard-error* (a stale
+      marker shouldn't break the view); #863 may add smarter re-anchoring later.
 - [ ] Tests: overlay intent (scenario 2), marker round-trip (scenario 3), ThemeAdapter
       contract (scenario 4), invariant (scenario 6 — asserts the overlay's *only* output channel
       is the `onAddComment` intent event; no side-channel writes), subscription teardown
-      (scenario 9), keyboard activation.
+      (scenario 9), keyboard activation, **adapter-error handling** (`read`/`list`/`watch` reject
+      → `onError` fired + prior markers preserved), and **out-of-range marker** (dropped + warned).
 
 #### Implementation Details
 - **Deferred #5:** while touching Current State references, correct the spec's
@@ -222,6 +236,8 @@ Revert the renderer module; Phase 1 surface remains intact.
 - [ ] Clicking `+` (mouse or keyboard) invokes `onAddComment` with the expected 0-based line; package never calls `add`.
 - [ ] Existing markers render (minimal v1 fidelity); host-side `add` + `watch` re-list refreshes them.
 - [ ] Disposing a subscription stops further re-renders; `dispose()` twice is a no-op.
+- [ ] A rejecting `read`/`list`/`watch`/`resolve`/`onChange` is caught → `onError` fired + logged; the component does not throw; a failed `list()` preserves prior markers (spec D2).
+- [ ] An out-of-range `ReviewMarker` (`line` ≥ document line count) is dropped (not rendered) and warned once.
 
 #### Test Plan
 - **Unit**: overlay intent + keyboard; marker render; teardown.
@@ -255,7 +271,10 @@ Revert overlay/component modules; renderer (P2) and skeleton (P1) remain usable.
       side store** → asserts the new marker renders. This proves the round-trip goes *through
       text* (satisfying the text-as-source-of-truth invariant), not merely UI refresh (iter-2 Codex).
 - [ ] `examples/` — a Vite dev **page** (developer aid, not the proof) reusing the same stub
-      adapters + sample artifact for hands-on/visual exercise. Excluded from the published package.
+      adapters + sample artifact for hands-on/visual exercise. Concrete entrypoint:
+      `examples/index.html` + `examples/main.tsx` + `examples/vite.config.ts`, launched by a
+      package script `"dev:example": "vite examples"` (the `vite` devDep declared in P1).
+      Excluded from the published package (`files`/`exports`). (iter-4 Codex/Claude.)
 - [ ] `README.md` — the three adapter contracts, `ArtifactCanvasProps`, the `--codev-canvas-*`
       tokens + override example, a host-implementation walkthrough, and a short note on **why
       `tsup`** was chosen (so maintainers don't "normalize" it away — iter-1 Claude).
@@ -345,6 +364,21 @@ addressed in iteration 4:
 
 Claude APPROVE'd; folded its tsconfig note (override `module`/`moduleResolution` to
 `ESNext`/`bundler` since the base is `NodeNext` and tsup owns module output).
+
+### Plan iteration 4 (2026-06-09)
+**Verdicts:** Gemini SKIPPED (agy); **Codex REQUEST_CHANGES (HIGH)**; **Claude APPROVE (HIGH)**.
+Not a clean 2/3. Codex's two gaps (both legitimate; the second a spec-mandated deferral that was
+missed), addressed in iteration 5:
+1. **Adapter error semantics had no AC/tests** — spec D2 locked the behavior; P3 now has an
+   explicit error-semantics deliverable, AC, and tests (guarded `read/watch/list/resolve/onChange`
+   → `onError` + console; failed `list()` preserves prior markers).
+2. **Out-of-range-marker policy unresolved** — the spec explicitly deferred it to the plan; P3 now
+   resolves it: an out-of-range `ReviewMarker` (line ≥ doc length) is **ignored** + warned once
+   (chosen over clamp/hard-error), with a test.
+Minor (Codex): named the `examples/` entrypoint (`index.html` + `main.tsx` + `vite.config.ts`,
+`dev:example` script). Folded Claude's notes: CI step placement (no core/types dep → runs right
+after install), publish-analogy precision (not even packed for local-install, unlike codev-core),
+vite devDep timing.
 
 ## Notes
 This plan keeps host integration out of scope (per spec Non-Goals). The smoke-test host uses

@@ -179,3 +179,18 @@ Pattern: Codex finds progressively smaller but legitimate repo-integration nits 
 (mirrors the spec phase); Claude has APPROVED all 3 plan iterations. Continuing per autonomy.
 
 Next: commit iter-4, re-consult (iter-4 plan).
+
+## 2026-06-09 — Plan iter-4 consult + iter-5 revision
+
+Plan iter-4 (7f06e594): Gemini SKIPPED, **Codex REQUEST_CHANGES (HIGH)**, **Claude APPROVE (HIGH)**.
+Codex's 2 legitimate gaps (fixed iter-5):
+1. Adapter error semantics (spec D2 locked) had no AC/tests → added P3 deliverable + AC + tests.
+2. Out-of-range-marker policy (spec deferred TO the plan, I'd missed it) → resolved: ignore +
+   warn once (over clamp/hard-error) + test.
+Minor: named examples/ entrypoint; folded Claude notes (CI placement, publish-analogy precision,
+vite timing).
+
+4 plan iterations now (Claude APPROVE x4; Codex RC x4 with shrinking-but-real items). If iter-5
+isn't clean, I'll put the judgment call to the user rather than loop further.
+
+Next: commit iter-5, re-consult (iter-5 plan).
