@@ -95,6 +95,30 @@ export function resolveCodevFile(relativePath: string, workspaceRoot?: string): 
 }
 
 /**
+ * Resolve `{{> <codev-relative-path>}}` include directives by reading the
+ * referenced framework file fresh through the four-tier resolver and
+ * substituting its content in place (recursively). This is how framework files
+ * (a protocol's `protocol.md` at spawn, a phase's template in a porch prompt) are
+ * delivered to the builder without committing a copy — the canonical file stays
+ * single-source and is read at delivery time, so it cannot drift.
+ *
+ * An include that does not resolve collapses to '' (never an error — the file
+ * genuinely isn't shipped). Depth-guarded against include cycles.
+ */
+export function resolveCodevIncludes(
+  content: string,
+  workspaceRoot?: string,
+  depth = 0,
+): string {
+  if (depth > 5) return content; // cycle / runaway guard
+  return content.replace(/\{\{>\s*([^}\s]+)\s*\}\}/g, (_match, relPath: string) => {
+    const resolved = resolveCodevFile(relPath, workspaceRoot);
+    if (!resolved) return '';
+    return resolveCodevIncludes(fs.readFileSync(resolved, 'utf-8'), workspaceRoot, depth + 1);
+  });
+}
+
+/**
  * Framework cache directory management.
  *
  * Uses lazy initialization: the cache dir is computed on first access

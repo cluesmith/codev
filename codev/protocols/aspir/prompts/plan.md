@@ -74,40 +74,9 @@ After completing the plan draft, signal completion. Porch will run 3-way consult
 
 ## Output
 
-Create the plan file at `codev/plans/{{artifact_name}}.md`.
+Create the plan file at `codev/plans/{{artifact_name}}.md`, following the template below. It includes the **machine-readable phases JSON** that porch requires (the plan gate checks for a `"phases": [...]` block with at least two `"id"` entries), so keep that block and fill in real phases.
 
-
-### Plan Structure
-
-```markdown
-# Implementation Plan: {{title}}
-
-## Overview
-Brief summary of what will be implemented.
-
-## Phases
-
-### Phase 1: [Name]
-- **Objective**: [Single clear goal]
-- **Files**: [List of files to create/modify]
-- **Dependencies**: None
-- **Success Criteria**: [How to verify completion]
-- **Tests**: [What tests will be written]
-
-### Phase 2: [Name]
-- **Objective**: [Single clear goal]
-- **Files**: [List of files]
-- **Dependencies**: Phase 1
-- **Success Criteria**: [Verification method]
-- **Tests**: [Test approach]
-
-[Continue for all phases...]
-
-## Risk Assessment
-- [Risk 1]: [Mitigation]
-- [Risk 2]: [Mitigation]
-
-```
+{{> protocols/spir/templates/plan.md}}
 
 ## Signals
 

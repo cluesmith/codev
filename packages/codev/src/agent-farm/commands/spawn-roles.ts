@@ -13,7 +13,7 @@ import type { SpawnOptions, Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { stripLeadingZeros } from '../utils/agent-names.js';
-import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
+import { resolveCodevFile, getSkeletonDir, resolveCodevIncludes } from '../../lib/skeleton.js';
 
 // =============================================================================
 // Template Rendering
@@ -109,35 +109,11 @@ function loadBuilderPromptTemplate(config: Config, protocolName: string): string
 }
 
 /**
- * Resolve `{{> <skeleton-relative-path>}}` include directives by reading the
- * referenced framework file fresh through the resolver and substituting its
- * content in place (recursively, so an included file may itself include).
- *
- * This is how framework files are delivered to the builder without committing
- * a duplicated copy anywhere: the canonical file (e.g. a protocol's template)
- * stays the single source of truth and is read at spawn time, so it can never
- * go stale. Unresolvable includes collapse to empty (the file genuinely isn't
- * shipped — e.g. an optional template), never an error.
- */
-function resolveIncludes(content: string, config: Config, depth = 0): string {
-  if (depth > 5) return content; // cycle / runaway guard
-  return content.replace(/\{\{>\s*([^}\s]+)\s*\}\}/g, (_match, relPath: string) => {
-    const resolved = resolveCodevFile(relPath, config.workspaceRoot);
-    if (!resolved) {
-      logger.debug(`Include not resolved: ${relPath} (skipped)`);
-      return '';
-    }
-    return resolveIncludes(readFileSync(resolved, 'utf-8'), config, depth + 1);
-  });
-}
-
-/**
  * Compute the protocol meta-doc text to inline into the spawn prompt via the
  * `{{protocol_reference}}` placeholder. Reads `protocol.md` fresh through the
- * resolver (tier 4 reaches the embedded skeleton in fresh installs) and
- * resolves any `{{> ...}}` template includes inside it. Returns '' when the
- * protocol ships no `protocol.md` (e.g. bugfix) — the builder-prompt's
- * `{{#if protocol_reference}}` guard then renders cleanly with no reference.
+ * resolver (tier 4 reaches the embedded skeleton in fresh installs) and resolves
+ * any `{{> ...}}` template includes inside it (via the shared resolver helper).
+ * Returns '' when the protocol ships no `protocol.md`.
  */
 function resolveProtocolReference(config: Config, protocolName: string): string {
   const protocolDocPath = resolveCodevFile(
@@ -148,7 +124,7 @@ function resolveProtocolReference(config: Config, protocolName: string): string 
     logger.debug(`No protocol.md for ${protocolName}; spawning without inlined reference`);
     return '';
   }
-  return resolveIncludes(readFileSync(protocolDocPath, 'utf-8'), config);
+  return resolveCodevIncludes(readFileSync(protocolDocPath, 'utf-8'), config.workspaceRoot);
 }
 
 /**

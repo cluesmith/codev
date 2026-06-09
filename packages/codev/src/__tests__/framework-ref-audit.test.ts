@@ -15,6 +15,7 @@ import { dirname, resolve, join } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { auditFrameworkRefs } from '../lib/framework-ref-audit.js';
+import { resolveCodevIncludes } from '../lib/skeleton.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // src/__tests__ → repo root is four levels up.
@@ -116,12 +117,32 @@ describe('skeleton sweep + embeds (issue #1011 Layers 1/2, Patch 2)', () => {
     expect(readFileSync(f, 'utf-8')).not.toMatch(/workflow-reference\.md/);
   });
 
-  it('spir/aspir plan prompts drop the redundant template pointer but keep Plan Structure', () => {
+  it('spir/aspir plan prompts deliver the canonical plan template via include (not a divergent inline copy)', () => {
     for (const p of ['spir', 'aspir']) {
       const md = readFileSync(join(SKELETON, 'protocols', p, 'prompts', 'plan.md'), 'utf-8');
+      // Uses the fresh-at-delivery include of the real template (which carries the
+      // machine-readable phases JSON porch requires), not a hand-rolled inline copy.
+      expect(md).toContain('{{> protocols/spir/templates/plan.md}}');
+      expect(md).not.toContain('### Plan Structure'); // the divergent JSON-less inline block is gone
+      // No literal-path / shell-fetch reference to the template (the include is resolver-mediated).
       expect(md).not.toMatch(/codev\/protocols\/spir\/templates\/plan\.md/);
-      expect(md).toContain('### Plan Structure');
     }
+  });
+
+  it('the plan template (delivered via the include) carries the porch-required phases JSON', () => {
+    const tmpl = readFileSync(join(SKELETON, 'protocols', 'spir', 'templates', 'plan.md'), 'utf-8');
+    expect(tmpl).toMatch(/"phases"\s*:/);            // has_phases_json
+    expect((tmpl.match(/"id"\s*:/g) || []).length).toBeGreaterThanOrEqual(2); // min_two_phases
+  });
+
+  it('the plan phase prompt, once its includes resolve (porch delivery), carries the phases JSON', () => {
+    // Mirrors what porch's loadPromptFile now does: read the phase prompt and
+    // resolve {{> ...}} includes. The resolved plan prompt must contain the JSON
+    // the plan gate requires — otherwise the builder writes a plan that fails it.
+    const planPrompt = readFileSync(join(SKELETON, 'protocols', 'spir', 'prompts', 'plan.md'), 'utf-8');
+    const resolved = resolveCodevIncludes(planPrompt, REPO_ROOT);
+    expect(resolved).not.toContain('{{> protocols/spir/templates/plan.md}}'); // include expanded
+    expect(resolved).toMatch(/"phases"\s*:/);                                  // JSON now present
   });
 
   it('experiment/spike reference templates via fresh-at-delivery include, not a static embed', () => {

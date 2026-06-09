@@ -84,3 +84,18 @@ Reviewer: since all protocols now have a protocol.md (bugfix got one in #1013), 
 - Residual (now handled): a user's OWN `codev/protocols/` json-only override (protocol.json, no protocol.md) would render an empty `## Protocol Reference` heading. Added a **non-fatal `validateProtocol` warning** for that case — "protocol X has a protocol.json but no protocol.md; builders will spawn with an empty Protocol Reference section." Non-fatal so json-only protocols stay valid; flags the omission at spawn without bringing back the render-time `{{#if}}` guard. +2 tests (warns when md absent; silent when md present).
 
 Build ✓, suite ✓ (3275 passed, 13 skips). Still at dev-approval gate.
+
+## BUG FOUND + FIXED: spir/aspir plan template was load-bearing (2026-06-09)
+
+Reviewer probed how the builder gets the plan template now. Found a real bug I introduced: porch's spir/aspir **plan gate requires machine-readable phases JSON** (`has_phases_json` + `min_two_phases`), which lives ONLY in `templates/plan.md`. My earlier "drop the redundant plan-template pointer; the inline `### Plan Structure` is self-contained" was WRONG — that inline block is JSON-less, and neither it nor the inlined protocol.md guides the JSON. So a spir/aspir builder would have written a markdown-only plan and FAILED the plan gate.
+
+Also surfaced a mechanism constraint: the `{{> }}` include only ran in `resolveProtocolReference` (spawn, on protocol.md). porch's `loadPromptFile` (phase-prompt delivery) did NOT resolve includes — so a `{{> }}` in a phase prompt would be left literal.
+
+Fix (Option B):
+- Extracted the include logic to a shared `resolveCodevIncludes` in `lib/skeleton.ts` (one impl).
+- `loadPromptFile` (porch) now resolves includes → phase prompts can pull framework files fresh.
+- spir/aspir `prompts/plan.md`: replaced the divergent inline `### Plan Structure` with `{{> protocols/spir/templates/plan.md}}` — the builder now follows the real canonical template (with the phases JSON), delivered fresh, single-source.
+- spawn-roles `resolveProtocolReference` now calls the shared `resolveCodevIncludes`.
+- Tests: spawn-roles skeleton mock provides `resolveCodevIncludes`; framework-ref-audit asserts the include is used (not inline structure), the template carries the JSON, and the resolved plan prompt contains the JSON (porch delivery). Build ✓, suite ✓ (3277 passed, 13 skips).
+
+spec/review re-check: **review is self-contained** — its prompt explicitly mandates `## Architecture Updates` + `## Lessons Learned Updates` (the porch-checked sections), so it's gate-satisfied (no template delivery needed). **specify has no porch check** and guides the spec via a process (no structural template delivered); not broken, but `templates/spec.md` isn't delivered and the spir/protocol.md "Structure: provided in the specify-phase prompt" note slightly overstates (the prompt gives a process, not the template). Flagged to the architect for a decision (deliver templates/spec.md via include for consistency, or leave process-only + correct the note).

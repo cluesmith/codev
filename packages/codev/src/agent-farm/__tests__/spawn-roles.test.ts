@@ -40,21 +40,32 @@ const skeletonMock = vi.hoisted(() => ({ root: '' as string }));
 vi.mock('../../lib/skeleton.js', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
+  // Mirrors the real four-tier resolver: .codev/ → codev/ → cache → skeleton.
+  // The cache tier is omitted (irrelevant to these tests).
+  const resolveCodevFile = (relativePath: string, workspaceRoot?: string): string | null => {
+    const root = workspaceRoot || process.cwd();
+    const overridePath = path.join(root, '.codev', relativePath);
+    if (fs.existsSync(overridePath)) return overridePath;
+    const localPath = path.join(root, 'codev', relativePath);
+    if (fs.existsSync(localPath)) return localPath;
+    if (skeletonMock.root) {
+      const skeletonPath = path.join(skeletonMock.root, relativePath);
+      if (fs.existsSync(skeletonPath)) return skeletonPath;
+    }
+    return null;
+  };
+  // Mirror of the real resolveCodevIncludes, using the mocked resolver.
+  const resolveCodevIncludes = (content: string, workspaceRoot?: string, depth = 0): string => {
+    if (depth > 5) return content;
+    return content.replace(/\{\{>\s*([^}\s]+)\s*\}\}/g, (_m, rel: string) => {
+      const resolved = resolveCodevFile(rel, workspaceRoot);
+      if (!resolved) return '';
+      return resolveCodevIncludes(fs.readFileSync(resolved, 'utf-8'), workspaceRoot, depth + 1);
+    });
+  };
   return {
-    // Mirrors the real four-tier resolver: .codev/ → codev/ → cache → skeleton.
-    // The cache tier is omitted (irrelevant to these tests).
-    resolveCodevFile: (relativePath: string, workspaceRoot?: string): string | null => {
-      const root = workspaceRoot || process.cwd();
-      const overridePath = path.join(root, '.codev', relativePath);
-      if (fs.existsSync(overridePath)) return overridePath;
-      const localPath = path.join(root, 'codev', relativePath);
-      if (fs.existsSync(localPath)) return localPath;
-      if (skeletonMock.root) {
-        const skeletonPath = path.join(skeletonMock.root, relativePath);
-        if (fs.existsSync(skeletonPath)) return skeletonPath;
-      }
-      return null;
-    },
+    resolveCodevFile,
+    resolveCodevIncludes,
     getSkeletonDir: (): string => skeletonMock.root,
   };
 });

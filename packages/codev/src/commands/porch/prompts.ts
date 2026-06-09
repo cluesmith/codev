@@ -16,7 +16,7 @@ import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
 import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import type { ArtifactResolver } from './artifacts.js';
 import { fetchIssue } from '../../lib/github.js';
-import { resolveCodevFile } from '../../lib/skeleton.js';
+import { resolveCodevFile, resolveCodevIncludes } from '../../lib/skeleton.js';
 
 /**
  * Get project summary from GitHub Issues, with spec-file fallback.
@@ -78,7 +78,11 @@ function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile:
   const relativePath = `protocols/${protocolName}/prompts/${promptFile}`;
   const resolved = resolveCodevFile(relativePath, workspaceRoot);
   if (!resolved) return null;
-  return fs.readFileSync(resolved, 'utf-8');
+  // Resolve `{{> ...}}` includes (e.g. a phase's template) fresh through the
+  // resolver, so phase prompts can pull in framework files (like the plan
+  // template, with its required machine-readable phases JSON) without a
+  // committed copy. Mirrors the spawn-side protocol.md inlining. #1011.
+  return resolveCodevIncludes(fs.readFileSync(resolved, 'utf-8'), workspaceRoot);
 }
 
 /**

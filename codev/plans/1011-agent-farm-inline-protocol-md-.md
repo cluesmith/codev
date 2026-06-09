@@ -18,10 +18,14 @@ when the file lives only in the embedded skeleton (fresh post-618 installs). The
 
 ### Investigation findings that drive the decisions
 
-1. **A.2 references are heterogeneous.** `spir`/`aspir` `prompts/plan.md` already embed a
-   self-contained `### Plan Structure` block (a *simpler, different* layout than the 184-line
-   canonical `templates/plan.md`) — the template pointer is **redundant chrome**. Only
-   `experiment` (`notes.md`, 97L) and `spike` (`findings.md`, 67L) are **genuine content**.
+1. **A.2 references are heterogeneous** — and the `spir`/`aspir` plan case was initially
+   mis-read. The plan prompt's inline `### Plan Structure` was a *simpler, JSON-less* layout, so
+   I first treated the `templates/plan.md` pointer as redundant chrome and dropped it. **That was
+   wrong**: porch's plan gate requires the **machine-readable phases JSON** (`has_phases_json` +
+   `min_two_phases`), which lives *only* in `templates/plan.md` — so the pointer was load-bearing.
+   Corrected by delivering `templates/plan.md` via a `{{> }}` include (see decision #2). The
+   `experiment` (`notes.md`, 97L) and `spike` (`findings.md`, 67L) templates are likewise genuine
+   content delivered via include.
 2. **`bugfix` ships no `protocol.md` in the skeleton** (only `protocol.json` + prompts), yet its
    `builder-prompt.md:28` references one, and the local `codev/` tree carries a real **548-line**
    `bugfix/protocol.md` that was *never tracked in the skeleton*. So Patch 1 cannot inline for
@@ -53,13 +57,20 @@ stale; the reviewer rejected it.)*
   `{{> protocols/<name>/templates/<file>}}` include directive, resolved fresh (recursively, while
   building `{{protocol_reference}}`). The canonical `templates/*.md` stays single-source.
 
-**2 — A.2 mechanism: fresh-at-delivery include placeholder. [revised from explicit-embed]**
-Sub-handled by reference kind (finding #1): drop the redundant pointer in `spir`/`aspir` plan
-prompts (already self-contained via `### Plan Structure`); in `experiment`/`spike` `protocol.md`
-reword the cp/use-template step to point at the `## Template:` section, which holds a `{{> ...}}`
-include resolved fresh at delivery. Auto-detect (blanket scan) is still rejected — it would
-double-deliver a conflicting plan layout for spir/aspir. The include directive is explicit (the
-author marks exactly what to inline) so it keeps that discrimination without committing a copy.
+**2 — A.2 mechanism: fresh-at-delivery `{{> }}` include, on BOTH delivery channels.**
+Every genuine template is delivered via a `{{> path}}` include resolved fresh by the shared
+`resolveCodevIncludes` (in `lib/skeleton.ts`), which now runs in **both** channels:
+- **spawn** — `resolveProtocolReference` resolves includes inside `protocol.md` (experiment/spike
+  `## Template:` sections → `notes.md` / `findings.md`).
+- **porch phase prompts** — `loadPromptFile` now resolves includes too, so `spir`/`aspir`
+  `prompts/plan.md` use `{{> protocols/spir/templates/plan.md}}` to deliver the canonical plan
+  template (with its required machine-readable phases JSON) fresh at the plan phase.
+
+The earlier "drop the spir/aspir plan pointer; the inline `### Plan Structure` is self-contained"
+call was **reverted** — that inline block lacked the porch-required JSON (finding #1). The
+divergent inline `### Plan Structure` is removed; the canonical `templates/plan.md` is the single
+source, delivered via the include. Auto-detect (blanket scan) is still rejected; the include is
+explicit (the author marks exactly what to inline), single-source, and never a committed copy.
 
 **Why inject for experiment/spike but not spir/aspir — the distinction is `mode`, not ad-hoc
 (finding #4):** `experiment` and `spike` default to **`mode: soft`** (verified in their
