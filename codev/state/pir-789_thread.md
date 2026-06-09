@@ -43,3 +43,7 @@ Human tested in the Extension Dev Host. Lenses did NOT appear in the `codev.view
 Validation: check-types/lint/test:unit (372) all green; esbuild bundles. **Needs human to re-test Option A**: F5 relaunch → click a changed file row in the Builders tree → single-file diff → lenses render (prompt offers to enable the setting first).
 
 Note for review file: the spec'd surface was infeasible; should reflect the per-file-diff entry point back to the issue.
+
+## Dev-approval iteration: hunk-lens placement fix
+
+Human observed hunk lenses landing on the wrong function's signature. Root cause: `--unified=3` reports each hunk's new-side start up to 3 *context* lines above the first real change, so near a function boundary the anchor lands on the preceding `def`/`return`. Fixed: `parseHunkRanges` now walks the hunk body to find the first/last actually-added (`+`) new-side lines (`changeStart`/`changeEnd`); `buildLensDescriptors` anchors AND labels on those instead of the header span. Deviation from issue's literal "hunk header range" — intentional, more accurate. 374 tests green. Needs human re-test after F5 relaunch.
