@@ -39,6 +39,8 @@
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **PR sidebar sorts by ownership, with a `(draft)` badge** (#787, PR #1019). The Pull Requests view used to render PRs in arbitrary forge order with no fast scan-path to the ones you'd authored or were asked to review, and no way to distinguish drafts. It now groups into one flat list ordered mine → review-requested → others, newest-first within each bucket; drafts carry a `(draft)` suffix and a draft icon. Two new fields (`reviewRequests`, `isDraft`) flow end-to-end through the forge concept; github + gitlab fully populate, gitea safely defaults because `tea pulls list` doesn't expose the fields. When `gh` is unavailable the list falls back to plain createdAt-desc with no crash.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->

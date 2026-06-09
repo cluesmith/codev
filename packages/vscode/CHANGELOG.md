@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### What's new
+
+- **PR sidebar sorts by ownership, with a `(draft)` badge.** The Pull Requests view groups PRs into one flat list ordered mine first, then review-requested, then others, newest-first within each bucket. Drafts carry a `(draft)` suffix and a draft icon so you can tell them apart at a glance. When `gh` isn't available the list falls back to plain newest-first ordering.
+
 ## [3.1.9] - 2026-06-08
 
 Lockstep republish with `@cluesmith/codev@3.1.9` to keep CLI and extension versions aligned. No extension changes from 3.1.8 — see [3.1.8] below for the cycle's substantive content. The npm-side hotfix that triggered v3.1.9 didn't affect the extension; the v3.1.8 marketplace publish is functionally identical to v3.1.9.
