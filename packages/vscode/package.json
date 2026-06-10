@@ -52,7 +52,7 @@
       },
       {
         "command": "codev.forwardSelectionToBuilder",
-        "title": "Forward Selection to Builder"
+        "title": "Codev: Forward Selection to Builder"
       },
       {
         "command": "codev.openArchitectTerminal",
@@ -648,6 +648,12 @@
         "command": "codev.approveGate",
         "key": "ctrl+k g",
         "mac": "cmd+k g"
+      },
+      {
+        "command": "codev.forwardSelectionToBuilder",
+        "key": "ctrl+k b",
+        "mac": "cmd+k b",
+        "when": "codev.activeEditorIsBuilderFile && editorHasSelection"
       },
       {
         "command": "workbench.view.extension.codev",
