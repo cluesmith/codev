@@ -42,3 +42,17 @@ Gotcha: consult auto-detect failed with "Multiple projects found" because this
 worktree is `.builders/bugfix-1024` (no `-<slug>` suffix), which the consult
 project-resolver regex `\.builders/[^/]*?-?(\d+)-([^/]+)` can't match. Fix:
 pass `--project-id bugfix-1024` explicitly.
+
+## CMAP + PR gate
+
+CMAP verdicts on PR #1026:
+- gemini: SKIPPED (agy/Antigravity unauthenticated — non-blocking per design)
+- codex:  APPROVE (MEDIUM)
+- claude: APPROVE (HIGH)
+
+Both codex and claude independently flagged stale `400ms` comments (extension.ts
+activation comment + the #983 Tower-divergence comment in preflight.ts). Both
+non-blocking, but addressed in f855d227 (comment-only, version-agnostic now).
+
+Notified architect. Ran `porch done` → `porch gate` → now WAITING at the `pr`
+gate for `porch approve bugfix-1024 pr`. STOP here per strict-mode protocol.
