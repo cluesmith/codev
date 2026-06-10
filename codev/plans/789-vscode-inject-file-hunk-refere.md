@@ -63,6 +63,25 @@ reg('codev.injectBuilderFileRef', async (builderId: string, text: string) => {
 - **Alternative rejected — render lenses on the left `codev-diff:` side** (fully scoped to the diff editor, never over-triggers): rejected because the left side holds *old* content with old-side line numbers and is empty for added files, so it can't carry new-side hunk ranges.
 - **Alternative rejected — replace the side-by-side editor with a single unified-diff text document** (file/hunk headers literally in text): rejected as a UX regression — reviewers rely on the side-by-side multi-file editor, and the issue asks to add lenses *to the existing `viewDiff` editor*, not replace it.
 
+## Revision (dev-approval gate): pivot from hunk lenses to symbol lenses + selection forward
+
+Testing at the `dev-approval` gate showed the approved hunk-driven approach is **not usable**: a newly-created file is a single whole-file git hunk, so it gets exactly one lens regardless of size — you can't forward a specific function/interface in a new file. Hunk granularity is hostage to where the *edit* is, not where you want to *comment*. (Also confirmed earlier: CodeLens doesn't render in the multi-file `vscode.changes` editor, so lenses live on the per-file `vscode.diff` / normal tab with `diffEditor.codeLens` enabled.)
+
+Revised approach (architect-directed at the gate):
+
+1. **Symbol-level lenses** — drive lenses off VSCode's Document Symbol provider (`vscode.executeDocumentSymbolProvider`) instead of git hunks, so granularity follows the *code*, not the diff. Level-2 depth + a kind allowlist:
+   - **Depth 0 (top-level):** Function, Class, Interface, Enum, Struct, Namespace, Module; plus **multi-line** top-level Variable/Constant (catches arrow-function components/handlers reported as Variable).
+   - **Depth 1 (into Class/Struct only):** Method, Constructor.
+   - Excluded: Property, Field, EnumMember, TypeParameter, Package, value kinds, one-line/non-top-level Variable/Constant.
+   - A symbol lens that anchors on line 0 is skipped (the file-level lens covers it).
+2. **File-level lens** retained (whole file).
+3. **Hunk lenses removed** — the git-diff hunk parsing (`parseHunkRanges`/`parseUnifiedDiff`) is no longer used for lenses.
+4. **Right-click "Forward Selection to Builder"** — an `editor/context` command on a non-empty selection injects `<path>:L<start>-L<end> ` for the exact selected range. Context menus are *not* suppressed in the multi-file View Diff editor, so this is the granular path that works in the scan view. Scoped via a `codev.activeEditorIsBuilderFile` context key (set when the active editor is a tracked builder-diff file) + the built-in `editorHasSelection`.
+
+Surfaces: symbol/file lenses → per-file diff + normal tab (CodeLens limitation). Selection context-menu → works in the multi-file View Diff editor too (to be validated at the gate).
+
+Deferred (future issue): hover-triggered forward action; deeper symbol nesting; per-kind density settings.
+
 ## Test Plan
 
 **Unit (`diff-inject-ref.test.ts`, vitest — `pnpm --filter codev-vscode test:unit`):**

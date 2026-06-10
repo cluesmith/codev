@@ -44,6 +44,19 @@ Validation: check-types/lint/test:unit (372) all green; esbuild bundles. **Needs
 
 Note for review file: the spec'd surface was infeasible; should reflect the per-file-diff entry point back to the issue.
 
+## Major pivot (dev-approval): symbol lenses + selection forward, hunk lenses removed
+
+Hunk-driven lenses proved unusable: a new file is one whole-file hunk → one lens regardless of size, no way to forward a specific function/interface. Architect directed a redesign (captured in the plan's "Revision" section):
+- **Lenses now driven by document symbols** (`vscode.executeDocumentSymbolProvider`), not git hunks. Level-2 policy: file-level lens + top-level Function/Class/Interface/Enum/Struct/Namespace/Module + multi-line top-level Variable/Constant; descend one level into Class/Struct for Method/Constructor. Line-0 collision with the file lens skipped.
+- **Hunk parsing removed** (`parseHunkRanges`/`parseUnifiedDiff`/`HunkRange` gone); registry entry simplified to `{fsPath, builderId, relPath}`; viewDiff/registerFileInjectSession no longer touch git for lenses.
+- **Right-click "Forward Selection to Builder"** (`editor/context`) added for arbitrary ranges — context menus DO work in the multi-file View Diff editor (unlike CodeLens), so this is the in-scan-view path. Scoped via `codev.activeEditorIsBuilderFile` context key + `editorHasSelection`.
+
+Label still "Forward to Builder" (lenses) / "Forward Selection to Builder" (menu). Command ids: `codev.forwardToBuilder` (lens, palette-hidden) + `codev.forwardSelectionToBuilder` (menu, palette-hidden, declared for the context menu).
+
+Validation: 368 unit tests, check-types, lint, bundle all green. **Needs human re-test (F5)**: symbol lenses on per-file diff/normal tab; right-click selection in View Diff editor. Surfaces caveat unchanged: CodeLens not in multi-file editor; selection menu is.
+
+Deferred to future issue(s): hover-triggered forward; deeper nesting; per-kind density settings.
+
 ## Dev-approval iteration: hunk-lens placement fix
 
 Human observed hunk lenses landing on the wrong function's signature. Root cause: `--unified=3` reports each hunk's new-side start up to 3 *context* lines above the first real change, so near a function boundary the anchor lands on the preceding `def`/`return`. Fixed: `parseHunkRanges` now walks the hunk body to find the first/last actually-added (`+`) new-side lines (`changeStart`/`changeEnd`); `buildLensDescriptors` anchors AND labels on those instead of the header span. Deviation from issue's literal "hunk header range" — intentional, more accurate. 374 tests green. Needs human re-test after F5 relaunch.
