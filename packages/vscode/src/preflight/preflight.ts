@@ -21,10 +21,10 @@ import type { TowerClient } from '@cluesmith/codev-core/tower-client';
 import {
   decidePreflight,
   decideTowerStatus,
+  DEFAULT_VERSION_TIMEOUT_MS,
   parseCliVersion,
   preflightFeedbackMessage,
   resolveCodevPath,
-  resolveVersionTimeout,
   runCodevVersion,
   towerDivergenceMessage,
   type PreflightStatus,
@@ -113,9 +113,12 @@ async function performPreflight(): Promise<PreflightStatus> {
   const extVersion = context.extension.packageJSON.version as string;
 
   const codevPath = resolveCodevPath(workspacePath, existsSync);
-  const timeoutMs = resolveVersionTimeout(
-    vscode.workspace.getConfiguration('codev').get<number>(VERSION_TIMEOUT_SETTING),
-  );
+  // VSCode resolves an unset setting to the package.json-declared default, and
+  // enforces the contributed `minimum`/`maximum` in its settings UI; the inline
+  // default here is the belt-and-suspenders fallback for that read.
+  const timeoutMs = vscode.workspace
+    .getConfiguration('codev')
+    .get<number>(VERSION_TIMEOUT_SETTING, DEFAULT_VERSION_TIMEOUT_MS);
   const { ok, stdout, timedOut } = await runCodevVersion(codevPath, workspacePath, timeoutMs);
   const cliVersion = parseCliVersion(stdout);
   const status = decidePreflight({ cliFound: ok, cliVersion, extVersion });

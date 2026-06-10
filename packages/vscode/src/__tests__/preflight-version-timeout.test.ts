@@ -1,11 +1,14 @@
 /**
- * Unit tests for the #1024 probe-timeout logic: the pure `resolveVersionTimeout`
- * defaulting/clamping and the `runCodevVersion` probe honouring its `timeoutMs`.
+ * Unit tests for the #1024 probe-timeout behavior. `runCodevVersion` lives in
+ * `preflight-core.ts` (vscode-free), so this runs under vitest with no vscode
+ * mock. It spawns a real process; we drive it with tiny temp scripts (a fast one
+ * that prints a version, a slow one that hangs) so the timeout path is exercised
+ * deterministically without depending on `codev`.
  *
- * Both live in `preflight-core.ts` (vscode-free), so this runs under vitest with
- * no vscode mock. `runCodevVersion` spawns a real process; we drive it with tiny
- * temp scripts (a fast one that prints a version, a slow one that hangs) so the
- * timeout path is exercised deterministically without depending on `codev`.
+ * The setting → timeout plumbing in `preflight.ts` is just an idiomatic
+ * `getConfiguration('codev').get<number>(key, DEFAULT_VERSION_TIMEOUT_MS)` read
+ * (VSCode supplies the package.json default when unset, and enforces the
+ * contributed min/max in its settings UI), so it isn't unit-tested here.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -14,34 +17,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_VERSION_TIMEOUT_MS,
-  MIN_VERSION_TIMEOUT_MS,
-  MAX_VERSION_TIMEOUT_MS,
-  resolveVersionTimeout,
   runCodevVersion,
 } from '../preflight/preflight-core.js';
-
-describe('resolveVersionTimeout', () => {
-  it('falls back to the default when the setting is unset', () => {
-    // Negative case (#1024 acceptance): setting unset → default, not 400.
-    expect(resolveVersionTimeout(undefined)).toBe(DEFAULT_VERSION_TIMEOUT_MS);
-    expect(resolveVersionTimeout(null)).toBe(DEFAULT_VERSION_TIMEOUT_MS);
-    expect(DEFAULT_VERSION_TIMEOUT_MS).toBe(5000);
-  });
-
-  it('falls back to the default for non-numeric / non-finite values', () => {
-    expect(resolveVersionTimeout(Number.NaN)).toBe(DEFAULT_VERSION_TIMEOUT_MS);
-    expect(resolveVersionTimeout(Infinity)).toBe(DEFAULT_VERSION_TIMEOUT_MS);
-  });
-
-  it('passes a valid in-range value through unchanged', () => {
-    expect(resolveVersionTimeout(12000)).toBe(12000);
-  });
-
-  it('clamps an out-of-range value to [MIN, MAX]', () => {
-    expect(resolveVersionTimeout(10)).toBe(MIN_VERSION_TIMEOUT_MS);
-    expect(resolveVersionTimeout(999999)).toBe(MAX_VERSION_TIMEOUT_MS);
-  });
-});
 
 describe('runCodevVersion', () => {
   let dir: string;
@@ -65,11 +42,23 @@ describe('runCodevVersion', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('keeps the default budget at 5000ms (regression guard against the old 400ms)', () => {
+    expect(DEFAULT_VERSION_TIMEOUT_MS).toBe(5000);
+  });
+
   it('resolves ok with stdout when the probe completes within budget', async () => {
     const result = await runCodevVersion(fastBin, null, 5000);
     expect(result.ok).toBe(true);
     expect(result.timedOut).toBe(false);
     expect(result.stdout).toContain('3.1.9');
+  });
+
+  it('falls back to the default budget when no timeoutMs is passed', async () => {
+    // Negative case (#1024 acceptance): with the setting unset, the glue passes
+    // the default through; the probe must still succeed under it, not hang.
+    const result = await runCodevVersion(fastBin, null);
+    expect(result.ok).toBe(true);
+    expect(result.timedOut).toBe(false);
   });
 
   it('honours an explicit timeoutMs: kills a hung probe and reports timedOut', async () => {

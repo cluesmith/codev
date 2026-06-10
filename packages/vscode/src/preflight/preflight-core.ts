@@ -21,28 +21,6 @@ import { resolve } from 'node:path';
  * Overridable per-workspace via the `codev.cliVersionTimeoutMs` setting.
  */
 export const DEFAULT_VERSION_TIMEOUT_MS = 5000;
-/** Floor for `codev.cliVersionTimeoutMs` (matches the package.json `minimum`). */
-export const MIN_VERSION_TIMEOUT_MS = 100;
-/**
- * Ceiling for `codev.cliVersionTimeoutMs` (matches the package.json `maximum`).
- * A soft sanity check: beyond 60s something else is genuinely wrong (binary
- * actually hung, PATH broken) and a longer cap just hides it.
- */
-export const MAX_VERSION_TIMEOUT_MS = 60000;
-
-/**
- * Resolve the effective probe timeout from the (possibly unset / out-of-range)
- * `codev.cliVersionTimeoutMs` setting value. Falls back to the default when the
- * setting is unset or non-numeric, and clamps to [MIN, MAX] otherwise — VSCode
- * surfaces the min/max in its settings UI but a hand-edited settings.json can
- * still pass an out-of-range number.
- */
-export function resolveVersionTimeout(configured: number | undefined | null): number {
-  if (typeof configured !== 'number' || !Number.isFinite(configured)) {
-    return DEFAULT_VERSION_TIMEOUT_MS;
-  }
-  return Math.min(MAX_VERSION_TIMEOUT_MS, Math.max(MIN_VERSION_TIMEOUT_MS, configured));
-}
 
 /**
  * Spawn `codev --version` with a hard timeout. Resolves `{ ok, stdout, timedOut }`;

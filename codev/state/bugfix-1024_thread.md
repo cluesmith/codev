@@ -56,3 +56,24 @@ non-blocking, but addressed in f855d227 (comment-only, version-agnostic now).
 
 Notified architect. Ran `porch done` → `porch gate` → now WAITING at the `pr`
 gate for `porch approve bugfix-1024 pr`. STOP here per strict-mode protocol.
+
+## Simplification (architect review at pr gate)
+
+Architect pushed back on the `resolveVersionTimeout` helper + MIN/MAX constants
+as over-built for a constant-bump bugfix. Walked through it: the helper's stated
+purpose (unset-fallback) is dead at runtime — VSCode returns the package.json
+`default` for an unset setting, so the undefined branch only ran in tests; its
+only live value was the clamp + a non-number guard, both marginal for a
+`"type": "number"` setting VSCode already validates in its UI.
+
+Collapsed to the codebase idiom (matches `overviewRefreshSeconds`):
+`getConfiguration('codev').get<number>(KEY, DEFAULT_VERSION_TIMEOUT_MS)`.
+Deleted `resolveVersionTimeout`, `MIN_VERSION_TIMEOUT_MS`, `MAX_VERSION_TIMEOUT_MS`.
+Bounds (100/60000) now live only in package.json (UI-enforced). `5000` lives in
+package.json + `DEFAULT_VERSION_TIMEOUT_MS` (param default + test anchor) — the
+irreducible minimum. Trade-off accepted: no runtime clamp of a hand-edited
+out-of-range `settings.json` value.
+
+Tests: dropped the resolveVersionTimeout cases; runCodevVersion suite now covers
+explicit-timeout (positive), default-when-omitted (negative), ok/spawn-error,
+and the 5000 regression anchor. check-types + lint + vitest green (41 tests).
