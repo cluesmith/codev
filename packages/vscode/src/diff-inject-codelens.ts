@@ -1,27 +1,41 @@
 /**
- * CodeLens provider backing the "Forward to Builder" actions in the
- * `codev.viewDiff` multi-file diff editor (issue #789).
+ * CodeLens provider backing the "Forward to Builder" actions in the builder
+ * diff (#789).
  *
- * The right side of each file in that editor is a plain `file:` document at
- * `<worktree>/<repo-relative-path>`, so we register against `{ scheme: 'file' }`
- * and emit lenses only for documents whose fs path is in the *active diff
- * session* registry. `viewDiff` replaces that registry (via
- * `setDiffInjectSession`) on each invocation, so lenses are scoped to the
- * files the reviewer just opened for diffing; any other `file:` document
- * returns `[]` and is unaffected.
+ * Lenses are driven by **document symbols** (functions/classes/interfaces/
+ * methods), not git hunks, so granularity follows the code and a brand-new
+ * file is as forwardable as a modified one. The right side of each file in the
+ * diff is a plain `file:` document at `<worktree>/<repo-relative-path>`, so we
+ * register against `{ scheme: 'file' }` and emit lenses only for documents
+ * whose fs path is in the *active diff session* registry. `viewDiff` and the
+ * per-file diff replace/extend that registry, so lenses are scoped to the
+ * files the reviewer opened for diffing; any other `file:` document returns
+ * `[]`.
  *
  * Clicking a lens runs `codev.forwardToBuilder` (a palette-hidden command
  * registered in `extension.ts`), which opens/reveals the builder terminal and
- * types the reference into its prompt without pressing Enter — mirroring the
- * architect-reference pattern (`codev.referenceIssueInArchitect`).
+ * types the reference into its prompt without pressing Enter.
+ *
+ * The registry also backs the `codev.activeEditorIsBuilderFile` context key
+ * (set on active-editor change) that scopes the right-click "Forward Selection
+ * to Builder" menu item to tracked builder-diff files.
+ *
+ * NOTE: CodeLens is suppressed in the multi-file `vscode.changes` editor, so
+ * these lenses render in the per-file `vscode.diff` and normal editor tabs
+ * (with `diffEditor.codeLens` enabled). The selection context-menu action is
+ * the path that works inside the multi-file editor.
  */
 
 import * as vscode from 'vscode';
-import { buildLensDescriptors, type HunkRange } from './diff-inject-ref.js';
+import { buildSymbolLensDescriptors, type SymbolNode } from './diff-inject-ref.js';
 
 /** Command id the lenses invoke. Registered in `extension.ts`, NOT declared in
  *  `contributes.commands`, so it never appears in the Command Palette. */
 export const FORWARD_TO_BUILDER_COMMAND = 'codev.forwardToBuilder';
+
+/** Context key (true when the active editor is a tracked builder-diff file) that
+ *  scopes the `editor/context` "Forward Selection to Builder" item. */
+export const BUILDER_FILE_CONTEXT_KEY = 'codev.activeEditorIsBuilderFile';
 
 /** One changed file in the active diff session, keyed by its right-side fs path. */
 export interface DiffInjectSessionEntry {
@@ -31,8 +45,16 @@ export interface DiffInjectSessionEntry {
   builderId: string;
   /** Repo-relative path injected into the prompt. */
   relPath: string;
-  /** New-side hunk ranges for the per-hunk lenses. */
-  hunks: HunkRange[];
+}
+
+/** Map a `vscode.DocumentSymbol` tree to the pure `SymbolNode` shape. */
+function toSymbolNode(s: vscode.DocumentSymbol): SymbolNode {
+  return {
+    kind: s.kind as number,
+    startLine: s.range.start.line,
+    endLine: s.range.end.line,
+    children: s.children?.map(toSymbolNode) ?? [],
+  };
 }
 
 class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
@@ -53,11 +75,32 @@ class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
     this._onDidChangeCodeLenses.fire();
   }
 
-  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+  get(fsPath: string): DiffInjectSessionEntry | undefined {
+    return this.registry.get(fsPath);
+  }
+
+  async provideCodeLenses(
+    document: vscode.TextDocument,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.CodeLens[]> {
     const entry = this.registry.get(document.uri.fsPath);
     if (!entry) { return []; }
+
+    let symbols: vscode.DocumentSymbol[] = [];
+    try {
+      symbols =
+        (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+          'vscode.executeDocumentSymbolProvider',
+          document.uri,
+        )) ?? [];
+    } catch {
+      symbols = [];
+    }
+    if (token.isCancellationRequested) { return []; }
+
+    const nodes = symbols.map(toSymbolNode);
     const lastLine = Math.max(document.lineCount - 1, 0);
-    return buildLensDescriptors(entry.relPath, entry.hunks).map(d => {
+    return buildSymbolLensDescriptors(entry.relPath, nodes).map(d => {
       const line = Math.min(Math.max(d.line, 0), lastLine);
       const range = new vscode.Range(line, 0, line, 0);
       return new vscode.CodeLens(range, {
@@ -75,11 +118,19 @@ class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
 
 const provider = new DiffInjectCodeLensProvider();
 
-/** Register the provider for `file:` documents. Called once at activation,
+/** Register the provider for `file:` documents and keep the builder-file
+ *  context key in sync with the active editor. Called once at activation,
  *  alongside `activateDiffView`. */
 export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): void {
+  const syncContextKey = (editor: vscode.TextEditor | undefined): void => {
+    const isBuilderFile = !!editor && provider.get(editor.document.uri.fsPath) !== undefined;
+    void vscode.commands.executeCommand('setContext', BUILDER_FILE_CONTEXT_KEY, isBuilderFile);
+  };
+  syncContextKey(vscode.window.activeTextEditor);
+
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, provider),
+    vscode.window.onDidChangeActiveTextEditor(syncContextKey),
     provider,
   );
 }
@@ -94,4 +145,10 @@ export function setDiffInjectSession(entries: DiffInjectSessionEntry[]): void {
  *  per-file diff path so its lenses appear without a prior `viewDiff` run. */
 export function upsertDiffInjectEntry(entry: DiffInjectSessionEntry): void {
   provider.upsert(entry);
+}
+
+/** Look up the tracked builder-diff entry for a file path (the selection
+ *  command uses this to resolve the owning builder + repo-relative path). */
+export function getDiffInjectEntry(fsPath: string): DiffInjectSessionEntry | undefined {
+  return provider.get(fsPath);
 }

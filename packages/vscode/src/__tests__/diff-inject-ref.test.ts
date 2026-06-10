@@ -1,136 +1,33 @@
 /**
- * Unit tests for the pure diff/ref helpers behind the "Forward to Builder"
+ * Unit tests for the pure symbol/ref helpers behind the "Forward to Builder"
  * CodeLens actions (#789). No `vscode` dependency, so the live implementation
  * is imported directly (same pattern as `architect-reference-injection.test.ts`).
  */
 
 import { describe, it, expect } from 'vitest';
 import {
-  parseHunkRanges,
-  parseUnifiedDiff,
   buildBuilderFileRef,
-  buildBuilderHunkRef,
-  buildLensDescriptors,
+  buildBuilderRangeRef,
+  buildSymbolLensDescriptors,
+  type SymbolNode,
 } from '../diff-inject-ref.js';
 
-describe('parseHunkRanges', () => {
-  it('reads the header span and the first/last actually-changed new-side lines', () => {
-    const patch = [
-      '@@ -1,4 +1,6 @@',
-      ' a',     // new line 1 (context)
-      '+b',     // new line 2 (added) ← first/last change
-      ' c',     // new line 3 (context)
-      '@@ -20,3 +22,10 @@ func()',
-      ' x',     // new line 22 (context)
-      ' y',     // new line 23 (context)
-      '+z1',    // new line 24 (added) ← first change
-      '+z2',    // new line 25 (added) ← last change
-      ' w',     // new line 26 (context)
-    ].join('\n');
-    expect(parseHunkRanges(patch)).toEqual([
-      { newStart: 1, newEnd: 6, changeStart: 2, changeEnd: 2 },
-      { newStart: 22, newEnd: 31, changeStart: 24, changeEnd: 25 },
-    ]);
-  });
+// Numeric vscode.SymbolKind values used by the tests.
+const K = {
+  Class: 4,
+  Method: 5,
+  Property: 6,
+  Constructor: 8,
+  Enum: 9,
+  Interface: 10,
+  Function: 11,
+  Variable: 12,
+  Constant: 13,
+} as const;
 
-  it('does not let deleted (-) lines advance the new-side line counter', () => {
-    const patch = [
-      '@@ -10,4 +10,3 @@',
-      ' ctx',   // new line 10
-      '-gone1',  // old-side only
-      '-gone2',  // old-side only
-      '+added',  // new line 11 ← the change
-      ' tail',   // new line 12
-    ].join('\n');
-    expect(parseHunkRanges(patch)).toEqual([
-      { newStart: 10, newEnd: 12, changeStart: 11, changeEnd: 11 },
-    ]);
-  });
-
-  it('treats an absent new-side length as a single line', () => {
-    expect(parseHunkRanges('@@ -10 +11 @@\n+added')).toEqual([
-      { newStart: 11, newEnd: 11, changeStart: 11, changeEnd: 11 },
-    ]);
-  });
-
-  it('falls back to the header start for a pure-deletion hunk (no + lines)', () => {
-    expect(parseHunkRanges('@@ -5,3 +4,0 @@\n-gone')).toEqual([
-      { newStart: 4, newEnd: 4, changeStart: 4, changeEnd: 4 },
-    ]);
-  });
-
-  it('ignores the "\\ No newline at end of file" marker', () => {
-    const patch = ['@@ -1,1 +1,2 @@', ' a', '+b', '\\ No newline at end of file'].join('\n');
-    expect(parseHunkRanges(patch)).toEqual([
-      { newStart: 1, newEnd: 2, changeStart: 2, changeEnd: 2 },
-    ]);
-  });
-
-  it('ignores non-hunk lines, including content that looks like @@', () => {
-    const patch = ['+const x = "@@ not a header";', '@@ -1,1 +1,2 @@', '+real'].join('\n');
-    expect(parseHunkRanges(patch)).toEqual([
-      { newStart: 1, newEnd: 2, changeStart: 1, changeEnd: 1 },
-    ]);
-  });
-});
-
-describe('parseUnifiedDiff', () => {
-  it('maps each file new-path to its hunk ranges', () => {
-    const patch = [
-      'diff --git a/src/a.ts b/src/a.ts',
-      'index 111..222 100644',
-      '--- a/src/a.ts',
-      '+++ b/src/a.ts',
-      '@@ -1,2 +1,3 @@',
-      ' x',
-      '+y',
-      'diff --git a/src/b.ts b/src/b.ts',
-      'index 333..444 100644',
-      '--- a/src/b.ts',
-      '+++ b/src/b.ts',
-      '@@ -10,0 +11,2 @@',
-      '+p',
-      '+q',
-    ].join('\n');
-    const map = parseUnifiedDiff(patch);
-    expect(map.get('src/a.ts')).toEqual([
-      { newStart: 1, newEnd: 3, changeStart: 2, changeEnd: 2 },
-    ]);
-    expect(map.get('src/b.ts')).toEqual([
-      { newStart: 11, newEnd: 12, changeStart: 11, changeEnd: 12 },
-    ]);
-  });
-
-  it('uses the new path for a rename (+++ b/<new>)', () => {
-    const patch = [
-      'diff --git a/old/name.ts b/new/name.ts',
-      'similarity index 90%',
-      'rename from old/name.ts',
-      'rename to new/name.ts',
-      '--- a/old/name.ts',
-      '+++ b/new/name.ts',
-      '@@ -3,1 +3,2 @@',
-      '+added',
-    ].join('\n');
-    const map = parseUnifiedDiff(patch);
-    expect([...map.keys()]).toEqual(['new/name.ts']);
-    expect(map.get('new/name.ts')).toEqual([
-      { newStart: 3, newEnd: 4, changeStart: 3, changeEnd: 3 },
-    ]);
-  });
-
-  it('omits deleted files (new side is /dev/null)', () => {
-    const patch = [
-      'diff --git a/gone.ts b/gone.ts',
-      'deleted file mode 100644',
-      '--- a/gone.ts',
-      '+++ /dev/null',
-      '@@ -1,3 +0,0 @@',
-      '-x',
-    ].join('\n');
-    expect(parseUnifiedDiff(patch).size).toBe(0);
-  });
-});
+function sym(kind: number, startLine: number, endLine: number, children: SymbolNode[] = []): SymbolNode {
+  return { kind, startLine, endLine, children };
+}
 
 describe('ref builders', () => {
   it('builds a file ref with a trailing space and no newline', () => {
@@ -138,50 +35,74 @@ describe('ref builders', () => {
       .toBe('packages/vscode/src/extension.ts ');
   });
 
-  it('builds a hunk ref with the L<start>-L<end> range', () => {
-    expect(buildBuilderHunkRef('a/b.ts', 10, 20)).toBe('a/b.ts:L10-L20 ');
+  it('builds a range ref with the L<start>-L<end> range', () => {
+    expect(buildBuilderRangeRef('a/b.ts', 10, 20)).toBe('a/b.ts:L10-L20 ');
   });
 });
 
-describe('buildLensDescriptors', () => {
-  it('emits a file-level lens at line 0 plus one lens per hunk, anchored on the change', () => {
-    const lenses = buildLensDescriptors('a/b.ts', [
-      { newStart: 2, newEnd: 12, changeStart: 5, changeEnd: 9 },
-      { newStart: 28, newEnd: 32, changeStart: 30, changeEnd: 30 },
-    ]);
-    expect(lenses).toEqual([
-      { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-9)', refText: 'a/b.ts:L5-L9 ' },
-      { line: 29, title: 'Forward to Builder (lines 30-30)', refText: 'a/b.ts:L30-L30 ' },
-    ]);
-  });
-
-  it('skips a hunk that anchors on the file-level lens line (added file / first-line change)', () => {
-    // A newly-added file is one whole-file hunk starting at line 1, so its
-    // hunk lens would anchor at line 0 and stack on the file-level lens. Only
-    // the file-level lens should remain.
-    const lenses = buildLensDescriptors('a/b.ts', [
-      { newStart: 1, newEnd: 17, changeStart: 1, changeEnd: 17 },
-    ]);
-    expect(lenses).toEqual([
+describe('buildSymbolLensDescriptors', () => {
+  it('always emits a file-level lens at line 0', () => {
+    expect(buildSymbolLensDescriptors('a/b.ts', [])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
     ]);
   });
 
-  it('keeps hunks below line 1 even when an earlier hunk was skipped at line 0', () => {
-    const lenses = buildLensDescriptors('a/b.ts', [
-      { newStart: 1, newEnd: 3, changeStart: 1, changeEnd: 3 },   // anchors line 0 → skipped
-      { newStart: 48, newEnd: 52, changeStart: 50, changeEnd: 52 }, // anchors line 49 → kept
-    ]);
-    expect(lenses).toEqual([
+  it('lenses top-level structural declarations with their full range', () => {
+    const symbols = [
+      sym(K.Function, 4, 9),    // function → line 4, L5-L10
+      sym(K.Interface, 12, 18), // interface → line 12, L13-L19
+      sym(K.Enum, 20, 24),      // enum → line 20, L21-L25
+    ];
+    expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 49, title: 'Forward to Builder (lines 50-52)', refText: 'a/b.ts:L50-L52 ' },
+      { line: 4, title: 'Forward to Builder', refText: 'a/b.ts:L5-L10 ' },
+      { line: 12, title: 'Forward to Builder', refText: 'a/b.ts:L13-L19 ' },
+      { line: 20, title: 'Forward to Builder', refText: 'a/b.ts:L21-L25 ' },
     ]);
   });
 
-  it('emits just the file-level lens when there are no hunks', () => {
-    expect(buildLensDescriptors('a/b.ts', [])).toEqual([
+  it('descends one level into a class for methods and the constructor', () => {
+    const cls = sym(K.Class, 3, 40, [
+      sym(K.Constructor, 5, 8),
+      sym(K.Method, 10, 20),
+      sym(K.Property, 22, 22), // excluded
+    ]);
+    expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
+      { line: 3, title: 'Forward to Builder', refText: 'a/b.ts:L4-L41 ' },   // class
+      { line: 5, title: 'Forward to Builder', refText: 'a/b.ts:L6-L9 ' },    // constructor
+      { line: 10, title: 'Forward to Builder', refText: 'a/b.ts:L11-L21 ' }, // method
+    ]);
+  });
+
+  it('lenses a top-level multi-line Variable/Constant but skips one-line ones', () => {
+    const symbols = [
+      sym(K.Variable, 4, 12),  // multi-line const (e.g. arrow component) → lensed
+      sym(K.Constant, 14, 14), // one-line scalar → skipped
+    ];
+    expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
+      { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
+      { line: 4, title: 'Forward to Builder', refText: 'a/b.ts:L5-L13 ' },
+    ]);
+  });
+
+  it('skips a symbol that anchors on line 0 (collides with the file-level lens)', () => {
+    // A file whose first declaration starts at line 0.
+    const symbols = [sym(K.Function, 0, 30)];
+    expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
+      { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
+    ]);
+  });
+
+  it('does not lens excluded top-level kinds (Property) or recurse past one level', () => {
+    const cls = sym(K.Class, 2, 50, [
+      sym(K.Class, 10, 40, [   // nested class: not lensed, not recursed
+        sym(K.Method, 12, 20),
+      ]),
+    ]);
+    expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
+      { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
+      { line: 2, title: 'Forward to Builder', refText: 'a/b.ts:L3-L51 ' },
     ]);
   });
 });
