@@ -1,9 +1,21 @@
 id: '945'
 title: build-foundational-reusable-pa
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Package skeleton, dual-format build, locked interfaces, theme tokens
+    status: in_progress
+  - id: phase_2
+    title: 'Markdown renderer: data-line mapping + DOMPurify sanitization'
+    status: pending
+  - id: phase_3
+    title: Comment overlay (intent-only) + v1 marker rendering + adapter wire-up
+    status: pending
+  - id: phase_4
+    title: Smoke-test host, README, cross-cutting tests
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-30T23:09:36.579Z'
-updated_at: '2026-06-10T00:06:53.615Z'
+updated_at: '2026-06-10T00:07:13.992Z'
