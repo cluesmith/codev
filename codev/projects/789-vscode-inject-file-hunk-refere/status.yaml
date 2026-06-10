@@ -1,7 +1,7 @@
 id: '789'
 title: vscode-inject-file-hunk-refere
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-06-09T22:20:14.795Z'
-updated_at: '2026-06-10T08:43:33.508Z'
+updated_at: '2026-06-10T08:43:47.162Z'
 pr_history:
   - phase: review
     pr_number: 1023
