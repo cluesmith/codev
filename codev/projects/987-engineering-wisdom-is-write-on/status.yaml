@@ -17,11 +17,11 @@ plan_phases:
     status: complete
   - id: phase_5
     title: Producer routing (review prompts, both trees)
-    status: in_progress
+    status: complete
   - id: phase_6
     title: MAINTAIN + skill policing, docs sweep, consistency
-    status: pending
-current_plan_phase: phase_5
+    status: in_progress
+current_plan_phase: phase_6
 gates:
   spec-approval:
     status: approved
@@ -35,8 +35,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -115,4 +115,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_5-iter1-claude.txt
 started_at: '2026-06-04T15:42:17.225Z'
-updated_at: '2026-06-12T02:01:33.955Z'
+updated_at: '2026-06-12T02:04:41.842Z'
