@@ -1,7 +1,7 @@
 id: '987'
 title: engineering-wisdom-is-write-on
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: 'Hot files: curation, cap, placement'
@@ -38,7 +38,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -129,5 +129,5 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_6-iter1-claude.txt
 started_at: '2026-06-04T15:42:17.225Z'
-updated_at: '2026-06-12T04:40:20.160Z'
+updated_at: '2026-06-12T23:43:20.447Z'
 pr_ready_for_human: false
