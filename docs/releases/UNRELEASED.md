@@ -33,6 +33,31 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Foundational package for cross-surface markdown artifact review: `@cluesmith/codev-artifact-canvas` (#945, PR #1027)
+
+A new internal workspace package ships at `packages/artifact-canvas/`: a host-agnostic React library for rendering and reviewing Codev markdown artifacts (specs, plans, reviews) across surfaces (VSCode, dashboard, future mobile). Standalone in v1 and not directly visible to end users in this release. Hosts wire it up by implementing three small adapter interfaces (`FileAdapter`, `MarkerAdapter`, `ThemeAdapter`); the VSCode and dashboard integrations land in follow-up cycles.
+
+What's in it:
+
+- **Markdown renderer** with `markdown-it` (`html: false`) plus DOMPurify sanitization. 0-based `data-line` attribution on block tokens enables per-line marker overlay positioning.
+- **`ArtifactCanvas` component**: intent-only comment overlay (emits `onAddComment(line)`, never writes markers itself), minimal v1 marker rendering, adapter-driven data flow with request-versioning, warn-once out-of-range handling, and a no-watcher `refreshKey` refresh path. Keyboard-accessible (focusable blocks, Enter/Space, ARIA).
+- **Adapter contracts**: three small host-implemented interfaces. `FileAdapter` (read + watch), `MarkerAdapter` (list/add), `ThemeAdapter` (JS-side, off the v1 render path).
+- **CSS-variable theming**: 8 `--codev-canvas-*` tokens plus a `./default-theme.css` export. Hosts theme by overriding the tokens; no JS theming on the render path.
+- **Dual-format build** (CJS + ESM + `.d.ts`) via `tsup`. React externalized as a peer (`^18 || ^19`).
+- **Smoke-test host** under `packages/artifact-canvas/examples/` with a full e2e round-trip test (mouse and keyboard), a Vite dev page, and a comprehensive README.
+
+What it enables in subsequent cycles (already filed):
+
+- **#859** — add review comments from the markdown preview pane (the canvas-powered comment surface in VSCode).
+- **#860** — review summary webview aggregating all REVIEW markers.
+- **#863** — marker-aware features in the markdown preview.
+- **#1036** — raw `<!-- REVIEW -->` HTML-comment rendering (deferred from this PR's visual review; stripping shifts `data-line` accounting and entangles with host serialization).
+- **#1029** — package web/native layering decision (filed during review).
+
+Also worth a note: **#1028** — systemic tracker filed during PR review for the "prefer render-time attributes over post-render effect DOM-mutation for anything tests or accessibility tools read synchronously" pattern, surfaced from two CI-only races on this PR (an e2e overlay race and a `tabindex` race). Not a fix in this release; a tracker capturing the principle so future packages and effects in the codebase avoid the same class of race.
+
+End-user-facing release content for this release stays the same; the canvas itself becomes visible when the next cycle's surfaces land on top of it.
+
 ## Code-review feedback: codelens in the unified diff editor injects file / hunk references into the builder PTY (#789, PR #1023)
 
 Architect-side review used to slow down at one specific point: you'd see something in the unified diff editor, want to give the builder targeted feedback about it, switch to the builder PTY, and type the file path and line range by hand into the prompt before adding your actual feedback. The file path was the typing bottleneck — error-prone, slow, and outside the diff editor where your attention already was.
