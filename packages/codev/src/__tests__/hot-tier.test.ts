@@ -58,6 +58,41 @@ function bulletsUnder(content: string, headingPrefix: string): number {
   return count;
 }
 
+// Top-level `## ` heading texts of a markdown doc.
+function topLevelHeadings(content: string): string[] {
+  return content
+    .split('\n')
+    .filter((l) => l.startsWith('## '))
+    .map((l) => l.slice(3).trim());
+}
+
+// The topic each map bullet points at: the text before the " — consult when…" guidance.
+function mapTopics(content: string): string[] {
+  const topics: string[] = [];
+  let inMap = false;
+  for (const line of content.split('\n')) {
+    if (line.startsWith('## ')) {
+      inMap = line.startsWith('## Map');
+    } else if (inMap && line.startsWith('- ')) {
+      topics.push(line.slice(2).split(' — ')[0].trim());
+    }
+  }
+  return topics;
+}
+
+// A map topic is accurate if it names a real cold-doc section — exact match, or a
+// prefix of one (so "Critical" maps "Critical (Prevent Major Failures)"). This
+// enforces accuracy without requiring completeness (the map is bounded by design).
+function isRealSection(topic: string, headings: string[]): boolean {
+  return headings.some((h) => h === topic || h.startsWith(`${topic} `));
+}
+
+// Which cold doc each real hot file maps.
+const COLD_DOC: Record<string, string> = {
+  'arch-critical.md': 'codev/resources/arch.md',
+  'lessons-critical.md': 'codev/resources/lessons-learned.md',
+};
+
 describe('Spec 987 — hot tier placement and cap', () => {
   it('every hot file exists at all four placement locations and is non-empty', () => {
     for (const dir of PLACEMENTS) {
@@ -95,6 +130,23 @@ describe('Spec 987 — hot tier placement and cap', () => {
 
       // The map must point at its sibling cold doc with "consult when" guidance.
       expect(content).toMatch(/## Map of (arch|lessons-learned)\.md \(consult when/);
+    }
+  });
+
+  it('every map topic in the real hot files names a real top-level section of its cold doc', () => {
+    // Accuracy (not completeness): the map is bounded/curated by design, so it need not
+    // list every cold-doc section — but every topic it DOES list must be a real one.
+    for (const file of HOT_FILES) {
+      const hot = read(`${REAL_DIR}/${file}`);
+      const headings = topLevelHeadings(read(COLD_DOC[file]));
+      const topics = mapTopics(hot);
+      expect(topics.length, `${file}: map should have topics`).toBeGreaterThan(0);
+      for (const topic of topics) {
+        expect(
+          isRealSection(topic, headings),
+          `${file}: map topic "${topic}" is not a real top-level section of ${COLD_DOC[file]}`
+        ).toBe(true);
+      }
     }
   });
 

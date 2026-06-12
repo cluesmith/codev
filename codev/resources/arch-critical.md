@@ -26,4 +26,6 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 - System-Wide Patterns — adding cross-cutting behavior.
 - Integration Points — crossing a subsystem or process boundary.
 - Monorepo Structure — adding a package or build wiring.
+- Technology Stack — choosing or upgrading a dependency.
+- VS Code Extension — changing sidebar views, commands, or keybindings.
 - Glossary — when a term is unfamiliar.
