@@ -4,7 +4,13 @@
         "packages/vscode/dist": true,
         "packages/codev/dist": true
     },
+    "files.watcherExclude": {
+        "**/.builders/**": true,
+        "**/node_modules/**": true
+    },
     "search.exclude": {
+        "**/.builders/**": true,
+        "**/node_modules/**": true,
         "packages/vscode/out": true,
         "packages/vscode/dist": true,
         "packages/codev/dist": true

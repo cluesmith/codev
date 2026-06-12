@@ -11,7 +11,7 @@
 
 ## Setup
 
-* install the recommended extensions (amodio.tsl-problem-matcher, ms-vscode.extension-test-runner, and dbaeumer.vscode-eslint)
+* install the recommended extensions (dbaeumer.vscode-eslint and connor4312.esbuild-problem-matchers)
 
 
 ## Get up and running straight away
@@ -33,7 +33,7 @@
 
 ## Run tests
 
-* Install the [Extension Test Runner](https://marketplace.visualstudio.com/items?itemName=ms-vscode.extension-test-runner)
+* Install the [Extension Test Runner](https://marketplace.visualstudio.com/items?itemName=ms-vscode.extension-test-runner). It is deliberately not in the workspace's recommended extensions: its test discovery walks the whole tree ignoring `.gitignore`, which is very expensive on workspaces containing `.builders/` worktrees. Install it only when working on extension tests.
 * Run the "watch" task via the **Tasks: Run Task** command. Make sure this is running, or tests might not be discovered.
 * Open the Testing view from the activity bar and click the Run Test" button, or use the hotkey `Ctrl/Cmd + ; A`
 * See the output of the test result in the Test Results view.
