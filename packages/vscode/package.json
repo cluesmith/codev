@@ -279,6 +279,11 @@
         "icon": "$(mention)"
       },
       {
+        "command": "codev.referencePRInArchitect",
+        "title": "Codev: Reference PR in Architect",
+        "icon": "$(mention)"
+      },
+      {
         "command": "codev.openBacklogIssue",
         "title": "Codev: Open Issue in Browser"
       },
@@ -317,6 +322,10 @@
         },
         {
           "command": "codev.referenceIssueInArchitect",
+          "when": "false"
+        },
+        {
+          "command": "codev.referencePRInArchitect",
           "when": "false"
         },
         {
@@ -487,6 +496,11 @@
         {
           "command": "codev.referenceIssueInArchitect",
           "when": "view == codev.backlog && viewItem == backlog-item",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.referencePRInArchitect",
+          "when": "view == codev.pullRequests && viewItem == pull-request",
           "group": "inline@1"
         },
         {

@@ -35,7 +35,7 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
 import { BuildersProvider, AccordionGate } from './views/builders.js';
-import { PullRequestsProvider } from './views/pull-requests.js';
+import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
 import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.js';
 import { RecentlyClosedProvider } from './views/recently-closed.js';
@@ -779,6 +779,16 @@ export async function activate(context: vscode.ExtensionContext) {
 			const title = extractIssueTitle(arg);
 			await vscode.commands.executeCommand('codev.openArchitectTerminal');
 			const ok = terminalManager?.injectArchitectText(buildArchitectReferenceInjection(issueId, title));
+			if (!ok) {
+				vscode.window.showWarningMessage('Codev: Architect terminal not available');
+			}
+		}),
+		regCli('codev.referencePRInArchitect', async (arg: vscode.TreeItem | undefined) => {
+			// Inline-button action on a PR row in the Pull Requests sidebar:
+			// mirror of codev.referenceIssueInArchitect for PR rows (#1043).
+			if (!(arg instanceof PullRequestTreeItem)) { return; }
+			await vscode.commands.executeCommand('codev.openArchitectTerminal');
+			const ok = terminalManager?.injectArchitectText(buildArchitectReferenceInjection(arg.prId, arg.prTitle));
 			if (!ok) {
 				vscode.window.showWarningMessage('Codev: Architect terminal not available');
 			}

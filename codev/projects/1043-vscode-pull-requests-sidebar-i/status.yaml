@@ -1,0 +1,17 @@
+id: '1043'
+title: vscode-pull-requests-sidebar-i
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-06-13T22:30:48.760Z'
+    approved_at: '2026-06-13T22:45:50.836Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-13T22:17:41.931Z'
+updated_at: '2026-06-13T22:45:50.837Z'
+pr_ready_for_human: false
