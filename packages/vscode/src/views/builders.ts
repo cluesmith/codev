@@ -10,7 +10,6 @@ import { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import { BuilderFolderTreeItem } from './builder-folder-tree-item.js';
 import { buildFilePathTree, type FilePathNode } from './file-path-tree.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
-import { AreaGroupExpansionStore, type GroupExpansionStore } from './area-group-expansion.js';
 import {
   type BuilderGrouping,
   type BuildersGroupBy,
@@ -74,45 +73,65 @@ export function orderForDisplay(builders: OverviewBuilder[], now: number = Date.
  *    root rows (zero regression for unlabeled repos).
  *
  * In both modes blocked builders sort to the top with a gate icon and wait-time
- * suffix; active builders below. Expand/collapse state persists per group name in
- * `workspaceState` under a per-axis key (`codev.buildersStageGroupExpansion` /
- * `codev.buildersGroupExpansion`) so the two modes don't clobber each other.
+ * suffix; active builders below.
+ *
+ * Group expand/collapse state is **not** persisted (#913): groups always render
+ * Expanded on a fresh session, and VSCode's native per-id in-session memory
+ * keeps any group the user collapses during the session collapsed until reload.
+ * (Backlog still persists its group state — different lifecycle.)
  */
 export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
-  // One grouping strategy per axis, each owning its own collapse-state store
-  // (separate `workspaceState` keys so collapsing IMPLEMENT in stage mode
-  // doesn't clobber a `vscode` group in area mode; area reuses the original
-  // `codev.buildersGroupExpansion` key so pre-#952 state survives). `active()`
-  // picks the one matching the `codev.buildersGroupBy` setting.
+  // One grouping strategy per axis; `active()` picks the one matching the
+  // `codev.buildersGroupBy` setting. Strategies no longer own a collapse-state
+  // store (#913 dropped Builders-view group persistence).
   private readonly groupings: Record<BuildersGroupBy, BuilderGrouping>;
-  // Stable routing wrapper handed to `persistAreaGroupExpansion`: the view's
-  // expand/collapse events write to whichever strategy's store is active at the
-  // moment of the event, and renders read from the same one. A getter-returning
-  // property wouldn't work — `persistAreaGroupExpansion` captures `.expansion`
-  // once at registration, so the routing must live inside the object.
-  readonly expansion: GroupExpansionStore = {
-    read: () => this.active().expansion.read(),
-    set: (name, expanded) => this.active().expansion.set(name, expanded),
-  };
   // Populated each time `rootChildren()` returns groups; consulted by
   // `getParent` so the accordion's `reveal(builderItem)` can walk the
   // parent chain in grouping mode. Empty in the single-`Uncategorized`
   // flatten case (area mode only — builders are root again), so `getParent`
   // returns `undefined` and the accordion works unchanged on that branch.
   private groupParentByBuilderId = new Map<string, BuilderGroupTreeItem>();
+  // Accordion state (#913). VSCode has no "collapse this row" API and never
+  // forgets a row id it has seen expanded, so the only way to force a builder
+  // row collapsed is to render it under an id VSCode hasn't seen. `gen` is a
+  // monotonic id allocator: every builder except the open one renders as
+  // `<id>#<gen>`; `collapseBuildersExcept` bumps `gen` so all those rows get
+  // fresh (never-expanded) ids and snap shut. The open builder is pinned to
+  // `openGen` so its row id is stable and it stays expanded. Group headers
+  // never carry the suffix, so the accordion can't touch them.
+  private gen = 0;
+  private openBuilderId: string | undefined;
+  private openGen = 0;
 
   constructor(
     private cache: OverviewCache,
     private readonly diffCache: BuilderDiffCache,
-    workspaceState: vscode.Memento,
   ) {
     this.groupings = {
-      stage: stageGrouping(new AreaGroupExpansionStore(workspaceState, 'codev.buildersStageGroupExpansion')),
-      area: areaGrouping(new AreaGroupExpansionStore(workspaceState, 'codev.buildersGroupExpansion')),
+      stage: stageGrouping(),
+      area: areaGrouping(),
     };
     cache.onDidChange(() => this.changeEmitter.fire());
+  }
+
+  /**
+   * Accordion (#913): collapse every builder row except the one just expanded,
+   * without touching group headers. Pins the clicked builder as the open one
+   * (its row id stays put across the re-render, so VSCode keeps it expanded),
+   * then bumps the generation so every *other* builder row re-renders under a
+   * fresh id and VSCode applies the provider's default `Collapsed` state.
+   *
+   * `openGen` is pinned from the clicked element's own rendered id rather than
+   * the current `gen`, so a render that landed between the last bump and this
+   * click can't leave the open row pointing at a stale generation.
+   */
+  collapseBuildersExcept(item: BuilderTreeItem): void {
+    this.openBuilderId = item.builderId;
+    this.openGen = generationOf(item.id) ?? this.gen;
+    this.gen += 1;
+    this.changeEmitter.fire();
   }
 
   /**
@@ -199,14 +218,17 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       return groups[0].items.map(b => this.makeBuilderRow(b, now));
     }
 
-    const expansion = grouping.expansion.read();
+    // Groups always render Expanded (#913) — no persisted state. VSCode's
+    // native per-id memory keeps a user-collapsed group collapsed for the
+    // rest of the session; on a fresh session this default applies again.
     this.groupParentByBuilderId.clear();
     return groups.map(g => {
-      const expanded = expansion[g.key] ?? true;
-      const state = expanded
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.Collapsed;
-      const groupItem = new BuilderGroupTreeItem(g.key, g.items.length, state, rollupGroupState(g.items, now));
+      const groupItem = new BuilderGroupTreeItem(
+        g.key,
+        g.items.length,
+        vscode.TreeItemCollapsibleState.Expanded,
+        rollupGroupState(g.items, now),
+      );
       for (const b of g.items) {
         this.groupParentByBuilderId.set(b.id, groupItem);
       }
@@ -230,10 +252,16 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     const isBlocked = !!b.blocked;
     const isIdle = !isBlocked && isIdleWaiting(b, now);
     const item = new BuilderTreeItem(b.id, builderRowLabel(b, isIdle, now, this.active().rowPrefix(b)));
-    // Stable id (not the churning label) so VSCode persists expansion across
-    // the frequent overview-poll refreshes, and so the accordion's
-    // collapseAll+reveal can target this row reliably.
-    item.id = b.id;
+    // Generation-suffixed id (#913). The base is `b.id` (stable, not the
+    // churning label) so VSCode preserves a row's expansion across the frequent
+    // overview-poll refreshes. The `#<gen>` suffix is the accordion lever: the
+    // open builder is pinned to `openGen` (id stays put → stays expanded), every
+    // other builder uses the current `gen`, so a bump in `collapseBuildersExcept`
+    // hands them never-seen ids and VSCode renders them with the default
+    // Collapsed state. Group ids carry no suffix, so the accordion can't touch
+    // them.
+    const generation = b.id === this.openBuilderId ? this.openGen : this.gen;
+    item.id = `${b.id}#${generation}`;
     // Expandable so the second-level changed-files list can hang off it.
     // The row keeps its open-terminal command (single click); the chevron
     // toggles the file list.
@@ -372,6 +400,24 @@ function builderHasReviewFile(b: OverviewBuilder): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Parse the generation suffix off a builder row id (`<builderId>#<gen>`),
+ * returning the numeric generation or `undefined` if the id carries none.
+ * Used by the accordion to pin the just-clicked builder to the generation its
+ * row was actually rendered with, immune to a render landing between the last
+ * bump and the click (#913).
+ */
+export function generationOf(id: string | undefined): number | undefined {
+  if (!id) { return undefined; }
+  const hash = id.lastIndexOf('#');
+  if (hash === -1) { return undefined; }
+  const suffix = id.slice(hash + 1);
+  // Guard the empty suffix (`Number('')` is 0) and any non-numeric tail.
+  if (suffix === '') { return undefined; }
+  const gen = Number(suffix);
+  return Number.isInteger(gen) ? gen : undefined;
 }
 
 /** Non-clickable informational leaf (no worktree / no changes / error). */
