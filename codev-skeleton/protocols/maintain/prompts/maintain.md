@@ -51,9 +51,9 @@ One removal at a time. Verify after each. Never use `git add -A`.
 
 ## Step 4: Sync Documentation
 
-**arch.md**: Read `codev/resources/arch.md`, compare with actual codebase. Update directory structure, component descriptions, key files. Remove references to deleted code. Add new components. Explain HOW things work, not just WHAT.
+**arch.md / arch-critical.md** (Spec 987 two-tier): Read both, compare with actual codebase. Route behavior-changing invariants to the HOT `arch-critical.md` (respect its cap + keep its cold-doc map accurate); reference detail to the COLD `arch.md` (directory structure, component descriptions, key files, removals). Explain HOW things work, not just WHAT.
 
-**lessons-learned.md**: Scan `codev/reviews/` for new reviews since the base commit. Extract actionable, durable, general lessons.
+**lessons-learned.md / lessons-critical.md** (two-tier): Scan `codev/reviews/` for new reviews since the base commit. **Route** each lesson — behavior-changing + cross-cutting → HOT `lessons-critical.md` (cap + displacement); reference recipe → COLD `lessons-learned.md`. Audit the hot caps + maps via the `update-arch-docs` skill.
 
 **CLAUDE.md / AGENTS.md**: `diff CLAUDE.md AGENTS.md` — they must be identical. Update the stale one.
 
@@ -61,8 +61,9 @@ One removal at a time. Verify after each. Never use `git add -A`.
 
 Commit documentation changes:
 ```bash
-git add codev/resources/arch.md codev/resources/lessons-learned.md
-git commit -m "[Maintain] Update arch.md and lessons-learned.md"
+git add codev/resources/arch.md codev/resources/arch-critical.md
+git add codev/resources/lessons-learned.md codev/resources/lessons-critical.md
+git commit -m "[Maintain] Update governance docs (hot + cold tiers)"
 ```
 
 ## Step 5: Final Checks

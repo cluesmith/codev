@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.1.7",
+  "version": "3.1.9",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -49,6 +49,10 @@
       {
         "command": "codev.helloWorld",
         "title": "Codev: Show Connection State"
+      },
+      {
+        "command": "codev.forwardSelectionToBuilder",
+        "title": "Codev: Forward Selection to Builder"
       },
       {
         "command": "codev.openArchitectTerminal",
@@ -296,6 +300,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "codev.forwardSelectionToBuilder",
+          "when": "false"
+        },
+        {
           "command": "codev.openBuilderById",
           "when": "false"
         },
@@ -386,6 +394,13 @@
         {
           "command": "codev.devServer.hideSidebar",
           "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codev.forwardSelectionToBuilder",
+          "when": "codev.activeEditorIsBuilderFile && editorHasSelection",
+          "group": "codev@1"
         }
       ],
       "view/item/context": [
@@ -635,6 +650,12 @@
         "mac": "cmd+k g"
       },
       {
+        "command": "codev.forwardSelectionToBuilder",
+        "key": "ctrl+k b",
+        "mac": "cmd+k b",
+        "when": "codev.activeEditorIsBuilderFile && editorHasSelection"
+      },
+      {
         "command": "workbench.view.extension.codev",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c",
@@ -729,6 +750,13 @@
           "type": "boolean",
           "default": true,
           "description": "Auto-start Tower if not running on activation"
+        },
+        "codev.cliVersionTimeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 60000,
+          "description": "Maximum time (in milliseconds) to wait for `codev --version` during the startup CLI preflight. Bump higher if you're on a slow remote / VM / network filesystem and the 'Get started with Codev' walkthrough keeps appearing despite codev being installed (check the Codev Output channel for `[Preflight] codev --version timed out` lines to confirm). Default 5000ms covers most local and remote-dev environments."
         },
         "codev.autoOpenBuilderTerminal": {
           "type": "string",

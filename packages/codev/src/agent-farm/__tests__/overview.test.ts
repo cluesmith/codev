@@ -1831,6 +1831,32 @@ describe('overview', () => {
       expect(data.pendingPRs[2].reviewStatus).toBe('REVIEW_REQUIRED');
     });
 
+    it('flows reviewRequests and isDraft through to pendingPRs', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 1, title: 'Draft PR', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z', reviewRequests: ['alice', 'bob'], isDraft: true },
+      ]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs[0].reviewRequests).toEqual(['alice', 'bob']);
+      expect(data.pendingPRs[0].isDraft).toBe(true);
+    });
+
+    it('defaults reviewRequests to [] and isDraft to false when the forge omits them', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 1, title: 'Bare PR', url: 'https://github.com/org/repo/pull/1', reviewDecision: '', body: '', createdAt: '2026-01-01T00:00:00Z' },
+      ]);
+      mockFetchIssueList.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs[0].reviewRequests).toEqual([]);
+      expect(data.pendingPRs[0].isDraft).toBe(false);
+    });
+
     it('passes workspace root as cwd to gh CLI calls', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);

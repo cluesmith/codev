@@ -1,10 +1,10 @@
 {
   "name": "cluesmith-codev",
-  "version": "3.1.7",
+  "version": "3.1.9",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "build": "scripts/check-main-fresh.sh && pnpm --filter @cluesmith/codev-types build && pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev build",
+    "build": "scripts/check-main-fresh.sh && pnpm --filter @cluesmith/codev-types build && pnpm --filter @cluesmith/codev-core build && pnpm --filter @cluesmith/codev-artifact-canvas build && pnpm --filter @cluesmith/codev build",
     "test": "pnpm --filter @cluesmith/codev test",
     "local-install": "scripts/local-install.sh",
     "bump-version": "scripts/bump-all.sh",

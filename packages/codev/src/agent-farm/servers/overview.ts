@@ -864,6 +864,8 @@ export class OverviewCache {
         linkedIssue: parseLinkedIssue(pr.body || '', pr.title),
         createdAt: pr.createdAt,
         author: pr.author?.login,
+        reviewRequests: pr.reviewRequests ?? [],
+        isDraft: pr.isDraft ?? false,
       }));
     }
 

@@ -57,7 +57,7 @@ Closes #<N>  <!-- Only if this run was triggered by a GitHub issue. Use "Refs #<
 
 - Dead code removed: X items
 - Dependencies cleaned: Y packages
-- Documentation updated: arch.md, lessons-learned.md
+- Documentation updated: arch.md / arch-critical.md, lessons-learned.md / lessons-critical.md (hot + cold tiers; hot caps + cold-doc maps policed)
 - Tests: all passing
 
 ## Test plan

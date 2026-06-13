@@ -1,0 +1,30 @@
+id: '789'
+title: vscode-inject-file-hunk-refere
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-09T22:26:05.749Z'
+    approved_at: '2026-06-09T22:58:51.188Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-09T23:04:34.034Z'
+    approved_at: '2026-06-10T07:46:32.265Z'
+  pr:
+    status: approved
+    requested_at: '2026-06-10T08:35:47.462Z'
+    approved_at: '2026-06-10T08:43:33.506Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-09T22:20:14.795Z'
+updated_at: '2026-06-10T08:43:33.508Z'
+pr_history:
+  - phase: review
+    pr_number: 1023
+    branch: builder/pir-789
+    created_at: '2026-06-10T08:25:20.462Z'
+pr_ready_for_human: false

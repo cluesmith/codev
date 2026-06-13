@@ -1,16 +1,16 @@
 ---
 name: update-arch-docs
-description: Audit, prune, and update the project's architecture documentation — `codev/resources/arch.md` and `codev/resources/lessons-learned.md`. Use this skill when running MAINTAIN's arch-doc step, or when asked to update / audit / prune `codev/resources/arch.md` or `codev/resources/lessons-learned.md`. The skill is opinionated about what NOT to include in these files (per-spec changelogs, exhaustive enumerations, aspirational state, duplicate meta-spec content) and ships two operating modes: diff-mode (apply a specific change) and audit-mode (propose cuts with reasons). It edits files directly via normal file-edit tooling and does not invoke destructive shell commands.
+description: "Audit, prune, and update the project's governance docs — the COLD reference archives `codev/resources/arch.md` and `codev/resources/lessons-learned.md` AND their always-on HOT companions `codev/resources/arch-critical.md` and `codev/resources/lessons-critical.md` (Spec 987, hot/cold two-tier model). Use this skill when running MAINTAIN's arch-doc step, or when asked to update / audit / prune any of those four files. It polices the hot-tier cap (capped facts/lessons + a bounded cold-doc map), enforces displacement (demote to cold when full), keeps each hot file's map accurate, and is opinionated about what NOT to put in each tier (per-spec changelogs, exhaustive enumerations, aspirational state). Two modes: diff-mode (apply a specific change) and audit-mode (propose cuts with reasons). Edits files directly via normal file-edit tooling; no destructive shell commands."
 ---
 
 # update-arch-docs
 
-This skill maintains two governance documents:
+This skill maintains the project's governance docs, each split into **two tiers** (Spec 987):
 
-- `codev/resources/arch.md` — the project's architecture document.
-- `codev/resources/lessons-learned.md` — durable engineering wisdom extracted from reviews.
+- **COLD reference archives** — `codev/resources/arch.md` (architecture) and `codev/resources/lessons-learned.md` (durable wisdom). Full, on-demand; grepped/read for depth.
+- **HOT always-on companions** — `codev/resources/arch-critical.md` and `codev/resources/lessons-critical.md`. Tiny, **hard-capped**, **always injected** into every porch prompt and into CLAUDE.md/AGENTS.md. Each holds capped facts/lessons **plus a bounded "consult when…" map** of its cold doc's top-level topics.
 
-It is invoked by the MAINTAIN protocol's documentation step, and ad-hoc whenever someone needs to update, audit, or prune either file. The skill is opinionated about *what does not belong* in these files. Use it whenever a doc change touches arch.md or lessons-learned.md, even if the change is just an addition.
+It is invoked by the MAINTAIN protocol's documentation step, and ad-hoc whenever someone updates, audits, or prunes any of these files. The skill is opinionated about *what does not belong* in each tier and **polices the hot-tier cap, displacement, and map accuracy**. Use it whenever a doc change touches any of the four files.
 
 ## What this skill does NOT do
 
@@ -26,12 +26,22 @@ These are the patterns that have, in practice, caused arch.md and lessons-learne
 - **Duplication of meta-spec content**. If a subsystem has its own meta-spec under `codev/architecture/<domain>.md` or under `codev/specs/`, arch.md should carry a 1-paragraph summary plus a pointer — not a copy.
 - **Retired-component graveyards**. When a component is removed, delete its section. `git log` retains history; an arch.md that describes things that no longer exist is misleading.
 
-### In lessons-learned.md
+### In the HOT files (`arch-critical.md`, `lessons-critical.md`)
 
-- **Spec-narrow recipes** that only matter inside the originating feature ("In spec 0073 we found that the rate limiter needs X"). These belong in the spec's review document, not in lessons-learned.md. lessons-learned.md captures patterns that apply *across* specs.
-- **Multi-paragraph entries**. If a lesson needs more than 1–3 sentences to land, it is either two lessons fused together or it is documentation that belongs elsewhere.
-- **Duplicate adjacent entries**. Fold variations of the same lesson into one entry. Two entries that say the same thing are louder, not clearer.
-- **Spec-numbered narrative entries** ("Lesson from #0468:…"). Link to the review if needed; the lesson itself should be stated as a general principle.
+These are capped, always-on, and **behavior-changers only**. Bright-line rejections:
+
+- **Anything over the cap.** Each hot file fits in a handful of lines (≈10 single-line facts/lessons + a cold-doc map of ≈12 top-level topics, ≤35 lines). To add an entry, **demote** a weaker one into the cold doc (displacement) — never grow the hot file.
+- **Spec-narrow recipes / reference detail.** Those go in the COLD archive (reference), never the hot file.
+- **A full/auto table of contents** in the cold-doc map. The map lists only **top-level** cold-doc sections, each with a one-line "consult when…" — never every entry.
+- **Multi-paragraph entries.** One line each.
+
+### In the COLD archives (`arch.md`, `lessons-learned.md`)
+
+These are the on-demand **reference**. They may hold spec-narrow recipes and deeper detail — the anti-accretion discipline lives in the hot cap, not here. Still avoid:
+
+- **Multi-paragraph lesson entries**. Split or compress to 1–3 sentences.
+- **Duplicate adjacent entries**. Fold variations of the same lesson into one.
+- **Spec-numbered narrative framing** ("Lesson from #0468:…"). State the general principle; link the review if needed.
 
 ### In either file (process)
 
@@ -50,6 +60,16 @@ Treat the two files as siblings with different purposes. When in doubt about whi
 | A system-shape surprise verified-wrong in production ("looks like X but isn't") | `arch.md` § "Verified-Wrong Assumptions" — *not* lessons-learned.md, because it's a property of the system, not a general pattern |
 
 The "system-shape surprise" routing is the one most often gotten wrong. If a future reader needs to know "the system *looks* like X but actually does Y", that is system shape and lives in arch.md. If they need to know "we learned that doing X is generally a bad idea", that is engineering wisdom and lives in lessons-learned.md.
+
+That arch-vs-lessons routing is the **cold-tier** axis. **Orthogonal to it is the hot/cold axis**: once you know a fact is architecture (or a lesson), decide whether it is *behavior-changing enough* to earn a slot in the capped hot companion, or whether it is reference detail for the cold archive.
+
+## Hot tier: cap, displacement, and map accuracy
+
+The hot files (`arch-critical.md`, `lessons-critical.md`) are the behavior-changers, and their value depends on staying tiny. When MAINTAIN runs — or any update touches them — enforce:
+
+- **Cap.** Each hot file fits in a handful of lines: ≈10 single-line facts/lessons **plus** a cold-doc map of ≈12 top-level topics, ≤35 lines total. If an addition would exceed the cap, **demote** the weakest existing entry into the corresponding cold doc rather than growing the hot file. The cap is load-bearing: it is what keeps the hot tier cheap enough to inject into *every* prompt.
+- **Map accuracy (bounded AND accurate).** Each hot file ends with a "Map of <cold doc> (consult when…)" listing only the cold doc's **top-level** sections, each with a one-line "consult when…". As cold-doc sections are added / renamed / removed, update the map to match — but keep it top-level only; never expand it into a full table of contents (that re-creates the accretion the hot tier exists to avoid).
+- **Behavior-changers only.** A hot entry must be something that should change a decision up front. Reference detail, recipes, and one-offs belong in the cold archive — demote on sight.
 
 ## Sizing by purpose, not by line count
 
@@ -85,11 +105,16 @@ In audit-mode:
    - Is it a per-file enumeration that's gone stale? If yes, prune to the directory shape + a few key files.
    - Is it a changelog/narrative section ("Spec 0042 added X")? If yes, absorb the architecturally-relevant facts and remove the spec-numbered framing.
    - Is the component still alive? If retired, delete the section entirely.
-3. For each entry in lessons-learned.md, run the per-entry checklist:
-   - Is it cross-applicable beyond the spec that produced it? If no, remove (the lesson belongs in the spec's review).
+3. For each entry in the COLD `lessons-learned.md`, run the per-entry checklist:
    - Is it terse (1–3 sentences)? If multi-paragraph, split or compress.
    - Is the topic section the right one? If filed under "Architecture (continued)" or a spec-numbered section, move it to the right topical home.
    - Is it a duplicate of an adjacent entry? If yes, fold them.
+   - (Spec-narrow recipes are **kept** here as reference — do not cut them just for being spec-narrow. Anti-accretion now lives in the hot cap, not in the cold archive.)
+
+   Then audit each **HOT** file (`arch-critical.md`, `lessons-critical.md`):
+   - **Cap**: within ≈10 entries + a ≈12-topic map, ≤35 lines? If over, **demote** the weakest entries into the cold doc.
+   - **Map accuracy**: does every map topic name a real top-level cold-doc section, and is any new/renamed section reflected? Fix drift; keep the map top-level only.
+   - **Behavior-changers only**: demote any reference detail that crept in.
 4. **When in doubt, KEEP.** This rule comes from the MAINTAIN protocol and applies in audit-mode too. A confident cut is better than three speculative ones. Bias toward fewer, higher-confidence proposals with clear rationale; do not chase a maximum cut count.
 5. Apply the cuts via the Edit tool — the skill does not produce a "candidate-cuts list and stop." The diff *is* the proposal. The MAINTAIN PR review is the human-confirmation step.
 6. Surface a short reason alongside each cut in the run file (`codev/maintain/NNNN.md`) so PR reviewers can evaluate intent ("removed because: per-spec changelog framing"; "compressed because: duplicates the orchestrator meta-spec").
@@ -100,7 +125,7 @@ Audit-mode is slower than diff-mode and produces larger diffs. Reserve it for ex
 
 The skill commits to the following:
 
-- It edits `codev/resources/arch.md` and `codev/resources/lessons-learned.md` directly via the Edit tool.
+- It edits the four governance files — `codev/resources/arch.md` / `arch-critical.md` and `codev/resources/lessons-learned.md` / `lessons-critical.md` — directly via the Edit tool.
 - It does not invoke destructive shell commands (no `rm -rf`, no `git rm`, no destructive `sed`). File deletions happen only through Edit removing the relevant content; whole-file removal would be a structural change that is out of scope for this skill.
 - In audit-mode, every removal is paired with a one-line reason in the MAINTAIN run file's `## Audit Findings` section. Rationale lives there so reviewers can evaluate intent without re-deriving it from the diff.
 - The skill does not modify other files (specs, plans, reviews, source code). If a fact belongs somewhere else, the skill flags it; it does not move it.

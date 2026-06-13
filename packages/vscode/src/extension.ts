@@ -7,7 +7,10 @@ import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
-import { viewDiff, activateDiffView, diffUrisForChange } from './commands/view-diff.js';
+import { viewDiff, activateDiffView, diffUrisForChange, registerFileInjectSession } from './commands/view-diff.js';
+import { activateDiffInjectCodeLens, getDiffInjectEntry } from './diff-inject-codelens.js';
+import { ensureDiffEditorCodeLens } from './ensure-diff-codelens.js';
+import { buildBuilderRangeRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
@@ -805,11 +808,62 @@ export async function activate(context: vscode.ExtensionContext) {
 			openWorktreeWindow(connectionManager!, extractBuilderId(arg))),
 		reg('codev.viewDiff', (arg: vscode.TreeItem | string | undefined) =>
 			viewDiff(connectionManager!, extractBuilderId(arg))),
+		// CodeLens-only inject (#789): open + focus the builder terminal, then
+		// type the file/hunk reference into its prompt without submitting, so
+		// the reviewer keeps typing feedback before hitting Enter. Mirrors
+		// `codev.referenceIssueInArchitect`. Not declared in
+		// `contributes.commands` → never appears in the Command Palette.
+		reg('codev.forwardToBuilder', async (builderId: string, text: string) => {
+			// openBuilderByRoleOrId resolves to the canonical id and runs the
+			// no-terminal recovery flow on a miss; inject against that id so the
+			// terminal lookup hits the same key that was just opened.
+			const resolvedId = await terminalManager?.openBuilderByRoleOrId(builderId, true);
+			if (resolvedId && !terminalManager?.injectBuilderText(resolvedId, text)) {
+				vscode.window.showWarningMessage('Codev: Builder terminal not available');
+			}
+		}),
+		// Right-click "Forward Selection to Builder" (#789): forward an arbitrary
+		// selected range when symbol/file lenses aren't granular enough. Unlike
+		// the CodeLens, a context-menu action works inside the multi-file View
+		// Diff editor too. Scoped via the `codev.activeEditorIsBuilderFile`
+		// context key + the built-in `editorHasSelection` in its `when` clause.
+		reg('codev.forwardSelectionToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			const sel = editor.selection;
+			if (sel.isEmpty) { return; }
+			const start = sel.start.line + 1;
+			// A selection ending at column 0 of a line doesn't include that line.
+			const end = sel.end.character === 0 && sel.end.line > sel.start.line
+				? sel.end.line
+				: sel.end.line + 1;
+			const text = buildBuilderRangeRef(entry.relPath, start, end);
+			const resolvedId = await terminalManager?.openBuilderByRoleOrId(entry.builderId, true);
+			if (resolvedId && !terminalManager?.injectBuilderText(resolvedId, text)) {
+				vscode.window.showWarningMessage('Codev: Builder terminal not available');
+			}
+		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }
+			// Open the diff FIRST so it appears instantly. Lens registration and
+			// the git hunk computation happen after — the entry registers
+			// synchronously (symbol/file lenses render right away) and the hunk
+			// lenses refresh in once git resolves (#789). Doing this before the
+			// open used to block the diff on a git subprocess.
 			const { left, right } = diffUrisForChange(arg.plan, { wt: arg.worktreePath, ref: arg.baseRef });
 			const title = `${arg.plan.resourcePath} (#${arg.builderId})`;
 			await vscode.commands.executeCommand('vscode.diff', left, right, title);
+			await registerFileInjectSession({
+				worktreePath: arg.worktreePath,
+				baseRef: arg.baseRef,
+				builderId: arg.builderId,
+				plan: arg.plan,
+			});
+			// Offer to enable diffEditor.codeLens (off by default — VS Code hides
+			// CodeLens in diff editors). After the open, so it never delays it.
+			await ensureDiffEditorCodeLens(context);
 		}),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
@@ -883,6 +937,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	// without relying on the Git extension's worktree discovery.
 	activateDiffView(context);
 
+	// CodeLens "Forward to Builder" actions inside the View Diff editor (#789).
+	// The backing command `codev.forwardToBuilder` is registered below and
+	// deliberately NOT declared in `contributes.commands`, so it stays out of
+	// the Command Palette (codelens-only entry point).
+	activateDiffInjectCodeLens(context);
+
 	// Review comment decorations
 	activateReviewDecorations(context);
 
@@ -919,7 +979,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// CLI preflight (#791): verify the codev CLI is installed and >= this
 	// extension's version. Fire-and-forget so activation isn't blocked — the
-	// probe self-bounds at 400ms and caches its result for the session. Uses
+	// probe self-bounds at the `codev.cliVersionTimeoutMs` budget (#1024) and
+	// caches its result for the session. Uses
 	// detectWorkspacePath() directly (connectionManager.getWorkspacePath() isn't
 	// populated until initialize() resolves, which may wait on Tower auto-start).
 	runPreflight(context, detectWorkspacePath(), outputChannel);

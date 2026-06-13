@@ -232,6 +232,15 @@ export interface OverviewPR {
   linkedIssue: string | null;
   createdAt: string;
   author?: string;
+  /**
+   * Logins of users requested as reviewers, flowed through from the `pr-list`
+   * forge concept. Consumed by the VSCode PR sidebar to sort PRs awaiting the
+   * current user's review above unrelated ones. Empty array when the forge
+   * exposes no review-request list.
+   */
+  reviewRequests: string[];
+  /** Whether the PR is a draft. Drives the draft badge in the VSCode PR sidebar. */
+  isDraft: boolean;
 }
 
 export interface OverviewBacklogItem {

@@ -82,6 +82,9 @@ export const USER_DATA_PATTERNS = [
   'reviews/',
   'resources/arch.md',
   'resources/lessons-learned.md',
+  // Hot-tier files are per-project-curated once materialized (Spec 987) — never overwrite.
+  'resources/arch-critical.md',
+  'resources/lessons-critical.md',
   '.update-hashes.json',
 ];
 

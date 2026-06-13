@@ -99,16 +99,16 @@ Iterations that could have been prevented with better builder behavior:
 
 ## Architecture Updates
 
-[What was added/changed in `codev/resources/arch.md`, or why no changes were needed.]
+[What you routed where — HOT `codev/resources/arch-critical.md` (tiny, capped, always-injected) vs COLD `codev/resources/arch.md` (reference) — or why no changes were needed.]
 
-- Updated: [section name] — [what was added/changed]
+- Routed: [hot | cold] — [fact/section] — [what was added/changed; note any demotion if the hot file was full]
 - Or: "No architecture updates needed — [brief reason]"
 
 ## Lessons Learned Updates
 
-[What was added/changed in `codev/resources/lessons-learned.md`, or why no changes were needed.]
+[What you routed where — HOT `codev/resources/lessons-critical.md` (capped) vs COLD `codev/resources/lessons-learned.md` (reference) — or why no changes were needed.]
 
-- Added: [category] — [lesson summary]
+- Routed: [hot | cold] — [category] — [lesson summary]
 - Or: "No lessons learned updates needed — [brief reason]"
 
 ## Technical Debt

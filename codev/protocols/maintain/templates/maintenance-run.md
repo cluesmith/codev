@@ -17,8 +17,8 @@
 - <package> — <reason>
 
 ### Documentation Updated
-- arch.md: <what changed>
-- lessons-learned.md: <what changed>
+- arch.md (cold) / arch-critical.md (hot): <what changed; note any demotions + map fixes>
+- lessons-learned.md (cold) / lessons-critical.md (hot): <what changed; note any demotions + map fixes>
 
 ### Documentation Changes Log
 | Document | Section | Action | Reason |

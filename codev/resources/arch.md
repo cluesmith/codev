@@ -1915,7 +1915,16 @@ try {
 - Simple string replacement, no complex templating engine
 - Applied to CLAUDE.md, AGENTS.md, and similar files
 
+## Governance Docs (Hot/Cold Tiers)
 
+Spec 987 split the two governance docs into a **hot/cold** two-tier model so durable wisdom is consumed at decision time, not just written:
+
+- **COLD** — `arch.md` and `lessons-learned.md`: full, on-demand reference archives (this file is the cold arch doc). Grepped/read for depth; may hold spec-narrow recipes.
+- **HOT** — `arch-critical.md` and `lessons-critical.md`: tiny, hard-capped (≈10 entries + a ≤12-topic "consult when…" map of the cold doc, ≤35 lines). **Always injected** into context two ways:
+  - **porch builders** — `buildHotTierContext()` in `packages/codev/src/commands/porch/prompts.ts` resolves the hot files via the runtime four-tier resolver (`resolveCodevFile`) and prepends them to *every* phase prompt.
+  - **interactive sessions** — a generated managed block (`packages/codev/src/lib/managed-block.ts`, delimited by `<!-- BEGIN/END CODEV HOT CONTEXT -->`) is written into `CLAUDE.md`/`AGENTS.md` at `codev init`/`update` time (non-clobbering; preserves user content).
+
+Hot files are materialized into projects by `copyHotTierDefaults` (wired into init/adopt/update) and resolve from the skeleton at tier-4 until a project curates its own. Producers **route** new facts/lessons by tier at review time (see the review prompts); MAINTAIN + the `update-arch-docs` skill police the hot caps, displacement (demote to cold when full), and cold-doc map accuracy. The cap is load-bearing: it is what keeps the hot tier cheap enough to inject everywhere.
 
 ## Troubleshooting
 

@@ -1,0 +1,133 @@
+id: '987'
+title: engineering-wisdom-is-write-on
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: 'Hot files: curation, cap, placement'
+    status: complete
+  - id: phase_2
+    title: Porch runtime injection (always-on, every phase)
+    status: complete
+  - id: phase_3
+    title: Interactive managed block in CLAUDE.md/AGENTS.md
+    status: complete
+  - id: phase_4
+    title: 'Project materialization: hot-file creation in init/adopt/update'
+    status: complete
+  - id: phase_5
+    title: Producer routing (review prompts, both trees)
+    status: complete
+  - id: phase_6
+    title: MAINTAIN + skill policing, docs sweep, consistency
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-06-04T17:29:55.095Z'
+    approved_at: '2026-06-06T14:48:28.494Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-06T15:07:29.295Z'
+    approved_at: '2026-06-06T17:04:58.440Z'
+  pr:
+    status: approved
+    requested_at: '2026-06-12T02:42:55.598Z'
+    approved_at: '2026-06-12T04:40:20.159Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter2-gemini.txt
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_1-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter2-gemini.txt
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_2-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_5-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_5-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_6-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-987/codev/projects/987-engineering-wisdom-is-write-on/987-phase_6-iter1-claude.txt
+started_at: '2026-06-04T15:42:17.225Z'
+updated_at: '2026-06-12T04:40:20.160Z'
+pr_ready_for_human: false

@@ -53,7 +53,7 @@ bats tests/e2e/
 
 ### 4. Update Version and Tag
 
-**Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every publishable package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-types`, and the VS Code extension) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches.
+**Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every version-aligned package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-types`, `@cluesmith/codev-artifact-canvas`, and the VS Code extension) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches. (`@cluesmith/codev-artifact-canvas` is version-aligned for consistency but is consumed by hosts via `workspace:*` and bundled by them — **not independently npm-published in v1** per spec-945, so it appears in the bump/commit steps below but not in the `pnpm publish` step.)
 
 For VS Code stable releases the script delegates to `scripts/bump-vscode.sh` (also exposed as `pnpm bump-vscode-version` for standalone use), which bumps the extension manifest **and** renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` in `packages/vscode/CHANGELOG.md` so the Marketplace listing reflects the new version. No fresh `[Unreleased]` heading is inserted — the next PR with notes adds one back. Skipped for pre-release versions (vscode is skipped entirely then). Use `pnpm bump-vscode-version` directly when shipping a vscode-only patch outside the lockstep cadence.
 
@@ -73,7 +73,7 @@ Replace `X.Y.Z` below with the version the script just wrote (it prints it as `B
 pnpm bump-version            # or: pnpm bump-version minor / major / 3.1.0-rc.1
 
 # Commit and tag (root package.json is the version anchor — Vue/Babel pattern)
-git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/vscode/package.json pnpm-lock.yaml
+git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/artifact-canvas/package.json packages/vscode/package.json pnpm-lock.yaml
 git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
 git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
@@ -230,12 +230,12 @@ Starting with v1.7.0, minor releases use a release candidate workflow for testin
 
 ```bash
 # Set version to RC. bump-all.sh auto-skips packages/vscode for pre-release
-# versions (VS Code Marketplace rejects semver pre-release suffixes), so only
-# codev, core, and types are bumped here. vscode catches up at RC → stable.
+# versions (VS Code Marketplace rejects semver pre-release suffixes), so
+# codev, core, types, and artifact-canvas are bumped here. vscode catches up at RC → stable.
 pnpm bump-version 1.7.0-rc.1
 
 # Commit and tag (note: no packages/vscode/package.json — it wasn't bumped)
-git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json pnpm-lock.yaml
+git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/artifact-canvas/package.json pnpm-lock.yaml
 git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"
 git push && git push origin v1.7.0-rc.1

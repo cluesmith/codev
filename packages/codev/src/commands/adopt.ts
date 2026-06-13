@@ -16,6 +16,7 @@ import {
   createProjectsDir,
   copySkills,
   copyRootFiles,
+  copyHotTierDefaults,
 } from '../lib/scaffold.js';
 import { updateGitignore } from '../lib/gitignore.js';
 
@@ -149,6 +150,15 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   for (const file of rootResult.conflicts) {
     console.log(chalk.yellow('  !'), file, chalk.dim('(conflict - .codev-new created)'));
     skippedCount++;
+  }
+
+  // Materialize the hot-tier files (Spec 987), skip-existing so a curated copy is preserved.
+  // The interactive managed block is injected on the next `codev update` (which calls
+  // syncHotContextBlock) — adopt intentionally does not modify a pre-existing CLAUDE.md/AGENTS.md
+  // beyond the standard .codev-new conflict path.
+  for (const file of copyHotTierDefaults(targetDir, skeletonDir, { skipExisting: true }).copied) {
+    console.log(chalk.green('  +'), `codev/resources/${file}`);
+    fileCount++;
   }
 
   // Create .codev/config.json if it doesn't exist

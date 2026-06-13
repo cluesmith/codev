@@ -153,6 +153,22 @@ export class TerminalManager {
   }
 
   /**
+   * Type `text` into a builder terminal's input *without* a trailing newline
+   * (no submit) — the builder-side analogue of `injectArchitectText`, backing
+   * the "Forward to Builder" CodeLens (#789). Returns false if no terminal is
+   * registered for `builderId`; callers ensure it's open first (via
+   * `openBuilderByRoleOrId`, whose resolved id keys the lookup).
+   */
+  injectBuilderText(builderId: string, text: string): boolean {
+    const key = `builder-${builderId}`;
+    const entry = this.terminals.get(key);
+    if (!entry) { return false; }
+    entry.terminal.show();
+    entry.terminal.sendText(text, false);
+    return true;
+  }
+
+  /**
    * Open a builder terminal. If a terminal already exists for this builder
    * but points at a different (stale) Tower session, dispose it before
    * opening a new one — happens when a builder is re-spawned and Tower
@@ -188,13 +204,19 @@ export class TerminalManager {
    * Tower's `/api/state` can momentarily omit a live builder while its session
    * registry rehydrates/reconnects, and that transient miss self-heals on the
    * next call (PIR #982). Only a persistent miss surfaces the recovery toast.
+   *
+   * Returns the resolved **canonical** builder id on success (the key under
+   * which the terminal is registered), or `undefined` when the builder can't
+   * be opened. The "Forward to Builder" inject path (#789) uses this to target
+   * the same terminal that was opened, even when called with a bare numeric id;
+   * other callers ignore the return value.
    */
-  async openBuilderByRoleOrId(roleOrId: string, focus = false): Promise<void> {
+  async openBuilderByRoleOrId(roleOrId: string, focus = false): Promise<string | undefined> {
     const client = this.connectionManager.getClient();
     const workspacePath = this.connectionManager.getWorkspacePath();
     if (!client || !workspacePath) {
       vscode.window.showErrorMessage('Codev: Not connected to Tower');
-      return;
+      return undefined;
     }
     try {
       // resolveBuilderTerminal uses resolveAgentName internally so the bare
@@ -212,17 +234,19 @@ export class TerminalManager {
         vscode.window.showWarningMessage(
           `Codev: Multiple builders match "${roleOrId}": ${outcome.matches.map(b => b.name).join(', ')}`,
         );
-        return;
+        return undefined;
       }
       if (outcome.kind === 'missing') {
         await this.promptNoTerminalRecovery(roleOrId, workspacePath, focus);
-        return;
+        return undefined;
       }
       const { builder, terminalId } = outcome;
       await this.openBuilder(terminalId, builder.id, `Codev: ${builder.name}`, focus);
+      return builder.id;
     } catch (err) {
       this.log('ERROR', `Failed to open builder ${roleOrId}: ${(err as Error).message}`);
       vscode.window.showErrorMessage(`Codev: Failed to open ${roleOrId}`);
+      return undefined;
     }
   }
 

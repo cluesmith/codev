@@ -507,8 +507,8 @@ Execute for each phase in the plan. Each phase follows a build-verify cycle.
    - Enhance documentation
 
 3. **Update Architecture Documentation**
-   - Update `codev/resources/arch.md` and `codev/resources/lessons-learned.md` with new modules, utilities, architectural changes, and durable engineering wisdom uncovered during this work
-   - Use the **`update-arch-docs` skill** (at `.claude/skills/update-arch-docs/SKILL.md`) to apply changes — the skill encodes the discipline for what NOT to include and the two-doc framing (arch.md owns system shape; lessons-learned.md owns durable engineering wisdom)
+   - Route new system-shape facts and durable wisdom by tier (Spec 987): behavior-changing + cross-cutting → the HOT `codev/resources/arch-critical.md` / `lessons-critical.md` (capped, always-injected; demote a weaker entry to cold if full); reference detail → the COLD `codev/resources/arch.md` / `lessons-learned.md`
+   - Use the **`update-arch-docs` skill** (at `.claude/skills/update-arch-docs/SKILL.md`) to apply changes — it encodes the hot/cold two-tier discipline (caps + cold-doc maps for the hot files; reference archive for the cold files) and what NOT to include
    - Follow guidance in the MAINTAIN protocol's Step 3 ("Sync Documentation") for structure, the "Lives where" routing matrix, and pruning checklists
    - Ensure both docs reflect current state
 

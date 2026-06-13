@@ -7,8 +7,8 @@ MAINTAIN is a single-pass maintenance protocol for keeping codebases healthy. Th
 **Core Principle**: Do the work in one pass. Don't over-ceremonialize housekeeping.
 
 **Key Documents** MAINTAIN keeps current:
-- `codev/resources/arch.md` - Architecture documentation
-- `codev/resources/lessons-learned.md` - Extracted wisdom from reviews
+- `codev/resources/arch.md` (COLD reference) + `codev/resources/arch-critical.md` (HOT, always-injected) — Architecture, two tiers (Spec 987)
+- `codev/resources/lessons-learned.md` (COLD reference) + `codev/resources/lessons-critical.md` (HOT, always-injected) — Engineering wisdom, two tiers
 
 The two governance docs are siblings with **different purposes**: `arch.md` owns system shape (services, transports, mental models, verified-wrong assumptions about *this* system); `lessons-learned.md` owns durable engineering wisdom that applies *across* specs. Use the routing matrix below to decide where each fact belongs.
 
@@ -18,8 +18,10 @@ The two governance docs are siblings with **different purposes**: `arch.md` owns
 |---|---|
 | Current system shape (services, transports, key mental models) | `codev/resources/arch.md` |
 | Mechanism for a unique subsystem | `codev/resources/arch.md` (subsystem section) OR a meta-spec under `codev/architecture/<domain>.md` if the mechanism is large enough to warrant its own doc |
-| A durable engineering pattern that applies across multiple specs | `codev/resources/lessons-learned.md` |
-| A spec-narrow fix recipe (only relevant inside the originating feature) | Spec review only — does NOT belong in `lessons-learned.md` |
+| A durable engineering pattern that applies across multiple specs | `codev/resources/lessons-learned.md` (COLD reference) |
+| A **behavior-changing, cross-cutting** rule (should change how the next project is built) | `codev/resources/lessons-critical.md` (HOT, capped) — demote to `lessons-learned.md` if full |
+| A **behavior-changing, cross-cutting** architecture invariant (a future builder must know up front) | `codev/resources/arch-critical.md` (HOT, capped) — demote to `arch.md` if full |
+| A spec-narrow fix recipe (reference detail) | `codev/resources/lessons-learned.md` (COLD) — kept as reference; **never** the hot file |
 | A system-shape surprise verified-wrong in production ("looks like X but isn't") | `codev/resources/arch.md` § "Verified-Wrong Assumptions" |
 | Aspirational architectural direction (where we want to go) | The relevant meta-spec or roadmap doc, NOT `arch.md` body |
 | A changelog entry ("we shipped X in spec Y on date Z") | `git log` + the spec/review document — NOT `arch.md`, NOT `lessons-learned.md` |
@@ -113,7 +115,7 @@ The `update-arch-docs` skill (at `.claude/skills/update-arch-docs/SKILL.md`) is 
 
 #### Step 3a: Audit documentation
 
-Invoke the `update-arch-docs` skill in **audit-mode**. The skill reads `codev/resources/arch.md` and `codev/resources/lessons-learned.md` end-to-end against the discipline below and produces a candidate-cuts list (with reasons) recorded in the run file (`codev/maintain/NNNN.md`) under a new `## Audit Findings` section before any edits land.
+Invoke the `update-arch-docs` skill in **audit-mode**. The skill reads all four governance files — `codev/resources/arch.md` / `arch-critical.md` and `codev/resources/lessons-learned.md` / `lessons-critical.md` — end-to-end against the discipline below, applies the cuts via the Edit tool, and records each cut's reason in the run file (`codev/maintain/NNNN.md`) under a `## Audit Findings` section. The diff plus the recorded reasons **is** the proposal; the architect's PR review is the human-confirmation step (consistent with the skill's audit-mode).
 
 **Per-arch.md-section pruning checklist** — for each section in `arch.md`, ask:
 - Does it describe **current state**? If aspirational, the section moves to a meta-spec; `arch.md` keeps a 1-paragraph summary + pointer (or nothing, if the meta-spec stands on its own).
@@ -122,21 +124,27 @@ Invoke the `update-arch-docs` skill in **audit-mode**. The skill reads `codev/re
 - Is it a changelog/narrative section ("Spec 0042 added X")? If yes, absorb the architecturally-relevant facts and remove the spec-numbered framing.
 - Is the component still alive? If retired, delete the section entirely.
 
-**Per-lessons-learned.md-entry pruning checklist** — for each entry, ask:
-- Is it cross-applicable beyond the spec that produced it? If no, remove (the lesson belongs in the spec's review).
+**Per-COLD-`lessons-learned.md`-entry pruning checklist** — for each entry, ask:
 - Is it terse (1–3 sentences)? If multi-paragraph, split or compress.
 - Is the topic section the right home? If filed under "Architecture (continued)" or a spec-numbered section, move it to the right topical home.
 - Is it a duplicate of an adjacent entry? If yes, fold them.
+- (Spec-narrow recipes are **kept** as reference — do not cut them just for being spec-narrow. Anti-accretion now lives in the hot cap, not the cold archive.)
+
+**Per-HOT-file checklist** (`arch-critical.md`, `lessons-critical.md`) — audit the cap and map:
+- Within the cap (≈10 entries + a ≈12-topic map, ≤35 lines)? If over, **demote** the weakest entries into the cold doc.
+- Does every map topic name a real top-level cold-doc section, and is any new/renamed section reflected? Fix drift; keep the map top-level only.
+- Is every entry still behavior-changing? Demote reference detail into the cold archive.
 
 **Sample audit prompt** (paste into the skill invocation if you want a baseline checklist run):
 
 ```
-Audit codev/resources/arch.md and codev/resources/lessons-learned.md against the
-discipline in the update-arch-docs skill. For each section/entry, run the per-
-arch.md-section and per-lessons-learned.md-entry pruning checklists from the
-MAINTAIN protocol (Step 3a). Produce a candidate-cuts list with one-line reasons.
-Bias toward fewer, higher-confidence cuts ("when in doubt, KEEP"). Record the
-findings in the current run file's ## Audit Findings section before applying.
+Audit all four governance files — codev/resources/arch.md + arch-critical.md and
+lessons-learned.md + lessons-critical.md — against the discipline in the
+update-arch-docs skill. For each cold section/entry run the cold pruning checklists,
+and for each hot file check the cap, displacement, and map accuracy (Step 3a).
+Apply the cuts with one-line reasons. Bias toward fewer, higher-confidence
+cuts ("when in doubt, KEEP"). Record each cut's reason in the current run
+file's ## Audit Findings section as you go — the diff plus those reasons is the proposal.
 ```
 
 **When in doubt, KEEP.** This rule is preserved from the older Step 3. A confident cut is better than three speculative ones. The audit pass is a *proposal*; the architect's PR review confirms it.
@@ -145,14 +153,14 @@ findings in the current run file's ## Audit Findings section before applying.
 
 Apply the audit decisions from Step 3a, plus any additive content needed.
 
-**arch.md**: Compare documented structure with actual codebase. Update:
+**arch.md / arch-critical.md**: Compare documented structure with actual codebase. Route behavior-changing invariants to `arch-critical.md` (HOT — respect the cap + keep its map accurate); reference detail to `arch.md` (COLD). Update:
 - Directory structure
 - Component descriptions (explain HOW things work, not just WHAT)
 - Key files and their purposes
 - Remove references to deleted code (per Step 3a audit findings)
 - Add new components/utilities
 
-**lessons-learned.md**: Scan `codev/reviews/` for new reviews since last run. Extract lessons that are actionable, durable, and general. Apply Step 3a's per-entry cuts.
+**lessons-learned.md / lessons-critical.md**: Scan `codev/reviews/` for new reviews since last run. **Route** each new lesson by tier — behavior-changing + cross-cutting → `lessons-critical.md` (HOT; respect the cap, demote a weaker entry to cold if full); reference recipe / spec-narrow → `lessons-learned.md` (COLD). Apply Step 3a's per-entry cuts and keep each hot file's cold-doc map accurate.
 
 For specific additive changes, invoke `update-arch-docs` in **diff-mode** — it applies the smallest section update needed.
 
@@ -192,13 +200,13 @@ Each run creates `codev/maintain/NNNN.md`:
 
 ## Audit Findings
 
-Recorded by Step 3a (Audit documentation) before any edits land. One line per candidate cut.
+Recorded by Step 3a (Audit documentation) as the cuts are applied — one line per cut, with its reason. The diff plus these reasons is the proposal; the architect's PR review is the gate.
 
-### arch.md
-- <section-name>: <reason for proposed cut/compression>
+### arch.md (cold) / arch-critical.md (hot)
+- <section or hot entry>: <reason for cut / compression / demotion>
 
-### lessons-learned.md
-- <entry>: <reason>
+### lessons-learned.md (cold) / lessons-critical.md (hot)
+- <entry>: <reason; note hot→cold demotions and any cold-doc-map fixes>
 
 ## What Was Done
 
@@ -207,8 +215,8 @@ Recorded by Step 3a (Audit documentation) before any edits land. One line per ca
 - Removed `some-package` dependency — zero imports
 
 ### Documentation Updated
-- arch.md: Added VS Code extension section, removed old dashboard-server refs
-- lessons-learned.md: Extracted 3 lessons from reviews 653, 672
+- arch.md / arch-critical.md: Added VS Code extension section + removed old dashboard-server refs (cold); routed 1 invariant to the hot tier, demoted 1 stale entry to cold
+- lessons-learned.md / lessons-critical.md: Extracted 3 lessons from reviews 653, 672 (cold); promoted 1 behavior-changer to the hot tier, refreshed its cold-doc map
 
 ### Documentation Changes Log
 | Document | Section | Action | Reason |

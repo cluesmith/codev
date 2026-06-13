@@ -28,6 +28,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import type { ConnectionManager } from '../connection-manager.js';
+import { parseHunkRanges, parseUnifiedDiff } from '../diff-inject-ref.js';
+import { setDiffInjectSession, upsertDiffInjectEntry, type DiffInjectSessionEntry } from '../diff-inject-codelens.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -348,10 +350,9 @@ export async function viewDiff(
     return;
   }
 
-  const resources: Array<[vscode.Uri, vscode.Uri, vscode.Uri]> = planResources(
-    changes,
-    binaryPaths,
-  ).map(plan => {
+  const plans = planResources(changes, binaryPaths);
+
+  const resources: Array<[vscode.Uri, vscode.Uri, vscode.Uri]> = plans.map(plan => {
     const { left, right } = diffUrisForChange(plan, { wt, ref: baseRef });
     return [
       vscode.Uri.file(path.join(wt, plan.resourcePath)),
@@ -360,11 +361,81 @@ export async function viewDiff(
     ];
   });
 
+  // CodeLens "Forward to Builder" actions (#789): register the right-side fs
+  // paths + owning builder now (no hunks yet) so symbol/file lenses and the
+  // selection menu work as soon as a file is opened — without blocking the
+  // editor on a git call.
+  const filePlans = plans.filter(plan => plan.right.kind === 'file');
+  setDiffInjectSession(
+    filePlans.map(plan => ({
+      fsPath: path.join(wt, plan.resourcePath),
+      builderId: builder.id,
+      relPath: plan.resourcePath,
+      hunks: [],
+    })),
+  );
+
   await vscode.commands.executeCommand(
     'vscode.changes',
     `Reviewing #${builder.issueId ?? builder.id} (${defaultBranch} ↔ HEAD)`,
     resources,
   );
+
+  // Fill per-hunk ranges after the editor is open; the provider's change event
+  // refreshes the lenses. Non-fatal on git failure — symbol/file lenses remain.
+  try {
+    const { stdout: patch } = await execFileAsync(
+      'git',
+      ['-C', wt, 'diff', '-M', '--unified=3', baseRef],
+      { maxBuffer: 64 * 1024 * 1024 },
+    );
+    const hunksByPath = parseUnifiedDiff(patch);
+    setDiffInjectSession(
+      filePlans.map(plan => ({
+        fsPath: path.join(wt, plan.resourcePath),
+        builderId: builder.id,
+        relPath: plan.resourcePath,
+        hunks: hunksByPath.get(plan.resourcePath) ?? [],
+      })),
+    );
+  } catch {
+    // keep the hunk-less entries already registered
+  }
+}
+
+/**
+ * Register the inject-codelens entry for a single changed file — the per-file
+ * `vscode.diff` opened from the Builders tree (`openBuilderFileDiff`). Mirrors
+ * what `viewDiff` does for the whole delta, but for one file, so the "Forward
+ * to Builder" lenses appear even when the reviewer opens a file diff without
+ * first running View Diff. Symbol lenses resolve lazily in the provider; the
+ * per-hunk ranges are computed here (non-fatal on git failure).
+ */
+export async function registerFileInjectSession(args: {
+  worktreePath: string;
+  baseRef: string;
+  builderId: string;
+  plan: ResourcePlan;
+}): Promise<void> {
+  // Deleted/binary files have no right-side `file:` document to host a lens.
+  if (args.plan.right.kind !== 'file') { return; }
+  const relPath = args.plan.resourcePath;
+  const fsPath = path.join(args.worktreePath, relPath);
+  // Register immediately with no hunks so the symbol/file lenses render right
+  // away — the git hunk computation below must not gate them.
+  upsertDiffInjectEntry({ fsPath, builderId: args.builderId, relPath, hunks: [] });
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', args.worktreePath, 'diff', '-M', '--unified=3', args.baseRef, '--', relPath],
+      { maxBuffer: 64 * 1024 * 1024 },
+    );
+    // Re-upsert with hunks; the provider's change event refreshes the lenses,
+    // adding the per-hunk ones.
+    upsertDiffInjectEntry({ fsPath, builderId: args.builderId, relPath, hunks: parseHunkRanges(stdout) });
+  } catch {
+    // keep the symbol/file lenses already registered
+  }
 }
 
 interface BuilderLike {

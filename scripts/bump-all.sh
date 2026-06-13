@@ -84,8 +84,10 @@ bump_file() {
 # Root first — always bumped (private, no marketplace constraints).
 bump_file "package.json"
 
-# Bump the npm-published packages (codev, core, types).
-for pkg in packages/codev packages/core packages/types; do
+# Bump the version-aligned workspace packages.
+# codev/core/types are npm-published; artifact-canvas is version-aligned for consistency
+# but consumed by hosts via workspace:* (not independently published in v1, per spec-945).
+for pkg in packages/codev packages/core packages/types packages/artifact-canvas; do
   bump_file "$pkg/package.json"
 done
 

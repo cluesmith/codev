@@ -58,13 +58,13 @@ Output of `git log main..HEAD --oneline`:
 
 ## Architecture Updates
 
-What changed in `codev/resources/arch.md` (or why no changes were needed). If this PR introduced or modified an architectural pattern, document it here AND update `arch.md` in this same commit. If no architectural updates are needed (typical for small fixes), write a single line explaining why: "No arch changes — this PR fixes a typo without affecting module boundaries."
+What you routed where, across the **two tiers** (Spec 987): **HOT** = `codev/resources/arch-critical.md` (tiny, hard-capped, always-injected) for a behavior-changing cross-cutting fact (demote a weaker entry into `arch.md` if the hot file is full); **COLD** = `codev/resources/arch.md` for reference detail. Update the file(s) you routed to in this same commit. If nothing qualifies, write a single line explaining why: "No arch changes — this PR fixes a typo without affecting module boundaries."
 
-Use the `update-arch-docs` skill if available (`.claude/skills/update-arch-docs/SKILL.md`) — it encodes the discipline for what NOT to include in arch docs.
+Use the `update-arch-docs` skill if available (`.claude/skills/update-arch-docs/SKILL.md`) — it encodes the discipline for what NOT to include in arch docs and how the hot/cold tiers relate.
 
 ## Lessons Learned Updates
 
-What durable engineering wisdom emerged from this PR (or why no lessons were captured). Same pattern as Architecture Updates: if something is worth recording in `codev/resources/lessons-learned.md`, update both files in this commit. If not, explain why: "No lessons captured — change was mechanical."
+What durable wisdom emerged, routed by tier: **HOT** `codev/resources/lessons-critical.md` for a behavior-changing cross-cutting rule (cap + displacement); **COLD** `codev/resources/lessons-learned.md` for a spec-narrow recipe/reference tip. Update the file(s) you routed to in this commit. If nothing qualifies: "No lessons captured — change was mechanical."
 
 ## Things to Look At During PR Review
 
@@ -85,7 +85,7 @@ List any tests you skipped due to pre-existing flakiness, with file:line refs an
 
 ### 2. Update Architecture / Lessons Docs (if applicable)
 
-If your "Architecture Updates" or "Lessons Learned Updates" section calls out real changes, update `codev/resources/arch.md` and/or `codev/resources/lessons-learned.md` accordingly. Use the `update-arch-docs` skill if it's available.
+If your "Architecture Updates" or "Lessons Learned Updates" section routed real changes, update the tier you chose — `arch-critical.md` / `lessons-critical.md` (hot, capped) or `arch.md` / `lessons-learned.md` (cold) — accordingly. Use the `update-arch-docs` skill if it's available.
 
 If neither doc needs updating, your review file's sections still need to explain why — the porch `checks` block enforces section presence.
 
@@ -93,9 +93,11 @@ If neither doc needs updating, your review file's sections still need to explain
 
 ```bash
 git add codev/reviews/{{artifact_name}}.md
-# Add arch.md / lessons-learned.md only if you changed them
-git add codev/resources/arch.md           # only if changed
-git add codev/resources/lessons-learned.md  # only if changed
+# Add the governance file(s) you routed to, only if changed
+git add codev/resources/arch-critical.md      # hot — only if changed
+git add codev/resources/lessons-critical.md   # hot — only if changed
+git add codev/resources/arch.md               # cold — only if changed
+git add codev/resources/lessons-learned.md    # cold — only if changed
 git commit -m "[PIR #{{issue.number}}] Review + retrospective"
 git push
 ```

@@ -33,8 +33,16 @@ jobs:
         working-directory: packages/types
         run: pnpm build
 
+      - name: Build artifact-canvas package (+ build-smoke)
+        working-directory: packages/artifact-canvas
+        run: pnpm build && pnpm build:smoke
+
       - name: Run core unit tests
         working-directory: packages/core
+        run: pnpm test
+
+      - name: Run artifact-canvas unit tests
+        working-directory: packages/artifact-canvas
         run: pnpm test
 
       - name: Copy skeleton for unit tests

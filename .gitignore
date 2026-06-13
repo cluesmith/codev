@@ -31,6 +31,7 @@ packages/codev/dist/
 packages/codev/skeleton/
 packages/types/dist/
 packages/core/dist/
+packages/artifact-canvas/dist/
 packages/vscode/dist/
 packages/vscode/out/
 *.vsix

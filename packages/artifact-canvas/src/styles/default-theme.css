@@ -1,0 +1,88 @@
+/*
+ * Default theme for @cluesmith/codev-artifact-canvas (spec D4, Model A).
+ *
+ * CSS custom properties are the SOLE v1 theming mechanism. Each token below has a sensible
+ * fallback; hosts override any subset by setting the variable on the canvas container, e.g.
+ * in a VSCode webview:
+ *
+ *   .codev-artifact-canvas {
+ *     --codev-canvas-foreground: var(--vscode-foreground);
+ *     --codev-canvas-background: var(--vscode-editor-background);
+ *   }
+ *
+ * Import via the package's dedicated export:
+ *   import '@cluesmith/codev-artifact-canvas/default-theme.css';
+ */
+
+.codev-artifact-canvas {
+  /* v1 token vocabulary (spec D4) */
+  --codev-canvas-foreground: #1f2328;
+  --codev-canvas-background: #ffffff;
+  --codev-canvas-accent: #0969da;
+  --codev-canvas-border: #d0d7de;
+  --codev-canvas-muted: #656d76;
+  --codev-canvas-code-background: #f6f8fa;
+  --codev-canvas-link: #0969da;
+  --codev-canvas-comment-marker: #bf8700;
+
+  color: var(--codev-canvas-foreground);
+  background: var(--codev-canvas-background);
+  /* Positioning context for the comment overlay, which anchors to the active block. */
+  position: relative;
+}
+
+/* Left gutter so the anchored "+" affordance sits beside a block, not over its text. */
+.codev-artifact-canvas-body {
+  padding-left: 1.9rem;
+}
+
+/* Phase 3 — comment overlay + minimal marker rendering */
+.codev-canvas-add-comment {
+  border: 1px solid var(--codev-canvas-border);
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-comment-marker);
+  cursor: pointer;
+  border-radius: 4px;
+  line-height: 1;
+  padding: 0 6px;
+}
+.codev-canvas-add-comment:hover,
+.codev-canvas-add-comment:focus-visible {
+  background: var(--codev-canvas-code-background);
+  outline: 2px solid var(--codev-canvas-accent);
+}
+
+/* v1 minimal indicator for a line carrying a review marker (#863 adds polished inline markers) */
+.codev-canvas-has-marker {
+  box-shadow: inset 3px 0 0 0 var(--codev-canvas-comment-marker);
+}
+
+.codev-artifact-canvas-body [data-line]:focus-visible {
+  outline: 2px solid var(--codev-canvas-accent);
+  outline-offset: 2px;
+}
+.codev-artifact-canvas-body a { color: var(--codev-canvas-link); }
+.codev-artifact-canvas-body pre,
+.codev-artifact-canvas-body code { background: var(--codev-canvas-code-background); }
+
+/* Overlay: the "+" affordance + the active line's existing comments (author + text).
+   Anchored to the active block: positioned absolutely in the canvas, with `top` set inline from
+   the block's offset (the `+` lands in the left gutter beside the hovered/focused block). */
+.codev-canvas-overlay {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  position: absolute;
+  left: 0;
+  z-index: 5;
+}
+.codev-canvas-marker-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--codev-canvas-comment-marker);
+  background: var(--codev-canvas-code-background);
+  color: var(--codev-canvas-foreground);
+  font-size: 0.9em;
+}
+.codev-canvas-marker-author { font-weight: 600; color: var(--codev-canvas-muted); }

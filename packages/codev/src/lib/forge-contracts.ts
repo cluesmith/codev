@@ -70,6 +70,15 @@ export interface PrListItem {
   createdAt: string;
   mergedAt?: string;
   author?: { login: string };
+  /**
+   * Logins of users requested as reviewers. Emitted by every forge's `pr-list`
+   * script (GitHub flattens gh's reviewer objects to logins; GitLab/Gitea emit
+   * `[]` as they expose no GitHub-equivalent per-user review-request list).
+   * Consumed by the VSCode PR sidebar to bucket "review-requested" PRs.
+   */
+  reviewRequests: string[];
+  /** Whether the PR is a draft. GitLab/Gitea emit `false` (not exposed). */
+  isDraft: boolean;
 }
 
 /** Output of the `pr-list` concept command. */

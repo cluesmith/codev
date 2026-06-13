@@ -144,6 +144,51 @@ export function copyResourceTemplates(
   return { copied, skipped };
 }
 
+/** The capped hot-tier files materialized into a project's codev/resources/ (Spec 987). */
+export const HOT_TIER_FILES = ['arch-critical.md', 'lessons-critical.md'] as const;
+
+/**
+ * Copy the hot-tier files (arch-critical.md, lessons-critical.md) from the skeleton
+ * into the project's codev/resources/.
+ *
+ * Spec 987: these are framework-provided starters each project then curates. Porch
+ * injection and the CLAUDE/AGENTS managed block resolve them via the four-tier chain
+ * (so injection works even before this runs), but materializing local copies makes the
+ * hot tier visible and per-project editable. `skipExisting` so a curated copy is never
+ * overwritten. This is a focused, wired-in step — distinct from the dead
+ * `copyResourceTemplates` (which init/adopt/update do not call).
+ */
+export function copyHotTierDefaults(
+  targetDir: string,
+  skeletonDir: string,
+  options: CopyResourceTemplatesOptions = {}
+): CopyResourceTemplatesResult {
+  const { skipExisting = false } = options;
+  const resourcesDir = path.join(targetDir, 'codev', 'resources');
+  const copied: string[] = [];
+  const skipped: string[] = [];
+
+  if (!fs.existsSync(resourcesDir)) {
+    fs.mkdirSync(resourcesDir, { recursive: true });
+  }
+
+  for (const file of HOT_TIER_FILES) {
+    const destPath = path.join(resourcesDir, file);
+    const srcPath = path.join(skeletonDir, 'templates', file);
+
+    if (skipExisting && fs.existsSync(destPath)) {
+      skipped.push(file);
+      continue;
+    }
+    if (fs.existsSync(srcPath)) {
+      fs.copyFileSync(srcPath, destPath);
+      copied.push(file);
+    }
+  }
+
+  return { copied, skipped };
+}
+
 interface CopyRootFilesOptions {
   handleConflicts?: boolean;
 }

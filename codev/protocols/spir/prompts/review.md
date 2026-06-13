@@ -148,17 +148,25 @@ Read the consultation output files from the project directory (`codev/projects/{
 
 **MANDATORY**: The review document MUST include `## Architecture Updates` and `## Lessons Learned Updates` sections. Porch will block advancement if these are missing.
 
-**Architecture Updates** (`codev/resources/arch.md`):
-1. Read the current `codev/resources/arch.md`
-2. Determine if this project introduced architectural changes worth documenting (new subsystems, data flows, design decisions, invariants, file locations)
-3. If yes: make the updates to arch.md and describe what you changed in the `## Architecture Updates` section of the review
-4. If no: write "No architecture updates needed" in the section with a brief explanation (e.g., "This was a template-only change with no new subsystems or data flows")
+Each governance doc has **two tiers** (Spec 987) — **route** each new fact/lesson to the right tier; do **not** just append to the cold archive:
+- **HOT** — `codev/resources/arch-critical.md` / `lessons-critical.md`: tiny, **hard-capped**, **always injected** into every prompt and into CLAUDE.md/AGENTS.md. The behavior-changer.
+- **COLD** — `codev/resources/arch.md` / `lessons-learned.md`: full, on-demand reference.
 
-**Lessons Learned Updates** (`codev/resources/lessons-learned.md`):
-1. Read the current `codev/resources/lessons-learned.md`
-2. Determine if this project produced generalizable lessons (patterns, anti-patterns, debugging insights, process improvements)
-3. If yes: add entries to lessons-learned.md and describe what you added in the `## Lessons Learned Updates` section of the review
-4. If no: write "No lessons learned updates needed" in the section with a brief explanation (e.g., "Straightforward implementation with no novel insights beyond existing entries")
+**Architecture Updates**:
+1. Read `arch-critical.md` (hot) and skim `arch.md` (cold).
+2. If this project produced a system-shape fact, route it:
+   - **Behavior-changing + cross-cutting** (an invariant/decision a future builder must know up front) → add to **`arch-critical.md`**. Respect the cap: if the hot file is full, **demote** a weaker entry into `arch.md` to make room. If you add/rename a top-level `arch.md` section, keep the hot file's cold-doc map accurate.
+   - **Reference detail** (subsystem mechanism, file location, one-off) → add to **`arch.md`** (cold).
+3. Describe what you routed where in the `## Architecture Updates` section. If nothing qualifies: write "No architecture updates needed" with a brief reason.
+
+**Lessons Learned Updates**:
+1. Read `lessons-critical.md` (hot) and skim `lessons-learned.md` (cold).
+2. If this project produced a durable lesson, route it:
+   - **Behavior-changing + cross-cutting** (a rule that should change how the next project is built) → add to **`lessons-critical.md`**, respecting the cap (demote a weaker entry into `lessons-learned.md` if full).
+   - **Spec-narrow recipe / reference tip** → add to **`lessons-learned.md`** (cold). Spec-narrow recipes belong in the cold archive, never the always-on hot file.
+3. Describe what you routed where in the `## Lessons Learned Updates` section. If nothing qualifies: write "No lessons learned updates needed" with a brief reason.
+
+**Never** grow a hot file past its cap by appending — route to cold or displace. The cap is what keeps the hot tier cheap enough to always inject.
 
 ### 4b. Update Other Documentation
 
