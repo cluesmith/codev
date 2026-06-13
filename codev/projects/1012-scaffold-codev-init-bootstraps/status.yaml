@@ -1,7 +1,7 @@
 id: '1012'
 title: scaffold-codev-init-bootstraps
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-12T19:24:46.703Z'
-updated_at: '2026-06-13T06:18:30.529Z'
+updated_at: '2026-06-13T06:18:43.738Z'
