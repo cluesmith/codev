@@ -83,6 +83,10 @@ describe('adopt command', () => {
       // Verify user data directories
       expect(fs.existsSync(path.join(projectDir, 'codev', 'specs'))).toBe(true);
       expect(fs.existsSync(path.join(projectDir, 'codev', 'plans'))).toBe(true);
+
+      // Issue #1012: cold-tier governance files are bootstrapped.
+      expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'arch.md'))).toBe(true);
+      expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'lessons-learned.md'))).toBe(true);
     });
 
     it('should throw error if codev directory already exists', async () => {

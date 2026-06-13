@@ -71,7 +71,12 @@ describe('init command', () => {
         expect(fs.existsSync(path.join(projectDir, 'codev', 'reviews'))).toBe(true);
         // Spec 0126: projectlist.md is no longer created
         expect(fs.existsSync(path.join(projectDir, 'codev', 'projectlist.md'))).toBe(false);
-        // Note: resources/ is NOT created in minimal structure (created by user if needed)
+        // Spec 987 (hot tier) + issue #1012 (cold tier): codev/resources/ is bootstrapped
+        // with all four governance files.
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'arch-critical.md'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'lessons-critical.md'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'arch.md'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'resources', 'lessons-learned.md'))).toBe(true);
       } finally {
         process.chdir(originalCwd);
       }
