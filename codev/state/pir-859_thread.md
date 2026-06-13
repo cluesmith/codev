@@ -169,3 +169,27 @@ CHECKS: core tests 31 pass (incl. new review-markers). vscode: check-types ✓ l
 unit tests 395 pass. Fixed a self-inflicted duplicate command-title (caught by contributes-commands test).
 
 Pushing; porch done -> dev-approval gate.
+
+## dev-approval gate feedback round (2026-06-14)
+
+Architect reviewed the running worktree. Changes made (gate still pending):
+- RENAME: "Codev Review Preview"/"Open Review Canvas" -> "Codev Markdown Preview" /
+  "Open Markdown Preview" (user-facing + internal: viewType codev.markdownPreview, command
+  codev.openMarkdownPreview, class MarkdownPreviewProvider, file preview-provider.ts, bundle
+  markdown-preview.{js,css}). "Review" collided with the reviews/ artifact type; also unified the
+  Preview-vs-Canvas inconsistency.
+- ICON: title-bar button now uses icons/codev.svg (Codev brand) instead of $(comment-discussion),
+  matching the activity-bar + existing view/title menu pattern.
+- INPUT decision: keep vscode showInputBox for v1. It's VSCode-only, but the package contract is
+  "host provides input" (onAddComment intent-only, D6), so the dashboard supplies its own input -
+  showInputBox doesn't constrain it. For CONSISTENT cross-surface input the box must live in the
+  PACKAGE (a host-level inline box wouldn't be shared with the dashboard). Noted that direction on
+  #863 (comment 4699870100); #859 ships with showInputBox.
+- Sidebar question: View Plan/Spec/Review currently open the plain TEXT editor (showTextDocument,
+  preview:false); the custom editor is priority:option so the sidebar does NOT route through it.
+  Offered to wire sidebar View commands -> markdown preview; awaiting architect decision (not done).
+
+Created untracked scratch fixture codev/plans/_markdown-preview-demo.md for manual testing of the
+working case + the multi-line-paragraph split limitation (delete when done).
+
+Build/tests still green (core 31, vscode 395, compile). Still at dev-approval.
