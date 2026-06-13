@@ -23,30 +23,58 @@ const esbuildProblemMatcherPlugin = {
 	},
 };
 
+/** Extension host bundle — Node / CJS, loaded by VS Code. */
+const extensionConfig = {
+	entryPoints: ['src/extension.ts'],
+	bundle: true,
+	format: 'cjs',
+	minify: production,
+	sourcemap: !production,
+	sourcesContent: false,
+	platform: 'node',
+	outfile: 'dist/extension.js',
+	external: ['vscode', 'bufferutil', 'utf-8-validate'],
+	logLevel: 'silent',
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
+/**
+ * Review-canvas webview bundle (#859) — a browser IIFE that mounts the React
+ * `@cluesmith/codev-artifact-canvas` surface inside the custom editor's webview.
+ * React + the canvas + its deps are bundled (the canvas package is not
+ * npm-published; each host bundles it). `process.env.NODE_ENV` is defined so
+ * React's dev/prod branch resolves in the browser (no Node `process` there).
+ * The imported `default-theme.css` is emitted next to the JS as
+ * `dist/webview/review-canvas.css`.
+ */
+const webviewConfig = {
+	entryPoints: ['src/markdown-preview/webview/main.ts'],
+	bundle: true,
+	format: 'iife',
+	minify: production,
+	sourcemap: !production,
+	sourcesContent: false,
+	platform: 'browser',
+	outfile: 'dist/webview/review-canvas.js',
+	loader: { '.css': 'css' },
+	define: { 'process.env.NODE_ENV': production ? '"production"' : '"development"' },
+	logLevel: 'silent',
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
 async function main() {
-	const ctx = await esbuild.context({
-		entryPoints: [
-			'src/extension.ts'
-		],
-		bundle: true,
-		format: 'cjs',
-		minify: production,
-		sourcemap: !production,
-		sourcesContent: false,
-		platform: 'node',
-		outfile: 'dist/extension.js',
-		external: ['vscode', 'bufferutil', 'utf-8-validate'],
-		logLevel: 'silent',
-		plugins: [
-			/* add to the end of plugins array */
-			esbuildProblemMatcherPlugin,
-		],
-	});
+	const configs = [extensionConfig, webviewConfig];
 	if (watch) {
-		await ctx.watch();
+		const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
+		await Promise.all(contexts.map((c) => c.watch()));
 	} else {
-		await ctx.rebuild();
-		await ctx.dispose();
+		await Promise.all(
+			configs.map(async (c) => {
+				const ctx = await esbuild.context(c);
+				await ctx.rebuild();
+				await ctx.dispose();
+			}),
+		);
 	}
 }
 

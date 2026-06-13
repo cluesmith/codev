@@ -231,12 +231,21 @@ importers:
 
   packages/vscode:
     dependencies:
+      '@cluesmith/codev-artifact-canvas':
+        specifier: workspace:*
+        version: link:../artifact-canvas
       '@cluesmith/codev-core':
         specifier: workspace:*
         version: link:../core
       '@cluesmith/codev-types':
         specifier: workspace:*
         version: link:../types
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
       ws:
         specifier: ^8.18.0
         version: 8.20.0
@@ -247,6 +256,12 @@ importers:
       '@types/node':
         specifier: 22.x
         version: 22.19.17
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
       '@types/vscode':
         specifier: ~1.105.0
         version: 1.105.0
@@ -4538,7 +4553,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@28.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
+      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@26.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
 
   '@vitest/expect@4.1.4':
     dependencies:

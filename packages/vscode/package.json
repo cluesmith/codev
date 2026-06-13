@@ -45,10 +45,25 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "codev.reviewPreview",
+        "displayName": "Codev Review Preview",
+        "selector": [
+          { "filenamePattern": "**/*.md" }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "codev.helloWorld",
         "title": "Codev: Show Connection State"
+      },
+      {
+        "command": "codev.openReviewCanvas",
+        "title": "Codev: Open Review Canvas",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "codev.forwardSelectionToBuilder",
@@ -298,7 +313,18 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "codev.openReviewCanvas",
+          "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//",
+          "group": "navigation"
+        }
+      ],
       "commandPalette": [
+        {
+          "command": "codev.openReviewCanvas",
+          "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
+        },
         {
           "command": "codev.forwardSelectionToBuilder",
           "when": "false"
@@ -858,14 +884,19 @@
     "vscode:publish:pre": "sh scripts/publish.sh --pre-release"
   },
   "dependencies": {
+    "@cluesmith/codev-artifact-canvas": "workspace:*",
     "@cluesmith/codev-core": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/vscode": "~1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
     "typescript-eslint": "^8.48.1",
     "eslint": "^9.39.1",
