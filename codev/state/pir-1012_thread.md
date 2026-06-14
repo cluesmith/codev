@@ -46,3 +46,10 @@ Issue #1012 — scaffold: `codev init` bootstraps `codev/resources/` with arch.m
 - Tests: new cold-tier-materialization.test.ts (7 tests: create/placeholder-marker/skip-existing/user-data-protection/update-backfill/customized-survives/dry-run); init.test.ts comment flipped to positive assertions for all 4 resource files; adopt.test.ts asserts cold files.
 - Build: needed full `pnpm build` from worktree root first (codev-core wasn't built — pre-existing infra, not my change). Then green.
 - Full suite: 163 files / 3310 tests pass, 48 pre-existing skips. Awaiting dev-approval gate.
+
+## dev-approval iter: convention fix (skeleton-sourced content)
+
+- Architect flagged: inline `COLD_TIER_STARTERS` constants in scaffold.ts break the copy-from-skeleton convention. Chose (via question) "minimal starter files in skeleton".
+- Refactored: added `codev-skeleton/templates/arch.starter.md` + `lessons-learned.starter.md` (the 4-line placeholders); replaced inline `createColdTierDefaults` with copy-based `copyColdTierDefaults(targetDir, skeletonDir, opts)` that maps starter→dest (arch.starter.md→arch.md). Rich `templates/{arch,lessons-learned}.md` left untouched (manual-cp reference). copyHotTierDefaults untouched.
+- COLD_TIER_FILES is now `[{src,dest}]`. Callers pass skeletonDir/templatesDir and use `.copied`.
+- Tests updated to mock a skeleton dir; full suite green (163/3310). Smoke: init copies starters → arch.md/lessons-learned.md, no .starter.md leaks into project.
