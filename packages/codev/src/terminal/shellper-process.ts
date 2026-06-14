@@ -36,7 +36,7 @@ import {
   type SignalMessage,
   type SpawnMessage,
 } from './shellper-protocol.js';
-import { ShellperReplayBuffer } from './shellper-replay-buffer.js';
+import { ShellperReplayBuffer, DEFAULT_MAX_REPLAY_BYTES } from './shellper-replay-buffer.js';
 import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
@@ -92,9 +92,10 @@ export class ShellperProcess extends EventEmitter {
     private readonly socketPath: string,
     replayBufferLines: number = 10_000,
     private readonly log: (msg: string) => void = () => {},
+    replayBufferMaxBytes: number = DEFAULT_MAX_REPLAY_BYTES,
   ) {
     super();
-    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines);
+    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines, replayBufferMaxBytes);
   }
 
   /**
