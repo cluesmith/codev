@@ -113,6 +113,48 @@ describe('RingBuffer', () => {
     expect(buf.getAll()).toEqual(['hello', '', 'world']);
   });
 
+  it('caps the partial to maxPartialBytes for a no-newline stream (Issue #1047)', () => {
+    const cap = 1024;
+    const buf = new RingBuffer(10, cap);
+    // Feed 100 KB with no newline, in 1 KB frames — mimics a full-screen TUI
+    // that redraws in place and never emits \n.
+    const frame = 'x'.repeat(1024);
+    for (let i = 0; i < 100; i++) {
+      buf.pushData(frame);
+    }
+    // No complete lines were ever pushed.
+    expect(buf.size).toBe(0);
+    // The partial is bounded by the cap, not the 100 KB total.
+    const all = buf.getAll();
+    expect(all).toHaveLength(1);
+    expect(all[0].length).toBe(cap);
+    // It retains the most recent bytes (front-trimmed).
+    expect(all[0]).toBe('x'.repeat(cap));
+  });
+
+  it('byte-cap retains the tail across a mixed boundary', () => {
+    const cap = 8;
+    const buf = new RingBuffer(10, cap);
+    buf.pushData('done\n');           // completes a line, clears partial
+    buf.pushData('ABCDEFGHIJ');       // 10 bytes, no newline → trim to last 8
+    expect(buf.getAll()).toEqual(['done', 'CDEFGHIJ']);
+  });
+
+  it('byte-cap does not clip lines that fit, and still splits correctly', () => {
+    const cap = 16;
+    const buf = new RingBuffer(10, cap);
+    buf.pushData('short\nalsoShort\ntail');
+    expect(buf.getAll()).toEqual(['short', 'alsoShort', 'tail']);
+  });
+
+  it('a newline after an over-cap run still emits a (trimmed) line', () => {
+    const cap = 4;
+    const buf = new RingBuffer(10, cap);
+    buf.pushData('ABCDEFGH'); // 8 bytes, no newline → partial trimmed to 'EFGH'
+    buf.pushData('\n');       // completes the (trimmed) line
+    expect(buf.getAll()).toEqual(['EFGH']);
+  });
+
   it('clear resets content but keeps seq', () => {
     const buf = new RingBuffer(5);
     buf.push('a');

@@ -21,6 +21,7 @@ export interface PtySessionConfig {
   label: string;
   logDir: string; // e.g., .agent-farm/logs/
   ringBufferLines?: number; // Default: 1000
+  maxPartialBytes?: number; // Default: DEFAULT_MAX_PARTIAL_BYTES (ring-buffer partial byte cap, #1047)
   diskLogEnabled?: boolean; // Default: true
   diskLogMaxBytes?: number; // Default: 50MB
   reconnectTimeoutMs?: number; // Default: 300_000 (5 min)
@@ -74,7 +75,7 @@ export class PtySession extends EventEmitter {
     this.cols = config.cols;
     this.rows = config.rows;
     this.createdAt = new Date().toISOString();
-    this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000);
+    this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000, config.maxPartialBytes);
     this.diskLogEnabled = config.diskLogEnabled ?? true;
     this.diskLogMaxBytes = config.diskLogMaxBytes ?? 50 * 1024 * 1024; // DEFAULT_DISK_LOG_MAX_BYTES
     this.reconnectTimeoutMs = config.reconnectTimeoutMs ?? 300_000;
@@ -117,6 +118,15 @@ export class PtySession extends EventEmitter {
    * User input flows: WebSocket → write() → shellper.
    */
   attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string): void {
+    // Idempotent re-attach (Issue #1047 Fix E): if a previous client is still
+    // attached, drop our listeners on it before subscribing to the new one so
+    // a re-attach can't double the per-byte data fan-out (each leaked 'data'
+    // listener would re-run onPtyData for every PTY byte).
+    if (this.shellperClient && this.shellperClient !== client) {
+      this.shellperClient.removeAllListeners('data');
+      this.shellperClient.removeAllListeners('exit');
+      this.shellperClient.removeAllListeners('close');
+    }
     this._shellperBacked = true;
     this.shellperClient = client;
     this.shellperPid = shellperPid;

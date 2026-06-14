@@ -11,15 +11,34 @@ import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
 import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
+import { DEFAULT_MAX_PARTIAL_BYTES } from './ring-buffer.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
   logDir?: string; // Default: <workspaceRoot>/.agent-farm/logs
   maxSessions?: number; // Default: 50
   ringBufferLines?: number;
+  maxPartialBytes?: number; // Default: DEFAULT_MAX_PARTIAL_BYTES (or CODEV_TERMINAL_MAX_PARTIAL_BYTES)
   diskLogEnabled?: boolean;
   diskLogMaxBytes?: number;
   reconnectTimeoutMs?: number;
+}
+
+/**
+ * Resolve the ring-buffer partial byte cap (Issue #1047), allowing operators
+ * to tune it via `CODEV_TERMINAL_MAX_PARTIAL_BYTES` (useful when Tower is
+ * hosted remotely and replay bandwidth matters). Falls back to the default
+ * for an unset or non-positive value.
+ */
+function resolveMaxPartialBytes(configured?: number): number {
+  if (configured !== undefined && configured > 0) {
+    return configured;
+  }
+  const fromEnv = parseInt(process.env.CODEV_TERMINAL_MAX_PARTIAL_BYTES || '', 10);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_MAX_PARTIAL_BYTES;
 }
 
 export interface CreateTerminalRequest {
@@ -49,6 +68,7 @@ export class TerminalManager {
       logDir: config.logDir ?? path.join(config.workspaceRoot, '.agent-farm', 'logs'),
       maxSessions: config.maxSessions ?? 50,
       ringBufferLines: config.ringBufferLines ?? 1000,
+      maxPartialBytes: resolveMaxPartialBytes(config.maxPartialBytes),
       diskLogEnabled: config.diskLogEnabled ?? true,
       diskLogMaxBytes: config.diskLogMaxBytes ?? DEFAULT_DISK_LOG_MAX_BYTES,
       reconnectTimeoutMs: config.reconnectTimeoutMs ?? 300_000,
@@ -87,6 +107,7 @@ export class TerminalManager {
       label: req.label ?? `terminal-${id.slice(0, 8)}`,
       logDir: this.config.logDir,
       ringBufferLines: this.config.ringBufferLines,
+      maxPartialBytes: this.config.maxPartialBytes,
       diskLogEnabled: this.config.diskLogEnabled,
       diskLogMaxBytes: this.config.diskLogMaxBytes,
       reconnectTimeoutMs: this.config.reconnectTimeoutMs,
@@ -120,8 +141,12 @@ export class TerminalManager {
    * a fresh one. Reconnect-after-restart passes the persisted id so a terminal
    * keeps its identity across a Tower restart (#991): the client's WebSocket url
    * (`/ws/terminal/<id>`) stays valid, so the existing reconnect machinery
-   * re-attaches transparently rather than hitting a dead id. The in-memory
-   * sessions map is empty at reconcile time, so reusing the id can't collide.
+   * re-attaches transparently rather than hitting a dead id. At startup reconcile
+   * the in-memory sessions map is empty so reuse can't collide; on the *live*
+   * on-the-fly reconnect path (callers guard on a missing session) it normally
+   * can't either, but if an entry already exists under this id we tear it down
+   * first (Issue #1047 Fix E) so a replaced session can't keep firing listeners
+   * on the surviving shellper client.
    */
   createSessionRaw(opts: { label: string; cwd: string; id?: string }): PtySessionInfo {
     if (this.sessions.size >= this.config.maxSessions) {
@@ -129,6 +154,13 @@ export class TerminalManager {
     }
 
     const id = opts.id ?? randomUUID();
+    const existing = this.sessions.get(id);
+    if (existing) {
+      // Defensive teardown before overwrite: detach the old session from its
+      // shellper client so its data/exit/close listeners stop processing on
+      // the client we're about to re-attach to a fresh session.
+      existing.detachShellper();
+    }
     const { cols, rows } = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {
       id,
@@ -141,6 +173,7 @@ export class TerminalManager {
       label: opts.label,
       logDir: this.config.logDir,
       ringBufferLines: this.config.ringBufferLines,
+      maxPartialBytes: this.config.maxPartialBytes,
       diskLogEnabled: this.config.diskLogEnabled,
       diskLogMaxBytes: this.config.diskLogMaxBytes,
       reconnectTimeoutMs: this.config.reconnectTimeoutMs,
