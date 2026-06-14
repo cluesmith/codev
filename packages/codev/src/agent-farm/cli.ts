@@ -694,14 +694,14 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   towerCmd
     .command('start')
-    .description('Start the tower dashboard (daemonizes by default)')
+    .description('Start the tower dashboard and wait for readiness by default')
     .option('-p, --port <port>', 'Port to run on (default: 4100)')
-    .option('--wait', 'Wait for server to start before returning')
+    .option('--wait', 'Deprecated no-op: tower start waits for readiness by default')
     .action(async (options) => {
       try {
         await towerStart({
           port: options.port ? parseInt(options.port, 10) : undefined,
-          wait: options.wait,
+          wait: true,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

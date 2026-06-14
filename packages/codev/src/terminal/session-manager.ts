@@ -182,7 +182,7 @@ export class SessionManager extends EventEmitter {
     // Read PID + startTime from stdout
     let info: { pid: number; startTime: number };
     try {
-      info = await this.readShellperInfo(child);
+      info = await this.readShellperInfo(child, stderrLogPath);
     } catch (err) {
       this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}`);
       // Kill orphaned child process using handle (not PID — may not be available yet)
@@ -695,11 +695,19 @@ export class SessionManager extends EventEmitter {
 
   private readShellperInfo(
     child: ReturnType<typeof cpSpawn>,
+    stderrLogPath: string,
   ): Promise<{ pid: number; startTime: number }> {
     return new Promise((resolve, reject) => {
       let data = '';
+      let settled = false;
+      const fail = (message: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error(this.withShellperDiagnostics(message, data, stderrLogPath)));
+      };
       const timeout = setTimeout(() => {
-        reject(new Error('Timed out reading shellper info from stdout'));
+        fail('Timed out reading shellper info from stdout');
       }, 10_000);
 
       child.stdout!.on('data', (chunk: Buffer) => {
@@ -707,27 +715,85 @@ export class SessionManager extends EventEmitter {
       });
 
       child.stdout!.on('end', () => {
-        clearTimeout(timeout);
+        if (settled) return;
         try {
           const info = JSON.parse(data) as { pid: number; startTime: number };
+          if (typeof info.pid !== 'number' || typeof info.startTime !== 'number') {
+            fail('Invalid shellper info JSON');
+            return;
+          }
+          settled = true;
+          clearTimeout(timeout);
           resolve(info);
         } catch {
-          reject(new Error(`Invalid shellper info JSON: ${data}`));
+          fail('Invalid shellper info JSON');
         }
       });
 
       child.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(err);
+        fail(err.message);
       });
 
       child.on('exit', (code) => {
         if (code !== null && code !== 0 && data === '') {
-          clearTimeout(timeout);
-          reject(new Error(`Shellper exited with code ${code} before writing info`));
+          fail(`Shellper exited with code ${code} before writing info`);
         }
       });
     });
+  }
+
+  private withShellperDiagnostics(message: string, stdout: string, stderrLogPath: string): string {
+    const details: string[] = [message];
+    const stdoutSnippet = this.safeDiagnosticSnippet(stdout);
+    if (stdoutSnippet) {
+      details.push(`stdout: ${stdoutSnippet}`);
+    }
+
+    const stderrTail = this.readTextTail(stderrLogPath, 4000);
+    if (stderrTail) {
+      details.push(`stderr log (${stderrLogPath}): ${stderrTail}`);
+    }
+
+    return details.join('\n');
+  }
+
+  private safeDiagnosticSnippet(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    try {
+      return JSON.stringify(this.redactDiagnosticValue(JSON.parse(trimmed))).slice(0, 1000);
+    } catch {
+      return '';
+    }
+  }
+
+  private redactDiagnosticValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.redactDiagnosticValue(item));
+    }
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    const result: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'env' || key === 'args') {
+        result[key] = '[redacted]';
+      } else {
+        result[key] = this.redactDiagnosticValue(child);
+      }
+    }
+    return result;
+  }
+
+  private readTextTail(filePath: string, maxChars: number): string {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8').trim();
+      if (!content) return '';
+      return content.length > maxChars ? content.slice(-maxChars) : content;
+    } catch {
+      return '';
+    }
   }
 
   private waitForSocket(socketPath: string, timeout = 5000): Promise<void> {

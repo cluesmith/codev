@@ -16,17 +16,21 @@ import { isPortAvailable } from '../utils/shell.js';
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
 
 // Startup verification settings
-const STARTUP_TIMEOUT_MS = 5000;
+const STARTUP_TIMEOUT_MS = 30000;
 const STARTUP_CHECK_INTERVAL_MS = 200;
 
 export interface TowerStartOptions {
   port?: number;
-  wait?: boolean; // Wait for server to start before returning
+  wait?: boolean; // Defaults to true. Set false for fire-and-forget startup.
 }
 
 export interface TowerStopOptions {
   port?: number;
   forceKillAllChildProcesses?: boolean;
+}
+
+export function shouldWaitForTowerStart(options: TowerStartOptions = {}): boolean {
+  return options.wait ?? true;
 }
 
 /**
@@ -120,6 +124,7 @@ export function getProcessesOnPort(port: number): number[] {
  */
 export async function towerStart(options: TowerStartOptions = {}): Promise<void> {
   const port = options.port || DEFAULT_TOWER_PORT;
+  const wait = shouldWaitForTowerStart(options);
 
   // Check if already running and responding
   if (await isServerResponding(port)) {
@@ -193,7 +198,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
 
   const dashboardUrl = `http://localhost:${port}`;
 
-  if (options.wait) {
+  if (wait) {
     // Wait for server to actually start responding
     logger.info('Waiting for server to start...');
     const started = await waitForServer(port);

@@ -795,6 +795,64 @@ describe('SessionManager', () => {
       try { process.kill(pid, 0); alive = true; } catch { /* ESRCH = dead, good */ }
       expect(alive).toBe(false);
     }, 20000);
+
+    it('surfaces shellper stderr when startup info is missing', async () => {
+      const failScript = path.join(socketDir, 'fail-before-info.js');
+      fs.writeFileSync(failScript, [
+        `process.stderr.write('node-pty failed: posix_spawnp failed\\n');`,
+        `process.exit(1);`,
+      ].join('\n'));
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: failScript,
+        nodeExecutable: process.execPath,
+      });
+
+      await expect(manager.createSession({
+        sessionId: 'stderr-startup-failure',
+        command: '/bin/echo',
+        args: [],
+        cwd: '/tmp',
+        env: { PATH: process.env.PATH || '/usr/bin:/bin', SECRET_VALUE: 'do-not-log' },
+        cols: 80,
+        rows: 24,
+      })).rejects.toThrow(/(Shellper exited with code 1 before writing info|Invalid shellper info JSON)[\s\S]*posix_spawnp failed/);
+    }, 15000);
+
+    it('redacts shellper startup stdout env and args diagnostics', async () => {
+      const failScript = path.join(socketDir, 'fail-with-redacted-info.js');
+      fs.writeFileSync(failScript, [
+        `process.stdout.write(JSON.stringify({ env: { SECRET_VALUE: 'do-not}log' }, args: ['--token=abc123'], nested: { args: ['--secret=def456'] } }));`,
+        `process.stderr.write('node-pty failed: posix_spawnp failed\\n');`,
+        `process.exit(1);`,
+      ].join('\n'));
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: failScript,
+        nodeExecutable: process.execPath,
+      });
+
+      let message = '';
+      try {
+        await manager.createSession({
+          sessionId: 'stderr-redaction-failure',
+          command: '/bin/echo',
+          args: [],
+          cwd: '/tmp',
+          env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+          cols: 80,
+          rows: 24,
+        });
+      } catch (err) {
+        message = (err as Error).message;
+      }
+
+      expect(message).toMatch(/stdout: \{"env":"\[redacted\]","args":"\[redacted\]","nested":\{"args":"\[redacted\]"\}\}/);
+      expect(message).not.toMatch(/do-not\}log|abc123|def456/);
+      expect(message).toContain('posix_spawnp failed');
+    }, 15000);
   });
 
   describe('killSession', () => {
