@@ -95,3 +95,6 @@ FIX (mirrors the web): after WS open, schedule a settle-delay (500ms) repaint nu
 This also resolves the earlier "how do you know it painted?" concern: the web client DOESN'T detect paint — it sends an unconditional delayed resize and trusts it. So we do the same (single gated nudge), not retry-until-painted.
 
 Reverted Option A (resume-handler change) — log proved it never runs (empty buffer, no resume). Diagnostics still in (tagged [#1047-diag]) for this test. NEXT: user rebuilds/installs, opens terminal, confirms it paints + pastes [#1047-diag] log (should show "repaint nudge: ...→..." then handleData LIVE).
+
+## Blank-on-open CONFIRMED FIXED (2026-06-15)
+User confirmed terminals now paint on open with the repaint-nudge fix. Stripped all [#1047-diag] diagnostic logging from terminal-adapter.ts (13 lines). Typecheck clean, adapter tests 18/18. The nudge + WS-open resize (#737) remain separate as decided.

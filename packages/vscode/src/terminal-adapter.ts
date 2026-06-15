@@ -83,7 +83,6 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   ) {}
 
   open(initialDimensions: vscode.TerminalDimensions | undefined): void {
-    this.log('INFO', `[#1047-diag] open(initialDimensions=${initialDimensions ? `${initialDimensions.columns}x${initialDimensions.rows}` : 'undefined'})`);
     if (initialDimensions) {
       this.lastDimensions = { cols: initialDimensions.columns, rows: initialDimensions.rows };
     }
@@ -135,11 +134,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.lastDimensions = { cols: dimensions.columns, rows: dimensions.rows };
     if (this.replaying) {
       // Defer resize during replay to prevent garbled rendering (Bugfix #625)
-      this.log('INFO', `[#1047-diag] setDimensions(${dimensions.columns}x${dimensions.rows}) DEFERRED (replaying)`);
       this.pendingResize = { cols: dimensions.columns, rows: dimensions.rows };
       return;
     }
-    this.log('INFO', `[#1047-diag] setDimensions(${dimensions.columns}x${dimensions.rows}) sending now`);
     this.sendResize(dimensions.columns, dimensions.rows);
   }
 
@@ -189,10 +186,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // overlap streaming content. Pause/replay messages arrive *after*
       // this outbound resize, so the order is auth → resize → replay → resume.
       if (this.lastDimensions) {
-        this.log('INFO', `[#1047-diag] WS open: sending resize ${this.lastDimensions.cols}x${this.lastDimensions.rows}`);
         this.sendResize(this.lastDimensions.cols, this.lastDimensions.rows);
-      } else {
-        this.log('INFO', '[#1047-diag] WS open: no lastDimensions, no resize sent');
       }
       // Force a redraw-SIGWINCH after the connection settles if nothing has
       // rendered (#1047), mirroring the web dashboard's post-connect resize.
@@ -361,11 +355,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     if (this.replaying) {
       const text = this.decoder.decode(payload, { stream: true });
       const safe = this.escapeBuffer.write(text);
-      this.log('INFO', `[#1047-diag] handleData REPLAY: payload=${payload.length}B, rendered=${safe.length}B`);
       if (safe.length > 0) { this.renderedSinceConnect = true; this.writeChunked(safe); }
       return;
     }
-    this.log('INFO', `[#1047-diag] handleData LIVE: payload=${payload.length}B`);
     this.renderedSinceConnect = true;
 
     // Live overload: if rendered output falls far enough behind that the queue
@@ -419,17 +411,13 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.clearRepaintNudge();
     this.repaintNudgeTimer = setTimeout(() => {
       this.repaintNudgeTimer = null;
-      if (this.disposed || this.renderedSinceConnect) {
-        this.log('INFO', `[#1047-diag] repaint nudge skipped (rendered=${this.renderedSinceConnect})`);
-        return;
-      }
+      if (this.disposed || this.renderedSinceConnect) { return; }
       if (!this.lastDimensions) { return; }
       const { cols, rows } = this.lastDimensions;
       if (rows <= 1) { this.sendResize(cols, rows); return; }
       // A 1-row change then back guarantees a real TIOCSWINSZ delta (and thus a
       // SIGWINCH) even if the PTY is already at the target size, ending at the
       // correct dimensions. The brief intermediate frame is overwritten at once.
-      this.log('INFO', `[#1047-diag] repaint nudge: ${cols}x${rows - 1} -> ${cols}x${rows}`);
       this.sendResize(cols, rows - 1);
       this.sendResize(cols, rows);
     }, REPAINT_NUDGE_DELAY_MS);
@@ -461,16 +449,13 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     switch (msg.type) {
       case 'seq':
         this.lastSeq = (msg.payload.seq as number) ?? this.lastSeq;
-        this.log('INFO', `[#1047-diag] control: seq=${this.lastSeq}`);
         break;
       case 'pong':
         break;
       case 'pause':
-        this.log('INFO', '[#1047-diag] control: pause (replay start)');
         this.replaying = true;
         break;
       case 'resume':
-        this.log('INFO', '[#1047-diag] control: resume (replay end)');
         this.replaying = false;
         // Flush deferred resize
         if (this.pendingResize) {
@@ -497,8 +482,6 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   }
 
   private sendResize(cols: number, rows: number): void {
-    const willSend = this.ws !== null && this.ws.readyState === WebSocket.OPEN;
-    this.log('INFO', `[#1047-diag] sendResize(${cols}x${rows}) wsOpen=${willSend}`);
     this.sendControl({ type: 'resize', payload: { cols, rows } });
   }
 
