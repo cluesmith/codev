@@ -170,12 +170,14 @@ async function main(): Promise<void> {
     // File doesn't exist — fine
   }
 
+  const replayBufferLines = config.replayBufferLines ?? 10_000;
+  const replayBufferMaxBytes = resolveReplayMaxBytes();
   const shellper = new ShellperProcess(
     createRealPty,
     config.socketPath,
-    config.replayBufferLines ?? 10_000,
+    replayBufferLines,
     logStderr,
-    resolveReplayMaxBytes(),
+    replayBufferMaxBytes,
   );
 
   logStderr(`Shellper started: pid=${process.pid}, command=${config.command}, socket=${config.socketPath}`);

@@ -18,6 +18,15 @@
  * replay payload) regardless of newline density. A few MB keeps a useful
  * scrollback while staying small enough to replay cheaply, including across
  * a remotely-hosted Tower reconnect.
+ *
+ * Deliberately a *distinct* limit from the Tower ring buffer's
+ * `DEFAULT_MAX_PARTIAL_BYTES` (256 KB) and the VSCode client's `MAX_QUEUE`
+ * (1 MB) — different layers, not a value to unify: the shellper retains
+ * scrollback for replay, Tower re-caps its own partial on ingest (`pushData`),
+ * and the client bounds unrendered output. It lives here rather than in a
+ * shared module because this file is dependency-free so the shellper process
+ * stays lean (see the header); importing from the `index.ts` barrel would pull
+ * in the full terminal tree (node-pty, ws).
  */
 export const DEFAULT_MAX_REPLAY_BYTES = 2 * 1024 * 1024;
 
