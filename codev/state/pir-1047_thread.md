@@ -84,3 +84,14 @@ Fix = Option A (suggested earlier this session): in the `resume` control handler
 Also added temporary diagnostic logging (all tagged `[#1047-diag]`, greppable, to be stripped before gate): logs open(dims), setDimensions (deferred vs now), WS-open resize, sendResize source, pause/resume/seq controls, handleData replay-vs-live + byte counts. User builds+installs the extension directly, so these surface in the Terminal output channel.
 
 NEXT: user rebuilds/installs extension, opens a terminal, pastes [#1047-diag] log. Confirms whether Option A paints it AND shows the exact event sequence.
+
+## Blank-on-open ROOT CAUSE found via web-vs-vscode comparison (2026-06-15)
+User asked the decisive question: why does the WEB dashboard render terminals fine but VS Code blanks? Both hit the same Tower/WS/PTY/Claude. → the bug is in the VS Code CLIENT's connect path, not Tower/PTY/SIGWINCH; the app DOES paint (web proves it).
+
+Read packages/dashboard/src/components/Terminal.tsx. The web client's flushInitialBuffer (lines 463-506) UNCONDITIONALLY sends a resize ~500ms after connect, in every branch, with the comment "send SIGWINCH to make the shell redraw at the correct size". It even has a skipReplay mode: "discard replay, just send SIGWINCH to make the running program redraw from scratch". So the web's rendering robustness = forcing a post-connect redraw-SIGWINCH. The VS Code adapter had NO equivalent — only the on-open resize (which is a no-op if it matches the PTY size) → app never redraws → blank until manual resize.
+
+FIX (mirrors the web): after WS open, schedule a settle-delay (500ms) repaint nudge — if nothing rendered yet, send resize(cols,rows-1) then resize(cols,rows) to guarantee a real SIGWINCH at the correct size. Gated on renderedSinceConnect so reconnects that painted via replay don't reflow. Cleared on close/reconnect. Nudge (vs plain resend) chosen because VS Code can't rely on the web's fit-difference; the 1-row delta guarantees the SIGWINCH even at same size.
+
+This also resolves the earlier "how do you know it painted?" concern: the web client DOESN'T detect paint — it sends an unconditional delayed resize and trusts it. So we do the same (single gated nudge), not retry-until-painted.
+
+Reverted Option A (resume-handler change) — log proved it never runs (empty buffer, no resume). Diagnostics still in (tagged [#1047-diag]) for this test. NEXT: user rebuilds/installs, opens terminal, confirms it paints + pastes [#1047-diag] log (should show "repaint nudge: ...→..." then handleData LIVE).

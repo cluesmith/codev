@@ -7,6 +7,7 @@ import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-core/r
 const CHUNK_SIZE = 16384; // 16KB — chunk onDidWrite to avoid CPU spikes
 const MAX_QUEUE = 1048576; // 1MB — drop live output if the unrendered queue exceeds this
 const DROP_WARN_INTERVAL_MS = 5000; // throttle backpressure-drop warnings (#1047)
+const REPAINT_NUDGE_DELAY_MS = 500; // settle delay before forcing a redraw-SIGWINCH (#1047), matching the web client's 500ms
 
 // Reconnect backoff. The exponential curve (1000 * 2^attempt, capped at 30s),
 // the give-up threshold, and the session-unknown classifier all live in the
@@ -50,6 +51,17 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private lastDropWarnAt = 0;
   private disposed = false;
 
+  // Repaint-nudge state (#1047). A freshly-attached terminal can stay blank:
+  // the app inside (e.g. Claude's full-screen TUI) only paints after a real
+  // window-size change (SIGWINCH), but the resize we send on connect can be a
+  // same-size no-op or land before the app reacts. The web dashboard client
+  // avoids this by unconditionally sending a "redraw" resize ~500ms after
+  // connect (Terminal.tsx flushInitialBuffer); the Pseudoterminal path here had
+  // no equivalent. We mirror it: after a settle delay, if nothing has rendered,
+  // nudge the size (a brief 1-row change, then back) to force the SIGWINCH.
+  private renderedSinceConnect = false;
+  private repaintNudgeTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Reconnect-loop state. The adapter owns reconnection end-to-end (#936) —
   // backoff scheduling, give-up after MAX_RECONNECT_ATTEMPTS, and a terminal
   // failure state that stops the loop until the user manually reconnects. The
@@ -85,6 +97,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
   close(): void {
     this.disposed = true;
+    this.clearRepaintNudge();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -181,6 +194,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       } else {
         this.log('INFO', '[#1047-diag] WS open: no lastDimensions, no resize sent');
       }
+      // Force a redraw-SIGWINCH after the connection settles if nothing has
+      // rendered (#1047), mirroring the web dashboard's post-connect resize.
+      this.renderedSinceConnect = false;
+      this.scheduleRepaintNudge();
     });
 
     this.ws.on('message', (raw: ArrayBuffer) => {
@@ -300,6 +317,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     // mis-route the next connection's live data (#1047).
     this.replaying = false;
     this.queuedBytes = 0;
+    // Drop any pending repaint nudge from a prior connection; the next WS open
+    // reschedules it.
+    this.clearRepaintNudge();
   }
 
   /**
@@ -342,10 +362,11 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       const text = this.decoder.decode(payload, { stream: true });
       const safe = this.escapeBuffer.write(text);
       this.log('INFO', `[#1047-diag] handleData REPLAY: payload=${payload.length}B, rendered=${safe.length}B`);
-      if (safe.length > 0) { this.writeChunked(safe); }
+      if (safe.length > 0) { this.renderedSinceConnect = true; this.writeChunked(safe); }
       return;
     }
     this.log('INFO', `[#1047-diag] handleData LIVE: payload=${payload.length}B`);
+    this.renderedSinceConnect = true;
 
     // Live overload: if rendered output falls far enough behind that the queue
     // exceeds MAX_QUEUE, DROP this burst rather than reconnecting. Terminal
@@ -386,6 +407,41 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     }
   }
 
+  /**
+   * Schedule the post-connect repaint nudge (#1047). Fires once after a settle
+   * delay; if the pane is still blank (nothing rendered since connect), it
+   * forces a SIGWINCH so the app redraws — the equivalent of the web client's
+   * unconditional post-connect resize. Skipped when replay/live output has
+   * already painted, so a reconnect that rendered from the buffer doesn't
+   * reflow.
+   */
+  private scheduleRepaintNudge(): void {
+    this.clearRepaintNudge();
+    this.repaintNudgeTimer = setTimeout(() => {
+      this.repaintNudgeTimer = null;
+      if (this.disposed || this.renderedSinceConnect) {
+        this.log('INFO', `[#1047-diag] repaint nudge skipped (rendered=${this.renderedSinceConnect})`);
+        return;
+      }
+      if (!this.lastDimensions) { return; }
+      const { cols, rows } = this.lastDimensions;
+      if (rows <= 1) { this.sendResize(cols, rows); return; }
+      // A 1-row change then back guarantees a real TIOCSWINSZ delta (and thus a
+      // SIGWINCH) even if the PTY is already at the target size, ending at the
+      // correct dimensions. The brief intermediate frame is overwritten at once.
+      this.log('INFO', `[#1047-diag] repaint nudge: ${cols}x${rows - 1} -> ${cols}x${rows}`);
+      this.sendResize(cols, rows - 1);
+      this.sendResize(cols, rows);
+    }, REPAINT_NUDGE_DELAY_MS);
+  }
+
+  private clearRepaintNudge(): void {
+    if (this.repaintNudgeTimer) {
+      clearTimeout(this.repaintNudgeTimer);
+      this.repaintNudgeTimer = null;
+    }
+  }
+
   private writeChunked(text: string): void {
     let offset = 0;
     const writeNext = (): void => {
@@ -413,24 +469,15 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
         this.log('INFO', '[#1047-diag] control: pause (replay start)');
         this.replaying = true;
         break;
-      case 'resume': {
-        this.log('INFO', `[#1047-diag] control: resume (replay end), pendingResize=${this.pendingResize ? `${this.pendingResize.cols}x${this.pendingResize.rows}` : 'none'}, lastDimensions=${this.lastDimensions ? `${this.lastDimensions.cols}x${this.lastDimensions.rows}` : 'none'}`);
+      case 'resume':
+        this.log('INFO', '[#1047-diag] control: resume (replay end)');
         this.replaying = false;
-        // Re-assert the terminal size once replay finishes (#1047). On a first
-        // open the PTY is still at its spawn-time default and the real
-        // setDimensions was deferred during the replay window, so the TUI never
-        // gets a SIGWINCH and stays blank until the user manually resizes the
-        // window. Sending the known size here forces that SIGWINCH so the app
-        // repaints — automating the manual-resize that empirically fixes it.
-        // Prefer any resize deferred during replay, else the last known
-        // dimensions. A redundant same-size resize is harmless.
-        const dims = this.pendingResize ?? this.lastDimensions;
-        this.pendingResize = null;
-        if (dims) {
-          this.sendResize(dims.cols, dims.rows);
+        // Flush deferred resize
+        if (this.pendingResize) {
+          this.sendResize(this.pendingResize.cols, this.pendingResize.rows);
+          this.pendingResize = null;
         }
         break;
-      }
       case 'error':
         this.log('ERROR', `Server error: ${JSON.stringify(msg.payload)}`);
         break;
