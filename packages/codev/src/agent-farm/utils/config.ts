@@ -237,6 +237,7 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
 
   return {
     architect: cliOverrides.architect ||
+               process.env.TOWER_ARCHITECT_CMD ||
                resolveCommand(userConfig?.shell?.architect, DEFAULT_COMMANDS.architect),
     builder: cliOverrides.builder ||
              resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder),
@@ -248,11 +249,18 @@ export function getResolvedCommands(workspaceRoot?: string): ResolvedCommands {
 /**
  * Get the resolved harness provider for the architect shell.
  * Resolution: explicit architectHarness → auto-detect from architect command → default claude.
+ *
+ * The command auto-detect source is the *override-aware* resolved command
+ * (getResolvedCommands → cliOverrides / TOWER_ARCHITECT_CMD / config), not the
+ * raw config value. Without this, `--architect-cmd gemini` / `TOWER_ARCHITECT_CMD=gemini`
+ * with no matching harness config would launch gemini but resolve the claude
+ * harness, re-arming the #929 resume crash-loop (claude buildResume injecting
+ * `--resume <stale-claude-uuid>` into a non-claude command).
  */
 export function getArchitectHarness(workspaceRoot?: string): HarnessProvider {
   const root = workspaceRoot || findWorkspaceRoot();
   const userConfig = loadUserConfig(root);
-  const architectCmd = resolveCommand(userConfig?.shell?.architect, DEFAULT_COMMANDS.architect);
+  const architectCmd = getResolvedCommands(root).architect;
   return resolveHarness(
     userConfig?.shell?.architectHarness,
     userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
@@ -263,11 +271,15 @@ export function getArchitectHarness(workspaceRoot?: string): HarnessProvider {
 /**
  * Get the resolved harness provider for the builder shell.
  * Resolution: explicit builderHarness → auto-detect from builder command → default claude.
+ *
+ * Like getArchitectHarness, the command auto-detect source is the override-aware
+ * resolved command (so `--builder-cmd gemini` with no matching harness config
+ * resolves the gemini harness, not claude — see #929).
  */
 export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
   const root = workspaceRoot || findWorkspaceRoot();
   const userConfig = loadUserConfig(root);
-  const builderCmd = resolveCommand(userConfig?.shell?.builder, DEFAULT_COMMANDS.builder);
+  const builderCmd = getResolvedCommands(root).builder;
   return resolveHarness(
     userConfig?.shell?.builderHarness,
     userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,

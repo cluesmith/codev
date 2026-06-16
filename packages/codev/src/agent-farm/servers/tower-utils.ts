@@ -13,6 +13,7 @@ import type { ServerResponse } from 'node:http';
 import type { RateLimitEntry } from './tower-types.js';
 import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 import { getArchitectHarness } from '../utils/config.js';
+import type { HarnessProvider } from '../utils/harness.js';
 
 // ============================================================================
 // Rate Limiting
@@ -168,9 +169,31 @@ export const MIME_TYPES: Record<string, string> = {
 // ============================================================================
 
 /**
+ * Write any harness-specific architect-context files into the workspace,
+ * only if absent so a user's existing file is never clobbered. Used by
+ * harnesses that need a project-context manifest role injection alone doesn't
+ * provide (e.g., Gemini's .gemini/settings.json → AGENTS.md). Issue #929.
+ *
+ * Called from buildArchitectArgs so EVERY architect-launch path that routes
+ * through it (launchInstance fresh, add-architect sibling, reconnect, and the
+ * no-Tower `afx architect`) writes these files — not just launchInstance.
+ */
+export function writeArchitectContextFiles(workspacePath: string, harness: HarnessProvider): void {
+  if (!harness.getArchitectFiles) return;
+  for (const file of harness.getArchitectFiles(workspacePath)) {
+    const targetPath = path.join(workspacePath, file.relativePath);
+    if (!fs.existsSync(targetPath)) {
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, file.content);
+    }
+  }
+}
+
+/**
  * Build architect command args with role prompt injected via harness provider.
  * Writes the role to .architect-role.md in the workspace dir and uses the
- * configured harness to determine the correct CLI args and env vars.
+ * configured harness to determine the correct CLI args and env vars. Also
+ * writes any harness-specific context files (e.g. Gemini's .gemini/settings.json).
  * Returns args and env for the caller to merge into session creation.
  */
 export function buildArchitectArgs(baseArgs: string[], workspacePath: string): { args: string[]; env: Record<string, string> } {
@@ -178,13 +201,15 @@ export function buildArchitectArgs(baseArgs: string[], workspacePath: string): {
   const bundledRolesDir = path.resolve(import.meta.dirname, '../../../skeleton/roles');
   const config: RoleConfig = { codevDir, bundledRolesDir, workspaceRoot: workspacePath };
 
+  const harness = getArchitectHarness(workspacePath);
+  writeArchitectContextFiles(workspacePath, harness);
+
   const role = loadRolePrompt(config, 'architect');
   if (!role) return { args: baseArgs, env: {} };
 
   const roleFile = path.join(workspacePath, '.architect-role.md');
   fs.writeFileSync(roleFile, role.content);
 
-  const harness = getArchitectHarness(workspacePath);
   const injection = harness.buildRoleInjection(role.content, roleFile);
 
   return {

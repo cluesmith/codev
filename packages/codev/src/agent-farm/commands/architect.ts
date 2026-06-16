@@ -7,10 +7,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { getConfig, getResolvedCommands, getArchitectHarness } from '../utils/index.js';
-import { loadRolePrompt } from '../utils/roles.js';
+import { getConfig, getResolvedCommands } from '../utils/index.js';
+import { buildArchitectArgs } from '../servers/tower-utils.js';
 
 export interface ArchitectOptions {
   args?: string[];
@@ -23,25 +21,15 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
   const config = getConfig();
   const commands = getResolvedCommands();
 
-  const args = [...(options.args || [])];
-  let env: Record<string, string> = {};
-
-  // Load and inject the architect role prompt via harness
-  const role = loadRolePrompt(config, 'architect');
-  if (role) {
-    const roleFilePath = resolve(config.workspaceRoot, '.architect-role.md');
-    writeFileSync(roleFilePath, role.content);
-
-    const harness = getArchitectHarness(config.workspaceRoot);
-    const injection = harness.buildRoleInjection(role.content, roleFilePath);
-    args.push(...injection.args);
-    env = injection.env;
-  }
-
   // Split command string into executable + initial args (supports e.g. "claude --dangerously-skip-permissions")
   const cmdParts = commands.architect.split(/\s+/);
   const cmd = cmdParts[0];
-  const allArgs = [...cmdParts.slice(1), ...args];
+
+  // Inject the architect role + write any harness-specific context files
+  // (e.g. Gemini's .gemini/settings.json) via the shared launch helper, so the
+  // no-Tower path matches every Tower launch path (Issue #929).
+  const baseArgs = [...cmdParts.slice(1), ...(options.args || [])];
+  const { args: allArgs, env } = buildArchitectArgs(baseArgs, config.workspaceRoot);
 
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, allArgs, {

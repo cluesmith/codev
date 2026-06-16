@@ -515,21 +515,11 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         }
         const architectHarness = getArchitectHarness(workspacePath);
         const resume = safeToResume ? (architectHarness.buildResume?.(workspacePath) ?? null) : null;
-        if (!safeToResume) {
+        // Only warn about a *skipped* resume when this harness actually supports
+        // resume (buildResume defined → claude). For codex/gemini, resume was
+        // never on the table, so the sibling-collision warning is just noise.
+        if (!safeToResume && architectHarness.buildResume) {
           _deps.log('WARN', `Skipping main architect conversation resume for ${workspacePath}: persisted sibling architects detected (or state.db unreadable); cannot disambiguate jsonl by cwd. See #832.`);
-        }
-
-        // Write any harness-specific architect-context files (e.g., Gemini's
-        // .gemini/settings.json → AGENTS.md), only if absent — never clobber a
-        // user's existing file. (Issue #929.)
-        if (architectHarness.getArchitectFiles) {
-          for (const file of architectHarness.getArchitectFiles(workspacePath)) {
-            const targetPath = path.join(workspacePath, file.relativePath);
-            if (!fs.existsSync(targetPath)) {
-              fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-              fs.writeFileSync(targetPath, file.content);
-            }
-          }
         }
 
         let cmdArgs: string[];
@@ -539,6 +529,9 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
           harnessEnv = {};
           _deps.log('INFO', `Resuming main architect session ${resume.sessionId.slice(0, 8)}… for ${workspacePath}`);
         } else {
+          // Fresh launch — buildArchitectArgs writes any harness-specific
+          // context files (e.g. Gemini's .gemini/settings.json) and injects the
+          // role. The resume path above is claude-only, which needs neither.
           const built = buildArchitectArgs(cmdParts.slice(1), workspacePath);
           cmdArgs = built.args;
           harnessEnv = built.env;

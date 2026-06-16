@@ -21,6 +21,7 @@ export const CODEV_GITIGNORE_ENTRIES = `# Codev
 codev/.update-hashes.json
 .builders/
 .architect-role.md
+.gemini/settings.json
 `;
 
 /**

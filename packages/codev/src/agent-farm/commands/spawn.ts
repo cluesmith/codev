@@ -90,7 +90,11 @@ export function discoverResumeSession(
   harness: HarnessProvider,
 ): { sessionId: string; args: string[]; scriptFragment: string } | undefined {
   if (!isResume) return undefined;
-  const resume = harness.buildResume?.(worktreePath) ?? null;
+  if (!harness.buildResume) {
+    logger.info('This harness does not support conversation resume; starting a fresh session.');
+    return undefined;
+  }
+  const resume = harness.buildResume(worktreePath);
   if (resume) {
     logger.kv('Session', `${resume.sessionId.slice(0, 8)}… (resuming conversation)`);
     return resume;

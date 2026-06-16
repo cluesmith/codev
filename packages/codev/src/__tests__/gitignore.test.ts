@@ -137,7 +137,7 @@ describe('Gitignore Utilities', () => {
       const result = backfillGitignore(targetDir, CODEV_GITIGNORE_ENTRIES, { today: new Date('2026-05-27') });
 
       expect(result.skipped).toBe(false);
-      expect(result.added).toEqual(['.architect-role.md']);
+      expect(result.added).toEqual(['.architect-role.md', '.gemini/settings.json']);
       expect(result.alreadyPresent).toEqual(
         expect.arrayContaining(['.agent-farm/', '.consult/', 'codev/.update-hashes.json', '.builders/'])
       );
@@ -208,7 +208,7 @@ describe('Gitignore Utilities', () => {
 
       const result = backfillGitignore(targetDir, CODEV_GITIGNORE_ENTRIES, { dryRun: true });
 
-      expect(result.added).toEqual(['.architect-role.md']);
+      expect(result.added).toEqual(['.architect-role.md', '.gemini/settings.json']);
       expect(fs.readFileSync(path.join(targetDir, '.gitignore'), 'utf-8')).toBe(original);
     });
 

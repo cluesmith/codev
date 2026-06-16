@@ -18,7 +18,9 @@ import {
   normalizeWorkspacePath,
   isTempDirectory,
   serveStaticFile,
+  writeArchitectContextFiles,
 } from '../servers/tower-utils.js';
+import { CLAUDE_HARNESS, GEMINI_HARNESS } from '../utils/harness.js';
 
 describe('tower-utils', () => {
   describe('isRateLimited', () => {
@@ -195,6 +197,47 @@ describe('tower-utils', () => {
       } finally {
         fs.unlinkSync(tmpFile);
       }
+    });
+  });
+
+  // Issue #929 — writeArchitectContextFiles is the shared helper buildArchitectArgs
+  // calls, so EVERY architect-launch path (launchInstance, add-architect sibling,
+  // reconnect, no-Tower `afx architect`) writes harness-specific context files,
+  // not just first-activation. Previously the write lived inline in launchInstance.
+  describe('writeArchitectContextFiles (#929)', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(tmpdir(), 'arch-files-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('gemini → writes .gemini/settings.json pointing at AGENTS.md', () => {
+      writeArchitectContextFiles(tmpDir, GEMINI_HARNESS);
+      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+      expect(JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))).toEqual({
+        context: { fileName: 'AGENTS.md' },
+      });
+    });
+
+    it('gemini → does not clobber a pre-existing .gemini/settings.json', () => {
+      const geminiDir = path.join(tmpDir, '.gemini');
+      fs.mkdirSync(geminiDir, { recursive: true });
+      const settingsPath = path.join(geminiDir, 'settings.json');
+      fs.writeFileSync(settingsPath, '{"custom":true}');
+
+      writeArchitectContextFiles(tmpDir, GEMINI_HARNESS);
+
+      expect(fs.readFileSync(settingsPath, 'utf-8')).toBe('{"custom":true}');
+    });
+
+    it('claude → writes nothing (no getArchitectFiles)', () => {
+      writeArchitectContextFiles(tmpDir, CLAUDE_HARNESS);
+      expect(fs.existsSync(path.join(tmpDir, '.gemini'))).toBe(false);
     });
   });
 });

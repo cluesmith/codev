@@ -8,16 +8,31 @@ Brings the OpenAI `codex` and Google `gemini` CLIs to parity with `claude` as Co
 
 ## Files Changed
 
-- `packages/codev/src/agent-farm/utils/harness.ts` (+46 / -0) — `buildResume?` + `getArchitectFiles?` on the interface; `CLAUDE_HARNESS.buildResume` (delegates to `findLatestSessionId`); `GEMINI_HARNESS.getArchitectFiles` (`.gemini/settings.json`)
-- `packages/codev/src/agent-farm/servers/tower-instances.ts` (+34 / -7) — architect resume gated on `getArchitectHarness(...).buildResume?.()`; writes `getArchitectFiles?()` if-missing on launch
-- `packages/codev/src/agent-farm/commands/spawn.ts` (+25 / -17) — `discoverResumeSession` takes the builder harness, returns the bundled resume object; both call sites pass `getBuilderHarness(...)`
-- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` (+14 / -11) — `startBuilderSession`'s `resumeSessionId?: string` → `resume?: { sessionId, scriptFragment }`; script emits the pre-escaped fragment
-- `packages/codev/src/commands/doctor.ts` (+9 / -2) — affirm codex/gemini architect support; single resolved-harness check
-- `packages/codev/src/agent-farm/__tests__/tower-instances.test.ts` (+152 / -0) — architect resume-skip regression guard + gemini `getArchitectFiles` write-if-missing/no-clobber
-- `packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts` (+74 / -1) — builder resume script uses escaped `scriptFragment`; codex/gemini → fresh script
-- `packages/codev/src/agent-farm/__tests__/discover-resume-session.test.ts` (+44 / -1) — harness-arg threading; codex/gemini null-return + claude bundled-object cases
-- `codev/resources/arch.md` (+7 / -1) — supported-architect-harnesses + Claude-only-resume documentation
-- `codev/plans/929-support-codex-and-gemini-clis-.md`, `codev/state/pir-929_thread.md`, `codev/projects/929-*/status.yaml` — protocol artifacts
+Resume seam + gemini context (initial implementation):
+- `packages/codev/src/agent-farm/utils/harness.ts` — `buildResume?` + `getArchitectFiles?` on the interface; `CLAUDE_HARNESS.buildResume` (delegates to `findLatestSessionId`); `GEMINI_HARNESS.getArchitectFiles` (`.gemini/settings.json`)
+- `packages/codev/src/agent-farm/servers/tower-instances.ts` — architect resume gated on `getArchitectHarness(...).buildResume?.()`; fresh path delegates context-file writing to `buildArchitectArgs`
+- `packages/codev/src/agent-farm/commands/spawn.ts` — `discoverResumeSession` takes the builder harness, returns the bundled resume object; both call sites pass `getBuilderHarness(...)`; distinct "harness does not support resume" log (nit 2)
+- `packages/codev/src/agent-farm/commands/spawn-worktree.ts` — `startBuilderSession`'s `resumeSessionId?: string` → `resume?: { sessionId, scriptFragment }`; script emits the pre-escaped fragment
+- `packages/codev/src/commands/doctor.ts` — affirm codex/gemini architect support; single resolved-harness check
+
+Integration-review fixes (architect punch list — 2 blockers + 3 nits):
+- `packages/codev/src/agent-farm/utils/config.ts` — **BLOCKER B**: `getArchitectHarness`/`getBuilderHarness` now auto-detect from the *override-aware* command (`getResolvedCommands`); `getResolvedCommands.architect` honors `TOWER_ARCHITECT_CMD`
+- `packages/codev/src/agent-farm/servers/tower-utils.ts` — **BLOCKER A**: exported `writeArchitectContextFiles`, called from the shared `buildArchitectArgs` so every launch path writes gemini's manifest; **nit 1**: (see tower-instances) WARN gated on resume support
+- `packages/codev/src/agent-farm/commands/architect.ts` — **BLOCKER A**: no-Tower path refactored to call `buildArchitectArgs` (was duplicating injection)
+- `.gitignore`, `packages/codev/src/lib/gitignore.ts` — **nit 3**: ignore `.gemini/settings.json` (repo + managed adopter list)
+
+Tests:
+- `packages/codev/src/agent-farm/__tests__/tower-instances.test.ts` — architect resume-skip regression guard + gemini `getArchitectFiles` write-if-missing/no-clobber
+- `packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts` — builder resume script uses escaped `scriptFragment`; codex/gemini → fresh script
+- `packages/codev/src/agent-farm/__tests__/discover-resume-session.test.ts` — harness-arg threading; codex/gemini null-return + claude bundled-object cases
+- `packages/codev/src/agent-farm/__tests__/config.test.ts` — **BLOCKER B regression**: override-aware harness resolution (TOWER_ARCHITECT_CMD / --architect-cmd / --builder-cmd → non-claude harness, no `buildResume`)
+- `packages/codev/src/agent-farm/__tests__/tower-utils.test.ts` — **BLOCKER A regression**: `writeArchitectContextFiles` gemini write + no-clobber + claude no-op
+- `packages/codev/src/agent-farm/__tests__/af-architect.test.ts` — updated mocks for the `buildArchitectArgs` delegation
+- `packages/codev/src/__tests__/gitignore.test.ts`, `update.test.ts` — managed-entry expectations include `.gemini/settings.json`
+
+Docs / artifacts:
+- `codev/resources/arch.md` — supported-architect-harnesses + Claude-only-resume + override-aware resolution + `getArchitectFiles` centralization
+- `codev/plans/...`, `codev/reviews/...`, `codev/state/pir-929_thread.md`, `codev/resources/lessons-learned.md`, `codev/projects/929-*/status.yaml`
 
 ## Commits
 
@@ -27,9 +42,9 @@ Brings the OpenAI `codex` and Google `gemini` CLIs to parity with `claude` as Co
 
 ## Test Results
 
-- `pnpm build`: ✓ pass (clean TS types for the new optional methods)
-- `pnpm vitest run` (3 affected files): ✓ pass (146 tests)
-- Manual verification: empirical codex/gemini lifecycle validation (clean + stale-jsonl launch, add-architect, `afx send` multiline/interrupt/streaming, reconnect, affinity, builder `--resume`, dashboard scrollback) was exercised by the human at the `dev-approval` gate against the running worktree — the reason PIR was chosen over AIR/BUGFIX.
+- `pnpm build`: ✓ pass (clean TS types)
+- `pnpm vitest run` (full suite): ✓ 3338 passed, 48 skipped, 0 failures
+- Manual verification: empirical codex/gemini lifecycle validation (clean + stale-jsonl launch, add-architect, `afx send` multiline/interrupt/streaming, reconnect, affinity, builder `--resume`, dashboard scrollback) was exercised by the human at the `dev-approval` gate against the running worktree — the reason PIR was chosen over AIR/BUGFIX. The architect's subsequent **integration review** caught the two override/path-dependency blockers below (fixed + regression-tested in this PR).
 
 ## Architecture Updates
 
@@ -48,7 +63,8 @@ No **HOT** (`lessons-critical.md`) change: the existing "Single source of truth 
 - **The `buildResume` bundling decision** (`harness.ts`): one method returns both the Node-argv `args` (for the `spawn()` architect site) and a shell-escaped `scriptFragment` (for the builder bash generator), mirroring `buildRoleInjection`/`buildScriptRoleInjection`. This deliberately avoids a second independently-optional method (which would force a `!` non-null assertion) and avoids `.join(' ')`-ing a raw argv into bash (word-split/quoting bug). Session ids are bare UUIDs today, so the escaping is belt-and-suspenders — kept for correct-by-construction consistency with the existing script-injection methods.
 - **The `safeToResume` interaction** (`tower-instances.ts`): the new harness gate composes with the pre-existing sibling-collision guard (`safeToResume`, #832) — resume happens only when *both* the harness implements `buildResume` *and* no persisted siblings exist. Confirm the ordering reads correctly.
 - **`getArchitectFiles` write-if-absent** (`tower-instances.ts`): writes `.gemini/settings.json` only when the target path doesn't exist, so a user's existing file is never clobbered. Test covers both the write and the no-clobber path.
-- **Two documented out-of-scope override caveats** (plan Risks): `TOWER_ARCHITECT_CMD`/`--architect-cmd` (and the `--builder-cmd` analog) set a non-Claude command without a matching `.codev/config.json` harness still resolve the claude harness → would still attempt resume. These are the issue's explicit *nice-to-have* ("command-aware harness resolution"); MVP fixes the config-driven path (all acceptance criteria target it) and documents the override caveat rather than expanding scope.
+- **Override-aware harness resolution precedence (BLOCKER B fix)**: `getResolvedCommands.architect` is now `cliOverrides.architect || TOWER_ARCHITECT_CMD || config`. Within the Tower process `cliOverrides` is empty (it's set in the spawning `afx` process, not the long-lived server), so this matches the launch site's `TOWER_ARCHITECT_CMD || config`. An explicit `shell.architectHarness` / `shell.builderHarness` still wins over auto-detection by design — so a *deliberately* contradictory `architectHarness: claude` + gemini command is the user's call, not auto-resolved. Worth a sanity check that this precedence reads as intended.
+- **`getArchitectFiles` centralization (BLOCKER A fix)**: moved the inline write out of `launchInstance` into the shared `buildArchitectArgs` (`writeArchitectContextFiles`), and refactored the no-Tower `architect.ts` to call `buildArchitectArgs` instead of duplicating role injection. Confirm the no-Tower path's arg shape is unchanged (covered by `af-architect.test.ts`) and that the claude resume path — the one path that does *not* call `buildArchitectArgs` — correctly needs no context files (claude has no `getArchitectFiles`).
 
 ## How to Test Locally
 

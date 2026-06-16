@@ -527,7 +527,7 @@ describe('update command', () => {
       const result = await update({ agent: true });
 
       expect(result.error).toBeUndefined();
-      expect(result.gitignoreAdded).toEqual(['.architect-role.md']);
+      expect(result.gitignoreAdded).toEqual(['.architect-role.md', '.gemini/settings.json']);
 
       const content = fs.readFileSync(path.join(projectDir, '.gitignore'), 'utf-8');
       expect(content).toContain('.architect-role.md');
@@ -547,7 +547,7 @@ describe('update command', () => {
       const { update } = await import('../commands/update.js');
       const result = await update({ agent: true, dryRun: true });
 
-      expect(result.gitignoreAdded).toEqual(['.architect-role.md']);
+      expect(result.gitignoreAdded).toEqual(['.architect-role.md', '.gemini/settings.json']);
       expect(fs.readFileSync(path.join(projectDir, '.gitignore'), 'utf-8')).toBe(stale);
     });
 

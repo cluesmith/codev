@@ -48,3 +48,17 @@ The three affected files: 143 passed. Full suite running. Build green.
 dev-approval gate approved (human validated the running worktree). Re-confirmed build green + 146 tests pass across the 3 affected files. Wrote `codev/reviews/929-support-codex-and-gemini-clis-.md` (Summary / Files / Architecture Updates / Lessons Learned / Things to Look At). arch.md was already updated in the implement commit; routed one cold-tier lesson to `lessons-learned.md` (Architecture): audit **all** invocation seams — including resume/restart — when extending a provider abstraction; the resume branch is a separate call site Spec 591 left harness-blind.
 
 PR target: branch lives on fork `mohidmakhdoomi/codev` (origin push → fork; `builder/pir-929` confirmed on fork, absent on cluesmith). Opening PR within the fork (base `main`). Recording with porch, then `porch done` runs the single-pass CMAP-2 verify.
+
+CMAP-2 verdicts (iter1): gemini=APPROVE, codex=APPROVE, no issues. (`pr_exists` check first failed because `gh` had no default repo → defaulted to cluesmith where the branch doesn't live; fixed with `gh repo set-default mohidmakhdoomi/codev`.) Gate fired pending; architect notified.
+
+### 2026-06-16 — Architect integration review: REQUEST CHANGES (2 blockers + 3 nits)
+
+Architect reviewed the running integration and returned a punch list. All addressed:
+
+- **BLOCKER B (override re-arms crash-loop)**: `getArchitectHarness`/`getBuilderHarness` auto-detected the harness from the *raw config* command, ignoring `TOWER_ARCHITECT_CMD` / `--architect-cmd` / `--builder-cmd`. So `TOWER_ARCHITECT_CMD=gemini` launched gemini but resolved claude → buildResume injects `--resume <stale-uuid>` → the exact crash-loop. Fix: both resolvers now source the command from `getResolvedCommands` (override-aware), and `getResolvedCommands.architect` now includes `TOWER_ARCHITECT_CMD`. Regression tests in `config.test.ts`.
+- **BLOCKER A (gemini context path-dependent)**: `getArchitectFiles` was written inline only in `launchInstance`, so sibling/no-Tower/reconnect gemini launches were context-blind. Fix: centralized into `buildArchitectArgs` (the shared helper all 4 Tower paths route through) as exported `writeArchitectContextFiles`; refactored the no-Tower `architect.ts` to call `buildArchitectArgs` instead of duplicating injection. Now every launch path writes it. Regression tests in `tower-utils.test.ts`.
+- **NIT 1**: `safeToResume` WARN now gated on `architectHarness.buildResume` (no noise for codex/gemini, which never resume).
+- **NIT 2**: `discoverResumeSession` logs "This harness does not support conversation resume" when `buildResume` is undefined, distinct from "No prior conversation found".
+- **NIT 3**: `.gemini/settings.json` added to both root `.gitignore` and the managed adopter `CODEV_GITIGNORE_ENTRIES` (gitignore.ts); gitignore/update test expectations updated.
+
+Full suite: 3338 passed, 48 skipped, 0 failures. Build green. Re-running `porch done` for a fresh single CMAP-2 pass, then re-requesting the pr gate.

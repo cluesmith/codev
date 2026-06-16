@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getConfig, ensureDirectories } from '../utils/config.js';
+import {
+  getConfig,
+  ensureDirectories,
+  getArchitectHarness,
+  getBuilderHarness,
+  setCliOverrides,
+} from '../utils/config.js';
 import { existsSync } from 'node:fs';
 import { rm, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -87,5 +93,52 @@ describe('ensureDirectories', () => {
 
     // Should not throw
     await expect(ensureDirectories(testConfig)).resolves.not.toThrow();
+  });
+});
+
+// Issue #929 — harness resolution must be override-aware. The mocked config
+// above resolves both shells to `claude` with NO explicit *Harness, so the
+// harness is auto-detected from the resolved command. A command override
+// (TOWER_ARCHITECT_CMD / --architect-cmd / --builder-cmd) without a matching
+// harness config previously still resolved the CLAUDE harness, whose buildResume
+// would inject `--resume <stale-claude-uuid>` into the non-claude command and
+// crash-loop. `buildResume` being undefined is the precise property that makes
+// codex/gemini relaunch fresh — so it's the regression assertion.
+describe('getArchitectHarness / getBuilderHarness override-awareness (#929)', () => {
+  const savedArchitectCmd = process.env.TOWER_ARCHITECT_CMD;
+
+  afterEach(() => {
+    setCliOverrides({});
+    if (savedArchitectCmd === undefined) {
+      delete process.env.TOWER_ARCHITECT_CMD;
+    } else {
+      process.env.TOWER_ARCHITECT_CMD = savedArchitectCmd;
+    }
+  });
+
+  it('resolves the claude harness (buildResume defined) with no overrides', () => {
+    delete process.env.TOWER_ARCHITECT_CMD;
+    setCliOverrides({});
+    expect(getArchitectHarness().buildResume).toBeDefined();
+    expect(getBuilderHarness().buildResume).toBeDefined();
+  });
+
+  it('TOWER_ARCHITECT_CMD=gemini → gemini architect harness (no claude resume)', () => {
+    process.env.TOWER_ARCHITECT_CMD = 'gemini';
+    const harness = getArchitectHarness();
+    expect(harness.buildResume).toBeUndefined();
+    // gemini harness writes its context manifest
+    expect(harness.getArchitectFiles).toBeDefined();
+  });
+
+  it('--architect-cmd codex → codex architect harness (no claude resume)', () => {
+    delete process.env.TOWER_ARCHITECT_CMD;
+    setCliOverrides({ architect: 'codex' });
+    expect(getArchitectHarness().buildResume).toBeUndefined();
+  });
+
+  it('--builder-cmd gemini → gemini builder harness (no claude resume)', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(getBuilderHarness().buildResume).toBeUndefined();
   });
 });

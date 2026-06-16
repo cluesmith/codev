@@ -14,10 +14,12 @@ vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
 }));
 
-// Mock fs.writeFileSync
-vi.mock('node:fs', () => ({
-  writeFileSync: vi.fn(),
-}));
+// Mock fs — buildArchitectArgs (tower-utils) uses a default `import fs from 'node:fs'`,
+// architect.ts historically used the named export, so provide both.
+vi.mock('node:fs', () => {
+  const fns = { writeFileSync: vi.fn(), existsSync: vi.fn(() => false), mkdirSync: vi.fn() };
+  return { ...fns, default: fns };
+});
 
 // Mock config — include getArchitectHarness
 vi.mock('../utils/index.js', () => ({
@@ -31,6 +33,13 @@ vi.mock('../utils/index.js', () => ({
     builder: 'claude',
     shell: 'bash',
   }),
+  getArchitectHarness: () => CLAUDE_HARNESS,
+}));
+
+// architect() now delegates role injection to buildArchitectArgs (tower-utils),
+// which resolves the harness via config.js directly (not the index.js barrel
+// mocked above). Mock that seam too so the unit test stays filesystem-free.
+vi.mock('../utils/config.js', () => ({
   getArchitectHarness: () => CLAUDE_HARNESS,
 }));
 
