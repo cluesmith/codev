@@ -35,6 +35,18 @@ This localizes the fault precisely:
   own render/cursor state drifting across the focus transition. This is a renderer-side
   (`area/vscode`) problem in code we do not own (VSCode's bundled xterm.js).
 
+**Scope broadened at the dev-approval gate (same root cause, second trigger).** Testing the
+fixed build surfaced that the corruption *also* appears on **initial terminal load**
+(not only after refocus), recoverable only by a manual resize. Same root cause (a renderer
+state that a SIGWINCH redraw recovers), different trigger: on a fresh open, Tower replays
+the full-screen TUI's alt-screen buffer, and rendering that mid-stream replay can land
+xterm in a corrupted state. PR #1050's connect-time nudge does not catch this because it is
+gated on `!renderedSinceConnect` — the corrupted replay *renders*, so the nudge is skipped.
+The fix is extended to force a guaranteed clean redraw when a **fresh full replay** ends
+(`lastSeq === 0` at connect → nudge on the replay's `resume`), while reconnect deltas
+(`lastSeq > 0`) keep #1050's no-reflow behavior. Net: both triggers (initial load and
+window refocus) are covered by the one SIGWINCH-redraw lever.
+
 **Why a forced redraw is the right lever.** The decisive observation is in the issue
 itself: **resizing the window clears the corruption**. A window resize forces a SIGWINCH,
 which makes the full-screen TUI (Claude Code's UI) clear and repaint its entire alt-screen,

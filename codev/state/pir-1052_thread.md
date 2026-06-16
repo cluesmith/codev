@@ -49,3 +49,15 @@ Three changes landed:
 Tests: 4 adapter behavioral tests (forceRepaint fires post-render; no-ops ×3) +
 2 source-level manager guards + vscode CHANGELOG entry (matched #1050: CHANGELOG only,
 no live UNRELEASED.md on this branch).
+
+### dev-approval gate feedback (architect)
+- Naming: renamed `forceSigwinchRedraw` → `sendRepaintNudge` (SIGWINCH was the only
+  identifier in the repo baking in the signal name; all others keep it in comments).
+- **Scope broadened.** Architect tested F5 dev build → corruption ALSO on *initial load*
+  (until manual resize), not just refocus. Root cause = #1050's connect-time nudge is gated
+  on `!renderedSinceConnect`, so a *corrupted-but-rendered* full replay skips the nudge
+  (#1050 only fixed *blank* on open). Fix extended: arm `nudgeAfterReplay = (lastSeq<=0)` at
+  connect; on the replay's `resume`, force one clean `sendRepaintNudge()`. Reconnect deltas
+  (lastSeq>0) stay gated (no reflow, preserves #1050 intent). +2 adapter tests (fires on
+  fresh replay; does NOT fire on reconnect delta). 424 unit tests green. Now covers BOTH
+  triggers with one lever. Awaiting re-test of on-open at the gate.
