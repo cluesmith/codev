@@ -30,7 +30,12 @@ Surface `spawned_by_architect` (Spec 755 data already in `state.db.builders`) th
 - [x] Worktree needed `pnpm install` (no node_modules on spawn); installed.
 - [x] Build (`pnpm build`) clean; full agent-farm suite 1973 pass / 13 pre-existing skips.
 - [x] E2E smoke: seeded a temp state.db, ran the BUILT `afx status --json/--architect/--mine` — owner sort, running flags, and both filters confirmed working end-to-end.
-- [ ] PR
+- [x] PR #1058 created (review embedded in body). porch PR-phase checks pass (pr_exists ✓, e2e_tests ✓).
+- [x] Reached `pr` gate → STOPPED for human approval. Architect notified.
+
+## Final state
+PR: https://github.com/cluesmith/codev/pull/1058 — implements #1057.
+Awaiting human approval at the `pr` gate (`porch approve 1057 pr`). Will not self-approve.
 
 ## E2E note
 `afx status` (human) only reaches the builder table when Tower is down OR the workspace is Tower-registered. Tower-running + unregistered-workspace early-returns at "not active in tower" (pre-existing). The real multi-architect case (Shannon) is registered, so the table renders there. `--json` is independent of registration — validated end-to-end.
