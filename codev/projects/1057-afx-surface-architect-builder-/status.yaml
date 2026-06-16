@@ -1,7 +1,7 @@
 id: '1057'
 title: afx-surface-architect-builder-
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-16T19:28:36.390Z'
-updated_at: '2026-06-16T19:28:36.391Z'
+updated_at: '2026-06-16T19:43:30.849Z'
