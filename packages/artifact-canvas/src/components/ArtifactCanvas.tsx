@@ -147,18 +147,32 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
 
   const html = React.useMemo(() => renderMarkdown(content), [content]);
 
-  // Decorate the rendered (innerHTML) DOM after each render: mark lines that carry a ReviewMarker
-  // and inject an inline-below comment-card stack for each annotated block (#863). The stack is a
-  // real DOM sibling inserted *after* the block, so it sits in normal flow and pushes subsequent
-  // content down — it never overlaps the block (the layout fix that replaced the absolutely-
-  // positioned hover overlay marker-list). Card author/body use textContent, never innerHTML, so
-  // document-supplied marker text can't inject markup.
+  // Own the markdown body imperatively rather than via React's `dangerouslySetInnerHTML`. React
+  // must NOT manage these children: when it did, a re-render would re-commit `innerHTML` and wipe
+  // the comment cards we inject below (the "cards flash then vanish" bug — the React-rendered
+  // minimap survived precisely because React owned it, while the injected cards did not). With the
+  // body left out of React's child reconciliation, the cards + decoration we add are stable. This
+  // is the standard React escape hatch for integrating non-React DOM: render an empty container and
+  // fill it in an effect. Runs only when `html` changes, so a markers-only update (below) does not
+  // rebuild the body and lose scroll/focus. Synthetic events still fire — the handlers live on this
+  // div and native events from the (non-fiber) children bubble to it exactly as before.
+  React.useEffect(() => {
+    const root = bodyRef.current;
+    if (root) root.innerHTML = html;
+  }, [html]);
+
+  // Decorate the body after it (re)renders: mark lines that carry a ReviewMarker and inject an
+  // inline-below comment-card stack for each annotated block (#863). The stack is a real DOM sibling
+  // inserted *after* the block, so it sits in normal flow and pushes subsequent content down — it
+  // never overlaps the block (the layout fix that replaced the absolutely-positioned hover overlay
+  // marker-list). Card author/body use textContent, never innerHTML, so document-supplied marker
+  // text can't inject markup. Declared AFTER the innerHTML effect so on an `html` change the body is
+  // rebuilt first, then decorated.
   React.useEffect(() => {
     const root = bodyRef.current;
     if (!root) return;
-    // Remove previously-injected stacks first: a markers-only re-render doesn't reset the
-    // dangerouslySetInnerHTML body, so without this the stacks would accumulate (an html change
-    // resets innerHTML and clears them for us — this covers the other case). Idempotent either way.
+    // Remove previously-injected stacks first so a markers-only update (the body is NOT rebuilt
+    // then) doesn't accumulate duplicates. Idempotent on an html change too (body just rebuilt).
     root.querySelectorAll('.codev-canvas-marker-cards').forEach((n) => n.remove());
 
     const byLine = new Map<number, ReviewMarker[]>();
@@ -236,7 +250,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           }
         }
       },
-      dangerouslySetInnerHTML: { __html: html },
+      // No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
+      // React never re-commits it (which would wipe the injected cards). Rendered with no children.
     }),
     // The overlay now carries ONLY the "+" add-comment affordance. Existing markers render as
     // always-visible inline cards below their block (injected above), not in this hover overlay —
