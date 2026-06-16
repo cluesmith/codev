@@ -92,6 +92,26 @@ Still KEPT (not decided by this log): refocus path (attempt #1, different trigge
 exercised) + post-replay reflow (attempt #3, live candidate). 425 unit tests pass.
 Awaiting architect's visual result (fixed or not) before next step.
 
+### REGRESSION + REVERT (override reflow caused scroll distortion)
+Attempt #3's onDidOverrideDimensions reflow REGRESSED: scrolling distorted (doubled/
+overlapping chars = xterm scrollback wrap corruption). Mechanism: override shrinks xterm
+1 cell then releases — a down-then-up reflow round-trip churns scrollback line-wrap flags.
+Reverted entirely (override emitter, forceXtermReflow, reflowAfterReplay, tests). 422 pass.
+
+### REFINED ROOT CAUSE (4 client-side levers now falsified)
+Falsified: defer-until-unsized (#2), post-replay SIGWINCH (#3a), override reflow (#3b).
+Through-line: **manual resize OR reopen fixes it** — both force a full xterm re-wrap /
+fresh state. Best hypothesis: **replay-width-mismatch.** Tower replays the ring-buffer
+(composed at capture-time PTY width) into xterm at the client's CURRENT width; panel then
+settles 114→116 (~120ms post-open, per diag log), so the chat-history scrollback is wrapped
+at the wrong width → distortion on scroll + corrupt initial frame. SIGWINCH doesn't fix
+(redraws alt-screen, not scrollback wrap). Corrupted content in screenshots = main-screen
+chat transcript (wrap-subject), not the alt-screen TUI box — supports this.
+Candidate fix: **settle-debounce the CONNECT/replay** — wait until setDimensions stops
+changing, THEN connect once at the final width (differs from reverted #2: keyed on "size
+stable", not "size present"). NOT YET IMPLEMENTED — escalating to architect first given the
+4-miss streak; consider a consult to de-risk.
+
 ### dev-approval gate feedback (architect)
 - Naming: renamed `forceSigwinchRedraw` → `sendRepaintNudge` (SIGWINCH was the only
   identifier in the repo baking in the signal name; all others keep it in comments).
