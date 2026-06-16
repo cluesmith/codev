@@ -19,6 +19,15 @@ Issue lists 4 candidate mechanisms. Investigated the VSCode terminal relay path:
   `packages/dashboard/src/components/Terminal.tsx:741` already re-fits + SIGWINCHs on
   `visibilitychange`. VSCode has no such handler — that's the gap.
 
+### Root-cause localization (folded into plan Understanding after architect Q)
+The WS lives in the **extension host** (Node `ws`), NOT the renderer. On window blur the
+ext host keeps draining the socket; Electron throttles the **renderer** (pauses rAF →
+xterm.js render loop stalls while its buffer fills), and the refocus catch-up is where the
+cursor desync / stacked frames appear. So: not backend, not the WS relay/replay (rules out
+issue mechanisms #2/#4), it's xterm.js render-state drift (mechanism #1) — renderer-side,
+in code we don't own. SIGWINCH redraw is the only available lever and matches the proven
+manual workaround.
+
 ### Decision
 Primary fix = mechanism #3. Add a public `forceRepaint()` to the adapter (the size-delta
 SIGWINCH, refactored out of the nudge timer, ungated by `renderedSinceConnect`), and wire

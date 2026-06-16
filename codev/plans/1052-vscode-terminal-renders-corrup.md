@@ -8,15 +8,41 @@ switch) and the user returns, the pane renders corrupted: stacked/overlapping TU
 and the cursor landing near the top of the pane instead of in the prompt area. The only
 workarounds are disruptive (resize the window, clear, or reopen the tab).
 
-**Root cause (the actionable one).** VSCode's terminal renderer (xterm.js) can drift out
-of sync with the PTY's actual screen/cursor state across a window-focus transition — the
-WebView is throttled while hidden, output accumulates, and on reactivation the rendered
-state no longer matches what the TUI app believes it drew. The decisive observation is in
-the issue itself: **resizing the window clears the corruption**. A window resize forces a
-SIGWINCH, which makes the full-screen TUI (Claude Code's UI) clear and repaint its entire
-alt-screen — re-emitting a complete frame whose trailing cursor-move sequence re-syncs
-xterm.js's cursor. So the corruption is recoverable by a single forced redraw; the bug is
-that nothing triggers that redraw automatically on refocus.
+**Where it originates: the renderer, not the backend or the relay.** The relay path is:
+
+```
+Tower (PTY) --WS--> extension host (CodevPseudoterminal) --writeEmitter--> VSCode core --> xterm.js (renderer)
+```
+
+The WebSocket lives in the **extension host**, a Node process (`terminal-adapter.ts:2`
+imports the Node `ws` library), not in the renderer. When the OS window loses focus the
+extension host keeps running: the socket keeps draining and the adapter keeps firing
+`writeEmitter`. What Electron throttles while the window is backgrounded is the
+**renderer** (it pauses `requestAnimationFrame`, which is what xterm.js renders on). So
+PTY output accumulates in xterm.js's buffer while its render loop is stalled, and on
+refocus xterm.js catches up — and that catch-up is where the cursor-position desync and
+stacked-frame corruption appear.
+
+This localizes the fault precisely:
+- **Not the backend.** The PTY content reaching Tower is correct (per the issue's
+  out-of-scope note), and the web dashboard — same Tower backend, different renderer —
+  does not exhibit this. A symptom in one client but not another sharing the backend
+  isolates the bug to the client layer.
+- **Not the WS relay / replay path either.** Because the socket runs in the (un-throttled)
+  extension host, the issue's mechanisms #2 (reconnect/replay race during inactivity) and
+  #4 (dropped partial escape under overload) are unlikely here — the socket is not
+  disrupted by the window going inactive. That leaves the issue's mechanism #1: xterm.js's
+  own render/cursor state drifting across the focus transition. This is a renderer-side
+  (`area/vscode`) problem in code we do not own (VSCode's bundled xterm.js).
+
+**Why a forced redraw is the right lever.** The decisive observation is in the issue
+itself: **resizing the window clears the corruption**. A window resize forces a SIGWINCH,
+which makes the full-screen TUI (Claude Code's UI) clear and repaint its entire alt-screen,
+re-emitting a complete frame whose trailing cursor-move sequence re-syncs xterm.js's
+cursor. So whichever exact xterm.js drift it is, the corruption is recoverable by a single
+app-driven redraw; the bug is that nothing triggers that redraw automatically on refocus.
+Since the extension cannot reach into xterm.js's internals, a PTY-size SIGWINCH is the only
+lever available, and it is the same one the manual workaround already uses.
 
 **Why the existing code doesn't cover it.** PR #1050 (#1047) added a post-connect repaint
 nudge to `CodevPseudoterminal` for the blank-on-open case:
