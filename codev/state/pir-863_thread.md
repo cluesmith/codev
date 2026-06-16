@@ -27,3 +27,14 @@ Decision: implement entirely in the artifact-canvas package (so all hosts inheri
 3. (Bundled, from issue comment) anchor the `+` affordance to the first line's vertical center.
 
 Writing plan to codev/plans/863-vscode-markdown-preview-marker.md.
+
+## Implement phase (in progress)
+
+plan-approval gate approved. Implementing in the artifact-canvas package:
+1. ArtifactCanvas.tsx — inject inline-below card stacks (DOM siblings, in flow);
+   drop the overlapping hover overlay marker-list; keep the "+" affordance; anchor "+"
+   to the first line's vertical center (bundled polish from the issue comment).
+2. MarkerMinimap.tsx (new) — right-edge fixed dot column; hover title; click→smooth-scroll;
+   hidden when zero markers.
+3. default-theme.css — card stack + minimap styles (existing --codev-canvas-* tokens only).
+4. Tests — update the old overlay-marker-list test to assert inline cards; add minimap tests.
