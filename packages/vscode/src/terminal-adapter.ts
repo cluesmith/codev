@@ -8,7 +8,6 @@ const CHUNK_SIZE = 16384; // 16KB — chunk onDidWrite to avoid CPU spikes
 const MAX_QUEUE = 1048576; // 1MB — drop live output if the unrendered queue exceeds this
 const DROP_WARN_INTERVAL_MS = 5000; // throttle backpressure-drop warnings (#1047)
 const REPAINT_NUDGE_DELAY_MS = 500; // settle delay before forcing a redraw-SIGWINCH (#1047), matching the web client's 500ms
-const OVERRIDE_RELEASE_MS = 100; // hold the dimension override briefly so xterm renders the shrunk frame before release (#1052)
 
 // Reconnect backoff. The exponential curve (1000 * 2^attempt, capped at 30s),
 // the give-up threshold, and the session-unknown classifier all live in the
@@ -33,15 +32,8 @@ export const RECONNECT_LINK_TEXT = 'Click here to reconnect';
 export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private readonly writeEmitter = new vscode.EventEmitter<string>();
   private readonly closeEmitter = new vscode.EventEmitter<number | void>();
-  // onDidOverrideDimensions is the ONLY lever a Pseudoterminal has to make
-  // VS Code's xterm.js re-render — firing a (smaller) dimension override then
-  // releasing it forces xterm to re-layout and repaint, the same recovery a
-  // manual window resize performs. We use it to clear the post-replay / refocus
-  // render corruption (#1052) that a PTY-side SIGWINCH alone cannot.
-  private readonly dimensionsEmitter = new vscode.EventEmitter<vscode.TerminalDimensions | undefined>();
   readonly onDidWrite = this.writeEmitter.event;
   readonly onDidClose = this.closeEmitter.event;
-  readonly onDidOverrideDimensions = this.dimensionsEmitter.event;
 
   private ws: WebSocket | null = null;
   private decoder = new TextDecoder('utf-8', { fatal: false });
@@ -70,10 +62,6 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private renderedSinceConnect = false;
   private repaintNudgeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Armed on a fresh full-replay connect; on the replay's `resume` we force an
-  // xterm reflow to clear any corruption the first render left behind (#1052).
-  private reflowAfterReplay = false;
-  private overrideReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Reconnect-loop state. The adapter owns reconnection end-to-end (#936) —
   // backoff scheduling, give-up after MAX_RECONNECT_ATTEMPTS, and a terminal
@@ -111,7 +99,6 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   close(): void {
     this.disposed = true;
     this.clearRepaintNudge();
-    this.clearOverrideRelease();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -122,7 +109,6 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     }
     this.writeEmitter.dispose();
     this.closeEmitter.dispose();
-    this.dimensionsEmitter.dispose();
   }
 
   handleInput(data: string): void {
@@ -213,11 +199,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
       // Force a redraw-SIGWINCH after the connection settles if nothing has
       // rendered (#1047), mirroring the web dashboard's post-connect resize.
       this.renderedSinceConnect = false;
-      // Arm an xterm reflow for when this connection's full replay ends — a
-      // fresh full replay can render corrupted, and only an xterm re-layout
-      // (not a PTY SIGWINCH) clears it (#1052). Reconnect deltas are excluded.
-      this.reflowAfterReplay = this.lastSeq <= 0;
-      this.log('INFO', `[#1052-diag] PATH ws-open → lastSeq=${this.lastSeq} reflowAfterReplay=${this.reflowAfterReplay}`);
+      this.log('INFO', `[#1052-diag] PATH ws-open → lastSeq=${this.lastSeq}`);
       this.scheduleRepaintNudge();
     });
 
@@ -478,42 +460,8 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     if (this.disposed) { this.log('INFO', '[#1052-diag] PATH forceRepaint(refocus) → SKIP disposed'); return; }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { this.log('INFO', '[#1052-diag] PATH forceRepaint(refocus) → SKIP socket not OPEN'); return; }
     if (this.replaying) { this.log('INFO', '[#1052-diag] PATH forceRepaint(refocus) → SKIP mid-replay'); return; }
-    this.log('INFO', '[#1052-diag] PATH forceRepaint(refocus) → SIGWINCH nudge + xterm reflow');
+    this.log('INFO', '[#1052-diag] PATH forceRepaint(refocus) → SIGWINCH nudge');
     this.sendRepaintNudge();
-    this.forceXtermReflow();
-  }
-
-  /**
-   * Force VS Code's xterm.js to re-layout and repaint by briefly overriding its
-   * dimensions one cell smaller, then releasing back to the panel size (#1052).
-   * This is the ONLY pty→renderer lever VS Code exposes (onDidOverrideDimensions)
-   * and it reproduces a manual window resize — the confirmed recovery for the
-   * post-replay / refocus corruption that a PTY-side SIGWINCH cannot clear. The
-   * override only applies while smaller than the panel, so it self-bounds; the
-   * brief 1-cell-smaller frame is released a tick later. No-ops when dimensions
-   * are unknown or degenerate.
-   */
-  private forceXtermReflow(): void {
-    if (!this.lastDimensions) { this.log('INFO', '[#1052-diag] PATH forceXtermReflow → SKIP no dimensions'); return; }
-    const { cols, rows } = this.lastDimensions;
-    if (cols <= 1 || rows <= 1) { this.log('INFO', `[#1052-diag] PATH forceXtermReflow → SKIP degenerate ${cols}x${rows}`); return; }
-    this.log('INFO', `[#1052-diag] PATH forceXtermReflow → override ${cols - 1}x${rows - 1}, release in ${OVERRIDE_RELEASE_MS}ms`);
-    this.dimensionsEmitter.fire({ columns: cols - 1, rows: rows - 1 });
-    this.clearOverrideRelease();
-    this.overrideReleaseTimer = setTimeout(() => {
-      this.overrideReleaseTimer = null;
-      if (!this.disposed) {
-        this.log('INFO', '[#1052-diag] PATH forceXtermReflow → releasing override (back to panel size)');
-        this.dimensionsEmitter.fire(undefined);
-      }
-    }, OVERRIDE_RELEASE_MS);
-  }
-
-  private clearOverrideRelease(): void {
-    if (this.overrideReleaseTimer) {
-      clearTimeout(this.overrideReleaseTimer);
-      this.overrideReleaseTimer = null;
-    }
   }
 
   private clearRepaintNudge(): void {
@@ -550,20 +498,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
         this.replaying = true;
         break;
       case 'resume':
-        this.log('INFO', `[#1052-diag] PATH ctrl/resume → replay done (reflowAfterReplay=${this.reflowAfterReplay})`);
+        this.log('INFO', '[#1052-diag] PATH ctrl/resume → replay done');
         this.replaying = false;
         // Flush deferred resize
         if (this.pendingResize) {
           this.sendResize(this.pendingResize.cols, this.pendingResize.rows);
           this.pendingResize = null;
-        }
-        // A fresh full replay just finished; force an xterm reflow to clear any
-        // corruption the first render committed (the lever a manual resize uses,
-        // #1052). One-shot — reconnect deltas don't arm it.
-        if (this.reflowAfterReplay) {
-          this.log('INFO', '[#1052-diag] PATH ctrl/resume → firing post-replay xterm reflow');
-          this.reflowAfterReplay = false;
-          this.forceXtermReflow();
         }
         break;
       case 'error':
