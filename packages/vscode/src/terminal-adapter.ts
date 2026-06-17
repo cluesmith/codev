@@ -8,6 +8,12 @@ const CHUNK_SIZE = 16384; // 16KB — chunk onDidWrite to avoid CPU spikes
 const MAX_QUEUE = 1048576; // 1MB — drop live output if the unrendered queue exceeds this
 const DROP_WARN_INTERVAL_MS = 5000; // throttle backpressure-drop warnings (#1047)
 const REPAINT_NUDGE_DELAY_MS = 500; // settle delay before forcing a redraw-SIGWINCH (#1047), matching the web client's 500ms
+// After the replay's `resume`, hold the buffered output until the terminal size
+// has been quiet this long, then paint it once at the settled width (#1052). VS
+// Code reports the pane size in two steps on open (e.g. 114→116 cols ~120ms
+// apart); painting the replay during that window wraps it at the wrong width and
+// strands a ghost frame in scrollback. Debounced so a still-moving size waits.
+const REPLAY_SETTLE_MS = 150;
 
 // Reconnect backoff. The exponential curve (1000 * 2^attempt, capped at 30s),
 // the give-up threshold, and the session-unknown classifier all live in the
@@ -42,6 +48,13 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private lastSeq = 0;
   private replaying = false;
   private pendingResize: { cols: number; rows: number } | null = null;
+  // Replay buffer-and-flush (#1052). Non-null from the replay's `pause` until
+  // the post-settle flush: while held, ALL incoming output (the bracketed replay
+  // and any live output that arrives before the flush) accumulates here instead
+  // of painting, preserving order. Flushed once, at the settled size. Mirrors
+  // the web dashboard's flushInitialBuffer (Terminal.tsx).
+  private replayHoldBuffer: string | null = null;
+  private replayFlushTimer: ReturnType<typeof setTimeout> | null = null;
   // Latest dimensions VSCode has told us about. Seeded from open()'s
   // initialDimensions and refreshed on every setDimensions(). Re-sent after
   // every WS auth so Tower's PTY isn't stuck at node-pty's 80×24 default
@@ -61,6 +74,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   // nudge the size (a brief 1-row change, then back) to force the SIGWINCH.
   private renderedSinceConnect = false;
   private repaintNudgeTimer: ReturnType<typeof setTimeout> | null = null;
+
 
   // Reconnect-loop state. The adapter owns reconnection end-to-end (#936) —
   // backoff scheduling, give-up after MAX_RECONNECT_ATTEMPTS, and a terminal
@@ -83,20 +97,21 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   ) {}
 
   open(initialDimensions: vscode.TerminalDimensions | undefined): void {
-    if (initialDimensions) {
-      this.lastDimensions = { cols: initialDimensions.columns, rows: initialDimensions.rows };
-    }
     // Prime the renderer synchronously inside open() — VS Code drops or
     // mis-orders writes that arrive purely asynchronously after open()
     // when the terminal becomes the active editor (microsoft/vscode#108298),
     // which manifests as a blank pane when openTerminal calls show(false).
     this.writeEmitter.fire('');
+    if (initialDimensions) {
+      this.lastDimensions = { cols: initialDimensions.columns, rows: initialDimensions.rows };
+    }
     this.connect();
   }
 
   close(): void {
     this.disposed = true;
     this.clearRepaintNudge();
+    this.clearReplayFlush();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -132,9 +147,12 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
   setDimensions(dimensions: vscode.TerminalDimensions): void {
     this.lastDimensions = { cols: dimensions.columns, rows: dimensions.rows };
-    if (this.replaying) {
-      // Defer resize during replay to prevent garbled rendering (Bugfix #625)
+    if (this.replayHoldBuffer !== null) {
+      // Held window (#1052; supersedes #625's replay-only defer): keep the resize
+      // pending so the PTY is sized at flush, and — if the settle flush is already
+      // armed — reset its debounce, since the size is still moving.
       this.pendingResize = { cols: dimensions.columns, rows: dimensions.rows };
+      if (this.replayFlushTimer) { this.armReplayFlush(); }
       return;
     }
     this.sendResize(dimensions.columns, dimensions.rows);
@@ -311,6 +329,10 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     // mis-route the next connection's live data (#1047).
     this.replaying = false;
     this.queuedBytes = 0;
+    // Drop a held replay from a connection that dropped mid-hold (#1052) so its
+    // buffer/timer don't leak into the next connection, which holds afresh.
+    this.replayHoldBuffer = null;
+    this.clearReplayFlush();
     // Drop any pending repaint nudge from a prior connection; the next WS open
     // reschedules it.
     this.clearRepaintNudge();
@@ -347,15 +369,16 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   // ── Data handling ────────────────────────────────────────────
 
   private handleData(payload: Buffer): void {
-    // Replay burst (bracketed by Tower's pause→…→resume, #1047): the initial
-    // buffer snapshot is expected to be large and is delivered once. Pace it
-    // through the chunked writer and do NOT count it toward the live
-    // backpressure budget — otherwise a multi-MB replay trips the guard before
-    // anything renders and the old reconnect-for-replay path looped forever.
-    if (this.replaying) {
+    // Held window (#1052): from the replay's `pause` until the post-settle flush,
+    // accumulate ALL output — the bracketed replay AND any live output that
+    // arrives before the flush — instead of painting. This keeps the replay off
+    // the live backpressure budget (as the #1047 replay branch did) and, by
+    // deferring the paint until the size settles, avoids wrapping the frame at a
+    // transient width. Flushed once by flushReplay(), in arrival order.
+    if (this.replayHoldBuffer !== null) {
       const text = this.decoder.decode(payload, { stream: true });
       const safe = this.escapeBuffer.write(text);
-      if (safe.length > 0) { this.renderedSinceConnect = true; this.writeChunked(safe); }
+      if (safe.length > 0) { this.replayHoldBuffer += safe; }
       return;
     }
     this.renderedSinceConnect = true;
@@ -411,16 +434,47 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     this.clearRepaintNudge();
     this.repaintNudgeTimer = setTimeout(() => {
       this.repaintNudgeTimer = null;
-      if (this.disposed || this.renderedSinceConnect) { return; }
-      if (!this.lastDimensions) { return; }
-      const { cols, rows } = this.lastDimensions;
-      if (rows <= 1) { this.sendResize(cols, rows); return; }
-      // A 1-row change then back guarantees a real TIOCSWINSZ delta (and thus a
-      // SIGWINCH) even if the PTY is already at the target size, ending at the
-      // correct dimensions. The brief intermediate frame is overwritten at once.
-      this.sendResize(cols, rows - 1);
-      this.sendResize(cols, rows);
+      // Skip while holding a replay (#1052): flushReplay() owns the resize then,
+      // and nudging mid-hold would paint/redraw at a not-yet-settled width.
+      if (this.disposed || this.renderedSinceConnect || this.replayHoldBuffer !== null) {
+        return;
+      }
+      this.sendRepaintNudge();
     }, REPAINT_NUDGE_DELAY_MS);
+  }
+
+  /**
+   * Send a size delta that forces the running app to repaint. A 1-row change
+   * then back guarantees a real terminal-size change (and thus a SIGWINCH) even
+   * when the PTY is already at the target size, landing back at the correct
+   * dimensions; the brief intermediate frame is overwritten at once. No-ops when
+   * dimensions are unknown. Shared by the connect-time nudge and the refocus
+   * repaint (#1052).
+   */
+  private sendRepaintNudge(): void {
+    if (!this.lastDimensions) { return; }
+    const { cols, rows } = this.lastDimensions;
+    if (rows <= 1) { this.sendResize(cols, rows); return; }
+    this.sendResize(cols, rows - 1);
+    this.sendResize(cols, rows);
+  }
+
+  /**
+   * Force an immediate redraw of the running app. Called when the VSCode window
+   * regains focus (#1052): while the window is backgrounded Electron throttles
+   * the renderer, so xterm.js's cursor/screen state can drift from the PTY and
+   * the pane shows stacked frames with the cursor near the top on return. A
+   * SIGWINCH makes a full-screen TUI clear and repaint a complete, correct frame
+   * — the same lever as the manual window-resize workaround, performed
+   * automatically. Ungated by `renderedSinceConnect` (the pane has already
+   * rendered by definition on a refocus); no-ops while disposed, disconnected,
+   * or mid-replay (the connect path owns the redraw then).
+   */
+  forceRepaint(): void {
+    if (this.disposed) { return; }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { return; }
+    if (this.replaying) { return; }
+    this.sendRepaintNudge();
   }
 
   private clearRepaintNudge(): void {
@@ -445,6 +499,48 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     writeNext();
   }
 
+  /**
+   * (Re)arm the debounced replay flush (#1052). Each call pushes the flush out by
+   * REPLAY_SETTLE_MS, so a still-changing terminal size (VS Code reports it in
+   * steps on open) waits until it has been quiet before the held output paints.
+   */
+  private armReplayFlush(): void {
+    this.clearReplayFlush();
+    this.replayFlushTimer = setTimeout(() => {
+      this.replayFlushTimer = null;
+      this.flushReplay();
+    }, REPLAY_SETTLE_MS);
+  }
+
+  private clearReplayFlush(): void {
+    if (this.replayFlushTimer) {
+      clearTimeout(this.replayFlushTimer);
+      this.replayFlushTimer = null;
+    }
+  }
+
+  /**
+   * Paint the held replay once, at the now-settled size (#1052). Sends the
+   * deferred resize first so the PTY/app are at the final width before the frame
+   * lands, then writes the accumulated buffer and returns to live painting.
+   */
+  private flushReplay(): void {
+    const buffered = this.replayHoldBuffer ?? '';
+    this.replayHoldBuffer = null;
+    // Size the PTY to the settled dimensions before painting so the app's live
+    // frame (and its SIGWINCH redraw) match the width the replay is written at.
+    if (this.pendingResize) {
+      this.sendResize(this.pendingResize.cols, this.pendingResize.rows);
+      this.pendingResize = null;
+    } else if (this.lastDimensions) {
+      this.sendResize(this.lastDimensions.cols, this.lastDimensions.rows);
+    }
+    if (buffered.length > 0) {
+      this.renderedSinceConnect = true;
+      this.writeChunked(buffered);
+    }
+  }
+
   private handleControlMessage(msg: ControlMessage): void {
     switch (msg.type) {
       case 'seq':
@@ -454,14 +550,14 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
         break;
       case 'pause':
         this.replaying = true;
+        // Begin holding: subsequent data accumulates instead of painting (#1052).
+        if (this.replayHoldBuffer === null) { this.replayHoldBuffer = ''; }
         break;
       case 'resume':
         this.replaying = false;
-        // Flush deferred resize
-        if (this.pendingResize) {
-          this.sendResize(this.pendingResize.cols, this.pendingResize.rows);
-          this.pendingResize = null;
-        }
+        // Replay fully received. Arm the debounced flush; setDimensions resets it
+        // while the size is still moving, so the paint lands at the settled width.
+        this.armReplayFlush();
         break;
       case 'error':
         this.log('ERROR', `Server error: ${JSON.stringify(msg.payload)}`);

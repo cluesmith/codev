@@ -104,6 +104,10 @@ const fakeOutputChannel = () => ({
   show: () => {}, hide: () => {}, dispose: () => {}, replace: () => {},
 });
 
+// Mirrors REPLAY_SETTLE_MS in terminal-adapter.ts (the replay buffer-and-flush
+// debounce window, #1052). Kept in sync by hand; the source value is internal.
+const REPLAY_SETTLE_MS_TEST = 150;
+
 /** Latest fake socket the adapter created. */
 function currentSocket() {
   return WebSocket.instances[WebSocket.instances.length - 1];
@@ -337,6 +341,9 @@ describe('PIR #1047 — oversized replay storm prevention', () => {
     sendControl(currentSocket(), { type: 'pause', payload: {} });
     sendData(currentSocket(), Buffer.alloc(2 * 1024 * 1024, 0x41)); // 2 MB
     sendControl(currentSocket(), { type: 'resume', payload: {} });
+    // The replay is held and painted once after the settle window (#1052);
+    // advance past it so flushReplay() paints (first chunk is synchronous).
+    vi.advanceTimersByTime(200);
 
     // No reconnect (the old bug looped here ~14k times), and content rendered.
     expect(WebSocket.instances.length).toBe(socketsBefore);
@@ -427,3 +434,141 @@ describe('PIR #1047 — post-connect repaint nudge', () => {
     expect(sentResizes(socket).some((r) => r.rows === 39)).toBe(false);
   });
 });
+
+describe('PIR #1052 — forceRepaint on window refocus', () => {
+  function makeOpenAdapter(cols: number, rows: number) {
+    const { pty, writes } = makeAdapter();
+    (pty as unknown as { setDimensions(d: { columns: number; rows: number }): void })
+      .setDimensions({ columns: cols, rows: rows });
+    const socket = currentSocket();
+    socket.readyState = WebSocket.OPEN;
+    socket.emit('open');
+    return { pty: pty as unknown as { forceRepaint(): void; close(): void }, writes, socket };
+  }
+
+  it('forces a redraw nudge (rows-1 then rows) even after output has rendered', () => {
+    const { pty, socket } = makeOpenAdapter(100, 40);
+    // The pane has already painted (the refocus case): renderedSinceConnect is
+    // true, which would suppress the connect-time nudge — but forceRepaint is
+    // ungated and must still fire.
+    sendData(socket, Buffer.from('hello', 'utf-8'));
+    socket.sent.length = 0;
+
+    pty.forceRepaint();
+
+    expect(sentResizes(socket)).toEqual([
+      { cols: 100, rows: 39 },
+      { cols: 100, rows: 40 },
+    ]);
+  });
+
+  it('no-ops when the socket is not OPEN', () => {
+    const { pty, socket } = makeOpenAdapter(100, 40);
+    socket.sent.length = 0;
+    socket.readyState = WebSocket.OPEN + 1; // anything but OPEN
+
+    pty.forceRepaint();
+
+    expect(sentResizes(socket)).toEqual([]);
+  });
+
+  it('no-ops while a connect-time replay is in flight', () => {
+    const { pty, socket } = makeOpenAdapter(100, 40);
+    sendControl(socket, { type: 'pause', payload: {} }); // enter replay
+    socket.sent.length = 0;
+
+    pty.forceRepaint();
+
+    expect(sentResizes(socket)).toEqual([]);
+  });
+
+  it('no-ops after the adapter is disposed', () => {
+    const { pty, socket } = makeOpenAdapter(100, 40);
+    socket.sent.length = 0;
+    pty.close();
+
+    pty.forceRepaint();
+
+    expect(sentResizes(socket)).toEqual([]);
+  });
+});
+
+describe('PIR #1052 — buffer replay and flush at the settled size', () => {
+  function makeOpenAdapter(cols: number, rows: number) {
+    const { pty, writes } = makeAdapter();
+    (pty as unknown as { setDimensions(d: { columns: number; rows: number }): void })
+      .setDimensions({ columns: cols, rows: rows });
+    const socket = currentSocket();
+    socket.readyState = WebSocket.OPEN;
+    socket.emit('open');
+    return { pty: pty as unknown as { setDimensions(d: { columns: number; rows: number }): void }, writes, socket };
+  }
+
+  it('holds the replay until the settle window elapses, then paints it once', () => {
+    const { writes, socket } = makeOpenAdapter(100, 40);
+    writes.length = 0;
+
+    sendControl(socket, { type: 'pause', payload: {} });
+    sendData(socket, Buffer.from('REPLAYED', 'utf-8'));
+    sendControl(socket, { type: 'resume', payload: {} });
+
+    // Nothing painted yet — the replay is held.
+    expect(writes.join('')).toBe('');
+
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST);
+    expect(writes.join('')).toContain('REPLAYED');
+  });
+
+  it('paints at the final width when the size changes during the hold', () => {
+    const { pty, writes, socket } = makeOpenAdapter(100, 40);
+    writes.length = 0;
+
+    sendControl(socket, { type: 'pause', payload: {} });
+    sendData(socket, Buffer.from('FRAME', 'utf-8'));
+    sendControl(socket, { type: 'resume', payload: {} }); // arms settle flush
+
+    // Size settles to a new width mid-hold; the flush must wait for it and then
+    // size the PTY to the final dimensions before painting.
+    socket.sent.length = 0;
+    pty.setDimensions({ columns: 116, rows: 41 });
+    expect(writes.join('')).toBe(''); // still held
+
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST);
+    expect(writes.join('')).toContain('FRAME');
+    expect(sentResizes(socket)).toContainEqual({ cols: 116, rows: 41 });
+  });
+
+  it('a size change resets the debounce so the paint waits for quiet', () => {
+    const { pty, writes, socket } = makeOpenAdapter(100, 40);
+    writes.length = 0;
+
+    sendControl(socket, { type: 'pause', payload: {} });
+    sendData(socket, Buffer.from('X', 'utf-8'));
+    sendControl(socket, { type: 'resume', payload: {} });
+
+    // Keep nudging the size just under the settle window — the flush keeps waiting.
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST - 10);
+    pty.setDimensions({ columns: 101, rows: 40 });
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST - 10);
+    expect(writes.join('')).toBe(''); // still held — debounce reset
+
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST);
+    expect(writes.join('')).toContain('X');
+  });
+
+  it('holds live output that arrives before the flush, preserving order', () => {
+    const { writes, socket } = makeOpenAdapter(100, 40);
+    writes.length = 0;
+
+    sendControl(socket, { type: 'pause', payload: {} });
+    sendData(socket, Buffer.from('HISTORY', 'utf-8'));
+    sendControl(socket, { type: 'resume', payload: {} });
+    // Live output arrives during the hold window — must be buffered after the
+    // replay, not painted ahead of it.
+    sendData(socket, Buffer.from('-LIVE', 'utf-8'));
+
+    vi.advanceTimersByTime(REPLAY_SETTLE_MS_TEST);
+    expect(writes.join('')).toBe('HISTORY-LIVE');
+  });
+});
+

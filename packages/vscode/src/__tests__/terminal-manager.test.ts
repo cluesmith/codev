@@ -150,3 +150,21 @@ describe('#921 — dev surface refresh on manual terminal close', () => {
     expect(closeHandler).toMatch(/_onDidChangeDevTerminals\.fire\(\)/);
   });
 });
+
+describe('PIR #1052 — repaint all terminals on window refocus', () => {
+  // Source-level guard (heavy TerminalManager harness avoided, per this file's
+  // rationale): repaintAllOnRefocus must fan a forceRepaint out to every managed
+  // pty so a window-refocus SIGWINCH recovers each corrupted pane. Behavioral
+  // coverage of forceRepaint itself lives in terminal-adapter.test.ts; the
+  // window-state rising-edge wiring is exercised at the dev-approval gate.
+  const repaintBody = TM_SRC.split('repaintAllOnRefocus()')[1]?.split('buildWsUrl')[0] ?? '';
+
+  it('iterates every managed terminal', () => {
+    expect(TM_SRC).toMatch(/repaintAllOnRefocus\(\): void/);
+    expect(repaintBody).toMatch(/for \(const entry of this\.terminals\.values\(\)\)/);
+  });
+
+  it('calls forceRepaint on each managed pty', () => {
+    expect(repaintBody).toMatch(/entry\.pty\.forceRepaint\(\)/);
+  });
+});

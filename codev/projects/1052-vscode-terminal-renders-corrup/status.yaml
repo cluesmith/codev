@@ -1,0 +1,30 @@
+id: '1052'
+title: vscode-terminal-renders-corrup
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-16T08:10:40.923Z'
+    approved_at: '2026-06-16T08:50:58.745Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-16T09:00:00.759Z'
+    approved_at: '2026-06-16T23:05:28.080Z'
+  pr:
+    status: approved
+    requested_at: '2026-06-16T23:16:48.940Z'
+    approved_at: '2026-06-16T23:25:08.304Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-16T08:06:41.248Z'
+updated_at: '2026-06-16T23:25:08.305Z'
+pr_history:
+  - phase: review
+    pr_number: 1061
+    branch: builder/pir-1052
+    created_at: '2026-06-16T23:09:24.316Z'
+pr_ready_for_human: false

@@ -190,6 +190,29 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.onDidChangeActiveTerminal(syncTerminalFocusContext));
 	syncTerminalFocusContext(); // seed initial state
 
+	// Opt-in: force a terminal repaint when the VSCode window regains focus
+	// (#1052). The initial-render fix (replay buffer-and-flush) already makes
+	// terminals render correctly on open, so this is OFF by default — testing
+	// showed no observable refocus corruption it was needed for. It remains as an
+	// escape hatch for setups that still see stale/misplaced content after
+	// switching back: enabling `codev.terminal.repaintOnRefocus` sends a SIGWINCH
+	// redraw (the manual-resize lever) to the terminals on refocus. Read at event
+	// time so flipping the setting takes effect on the next focus change with no
+	// reload; fired only on the rising edge (unfocused → focused).
+	let windowFocused = vscode.window.state.focused;
+	context.subscriptions.push(
+		vscode.window.onDidChangeWindowState((state) => {
+			if (state.focused && !windowFocused) {
+				const enabled = vscode.workspace
+					.getConfiguration('codev')
+					.get<boolean>('terminal.repaintOnRefocus', false);
+				if (enabled) {
+					terminalManager?.repaintAllOnRefocus();
+				}
+			}
+			windowFocused = state.focused;
+		}));
+
 	// Drive the `codev.hasDevCommand` context key so the builder-row Run/Stop
 	// Dev Server menu entries, the dev keybindings, and the workspace-dev palette
 	// entries only surface when a runnable `worktree.devCommand` is configured
