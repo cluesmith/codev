@@ -74,3 +74,11 @@ Architect verified all 5 integration-review items at source (affected tests 193/
 PR retargeting: this is an **upstream contribution to cluesmith/codev**. Architect opened the correct cross-fork PR → **cluesmith/codev#1059** (head `mohidmakhdoomi:builder/pir-929` → base `cluesmith/codev:main`). Fork PR #1 CLOSED as superseded (wrong base = fork main).
 
 **MERGE POLICY: pull-only on cluesmith — do NOT self-merge. A cluesmith maintainer merges #1059.** The porch pr gate is the human's to approve as bookkeeping only (no `gh pr merge` from me). Bookkeeping done: reset gh default repo → cluesmith, recorded PR #1059 in porch pr_history. Nothing further to push unless review feedback lands on #1059. Waiting at the pr gate; on gate approval I will NOT merge — I'll record/close out per the no-self-merge policy.
+
+### 2026-06-17 — 3-way re-review: APPROVE-with-caveat (doc-only addendum)
+
+Architect ran a 3-way re-review: gemini APPROVE, claude APPROVE, codex REQUEST_CHANGES (2/3). Verdict: **APPROVE with one documented caveat**.
+
+Codex's lone (verified) finding: `resolveHarness` (harness.ts) defaults an *unrecognized* override command (e.g. `TOWER_ARCHITECT_CMD=bash`, a wrapper script) to `CLAUDE_HARNESS` when no explicit `shell.architectHarness`/`builderHarness` is set → can still build `<cmd> --resume <uuid>` against a stale claude jsonl. **Pre-existing, narrow, separable — not a #929 regression** (#929 strictly improved the recognized codex/gemini cases). Disposition: document + follow-up (cluesmith/codev#1062).
+
+Doc-only addendum (no code change, per architect instruction): added the caveat to arch.md's #929 subsection and the review's caveat section, noting the unrecognized-command default + mitigation (set explicit harness) + the #1062 follow-up. Commit + push flows into PR #1059; no gate re-request (doc addendum to an already-approved PR). Still no self-merge — maintainer merges #1059.
