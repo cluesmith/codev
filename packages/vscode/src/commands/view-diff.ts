@@ -30,6 +30,7 @@ import * as path from 'node:path';
 import type { ConnectionManager } from '../connection-manager.js';
 import { parseHunkRanges, parseUnifiedDiff } from '../diff-inject-ref.js';
 import { setDiffInjectSession, upsertDiffInjectEntry, type DiffInjectSessionEntry } from '../diff-inject-codelens.js';
+import { ensureDiffEditorCodeLens } from '../ensure-diff-codelens.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -401,6 +402,44 @@ export async function viewDiff(
   } catch {
     // keep the hunk-less entries already registered
   }
+}
+
+/**
+ * Open one builder changed-file as a per-file `vscode.diff` and register its
+ * inject-codelens session. This is the shared seam behind both the Builders
+ * tree's `codev.openBuilderFileDiff` command (a single sidebar-row click) and
+ * the cross-file navigation commands (`codev.diffNextFile` / `diffPreviousFile`,
+ * #1060), so a navigated file opens exactly like a clicked one.
+ *
+ * The diff opens FIRST so it appears instantly; the lens registration + git
+ * hunk computation happen after (the entry registers synchronously so the
+ * symbol/file lenses render right away, and the hunk lenses refresh once git
+ * resolves — #789). `showOptions` is forwarded to `vscode.diff`: navigation
+ * passes `{ preview: true }` so a walk reuses one preview tab instead of piling
+ * up a tab per file (#1060). The sidebar click passes nothing, preserving its
+ * existing open behavior exactly.
+ */
+export async function openBuilderFileDiff(
+  context: vscode.ExtensionContext,
+  args: { worktreePath: string; baseRef: string; builderId: string; plan: ResourcePlan },
+  showOptions?: vscode.TextDocumentShowOptions,
+): Promise<void> {
+  const { left, right } = diffUrisForChange(args.plan, { wt: args.worktreePath, ref: args.baseRef });
+  const title = `${args.plan.resourcePath} (#${args.builderId})`;
+  if (showOptions) {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title, showOptions);
+  } else {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+  }
+  await registerFileInjectSession({
+    worktreePath: args.worktreePath,
+    baseRef: args.baseRef,
+    builderId: args.builderId,
+    plan: args.plan,
+  });
+  // Offer to enable diffEditor.codeLens (off by default — VS Code hides CodeLens
+  // in diff editors). After the open, so it never delays it.
+  await ensureDiffEditorCodeLens(context);
 }
 
 /**

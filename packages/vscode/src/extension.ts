@@ -7,9 +7,9 @@ import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
-import { viewDiff, activateDiffView, diffUrisForChange, registerFileInjectSession } from './commands/view-diff.js';
+import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
+import { navigateDiff } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry } from './diff-inject-codelens.js';
-import { ensureDiffEditorCodeLens } from './ensure-diff-codelens.js';
 import { buildBuilderRangeRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
@@ -876,24 +876,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }
-			// Open the diff FIRST so it appears instantly. Lens registration and
-			// the git hunk computation happen after — the entry registers
-			// synchronously (symbol/file lenses render right away) and the hunk
-			// lenses refresh in once git resolves (#789). Doing this before the
-			// open used to block the diff on a git subprocess.
-			const { left, right } = diffUrisForChange(arg.plan, { wt: arg.worktreePath, ref: arg.baseRef });
-			const title = `${arg.plan.resourcePath} (#${arg.builderId})`;
-			await vscode.commands.executeCommand('vscode.diff', left, right, title);
-			await registerFileInjectSession({
+			await openBuilderFileDiff(context, {
 				worktreePath: arg.worktreePath,
 				baseRef: arg.baseRef,
 				builderId: arg.builderId,
 				plan: arg.plan,
 			});
-			// Offer to enable diffEditor.codeLens (off by default — VS Code hides
-			// CodeLens in diff editors). After the open, so it never delays it.
-			await ensureDiffEditorCodeLens(context);
 		}),
+		// Cross-file navigation in a builder diff review (#1060): walk the
+		// builder's changed-file list top-to-bottom (next) / bottom-to-top (prev),
+		// opening each file's per-file diff. CLI-independent — operates on editor
+		// state + the shared diff cache, not Tower.
+		reg('codev.diffNextFile', () =>
+			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
+		reg('codev.diffPreviousFile', () =>
+			navigateDiff(-1, { context, overviewCache, diffCache: builderDiffCache })),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		regCli('codev.stopWorktreeDev', () =>
