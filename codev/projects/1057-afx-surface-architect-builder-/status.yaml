@@ -1,0 +1,17 @@
+id: '1057'
+title: afx-surface-architect-builder-
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-06-16T19:45:55.268Z'
+    approved_at: '2026-06-16T20:59:43.690Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-16T19:28:36.390Z'
+updated_at: '2026-06-16T20:59:43.691Z'
+pr_ready_for_human: false

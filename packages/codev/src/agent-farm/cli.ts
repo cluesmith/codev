@@ -213,10 +213,17 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   program
     .command('status')
     .description('Show status of all agents')
-    .action(async () => {
+    .option('--json', 'Output machine-readable JSON (builders carry spawnedByArchitect)')
+    .option('--architect <name>', 'Only show builders spawned by this architect')
+    .option('--mine', 'Only show builders spawned by the current architect (CODEV_ARCHITECT_NAME)')
+    .action(async (options) => {
       const { status } = await import('./commands/status.js');
       try {
-        await status();
+        await status({
+          json: options.json,
+          architect: options.architect,
+          mine: options.mine,
+        });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

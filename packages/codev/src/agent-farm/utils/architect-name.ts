@@ -71,3 +71,20 @@ export function autoNumberArchitectName(existingNames: Iterable<string>): string
   while (usedNumbers.has(n)) n++;
   return `architect-${n}`;
 }
+
+/**
+ * Resolve the *current* terminal session's architect name (Spec 1057).
+ *
+ * Tower injects `CODEV_ARCHITECT_NAME` into every architect terminal it starts
+ * (see `commands/spawn.ts` and `servers/tower-instances.ts`). When present, it
+ * names the architect whose terminal this command is running in — exactly what
+ * `afx status --mine` needs to scope builders to "my own". When absent (a plain
+ * shell, or a pre-#786 single-architect workspace) we fall back to the reserved
+ * default `main`.
+ *
+ * Pure apart from the default `env` binding; pass an explicit `env` in tests.
+ */
+export function currentArchitectName(env: NodeJS.ProcessEnv = process.env): string {
+  const value = env.CODEV_ARCHITECT_NAME?.trim();
+  return value || DEFAULT_ARCHITECT_NAME;
+}
