@@ -37,3 +37,13 @@ Tests: canvas 54/54, vscode 442/442 unit; both typechecks + esbuild bundle clean
 new tokens + prose rules land in the bundled `dist/webview/markdown-preview.css`.
 (Had to build codev-core + codev-types first — they weren't built in the fresh worktree; the
 resolution errors were environmental, not from my diff.)
+
+## dev-approval gate — reviewer Q&A
+
+Reviewer probed the Tier-3 plumbing (config listener, buildUserTypographyOverrides): all of it
+exists only to make the two `codev.markdownPreview.*` settings reflow live. Reviewer confirmed
+Tier 3 is "essential" → KEEP it. Settings are controlled via VSCode's standard Settings editor /
+settings.json only (no in-preview UI).
+- Per reviewer: documented the two settings in `packages/vscode/README.md` Settings table.
+- Per reviewer: filed #1070 (area/vscode) for an in-preview zoom control affordance + write-back
+  (the UI piece, deliberately out of scope here; tokens + settings already shipped by #1053).
