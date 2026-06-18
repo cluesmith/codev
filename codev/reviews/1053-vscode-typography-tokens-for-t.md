@@ -86,8 +86,9 @@ high-blast-radius cross-cutting rules). Three reusable lessons are recorded in t
 
 ## Test Results
 
-- `pnpm --filter @cluesmith/codev-artifact-canvas test` — **55 passed** (incl. the new
-  `default-theme.test.ts` token-vocabulary snapshot + contrast-token assertion).
+- `pnpm --filter @cluesmith/codev-artifact-canvas test` — **56 passed** (incl. the new
+  `default-theme.test.ts` token-vocabulary snapshot, contrast-token assertion, and the
+  standalone-`MarkdownView`-coverage regression test added after the 3-way consult).
 - `pnpm --filter codev-vscode test:unit` — **442 passed**.
 - `pnpm --filter @cluesmith/codev-artifact-canvas build`, vscode `check-types` (host + webview
   tsconfigs) and the esbuild production bundle — all clean.
@@ -115,6 +116,27 @@ high-blast-radius cross-cutting rules). Three reusable lessons are recorded in t
 - The two horizontal-scroll behaviors are intentionally different: `pre` + `table` scroll *within
   their block* (long code lines / wide tables shouldn't wrap); prose breaks long tokens
   (`overflow-wrap`) so it never forces a *page-level* scrollbar.
+
+### 3-way consultation disposition (single advisory pass, `max_iterations: 1`)
+
+- **Codex — REQUEST_CHANGES (HIGH), addressed (real defect).** The typography rules were scoped to
+  `.codev-artifact-canvas-body` only, but the **exported standalone `MarkdownView`** renders
+  `.codev-artifact-canvas-rendered` with no `.codev-artifact-canvas` ancestor — so the standalone
+  public surface received *no* typography (not even the base font), contradicting the approved
+  plan, which required both containers be covered. **Fix:** the token + base-font block now names
+  both roots, and every prose element rule uses an `:is(.codev-artifact-canvas-body,
+  .codev-artifact-canvas-rendered)` container group; overlay-only chrome (gutter, focus outline,
+  cards, minimap) stays composed-surface-only. Added a regression test
+  (`default-theme.test.ts` → "covers the standalone MarkdownView root…") that fails if a prose rule
+  or the token block stops naming the standalone root. The VSCode preview (the only current
+  consumer, which uses `ArtifactCanvas` → `-body`) is unaffected — `-body` is inside the `:is()`
+  group. *Escalated because PIR's single-pass design did not independently re-review this fix.*
+- **Claude — APPROVE (HIGH).** Flagged the same scoping gap as a non-blocking observation; its
+  parenthetical that the standalone view still "gets the font baseline" is incorrect (the base font
+  is on `.codev-artifact-canvas`, not an ancestor of `-rendered`), which is exactly why it was
+  worth fixing rather than rebutting.
+- **Gemini — no usable verdict.** Output was a sandbox/environment message, not a review (no
+  VERDICT line). Nothing to action.
 
 ## Follow-ups
 
