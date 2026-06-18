@@ -9,7 +9,8 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
 import { navigateDiff, recordDiffNavPosition } from './commands/diff-nav.js';
-import { activateDiffInjectCodeLens, getDiffInjectEntry } from './diff-inject-codelens.js';
+import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
+import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
@@ -489,6 +490,52 @@ export async function activate(context: vscode.ExtensionContext) {
 			accordion.setEnabled(on);
 			vscode.commands.executeCommand('setContext', 'codev.buildersAutoCollapse', on);
 		}),
+	);
+
+	// Builders active-file sync (#1066): when the active editor becomes a tracked
+	// builder-diff file, reveal + select its row in the Builders tree — the
+	// Explorer's `explorer.autoReveal` for builder diffs. One function covers
+	// every entry point that moves the diff editor without touching the sidebar:
+	// keyboard navigation (#1060), clicking a file in the multi-file View Diff,
+	// and the per-file diff. The `getDiffInjectEntry` gate is the no-hijack
+	// guarantee: a normal source file or the diff's base/left side (not in the
+	// registry) resolves to undefined, leaving the selection alone. `focus:false`
+	// keeps focus in the editor — the sidebar follows, it doesn't grab.
+	//
+	// Fired on BOTH the active-editor change AND the diff-inject registry change,
+	// because `openBuilderFileDiff` opens the diff (→ active-editor event) *before*
+	// it registers the file (→ registry event). On a file's first open the
+	// active-editor event sees an empty registry and bails; the registry event
+	// then re-runs the reveal once the entry exists. Same dual-trigger the
+	// context-key sync uses (see `activateDiffInjectCodeLens`).
+	const readAutoReveal = () =>
+		vscode.workspace.getConfiguration('codev').get<boolean>('buildersAutoReveal', true);
+	const revealActiveBuilderFile = async (): Promise<void> => {
+		if (!readAutoReveal()) { return; }
+		const fsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
+		if (!fsPath) { return; }
+		const entry = getDiffInjectEntry(fsPath);
+		if (!entry) { return; }
+		// Skip the reveal when the builder file is open as a normal editor tab
+		// rather than in a diff. The registry is keyed by the worktree file path,
+		// which a standalone open shares — gating this out keeps a plain open from
+		// hijacking the sidebar selection. (Checking "plain text tab" rather than
+		// "diff tab" avoids TabInputTextMultiDiff, absent from stable @types/vscode.)
+		if (isStandaloneTextTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input)) { return; }
+		const item = await buildersProvider.findFileItem(entry.builderId, entry.relPath);
+		if (!item) { return; }
+		// The active editor may have changed during the await (rapid navigation);
+		// don't let a slow lookup override a newer file's reveal.
+		if (vscode.window.activeTextEditor?.document.uri.fsPath !== fsPath) { return; }
+		try {
+			await buildersView!.reveal(item, { select: true, expand: true, focus: false });
+		} catch {
+			// Benign if the row is no longer present (e.g. mid-cleanup).
+		}
+	};
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(() => { revealActiveBuilderFile(); }),
+		onDidChangeDiffInjectRegistry(() => { revealActiveBuilderFile(); }),
 	);
 
 	// Builders file-view-as-tree: each builder's changed-files list renders

@@ -113,6 +113,26 @@ export function buildFilePathTree(files: BuilderFileChange[]): FilePathNode[] {
   return topLevel.sort(compareNodes);
 }
 
+/**
+ * Flatten a built file-path tree to its leaf files in **display order** — the
+ * depth-first walk VSCode renders: a folder's entire subtree before its next
+ * sibling, folders before loose files within each level (the order
+ * `buildFilePathTree` already sorted into). Used by cross-file navigation
+ * (#1060) so stepping matches the visual tree in tree-view mode, rather than the
+ * raw git `--name-status` order (#1066 review feedback).
+ */
+export function flattenTreeOrder(nodes: FilePathNode[]): BuilderFileChange[] {
+  const out: BuilderFileChange[] = [];
+  for (const node of nodes) {
+    if (node.children) {
+      out.push(...flattenTreeOrder(node.children));
+    } else if (node.file) {
+      out.push(node.file);
+    }
+  }
+  return out;
+}
+
 /** Folders before files; alphabetical (case-insensitive) within each group. */
 function compareNodes(a: FilePathNode, b: FilePathNode): number {
   const aIsFolder = a.children !== undefined;

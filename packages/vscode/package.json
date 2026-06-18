@@ -858,6 +858,11 @@
           "default": true,
           "description": "Render a builder's changed-files list as a folder tree (with single-child folder chains compacted, like VSCode's Source Control panel) instead of a flat list. Toggleable via the Builders title-bar button."
         },
+        "codev.buildersAutoReveal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Builders view: when the active builder-diff editor changes (keyboard navigation, a click inside the multi-file View Diff, or a per-file diff), reveal and select the matching file's row in the tree. The Builders-view equivalent of the Explorer's auto-reveal. When off, the sidebar selection only follows an explicit click."
+        },
         "codev.backlogShowAll": {
           "type": "boolean",
           "default": false,

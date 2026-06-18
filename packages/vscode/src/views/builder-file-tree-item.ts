@@ -86,6 +86,15 @@ export class BuilderFileTreeItem extends vscode.TreeItem {
     const rel = plan.resourcePath;
     super(path.basename(rel));
 
+    // Stable, unique id so the Builders tree can `reveal` this row when the
+    // active builder-diff editor changes (#1066). `reveal` matches recreated
+    // elements by id; without one a file row can't be located. The `builderId`
+    // prefix keeps two builders that changed the same relative path distinct
+    // (same reason `resourceUri` carries the worktree path, above). Distinct
+    // from folder ids (`<builderId>::folder::<...>`) and builder-row ids
+    // (`<builderId>#<version>`).
+    this.id = `${builderId}::${rel}`;
+
     const dir = path.dirname(rel);
     const dirLabel = dir === '.' ? '' : dir;
     this.description =

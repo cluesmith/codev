@@ -1,11 +1,12 @@
 /**
- * #1060 — cross-file diff navigation pure helpers.
+ * #1060 — cross-file diff navigation pure helpers (extended by #1066).
  *
  * These cover the logic that the acceptance criteria pin down without needing a
- * live VS Code: navigation order matches the file list, the edges no-op (no
- * wrap), and two builders' lists resolve independently (multi-builder
- * isolation). The command glue (`navigateDiff`) is exercised manually at the
- * dev-approval gate.
+ * live VS Code: navigation order matches the visible list (raw git order in flat
+ * mode, depth-first tree order in tree mode — #1066), stepping wraps around at
+ * the ends (#1066, to match VSCode's built-in hunk navigation), and two
+ * builders' lists resolve independently (multi-builder isolation). The command
+ * glue (`navigateDiff`) is exercised manually at the dev-approval gate.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -24,6 +25,7 @@ vi.mock('vscode', () => ({
 
 const {
   orderedRelPaths,
+  navigationOrder,
   computeNavTarget,
   indexOfRelPath,
   recordDiffNavPosition,
@@ -51,30 +53,67 @@ describe('orderedRelPaths', () => {
   });
 });
 
+describe('navigationOrder (#1066: match the visible tree order)', () => {
+  // A list whose git order interleaves a folder's contents with loose files at
+  // the same level — exactly the screenshot case (middleware/ shown first, but
+  // git lists the loose src files before it).
+  const files = [
+    mk('apps/auth/src/index.ts'),
+    mk('apps/auth/src/google-service-scope-allowlist.ts'),
+    mk('apps/auth/src/middleware/require-user-or-service-auth.ts'),
+    mk('README.md'),
+  ];
+
+  it('flat-list mode: keeps the raw git --name-status order', () => {
+    expect(navigationOrder(files, false).map(f => f.plan.resourcePath)).toEqual([
+      'apps/auth/src/index.ts',
+      'apps/auth/src/google-service-scope-allowlist.ts',
+      'apps/auth/src/middleware/require-user-or-service-auth.ts',
+      'README.md',
+    ]);
+  });
+
+  it('tree mode: depth-first display order — a folder\'s subtree before its sibling loose files; folders before files; root files last', () => {
+    expect(navigationOrder(files, true).map(f => f.plan.resourcePath)).toEqual([
+      // apps/ (folder) before README.md (root file); within src/, middleware/
+      // (folder) is exhausted before the loose files, each group alphabetical.
+      'apps/auth/src/middleware/require-user-or-service-auth.ts',
+      'apps/auth/src/google-service-scope-allowlist.ts',
+      'apps/auth/src/index.ts',
+      'README.md',
+    ]);
+  });
+
+  it('is a stable passthrough for an empty list in either mode', () => {
+    expect(navigationOrder([], true)).toEqual([]);
+    expect(navigationOrder([], false)).toEqual([]);
+  });
+});
+
 describe('computeNavTarget', () => {
   const count = 3;
 
   it('advances by one mid-list', () => {
-    expect(computeNavTarget(0, count, 1)).toEqual({ index: 1, atEdge: false });
-    expect(computeNavTarget(1, count, 1)).toEqual({ index: 2, atEdge: false });
+    expect(computeNavTarget(0, count, 1)).toEqual({ index: 1 });
+    expect(computeNavTarget(1, count, 1)).toEqual({ index: 2 });
   });
 
   it('retreats by one mid-list', () => {
-    expect(computeNavTarget(2, count, -1)).toEqual({ index: 1, atEdge: false });
-    expect(computeNavTarget(1, count, -1)).toEqual({ index: 0, atEdge: false });
+    expect(computeNavTarget(2, count, -1)).toEqual({ index: 1 });
+    expect(computeNavTarget(1, count, -1)).toEqual({ index: 0 });
   });
 
-  it('no-ops at the last file going forward (no wrap)', () => {
-    expect(computeNavTarget(2, count, 1)).toEqual({ index: 2, atEdge: true });
+  it('wraps from the last file forward to the first (#1066: match hunk-nav wrap)', () => {
+    expect(computeNavTarget(2, count, 1)).toEqual({ index: 0 });
   });
 
-  it('no-ops at the first file going backward (no wrap)', () => {
-    expect(computeNavTarget(0, count, -1)).toEqual({ index: 0, atEdge: true });
+  it('wraps from the first file backward to the last', () => {
+    expect(computeNavTarget(0, count, -1)).toEqual({ index: 2 });
   });
 
-  it('treats a single-file list as both edges', () => {
-    expect(computeNavTarget(0, 1, 1)).toEqual({ index: 0, atEdge: true });
-    expect(computeNavTarget(0, 1, -1)).toEqual({ index: 0, atEdge: true });
+  it('wraps a single-file list to itself in either direction', () => {
+    expect(computeNavTarget(0, 1, 1)).toEqual({ index: 0 });
+    expect(computeNavTarget(0, 1, -1)).toEqual({ index: 0 });
   });
 });
 
@@ -105,7 +144,7 @@ describe('indexOfRelPath', () => {
       mk('next.ts'),
     ];
     expect(indexOfRelPath(withDeleted, 'gone.ts')).toBe(1);
-    expect(computeNavTarget(1, withDeleted.length, 1)).toEqual({ index: 2, atEdge: false });
+    expect(computeNavTarget(1, withDeleted.length, 1)).toEqual({ index: 2 });
   });
 
   it('resolves two builders independently (multi-builder isolation)', () => {
@@ -118,9 +157,10 @@ describe('indexOfRelPath', () => {
     expect(indexOfRelPath(builderB, 'b/gamma.ts')).toBe(2);
     expect(indexOfRelPath(builderA, 'b/gamma.ts')).toBe(-1);
 
-    // Stepping in one list is unaffected by the other's length.
-    expect(computeNavTarget(indexOfRelPath(builderA, 'a/two.ts'), builderA.length, 1)).toEqual({ index: 1, atEdge: true });
-    expect(computeNavTarget(indexOfRelPath(builderB, 'b/beta.ts'), builderB.length, 1)).toEqual({ index: 2, atEdge: false });
+    // Stepping in one list is unaffected by the other's length. A's last file
+    // wraps to its own index 0; B steps mid-list to index 2.
+    expect(computeNavTarget(indexOfRelPath(builderA, 'a/two.ts'), builderA.length, 1)).toEqual({ index: 0 });
+    expect(computeNavTarget(indexOfRelPath(builderB, 'b/beta.ts'), builderB.length, 1)).toEqual({ index: 2 });
   });
 });
 

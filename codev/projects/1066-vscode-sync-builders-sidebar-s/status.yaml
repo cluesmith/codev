@@ -1,0 +1,29 @@
+id: '1066'
+title: vscode-sync-builders-sidebar-s
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-17T21:46:00.263Z'
+    approved_at: '2026-06-17T22:03:37.207Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-17T22:10:21.138Z'
+    approved_at: '2026-06-18T22:33:00.466Z'
+  pr:
+    status: pending
+    requested_at: '2026-06-18T22:45:18.434Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-17T21:41:05.159Z'
+updated_at: '2026-06-18T22:45:18.435Z'
+pr_history:
+  - phase: review
+    pr_number: 1075
+    branch: builder/pir-1066
+    created_at: '2026-06-18T22:35:59.387Z'
+pr_ready_for_human: true

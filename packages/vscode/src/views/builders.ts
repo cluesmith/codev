@@ -147,15 +147,96 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     return element;
   }
 
-  // The accordion's `reveal(builderItem)` needs the parent chain.
-  // Builders nested under a group return their cached group; everything
-  // else (group rows themselves, file/folder rows, builders in the
-  // single-Uncategorized flatten case) is treated as a root by VSCode.
-  getParent(element: vscode.TreeItem): vscode.TreeItem | undefined {
+  // The accordion's `reveal(builderItem)` and the active-file sync's
+  // `reveal(fileItem)` (#1066) both need the parent chain.
+  //  - Builder rows return their cached group (or undefined in the
+  //    single-Uncategorized flatten case — VSCode treats them as roots).
+  //  - File / folder rows reconstruct their chain: file → folder(s) (tree
+  //    mode) → builder → group. Async because tree-mode reconstruction reads
+  //    the (cached) diff to rebuild the folder hierarchy; VSCode's `getParent`
+  //    accepts a Thenable.
+  //  - Group rows themselves are roots.
+  getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
     if (element instanceof BuilderTreeItem) {
       return this.groupParentByBuilderId.get(element.builderId);
     }
+    if (element instanceof BuilderFileTreeItem || element instanceof BuilderFolderTreeItem) {
+      return this.parentForFileNode(element);
+    }
     return undefined;
+  }
+
+  /**
+   * Reconstruct the parent of a file or folder row so `reveal` can build the
+   * chain up to the root (#1066). Reconstruction (not a getChildren-populated
+   * map) is required because `reveal` walks parents while the subtree is still
+   * collapsed — `getChildren` for a file only runs once its builder is expanded.
+   *
+   *  - **Flat-list mode**: a file's parent is the builder row directly.
+   *  - **Tree mode**: rebuild the compacted folder tree (same `buildFilePathTree`
+   *    the rows were rendered from, off the 15s-TTL diff cache) and return the
+   *    enclosing folder row, or the builder row when the node sits at top level.
+   *
+   * The reconstructed builder row carries the current accordion-versioned id
+   * (`makeBuilderRow` → `rowIds.idFor`), and folder rows carry the same
+   * `<builderId>::folder::<fullPath>` id `materialiseNode` produces, so the
+   * chain matches what `getChildren` renders.
+   */
+  /**
+   * The builder with this id, but only if it has a worktree on record — the
+   * shared precondition for the changed-file methods (`fileChildren`,
+   * `parentForFileNode`, `findFileItem`). The return type narrows
+   * `worktreePath` to a non-null `string`, so callers can pass it to
+   * `diffCache.getDiff` without re-guarding.
+   */
+  private builderWithWorktree(builderId: string): (OverviewBuilder & { worktreePath: string }) | undefined {
+    const builder = this.cache.getData()?.builders.find(b => b.id === builderId);
+    if (!builder?.worktreePath) { return undefined; }
+    return builder as OverviewBuilder & { worktreePath: string };
+  }
+
+  private async parentForFileNode(
+    element: BuilderFileTreeItem | BuilderFolderTreeItem,
+  ): Promise<vscode.TreeItem | undefined> {
+    const builderId = element.builderId;
+    const builder = this.builderWithWorktree(builderId);
+    if (!builder) { return undefined; }
+    const builderRow = this.makeBuilderRow(builder, Date.now());
+
+    if (!this.viewAsTree()) {
+      // Flat list: folders don't exist here, so any file's parent is the builder.
+      return builderRow;
+    }
+
+    const result = await this.diffCache.getDiff(builderId, builder.worktreePath);
+    if (result.error) { return builderRow; }
+    const targetPath = element instanceof BuilderFolderTreeItem
+      ? element.node.fullPath
+      : element.plan.resourcePath;
+    const parentNode = findParentNode(buildFilePathTree(result.files), targetPath);
+    if (!parentNode) {
+      // Top-level node: parent is the builder row.
+      return builderRow;
+    }
+    return new BuilderFolderTreeItem(builderId, builder.worktreePath, result.baseRef, parentNode);
+  }
+
+  /**
+   * Build the `BuilderFileTreeItem` matching `(builderId, relPath)` so the
+   * active-file sync can hand it to `buildersView.reveal` (#1066). Returns
+   * `undefined` if the builder or file is no longer present. The constructed
+   * item's id matches the rendered row, so `reveal` + `getParent` locate and
+   * highlight the correct row (incl. the right builder when two builders share
+   * a relative path).
+   */
+  async findFileItem(builderId: string, relPath: string): Promise<BuilderFileTreeItem | undefined> {
+    const builder = this.builderWithWorktree(builderId);
+    if (!builder) { return undefined; }
+    const result = await this.diffCache.getDiff(builderId, builder.worktreePath);
+    if (result.error) { return undefined; }
+    const file = result.files.find(f => f.plan.resourcePath === relPath);
+    if (!file) { return undefined; }
+    return new BuilderFileTreeItem(builderId, builder.worktreePath, result.baseRef, file.change, file.plan);
   }
 
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
@@ -295,8 +376,8 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
    * in both modes — only the grouping around the leaves differs.
    */
   private async fileChildren(builderId: string): Promise<vscode.TreeItem[]> {
-    const builder = this.cache.getData()?.builders.find(b => b.id === builderId);
-    if (!builder?.worktreePath) {
+    const builder = this.builderWithWorktree(builderId);
+    if (!builder) {
       return [placeholder('No worktree on record')];
     }
 
@@ -352,6 +433,36 @@ function materialiseNode(
     return placeholder(node.name);
   }
   return new BuilderFileTreeItem(builderId, worktreePath, baseRef, node.file.change, node.file.plan);
+}
+
+/**
+ * Walk a (compacted) file-path tree and return the parent node of the node
+ * whose `fullPath` matches `targetPath`, or `undefined` when the target sits at
+ * top level (no parent folder) or isn't found. Used by `getParent` to
+ * reconstruct a file/folder row's enclosing folder for `reveal` (#1066).
+ *
+ * Folder fullPaths are compacted (`packages/codev/src`), and a file leaf's
+ * `fullPath` equals its `plan.resourcePath` (leaves aren't compacted), so a
+ * direct `fullPath` match resolves both row kinds.
+ *
+ * Returns `undefined` for both "top-level node (no parent folder)" and "not
+ * found"; the caller treats both as "parent is the builder row". Recursive
+ * calls always pass a defined `parent`, so a node found below the top level
+ * never resolves to `undefined`.
+ */
+export function findParentNode(
+  nodes: FilePathNode[],
+  targetPath: string,
+  parent?: FilePathNode,
+): FilePathNode | undefined {
+  for (const node of nodes) {
+    if (node.fullPath === targetPath) { return parent; }
+    if (node.children) {
+      const found = findParentNode(node.children, targetPath, node);
+      if (found !== undefined) { return found; }
+    }
+  }
+  return undefined;
 }
 
 /**

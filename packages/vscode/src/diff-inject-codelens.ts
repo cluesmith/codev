@@ -161,3 +161,15 @@ export function upsertDiffInjectEntry(entry: DiffInjectSessionEntry): void {
 export function getDiffInjectEntry(fsPath: string): DiffInjectSessionEntry | undefined {
   return provider.get(fsPath);
 }
+
+/**
+ * Subscribe to registry changes (a `setSession` / `upsert`). The registry is
+ * frequently populated *after* the diff editor is already active —
+ * `openBuilderFileDiff` opens the diff, then registers its file — so a consumer
+ * that only watches `onDidChangeActiveTextEditor` sees an empty registry on a
+ * file's first open. The Builders active-file sync (#1066) re-runs its reveal on
+ * this event for the same reason the context-key sync does (see
+ * `activateDiffInjectCodeLens`). */
+export function onDidChangeDiffInjectRegistry(listener: () => void): vscode.Disposable {
+  return provider.onDidChangeCodeLenses(listener);
+}
