@@ -1,7 +1,7 @@
 id: '1074'
 title: vscode-align-backlog-issue-pre
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-18T22:37:33.400Z'
-updated_at: '2026-06-18T22:37:33.400Z'
+updated_at: '2026-06-18T22:47:33.404Z'
