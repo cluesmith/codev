@@ -71,6 +71,26 @@ afx send 0042 "PR approved, please merge"
 afx send 0585 "check the test output" --file /tmp/test-results.txt
 ```
 
+**Addressing forms** — the recipient isn't only a builder ID:
+
+| Form | Routes to |
+|------|-----------|
+| `afx send 0585 "…"` | Builder `0585` (zero-padded). |
+| `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
+| `afx send architect:<name> "…"` | A specific named architect (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
+| `afx send <workspace>:architect "…"` | The architect in **another workspace** (cross-workspace). |
+
+```bash
+afx send architect:ob-refine "PR-iter-2 feedback ready"   # sibling architect, same workspace
+afx send taqwabench:architect "use porch.checks, don't fork protocol.json"  # cross-workspace
+```
+
+**Find the exact workspace name first** — guessing fails with `NOT_FOUND`. The name is the basename of the workspace path, which can differ from how someone refers to it. List active workspaces via the Tower API:
+
+```bash
+curl -s http://localhost:4100/api/workspaces | python3 -m json.tool   # → each .name is a valid <workspace> address
+```
+
 ## afx cleanup
 
 Removes a builder's worktree and branch after work is done.

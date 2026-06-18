@@ -55,6 +55,29 @@ porch pending                  # List all gates waiting for approval
 - `porch run` is for strict mode only — soft mode builders follow the protocol document manually
 - When running `porch approve` from the architect, use a subshell if you need worktree context: `(cd /path/to/worktree && porch approve ...)`
 
+## Language-agnostic checks (`porch.checks` override)
+
+Protocol check commands default to the **npm** toolchain (`npm run build`, `npm test`, etc.) baked into each `protocol.json`. A non-Node project (Python/uv, Go, Rust) will BLOCK at the first implement-phase check because `npm` can never pass there — even when the code is green under its real test runner.
+
+**You do NOT need to fork `protocol.json`.** Override check commands per-name in `.codev/config.json` under `porch.checks`. Each entry takes `command` (replace), `cwd` (replace), and/or `skip: true`. This covers both phase checks **and** the `phase_completion` predicates (`build_succeeds` / `tests_pass`).
+
+```jsonc
+// .codev/config.json — Python/uv example
+{
+  "porch": {
+    "checks": {
+      "build":          { "command": "uv build" },
+      "test":           { "command": "uv run pytest" },
+      "build_succeeds": { "command": "uv build" },
+      "tests_pass":     { "command": "uv run pytest" },
+      "e2e_tests":      { "skip": true }
+    }
+  }
+}
+```
+
+Keys are the **check names** from the protocol: `build` / `test` / `e2e_tests` live in phases; `build_succeeds` / `tests_pass` live in `phase_completion`. An override key that matches no check in the protocol prints a warning. Shipped by Spec #550.
+
 ## State storage
 
 Project state lives in `codev/projects/<id>-<name>/status.yaml`, managed automatically by porch. The status file tracks current phase, gate states, consultation results, and timestamps.
