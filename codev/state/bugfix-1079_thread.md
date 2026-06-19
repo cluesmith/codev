@@ -25,3 +25,7 @@ Verification:
 - Guarded real-agy 1.0.10 inline contract test passed and returned its unique marker.
 - Guarded real-agy file-access test passed and returned the planted file marker.
 - Built front doors returned exact markers for `-m gemini --prompt`, `-m pro --prompt`, and `-m gemini --prompt-file`.
+
+## PR
+
+Opened PR #1081. CMAP results so far: Gemini APPROVE (HIGH) and Codex APPROVE (HIGH), both with no key issues. The initially invoked globally installed Gemini lane reproduced the very bug being fixed, so the review was rerun through the freshly built local CLI and then approved. Claude consultation is blocked by the Claude Code session limit until its stated 8:30pm America/Toronto reset; architect notified. Holding before the PR gate until the required third verdict is available.
