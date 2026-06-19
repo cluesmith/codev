@@ -1,0 +1,18 @@
+id: '841'
+title: feat-vscode-architects-tree-ad
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-19T22:48:56.842Z'
+updated_at: '2026-06-19T22:48:56.843Z'
