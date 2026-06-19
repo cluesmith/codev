@@ -15,11 +15,12 @@ gates:
     approved_at: '2026-06-19T20:25:50.053Z'
   pr:
     status: pending
+    requested_at: '2026-06-19T20:39:26.845Z'
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-05-31T19:04:30.567Z'
-updated_at: '2026-06-19T20:39:11.256Z'
+updated_at: '2026-06-19T20:39:26.845Z'
 pr_history:
   - phase: review
     pr_number: 1
@@ -33,4 +34,4 @@ pr_history:
     pr_number: 1059
     branch: builder/pir-929
     created_at: '2026-06-19T20:31:25.040Z'
-pr_ready_for_human: false
+pr_ready_for_human: true
