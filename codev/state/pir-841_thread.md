@@ -16,3 +16,14 @@ Casing safety check: `removeArchitect` reads `arg.label`; Option A keeps sibling
 
 ## Plan revision 1 — casing decision
 User chose **UPPERCASE all** for architect display labels (`MAIN`, `WEB`, `OB-REFINE`). Internal id stays lowercase. Consequence: sibling label now != raw name, so the `removeArchitect` fix (read raw name from `item.id`, not `arg.label`) is now MANDATORY, not defensive — otherwise Remove would DELETE the uppercased name Tower doesn't know. Plan Gap 3 + Files + Tests + Risks updated. Still awaiting plan-approval gate.
+
+## Implement phase (done, awaiting dev-approval)
+Plan approved. Implemented all three gaps:
+- **Decision A1**: relocated pure `validateArchitectName`/`autoNumberArchitectName`/constants to `packages/core/src/architect-name.ts` (+ `./architect-name` export); codev shim re-exports them (zero churn at 6 call sites; `currentArchitectName` stays in codev). Confirmed codev-side tests (spec-755-phase2, spec-1057, af-architect) pass through the shim.
+- **Gap 1**: `codev.addArchitect` command + inline `$(add)` button on the Architects root row; InputBox validates via the shared core validator; refresh on success. Palette-visible.
+- **Gap 2**: `openArchitectTerminal` no-arg + N>1 shows QuickPick (`sortArchitectsForPicker`, main-first); N<=1 opens main directly.
+- **Gap 3**: UPPERCASE labels via `displayArchitectName`; pure helpers extracted to vscode-free `views/architect-display.ts` so they're directly unit-testable. `removeArchitect` now resolves raw name from `item.id` (mandatory with uppercased labels).
+
+Tests: 34 architect tests pass (new architect-display.test.ts behavior tests + extended sentinels). check-types ✓, lint ✓, esbuild bundles ✓ (after building workspace deps).
+
+**Pre-existing unrelated failures** (confirmed on base via stash): `terminal-adapter.test.ts` + `reconnect-link-provider.test.ts` fail to collect under plain vitest (dynamic `import('ws')` / `terminal-link-provider.js`). NOT touched by this diff — out of scope, will note in review.
