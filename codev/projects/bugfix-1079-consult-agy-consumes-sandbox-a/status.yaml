@@ -1,0 +1,14 @@
+id: bugfix-1079
+title: consult-agy-consumes-sandbox-a
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-19T23:24:59.389Z'
+updated_at: '2026-06-19T23:24:59.390Z'
