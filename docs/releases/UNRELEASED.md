@@ -33,6 +33,22 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Add Architect from the Workspace tab (#841, PR #1082)
+
+The Workspace tab in the Codev sidebar lists registered architects under an "Architects" parent row (one child per architect registered in Tower's state, since Spec 786). Until now the only way to *add* a second architect was the CLI command `afx workspace add-architect --name <name>`. The VS Code surface lagged: the tree could render N architects but the extension provided no `+` affordance.
+
+This release adds the missing affordance. A new `Codev: Add Architect` command surfaces three ways:
+
+1. **The Architects row carries an inline `+` action**. Click it to register a new architect for the current workspace; a Quick Pick asks for the architect name; on submit, Tower's state updates and the Architects section re-renders with the new row underneath.
+2. **`Cmd+K A` / `Ctrl+K A` keyboard shortcut** invokes the same flow without leaving the keyboard.
+3. **The command palette** entry `Codev: Add Architect` runs the same code path.
+
+Architect names render in UPPERCASE in the sidebar (`MAIN`, `OB-REFINE`, etc.) so they read as a distinct name family from the file / folder labels that share the tree. This matches the casing convention already used in `afx status` and the Tower dashboard, so the same identity reads the same way across surfaces.
+
+A small structural cleanup ships with this: the architect-name validator that was previously duplicated between `packages/codev/src/agent-farm/utils/architect-name.ts` (the CLI surface) and the VS Code extension is now a single shared source in `@cluesmith/codev-core` (`packages/core/src/architect-name.ts`). Name validation (allowed characters, length cap, reserved-name check) is identical no matter which surface the user adds an architect from. The CLI module is a thin re-export.
+
+This is one of the four follow-ups originally listed in #770 for multi-architect VS Code support. The remaining three (`#950` Quick Pick for sending to a chosen architect, `#1009` handoff / pickup UI, `#984`-derived coordination polish) ship on their own cadence.
+
 ## Builders sidebar auto-reveals the active builder-file diff (#1066, PR #1075)
 
 A natural follow-up to PR #1067's cross-file navigation (#1060): with the keyboard `Ctrl+Alt+]` / `Ctrl+Alt+[` walk in place, the Builders sidebar tree was a step out of sync. Opening file 3 of a diff session would leave the sidebar selection pointing at file 1, so the visual reference for "where you are in the changed-file list" did not match the editor.
