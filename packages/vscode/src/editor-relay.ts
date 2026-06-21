@@ -154,6 +154,7 @@ export function wireEditorProvider(connectionManager: ConnectionManager): vscode
         editor.revealRange(new vscode.Range(caret, caret), vscode.TextEditorRevealType.InCenter);
         return;
       }
+      if (cmd.action !== 'scrollEditor') {return;} // ignore unknown scroll actions
       await vscode.commands.executeCommand('editorScroll', {
         to: cmd.to,
         by: cmd.by,
@@ -168,12 +169,20 @@ export function wireEditorProvider(connectionManager: ConnectionManager): vscode
   // Map a canonical verb to this provider's VSCode command and run it. A verb
   // absent from VERB_COMMANDS is ignored (the map is the allowlist).
   const runVerb = async (req: CommandRequest): Promise<void> => {
+    // Self-gate on focus, like position/scroll: only the focused window runs a
+    // relayed verb, so multiple windows on one workspace execute it exactly once
+    // (a single active provider). Pending: a "claim active provider" handshake
+    // would let an unfocused provider act; until then the focused window wins.
+    if (!vscode.window.state.focused) {return;}
     const command = VERB_COMMANDS[req.verb];
     if (!command) {
       return; // unknown verb: ignore silently
     }
+    // The verb operands arrive over the wire as `unknown[]`; a non-array (a stray
+    // object) would throw on spread, so coerce to an empty arg list.
+    const args = Array.isArray(req.args) ? req.args : [];
     try {
-      await vscode.commands.executeCommand(command, ...(req.args ?? []));
+      await vscode.commands.executeCommand(command, ...args);
     } catch {
       // command failures surface in VSCode's own UI; nothing to relay back
     }

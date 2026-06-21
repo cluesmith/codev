@@ -123,9 +123,18 @@ export async function handleEditorRoute(
         ctx.broadcastNotification({ type, title: type, body: JSON.stringify(body) }),
     });
   }
-  // Any request keeps the controller "present" and (re)starts the expiry timer.
-  markPresence();
+  // Presence is a CONTROLLER signal, so only controller-originated routes refresh
+  // it. The provider's own position/context reports must NOT: a provider emits
+  // those only because a controller asked it to, so counting them as presence
+  // would keep an already-departed controller "alive" and the TTL would never
+  // release the demand.
   const path = url.pathname;
+  const isControllerRoute =
+    path === EDITOR_ROUTES.command ||
+    path === EDITOR_ROUTES.scroll ||
+    path === EDITOR_ROUTES.wantsPosition ||
+    path === EDITOR_ROUTES.heartbeat;
+  if (isControllerRoute) markPresence();
   if (req.method === 'POST' && path === EDITOR_ROUTES.command) return handleCommand(req, res);
   if (req.method === 'POST' && path === EDITOR_ROUTES.scroll) return handleScroll(req, res);
   if (req.method === 'POST' && path === EDITOR_ROUTES.wantsPosition) return handleWantsPosition(req, res);
@@ -196,8 +205,12 @@ export async function handleWantsPosition(
     positionWantedCount += 1;
     if (positionWantedCount === 1) d.broadcast(EDITOR_EVENTS.wantsPosition, { wanted: true });
   } else {
-    if (positionWantedCount > 0) positionWantedCount -= 1;
-    if (positionWantedCount === 0) d.broadcast(EDITOR_EVENTS.wantsPosition, { wanted: false });
+    // Decrement and signal only on a real 1->0 transition; a `wanted:false` while
+    // the count is already 0 is a no-op, not another stop broadcast.
+    if (positionWantedCount > 0) {
+      positionWantedCount -= 1;
+      if (positionWantedCount === 0) d.broadcast(EDITOR_EVENTS.wantsPosition, { wanted: false });
+    }
   }
   return sendJson(res, 200, { ok: true });
 }

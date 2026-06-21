@@ -197,6 +197,11 @@ export async function navigateDiffToFirst(deps: NavDeps): Promise<void> {
  * (no stable "first change" command exists). A no-op outside a diff editor.
  */
 export async function diffFirstHunk(): Promise<void> {
+  // Guard on the diff-inject registry so this is a true no-op outside a tracked
+  // diff: otherwise `cursorTop` would jump the caret in whatever plain editor
+  // happens to be focused.
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || !getDiffInjectEntry(editor.document.uri.fsPath)) { return; }
   await vscode.commands.executeCommand('cursorTop');
   await vscode.commands.executeCommand('workbench.action.compareEditor.nextChange');
 }

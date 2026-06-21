@@ -66,6 +66,13 @@ describe('editor + command relay', () => {
     ]);
   });
 
+  it('ignores a wants:false while demand is already zero (no spurious stop)', async () => {
+    await handleWantsPosition(fakeReq({ wanted: false }), fakeRes().res);
+    await handleWantsPosition(fakeReq({ wanted: false }), fakeRes().res);
+    const wantsCalls = broadcast.mock.calls.filter((c) => c[0] === 'editor-wants-position');
+    expect(wantsCalls).toEqual([]);
+  });
+
   it('fans every editor-position report out as-is (provider already throttles)', async () => {
     await handleEditorPosition(fakeReq({ value: { visibleStart: 0, visibleEnd: 40, totalLines: 500, file: 'a' } }), fakeRes().res);
     await handleEditorPosition(fakeReq({ value: { visibleStart: 5, visibleEnd: 45, totalLines: 500, file: 'a' } }), fakeRes().res);

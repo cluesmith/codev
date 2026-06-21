@@ -207,4 +207,35 @@ describe('wireEditorProvider', () => {
 
     expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
   });
+
+  it('does not run a relayed verb when the window is not focused (single active provider)', async () => {
+    vscode.window.state.focused = false;
+    const { mgr, fire } = makeConnMgr(client);
+    wireEditorProvider(mgr as never);
+
+    fire('command', { verb: 'open-terminal', args: ['spir-809'] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('coerces non-array verb args to an empty arg list (no crash on a stray object)', async () => {
+    const { mgr, fire } = makeConnMgr(client);
+    wireEditorProvider(mgr as never);
+
+    fire('command', { verb: 'refresh-overview', args: { not: 'an array' } });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.refreshOverview');
+  });
+
+  it('ignores a scroll command with an unknown action (no editorScroll)', async () => {
+    const { mgr, fire } = makeConnMgr(client);
+    wireEditorProvider(mgr as never);
+
+    fire('editor-scroll', { action: 'launchMissiles', to: 'down', by: 'line', value: 3 });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+  });
 });
