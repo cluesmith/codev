@@ -216,6 +216,14 @@
         "title": "Codev: Go to Previous File in Diff"
       },
       {
+        "command": "codev.diffFirstFile",
+        "title": "Codev: Go to First File in Diff"
+      },
+      {
+        "command": "codev.diffFirstHunk",
+        "title": "Codev: Go to First Change in Diff"
+      },
+      {
         "command": "codev.openWorktreeWindow",
         "title": "Codev: Open Worktree in New Window"
       },

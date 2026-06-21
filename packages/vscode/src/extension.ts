@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
+import { wireEditorProvider } from './editor-relay.js';
 import { TerminalManager } from './terminal-manager.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
@@ -8,10 +9,10 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
-import { buildBuilderRangeRef } from './diff-inject-ref.js';
+import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
@@ -994,6 +995,31 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.window.showWarningMessage('Codev: Builder terminal not available');
 			}
 		}),
+		// Forward the whole active diff file as a reference (the Forward File action).
+		reg('codev.forwardCurrentFileToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			await vscode.commands.executeCommand(
+				'codev.forwardToBuilder', entry.builderId, buildBuilderFileRef(entry.relPath));
+		}),
+		// Forward the changed hunk under the cursor (the Forward Hunk action): the
+		// diff-inject session already carries the new-side hunk ranges (1-based).
+		reg('codev.forwardCurrentHunkToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			const line = editor.selection.active.line + 1;
+			const hunk = entry.hunks.find(h => line >= h.start && line <= h.end);
+			if (!hunk) {
+				vscode.window.setStatusBarMessage('Codev: place the cursor in a changed hunk', 3000);
+				return;
+			}
+			await vscode.commands.executeCommand(
+				'codev.forwardToBuilder', entry.builderId, buildBuilderRangeRef(entry.relPath, hunk.start, hunk.end));
+		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }
 			await openBuilderFileDiff(context, {
@@ -1015,6 +1041,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffPreviousFile', () =>
 			navigateDiff(-1, { context, overviewCache, diffCache: builderDiffCache })),
+		// "Reset to start" gestures (e.g. a controller dial press): jump to the
+		// first file in the list / the first hunk of the active diff.
+		reg('codev.diffFirstFile', () =>
+			navigateDiffToFirst({ context, overviewCache, diffCache: builderDiffCache })),
+		reg('codev.diffFirstHunk', () => diffFirstHunk()),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
 		regCli('codev.stopWorktreeDev', () =>
@@ -1128,6 +1159,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		connectionManager.onSSEEvent(({ type, data }) => builderSpawnHandler.handle(type, data)),
 	);
+
+	// VSCode as the editor provider for Tower's editor + command relay: run scroll
+	// + canonical verbs from a controller and report editor position/context for
+	// the controller's UI.
+	context.subscriptions.push(wireEditorProvider(connectionManager));
 
 	// Make builder names clickable in any terminal output
 	context.subscriptions.push(

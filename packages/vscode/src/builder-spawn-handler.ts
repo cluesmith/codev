@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { BuilderSpawnedPayload } from '@cluesmith/codev-types';
+import { parseSseEnvelope } from './sse-envelope.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { TerminalManager } from './terminal-manager.js';
 
@@ -16,14 +17,8 @@ export class BuilderSpawnHandler {
   ) {}
 
   handle(_eventType: string, data: string): void {
-    // Tower emits events as a JSON-serialized envelope on the SSE `data:` field
-    // with no `event:` name, so we must inspect the envelope's `type` ourselves.
-    let envelope: { type?: unknown; body?: unknown };
-    try {
-      envelope = JSON.parse(data);
-    } catch {
-      return;
-    }
+    const envelope = parseSseEnvelope(data);
+    if (!envelope) { return; }
 
     if (envelope.type !== 'builder-spawned') { return; }
 

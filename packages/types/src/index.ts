@@ -12,6 +12,23 @@ export {
 } from './sse.js';
 
 export {
+  type ScrollDirection,
+  type ScrollBy,
+  type ScrollAction,
+  type EditorPosition,
+  type WantsEditorPosition,
+  type CommandRequest,
+  type ScrollEditorRequest,
+  type EditorPositionReport,
+  type EditorContext,
+  type EditorContextReport,
+  type CommandResult,
+  EDITOR_ROUTES,
+  EDITOR_ROUTE_PREFIX,
+  EDITOR_EVENTS,
+} from './editor.js';
+
+export {
   type ArchitectState,
   type Builder,
   type UtilTerminal,

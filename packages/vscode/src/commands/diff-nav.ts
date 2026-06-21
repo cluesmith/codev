@@ -101,7 +101,21 @@ function flash(message: string): void {
   vscode.window.setStatusBarMessage(`Codev: ${message}`, 4000);
 }
 
-export async function navigateDiff(direction: 1 | -1, deps: NavDeps): Promise<void> {
+/** Resolved navigation context: the ordered file list plus where we are in it. */
+interface DiffContext {
+  ordered: BuilderFileChange[];
+  builderId: string;
+  worktreePath: string;
+  baseRef: string;
+  currentIdx: number;
+}
+
+/**
+ * Resolve the builder's ordered changed-file list and the current position
+ * within it (steps 1-3 shared by every navigation gesture). Flashes and returns
+ * undefined when there's nothing to navigate.
+ */
+async function resolveDiffContext(deps: NavDeps): Promise<DiffContext | undefined> {
   // 1. Resolve the current builder + file from the active editor, falling back
   //    to the last navigated position.
   const activeFsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
@@ -111,14 +125,14 @@ export async function navigateDiff(direction: 1 | -1, deps: NavDeps): Promise<vo
     : lastPosition;
   if (!current) {
     flash('open a builder file diff first');
-    return;
+    return undefined;
   }
 
   // 2. Resolve the worktree path for that builder (synchronous overview read).
   const builder = builderWithWorktree(deps.overviewCache.getData(), current.builderId);
   if (!builder) {
     flash(`no worktree on record for ${current.builderId}`);
-    return;
+    return undefined;
   }
   const worktreePath = builder.worktreePath;
 
@@ -128,29 +142,63 @@ export async function navigateDiff(direction: 1 | -1, deps: NavDeps): Promise<vo
   const result = await deps.diffCache.getDiff(current.builderId, worktreePath);
   if (result.error || result.files.length === 0) {
     flash('no changed files to navigate');
-    return;
+    return undefined;
   }
   const ordered = navigationOrder(result.files, readBuildersFileViewAsTree());
+  return {
+    ordered,
+    builderId: current.builderId,
+    worktreePath,
+    baseRef: result.baseRef,
+    currentIdx: indexOfRelPath(ordered, current.relPath),
+  };
+}
 
-  // 4. Find where we are; bail if the current file isn't in this list.
-  const idx = indexOfRelPath(ordered, current.relPath);
-  if (idx < 0) {
+/** Open the diff for `ordered[index]` as a reused preview tab and anchor there. */
+async function openDiffAt(deps: NavDeps, ctx: DiffContext, index: number): Promise<void> {
+  const target = ctx.ordered[index]!;
+  await openBuilderFileDiff(
+    deps.context,
+    { worktreePath: ctx.worktreePath, baseRef: ctx.baseRef, builderId: ctx.builderId, plan: target.plan },
+    { preview: true },
+  );
+  recordDiffNavPosition(ctx.builderId, target.plan.resourcePath);
+}
+
+export async function navigateDiff(direction: 1 | -1, deps: NavDeps): Promise<void> {
+  const ctx = await resolveDiffContext(deps);
+  if (!ctx) { return; }
+  // Bail if the current file isn't in this list (can't step relative to nothing).
+  if (ctx.currentIdx < 0) {
     flash('current file is not in this diff');
     return;
   }
+  // Step, wrapping around at the ends (consistent with the built-in hunk
+  // navigation, which also wraps).
+  const { index } = computeNavTarget(ctx.currentIdx, ctx.ordered.length, direction);
+  await openDiffAt(deps, ctx, index);
+}
 
-  // 5. Step, wrapping around at the ends (consistent with the built-in hunk
-  //    navigation, which also wraps).
-  const { index: targetIdx } = computeNavTarget(idx, ordered.length, direction);
+/**
+ * Jump to the FIRST file in the builder's changed-file list (#1060 completion:
+ * the "reset to start" gesture, e.g. a controller dial press). Unlike stepping,
+ * this doesn't need the current file to be in the list; any resolvable builder
+ * is enough.
+ */
+export async function navigateDiffToFirst(deps: NavDeps): Promise<void> {
+  const ctx = await resolveDiffContext(deps);
+  if (!ctx) { return; }
+  await openDiffAt(deps, ctx, 0);
+}
 
-  // 6. Open the target file's diff as a reused preview tab.
-  const target = ordered[targetIdx]!;
-  await openBuilderFileDiff(
-    deps.context,
-    { worktreePath, baseRef: result.baseRef, builderId: current.builderId, plan: target.plan },
-    { preview: true },
-  );
-  recordDiffNavPosition(current.builderId, target.plan.resourcePath);
+/**
+ * Jump to the FIRST hunk of the active diff editor: move to the top, then step
+ * to the first change. Uses VS Code's built-in compare-editor change navigation
+ * (no stable "first change" command exists). A no-op outside a diff editor.
+ */
+export async function diffFirstHunk(): Promise<void> {
+  await vscode.commands.executeCommand('cursorTop');
+  await vscode.commands.executeCommand('workbench.action.compareEditor.nextChange');
 }
 
 /**

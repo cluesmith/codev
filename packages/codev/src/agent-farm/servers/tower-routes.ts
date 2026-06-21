@@ -45,6 +45,8 @@ import { ensureWorktreeConfigWatcher } from './worktree-config-watcher.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
+import { handleEditorRoute } from './editor-relay.js';
+import { EDITOR_ROUTES, EDITOR_ROUTE_PREFIX } from '@cluesmith/codev-types';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
@@ -233,6 +235,13 @@ export async function handleRequest(
       const tunnelSub = url.pathname.slice('/api/tunnel/'.length);
       await handleTunnelEndpoint(req, res, tunnelSub);
       return;
+    }
+
+    // Editor + command relay: /api/editor/* and /api/command —
+    // the module self-routes and lazily initializes, so this is the only
+    // Tower-side seam. Drives the active editor provider for any controller.
+    if (url.pathname === EDITOR_ROUTES.command || url.pathname.startsWith(EDITOR_ROUTE_PREFIX)) {
+      return await handleEditorRoute(req, res, url, ctx);
     }
 
     // Workspace API: /api/workspaces/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)
