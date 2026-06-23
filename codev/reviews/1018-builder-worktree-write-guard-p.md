@@ -49,6 +49,14 @@ Note on running the suite: a full `npm run build` must precede `npm test`. The t
 
 **HOT** — no change. `lessons-critical.md` is capped and full; the closest existing hot lesson ("When guessing fails, build a minimal repro") is adjacent but distinct, and these are spec-narrow recipes better kept cold.
 
+## 3-Way Consultation Outcome (single advisory pass)
+
+- **Gemini**: APPROVE (HIGH). **Claude**: APPROVE (HIGH). **Codex**: REQUEST_CHANGES (HIGH).
+- **Codex finding (addressed):** the guard was only emitted in the *role-bearing* spawn branches, so a Claude builder spawned **without a role** fell through the unguarded `else` branches in `startBuilderSession` and `buildWorktreeLaunchScript` and never received the guard — not deterministic across all spawn modes. Real gap; fixed. Harness-file installation is now role-independent via a shared `installHarnessWorktreeFiles()` helper called from **all four** fresh-spawn branches (role + no-role, both functions). Added two regression tests in `spawn-worktree.test.ts` asserting the guard files are written for Claude both with and without a role; the no-role one fails without this fix.
+- **Claude minor observation (noted, not changed):** if an adopter already has a `.claude/settings.local.json` containing its own `hooks.PreToolUse`, `writeWorktreeFiles`'s shallow merge (`{...existing, ...incoming}`) overwrites the whole `hooks` key. Near-zero risk today (fresh worktree; the file is generated/untracked), so deferred — flagged here for a future deep-merge iteration if needed.
+- **Known edge (not a spawn-mode gap):** the `--resume` path reuses an existing worktree and does not re-emit; a worktree first spawned *before* this feature and later resumed won't retroactively get the guard. `afx setup` or a fresh spawn covers it.
+- PIR is single-pass — none of the above was independently re-reviewed by the models. The human at the `pr` gate is the remaining check on the fix.
+
 ## Things to Look At During PR Review
 
 - **Allowlist policy** (`worktree-write-guard.ts`): temp dirs + `$HOME/.claude`. The `~/.claude` entry is deliberate so builder *memory* writes are not blocked. A consequence worth a conscious nod: symlinked shared root config (`.codev/config.json`, `.env`) resolves outside the worktree and is **denied** for writes — judged correct (a builder should not mutate shared root config), but it is a behavior boundary.
