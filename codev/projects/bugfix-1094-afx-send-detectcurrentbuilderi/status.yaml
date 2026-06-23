@@ -1,7 +1,7 @@
 id: bugfix-1094
 title: afx-send-detectcurrentbuilderi
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-23T21:45:58.428Z'
-updated_at: '2026-06-23T21:45:58.428Z'
+updated_at: '2026-06-23T21:50:08.843Z'
