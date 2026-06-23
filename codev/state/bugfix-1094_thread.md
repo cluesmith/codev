@@ -70,3 +70,25 @@ Tests:
 
 Full suite green: 167 files / 3347 tests pass, 0 fail. Net ~217 LOC tracked +
 ~110 new test file. Within BUGFIX scope.
+
+## PR (gate: pr)
+
+PR #1095 opened. CMAP (`--protocol bugfix --type pr`):
+- codex  = APPROVE (HIGH, no key issues)
+- claude = APPROVE (HIGH, no key issues)
+- gemini = NO VERDICT (broken agy review lane — burned session hunting for source
+  under sandbox restrictions; matches reference_agy_consult_review_broken #1032/1033)
+
+No REQUEST_CHANGES, no defects surfaced. One non-blocking note (looksLikeBuilderId
+could match a hypothetical architect name like `custom-42`) — already mitigated by the
+`!entry.architects.has(sender)` guard + warning-only nature. No changes made.
+
+Two pre-existing consult tooling gotchas hit (NOT my bug, candidates for follow-up issues):
+1. `consult --type pr` needs explicit `--protocol bugfix` or it looks at top-level
+   `codev/consult-types/pr-review.md` (only `integration-review.md` lives there;
+   pr-review.md is per-protocol under `protocols/<p>/consult-types/`).
+2. consult project auto-detect regex `/\.builders\/[^/]*?-?(\d+)-([^/]+)/` requires a
+   trailing slug after the issue number; worktree `bugfix-1094` (no slug) fails →
+   "Multiple projects found". Workaround: `--project-id 1094`.
+
+Requesting pr gate via `porch done`. Waiting for human approval.
