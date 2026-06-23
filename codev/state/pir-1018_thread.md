@@ -95,6 +95,23 @@ intentionally excluded (existing worktree already guarded). Claude's shallow-mer
 note deferred (near-zero risk). Build+test green (3360 passed). Dispositions in
 codev/projects/1018-*/1018-review-iter1-rebuttals.md.
 
-### Status: pr gate PENDING
+### Status: pr gate PENDING (iter1)
 Architect notified (led with REQUEST_CHANGES + fix). Waiting for human to merge +
 approve pr gate. Will NOT merge until porch reports gate_status: approved.
+
+### Linux CI failure + fix (architect-flagged)
+CI red on Linux: 3 deny-tests in worktree-write-guard.test.ts allowed-as-pass.
+Root cause = TEST FIXTURE, not the guard: fixtures lived under os.tmpdir(), which
+is /tmp on Linux, and the guard correctly allowlists /tmp → the fake
+"outside-worktree" path was allowlisted. Guard already realpaths both sides;
+verified the compiled guard DENIES a literal non-/tmp path (Linux-equivalent).
+Production worktrees never live under /tmp → guard always correct in prod.
+Fix: anchor fixtures under packages/codev/node_modules/.cguard-fixtures
+(gitignored, never allowlisted, literal path). Kept /tmp allow-tests.
+Re-verified: build ✓, test ✓ (3360), CI GREEN on dfd0f264 (Tests + CLI).
+CMAP-3 re-run (iter2, architect-directed): codex=APPROVE, claude=APPROVE,
+gemini=skipped (agy timeout, non-blocking). No REQUEST_CHANGES remaining.
+
+### Status: pr gate PENDING (iter2) — CI green, CMAP-3 clear
+Waiting for human to review PR #1098 + approve pr gate. Will NOT merge until
+porch reports gate_status: approved.

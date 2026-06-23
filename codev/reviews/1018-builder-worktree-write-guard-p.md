@@ -57,6 +57,14 @@ Note on running the suite: a full `npm run build` must precede `npm test`. The t
 - **Known edge (not a spawn-mode gap):** the `--resume` path reuses an existing worktree and does not re-emit; a worktree first spawned *before* this feature and later resumed won't retroactively get the guard. `afx setup` or a fresh spawn covers it.
 - PIR is single-pass — none of the above was independently re-reviewed by the models. The human at the `pr` gate is the remaining check on the fix.
 
+### Iteration 2 (architect-directed re-run, after the Linux CI fix)
+
+CI on the first push failed on the **Linux** runner: the guard test placed its fake repo under `os.tmpdir()`, which is `/tmp` on Linux — and the guard correctly allowlists `/tmp`, so the "outside-worktree" deny-tests were allowlisted-as-allowed (green on macOS where `tmpdir` is `/var/folders`, red on Linux). **Root cause: test fixture location, not the guard** — the guard already canonicalizes both sides with `realpathSync`, and a literal non-`/tmp` path (verified against the compiled guard) is correctly denied on Linux. Production worktrees never live under `/tmp`, so the guard was always correct in production.
+
+**Fix:** anchor the guard test fixtures under the package's gitignored `node_modules/.cguard-fixtures` (never allowlisted; literal, non-symlinked on both platforms). This makes the deny-tests platform-independent and actually exercises the Linux-style literal-path comparison. The `/tmp`/`/private/tmp` *allow*-tests stay (they cover the symlink-normalization/allowlist path).
+
+Re-verified: `npm run build` ✓, `npm test` ✓ (3360 passed); **CI green** on the fix commit (Tests + CLI Integration Tests). Re-ran CMAP-3 on the updated diff: **Codex APPROVE (HIGH)**, **Claude APPROVE (HIGH)**, **Gemini skipped** (agy timed out — non-blocking). No REQUEST_CHANGES remaining.
+
 ## Things to Look At During PR Review
 
 - **Allowlist policy** (`worktree-write-guard.ts`): temp dirs + `$HOME/.claude`. The `~/.claude` entry is deliberate so builder *memory* writes are not blocked. A consequence worth a conscious nod: symlinked shared root config (`.codev/config.json`, `.env`) resolves outside the worktree and is **denied** for writes — judged correct (a builder should not mutate shared root config), but it is a behavior boundary.
