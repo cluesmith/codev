@@ -1,0 +1,18 @@
+id: '1104'
+title: vscode-merge-architects-builde
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-27T11:55:09.921Z'
+updated_at: '2026-06-27T11:55:09.922Z'
