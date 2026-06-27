@@ -40,8 +40,8 @@ import {
   serveStaticFile,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
-import { getWorktreeConfig } from '../utils/config.js';
-import { ensureWorktreeConfigWatcher } from './worktree-config-watcher.js';
+import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
+import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
@@ -168,6 +168,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
   'GET /api/issue-search': (_req, res, url) => handleIssueSearch(res, url),
   'GET /api/worktree-config': (_req, res, url) => handleWorktreeConfigView(res, url),
+  'GET /api/activity-hooks': (_req, res, url) => handleActivityHooksView(res, url),
   'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
@@ -387,7 +388,7 @@ async function handleAddArchitect(
     // Spec 823: emit an `architects-updated` SSE event so VSCode's
     // WorkspaceProvider tree refreshes when the add happens via the CLI
     // (today the tree only refreshes when add is triggered from within
-    // VSCode itself). Mirrors `worktree-config-updated`'s broadcast shape.
+    // VSCode itself). Mirrors `codev-config-updated`'s broadcast shape.
     ctx.broadcastNotification({
       type: 'architects-updated',
       title: 'Architects updated',
@@ -1031,7 +1032,7 @@ async function handleIssueSearch(res: http.ServerResponse, url: URL): Promise<vo
  *
  * Side effect: lazily installs a directory watcher on the workspace's
  * `.codev/` so any subsequent edit to `config.json` /
- * `config.local.json` fans out a `worktree-config-updated` SSE event
+ * `config.local.json` fans out a `codev-config-updated` SSE event
  * — clients refetch via this same endpoint and re-render.
  */
 function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
@@ -1047,13 +1048,42 @@ function handleWorktreeConfigView(res: http.ServerResponse, url: URL): void {
   }
   try {
     const config = getWorktreeConfig(workspaceRoot);
-    ensureWorktreeConfigWatcher(workspaceRoot);
+    ensureCodevConfigWatcher(workspaceRoot);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(config));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: `Failed to resolve worktree config: ${message}` }));
+  }
+}
+
+/**
+ * GET /api/activity-hooks — returns the canonical `ResolvedActivityHooks` (the
+ * `activityHooks` block merged across the loadConfig layer chain). Installs the
+ * shared config-file watcher, so an edit to `.codev/config(.local).json` fans out a
+ * `codev-config-updated` SSE (the config-file-change signal) and clients re-fetch.
+ */
+function handleActivityHooksView(res: http.ServerResponse, url: URL): void {
+  let workspaceRoot = url.searchParams.get('workspace');
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+  if (!workspaceRoot) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing workspace' }));
+    return;
+  }
+  try {
+    const config = getActivityHooks(workspaceRoot);
+    ensureCodevConfigWatcher(workspaceRoot);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(config));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `Failed to resolve activity hooks: ${message}` }));
   }
 }
 

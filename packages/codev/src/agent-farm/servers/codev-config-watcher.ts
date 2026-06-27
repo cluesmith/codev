@@ -1,11 +1,13 @@
 /**
  * Per-workspace file watcher for `.codev/config.json` and
- * `.codev/config.local.json`. Lazily installed by the
- * `/api/worktree-config` route handler on first request, then persists
- * for the Tower process lifetime. On each detected change it fans out
- * a `worktree-config-updated` SSE event so subscribed clients (the
- * VSCode extension, the dashboard) can refetch via the route and
- * re-render.
+ * `.codev/config.local.json`. Lazily installed by any config-resolving route
+ * handler (`/api/worktree-config`, `/api/activity-hooks`) on first request, then
+ * persists for the Tower process lifetime. On each detected change it fans out a
+ * `codev-config-updated` SSE event so subscribed clients (the VSCode extension, the
+ * dashboard) refetch whichever resolved config they consume and re-render.
+ *
+ * Watches the codev config FILES, not any one config section — so a single watcher
+ * + event serves every consumer of `.codev/config(.local).json`.
  *
  * Pattern follows `tower-tunnel.ts:startConfigWatcher` (which watches
  * `~/.codev/cloud.json` for OAuth credential changes) — `node:fs.watch`
@@ -32,10 +34,9 @@ let notify: NotifyFn | undefined;
 
 /**
  * Wire the broadcast function once at Tower startup. Subsequent calls
- * to `ensureWorktreeConfigWatcher` will use this notifier when files
- * change.
+ * to `ensureCodevConfigWatcher` will use this notifier when files change.
  */
-export function setWorktreeConfigNotifier(fn: NotifyFn): void {
+export function setCodevConfigNotifier(fn: NotifyFn): void {
   notify = fn;
 }
 
@@ -44,7 +45,7 @@ export function setWorktreeConfigNotifier(fn: NotifyFn): void {
  * `<workspacePath>/.codev/{config.json,config.local.json}`. Safe to
  * call on every route hit.
  */
-export function ensureWorktreeConfigWatcher(workspacePath: string): void {
+export function ensureCodevConfigWatcher(workspacePath: string): void {
   if (watchers.has(workspacePath)) { return; }
   const dir = path.join(workspacePath, '.codev');
   try {
@@ -57,8 +58,8 @@ export function ensureWorktreeConfigWatcher(workspacePath: string): void {
         setTimeout(() => {
           debounces.delete(workspacePath);
           notify?.({
-            type: 'worktree-config-updated',
-            title: 'Worktree config changed',
+            type: 'codev-config-updated',
+            title: 'Codev config changed',
             body: JSON.stringify({ workspace: workspacePath }),
             workspace: workspacePath,
           });
@@ -73,7 +74,7 @@ export function ensureWorktreeConfigWatcher(workspacePath: string): void {
 }
 
 /** Test / shutdown helper — close every watcher and clear pending debounces. */
-export function stopAllWorktreeConfigWatchers(): void {
+export function stopAllCodevConfigWatchers(): void {
   for (const t of debounces.values()) { clearTimeout(t); }
   debounces.clear();
   for (const w of watchers.values()) { try { w.close(); } catch { /* benign */ } }

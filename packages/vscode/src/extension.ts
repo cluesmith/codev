@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from './connection-manager.js';
 import { wireCommandProvider } from './command-relay.js';
+import { fireActivity, setActivityHooks } from './activity-hooks.js';
+import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
@@ -191,8 +193,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.executeCommand(
 			'setContext', 'codev.terminalFocused',
 			terminalManager?.isCodevTerminalActive() ?? false);
+	// Publish a builder-active event (for configured activity hooks) when a builder
+	// terminal is focused. Same subscription as the focus context.
+	const announceActiveBuilderFromTerminal = (): void => {
+		const id = terminalManager?.getActiveBuilderId();
+		if (id) { fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: id }); }
+	};
 	context.subscriptions.push(
-		vscode.window.onDidChangeActiveTerminal(syncTerminalFocusContext));
+		vscode.window.onDidChangeActiveTerminal(() => {
+			syncTerminalFocusContext();
+			announceActiveBuilderFromTerminal();
+		}));
 	syncTerminalFocusContext(); // seed initial state
 
 	// Opt-in: force a terminal repaint when the VSCode window regains focus
@@ -214,9 +225,15 @@ export async function activate(context: vscode.ExtensionContext) {
 				if (enabled) {
 					terminalManager?.repaintAllOnRefocus();
 				}
+				// Publish a window-focus activity event so configured hooks can
+				// follow the focused window.
+				fireActivity(connectionManager?.getWorkspacePath() ?? null, 'window-focus');
 			}
 			windowFocused = state.focused;
 		}));
+		// NOTE: the activation-time `window-focus` publish is deferred until after the
+		// initial hooks load (see `seedActivityHooks` below) — firing here would race
+		// the async hook fetch and publish into an empty cache.
 
 	// Drive the `codev.hasDevCommand` context key so the builder-row Run/Stop
 	// Dev Server menu entries, the dev keybindings, and the workspace-dev palette
@@ -225,7 +242,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// regardless of whether the Builders tree has rendered), so the key is
 	// refreshed by global signals — mirroring the Workspace view's own gate:
 	// `onStateChange` for the initial value once Tower is reachable, plus the
-	// `worktree-config-updated` SSE envelope (fired by Tower's config-file
+	// `codev-config-updated` SSE envelope (fired by Tower's config-file
 	// watcher) so the key stays live on `.codev/config(.local).json` edits
 	// without a window reload. The config is the Tower-merged 5-layer view
 	// (shared + project-local). Fail-safe: a disconnected/error state resolves
@@ -235,19 +252,39 @@ export async function activate(context: vscode.ExtensionContext) {
 		await vscode.commands.executeCommand(
 			'setContext', 'codev.hasDevCommand', hasRunnableDevCommand(config));
 	};
+	// Cache this workspace's resolved activity hooks (Tower's 5-layer merge, incl.
+	// ~/.codev and .codev/config.local.json). Refreshed by the same signals as the
+	// dev-command context: Tower reachability + the config-file-change SSE — so
+	// edits to .codev/config(.local).json take effect without a window reload.
+	const syncActivityHooks = async () => {
+		const resolved = await loadActivityHooks(connectionManager!);
+		setActivityHooks(resolved?.hooks ?? []);
+	};
+	// Initial seed: load the hooks FIRST, then publish the activation `window-focus`
+	// if this window is focused — so a reload syncs a listener without a focus bounce
+	// (the cache is populated before the event fires, unlike a bare activation-time
+	// publish which would race the async fetch).
+	const seedActivityHooks = async () => {
+		await syncActivityHooks();
+		if (vscode.window.state.focused) {
+			fireActivity(connectionManager?.getWorkspacePath() ?? null, 'window-focus');
+		}
+	};
 	context.subscriptions.push(
-		connectionManager.onStateChange(() => { syncHasDevCommandContext(); }));
+		connectionManager.onStateChange(() => { syncHasDevCommandContext(); syncActivityHooks(); }));
 	context.subscriptions.push(
 		connectionManager.onSSEEvent(({ data }) => {
 			try {
-				if ((JSON.parse(data) as { type?: unknown }).type === 'worktree-config-updated') {
+				if ((JSON.parse(data) as { type?: unknown }).type === 'codev-config-updated') {
 					syncHasDevCommandContext();
+					syncActivityHooks();
 				}
 			} catch {
 				// benign — malformed envelope
 			}
 		}));
 	syncHasDevCommandContext(); // seed initial state
+	seedActivityHooks();
 
 	// Update status bar with builder + needs-attention counts.
 	// Two "needs me" signals: blocked (formal gate) and idle-waiting
@@ -379,6 +416,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	// count; the rest stay on registerTreeDataProvider.
 	const buildersProvider = new BuildersProvider(overviewCache, builderDiffCache);
 	buildersView = vscode.window.createTreeView('codev.builders', { treeDataProvider: buildersProvider });
+	// Publish a builder-active event when a builder row is selected in the sidebar.
+	// Builder tree items carry `builderId` (= OverviewBuilder.id); selecting a
+	// builder's root node or a file row re-targets any configured hook.
+	context.subscriptions.push(buildersView.onDidChangeSelection((e) => {
+		const sel = e.selection[0] as { builderId?: string } | undefined;
+		if (sel?.builderId) { fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: sel.builderId }); }
+	}));
 	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
 	const backlogProvider = new BacklogProvider(overviewCache, context.workspaceState);
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: backlogProvider });
@@ -537,9 +581,22 @@ export async function activate(context: vscode.ExtensionContext) {
 			// Benign if the row is no longer present (e.g. mid-cleanup).
 		}
 	};
+	// Publish a builder-active event when a builder diff is under review, so a
+	// configured hook can follow it. The diff session entry already carries the
+	// builder id (`OverviewBuilder.id`) — fire it directly. Same diff-only gate as
+	// the reveal above (registry entry present + not a standalone tab), so a plain
+	// source file or the diff's base side doesn't re-target the hook.
+	const announceActiveBuilderFromEditor = (): void => {
+		const fsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
+		if (!fsPath) { return; }
+		const entry = getDiffInjectEntry(fsPath);
+		if (!entry) { return; }
+		if (isStandaloneTextTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input)) { return; }
+		fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: entry.builderId });
+	};
 	context.subscriptions.push(
-		vscode.window.onDidChangeActiveTextEditor(() => { revealActiveBuilderFile(); }),
-		onDidChangeDiffInjectRegistry(() => { revealActiveBuilderFile(); }),
+		vscode.window.onDidChangeActiveTextEditor(() => { revealActiveBuilderFile(); announceActiveBuilderFromEditor(); }),
+		onDidChangeDiffInjectRegistry(() => { revealActiveBuilderFile(); announceActiveBuilderFromEditor(); }),
 	);
 
 	// Builders file-view-as-tree: each builder's changed-files list renders
@@ -1080,6 +1137,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		reg('codev.viewReviewFile', (arg: vscode.TreeItem | string | undefined) =>
 			viewReviewFile(connectionManager!, extractBuilderId(arg))),
 		reg('codev.refreshOverview', () => overviewCache.refresh()),
+		// Focus the editor window for a workspace path (driven by a controller via the
+		// command relay). `vscode.openFolder` with forceNewWindow reuses and focuses an
+		// existing window for that folder rather than replacing this one; it opens a new
+		// window only if the folder isn't already open.
+		reg('codev.focusWorkspaceWindow', async (arg: unknown) => {
+			if (typeof arg !== 'string' || !arg) { return; }
+			// Only ever focus a Tower-KNOWN Codev workspace, never an arbitrary
+			// controller-supplied path (which would otherwise open any folder in a new
+			// window). The path originates from Tower's /api/workspaces and is echoed
+			// back by the controller, so an exact match against the same list is the guard.
+			const known = (await connectionManager?.getClient()?.listWorkspaces()) ?? [];
+			if (!known.some((w) => w.path === arg)) { return; }
+			await vscode.commands.executeCommand(
+				'vscode.openFolder', vscode.Uri.file(arg), { forceNewWindow: true });
+		}),
 		reg('codev.enableBuildersAutoCollapse', () =>
 			vscode.workspace.getConfiguration('codev').update('buildersAutoCollapse', true, vscode.ConfigurationTarget.Global)),
 		reg('codev.disableBuildersAutoCollapse', () =>

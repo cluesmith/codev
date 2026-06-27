@@ -25,9 +25,9 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     // killed this workspace's dev, or cleanup) so the conditional "Stop Dev
     // Server" row reflects reality across every path.
     terminalManager.onDidChangeDevTerminals(() => this.changeEmitter.fire());
-    // Tower fans out a `worktree-config-updated` SSE event whenever
+    // Tower fans out a `codev-config-updated` SSE event whenever
     // .codev/config(.local).json changes (server-side file watcher in
-    // worktree-config-watcher.ts), and a `architects-updated` event
+    // codev-config-watcher.ts), and a `architects-updated` event
     // whenever an architect is added or removed (Spec 823 — closes the
     // gap where the Architects tree went stale when add/remove happened
     // via CLI outside VSCode). We re-render on either signal.
@@ -40,11 +40,11 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     // No workspace filter at the SSE-subscriber layer: VSCode is opened
     // against one workspace at a time, and `WorkspaceProvider` is
     // workspace-scoped at construction. Mirrors the existing
-    // `worktree-config-updated` subscriber's unconditional-fire behaviour.
+    // `codev-config-updated` subscriber's unconditional-fire behaviour.
     connectionManager.onSSEEvent(({ data }) => {
       try {
         const envelope = JSON.parse(data) as { type?: unknown };
-        if (envelope.type === 'worktree-config-updated' || envelope.type === 'architects-updated') {
+        if (envelope.type === 'codev-config-updated' || envelope.type === 'architects-updated') {
           this.changeEmitter.fire();
         }
       } catch {

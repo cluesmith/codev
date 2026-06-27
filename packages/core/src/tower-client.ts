@@ -7,7 +7,7 @@
  * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
  */
 
-import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig, TowerVersionInfo } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { ensureLocalKey } from './auth.js';
 
@@ -379,13 +379,28 @@ export class TowerClient {
    * that needs to act on `.codev/config(.local).json` — e.g. the VSCode
    * "Open Dev URL" surface — without parsing or merging the files
    * locally. Tower lazily installs a directory watcher on first call;
-   * subsequent edits fan out a `worktree-config-updated` SSE event so
+   * subsequent edits fan out a `codev-config-updated` SSE event so
    * subscribed clients refetch and re-render. Returns null on failure
    * so callers can degrade.
    */
   async getWorktreeConfig(workspacePath?: string): Promise<ResolvedWorktreeConfig | null> {
     const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : '';
     const result = await this.request<ResolvedWorktreeConfig>(`/api/worktree-config${query}`);
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Resolved `activityHooks` from Tower's GET /api/activity-hooks. Single source of
+   * truth for the extension's activity hooks — no local file parsing. SECURITY: Tower
+   * resolves these from the PERSONAL config layers only (`~/.codev/config.json` +
+   * `.codev/config.local.json`), never the committed `.codev/config.json` — hooks open
+   * URLs, so a committed hook would be a zero-click RCE (do NOT widen to loadConfig).
+   * Shares the config-file watcher with worktree-config, so a `.codev/config(.local).json`
+   * edit fans out a `codev-config-updated` SSE and subscribed clients refetch. Null on failure.
+   */
+  async getActivityHooks(workspacePath?: string): Promise<ResolvedActivityHooks | null> {
+    const query = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : '';
+    const result = await this.request<ResolvedActivityHooks>(`/api/activity-hooks${query}`);
     return result.ok ? result.data! : null;
   }
 

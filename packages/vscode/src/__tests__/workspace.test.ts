@@ -93,9 +93,9 @@ describe('Spec 786 Phase 6 — WorkspaceProvider expandable Architects tree', ()
 describe('Spec 823 — WorkspaceProvider subscribes to architects-updated SSE', () => {
   it('SSE subscriber matches the architects-updated envelope type', () => {
     // The subscriber callback uses the SAME `connectionManager.onSSEEvent`
-    // subscription that already handles `worktree-config-updated`. Phase 4
+    // subscription that already handles `codev-config-updated`. Phase 4
     // extends the type check to also accept `architects-updated`.
-    expect(WS_SRC).toMatch(/envelope\.type === ['"]worktree-config-updated['"]/);
+    expect(WS_SRC).toMatch(/envelope\.type === ['"]codev-config-updated['"]/);
     expect(WS_SRC).toMatch(/envelope\.type === ['"]architects-updated['"]/);
   });
 

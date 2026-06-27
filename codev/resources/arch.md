@@ -312,15 +312,15 @@ A workspace can host more than one architect terminal. Each architect has a stab
 - `terminal-manager.ts` keys terminal slots by architect name (`architect:${name}`), not the pre-786 singleton `'architect'`. Each architect gets its own VSCode terminal.
 - Right-click context menu on a sibling entry → "Remove Architect" (gated on `viewItem == workspace-architect-sibling`; `main` uses `'workspace-architect-main'` and gets no remove option).
 - `codev.referenceIssueInArchitect` (Backlog inline button) always targets `main` regardless of how many siblings exist — preserves the pre-786 Backlog UX.
-- **Spec 823**: the tree auto-refreshes when an architect is added or removed from outside VSCode (CLI, dashboard close-button, mobile TabBar). Tower emits an `architects-updated` SSE notification from every successful add/remove path; `WorkspaceProvider` subscribes via its existing `connectionManager.onSSEEvent` callback and fires `changeEmitter` on a matching envelope. Same JSON-envelope-on-`data:` shape as `worktree-config-updated`, no workspace filter at the SSE-subscriber layer.
+- **Spec 823**: the tree auto-refreshes when an architect is added or removed from outside VSCode (CLI, dashboard close-button, mobile TabBar). Tower emits an `architects-updated` SSE notification from every successful add/remove path; `WorkspaceProvider` subscribes via its existing `connectionManager.onSSEEvent` callback and fires `changeEmitter` on a matching envelope. Same JSON-envelope-on-`data:` shape as `codev-config-updated`, no workspace filter at the SSE-subscriber layer.
 
 #### Tower SSE Event Conventions
 
-Tower fans events to subscribers via an SSE stream. The shape convention (used by `worktree-config-updated`, `architects-updated`, and `builder-spawned`):
+Tower fans events to subscribers via an SSE stream. The shape convention (used by `codev-config-updated`, `architects-updated`, and `builder-spawned`):
 
 - Events ride the generic `notification` SSE event type — no per-event-type `event:` name on the SSE wire. The SSE-client-level `type` is always `''`; the real event-type lives inside the JSON envelope at `data.type`.
 - Subscribers parse the `data:` JSON in a `try/catch` to swallow malformed payloads, then match `envelope.type === '<known>'` to decide whether to act.
-- `NotifyFn` shape (`worktree-config-watcher.ts:19-24`): `{ type: string; title: string; body: string; workspace?: string }`. `body` is `JSON.stringify({ workspace })` for events that are workspace-scoped.
+- `NotifyFn` shape (`codev-config-watcher.ts:19-24`): `{ type: string; title: string; body: string; workspace?: string }`. `body` is `JSON.stringify({ workspace })` for events that are workspace-scoped.
 - `ctx.broadcastNotification` is available directly on the `RouteContext` for route handlers; standalone modules (like the worktree config watcher) wire their own notifier via a setter (`setWorktreeConfigNotifier`).
 
 #### Builder Gate Notifications (Spec 0100, replaced by Spec 0108)

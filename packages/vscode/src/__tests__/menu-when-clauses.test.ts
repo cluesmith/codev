@@ -132,7 +132,7 @@ describe('commandPalette hiding for view{Spec,Plan,Review}File', () => {
  * they gated on view + viewItem family only, so they showed even with no
  * dev command — picking one ran against a missing command. The fix appends
  * `&& codev.hasDevCommand` (a setContext key extension.ts refreshes from the
- * Tower-merged config on connect + the `worktree-config-updated` SSE) to the
+ * Tower-merged config on connect + the `codev-config-updated` SSE) to the
  * `when` clause.
  *
  * The same gate extends to the keybindings and the workspace-dev palette

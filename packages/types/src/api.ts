@@ -320,6 +320,37 @@ export interface ResolvedWorktreeConfig {
   devUrls: WorktreeDevUrl[];
 }
 
+// --- Activity hooks (GET /api/activity-hooks) ---
+
+/** An abstract Codev activity the extension publishes to configured URL hooks. */
+export type ActivityEvent = 'window-focus' | 'builder-active';
+
+/**
+ * One configured sink from the `activityHooks` config block: when one of `on`'s
+ * events fires, the extension opens `url` (a template — `{workspace}`/`{builder}`
+ * placeholders are replaced with the URL-encoded event data). `background: true`
+ * delivers without foregrounding the handler app. The destination is the user's
+ * (a deep link, a companion app, a webhook launcher); the extension is agnostic.
+ */
+export interface ActivityHook {
+  on: ActivityEvent[];
+  url: string;
+  background?: boolean;
+}
+
+/**
+ * Resolved `activityHooks`. SECURITY: hooks resolve from the **personal config
+ * layers only** — `~/.codev/config.json` (global) + `.codev/config.local.json`
+ * (per-engineer) — and NEVER the committed `.codev/config.json` project layer.
+ * Hooks open URLs (a deep link, a companion app, a scheme handler), so sourcing
+ * them from repo-committed config would be a zero-click RCE (a cloned repo could
+ * ship a hook url that fires on `window-focus`). Do NOT widen this to `loadConfig`.
+ * Malformed entries are dropped; `hooks` is always an array (`[]` when unset).
+ */
+export interface ResolvedActivityHooks {
+  hooks: ActivityHook[];
+}
+
 // --- Issue view (GET /api/issue) ---
 
 /**

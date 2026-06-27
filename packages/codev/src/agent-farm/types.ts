@@ -243,6 +243,19 @@ export interface UserConfig {
      */
     devUrls?: Array<{ label: string; url: string }>;
   };
+  /**
+   * Activity hooks: URL sinks the VSCode extension fires when an abstract event
+   * occurs (`window-focus`, `builder-active`). Integration-agnostic — the
+   * destination url (a deep link, a companion app, a webhook launcher) is yours.
+   * Like other array settings, a higher config layer REPLACES a lower one's list,
+   * so define them in a single layer: `~/.codev/config.json` for a personal hook
+   * across all repos, or `.codev/config.local.json` for a per-repo personal one.
+   */
+  activityHooks?: Array<{
+    on?: Array<'window-focus' | 'builder-active'>;
+    url?: string;
+    background?: boolean;
+  }>;
 }
 
 /**

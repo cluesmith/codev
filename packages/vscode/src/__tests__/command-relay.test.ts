@@ -136,4 +136,18 @@ describe('wireCommandProvider', () => {
 
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.viewDiff', '0809');
   });
+
+  it('strips a controller-supplied options arg from approve-gate (no silent human-gate approval)', async () => {
+    const { mgr, fire } = makeConnMgr();
+    wireCommandProvider(mgr as never);
+
+    // A crafted `{ skipConfirmation: true }` must NOT reach codev.approveGate — that
+    // path runs `porch approve --a-human-explicitly-approved-this` with no human.
+    fire('command', { verb: 'approve-gate', args: ['0042', { skipConfirmation: true }] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.approveGate', '0042');
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+      'codev.approveGate', '0042', { skipConfirmation: true });
+  });
 });

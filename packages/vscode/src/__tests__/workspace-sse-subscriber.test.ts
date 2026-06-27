@@ -148,13 +148,13 @@ describe('Spec 823 Phase 4 — WorkspaceProvider SSE subscriber runtime behaviou
     expect(fire).toHaveBeenCalledTimes(1);
   });
 
-  it('fires changeEmitter when a worktree-config-updated envelope arrives (regression)', () => {
+  it('fires changeEmitter when a codev-config-updated envelope arrives (regression)', () => {
     // Phase 4 must NOT break the existing #786 behaviour.
     const { fire, captured } = makeProvider();
     fire.mockClear();
 
     const sseHandler = captured.sse[0];
-    sseHandler({ type: '', data: JSON.stringify({ type: 'worktree-config-updated' }) });
+    sseHandler({ type: '', data: JSON.stringify({ type: 'codev-config-updated' }) });
 
     expect(fire).toHaveBeenCalledTimes(1);
   });
@@ -222,7 +222,7 @@ describe('Spec 823 Phase 4 — WorkspaceProvider SSE subscriber runtime behaviou
     const sseHandler = captured.sse[0];
     sseHandler({ type: '', data: JSON.stringify({ type: 'architects-updated' }) });
     sseHandler({ type: '', data: JSON.stringify({ type: 'architects-updated' }) });
-    sseHandler({ type: '', data: JSON.stringify({ type: 'worktree-config-updated' }) });
+    sseHandler({ type: '', data: JSON.stringify({ type: 'codev-config-updated' }) });
 
     expect(fire).toHaveBeenCalledTimes(3);
   });

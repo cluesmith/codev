@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
+import { getActivityHooks } from '../agent-farm/utils/config.js';
 
 // Helpers
 let tmpDir: string;
@@ -252,5 +253,40 @@ describe('loadConfig', () => {
     // no writeLocalConfig — file absent
     const config = loadConfig(tmpDir);
     expect(config.shell?.architect).toBe('project-architect');
+  });
+});
+
+describe('getActivityHooks (trusted personal layers only — never the committed config)', () => {
+  it('resolves hooks from .codev/config.local.json, dropping malformed entries', () => {
+    writeLocalConfig(tmpDir, {
+      activityHooks: [
+        { on: ['window-focus', 'builder-active'], url: 'app://x?w={workspace}', background: true },
+        { on: ['bogus-event'], url: 'app://drop-me' }, // no valid event → dropped
+        { on: ['window-focus'] },                       // no url → dropped
+      ],
+    });
+    expect(getActivityHooks(tmpDir).hooks).toEqual([
+      { on: ['window-focus', 'builder-active'], url: 'app://x?w={workspace}', background: true },
+    ]);
+  });
+
+  it('IGNORES the committed .codev/config.json (closes the zero-click RCE vector)', () => {
+    writeProjectConfig(tmpDir, { activityHooks: [{ on: ['window-focus'], url: 'app://committed-rce' }] });
+    expect(getActivityHooks(tmpDir).hooks).toEqual([]);
+  });
+
+  it('a per-engineer config.local.json replaces the global hook', () => {
+    writeGlobalConfig({ activityHooks: [{ on: ['window-focus'], url: 'app://global' }] });
+    writeLocalConfig(tmpDir, { activityHooks: [{ on: ['window-focus'], url: 'app://mine' }] });
+    expect(getActivityHooks(tmpDir).hooks.map((h) => h.url)).toEqual(['app://mine']);
+  });
+
+  it('picks up a personal hook from ~/.codev/config.json (global)', () => {
+    writeGlobalConfig({ activityHooks: [{ on: ['builder-active'], url: 'app://global' }] });
+    expect(getActivityHooks(tmpDir).hooks.map((h) => h.url)).toEqual(['app://global']);
+  });
+
+  it('returns [] when nothing is configured', () => {
+    expect(getActivityHooks(tmpDir).hooks).toEqual([]);
   });
 });

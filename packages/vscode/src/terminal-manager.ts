@@ -435,6 +435,24 @@ export class TerminalManager {
     return this.getActiveManagedPty() !== null;
   }
 
+  /**
+   * The builder id of the currently-focused VSCode terminal, or null when the
+   * active terminal isn't a Codev *builder* terminal. Recovered from the map key
+   * (`builder-<builderId>`), the same id the open path was given. Used to publish a
+   * `builder-active` activity event when a builder terminal is focused.
+   */
+  getActiveBuilderId(): string | null {
+    const active = vscode.window.activeTerminal;
+    if (!active) { return null; }
+    const prefix = 'builder-';
+    for (const [mapKey, entry] of this.terminals) {
+      if (entry.terminal === active && entry.type === 'builder' && mapKey.startsWith(prefix)) {
+        return mapKey.slice(prefix.length);
+      }
+    }
+    return null;
+  }
+
   // ── Internal ─────────────────────────────────────────────────
 
   private async openTerminal(

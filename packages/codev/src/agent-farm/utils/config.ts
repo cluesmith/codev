@@ -2,7 +2,8 @@
  * Configuration management for Agent Farm
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -11,7 +12,7 @@ import { getSkeletonDir } from '../../lib/skeleton.js';
 import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
 import { resolveHarness, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
-import type { ResolvedWorktreeConfig, WorktreeDevUrl } from '@cluesmith/codev-types';
+import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
 
 // Re-export so existing internal callers that import the resolved types
 // from this module keep working. The canonical home is now
@@ -296,6 +297,49 @@ export function getWorktreeConfig(workspaceRoot?: string): ResolvedWorktreeConfi
     devCommand: w?.devCommand ?? null,
     devUrls: resolveDevUrls(w),
   };
+}
+
+const ACTIVITY_EVENTS: ReadonlySet<string> = new Set<ActivityEvent>(['window-focus', 'builder-active']);
+
+interface RawActivityHook { on?: string[]; url?: string; background?: boolean }
+
+/**
+ * Read the `activityHooks` array from one config file. Returns `undefined` when the
+ * file is missing/invalid or doesn't define the key — so a present-but-empty list in
+ * a higher layer can still REPLACE a lower one (array-replace, matching deepMerge).
+ */
+function readActivityHooksLayer(configPath: string): RawActivityHook[] | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as { activityHooks?: RawActivityHook[] };
+    if (!('activityHooks' in parsed)) { return undefined; }
+    return Array.isArray(parsed.activityHooks) ? parsed.activityHooks : [];
+  } catch {
+    return undefined; // absent / unreadable / invalid JSON → layer not present
+  }
+}
+
+/**
+ * Resolved `activityHooks` for a workspace.
+ *
+ * SECURITY: hooks EXECUTE (the VSCode extension opens their url), so they are
+ * resolved ONLY from the user's trusted personal config layers — `~/.codev/config.json`
+ * (global, across all repos) and `<root>/.codev/config.local.json` (per-engineer,
+ * gitignored) — and NEVER from the committed `.codev/config.json`, which a cloned repo
+ * controls (a committed hook would be a zero-click RCE). The project-local layer
+ * replaces the global one when present. Malformed entries (no url, or no valid `on`
+ * event) are dropped.
+ */
+export function getActivityHooks(workspaceRoot?: string): ResolvedActivityHooks {
+  const root = workspaceRoot || findWorkspaceRoot();
+  const local = readActivityHooksLayer(resolve(root, '.codev', 'config.local.json'));
+  const global = readActivityHooksLayer(resolve(homedir(), '.codev', 'config.json'));
+  const raw = local ?? global ?? [];
+  const hooks: ActivityHook[] = raw.flatMap((h) => {
+    const on = (h?.on ?? []).filter((e): e is ActivityEvent => ACTIVITY_EVENTS.has(e));
+    if (!h?.url || on.length === 0) { return []; }
+    return [{ on, url: h.url, background: h.background ?? false }];
+  });
+  return { hooks };
 }
 
 /**

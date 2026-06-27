@@ -35,6 +35,9 @@ const VERB_COMMANDS: Record<string, string> = {
   // Context verbs (operate on the focused editor; no arg).
   'add-comment': 'codev.addReviewComment',
   'forward-selection': 'codev.forwardSelectionToBuilder',
+  // Gate review (arg: builder id). Surfaces the approval modal in the focused
+  // window — a deliberate, human-confirmed action, never a silent approve.
+  'approve-gate': 'codev.approveGate',
   // Diff-review navigation.
   'diff-next-file': 'codev.diffNextFile',
   'diff-prev-file': 'codev.diffPreviousFile',
@@ -42,7 +45,11 @@ const VERB_COMMANDS: Record<string, string> = {
   'diff-next-hunk': 'workbench.action.compareEditor.nextChange',
   'diff-prev-hunk': 'workbench.action.compareEditor.previousChange',
   'diff-first-hunk': 'codev.diffFirstHunk',
+  // Viewport scroll of the focused editor (the Scroll dial). Args carry the
+  // built-in editorScroll options { to, by, value, revealCursor }.
+  'scroll': 'editorScroll',
   // Workspace verbs (configurable Codev Action key / Dev Server key).
+  'focus-workspace': 'codev.focusWorkspaceWindow',
   'open-architect-terminal': 'codev.openArchitectTerminal',
   'open-builder-terminal': 'codev.openBuilderTerminal',
   'send-message': 'codev.sendMessage',
@@ -77,8 +84,15 @@ export function wireCommandProvider(connectionManager: ConnectionManager): vscod
     // The verb operands arrive over the wire as `unknown[]`; a non-array (a stray
     // object) would throw on spread, so coerce to an empty arg list.
     const args = Array.isArray(req.args) ? req.args : [];
+    // SECURITY: `approve-gate` surfaces the human-confirmation modal; its command
+    // ALSO accepts an `{ skipConfirmation }` options arg that runs
+    // `porch approve --a-human-explicitly-approved-this` with no human. A controller
+    // must never reach that path, so forward ONLY the builder id (first arg) — never
+    // a second options object. (Other verbs legitimately take object args, e.g.
+    // `scroll`, so this is scoped to the privileged verb, not a blanket filter.)
+    const callArgs = req.verb === 'approve-gate' ? args.slice(0, 1) : args;
     try {
-      await vscode.commands.executeCommand(command, ...args);
+      await vscode.commands.executeCommand(command, ...callArgs);
     } catch {
       // command failures surface in VSCode's own UI; nothing to relay back
     }
