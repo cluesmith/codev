@@ -1,8 +1,11 @@
 # The Seven Spheres of Human-AI Co-Development
 
 By Waleed Kadous  
-Published 2026-02-10  
-Original: https://cluesmith.com/blog/seven-spheres
+Published 2025-12-15  
+Links:  
+https://waleedk.medium.com/the-seven-spheres-of-human-ai-co-development-d67f51bcbc29  
+https://cluesmith.com/blog/seven-spheres
+
 
 <img src="./assets/seven-spheres-cover.png" alt="The Seven Spheres of Human-AI Co-Development" width="640">
 
