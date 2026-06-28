@@ -1,7 +1,7 @@
 id: '1104'
 title: vscode-merge-architects-builde
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-06-27T11:55:09.921Z'
-updated_at: '2026-06-28T02:28:47.220Z'
+updated_at: '2026-06-28T02:28:54.323Z'
 pr_history:
   - phase: review
     pr_number: 1106
