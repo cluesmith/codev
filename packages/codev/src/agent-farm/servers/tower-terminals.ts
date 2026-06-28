@@ -35,7 +35,7 @@ import type { SessionManager, ReconnectRestartOptions } from '../../terminal/ses
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
 import { normalizeWorkspacePath, resolveArchitectLaunch } from './tower-utils.js';
-import { setArchitectByName, getArchitects } from '../state.js';
+import { setArchitectByName, getArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
 // ============================================================================
@@ -52,21 +52,6 @@ let terminalManager: TerminalManager | null = null;
 
 /** True while reconcileTerminalSessions() is running — blocks on-the-fly reconnection (Bugfix #274) */
 let _reconciling = false;
-
-/**
- * Issue #832: whether `main`'s #830 newest-by-mtime discovery fallback is safe at
- * an architect restart site. Safe only for `main` in a single-architect workspace,
- * where the cwd unambiguously belongs to it; siblings share the cwd so discovery
- * cannot attribute a jsonl to them. Mirrors launchInstance's `discoveryFallback`.
- */
-function isLoneMainArchitect(architectName: string, workspacePath: string): boolean {
-  if (architectName !== 'main') return false;
-  try {
-    return getArchitects(workspacePath).length <= 1;
-  } catch {
-    return false;
-  }
-}
 
 // ============================================================================
 // Dependency injection interface
@@ -668,17 +653,19 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       const architectName = dbSession.role_id || 'main';
       cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
       try {
-        // Issue #832: bake `--resume <derivedId>` into the auto-restart args so a
-        // claude crash inside a live shellper revives the SAME conversation
-        // (the silent-context-loss path). Lone `main` keeps #830's discovery
-        // fallback so its pre-#832 conversation survives an in-process crash too;
-        // siblings use the derived id only (shared cwd is ambiguous for discovery).
-        const discoveryFallback = isLoneMainArchitect(architectName, workspacePath);
+        // Issue #832: bake `--resume <storedId>` into the auto-restart args so a
+        // claude crash inside a live shellper revives the SAME conversation (the
+        // silent-context-loss path). The id was stored at the original spawn; a
+        // legacy architect with none falls through to a fresh session (bridged by
+        // `stop --capture-sessions`). The minted id on the fresh branch is not
+        // persisted here (the bake precedes the actual restart) — fine, since
+        // post-#832 architects always carry a stored id and take the resume path.
+        const storedSessionId = getArchitectByName(workspacePath, architectName)?.sessionId ?? null;
         const { args: architectArgs, env: harnessEnv } = resolveArchitectLaunch({
           workspacePath,
           name: architectName,
           baseArgs: cmdParts.slice(1),
-          discoveryFallback,
+          storedSessionId,
         });
         restartOptions = {
           command: cmdParts[0],
@@ -912,13 +899,13 @@ export async function getTerminalsForWorkspace(
           cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
           try {
             // Issue #832: revive the same conversation on auto-restart via the
-            // derived session id (see matching block above).
-            const discoveryFallback = isLoneMainArchitect(architectName, dbSession.workspace_path);
+            // stored session id (see matching block above).
+            const storedSessionId = getArchitectByName(dbSession.workspace_path, architectName)?.sessionId ?? null;
             const { args: architectArgs, env: harnessEnv } = resolveArchitectLaunch({
               workspacePath: dbSession.workspace_path,
               name: architectName,
               baseArgs: cmdParts.slice(1),
-              discoveryFallback,
+              storedSessionId,
             });
             restartOptions = {
               command: cmdParts[0],

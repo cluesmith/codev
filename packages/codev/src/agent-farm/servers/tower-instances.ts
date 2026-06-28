@@ -13,7 +13,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { encodeWorkspacePath } from '../lib/tower-client.js';
-import { deleteArchitectSessionFile } from '../utils/claude-session-discovery.js';
+import { getArchitectHarness } from '../utils/config.js';
 import { loadConfig } from '../../lib/config.js';
 
 const execAsync = promisify(exec);
@@ -34,7 +34,7 @@ import {
   validateArchitectName,
   DEFAULT_ARCHITECT_NAME,
 } from '../utils/architect-name.js';
-import { setArchitect, setArchitectByName, getArchitects } from '../state.js';
+import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
 
 // ============================================================================
 // Dependency interface
@@ -466,30 +466,19 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         const cmdParts = architectCmd.split(/\s+/);
         const cmd = cmdParts[0];
 
-        // Issue #832: resolve resume-vs-fresh via a per-architect DERIVED session
-        // id (a pure function of `(workspacePath, name)`) — see
-        // resolveArchitectLaunch. `main` keeps #830's newest-by-mtime discovery as
-        // a fallback ONLY in a single-architect workspace, where the cwd
-        // unambiguously belongs to it (so its existing pre-#832 conversation
-        // resumes with no context loss). With siblings present, discovery can't
-        // disambiguate the shared cwd, so main uses the derived id instead — which
-        // is exactly the recovery the old `safeToResume` guard had to forgo.
-        let discoveryFallback: boolean;
+        // Issue #832: resume main's persisted conversation when its row carries a
+        // session id, else spawn fresh and mint one. The returned `sessionId` is
+        // stored on the architect row below so the next restart resumes it. A
+        // state.db read failure degrades to a fresh spawn rather than aborting.
+        let storedSessionId: string | null = null;
         try {
-          // Bugfix #826: getArchitects is workspace-scoped — pass resolvedPath
-          // (the canonical workspace path used by the architect table).
-          discoveryFallback = getArchitects(resolvedPath).length <= 1;
-        } catch {
-          // state.db read should never fail here; if it does, decline the
-          // discovery fallback (the derived id still works) rather than risk
-          // attaching main to an unrelated jsonl.
-          discoveryFallback = false;
-        }
-        const { args: cmdArgs, env: harnessEnv } = resolveArchitectLaunch({
+          storedSessionId = getArchitectByName(resolvedPath, DEFAULT_ARCHITECT_NAME)?.sessionId ?? null;
+        } catch { /* state.db unreadable — spawn fresh */ }
+        const { args: cmdArgs, env: harnessEnv, sessionId: mainSessionId } = resolveArchitectLaunch({
           workspacePath,
           name: DEFAULT_ARCHITECT_NAME,
           baseArgs: cmdParts.slice(1),
-          discoveryFallback,
+          storedSessionId,
         });
 
         // Build env with CLAUDECODE removed so spawned Claude processes
@@ -548,6 +537,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
                 cmd: architectCmd,
                 startedAt: new Date().toISOString(),
                 terminalId: session.id,
+                sessionId: mainSessionId ?? undefined,
               });
             } catch (stateErr) {
               _deps.log('WARN', `Failed to persist architect to state.db: ${(stateErr as Error).message}`);
@@ -610,6 +600,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
               cmd: architectCmd,
               startedAt: new Date().toISOString(),
               terminalId: session.id,
+              sessionId: mainSessionId ?? undefined,
             });
           } catch (stateErr) {
             _deps.log('WARN', `Failed to persist architect to state.db: ${(stateErr as Error).message}`);
@@ -916,16 +907,20 @@ export async function addArchitect(
   const manager = _deps.getTerminalManager();
   const cmdParts = architectCmd.split(/\s+/);
   const cmd = cmdParts[0];
-  // Issue #832: resume this sibling's prior conversation via its DERIVED session
-  // id when one exists, else spawn fresh at that id. No discovery fallback —
-  // siblings share the workspace cwd, so newest-by-mtime can't attribute a jsonl
-  // to a specific sibling. The same call serves both a user-driven
-  // `add-architect` (no jsonl yet → fresh) and launchInstance's reconcile loop
-  // re-spawning a persisted sibling after reboot (jsonl exists → resume).
-  const { args: cmdArgs, env: harnessEnv } = resolveArchitectLaunch({
+  // Issue #832: resume this sibling's persisted conversation when its row carries
+  // a session id, else spawn fresh and mint one. The same call serves both a
+  // user-driven `add-architect` (no row yet → fresh) and launchInstance's
+  // reconcile loop re-spawning a persisted sibling after reboot (row has id →
+  // resume). The returned id is persisted on the architect row below.
+  let storedSessionId: string | null = null;
+  try {
+    storedSessionId = getArchitectByName(resolvedPath, name)?.sessionId ?? null;
+  } catch { /* state.db unreadable — spawn fresh */ }
+  const { args: cmdArgs, env: harnessEnv, sessionId: convoSessionId } = resolveArchitectLaunch({
     workspacePath,
     name,
     baseArgs: cmdParts.slice(1),
+    storedSessionId,
   });
 
   // Spec 755: inject CODEV_ARCHITECT_NAME so the new architect terminal's
@@ -978,6 +973,7 @@ export async function addArchitect(
           cmd: architectCmd,
           startedAt: new Date().toISOString(),
           terminalId: session.id,
+          sessionId: convoSessionId ?? undefined,
         });
       } catch (stateErr) {
         _deps.log('WARN', `Failed to persist architect '${name}' to state.db: ${(stateErr as Error).message}`);
@@ -1032,6 +1028,7 @@ export async function addArchitect(
           cmd: architectCmd,
           startedAt: new Date().toISOString(),
           terminalId: session.id,
+          sessionId: convoSessionId ?? undefined,
         });
       } catch (stateErr) {
         _deps.log('WARN', `Failed to persist architect '${name}' to state.db: ${(stateErr as Error).message}`);
@@ -1155,12 +1152,8 @@ export async function removeArchitect(
 
     // Wait for the actual 'exit' event before clearing the flag.
     await exitPromise;
-
-    // Issue #832: the derived session id is a pure function of (workspace, name),
-    // so re-adding a sibling with the same name would otherwise resume this
-    // (now-removed) architect's conversation. Prune its jsonl so a future re-add
-    // starts fresh. Done after the PTY has exited so the file is no longer in use.
-    deleteArchitectSessionFile(workspacePath, name);
+    // Issue #832: no session cleanup needed — the row delete above cleared the
+    // persisted session_id, so a re-add with the same name starts fresh.
   } finally {
     intentionallyStopping.delete(resolvedPath);
     if (resolvedPath !== workspacePath) intentionallyStopping.delete(workspacePath);
@@ -1168,4 +1161,84 @@ export async function removeArchitect(
 
   _deps.log('INFO', `Removed architect '${name}' from workspace ${workspacePath}`);
   return { success: true };
+}
+
+// ============================================================================
+// captureArchitectSessions (Issue #832) — transitional backfill
+// ============================================================================
+
+/**
+ * Capture the live conversation session id of each running architect that does
+ * not yet have one stored, and persist it. Invoked by `afx workspace stop
+ * --capture-sessions` BEFORE the stop kills the architects (they must be alive to
+ * read their live session id), so the next `afx workspace start` resumes them.
+ *
+ * Transitional: architects spawned under #832 already store their id at spawn, so
+ * this only does work for architects still running under pre-#832 code. It is a
+ * one-off upgrade bridge, not a long-term operation.
+ *
+ * Disambiguation is delegated to the harness's `captureRunningSession` (Claude
+ * correlates each architect's process subtree to the jsonl it holds open; a sole
+ * architect falls back to the unambiguous newest-by-mtime). Agents without a
+ * `session` capability are skipped. Best-effort and never fatal.
+ */
+export async function captureArchitectSessions(
+  workspacePath: string,
+): Promise<{ success: boolean; captured: string[]; skipped: string[]; error?: string }> {
+  if (!_deps) return { success: false, captured: [], skipped: [], error: 'Tower is still starting up. Try again shortly.' };
+
+  let resolvedPath = workspacePath;
+  try {
+    if (fs.existsSync(workspacePath)) resolvedPath = fs.realpathSync(workspacePath);
+  } catch { /* use original path */ }
+
+  const manager = _deps.getTerminalManager();
+  const harness = getArchitectHarness(workspacePath);
+  const capture = harness.session?.captureRunningSession;
+
+  const captured: string[] = [];
+  const skipped: string[] = [];
+
+  let architects: ReturnType<typeof getArchitects>;
+  try {
+    architects = getArchitects(resolvedPath);
+  } catch (err) {
+    return { success: false, captured, skipped, error: `Failed to read architects: ${(err as Error).message}` };
+  }
+
+  // A sole architect owns the cwd unambiguously → the harness may use a no-lsof fallback.
+  const soleArchitect = architects.length <= 1;
+
+  for (const a of architects) {
+    if (a.sessionId) continue;              // already known — nothing to capture
+    if (!capture) { skipped.push(a.name); continue; }   // agent has no resumable sessions
+
+    const pid = a.terminalId ? manager.getSession(a.terminalId)?.pid : undefined;
+    if (!pid) { skipped.push(a.name); continue; }
+
+    let liveId: string | null = null;
+    try {
+      liveId = capture(workspacePath, pid, soleArchitect);
+    } catch (err) {
+      _deps.log('WARN', `capture-sessions: failed to read session for architect '${a.name}': ${(err as Error).message}`);
+    }
+    if (!liveId) { skipped.push(a.name); continue; }
+
+    try {
+      setArchitectByName(resolvedPath, a.name, {
+        name: a.name,
+        cmd: a.cmd,
+        startedAt: a.startedAt,
+        terminalId: a.terminalId,
+        sessionId: liveId,
+      });
+      captured.push(a.name);
+    } catch (err) {
+      _deps.log('WARN', `capture-sessions: failed to persist session for architect '${a.name}': ${(err as Error).message}`);
+      skipped.push(a.name);
+    }
+  }
+
+  _deps.log('INFO', `capture-sessions for ${workspacePath}: captured ${captured.length}, skipped ${skipped.length}`);
+  return { success: true, captured, skipped };
 }
