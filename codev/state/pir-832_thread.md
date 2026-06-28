@@ -197,3 +197,14 @@ via harness.session.captureRunningSession, writes via new targeted
 state.setArchitectSessionId (session_id-only UPDATE, race-safe vs live Tower).
 captureRunningClaudeSession helper unchanged. Build green, suite 3394 passed.
 Script type-checked via one-off tsconfig (scripts/ is outside the tsc build include).
+
+## Removed captureRunningSession from HarnessProvider interface (architect feedback)
+Architect: capture is backfill-only, shouldn't pollute the permanent agent interface.
+- HarnessProvider.session now = { newSessionArgs, resumeArgs } only (steady-state).
+- CLAUDE_HARNESS.session drops captureRunningSession; harness.ts drops the
+  captureRunningClaudeSession import.
+- Script calls captureRunningClaudeSession DIRECTLY (it's Claude-specific +
+  transitional, lives in claude-session-discovery.ts), gated on !!harness.session
+  (permanent capability = "is this agent resumable at all"). Non-Claude → no ~/.claude
+  jsonl → null → skipped anyway.
+Build green, suite 3394 passed.
