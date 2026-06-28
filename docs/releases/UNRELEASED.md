@@ -69,6 +69,55 @@ The workspace-scoping field is defensive infrastructure landed ahead of demand: 
 
 CMAP-3 caught and the author addressed two findings at review time: the four new commands now appear in the manifest (so they're palette-discoverable and keybindable, not just relay-callable), and the workspace-scope filter was added as described above (originally the relay was focus-gate-only, which the reviewer flagged as insufficient for multi-workspace setups). The defensive workspace filter is the second-place issue from the reviewer's three-option recommendation, kept in scope because it's separable from controller-side scoping and prevents a real wrong-target risk on the privileged verbs.
 
+## Activity hooks: VS Code publishes events to URLs you declare (PR #1105)
+
+The outbound-direction sibling of the controller-agnostic command relay (#1091). The VS Code extension now publishes two abstract activity events to URL templates you declare in personal config: `window-focus` (fires when a Codev workspace's VS Code window gains focus) and `builder-active` (fires when you switch focus to a specific builder via terminal, sidebar selection, or its diff editor). Each event interpolates `{workspace}` and `{builder}` into the URL template (URL-encoded; absent keys collapse to empty) and asks the OS to open the result, so anything that can register a URL scheme — a hardware controller, a desktop companion app, a hosted control page, a webhook receiver — can react to which workspace and which builder you're focused on.
+
+Example personal config (`~/.codev/config.json` to follow you across every workspace, or `.codev/config.local.json` to scope to one repo):
+
+```jsonc
+{
+  "activityHooks": [
+    { "on": ["window-focus", "builder-active"],
+      "url": "<scheme>://...?workspace={workspace}&builder={builder}",
+      "background": true }
+  ]
+}
+```
+
+Three security postures bake in by default:
+
+- **Hooks resolve from personal config layers only.** `~/.codev/config.json` (global) and `.codev/config.local.json` (gitignored per-project) feed the hook resolver; the committed `.codev/config.json` is **excluded**. Hooks open URLs, so a hook URL committed in a malicious repo would be a zero-click execution surface on workspace open. Personal-layers-only closes that.
+- **The extension is fully disabled in untrusted workspaces** (VS Code Restricted Mode). The `package.json` `untrustedWorkspaces` capability is intentionally omitted entirely (not set to `'limited'`) so VS Code's own trust gate covers every Codev surface, not just hooks — the committed `worktree.devCommand` (the runnable-worktree dev-server command) is a sibling attack surface that the same gate now also closes.
+- **URL opens route through `vscode.env.openExternal`.** Hooks reach the *local* client when you're using remote dev (SSH / WSL / Codespaces), where the handler app actually lives, instead of running on the extension host. Cross-platform shell-quoting pitfalls (a Windows `cmd /c start "" url` treating an `&` in the URL as a command separator) go away in the same change.
+
+Inert by default — no `activityHooks` declared means zero behaviour change. A url whose handler isn't registered fails fast and pauses hooks for the window after one warning, rather than relaunching a doomed process on every event. `builder-active` is de-duplicated across the three subscription sources (terminal focus, sidebar selection, diff focus) so rapid navigation within one builder doesn't relaunch the same URL repeatedly.
+
+The shared codev-config-watcher (a rename of the earlier worktree-config-watcher, behaviour-preserving) carries the SSE event that signals an edit to `.codev/config(.local).json`, so an activity-hooks edit fans out the same `codev-config-updated` event the worktree-config view already reacts to — one watcher per workspace, not one per consumer.
+
+## Agents view: a three-way group-by axis and conversational Add Architect (#1104, PR #1106)
+
+The Builders tree is now called **Agents**, and its title-bar button cycles the grouping axis between three modes instead of toggling between two:
+
+- **Stage** (the default action axis): groups by lifecycle stage — `SPECIFY → PLAN → IMPLEMENT → REVIEW → PR → VERIFIED` — for "where do I need to act?" triage. Row prefix carries the complementary `area/*` label.
+- **Area** (the domain axis): groups by `area/*` label matching the Backlog view, for "what's happening in this subsystem?" triage. Row prefix carries the complementary lifecycle phase.
+- **Architect** (the new ownership axis): groups by the architect that spawned each builder (`spawnedByArchitect`), `main` first then alphabetical. Row prefix carries the complementary lifecycle stage. Answers "who's running what?" — the question multi-architect workspaces couldn't answer at a glance before.
+
+The cycling button's icon shows the axis you'll switch *to* on the next click (VS Code toolbar buttons have no pressed state, so the icon-as-next-target affordance keeps the cycle obvious without one): the area `$(tag)` icon visible in stage mode, a custom octopus icon visible in area mode, and the stage `$(milestone)` icon visible in architect mode. The octopus is the architect-axis glyph — one body with many arms representing one orchestrator spawning many builders — and renders as a theme-adapting monochrome SVG pair (light / dark) matching the codev-light / codev-dark convention.
+
+In architect mode only architects that *own in-flight builders* appear as group headers — childless architects (like `REVIEWER` between assignments) don't clutter the work view. The full architect roster, including childless ones, remains in Workspace > Architects which is the canonical full-roster surface for launching architect terminals and adding new architects. The view-id renames `codev.builders` → `codev.agents` to match the new framing; setting keys (`codev.buildersAutoCollapse`, `codev.buildersFileViewAsTree`, `codev.buildersGroupBy`, `codev.buildersAutoReveal`) intentionally retain their `builders*` prefix — they're internal setting names and renaming them would force a user-facing migration with no behavioural benefit.
+
+A separate but related change ships in the same PR: **Add Architect is now a conversation with main, not a direct CLI call**. The `Codev: Add Architect` action (and the `Cmd+K A` / `Ctrl+K A` keybinding from v3.2.1) no longer runs `afx workspace add-architect` directly. It now asks the `main` architect — the workspace orchestrator that owns backlog triage, release decisions, and architect-roster management — to create the new architect:
+
+1. VS Code prompts for the architect name (validated against the same rule Tower enforces server-side, shared with the CLI for parity).
+2. The extension dispatches `client.sendMessage('architect:main', 'Please add a <name> architect.')`.
+3. Main receives the request, decides whether the specialisation makes sense (may push back, may ask for scope), runs `afx workspace add-architect --name <name>` from its own terminal, sends the brief as the new architect's first message, and updates its working memory.
+4. The roster updates automatically via the existing `architects-updated` SSE — no extension-side refresh needed.
+
+The rationale: architect creation is a workspace-orchestration event — it changes the roster, the specialisation matrix, and the conversation routing. Main is the workspace orchestrator; architect creation belongs in main's lane for the same reason cross-cutting work and release decisions do. Letting any developer create an unbriefed architect via direct CLI call leads to architect proliferation, missing briefs, and roster drift. The handler refuses with an informational modal pointing at `afx workspace start` (or the CLI fallback `afx workspace add-architect --name <name>`) when no main session is active — the action's contract is "ask main to add", so without main there's nothing to ask.
+
+Originally the design was a nested architect tier (architect → area/phase → builder, with passive architects rendering as leaf rows). At the dev-approval gate the running tree showed three problems: it duplicated Workspace > Architects, the single-architect collapse rule introduced a layout shift on adding a second architect, and architect-tier headers competed with area/stage headers for visual hierarchy. The pivot to the flat 3-way axis resolves all three, with the honest trade that ownership becomes a button away rather than always visible per-row. The PR description and the issue body name the trade-off explicitly so it's not invisible at release time.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
