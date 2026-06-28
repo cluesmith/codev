@@ -1,0 +1,14 @@
+id: '1108'
+title: vscode-clicking-an-architect-g
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-28T03:22:54.684Z'
+updated_at: '2026-06-28T03:22:54.684Z'
