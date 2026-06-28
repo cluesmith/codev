@@ -34,8 +34,8 @@ function extractShellperSessionId(socketPath: string | null): string | null {
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeWorkspacePath, buildArchitectArgs } from './tower-utils.js';
-import { setArchitectByName } from '../state.js';
+import { normalizeWorkspacePath, resolveArchitectLaunch } from './tower-utils.js';
+import { setArchitectByName, getArchitects } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
 // ============================================================================
@@ -52,6 +52,21 @@ let terminalManager: TerminalManager | null = null;
 
 /** True while reconcileTerminalSessions() is running — blocks on-the-fly reconnection (Bugfix #274) */
 let _reconciling = false;
+
+/**
+ * Issue #832: whether `main`'s #830 newest-by-mtime discovery fallback is safe at
+ * an architect restart site. Safe only for `main` in a single-architect workspace,
+ * where the cwd unambiguously belongs to it; siblings share the cwd so discovery
+ * cannot attribute a jsonl to them. Mirrors launchInstance's `discoveryFallback`.
+ */
+function isLoneMainArchitect(architectName: string, workspacePath: string): boolean {
+  if (architectName !== 'main') return false;
+  try {
+    return getArchitects(workspacePath).length <= 1;
+  } catch {
+    return false;
+  }
+}
 
 // ============================================================================
 // Dependency injection interface
@@ -650,9 +665,21 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // sibling would lose affinity to the sibling. The `|| 'main'` fallback
       // covers legacy rows where role_id is null (v13 backfill should have
       // populated them; this is belt-and-suspenders).
-      cleanEnv['CODEV_ARCHITECT_NAME'] = dbSession.role_id || 'main';
+      const architectName = dbSession.role_id || 'main';
+      cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
       try {
-        const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), workspacePath);
+        // Issue #832: bake `--resume <derivedId>` into the auto-restart args so a
+        // claude crash inside a live shellper revives the SAME conversation
+        // (the silent-context-loss path). Lone `main` keeps #830's discovery
+        // fallback so its pre-#832 conversation survives an in-process crash too;
+        // siblings use the derived id only (shared cwd is ambiguous for discovery).
+        const discoveryFallback = isLoneMainArchitect(architectName, workspacePath);
+        const { args: architectArgs, env: harnessEnv } = resolveArchitectLaunch({
+          workspacePath,
+          name: architectName,
+          baseArgs: cmdParts.slice(1),
+          discoveryFallback,
+        });
         restartOptions = {
           command: cmdParts[0],
           args: architectArgs,
@@ -881,9 +908,18 @@ export async function getTerminalsForWorkspace(
           delete cleanEnv['CLAUDECODE'];
           // Spec 786 Phase 2: preserve architect identity across shellper auto-
           // restart (see matching block in reconcileTerminalSessionsInner above).
-          cleanEnv['CODEV_ARCHITECT_NAME'] = dbSession.role_id || 'main';
+          const architectName = dbSession.role_id || 'main';
+          cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
           try {
-            const { args: architectArgs, env: harnessEnv } = buildArchitectArgs(cmdParts.slice(1), dbSession.workspace_path);
+            // Issue #832: revive the same conversation on auto-restart via the
+            // derived session id (see matching block above).
+            const discoveryFallback = isLoneMainArchitect(architectName, dbSession.workspace_path);
+            const { args: architectArgs, env: harnessEnv } = resolveArchitectLaunch({
+              workspacePath: dbSession.workspace_path,
+              name: architectName,
+              baseArgs: cmdParts.slice(1),
+              discoveryFallback,
+            });
             restartOptions = {
               command: cmdParts[0],
               args: architectArgs,
