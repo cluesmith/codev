@@ -18,15 +18,22 @@ preserved end-to-end while typing.
 What the codebase already gives us:
 
 - `packages/artifact-canvas/src/components/ArtifactCanvas.tsx` is the shared React
-  canvas. It already renders a React overlay **anchored at the active block's
-  vertical center** (`overlayTop`, set in `activateFromTarget`). Today that
-  overlay carries only the `CommentAffordance` (`+`) button, which calls
-  `onAddComment(line)` — the intent-only seam (spec 945 D6). The host then runs
-  the text input and write-back.
-- The marker-card stack (existing comments) is injected imperatively into the
-  innerHTML-managed body. The overlay, by contrast, is **React-owned** — which is
-  exactly where an interactive composer belongs (clean state / focus / Esc, no
-  "cards flash then vanish" re-render hazard).
+  canvas. It renders a React overlay with the `CommentAffordance` (`+`) button
+  anchored at the active block's vertical center (`overlayTop`); the `+` calls
+  `onAddComment(line)` — the intent-only seam (spec 945 D6). The host then runs the
+  text input and write-back.
+- The **read-only comment cards** (existing comments) are injected imperatively as
+  **in-flow DOM siblings directly below the block** (`.codev-canvas-marker-cards`,
+  built in `buildMarkerCards` and inserted via `el.after(...)` in the `[html,
+  markers]` effect). They sit in normal flow and push following content down.
+- **Decision (reviewer, 2026-06-30): the composer renders in the same in-flow
+  location as those read-only cards** — directly below the block, where the comment
+  will live after submit — rather than in the left-gutter overlay. This keeps the
+  add flow visually consistent with the existing card pattern and sets the precedent
+  #1055 (edit mode) will reuse. To stay React-owned (clean state / focus / Esc) while
+  living in the innerHTML-managed body, the composer mounts via **`ReactDOM.createPortal`
+  into an in-flow placeholder element** injected below the block — the standard
+  React-into-imperative-DOM pattern.
 - `packages/core/src/review-markers.ts` `serializeReviewMarker` **already
   normalizes the body to a single line** (`body.replace(/\s+/g, ' ').trim()`). So
   a multi-line composer is purely an input ergonomics improvement; the on-disk
@@ -64,22 +71,33 @@ Behavior:
 - `aria-label` on the textarea references the 1-based line (matches the
   `CommentAffordance` accessibility convention).
 
-### 2. Wire the composer into ArtifactCanvas
+### 2. Wire the composer into ArtifactCanvas (in-flow, via portal)
 
 In `ArtifactCanvas.tsx`:
-- Add `composingLine: number | null` state.
+- Add `composingLine: number | null` state and a `composerHost: HTMLElement | null`
+  state (the in-flow placeholder node the composer portals into).
 - The `+` click (`CommentAffordance.onActivate`) and the keyboard Enter/Space path
   now **open the composer** (`setComposingLine(line)`) instead of calling
-  `onAddComment` directly.
-- When `composingLine !== null`, the overlay renders `<CommentComposer>` (anchored
-  at the same `overlayTop` as the `+`, so it appears right at the block) **instead
-  of** the `+` button.
+  `onAddComment` directly. The `+` for that line is suppressed while its composer is
+  open.
+- A dedicated effect keyed on `[composingLine, html, markers]` manages the
+  placeholder: remove any prior `.codev-canvas-comment-composer-host`, and if
+  `composingLine !== null`, find the first `[data-line="<composingLine>"]` block and
+  insert a fresh placeholder `<div>` **after the block's marker-card stack** (so the
+  composer sits below any existing comments, like appending to a thread). Store the
+  node via `setComposerHost`. This mirrors the marker-card injection and survives
+  markers-only updates (the body isn't rebuilt then; the effect re-runs and re-places
+  the placeholder). If the block no longer exists after a reload, clear
+  `composingLine` (so the composer can't dangle).
+- Render `composerHost && composingLine !== null ? createPortal(<CommentComposer
+  line={composingLine} ... />, composerHost) : null`. The portal keeps the composer's
+  state / focus / Esc React-owned even though its host node lives in the
+  imperatively-managed body.
 - On composer submit: call `onAddComment(line, text)`, then `setComposingLine(null)`.
-- On composer cancel / Esc: `setComposingLine(null)` and restore focus to the
-  block (or the `+`), so keyboard users aren't stranded.
-- Clear `composingLine` if a content reload removes the active block (extend the
-  existing `setActiveLine` reconciliation guard in the `[html, markers]` effect),
-  so the composer can't dangle over a line the new content no longer has.
+  The host write-back fires a document change → re-list → the new card renders in the
+  spot the composer occupied.
+- On composer cancel / Esc: `setComposingLine(null)` and restore focus to the block
+  (or its `+`), so keyboard users aren't stranded.
 
 ### 3. Widen the comment-intent seam
 
@@ -112,19 +130,21 @@ writes markers itself (D6 invariant preserved).
 
 ### 5. Styling
 
-Add `.codev-canvas-comment-composer` (and child) rules to
+Add `.codev-canvas-comment-composer-host` (the in-flow placeholder) and
+`.codev-canvas-comment-composer` (and child) rules to
 `packages/artifact-canvas/src/styles/default-theme.css`, using the existing
 `--codev-canvas-*` tokens (border, background, accent, foreground) so the composer
-matches the preview's prose typography and theme. The composer is positioned via
-the existing overlay anchor; give it a sensible width and let it sit beside/below
-the block without overlapping prose.
+matches the preview's prose typography and theme. Mirror the
+`.codev-canvas-marker-cards` left-rule / spacing so the open composer reads as the
+in-progress sibling of the comment cards it will become. The textarea is
+full-width within the prose column; Submit / Cancel sit on a footer row.
 
 ## Files to change
 
 | File | Change |
 |---|---|
 | `packages/artifact-canvas/src/overlays/CommentComposer.tsx` | **New** — textarea + Submit/Cancel composer |
-| `packages/artifact-canvas/src/components/ArtifactCanvas.tsx` | `composingLine` state; open composer on `+`/Enter; render composer in overlay; emit `onAddComment(line, text)` on submit; reconcile on reload |
+| `packages/artifact-canvas/src/components/ArtifactCanvas.tsx` | `composingLine` + `composerHost` state; open composer on `+`/Enter; inject in-flow placeholder below the block + `createPortal` the composer into it; emit `onAddComment(line, text)` on submit; reconcile on reload |
 | `packages/artifact-canvas/src/types.ts` | `onAddComment(line, text)` signature + doc |
 | `packages/artifact-canvas/src/styles/default-theme.css` | `.codev-canvas-comment-composer` rules |
 | `packages/artifact-canvas/examples/main.tsx` | Update dev-example `onAddComment` to new signature |
@@ -146,10 +166,16 @@ the block without overlapping prose.
   surface. Contained: one production consumer, updated in the same PR; the D6
   "package never writes markers" invariant is preserved. Documented in types.ts and
   the review's Architecture Updates.
-- **Imperative-body interaction.** The composer is React-owned in the overlay, NOT
-  injected into the innerHTML body, so it sidesteps the marker-card re-render hazard
-  entirely. The reconciliation guard for a vanished active line is extended to also
-  clear `composingLine`.
+- **Imperative-body interaction (the main implementation risk).** The composer lives
+  in-flow below the block, so its host placeholder is injected into the
+  innerHTML-managed body — the same surface as the read-only cards. The "cards flash
+  then vanish" hazard is avoided by (a) portalling the composer (React owns its
+  content / focus / state; only the host *node* is in the body), and (b) re-placing
+  the placeholder in the `[composingLine, html, markers]` effect, which re-runs on the
+  same triggers that rebuild/redecorate the body. A document change while composing
+  (rare — the reviewer is typing, not editing the file) rebuilds the body; the effect
+  re-injects the placeholder and the portal re-attaches. The reconciliation guard also
+  clears `composingLine` if the target block disappears on reload.
 - **Multi-line vs single-line storage.** The composer accepts multi-line input;
   `serializeReviewMarker` collapses it to one line on write (unchanged behavior).
   No marker-format change here. If #1055 (v2 format) lands later, the composer's
@@ -165,11 +191,13 @@ the block without overlapping prose.
 - `comment-composer.test.tsx` (new): autofocus; Cmd/Ctrl+Enter submits trimmed body;
   Enter inserts newline (does not submit); Esc cancels; empty/whitespace submit is a
   no-op; Submit/Cancel buttons work.
-- `artifact-canvas.test.tsx` (updated): `+` click opens the composer (no immediate
-  `onAddComment`); submitting the composer emits `onAddComment(line, text)`; Enter on
-  a focused block opens the composer; the round-trip test drives text through the
-  composer; D6 invariant (`markerAdapter.add` never called by the package) preserved;
-  reload removing the active block clears the composer.
+- `artifact-canvas.test.tsx` (updated): `+` click opens the composer **in-flow below
+  the block** (placeholder is a sibling after the block / its card stack, not in the
+  gutter; no immediate `onAddComment`); submitting the composer emits
+  `onAddComment(line, text)`; Enter on a focused block opens the composer; the
+  round-trip test drives text through the composer; D6 invariant (`markerAdapter.add`
+  never called by the package) preserved; reload removing the active block clears the
+  composer.
 
 **Build / typecheck:**
 - `pnpm --filter @cluesmith/codev-artifact-canvas check-types` and `build`.

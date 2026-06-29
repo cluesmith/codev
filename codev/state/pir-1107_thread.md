@@ -40,3 +40,13 @@ Plan written to `codev/plans/1107-preview-inline-comment-composer.md`, committed
 pushed (907ed56b). `porch check` + `porch done` passed; `plan-approval` gate is now
 **pending**. Waiting for human review. Implementation does not start until the gate is
 approved.
+
+### Plan revised on reviewer feedback (2026-06-30)
+Reviewer asked to show the visual and questioned placement vs the existing read-only
+cards. Settled a design fork: **composer renders in-flow directly below the block**
+(same location as the read-only `.codev-canvas-marker-cards`), not in the gutter
+overlay. Implementation: inject an in-flow placeholder below the block and
+`createPortal` the composer into it (React-owned state/focus/Esc, in-flow position).
+Clarified scope: this issue is **add only**; edit/delete/reply/resolve = #1055. The
+composer sets the visual precedent #1055's edit mode will reuse. Plan sections 1, 2,
+5, files table, risks, and test plan updated + recommitted. Gate still pending.
