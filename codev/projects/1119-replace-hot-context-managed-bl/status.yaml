@@ -1,7 +1,7 @@
 id: '1119'
 title: replace-hot-context-managed-bl
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-29T17:42:36.679Z'
-updated_at: '2026-06-29T17:42:36.681Z'
+updated_at: '2026-06-29T17:55:12.209Z'
