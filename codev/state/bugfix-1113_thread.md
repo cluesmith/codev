@@ -82,6 +82,20 @@ Net diff ~150 LOC + 144 LOC test. Well within BUGFIX scope.
 - PR #1114, CMAP summary comment posted.
 - Final full suite: 170 files passed / 3395 tests / 0 failed. pnpm build green.
 
+## Architect feedback (round 1 on PR) — addressed
+Architect approved the core fix; asked for 2 things before the human pr gate:
+1. A test driving the actual `--type integration` command path (not just helpers).
+   → Added bugfix-1113-integration-dispatch.test.ts: drives resolveArchitectQuery →
+   resolveIntegrationBase → computeLocalPRDiff → buildPRQuery with --base ci (forge
+   stubbed, git real); asserts the query consumed the local three-dot diff (feature.txt
+   only; temp file holds real change, not the stubbed gh pr diff). Exported
+   resolveArchitectQuery. Stable across 3 runs, has teeth. Commit 00f6ecde.
+2. Document proven-vs-deferred in the PR. → PR body now has a "Proven locally vs.
+   deferred" section: diff math + wiring + fail-loud proven; the true end-to-end
+   "overflowing PR now fits + verdicts" requires an adopter repo with real
+   ci-ahead-of-main topology and was NOT run locally (close vs real repro PR after merge).
+- Full suite after change: 171 files / 3396 tests / 0 failed.
+
 ## Status
-- Phase: PR complete. Requesting `pr` gate via porch done. WAITING for human gate approval.
+- Phase: PR. Re-requesting `pr` gate. WAITING for human gate approval.
 - Do NOT self-merge: merge is gated by porch `pr` state, approved only by a human.
