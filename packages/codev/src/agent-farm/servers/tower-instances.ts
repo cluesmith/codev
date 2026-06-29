@@ -34,6 +34,7 @@ import {
   DEFAULT_ARCHITECT_NAME,
 } from '../utils/architect-name.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
+import { findLatestSessionId } from '../utils/claude-session-discovery.js';
 
 // ============================================================================
 // Dependency interface
@@ -469,9 +470,20 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         // session id, else spawn fresh and mint one. The returned `sessionId` is
         // stored on the architect row below so the next restart resumes it. A
         // state.db read failure degrades to a fresh spawn rather than aborting.
+        //
+        // Legacy bridge: a row from before #832 has no stored id. For it, fall back
+        // to #830's jsonl-discovery — but ONLY when main is the sole architect, since
+        // a cwd shared with siblings makes newest-by-mtime ambiguous (the old
+        // `safeToResume` guard, now scoped to just this fallback rather than gating
+        // resume wholesale). Stored-UUID resume applies regardless of architect
+        // count, so main resumes in multi-architect workspaces too once it has an id.
+        // resolveArchitectLaunch persists whatever it resolves back onto the row, so
+        // a jsonl-discovered id self-migrates into the stored-UUID path on this same
+        // revival — no separate backfill step needed.
         let storedSessionId: string | null = null;
         try {
-          storedSessionId = getArchitectByName(resolvedPath, DEFAULT_ARCHITECT_NAME)?.sessionId ?? null;
+          storedSessionId = getArchitectByName(resolvedPath, DEFAULT_ARCHITECT_NAME)?.sessionId
+            ?? (getArchitects(resolvedPath).length <= 1 ? findLatestSessionId(workspacePath) : null);
         } catch { /* state.db unreadable — spawn fresh */ }
         const { args: cmdArgs, env: harnessEnv, sessionId: mainSessionId, resumed } = resolveArchitectLaunch({
           workspacePath,

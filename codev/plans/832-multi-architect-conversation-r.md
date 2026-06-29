@@ -1,10 +1,11 @@
 # PIR Plan: Multi-architect conversation resume via persisted per-architect session ID
 
 > **Approach summary:** persist a generated, agent-neutral `session_id` on each
-> architect row at spawn; resume from it at every revive surface; bridge pre-#832
-> running architects across the upgrade restart with a transitional **standalone
-> script** (`scripts/backfill-architect-sessions.ts`) kept out of the CLI/API. No
-> jsonl discovery in the spawn/revive path.
+> architect row at spawn; resume from it at every revive surface. For legacy rows
+> with no stored id, `main`'s cold-spawn path keeps #830's jsonl-discovery fallback
+> **gated to the sole-architect case** (where the shared cwd is unambiguous); the
+> resolved id is persisted on that same revival, so it self-migrates into the
+> stored-UUID path. No separate backfill step.
 
 > **Revision note (post-plan-approval, per dev-gate feedback).** An earlier revision
 > derived the session ID statelessly by hashing `(workspacePath, name)`. That proved
@@ -16,6 +17,28 @@
 > The persisted column is **agent-neutral** (`session_id`, not `claude_session_id`)
 > because architects can run other agents (Codex, Gemini); the agent-specific resume
 > mechanics route through the existing harness abstraction.
+
+> **Revision note 2 (post-plan-approval, at the dev-approval gate).** The originally
+> approved plan bridged pre-#832 running architects with a transitional standalone
+> **backfill script** (`scripts/backfill-architect-sessions.ts`) + a narrow Tower
+> setter route + `TowerClient.setArchitectSessionId` + a live-process capture helper
+> (`captureRunningClaudeSession`). During gate review two facts killed that approach:
+> (1) **Claude does not hold its session jsonl open** (verified empirically: `lsof`
+> against live architects shows no jsonl fd), so the script's process→open-file
+> correlation never worked — every capture came from the sole-architect mtime
+> fallback, which can't disambiguate siblings; and (2) pre-#832 **siblings are
+> unrecoverable** by any robust signal (no `--session-id` arg, no open fd, only the
+> jsonl filename with no reliable pid bridge), so the script could only ever rescue
+> `main`. Since `main` was **already self-recovering** under #830 via jsonl-discovery
+> — which this branch had *removed* — the clean fix is to not remove it: **restore
+> the sole-architect jsonl-discovery fallback** in `launchInstance` and **delete the
+> entire backfill layer**. Every architect now self-heals in one revival cycle
+> (legacy fresh once → id stored → resumes forever); single-architect `main` never
+> regresses; the stored-UUID path delivers exact resume for every architect spawned
+> under #832, including multi-architect mains and siblings. The `getArchitects() <= 1`
+> check is retained, but its role changes: it no longer gates resume wholesale (the
+> #830 bug); it gates *only* the legacy jsonl fallback. Stored-UUID resume applies
+> regardless of architect count.
 
 ## Understanding
 
@@ -63,16 +86,14 @@ session?: {
 }
 ```
 
-The interface carries only the **steady-state** pin/resume contract. Capturing a
-*live* process's id is transitional and Claude-specific (it reads Claude's on-disk
-store), so it lives in `claude-session-discovery.ts` + the backfill script, **not** in
-this permanent interface.
+The interface carries only the **steady-state** pin/resume contract — no live-process
+capture (that path was dropped; see Revision note 2).
 
 - `CLAUDE_HARNESS.session = { newSessionArgs: id => ['--session-id', id], resumeArgs: id => ['--resume', id] }`.
 - `CODEX_HARNESS`, `GEMINI_HARNESS`, `OPENCODE_HARNESS`: **omit** `session` →
-  treated as "no resumable sessions" → always fresh, nothing persisted, skipped by the
-  backfill. (When/if a future agent gains resume support, it implements this capability
-  and gets recovery for free.)
+  treated as "no resumable sessions" → always fresh, nothing persisted. (When/if a
+  future agent gains resume support, it implements this capability and gets recovery
+  for free.)
 - Custom harnesses (`.codev/config.json`): out of scope — they omit `session` and
   behave like Codex/Gemini (fresh spawn).
 
@@ -87,11 +108,12 @@ resolveArchitectLaunch(opts: {
   workspacePath: string;
   name: string;
   baseArgs: string[];
-  storedSessionId?: string | null;   // architect row's session_id
-  discoveryBootstrap?: boolean;      // lone main only (see below)
-}): { args: string[]; env: Record<string, string>; sessionId: string | null }
+  storedSessionId?: string | null;   // architect row's session_id (the caller supplies
+                                      // main's sole-architect jsonl fallback here)
+}): { args: string[]; env: Record<string, string>; sessionId: string | null; resumed: boolean }
 //   ^ sessionId = the id to write back onto the architect row (null if the agent
 //     has no session support — nothing to resume next time)
+//     resumed = true when an existing id was resumed (drives the "Resuming…" log line)
 ```
 
 Decision (single source of truth):
@@ -111,84 +133,59 @@ every spawn (fresh → new id; resume → same id; no-session → null). No part
 exist (the only other writes are full-row deletes on exit/remove), so `INSERT OR
 REPLACE` can't wipe it — no COALESCE needed.
 
-**No jsonl discovery in the spawn/revive path.** Every *new* architect (main or
-sibling, post-#832) gets a generated id stored at spawn, so it is restart-safe from
-birth, deterministically, with zero on-disk guessing.
+**No jsonl discovery for *new* architects.** Every architect spawned post-#832 (main
+or sibling) gets a generated id stored at spawn, so it is restart-safe from birth,
+deterministically, with zero on-disk guessing. jsonl-discovery survives only as the
+legacy sole-architect bridge below.
 
-### Backfill: `scripts/backfill-architect-sessions.ts` — a thin Tower client (transitional)
+### Legacy bridge: sole-architect jsonl-discovery fallback (no script)
 
-> **Transition-only, no day-to-day CLI surface.** This bridge carries architects
-> already running under pre-#832 code across the upgrade. It is **not** an `afx`
-> subcommand. It IS a thin client over the running Tower: it reads via `TowerClient`
-> and writes through ONE narrow, transitional Tower endpoint (a pure `session_id`
-> setter — not capture/orchestration). Both the script and that endpoint are deleted
-> once the upgrade is done. Architects spawned under #832 store their id at spawn, so
-> this only does real work during the upgrade window (it re-writes the same id
-> idempotently for already-#832 architects).
+Architects spawned under #832 store their id at spawn, so they are restart-safe from
+birth. The only rows without a stored id are those **already running under pre-#832
+code**. Rather than a standalone backfill (see Revision note 2 for why that was
+dropped), `main`'s cold-spawn path bridges them by retaining #830's jsonl-discovery,
+**gated to the sole-architect case**:
 
-**Why a Tower endpoint and not a direct `state.db` write (Option B over A).** The
-authoritative `state.db` is owned by the single running Tower; its file location is
-cwd-derived (`getConfig()` → `findWorkspaceRoot(cwd)`). A script writing it directly
-both (a) reaches around the owning process's open SQLite and (b) opens the *wrong*
-DB unless run from exactly the right directory. Routing through Tower makes the
-**owner** do the write, eliminates the cwd footgun, and lets the script run from
-anywhere (it talks to Tower's port, never the filesystem).
-
-The only architects without a stored id are those **already running under pre-#832
-code** (their conversations exist on disk, but Tower never recorded the id). Run the
-script by hand, while they are still alive, before a planned restart/reboot:
-
-```
-# preview every workspace (read-only — shows the id each architect WOULD get):
-pnpm --filter @cluesmith/codev exec tsx scripts/backfill-architect-sessions.ts --all --dry-run
-# apply (all workspaces, or a single workspace path):
-pnpm --filter @cluesmith/codev exec tsx scripts/backfill-architect-sessions.ts --all
-pnpm --filter @cluesmith/codev exec tsx scripts/backfill-architect-sessions.ts [workspacePath]
+```ts
+// tower-instances.ts launchInstance (main)
+storedSessionId = getArchitectByName(resolvedPath, 'main')?.sessionId
+  ?? (getArchitects(resolvedPath).length <= 1 ? findLatestSessionId(workspacePath) : null);
 ```
 
-- **Tower-client only** — no `state.db`/`global.db`/`config` access, so no cwd
-  coupling; runs from anywhere. Enumerate via `TowerClient.listWorkspaces()` (`--all`);
-  per workspace, `TowerClient.getWorkspaceStatus(ws)` gives the live architect
-  terminals (`architectName` + `pid`). It captures each one's live id with
-  `captureRunningClaudeSession(ws, pid, { soleArchitect })` (`lsof`/`ps` — local OS
-  introspection, the one non-HTTP bit), then writes via
-  `TowerClient.setArchitectSessionId(ws, name, id)`.
-- **The new endpoint:** `PUT /api/workspaces/:ws/architects/:name/session-id` →
-  `setArchitectSessionId(ws, name, id)` server-side (targeted `session_id`-only
-  UPDATE). Narrow setter, no capture/orchestration in Tower. Marked transitional.
-- It does **not** need the stored `session_id`: it captures every live architect and
-  writes the result. A non-Claude architect has no `~/.claude` jsonl → capture returns
-  null → skipped. An already-#832 architect resolves to its existing id → idempotent
-  re-write. (This avoids putting `session_id` on the wire `ArchitectState` in
-  `@cluesmith/codev-types`.)
-- **Disambiguation (the crux):** maps each architect to *its own* conversation by
-  process, not by mtime, via `captureRunningClaudeSession(ws, pid, { soleArchitect })`:
-  - **Single architect** → `findLatestSessionId(ws)` (unambiguous; no `lsof`).
-  - **Multiple architects** → correlate the architect's process subtree to the
-    `~/.claude/projects/<encoded-cwd>/*.jsonl` it holds **open** (`lsof`; `/proc/<pid>/fd`
-    on Linux). The recorded pid is the shellper; the agent is its descendant, so it
-    walks the subtree. A running process holds exactly one such jsonl open → exact match.
-  - If correlation fails / `lsof` unavailable → that architect is skipped with a note
-    (it spawns fresh on restart — no worse than today). Never fatal.
-- Spec 786's intentional-stop logic already **preserves** architect rows across
-  `afx workspace stop`, so a written `session_id` survives to the next
-  `afx workspace start`, where `resolveArchitectLaunch` branch 2 resumes every
-  architect — lone or sibling — deterministically.
+- **Stored id present** → exact resume, regardless of architect count (so `main`
+  resumes in multi-architect workspaces — the headline fix).
+- **Legacy row, sole architect** → jsonl-discovery finds the one unambiguous
+  conversation (exactly #830's behavior). `resolveArchitectLaunch` then **persists**
+  the discovered id back onto the row, so it self-migrates into the stored-UUID path
+  on this same revival — no manual step, deterministic from then on.
+- **Legacy row, multiple architects** → jsonl-discovery is ambiguous (shared cwd), so
+  it is skipped → fresh spawn once → id stored → resumes thereafter. Self-heals.
 
-So: **new architects are auto-deterministic** (id at spawn); **existing running
-architects** survive a planned restart by running the backfill script first. `lsof`
-is confined to the multi-architect script path (a narrow, opt-in, transitional case)
-and degrades gracefully.
+**Siblings never use jsonl-discovery** (`addArchitect` passes `storedSessionId
+?? null`): a sibling's cwd is shared, so newest-by-mtime would mis-attach. A pre-#832
+sibling therefore self-heals (fresh once, then stored). This is the irreducible
+limit: a sibling's pre-#832 conversation id lives only as a jsonl filename with no
+robust pid bridge (Claude holds no fd open), so it cannot be recovered — only the
+go-forward stored-UUID path fixes siblings, which it does completely.
+
+The **shellper auto-restart** sites resume from the stored id but do **not** add the
+jsonl fallback (matching #830, which never resumed there) — a legacy architect that
+only ever restarts self-heals on its next cold revival.
+
+Spec 786's intentional-stop logic preserves architect rows across `afx workspace
+stop`, so a stored `session_id` survives to the next `afx workspace start`.
 
 ### Spawn / revive sites
 
 All three sites follow the same shape: read the stored id → `resolveArchitectLaunch`
-→ persist the returned id. No `discoveryBootstrap` flag (discovery is gone from this
-path).
+→ persist the returned id.
 
 - `tower-instances.ts launchInstance` (main): read
-  `getArchitectByName(resolvedPath, 'main')?.sessionId`, call `resolveArchitectLaunch`,
-  pass the returned `sessionId` into the two existing `setArchitect(...)` calls.
+  `getArchitectByName(resolvedPath, 'main')?.sessionId`, **falling back to
+  `findLatestSessionId(workspacePath)` only when `getArchitects(resolvedPath).length
+  <= 1`** (the legacy sole-architect bridge); call `resolveArchitectLaunch`, pass the
+  returned `sessionId` into the two existing `setArchitect(...)` calls (so a
+  discovered id is persisted and self-migrates).
 - `tower-instances.ts addArchitect` (siblings): read
   `getArchitectByName(resolvedPath, name)?.sessionId`, call `resolveArchitectLaunch`,
   pass the returned `sessionId` into the existing `setArchitectByName(...)` calls.
@@ -224,40 +221,28 @@ approach's clean win over the derived scheme, which needed an explicit file prun
 
 - `packages/codev/src/agent-farm/utils/harness.ts` — add optional `session` capability
   (`newSessionArgs`/`resumeArgs` only) to `HarnessProvider`; implement on `CLAUDE_HARNESS`;
-  others omit. (No capture method on the interface — that's transitional, see the script.)
+  others omit.
 - `packages/codev/src/agent-farm/utils/claude-session-discovery.ts` — **revert** the
   derived-id additions (`architectSessionId`, `sessionFileExists`,
   `deleteArchitectSessionFile`, `ARCHITECT_SESSION_NAMESPACE`). Keep `findLatestSessionId`
-  (builders + the script's single-architect fallback); add `captureRunningClaudeSession`
-  (the script's process-correlation capture — Claude-specific, called directly).
+  (builders + the sole-architect legacy fallback). No live-process capture helper.
 - `packages/codev/src/agent-farm/servers/tower-utils.ts` — rewrite
   `resolveArchitectLaunch` to the stored-id + harness-capability model above (no
   agent-specific flags here); drop the `isLoneMainArchitect`/discovery wiring.
 - `packages/codev/src/agent-farm/servers/tower-instances.ts` — read stored `sessionId`
-  + persist the returned id at `launchInstance` and `addArchitect`; drop the jsonl
-  prune from `removeArchitect`.
+  (main: with the sole-architect `findLatestSessionId` fallback) + persist the returned
+  id at `launchInstance` and `addArchitect`; drop the jsonl prune from `removeArchitect`.
 - `packages/codev/src/agent-farm/servers/tower-terminals.ts` — both restart-bake sites
   read stored id + resume via the helper.
-- **Backfill (transitional, no `afx` CLI surface)**:
-  - `packages/codev/scripts/backfill-architect-sessions.ts` — thin `tsx` client over the
-    running Tower (`TowerClient` reads + the new setter), capturing live ids with
-    `captureRunningClaudeSession`. No DB/config imports → no cwd coupling.
-  - `packages/codev/src/agent-farm/servers/tower-routes.ts` — `PUT
-    /api/workspaces/:ws/architects/:name/session-id` → `setArchitectSessionId` (narrow
-    transitional setter; `handleSetArchitectSessionId`).
-  - `packages/core/src/tower-client.ts` — `setArchitectSessionId(ws, name, id)` client method.
 - DB layer: `db/schema.ts`, `db/index.ts` (v12), `db/types.ts`, `types.ts`, `state.ts`
-  (setters write `session_id`; new targeted `setArchitectSessionId`, called by the route).
+  (setters write `session_id`).
 - Tests — `__tests__/state.test.ts` (round-trip + removal-clears), a migration test,
-  `__tests__/tower-utils.test.ts` (harness-routed decision), the harness unit test, and
-  a capture test (single-architect `findLatestSessionId` path; multi-architect skip /
-  graceful-degrade behavior — the `lsof` subtree-correlation is integration-tested
-  manually at the `dev-approval` gate).
+  `__tests__/tower-utils.test.ts` (harness-routed resume/fresh decision), the harness
+  unit test, and `claude-session-discovery.test.ts` (`findLatestSessionId`).
 
 **Not touched**: `codev-skeleton/`; builders / `spawn.ts`; `global.db`; Tower
-messaging / SSE; porch / gates; the wire `ArchitectState` in `@cluesmith/codev-types`
-(the script avoids needing `session_id` over the wire). One narrow transitional Tower
-route IS added (the backfill setter, above).
+messaging / SSE; porch / gates; the wire `ArchitectState` in `@cluesmith/codev-types`.
+No new Tower routes or client methods.
 
 ## Blast Radius & Rollout Control
 
@@ -269,28 +254,23 @@ route IS added (the backfill setter, above).
 - **harness.ts** — additive optional capability; non-Claude providers unchanged.
 - **resolveArchitectLaunch** — agent-neutral; the only behavior change is that
   architects now resume from their stored id.
-- **Backfill script** — zero day-to-day surface: not in `afx`, not a REST route, not a
-  client method. Manually run, transitional. Writes only `session_id` (targeted UPDATE),
-  safe alongside a live Tower.
-- **Soft-fail** — no stored id (legacy row, first spawn, or no-session agent) → fresh
-  spawn. Worst case "loses context once," never "fails to start." Script failures are
-  per-architect skips, never fatal.
-- **Size** — ~200–280 LOC incl. the script + tests, all within `packages/codev`, no new
-  deps (`lsof`/`ps` are invoked, not bundled; `tsx` is already a devDependency).
+- **Legacy fallback** — `main`'s sole-architect `findLatestSessionId` path is exactly
+  #830's behavior, gated identically (`getArchitects() <= 1`). No new surface.
+- **Soft-fail** — no stored id (legacy multi-architect row, first spawn, or no-session
+  agent) → fresh spawn. Worst case "loses context once," never "fails to start."
+- **Size** — ~120–180 LOC incl. tests, all within `packages/codev`, no new deps.
 
 ## Risks & Alternatives Considered
 
-- **One-time `main`/sibling context loss on the upgrade restart** — bridged by the
-  `scripts/backfill-architect-sessions.ts` script. Architects already running under
-  pre-#832 code have no stored id; running the script before a planned restart records
-  their live ids so `start` resumes them. If a developer doesn't run it (or hits an
-  *unplanned* reboot), those pre-#832 architects lose context once, then are
-  deterministic forever after (the next spawn stores an id). New architects are never
+- **One-time context loss on the upgrade restart.** A single-architect `main`
+  self-recovers via the sole-architect jsonl fallback (no loss). A legacy
+  *multi-architect* `main` and *all* legacy siblings lose context **once** on their
+  first #832 revival (fresh spawn → id stored), then resume deterministically forever.
+  This is accepted (issue's backwards-compat section); a transitional backfill script
+  was prototyped to spare even that one loss but **dropped** — it could only rescue
+  `main` (which the jsonl fallback already covers) and never siblings, because Claude
+  holds no jsonl fd open to correlate (see Revision note 2). New architects are never
   affected.
-- **`lsof` dependency / portability.** Confined to the multi-architect script path.
-  Single-architect capture uses `findLatestSessionId` (no `lsof`). If `lsof`
-  (or `/proc`) is unavailable or correlation is ambiguous, capture skips that architect
-  with a warning — it spawns fresh on restart (no worse than today). Never fatal.
 - **`INSERT OR REPLACE` wiping the id.** Ruled out by the caller graph: every non-null
   write is a spawn site that passes the resolved `sessionId`; all other writes delete
   the row. No partial update exists.
@@ -326,21 +306,16 @@ Unit tests (run from the worktree: `pnpm --filter @cluesmith/codev test`):
   tests): a sibling row with a stored id bakes `restartOptions.args` with `--resume
   <id>` and skips role injection; no stored id → `buildArchitectArgs`;
   `CODEV_ARCHITECT_NAME` still resolved.
-- **Capture helper** (`claude-session-discovery.test.ts`): the sole-architect fallback
-  returns the newest jsonl when process correlation finds nothing; the multi-architect
-  path returns null (no mtime guess); no session on disk → null. (The `lsof` success
-  path is integration-tested manually below.)
-- **Backfill state helper** (`state.test.ts`): `setArchitectSessionId` updates only the
-  `session_id` column and is a no-op for a missing row.
+- **Discovery helper** (`claude-session-discovery.test.ts`): `findLatestSessionId`
+  returns the newest jsonl by mtime, null when the dir is missing/empty, and handles
+  the encode/path edge cases (shared with the builder resume path).
 
-Manual (reviewer at `dev-approval`, **post-deploy** — Tower must be on the #832 code
-for the new write endpoint to exist):
-- **Backfill end-to-end**: with a multi-architect workspace's architects alive, run
-  `... backfill-architect-sessions.ts --all --dry-run` and confirm it lists each
-  architect → a resolved id; then run without `--dry-run`, `afx workspace stop` +
-  `afx workspace start`; confirm main + a named sibling each resume their own
-  conversation and the sibling keeps its brief. (Exercises the `lsof` subtree
-  correlation + the Tower setter route that unit tests can't.)
-- Normal multi-architect `stop` + `start` for a workspace whose architects were spawned
-  under the new code (ids stored at spawn) — confirm resume with no backfill step.
+Manual (reviewer at `dev-approval`, **post-deploy** — Tower must be on the #832 code):
+- **Multi-architect resume (go-forward)**: spawn `main` + a named sibling under the new
+  code (ids stored at spawn), `afx workspace stop` + `afx workspace start`; confirm each
+  resumes its own conversation and the sibling keeps its brief. Watch for the
+  `Resuming architect '<name>' session <id8>…` log line at each site.
+- **Legacy sole-architect bridge**: a single-`main` workspace with a pre-#832 row (no
+  stored id) → `start` resumes via `findLatestSessionId`, and the row gains a stored id
+  (self-migration) so the next restart takes the exact-id path.
 - `afx workspace remove-architect reviewer` then re-add; confirm it starts fresh.

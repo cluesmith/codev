@@ -28,7 +28,7 @@ const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
 import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo } from '@cluesmith/codev-types';
-import { getBuilders, setArchitectByName, setArchitectSessionId } from '../state.js';
+import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
@@ -257,14 +257,6 @@ export async function handleRequest(
       return await handleAddArchitect(req, res, architectsMatch, ctx);
     }
 
-    // Workspace API: PUT /api/workspaces/:encodedPath/architects/:name/session-id (Issue #832)
-    // Transitional backfill write — set ONLY the architect's conversation session id.
-    // Delete alongside scripts/backfill-architect-sessions.ts once the upgrade is done.
-    const architectSessionMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/architects\/([^/]+)\/session-id$/);
-    if (architectSessionMatch) {
-      return await handleSetArchitectSessionId(req, res, architectSessionMatch);
-    }
-
     // Workspace API: DELETE /api/workspaces/:encodedPath/architects/:name (Spec 786)
     const architectRemoveMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/architects\/([^/]+)$/);
     if (architectRemoveMatch) {
@@ -470,66 +462,6 @@ async function handleRemoveArchitect(
     const status = result.error?.includes('not running') || result.error?.includes('not found') ? 404 : 400;
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: false, error: result.error }));
-  }
-}
-
-/**
- * PUT /api/workspaces/:encodedPath/architects/:name/session-id (Issue #832, transitional)
- *
- * Sets ONLY the architect's persisted conversation `session_id`. Used by the
- * one-off `scripts/backfill-architect-sessions.ts` so the write goes through Tower
- * (the owner of state.db) instead of the script reaching around it. A targeted
- * UPDATE — no-op if the row doesn't exist. Delete this with the backfill script.
- */
-async function handleSetArchitectSessionId(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  match: RegExpMatchArray,
-): Promise<void> {
-  if (req.method !== 'PUT') {
-    res.writeHead(405, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Method not allowed' }));
-    return;
-  }
-
-  const [, encodedPath, encodedName] = match;
-  let workspacePath: string;
-  try {
-    workspacePath = decodeWorkspacePath(encodedPath);
-    if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
-      throw new Error('Invalid path');
-    }
-    workspacePath = normalizeWorkspacePath(workspacePath);
-  } catch {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid workspace path encoding' }));
-    return;
-  }
-
-  let body: { sessionId?: string };
-  try {
-    body = (await parseJsonBody(req)) as { sessionId?: string };
-  } catch {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid JSON body' }));
-    return;
-  }
-
-  const sessionId = body.sessionId;
-  if (typeof sessionId !== 'string' || sessionId.length === 0) {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Body must include a non-empty "sessionId" string' }));
-    return;
-  }
-
-  const name = decodeURIComponent(encodedName);
-  try {
-    setArchitectSessionId(workspacePath, name, sessionId);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
-  } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: (err as Error).message }));
   }
 }
 

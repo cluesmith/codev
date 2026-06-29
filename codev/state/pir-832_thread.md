@@ -263,3 +263,32 @@ for legacy fresh spawns; a pre-#832 SIBLING returns null and self-heals on its f
 tests (space form, resume form, shellper JSON form, =form, lowercasing, bare-prose
 null, no-flag null, glued-token null). Backfill skip message now explains WHY per
 case. Build green; claude-session-discovery suite 20 passed.
+
+## Dropped the backfill layer entirely; restored sole-architect jsonl fallback (architect decision)
+Architect reasoned: if pre-#832 siblings are unrecoverable (Claude holds no jsonl fd;
+no robust pid→jsonl bridge) and the backfill could only ever rescue main — which #830
+ALREADY self-recovered via jsonl-discovery (a path THIS branch had removed) — then the
+clean fix is to not remove it. Verified via git: base (#830) launchInstance used
+`safeToResume = getArchitects()<=1; resumeSessionId = safeToResume ? findLatestSessionId : null`;
+my branch had replaced that with stored-id-only (no fallback), so a legacy main would
+lose context once. Decision: restore the fallback, delete the whole backfill layer.
+Changes:
+- launchInstance (main): storedSessionId = row.sessionId ?? (getArchitects()<=1 ?
+  findLatestSessionId(workspacePath) : null). resolveArchitectLaunch persists the
+  resolved id back onto the row → discovered id self-migrates into the stored-UUID path
+  on the same revival (no manual step). The <=1 check no longer gates resume wholesale
+  (the #830 bug) — it gates ONLY the legacy jsonl fallback; stored-UUID resume applies
+  regardless of architect count. Re-added findLatestSessionId import.
+- Deleted: scripts/backfill-architect-sessions.ts, state.setArchitectSessionId, PUT
+  /api/workspaces/:ws/architects/:name/session-id route + handleSetArchitectSessionId,
+  TowerClient.setArchitectSessionId, captureRunningClaudeSession +
+  extractSessionIdFromCmdline + processSubtree + execCapture (claude-session-discovery.ts,
+  + execFileSync import), and their tests (capture + extract describes, 2 state setter
+  tests). Fixed stale backfill comment in tower-terminals.ts.
+- Siblings (addArchitect) keep storedSessionId ?? null (no jsonl — shared cwd ambiguous);
+  restart-bake sites keep stored-id-or-fresh (no jsonl fallback, matches #830). Both
+  self-heal once for legacy rows.
+- Plan rewritten: Revision note 2 documents the pivot; summary, Legacy-bridge section,
+  Files/Risks/Test sections updated; removed backfill/lsof/capture references.
+Core builds, codev builds, full suite 3389 passed | 48 skipped (was 3402; -13 removed
+backfill tests). Net simpler than both the original plan and the prior branch state.

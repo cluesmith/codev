@@ -278,35 +278,6 @@ export class TowerClient {
   }
 
   /**
-   * Issue #832 (transitional): set an architect's persisted conversation session
-   * id. Backs `scripts/backfill-architect-sessions.ts` so the write goes through
-   * Tower (the owner of state.db) rather than the script reaching around it.
-   *
-   * REST: `PUT /api/workspaces/:encoded/architects/:name/session-id`.
-   */
-  async setArchitectSessionId(
-    workspacePath: string,
-    name: string,
-    sessionId: string,
-  ): Promise<{ ok: boolean; error?: string }> {
-    const encodedWorkspace = encodeWorkspacePath(workspacePath);
-    const encodedName = encodeURIComponent(name);
-    const result = await this.request<{ success: boolean; error?: string }>(
-      `/api/workspaces/${encodedWorkspace}/architects/${encodedName}/session-id`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
-      },
-    );
-
-    if (!result.ok) {
-      return { ok: false, error: result.error };
-    }
-    return { ok: result.data?.success ?? false, error: result.data?.error };
-  }
-
-  /**
    * Spec 786: remove a named sibling architect from a workspace.
    *
    * REST: `DELETE /api/workspaces/:encoded/architects/:name`. The name is URI-

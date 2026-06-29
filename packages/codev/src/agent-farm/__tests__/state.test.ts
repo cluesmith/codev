@@ -238,23 +238,6 @@ describe('State Management', () => {
       expect(state.getArchitectByName(WS, 'reviewer')?.sessionId).toBe('rev');
       expect(state.getArchitectByName(WS, 'casa')?.sessionId).toBe('casa');
     });
-
-    it('setArchitectSessionId updates ONLY the session_id, preserving other fields', () => {
-      const startedAt = new Date().toISOString();
-      state.setArchitectByName(WS, 'reviewer', {
-        name: 'reviewer', cmd: 'claude --foo', startedAt, terminalId: 'term-1',
-      });
-      state.setArchitectSessionId(WS, 'reviewer', 'backfilled-id');
-      const row = state.getArchitectByName(WS, 'reviewer');
-      expect(row?.sessionId).toBe('backfilled-id');
-      expect(row?.cmd).toBe('claude --foo');     // not clobbered
-      expect(row?.terminalId).toBe('term-1');    // not clobbered
-    });
-
-    it('setArchitectSessionId is a no-op for a missing row', () => {
-      expect(() => state.setArchitectSessionId(WS, 'ghost', 'x')).not.toThrow();
-      expect(state.getArchitectByName(WS, 'ghost')).toBeNull();
-    });
   });
 
   describe('upsertBuilder', () => {

@@ -161,21 +161,6 @@ export function setArchitectByName(workspacePath: string, name: string, architec
 }
 
 /**
- * Issue #832: set ONLY the `session_id` of an existing architect row, scoped by
- * workspace + name. A targeted UPDATE (not a full-row upsert) so it cannot clobber
- * the row's other fields — used by the transitional backfill script, which may run
- * while Tower is live and could otherwise race the spawn-path full-row writes.
- * No-op if the row doesn't exist.
- *
- * Bugfix #826: scoped by workspace_path.
- */
-export function setArchitectSessionId(workspacePath: string, name: string, sessionId: string): void {
-  const db = getDb();
-  const ws = canonicalize(workspacePath);
-  db.prepare('UPDATE architect SET session_id = ? WHERE workspace_path = ? AND id = ?').run(sessionId, ws, name);
-}
-
-/**
  * Add or update a builder
  * Note: This is now synchronous
  */

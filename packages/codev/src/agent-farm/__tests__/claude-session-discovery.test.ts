@@ -12,8 +12,6 @@ import { join } from 'node:path';
 import {
   encodeClaudeProjectDir,
   findLatestSessionId,
-  captureRunningClaudeSession,
-  extractSessionIdFromCmdline,
 } from '../utils/claude-session-discovery.js';
 
 describe('encodeClaudeProjectDir', () => {
@@ -98,88 +96,7 @@ describe('findLatestSessionId', () => {
   });
 });
 
-describe('captureRunningClaudeSession (Issue #832)', () => {
-  let fakeHome: string;
-  const ws = '/Users/x/repo';
-
-  beforeEach(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'csd-cap-'));
-    mkdirSync(join(fakeHome, '.claude', 'projects'), { recursive: true });
-  });
-
-  afterEach(() => {
-    rmSync(fakeHome, { recursive: true, force: true });
-  });
-
-  function seedSession(uuid: string): void {
-    const dir = join(fakeHome, '.claude', 'projects', encodeClaudeProjectDir(ws));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${uuid}.jsonl`), `{"sessionId":"${uuid}"}\n`, 'utf-8');
-  }
-
-  // The vitest process carries no `--session-id`/`--resume` UUID on its command
-  // line, so the cmdline scan finds nothing — exercising the sole-architect
-  // fallback and the multi-architect "no match" path deterministically. (The
-  // cmdline success path is unit-tested on extractSessionIdFromCmdline below, and
-  // integration-tested manually at the dev-approval gate.)
-
-  it('sole architect: falls back to newest-by-mtime when the cmdline carries no id', () => {
-    seedSession('only-session');
-    const id = captureRunningClaudeSession(ws, process.pid, { soleArchitect: true, homeDir: fakeHome });
-    expect(id).toBe('only-session');
-  });
-
-  it('multiple architects: returns null when the cmdline carries no id (no mtime guess)', () => {
-    seedSession('ambiguous-a');
-    seedSession('ambiguous-b');
-    const id = captureRunningClaudeSession(ws, process.pid, { soleArchitect: false, homeDir: fakeHome });
-    expect(id).toBeNull();
-  });
-
-  it('returns null for a sole architect with no session on disk', () => {
-    const id = captureRunningClaudeSession(ws, process.pid, { soleArchitect: true, homeDir: fakeHome });
-    expect(id).toBeNull();
-  });
-});
-
-describe('extractSessionIdFromCmdline (Issue #832)', () => {
-  const uuid = '8f587d12-75df-4f6c-8b66-1dfd7420cea3';
-
-  it('reads --session-id <uuid> from the claude process (space-separated)', () => {
-    const cmd = `claude --session-id ${uuid} --append-system-prompt # Role: Architect`;
-    expect(extractSessionIdFromCmdline(cmd)).toBe(uuid);
-  });
-
-  it('reads --resume <uuid> from a revived claude process', () => {
-    const cmd = `claude --resume ${uuid} --dangerously-skip-permissions`;
-    expect(extractSessionIdFromCmdline(cmd)).toBe(uuid);
-  });
-
-  it('reads the id from the shellper parent JSON args blob', () => {
-    const cmd = `node shellper-main.js {"command":"claude","args":["--resume","${uuid}","--append-system-prompt"]}`;
-    expect(extractSessionIdFromCmdline(cmd)).toBe(uuid);
-  });
-
-  it('reads the --session-id=<uuid> equals form', () => {
-    expect(extractSessionIdFromCmdline(`claude --session-id=${uuid}`)).toBe(uuid);
-  });
-
-  it('lowercases the captured UUID', () => {
-    expect(extractSessionIdFromCmdline(`claude --resume ${uuid.toUpperCase()}`)).toBe(uuid);
-  });
-
-  it('returns null for a bare --resume with no UUID (role-doc prose)', () => {
-    // A fresh pre-#832 spawn injects a role doc that uses the word "resume"; no
-    // UUID follows, so it must not be mistaken for a session id.
-    const cmd = 'claude --append-system-prompt # Role: Architect ... you can --resume your work later';
-    expect(extractSessionIdFromCmdline(cmd)).toBeNull();
-  });
-
-  it('returns null when no session flag is present', () => {
-    expect(extractSessionIdFromCmdline('claude --append-system-prompt # Role: Builder')).toBeNull();
-  });
-
-  it('does not match a session flag glued to a non-UUID token', () => {
-    expect(extractSessionIdFromCmdline('claude --session-idfoo bar')).toBeNull();
-  });
-});
+// Issue #832: the live-process session-id capture (cmdline-reading backfill) was
+// dropped in favour of the sole-architect jsonl-discovery fallback in
+// launchInstance + the stored-UUID spawn/revive path. findLatestSessionId (above)
+// is the shared discovery helper that remains.

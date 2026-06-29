@@ -656,10 +656,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         // Issue #832: bake `--resume <storedId>` into the auto-restart args so a
         // claude crash inside a live shellper revives the SAME conversation (the
         // silent-context-loss path). The id was stored at the original spawn; a
-        // legacy architect with none falls through to a fresh session (bridged by
-        // scripts/backfill-architect-sessions.ts). The minted id on the fresh branch is not
-        // persisted here (the bake precedes the actual restart) — fine, since
-        // post-#832 architects always carry a stored id and take the resume path.
+        // legacy architect with none falls through to a fresh session, then self-
+        // heals (the next spawn/revival stores an id). The minted id on the fresh
+        // branch is not persisted here (the bake precedes the actual restart) —
+        // fine, since post-#832 architects always carry a stored id and resume.
         const storedSessionId = getArchitectByName(workspacePath, architectName)?.sessionId ?? null;
         const { args: architectArgs, env: harnessEnv, resumed } = resolveArchitectLaunch({
           workspacePath,
