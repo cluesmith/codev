@@ -52,6 +52,16 @@ structural change:
   vestigial (no production `addUtil` callers). No collision risk.
 - **`annotations` — as-is.** UUID ids (`file-<uuid>`), runtime-ephemeral. No collision risk.
 
+The `builders` reshape adds **only** `workspace_path` + composite PK — making builders
+structurally consistent with `architect` on the one dimension a shared DB requires
+(workspace-scoped identity, since `id` is unique within a workspace but reused across them).
+It deliberately does **not** add a `session_id` column: builder conversation resume works by
+mtime discovery over each builder's *unique worktree cwd* (`buildResume` →
+`findLatestSessionId`), so unlike sibling architects sharing one workspace cwd (Issue #832,
+v12), builders have nothing to disambiguate. Persisting builder session ids is the explicit
+charter of **#1112** and lands cleanly later as an additive nullable `ALTER` on top of this
+reshape — out of scope here.
+
 > Note: the issue's proposal §4 ("state.ts function signatures stay — they already take
 > `workspace_path`") is true only for the *architect* functions. The *builder* functions
 > (`upsertBuilder`, `getBuilder`, `getBuilders`, `getBuildersByStatus`, `removeBuilder`,
