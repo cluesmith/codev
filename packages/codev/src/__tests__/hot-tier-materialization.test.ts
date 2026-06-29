@@ -95,5 +95,11 @@ describe('Spec 987 — codev update materializes hot files + injects the block',
     expect(claude).toContain(HOT_BLOCK_BEGIN);
     expect(claude).toContain('KEEP_USER_CONTENT');
     expect(claude).toBe(agents);
+
+    // #1119: the block carries @import lines, not a verbatim copy of the hot files.
+    expect(claude).toContain('@codev/resources/arch-critical.md');
+    expect(claude).toContain('@codev/resources/lessons-critical.md');
+    // The hot files' own structural marker would only appear if content were inlined.
+    expect(claude).not.toContain('<!-- HOT tier:');
   });
 });

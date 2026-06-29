@@ -1,0 +1,17 @@
+id: '1119'
+title: replace-hot-context-managed-bl
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-06-29T17:58:05.897Z'
+    approved_at: '2026-06-29T20:42:45.091Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-06-29T17:42:36.679Z'
+updated_at: '2026-06-29T20:42:45.092Z'
+pr_ready_for_human: false

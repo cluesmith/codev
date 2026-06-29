@@ -65,7 +65,7 @@ describe('Spec 987 — managed block (pure upsert logic)', () => {
   });
 });
 
-describe('Spec 987 — managed block (render + sync into root docs)', () => {
+describe('Spec 987 / #1119 — managed block (render + sync into root docs)', () => {
   let tmp: string;
 
   beforeEach(() => {
@@ -75,13 +75,29 @@ describe('Spec 987 — managed block (render + sync into root docs)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('renders a marker-delimited block carrying both hot files', () => {
+  it('renders a marker-delimited block of @import lines, not inlined hot content', () => {
     seedHotFiles(tmp);
     const block = renderHotContextBlock(tmp);
     expect(block.startsWith(HOT_BLOCK_BEGIN)).toBe(true);
     expect(block.trimEnd().endsWith(HOT_BLOCK_END)).toBe(true);
-    expect(block).toContain('ARCH_HOT_MARKER');
-    expect(block).toContain('LESSONS_HOT_MARKER');
+    // #1119: the block points at the on-disk hot files (single source of truth) …
+    expect(block).toContain('@codev/resources/arch-critical.md');
+    expect(block).toContain('@codev/resources/lessons-critical.md');
+    // … and never copies their verbatim content in (that was the drift footgun).
+    expect(block).not.toContain('ARCH_HOT_MARKER');
+    expect(block).not.toContain('LESSONS_HOT_MARKER');
+  });
+
+  it('emits an @import only for a hot file that resolves; returns "" when neither does', () => {
+    // Neither hot file present → no block, callers leave the doc untouched.
+    expect(renderHotContextBlock(tmp)).toBe('');
+
+    // Only arch-critical present → only its import line is emitted.
+    fs.mkdirSync(path.join(tmp, 'codev', 'resources'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'codev', 'resources', 'arch-critical.md'), '# arch\n');
+    const block = renderHotContextBlock(tmp);
+    expect(block).toContain('@codev/resources/arch-critical.md');
+    expect(block).not.toContain('@codev/resources/lessons-critical.md');
   });
 
   it('injects an identical block into both CLAUDE.md and AGENTS.md; skips missing docs', () => {
@@ -94,8 +110,8 @@ describe('Spec 987 — managed block (render + sync into root docs)', () => {
 
     const claude = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
     const agents = fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf-8');
-    // Both carry the block and remain byte-identical (the CLAUDE.md ≡ AGENTS.md invariant).
-    expect(claude).toContain('ARCH_HOT_MARKER');
+    // Both carry the @import block and remain byte-identical (the CLAUDE.md ≡ AGENTS.md invariant).
+    expect(claude).toContain('@codev/resources/arch-critical.md');
     expect(claude).toContain('project instructions');
     expect(claude).toBe(agents);
 
@@ -105,22 +121,51 @@ describe('Spec 987 — managed block (render + sync into root docs)', () => {
     expect(syncHotContextBlock(tmp)).toEqual(['CLAUDE.md']);
   });
 
-  it('refreshes the block when a hot file changes, preserving user edits outside it', () => {
-    seedHotFiles(tmp, 'ARCH_V1');
+  it('is idempotent — editing hot-file content does not churn the block (the DRY win)', () => {
+    seedHotFiles(tmp);
     fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), '# Codev\n\nKEEP_ME_ABOVE\n\n## More\nKEEP_ME_BELOW');
-    syncHotContextBlock(tmp);
+    expect(syncHotContextBlock(tmp)).toEqual(['CLAUDE.md']);
+    const after1 = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
 
-    // Edit the hot file and re-sync.
-    fs.writeFileSync(path.join(tmp, 'codev', 'resources', 'arch-critical.md'), '# arch\n\nARCH_V2\n');
-    const changed = syncHotContextBlock(tmp);
-    expect(changed).toEqual(['CLAUDE.md']);
+    // The block is @import lines, so changing hot-file CONTENT cannot stale it: a
+    // re-sync is a no-op. This is exactly the drift footgun the old inlined block had.
+    fs.writeFileSync(path.join(tmp, 'codev', 'resources', 'arch-critical.md'), '# arch\n\nTOTALLY_DIFFERENT\n');
+    expect(syncHotContextBlock(tmp)).toEqual([]);
+    const after2 = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+
+    expect(after2).toBe(after1);
+    expect(after2).toContain('KEEP_ME_ABOVE');
+    expect(after2).toContain('KEEP_ME_BELOW');
+    expect(after2).toContain('@codev/resources/arch-critical.md');
+    // Still exactly one block.
+    expect(after2.split(HOT_BLOCK_BEGIN).length - 1).toBe(1);
+  });
+
+  it('migrates an existing adopter\'s old inlined block to the @import form', () => {
+    seedHotFiles(tmp);
+    // An existing adopter whose committed block still inlines verbatim hot content.
+    const oldInlined = [
+      HOT_BLOCK_BEGIN,
+      '',
+      '# Always-On Engineering Context (hot tier)',
+      '',
+      'ARCH_HOT_MARKER',
+      'LESSONS_HOT_MARKER',
+      '',
+      HOT_BLOCK_END,
+    ].join('\n');
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), `# Codev\n\n${oldInlined}\n\nUSER_TAIL`);
+
+    // The idempotent upsert replaces the stale inlined block in place on next sync.
+    expect(syncHotContextBlock(tmp)).toEqual(['CLAUDE.md']);
 
     const claude = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
-    expect(claude).toContain('ARCH_V2');
-    expect(claude).not.toContain('ARCH_V1');
-    expect(claude).toContain('KEEP_ME_ABOVE');
-    expect(claude).toContain('KEEP_ME_BELOW');
-    // Still exactly one block.
+    expect(claude).not.toContain('ARCH_HOT_MARKER');
+    expect(claude).not.toContain('LESSONS_HOT_MARKER');
+    expect(claude).toContain('@codev/resources/arch-critical.md');
+    expect(claude).toContain('@codev/resources/lessons-critical.md');
+    expect(claude).toContain('USER_TAIL');
+    // Exactly one block (migrated in place, not duplicated).
     expect(claude.split(HOT_BLOCK_BEGIN).length - 1).toBe(1);
   });
 });
