@@ -26,5 +26,27 @@
   come from `LOCAL_SCHEMA`. After merge they must come from `GLOBAL_SCHEMA`; test mocks +
   fixtures need updating.
 
-Plan written next; flagging the prune-state per-table strategy + consolidation-as-boot-step
+Plan written; flagging the prune-state per-table strategy + consolidation-as-boot-step
 vs migration as the key plan-gate design decisions.
+
+### Plan revision (architect feedback at plan-approval gate)
+Architect pushed back on 4 points; plan revised:
+1+2. **Cut `afx prune-state` + `afx workspace forget`.** Stale rows are harmless under
+   workspace_path read-scoping; pruning was cosmetic + dragged in the per-table mess. Deviates
+   from issue acceptance criteria — flagged for confirmation.
+3. **Migration on Tower boot** — locked in (removed the fold-into-v14 alternative).
+4. **`lookupBuilderSpawningArchitect` workspacePath param is LOAD-BEARING, not vestigial.**
+   Investigating it surfaced the big finding: **builder ids collide across workspaces**
+   (`<protocol>-<issueNumber>`; issue numbers repeat across repos). Per-workspace state.db FILES
+   keep them distinct today; `spec-755-lookup-builder.test.ts:113-116` encodes this as a
+   security-relevant contract (spoofing check). So **`builders` needs workspace_path + composite
+   PK `(workspace_path, id)`** — the one structural reshape; mirrors #826/v11 for architect.
+
+### Table verdict (architect asked: move as-is or reshape?)
+- architect → as-is (already composite PK since v11)
+- builders → RESHAPED (add workspace_path + composite PK) — the only structural change
+- utils, annotations → as-is (UUID ids, no production addUtil/addAnnotation callers, vestigial)
+
+Builder-read callsite audit (getBuilder/getBuilders/removeBuilder/getBuildersByStatus) is the
+bounded extra cost. upsertBuilder can derive workspace_path from builder.worktree (no sig change).
+Still at plan-approval gate awaiting re-review.
