@@ -2033,6 +2033,7 @@ export {
   composePRQueryText as _composePRQueryText,
   computeLocalPRDiff as _computeLocalPRDiff,
   resolveIntegrationBase as _resolveIntegrationBase,
+  resolveArchitectQuery as _resolveArchitectQuery,
   computePersistentOutputPath as _computePersistentOutputPath,
   MODEL_CONFIGS as _MODEL_CONFIGS,
   MODEL_ALIASES as _MODEL_ALIASES,
