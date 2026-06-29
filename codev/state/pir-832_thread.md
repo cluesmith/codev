@@ -238,3 +238,10 @@ Implemented Option B — single-writer via the owning Tower:
   same id -> idempotent re-write.
 Build green, suite 3394 passed, script type-checks. Plan + Files-to-Change updated.
 Note: like all variants, only works once Tower runs #832 code (endpoint must exist).
+
+## Added resume log line (architect request, for e2e verification)
+resolveArchitectLaunch now returns resumed:boolean. All 4 callers (launchInstance main,
+addArchitect, both tower-terminals restart-bake sites) log INFO
+"Resuming architect '<name>' session <id8>… in <ws>" when a stored id is resumed.
+Makes Phase 1/2 of e2e test eyeball-able from Tower logs. Tests assert resumed flag.
+Build green, suite 3394 passed.
