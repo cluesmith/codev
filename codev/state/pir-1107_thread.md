@@ -74,3 +74,12 @@ build codev-core/types first (pre-existing build-order, unrelated to this change
 
 → dev-approval gate next. Reviewer should run the worktree and exercise the composer in the
 Codev Markdown Preview. Key UX to confirm: ⌘/Ctrl+Enter-to-submit (vs old Enter-to-submit).
+
+### Dev-gate feedback round 1 (2026-06-30)
+Reviewer flagged `preview-provider.ts` inline anonymous message type. The postMessage value is
+genuinely untrusted/unknown at the boundary, so runtime validation stays — but the shape is now a
+named, shared protocol: new `markdown-preview/messages.ts` with `HostToWebviewMessage` +
+`WebviewToHostMessage`, used by BOTH host (`preview-provider.ts`) and webview (`main.ts`) so the
+two ends can't drift. Host casts unknown→union for the discriminant, still validates addComment
+fields at runtime. check-types (host+webview) ✓, esbuild ✓, lint ✓, test:unit ✓ (516). Gate still
+pending.
