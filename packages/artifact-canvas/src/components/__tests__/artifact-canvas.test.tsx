@@ -57,7 +57,7 @@ describe('ArtifactCanvas (Phase 3)', () => {
     expect(host.markerAdapter.list).toHaveBeenCalled();
   });
 
-  it('hover shows the "+" affordance; clicking emits onAddComment with the 0-based line (scenario 2)', async () => {
+  it('hover shows the "+" affordance; clicking opens the inline composer below the block (#1107)', async () => {
     const host = makeHost('# Title\n\nA paragraph.');
     const onAddComment = vi.fn();
     render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
@@ -69,12 +69,37 @@ describe('ArtifactCanvas (Phase 3)', () => {
     fireEvent.mouseOver(p);
     const plus = await screen.findByRole('button', { name: /add comment on line/i });
     fireEvent.click(plus);
-    expect(onAddComment).toHaveBeenCalledWith(Number(p.getAttribute('data-line')));
+    // Clicking "+" no longer emits intent directly (#1107) — it opens the composer in-flow below
+    // the block, where the comment will live.
+    const composer = await screen.findByRole('textbox', { name: /add comment on line/i });
+    const host_el = composer.closest('.codev-canvas-comment-composer-host');
+    expect(host_el).not.toBeNull();
+    expect(p.nextElementSibling).toBe(host_el); // placed directly below the block
+    expect(onAddComment).not.toHaveBeenCalled();
     // The package must NOT write the marker itself (D6 intent-only / invariant scenario 6).
     expect(host.markerAdapter.add).not.toHaveBeenCalled();
   });
 
-  it('is keyboard-activatable: Enter on a focused block emits onAddComment (accessibility AC)', async () => {
+  it('composer submit (Cmd/Ctrl+Enter) emits onAddComment(line, text) (#1107)', async () => {
+    const host = makeHost('# Title\n\nA paragraph.');
+    const onAddComment = vi.fn();
+    render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
+    const p = await waitFor(() => {
+      const el = document.querySelector('p[data-line]');
+      if (!el) throw new Error('no paragraph yet');
+      return el as HTMLElement;
+    });
+    const line = Number(p.getAttribute('data-line'));
+    fireEvent.mouseOver(p);
+    fireEvent.click(await screen.findByRole('button', { name: /add comment on line/i }));
+    const composer = await screen.findByRole('textbox', { name: /add comment on line/i });
+    fireEvent.change(composer, { target: { value: 'please clarify' } });
+    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
+    expect(onAddComment).toHaveBeenCalledWith(line, 'please clarify');
+    expect(host.markerAdapter.add).not.toHaveBeenCalled(); // host writes; package never does (D6)
+  });
+
+  it('is keyboard-activatable: Enter on a focused block opens the composer (accessibility AC)', async () => {
     const host = makeHost('A paragraph.');
     const onAddComment = vi.fn();
     render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
@@ -85,14 +110,16 @@ describe('ArtifactCanvas (Phase 3)', () => {
     });
     expect(p.tabIndex).toBe(0); // focusable
     fireEvent.keyDown(p, { key: 'Enter' });
-    expect(onAddComment).toHaveBeenCalledWith(0);
+    const composer = await screen.findByRole('textbox', { name: /add comment on line/i });
+    expect(composer).not.toBeNull();
+    expect(onAddComment).not.toHaveBeenCalled(); // opens composer, doesn't emit yet
   });
 
-  it('round-trips a marker through text: host add → watch → re-list → marker renders (scenario 3)', async () => {
+  it('round-trips a marker through text: composer submit → host add → watch → re-list → renders (scenario 3)', async () => {
     const host = makeHost('A paragraph.'); // line 0, no markers
-    const onAddComment = vi.fn((line: number) => {
-      // Host glue: collect text + write back via MarkerAdapter.add (which serializes into the file text).
-      void host.markerAdapter.add('x', line, 'please clarify', 'reviewer');
+    const onAddComment = vi.fn((line: number, text: string) => {
+      // Host glue: write back via MarkerAdapter.add (which serializes into the file text).
+      void host.markerAdapter.add('x', line, text, 'reviewer');
     });
     render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
     const p = await waitFor(() => {
@@ -102,10 +129,57 @@ describe('ArtifactCanvas (Phase 3)', () => {
     });
     fireEvent.mouseOver(p);
     fireEvent.click(await screen.findByRole('button', { name: /add comment on line/i }));
+    const composer = await screen.findByRole('textbox', { name: /add comment on line/i });
+    fireEvent.change(composer, { target: { value: 'please clarify' } });
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
     expect(host.markerAdapter.add).toHaveBeenCalled();
     // After the host writes + the watcher fires, the component re-lists and renders the marker.
     await waitFor(() => expect(document.querySelector('.codev-canvas-has-marker')).not.toBeNull());
     expect(host.text()).toContain('<!-- REVIEW(@reviewer): please clarify -->'); // proves text round-trip
+    // The composer closes after submit.
+    expect(document.querySelector('.codev-canvas-comment-composer')).toBeNull();
+  });
+
+  it('Esc / Cancel closes the composer without emitting (#1107)', async () => {
+    const host = makeHost('A paragraph.');
+    const onAddComment = vi.fn();
+    render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
+    const p = await waitFor(() => {
+      const el = document.querySelector('p[data-line]');
+      if (!el) throw new Error('no paragraph yet');
+      return el as HTMLElement;
+    });
+    fireEvent.mouseOver(p);
+    fireEvent.click(await screen.findByRole('button', { name: /add comment on line/i }));
+    const composer = await screen.findByRole('textbox', { name: /add comment on line/i });
+    fireEvent.keyDown(composer, { key: 'Escape' });
+    await waitFor(() =>
+      expect(document.querySelector('.codev-canvas-comment-composer')).toBeNull(),
+    );
+    expect(onAddComment).not.toHaveBeenCalled();
+    // The placeholder host is cleaned up too (no orphan node left in the body).
+    expect(document.querySelector('.codev-canvas-comment-composer-host')).toBeNull();
+  });
+
+  it('a reload that removes the active block closes the composer (#1107)', async () => {
+    const host = makeHost('first para\n\nsecond para');
+    const onAddComment = vi.fn();
+    render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
+    // Open the composer on the LAST paragraph, then shrink the document so that line is gone.
+    const paras = await waitFor(() => {
+      const els = document.querySelectorAll('p[data-line]');
+      if (els.length < 2) throw new Error('paragraphs not rendered yet');
+      return els;
+    });
+    const last = paras[paras.length - 1] as HTMLElement;
+    fireEvent.mouseOver(last);
+    fireEvent.click(await screen.findByRole('button', { name: /add comment on line/i }));
+    expect(await screen.findByRole('textbox', { name: /add comment on line/i })).not.toBeNull();
+    // A watch reload to a shorter document removes the block the composer was anchored to.
+    await act(async () => { host.watchers.forEach((cb) => cb('only one para now')); });
+    await waitFor(() =>
+      expect(document.querySelector('.codev-canvas-comment-composer')).toBeNull(),
+    );
   });
 
   it('drops an out-of-range marker and warns ONCE even across reloads (deferred #4)', async () => {
@@ -256,7 +330,7 @@ describe('ArtifactCanvas (Phase 3)', () => {
     expect(cards.querySelector('img')).toBeNull();
   });
 
-  it('activates on Space (not just Enter) on a focused block', async () => {
+  it('activates on Space (not just Enter) on a focused block — opens the composer (#1107)', async () => {
     const host = makeHost('A paragraph.');
     const onAddComment = vi.fn();
     render(<ArtifactCanvas uri="x" {...host} onAddComment={onAddComment} />);
@@ -266,7 +340,8 @@ describe('ArtifactCanvas (Phase 3)', () => {
       return el as HTMLElement;
     });
     fireEvent.keyDown(p, { key: ' ' });
-    expect(onAddComment).toHaveBeenCalledWith(0);
+    expect(await screen.findByRole('textbox', { name: /add comment on line/i })).not.toBeNull();
+    expect(onAddComment).not.toHaveBeenCalled(); // opens composer; emit happens on submit
   });
 
   it('keeps previously-rendered markers when a LATER list() rejects (D2 — prior markers preserved)', async () => {

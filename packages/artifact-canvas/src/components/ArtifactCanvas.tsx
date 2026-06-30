@@ -1,7 +1,9 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import type { ArtifactCanvasProps, ReviewMarker } from '../types.js';
 import { renderMarkdown } from '../renderer/renderer.js';
 import { CommentAffordance } from '../overlays/CommentAffordance.js';
+import { CommentComposer } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
 
 /**
@@ -60,6 +62,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   const [activeLine, setActiveLine] = React.useState<number | null>(null);
   // Vertical offset (px, relative to the canvas) of the active block, so the overlay anchors to it.
   const [overlayTop, setOverlayTop] = React.useState(0);
+  // The line currently being commented on (the inline composer is open for it), and the in-flow
+  // placeholder node the composer portals into — injected directly below that block (#1107).
+  const [composingLine, setComposingLine] = React.useState<number | null>(null);
+  const [composerHost, setComposerHost] = React.useState<HTMLElement | null>(null);
   const bodyRef = React.useRef<HTMLDivElement>(null);
 
   const report = React.useCallback(
@@ -215,6 +221,62 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     );
   }, [html, markers]);
 
+  // Manage the in-flow composer placeholder (#1107). When `composingLine` is set, inject a
+  // placeholder `<div>` directly below that block — AFTER its marker-card stack if present, so the
+  // composer reads as the in-progress sibling of the existing comments — and hand the node to the
+  // portal below. Declared AFTER the marker-card decoration effect so the card stack already exists
+  // when we pick the insertion anchor. Idempotent: if a correctly-placed host already exists for
+  // this line we leave it (prevents a setState→re-run loop); an `html` change wipes the body, so the
+  // node disconnects and we re-create it. If the target block vanished on reload, close the composer.
+  React.useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) { return; }
+
+    if (composingLine === null) {
+      if (composerHost) { composerHost.remove(); setComposerHost(null); }
+      return;
+    }
+    const block = root.querySelector(`[data-line="${composingLine}"]`);
+    if (!block) {
+      if (composerHost) { composerHost.remove(); }
+      setComposerHost(null);
+      setComposingLine(null);
+      return;
+    }
+    // Anchor below the block's marker-card stack when it has one, else directly below the block.
+    let anchor: Element = block;
+    const sib = block.nextElementSibling;
+    if (sib?.classList.contains('codev-canvas-marker-cards')) { anchor = sib; }
+
+    if (composerHost?.isConnected && composerHost.previousElementSibling === anchor) {
+      return; // already placed correctly — nothing to do (avoids an infinite re-run)
+    }
+    composerHost?.remove();
+    const host = document.createElement('div');
+    host.className = 'codev-canvas-comment-composer-host';
+    anchor.after(host);
+    setComposerHost(host);
+  }, [composingLine, html, markers, composerHost]);
+
+  // Comment-intent seam (#1107): clicking "+" / pressing Enter opens the inline composer for the
+  // line; submitting emits `onAddComment(line, text)` (the host writes the marker); cancel/Esc just
+  // closes it and restores focus to the block so keyboard users aren't stranded.
+  const openComposer = (line: number): void => setComposingLine(line);
+  const submitComposer = (text: string): void => {
+    if (composingLine === null) { return; }
+    onAddComment(composingLine, text);
+    setComposingLine(null);
+  };
+  const cancelComposer = (): void => {
+    const line = composingLine;
+    setComposingLine(null);
+    if (line !== null) {
+      // The block element persists across this state change (the body is not rebuilt), so focus it
+      // synchronously to return the reviewer to where they were.
+      bodyRef.current?.querySelector<HTMLElement>(`[data-line="${line}"]`)?.focus();
+    }
+  };
+
   const lineFromEvent = (target: EventTarget | null): number | null => {
     const el = (target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null;
     if (!el) return null;
@@ -243,36 +305,48 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setOverlayTop(el.offsetTop + lineHeight / 2);
   };
 
-  return React.createElement(
-    'div',
-    { className: 'codev-artifact-canvas', onMouseLeave: () => setActiveLine(null) },
-    React.createElement('div', {
-      ref: bodyRef,
-      className: 'codev-artifact-canvas-body',
-      onMouseOver: (e: React.MouseEvent) => activateFromTarget(e.target),
-      onFocus: (e: React.FocusEvent) => activateFromTarget(e.target),
-      onKeyDown: (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          const l = lineFromEvent(e.target);
-          if (l !== null) {
-            e.preventDefault();
-            onAddComment(l); // intent only (D6)
+  return (
+    <div className="codev-artifact-canvas" onMouseLeave={() => setActiveLine(null)}>
+      {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
+          React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
+      <div
+        ref={bodyRef}
+        className="codev-artifact-canvas-body"
+        onMouseOver={(e) => activateFromTarget(e.target)}
+        onFocus={(e) => activateFromTarget(e.target)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            const l = lineFromEvent(e.target);
+            if (l !== null) {
+              e.preventDefault();
+              openComposer(l); // open the inline composer for this block (#1107)
+            }
           }
-        }
-      },
-      // No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
-      // React never re-commits it (which would wipe the injected cards). Rendered with no children.
-    }),
-    // The overlay now carries ONLY the "+" add-comment affordance. Existing markers render as
-    // always-visible inline cards below their block (injected above), not in this hover overlay —
-    // that's the layout fix that stopped the cards overlapping the block content (#863).
-    activeLine !== null
-      ? React.createElement(
-          'div',
-          { className: 'codev-canvas-overlay', style: { top: overlayTop } },
-          React.createElement(CommentAffordance, { line: activeLine, onActivate: onAddComment }),
-        )
-      : null,
-    React.createElement(MarkerMinimap, { markers, bodyRef }),
+        }}
+      />
+      {/* The overlay carries ONLY the "+" add-comment affordance. Existing markers render as
+          always-visible inline cards below their block (injected above), not in this hover overlay —
+          that's the layout fix that stopped the cards overlapping the block content (#863). The "+"
+          is suppressed for the line whose composer is open (the composer is shown there instead). */}
+      {activeLine !== null && activeLine !== composingLine ? (
+        <div className="codev-canvas-overlay" style={{ top: overlayTop }}>
+          <CommentAffordance line={activeLine} onActivate={openComposer} />
+        </div>
+      ) : null}
+      {/* Inline composer (#1107): portalled into the in-flow placeholder injected directly below the
+          block, so the reviewer types where the comment will live. Keeping it React-owned (rather than
+          hand-built DOM in the imperatively-managed body) gives clean state / focus / Esc handling. */}
+      {composingLine !== null && composerHost
+        ? createPortal(
+            <CommentComposer
+              line={composingLine}
+              onSubmit={submitComposer}
+              onCancel={cancelComposer}
+            />,
+            composerHost,
+          )
+        : null}
+      <MarkerMinimap markers={markers} bodyRef={bodyRef} />
+    </div>
   );
 }

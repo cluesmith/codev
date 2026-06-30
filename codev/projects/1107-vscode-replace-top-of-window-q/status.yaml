@@ -1,0 +1,29 @@
+id: '1107'
+title: vscode-replace-top-of-window-q
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-29T23:29:21.703Z'
+    approved_at: '2026-06-29T23:52:15.206Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-30T00:03:33.675Z'
+    approved_at: '2026-06-30T00:39:35.411Z'
+  pr:
+    status: pending
+    requested_at: '2026-06-30T00:53:16.329Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-29T23:23:50.850Z'
+updated_at: '2026-06-30T00:53:16.329Z'
+pr_history:
+  - phase: review
+    pr_number: 1121
+    branch: builder/pir-1107
+    created_at: '2026-06-30T00:44:34.712Z'
+pr_ready_for_human: true

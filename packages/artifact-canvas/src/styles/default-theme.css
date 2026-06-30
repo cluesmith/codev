@@ -284,6 +284,64 @@
 .codev-canvas-marker-card-icon { margin-right: 4px; }
 .codev-canvas-marker-card-author { font-weight: 600; color: var(--codev-canvas-muted); margin-right: 4px; }
 
+/* Inline comment composer (#1107): rendered in-flow directly below the block (the host portals it
+   into `.codev-canvas-comment-composer-host`), mirroring the marker-card stack's left rule + spacing
+   so the open composer reads as the in-progress sibling of the comments it will become. The host is
+   a layout-only wrapper; all chrome lives on `.codev-canvas-comment-composer`. */
+.codev-canvas-comment-composer-host { display: block; }
+.codev-canvas-comment-composer {
+  margin: 4px 0 10px;
+  padding-left: 8px;
+  border-left: 2px solid var(--codev-canvas-comment-marker);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.codev-canvas-comment-composer-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  color: var(--codev-canvas-foreground);
+  background: var(--codev-canvas-background);
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.codev-canvas-comment-composer-input:focus-visible {
+  outline: 2px solid var(--codev-canvas-accent);
+  outline-offset: 1px;
+}
+.codev-canvas-comment-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.codev-canvas-comment-composer-actions button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--codev-canvas-border);
+  padding: 3px 12px;
+}
+.codev-canvas-comment-composer-cancel {
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-foreground);
+}
+.codev-canvas-comment-composer-submit {
+  background: var(--codev-canvas-accent);
+  color: var(--codev-canvas-background);
+  border-color: var(--codev-canvas-accent);
+}
+.codev-canvas-comment-composer-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.codev-canvas-comment-composer-actions button:focus-visible {
+  outline: 2px solid var(--codev-canvas-accent);
+  outline-offset: 1px;
+}
+
 /* Right-edge marker minimap (#863): a fixed, narrow column of dots — one per REVIEW marker,
    positioned proportional to the marker's place in the document. The column itself is
    click-transparent (pointer-events: none) so only the dots are interactive, and it is narrow

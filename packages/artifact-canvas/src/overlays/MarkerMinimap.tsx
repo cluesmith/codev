@@ -64,24 +64,24 @@ export function MarkerMinimap({ markers, bodyRef }: MarkerMinimapProps): React.R
 
   if (markers.length === 0) return null; // hidden when the doc has zero markers (AC)
 
-  return React.createElement(
-    'div',
-    { className: 'codev-canvas-minimap', 'aria-label': 'Review marker minimap' },
-    dots.map((dot, i) =>
-      React.createElement('button', {
-        key: String(i),
-        type: 'button',
-        className: 'codev-canvas-minimap-dot',
-        style: { top: `${dot.frac * 100}%` },
-        title: `${dot.marker.author}: ${truncate(dot.marker.text)}`,
-        'aria-label': `Jump to comment by ${dot.marker.author} on line ${dot.marker.line + 1}`,
-        onClick: () => {
-          const el = bodyRef.current?.querySelector<HTMLElement>(
-            `[data-line="${dot.marker.line}"]`,
-          );
-          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        },
-      }),
-    ),
+  return (
+    <div className="codev-canvas-minimap" aria-label="Review marker minimap">
+      {dots.map((dot, i) => (
+        <button
+          key={String(i)}
+          type="button"
+          className="codev-canvas-minimap-dot"
+          style={{ top: `${dot.frac * 100}%` }}
+          title={`${dot.marker.author}: ${truncate(dot.marker.text)}`}
+          aria-label={`Jump to comment by ${dot.marker.author} on line ${dot.marker.line + 1}`}
+          onClick={() => {
+            const el = bodyRef.current?.querySelector<HTMLElement>(
+              `[data-line="${dot.marker.line}"]`,
+            );
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }}
+        />
+      ))}
+    </div>
   );
 }

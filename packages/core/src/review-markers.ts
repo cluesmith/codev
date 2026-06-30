@@ -91,6 +91,24 @@ export function markerInsertionLine(annotatedLine: number): number {
 }
 
 /**
+ * The file line a new marker should be written to so it **appends below** any markers already
+ * stacked on `annotatedLine` — i.e. the line after the contiguous run of REVIEW markers that
+ * immediately follows the annotated line. With no existing markers this is just
+ * `markerInsertionLine(annotatedLine)`. Because markers render in file order (a run all anchors to
+ * the block above it), appending after the run makes the newest comment the **last** card in the
+ * block's thread. Shared in core so any host that appends to a thread agrees on the convention.
+ * Pure (operates on the document text), so it is unit-testable without a host.
+ */
+export function markerAppendLine(text: string, annotatedLine: number): number {
+  const lines = text.split('\n');
+  let insertAt = markerInsertionLine(annotatedLine);
+  while (insertAt < lines.length && isReviewMarkerLine(lines[insertAt])) {
+    insertAt++;
+  }
+  return insertAt;
+}
+
+/**
  * Parse all review markers out of `text` into `ReviewMarker`s, mapping each to
  * the 0-based logical line it annotates: the nearest line ABOVE the marker that
  * is not itself a marker. Skipping over a run of stacked markers means several

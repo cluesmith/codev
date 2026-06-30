@@ -10,15 +10,17 @@
  * which is exactly what the artifact-canvas package is for.
  *
  * Architecture (host side of the package's adapter contract):
- * - The host reads `document.getText()`, hides markers for rendering via the
- *   shared `stripMarkersForRender` (the #1036 fix), and parses markers via
- *   `parseReviewMarkers`. Both come from `@cluesmith/codev-core/review-markers`,
- *   so this surface and the editor Comments-API path write/parse identical bytes.
+ * - The host posts the **raw** document text and parses markers via `parseReviewMarkers`
+ *   (from `@cluesmith/codev-core/review-markers`); the canvas renderer strips full-line
+ *   REVIEW/comment lines itself before block parsing (the #1036/#1042 fix), so the host no
+ *   longer pre-hides them. The shared core codec means this surface and the editor
+ *   Comments-API path write/parse identical bytes.
  * - Content + markers are pushed into the webview, which mounts `<ArtifactCanvas>`
- *   (see `webview/main.ts`). The canvas emits an `addComment` intent; the host
- *   collects the text via `showInputBox` and writes the marker with a
- *   `WorkspaceEdit`. The document change re-pushes — the round-trip goes through
- *   the file text, matching the package's design.
+ *   (see `webview/main.ts`). The canvas's inline composer (#1107) collects the
+ *   comment body and emits an `addComment` intent carrying `{ line, text }`; the
+ *   host writes the marker with a `WorkspaceEdit`. The document change re-pushes —
+ *   the round-trip goes through the file text, matching the package's design.
+ *   (Pre-#1107 the host collected the body via a center-top `showInputBox`.)
  *
  * Registered with `priority: "option"` so it never replaces the default `.md`
  * editor or the built-in preview; it is opt-in via "Reopen With…" or the
@@ -28,10 +30,11 @@
 import * as vscode from 'vscode';
 import {
   serializeReviewMarker,
-  markerInsertionLine,
+  markerAppendLine,
   parseReviewMarkers,
 } from '@cluesmith/codev-core/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
+import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
 export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider {
@@ -67,11 +70,12 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       // Send the raw document text: the canvas renderer strips REVIEW/comment lines itself
       // (and keeps blocks intact + data-line accurate), so the host no longer pre-hides them.
       const text = document.getText();
-      panel.webview.postMessage({
+      const message: HostToWebviewMessage = {
         type: 'update',
         content: text,
         markers: parseReviewMarkers(text),
-      });
+      };
+      panel.webview.postMessage(message);
     };
 
     const changeSub = vscode.workspace.onDidChangeTextDocument((e) => {
@@ -81,30 +85,35 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
 
     panel.webview.onDidReceiveMessage((msg: unknown) => {
       if (!msg || typeof msg !== 'object') { return; }
-      const m = msg as { type?: string; line?: number };
+      // Untrusted input from the webview: cast to the protocol union for the discriminant, but still
+      // validate the `addComment` payload fields at runtime before acting on them.
+      const m = msg as WebviewToHostMessage;
       if (m.type === 'ready') { pushUpdate(); return; }
-      if (m.type === 'addComment' && typeof m.line === 'number') {
-        this.addComment(document, m.line);
+      if (m.type === 'addComment' && typeof m.line === 'number' && typeof m.text === 'string') {
+        this.addComment(document, m.line, m.text);
       }
     });
   }
 
-  /** Collect comment text from the user and write the marker (host side of D6). */
-  private async addComment(document: vscode.TextDocument, line: number): Promise<void> {
-    const text = await vscode.window.showInputBox({
-      prompt: 'Add review comment',
-      placeHolder: 'Type your review comment, then Enter to submit',
-    });
-    if (!text) { return; }
+  /**
+   * Write the marker for a comment the inline composer collected (host side of D6, #1107). The
+   * body arrives with the `addComment` message — the canvas's composer replaced the old
+   * `showInputBox` (#1107), so there is no host-side text prompt anymore.
+   */
+  private async addComment(document: vscode.TextDocument, line: number, text: string): Promise<void> {
+    if (!text.trim()) { return; }
     const author = this.overviewCache.getData()?.currentUser ?? 'architect';
     const indent =
       line < document.lineCount
         ? (document.lineAt(line).text.match(/^\s*/)?.[0] ?? '')
         : '';
     const edit = new vscode.WorkspaceEdit();
+    // Append below any markers already stacked on this block so the new comment lands where the
+    // inline composer appeared (in-flow below the existing cards), not at the top of the thread
+    // (#1107). markerInsertionLine alone (line+1) would prepend ahead of an existing run.
     edit.insert(
       document.uri,
-      new vscode.Position(markerInsertionLine(line), 0),
+      new vscode.Position(markerAppendLine(document.getText(), line), 0),
       serializeReviewMarker(author, text, indent) + '\n',
     );
     await vscode.workspace.applyEdit(edit);

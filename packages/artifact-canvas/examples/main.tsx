@@ -17,10 +17,10 @@ import '../src/styles/default-theme.css';
 const host = createStubHost(SAMPLE_ARTIFACT);
 
 function Example(): React.ReactElement {
-  const onAddComment = (line: number) => {
-    // Host glue (spec D6): the package emits intent; the host collects input + writes back.
-    const text = window.prompt(`Comment on line ${line + 1}:`);
-    if (text) void host.markerAdapter.add('artifact://sample.md', line, text, 'you');
+  const onAddComment = (line: number, text: string) => {
+    // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
+    // here; the host just writes it back. (Pre-#1107 this used window.prompt for the input.)
+    void host.markerAdapter.add('artifact://sample.md', line, text, 'you');
   };
   return React.createElement(
     'div',

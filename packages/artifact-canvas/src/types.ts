@@ -46,9 +46,11 @@ export interface ReviewMarker {
 /**
  * Public props of the React canvas component — the host-facing contract.
  *
- * `onAddComment` is the single canonical comment-intent seam (spec D6): the overlay calls it
- * with a 0-based line; the host performs the text input and calls its own
- * `MarkerAdapter.add(...)`. The package never calls `add` itself.
+ * `onAddComment` is the single canonical comment-intent seam (spec D6): the canvas collects the
+ * body via its inline composer (#1107) and calls this with the 0-based line **and** the trimmed
+ * text; the host writes the marker via its own `MarkerAdapter.add(...)`. The package never calls
+ * `add` itself. (Contract amendment #1107: the seam gained the `text` argument when the text input
+ * moved from the host's `showInputBox` into the canvas's inline composer.)
  */
 export interface ArtifactCanvasProps {
   /** Host-opaque document identifier; the package never interprets it as a filesystem path. */
@@ -56,8 +58,8 @@ export interface ArtifactCanvasProps {
   fileAdapter: FileAdapter;
   markerAdapter: MarkerAdapter;
   themeAdapter: ThemeAdapter;
-  /** Comment-intent event (spec D6); `line` is 0-based (spec D5). */
-  onAddComment(line: number): void;
+  /** Comment-intent event (spec D6); `line` is 0-based (spec D5), `text` is the trimmed body (#1107). */
+  onAddComment(line: number, text: string): void;
   /** Optional host error sink; the package never throws out of an event handler (spec D2). */
   onError?(err: unknown): void;
   /**
