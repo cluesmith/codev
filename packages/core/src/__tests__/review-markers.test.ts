@@ -3,6 +3,7 @@ import {
   serializeReviewMarker,
   parseReviewMarkers,
   markerInsertionLine,
+  markerAppendLine,
   isReviewMarkerLine,
   isEligibleReviewPath,
 } from '../review-markers.js';
@@ -77,6 +78,39 @@ describe('round-trip (insert → parse)', () => {
     const markers = parseReviewMarkers(written);
     expect(markers).toHaveLength(1);
     expect(markers[0].line).toBe(0); // back to the heading
+  });
+});
+
+describe('markerAppendLine (#1107 — append below an existing thread)', () => {
+  it('equals markerInsertionLine when the block has no existing markers', () => {
+    const text = '# Heading\nbody paragraph';
+    expect(markerAppendLine(text, 0)).toBe(markerInsertionLine(0)); // -> 1
+  });
+
+  it('appends AFTER a run of stacked markers so the newest comment is last (regression for #1107)', () => {
+    // Block on line 0 with two stacked markers on lines 1 and 2.
+    const text = [
+      '# Heading',
+      serializeReviewMarker('a', 'first'),
+      serializeReviewMarker('b', 'second'),
+      'body paragraph',
+    ].join('\n');
+    // markerInsertionLine would prepend at line 1 (top of the thread); append lands at line 3.
+    expect(markerInsertionLine(0)).toBe(1);
+    const appendAt = markerAppendLine(text, 0);
+    expect(appendAt).toBe(3);
+
+    // Writing there keeps the existing two first and the new one last, in file/render order.
+    const lines = text.split('\n');
+    lines.splice(appendAt, 0, serializeReviewMarker('c', 'third'));
+    const markers = parseReviewMarkers(lines.join('\n'));
+    expect(markers.map((m) => m.text)).toEqual(['first', 'second', 'third']);
+    expect(markers.every((m) => m.line === 0)).toBe(true); // all anchor to the heading
+  });
+
+  it('handles a block whose marker run reaches end-of-file', () => {
+    const text = ['para', serializeReviewMarker('a', 'only')].join('\n'); // marker on the last line
+    expect(markerAppendLine(text, 0)).toBe(2); // just past the run (end of file)
   });
 });
 

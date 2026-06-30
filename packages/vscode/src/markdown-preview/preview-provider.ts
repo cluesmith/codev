@@ -10,10 +10,11 @@
  * which is exactly what the artifact-canvas package is for.
  *
  * Architecture (host side of the package's adapter contract):
- * - The host reads `document.getText()`, hides markers for rendering via the
- *   shared `stripMarkersForRender` (the #1036 fix), and parses markers via
- *   `parseReviewMarkers`. Both come from `@cluesmith/codev-core/review-markers`,
- *   so this surface and the editor Comments-API path write/parse identical bytes.
+ * - The host posts the **raw** document text and parses markers via `parseReviewMarkers`
+ *   (from `@cluesmith/codev-core/review-markers`); the canvas renderer strips full-line
+ *   REVIEW/comment lines itself before block parsing (the #1036/#1042 fix), so the host no
+ *   longer pre-hides them. The shared core codec means this surface and the editor
+ *   Comments-API path write/parse identical bytes.
  * - Content + markers are pushed into the webview, which mounts `<ArtifactCanvas>`
  *   (see `webview/main.ts`). The canvas's inline composer (#1107) collects the
  *   comment body and emits an `addComment` intent carrying `{ line, text }`; the
@@ -29,7 +30,7 @@
 import * as vscode from 'vscode';
 import {
   serializeReviewMarker,
-  markerInsertionLine,
+  markerAppendLine,
   parseReviewMarkers,
 } from '@cluesmith/codev-core/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
@@ -107,9 +108,12 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
         ? (document.lineAt(line).text.match(/^\s*/)?.[0] ?? '')
         : '';
     const edit = new vscode.WorkspaceEdit();
+    // Append below any markers already stacked on this block so the new comment lands where the
+    // inline composer appeared (in-flow below the existing cards), not at the top of the thread
+    // (#1107). markerInsertionLine alone (line+1) would prepend ahead of an existing run.
     edit.insert(
       document.uri,
-      new vscode.Position(markerInsertionLine(line), 0),
+      new vscode.Position(markerAppendLine(document.getText(), line), 0),
       serializeReviewMarker(author, text, indent) + '\n',
     );
     await vscode.workspace.applyEdit(edit);
