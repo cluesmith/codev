@@ -1,7 +1,7 @@
 #!/bin/sh
 # Forge concept: issue-view (Linear via GraphQL API)
 # Input: CODEV_ISSUE_ID (e.g. "ENG-123")
-# Output: JSON {title, body, state, comments[]}
+# Output: JSON {title, body, state, url, comments[]}
 set -e
 
 if [ -z "$LINEAR_API_KEY" ]; then
@@ -18,7 +18,7 @@ curl -sf -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: $LINEAR_API_KEY" \
   -d "$(jq -n --arg id "$CODEV_ISSUE_ID" '{
-    query: "query($id: String!) { issueVcsByFilter: issues(filter: { identifier: { eq: $id } }) { nodes { title description state { name } comments { nodes { body createdAt user { displayName } } } } } }",
+    query: "query($id: String!) { issueVcsByFilter: issues(filter: { identifier: { eq: $id } }) { nodes { title url description state { name } comments { nodes { body createdAt user { displayName } } } } } }",
     variables: { id: $id }
   }')" \
   | jq 'if (.data.issueVcsByFilter.nodes | length) == 0 then
@@ -26,6 +26,7 @@ curl -sf -X POST https://api.linear.app/graphql \
   else
     .data.issueVcsByFilter.nodes[0] | {
       title: .title,
+      url: .url,
       body: (.description // ""),
       state: .state.name,
       comments: [.comments.nodes[] | {

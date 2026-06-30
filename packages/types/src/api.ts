@@ -380,7 +380,7 @@ export interface IssueView {
    * GitHub `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the API
    * endpoint — do not use it), Linear `url`. Optional so the contract stays
    * forge-neutral; consumers that open the issue in a browser degrade
-   * gracefully when it's absent. Currently populated by the GitHub script only.
+   * gracefully when it's absent (e.g. a forge script that doesn't emit it).
    */
   url?: string;
   comments: Array<{

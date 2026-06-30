@@ -48,3 +48,17 @@ Found "Open Issue in Browser" (`codev.openBacklogIssue`) is NOT directly reusabl
 `url` is OPTIONAL (forge-neutral): gitlab/gitea/linear scripts don't emit it yet → those degrade to in-editor preview. Clean follow-up to populate them.
 
 Validation: types+core rebuilt; check-types ✓, lint ✓, vitest 530/530 ✓. Porch checks: build ✓, tests ✓. Plan file updated to reflect the pivot.
+
+## Implement phase — extend url to all forge issue-view scripts (2026-06-30)
+
+Architect direction: extend `issue-view` scripts for gitlab/gitea/linear to emit `url` too (not GitHub-only).
+
+Per-forge mapping (field names verified vs each forge's API docs):
+- github: `gh issue view --json …,url` (done earlier; gh `url` = web url).
+- gitlab: `glab issue view … | jq '. + {url: .web_url}'` — maps GitLab web_url, non-destructive.
+- gitea: `tea issues view … | jq '.url = (.html_url // .url)'` — Gitea's raw `url` is the API endpoint; prefer html_url (browser), fall back if absent.
+- linear: added `url` to the GraphQL selection + jq output map (Linear Issue.url = web url).
+
+Testability: only github is runtime-testable here. The gitlab/gitea/linear jq transforms were validated against representative sample payloads (correct url extracted, other fields preserved, gitea fallback works) but NOT against live glab/tea/Linear. Flagged for the human at dev-approval / a forge-equipped reviewer.
+
+Exec bits preserved (755, no git mode change). Porch checks: build ✓, tests ✓.

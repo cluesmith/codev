@@ -26,8 +26,7 @@ export interface IssueViewResult {
    * supplies it. Each forge script maps its own web-URL field here: GitHub
    * `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the API
    * endpoint — do not use it), Linear `url`. Optional to keep the contract
-   * forge-neutral. Currently emitted by the GitHub `issue-view` script only
-   * (`gh issue view --json …,url`).
+   * forge-neutral (a forge script that doesn't emit it degrades gracefully).
    */
   url?: string;
   comments: Array<{

@@ -131,11 +131,20 @@ needs the Tower client for the fetch).
 - `packages/codev/src/lib/forge-contracts.ts` — add optional `url?: string` to
   `IssueViewResult` (mirrors the wire contract). Tower's `handleIssueView` already
   passes the whole object through, so no route change is needed.
-- `packages/codev/scripts/forge/github/issue-view.sh` — add `url` to the
-  `gh issue view --json` field list. Other forge scripts (gitlab/gitea/linear)
-  leave `url` unset for now; the optional field + in-editor fallback keeps them
-  working. (No `codev-skeleton` mirror: forge scripts ship from the package, not
-  the skeleton.)
+- `packages/codev/scripts/forge/*/issue-view.sh` — emit the issue's **browser**
+  URL as `url`, per forge:
+  - **github**: add `url` to `gh issue view --json` (gh's `url` is the web URL).
+  - **gitlab**: pipe through `jq '. + {url: .web_url}'` (maps GitLab's `web_url`;
+    non-destructive, other fields untouched).
+  - **gitea**: pipe through `jq '.url = (.html_url // .url)'` (Gitea's raw `url`
+    is the API endpoint — prefer the browser `html_url`, fall back if absent).
+  - **linear**: add `url` to the GraphQL selection + the jq output map (Linear's
+    `Issue.url` is the web URL).
+  Field names verified against each forge's API docs. Only the github path is
+  runtime-testable in this environment; the gitlab/gitea/linear `jq` transforms
+  were validated against representative sample payloads (correct `url`, other
+  fields preserved) but not against a live `glab`/`tea`/Linear instance. (No
+  `codev-skeleton` mirror: forge scripts ship from the package, not the skeleton.)
 - `packages/vscode/src/extension.ts`
   - Import `openIssueById` (near the `view-issue` / `search-backlog` imports, ~line 27-29).
   - Register `reg('codev.openIssueById', () => openIssueById(connectionManager!))`
