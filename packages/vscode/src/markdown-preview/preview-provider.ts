@@ -15,10 +15,11 @@
  *   `parseReviewMarkers`. Both come from `@cluesmith/codev-core/review-markers`,
  *   so this surface and the editor Comments-API path write/parse identical bytes.
  * - Content + markers are pushed into the webview, which mounts `<ArtifactCanvas>`
- *   (see `webview/main.ts`). The canvas emits an `addComment` intent; the host
- *   collects the text via `showInputBox` and writes the marker with a
- *   `WorkspaceEdit`. The document change re-pushes — the round-trip goes through
- *   the file text, matching the package's design.
+ *   (see `webview/main.ts`). The canvas's inline composer (#1107) collects the
+ *   comment body and emits an `addComment` intent carrying `{ line, text }`; the
+ *   host writes the marker with a `WorkspaceEdit`. The document change re-pushes —
+ *   the round-trip goes through the file text, matching the package's design.
+ *   (Pre-#1107 the host collected the body via a center-top `showInputBox`.)
  *
  * Registered with `priority: "option"` so it never replaces the default `.md`
  * editor or the built-in preview; it is opt-in via "Reopen With…" or the
@@ -81,21 +82,21 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
 
     panel.webview.onDidReceiveMessage((msg: unknown) => {
       if (!msg || typeof msg !== 'object') { return; }
-      const m = msg as { type?: string; line?: number };
+      const m = msg as { type?: string; line?: number; text?: string };
       if (m.type === 'ready') { pushUpdate(); return; }
-      if (m.type === 'addComment' && typeof m.line === 'number') {
-        this.addComment(document, m.line);
+      if (m.type === 'addComment' && typeof m.line === 'number' && typeof m.text === 'string') {
+        this.addComment(document, m.line, m.text);
       }
     });
   }
 
-  /** Collect comment text from the user and write the marker (host side of D6). */
-  private async addComment(document: vscode.TextDocument, line: number): Promise<void> {
-    const text = await vscode.window.showInputBox({
-      prompt: 'Add review comment',
-      placeHolder: 'Type your review comment, then Enter to submit',
-    });
-    if (!text) { return; }
+  /**
+   * Write the marker for a comment the inline composer collected (host side of D6, #1107). The
+   * body arrives with the `addComment` message — the canvas's composer replaced the old
+   * `showInputBox` (#1107), so there is no host-side text prompt anymore.
+   */
+  private async addComment(document: vscode.TextDocument, line: number, text: string): Promise<void> {
+    if (!text.trim()) { return; }
     const author = this.overviewCache.getData()?.currentUser ?? 'architect';
     const indent =
       line < document.lineCount

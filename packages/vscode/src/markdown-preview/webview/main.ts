@@ -11,9 +11,10 @@
  *    refresh signal (re-read + re-list).
  *  - webview -> host `{ type: 'ready' }`: sent once on mount so the host pushes
  *    the first update.
- *  - webview -> host `{ type: 'addComment', line }`: the canvas's comment intent
- *    (0-based line). The host runs the InputBox + write-back; the resulting
- *    document change comes back as another `update`.
+ *  - webview -> host `{ type: 'addComment', line, text }`: the canvas's comment
+ *    intent (0-based line) with the body the inline composer collected (#1107).
+ *    The host writes the marker; the resulting document change comes back as
+ *    another `update`. (Pre-#1107 the host collected the text via `showInputBox`.)
  *
  * This file is bundled by esbuild as a browser IIFE (`dist/webview/markdown-preview.js`)
  * and is intentionally excluded from the extension's `tsc` typecheck (it targets
@@ -72,7 +73,8 @@ function render(): void {
       fileAdapter,
       markerAdapter,
       themeAdapter,
-      onAddComment: (line: number) => vscodeApi.postMessage({ type: 'addComment', line }),
+      onAddComment: (line: number, text: string) =>
+        vscodeApi.postMessage({ type: 'addComment', line, text }),
       refreshKey,
     }),
   );
