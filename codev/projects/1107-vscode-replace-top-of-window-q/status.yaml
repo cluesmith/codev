@@ -1,7 +1,7 @@
 id: '1107'
 title: vscode-replace-top-of-window-q
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-06-29T23:23:50.850Z'
-updated_at: '2026-06-30T00:39:35.412Z'
+updated_at: '2026-06-30T00:39:52.285Z'
