@@ -27,6 +27,8 @@ unchanged (multi-line input collapses to single-line at write time, as before).
 - `packages/artifact-canvas/src/renderer/MarkdownView.tsx` (+7 / −3) — JSX conversion
 - `packages/artifact-canvas/src/styles/default-theme.css` (+58 / −0) — composer styling
 - `packages/artifact-canvas/examples/main.tsx` (+4 / −4) — example uses the new seam
+- `packages/core/src/review-markers.ts` (+19 / −0) — new `markerAppendLine` codec helper (append-below-thread)
+- `packages/core/src/__tests__/review-markers.test.ts` (+27 / −0) — `markerAppendLine` regression tests
 - `packages/vscode/src/markdown-preview/messages.ts` (+24 / −0) — new named webview↔host protocol types
 - `packages/vscode/src/markdown-preview/preview-provider.ts` (+~22 / −~15) — drop `showInputBox`; write from posted text; use protocol types
 - `packages/vscode/src/markdown-preview/webview/main.ts` (+~9 / −~6) — post `{line, text}`; use protocol types
@@ -76,6 +78,38 @@ the component into it, with an idempotent injection effect to avoid a
 
 **HOT — no `lessons-critical.md` change.** No behavior-changing cross-cutting rule
 emerged that warrants displacing a capped hot lesson.
+
+## Consultation Findings (PIR single advisory pass)
+
+The PR-stage consultation (claude + codex, `type=impl`, `max_iterations: 1`) returned:
+**claude = APPROVE (HIGH)**, **codex = REQUEST_CHANGES (HIGH)**.
+
+**Codex finding (real defect — FIXED in `4a…` + regression test):** the host inserted
+the new marker at `markerInsertionLine(line)` (line+1), which *prepends* ahead of any
+markers already stacked on the block — so for a block with existing comments, the new
+card rendered at the **top** of the thread, while the inline composer had appeared
+**below** the existing cards. Visual position ≠ result, and it violated the approved
+plan's append-to-thread behavior.
+- **Fix:** added `markerAppendLine(text, annotatedLine)` to `@cluesmith/codev-core/review-markers`
+  (returns the line after the contiguous marker run; falls back to `markerInsertionLine`
+  when the block has none). `preview-provider.ts` now inserts there, so the new comment
+  lands where the composer was (newest-last).
+- **Regression test:** `packages/core/src/__tests__/review-markers.test.ts` — `markerAppendLine`
+  appends after a 2-marker run (asserts file/render order `first, second, third`, all
+  anchored to the block) and handles end-of-file; without the fix the new comment would
+  be first.
+- **Codex's other two points:** (a) the stacked-comment path lacked coverage — addressed
+  by the regression test above; (b) the stale `stripMarkersForRender` header comment in
+  `preview-provider.ts` — corrected to describe the raw-text + renderer-strips flow.
+
+**⚠️ Escalation for the `pr` gate (PIR will not re-review this):** the fix changes the
+canvas surface to append-below (newest-last). The **editor** Comments-API path
+(`comments/plan-review.ts:171`) still inserts at `markerInsertionLine(line)` (newest-first),
+so the two authoring surfaces now stack a *new* comment on an already-commented block in
+different order. Aligning the editor path is **out of scope for #1107** (the issue lists
+it as out of scope) and is a one-line change best done deliberately — recommend a
+follow-up issue. Please confirm the append-below choice (it matches this PR's approved
+plan and conventional thread UX) at the gate.
 
 ## Things to Look At During PR Review
 

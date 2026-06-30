@@ -107,3 +107,16 @@ At / How to Test). Governance routing (Spec 987 cold tier):
   the idempotent-injection guard. No hot lessons-critical change.
 Next: open PR with review as body, `porch done --pr`, then `porch done` → single CMAP-2 advisory
 pass → pr gate.
+
+### Consultation results + fix (2026-06-30)
+PR #1121 opened. 2-way CMAP-2 (claude+codex, single pass): claude=APPROVE(HIGH),
+codex=REQUEST_CHANGES(HIGH). Verified all 3 codex claims against code — all valid:
+1. REAL DEFECT: host inserted at markerInsertionLine (line+1) = prepend, so a new comment on a
+   block with existing markers rendered at TOP of the stack while the composer appeared BELOW.
+   Fixed: added core `markerAppendLine` (insert after the contiguous marker run = newest-last,
+   matching composer position + approved plan). Regression test in core review-markers.test.ts.
+2. Test gap (stacked path) → covered by the new core test.
+3. Stale `stripMarkersForRender` header comment → corrected to raw-text+renderer-strips.
+Escalating at pr gate: editor path (plan-review.ts:171) still prepends (out of scope #1107) →
+recommend follow-up issue to align. core build+test ✓ (32), vscode check-types/esbuild/lint/
+test:unit ✓ (516). PIR single-pass: no re-consult; human verifies at pr gate.
