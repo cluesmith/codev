@@ -18,10 +18,10 @@ gates:
     requested_at: '2026-06-30T01:13:27.383Z'
     approved_at: '2026-06-30T03:03:52.426Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history: []
 started_at: '2026-06-29T23:28:56.911Z'
-updated_at: '2026-06-30T03:03:52.427Z'
+updated_at: '2026-06-30T03:03:54.105Z'
 pr_history:
   - phase: review
     pr_number: 1123
