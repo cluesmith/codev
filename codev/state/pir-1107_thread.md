@@ -83,3 +83,12 @@ named, shared protocol: new `markdown-preview/messages.ts` with `HostToWebviewMe
 two ends can't drift. Host casts unknown→union for the discriminant, still validates addComment
 fields at runtime. check-types (host+webview) ✓, esbuild ✓, lint ✓, test:unit ✓ (516). Gate still
 pending.
+
+### Dev-gate feedback round 2 (2026-06-30)
+Reviewer questioned `React.createElement` style in CommentComposer. Clarified it IS a real
+component (createElement vs JSX is just syntax). Reviewer chose to convert the WHOLE package to
+JSX (accepted scope expansion beyond #1107). Converted all 5 source components — CommentComposer,
+ArtifactCanvas, CommentAffordance, MarkerMinimap, MarkdownView — from createElement to JSX
+(package tsconfig already had jsx: react-jsx; tests already used JSX, so build supported it).
+Behavior unchanged. artifact-canvas check-types ✓ + test ✓ (68) + build ✓; vscode check-types ✓ +
+esbuild ✓ + test:unit ✓ (516). Gate still pending.
