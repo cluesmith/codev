@@ -243,6 +243,7 @@ function broadcastNotification(notification: { type: string; title: string; body
 // tunnel-proxied clients that don't properly close (clients auto-reconnect).
 const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
 const SSE_MAX_AGE_MS = 5 * 60_000; // 5 minutes
+const SSE_MAX_AGE_JITTER_MS = 60_000; // ±1 min jitter → 4–6 min range
 const sseHeartbeatInterval = setInterval(() => {
   if (sseClients.length === 0) return;
   const now = Date.now();
@@ -252,9 +253,7 @@ const sseHeartbeatInterval = setInterval(() => {
       deadIds.push(client.id);
       continue;
     }
-    // Evict connections older than max-age — tunnel-proxied SSE connections
-    // can leak because both ends are localhost and TCP never detects the close.
-    if (now - client.connectedAt > SSE_MAX_AGE_MS) {
+    if (now - client.connectedAt > client.maxAge) {
       try { client.res.end(); } catch { /* already dead */ }
       deadIds.push(client.id);
       continue;
@@ -318,19 +317,14 @@ const routeCtx: RouteContext = {
   hasReactDashboard,
   getShellperManager: () => shellperManager,
   broadcastNotification,
-  addSseClient: (client: SSEClient) => {
-    // Hard cap: evict oldest connections when over limit to prevent
-    // unbounded accumulation (tunnel-proxied EventSource reconnects
-    // can leak because TCP close doesn't propagate reliably).
-    const SSE_MAX_CLIENTS = 50;
-    while (sseClients.length >= SSE_MAX_CLIENTS) {
-      const oldest = sseClients.shift();
-      if (oldest) {
-        try { oldest.res.end(); } catch { /* already dead */ }
-        log('WARN', `SSE cap reached (${SSE_MAX_CLIENTS}), evicted oldest client: ${oldest.id}`);
-      }
+  addSseClient: (client: SSEClient): boolean => {
+    const SSE_MAX_CLIENTS = 200;
+    if (sseClients.length >= SSE_MAX_CLIENTS) {
+      return false;
     }
+    client.maxAge = SSE_MAX_AGE_MS + Math.floor(Math.random() * 2 * SSE_MAX_AGE_JITTER_MS) - SSE_MAX_AGE_JITTER_MS;
     sseClients.push(client);
+    return true;
   },
   removeSseClient: (id: string) => {
     const index = sseClients.findIndex(c => c.id === id);

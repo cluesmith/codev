@@ -143,7 +143,7 @@ export interface RouteContext {
   hasReactDashboard: boolean;
   getShellperManager: () => SessionManager | null;
   broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
-  addSseClient: (client: SSEClient) => void;
+  addSseClient: (client: SSEClient) => boolean;
   removeSseClient: (id: string) => void;
 }
 
@@ -1179,6 +1179,16 @@ function handleSSEEvents(
   ctx: RouteContext,
 ): void {
   const clientId = crypto.randomBytes(8).toString('hex');
+  const client: SSEClient = { res, id: clientId, connectedAt: Date.now(), maxAge: 0 };
+
+  if (!ctx.addSseClient(client)) {
+    res.writeHead(503, {
+      'Content-Type': 'application/json',
+      'Retry-After': '5',
+    });
+    res.end(JSON.stringify({ error: 'SSE capacity reached', retryAfter: 5 }));
+    return;
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -1186,13 +1196,8 @@ function handleSSEEvents(
     Connection: 'keep-alive',
   });
 
-  // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected', id: clientId })}\n\n`);
-
-  const client: SSEClient = { res, id: clientId, connectedAt: Date.now() };
-  ctx.addSseClient(client);
-
-  ctx.log('INFO', `SSE client connected: ${clientId}`);
+  res.write('retry: 5000\n\n');
 
   // Clean up on disconnect — guard against duplicate cleanup (Bugfix #580)
   let cleaned = false;
@@ -1200,7 +1205,6 @@ function handleSSEEvents(
     if (cleaned) return;
     cleaned = true;
     ctx.removeSseClient(clientId);
-    ctx.log('INFO', `SSE client disconnected: ${clientId}`);
   };
   req.on('close', cleanup);
   res.on('close', cleanup);

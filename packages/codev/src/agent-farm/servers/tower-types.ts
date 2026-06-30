@@ -50,6 +50,8 @@ export interface SSEClient {
   res: http.ServerResponse;
   id: string;
   connectedAt: number;
+  /** Per-client max-age with jitter to prevent synchronized eviction bursts */
+  maxAge: number;
 }
 
 /** Rate limiting entry for activation requests */
