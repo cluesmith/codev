@@ -92,3 +92,18 @@ ArtifactCanvas, CommentAffordance, MarkerMinimap, MarkdownView — from createEl
 (package tsconfig already had jsx: react-jsx; tests already used JSX, so build supported it).
 Behavior unchanged. artifact-canvas check-types ✓ + test ✓ (68) + build ✓; vscode check-types ✓ +
 esbuild ✓ + test:unit ✓ (516). Gate still pending.
+
+## Phase: Review
+
+### Review artifact + governance (2026-06-30)
+dev-approval approved → review phase. Wrote `codev/reviews/1107-preview-inline-comment-composer.md`
+(Summary / Files / Commits / Test Results / Architecture Updates / Lessons Learned / Things to Look
+At / How to Test). Governance routing (Spec 987 cold tier):
+- arch.md: updated the "Markdown Preview / artifact-canvas host integration" entry — old text
+  described the removed `onAddComment(line)`→`showInputBox` flow; now describes inline composer +
+  `(line,text)` seam + named messages.ts protocol. No hot arch-critical change (package-level, not
+  framework-wide; file near cap).
+- lessons-learned.md (Architecture): added the createPortal-into-innerHTML-managed-body pattern with
+  the idempotent-injection guard. No hot lessons-critical change.
+Next: open PR with review as body, `porch done --pr`, then `porch done` → single CMAP-2 advisory
+pass → pr gate.
