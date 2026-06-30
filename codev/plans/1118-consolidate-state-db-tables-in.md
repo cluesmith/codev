@@ -114,38 +114,48 @@ post-upgrade Tower boot. It is guarded by one persistent marker in global.db; on
 `state.db` has no further role and is **never read or checked again**. This is not a per-boot
 sweep — it is a one-off cutover.
 
-New module `db/consolidate.ts`:
-- `activeStateDbPath(): string` — the pre-fix `getDb()` path for this boot
-  (`<Tower-start-workspace-root>/.agent-farm/state.db`).
-- `planMigration(globalDb, file): MigrationPlan` — pure read; reports per-table row counts from
-  the active file. Reads defensively (`PRAGMA table_info`): a pre-v11 `architect` row with no
-  `workspace_path` gets it synthesized from the file's directory; a `builders` row gets
-  `workspace_path` derived from its `worktree` column (fallback: the file's directory).
-- `applyMigration(globalDb, file)` — a **straight copy**: the global tables are empty before the
-  one-off and a single `state.db` has unique PKs, so there is **no conflict resolution** — rows
-  insert cleanly (architect/builders carry their workspace_path; utils/annotations carry their
-  UUIDs). One transaction; on success, set the marker and rename the source `state.db`
-  (+ `-wal`/`-shm` sidecars) to `state.db.pre-merge-<timestamp>` (preserved, never deleted, for
-  recovery/tidiness). Other workspaces' `state.db` files are left untouched and simply
-  abandoned.
-- Idempotency: the persistent marker. Every subsequent boot reads the marker and short-circuits
-  before touching any `state.db`.
+**Reusable engine — `db/consolidate.ts`** (the single source of truth; knows nothing about the
+marker or about Tower boot):
+- `activeStateDbPath(): string` — the pre-fix `getDb()` path
+  (`<workspace-root>/.agent-farm/state.db`), used by the boot caller.
+- `planMigration(globalDb, file): MigrationPlan` — pure read; per-table counts + which rows are
+  newer/older than existing global rows. Reads defensively (`PRAGMA table_info`): a pre-v11
+  `architect` row with no `workspace_path` gets it synthesized from the file's directory; a
+  `builders` row gets `workspace_path` derived from its `worktree` column (fallback: the file's
+  directory).
+- `applyMigration(globalDb, file)` — **upsert-if-newer, always**:
+  `INSERT … ON CONFLICT(<pk>) DO UPDATE SET … WHERE excluded.started_at > started_at`. On an
+  empty target (the boot one-off) every row is "newer than nonexistent" → all insert; on a
+  non-empty target (a satellite import after the one-off already ran) a stale overlapping row
+  (e.g. an old `codev/main`) is correctly skipped. One transaction; on success, rename the source
+  `state.db` (+ `-wal`/`-shm` sidecars) to `state.db.pre-merge-<timestamp>` (preserved, never
+  deleted). This unifies the boot and manual paths on one code path with correct conflict
+  resolution for free.
 
-**Where it runs**:
-- Normal start: invoked at Tower boot in `tower-server.ts main()`, before `initInstances()`,
-  gated by the marker. (Schema v14 is already applied by the first `getGlobalDb()`.)
-- Preview: `afx tower start --dry-run-migration` prints what the active file would contribute
-  (per-table counts) and **exits without spawning the server**, opening global.db read-only so
-  the preview never applies the migration. `--apply-migration` (or plain `afx tower start`)
-  commits.
+**Caller 1 — automatic boot one-off** (`tower-server.ts main()`, before `initInstances()`):
+gated by the persistent `_consolidation` marker. If unset: `applyMigration(activeStateDbPath())`,
+then write the marker **in the same transaction as the row copy**. Once set, every subsequent
+boot reads the marker and short-circuits — `state.db` is never opened again. The marker guards
+*the automatic boot cutover only*.
+- Preview: `afx tower start --dry-run-migration` prints what the active file would contribute and
+  **exits without spawning the server**, opening global.db read-only so the preview never
+  applies. `--apply-migration` (or plain `afx tower start`) commits.
 
-**Accepted scope** (deliberate simplification): only the file active at the first post-upgrade
-boot is migrated. Rows that live *only* in another workspace's `state.db` (sessions Tower
-happened to start from elsewhere) are **not** recovered — they remain on disk for manual
-recovery. Recovery completeness therefore depends on which workspace Tower is first started from
-after the upgrade; first-starting from the dominant start-cwd (the usual aggregate, e.g. the
-audit's 40-row codev file) captures the bulk. The dry-run lets the user confirm the right file
-before committing.
+**Caller 2 — manual command `afx db consolidate <path-to-state.db>`** (fits the existing `db`
+group alongside dump/query/reset): dry-run by default, `--apply` to commit. Calls
+`applyMigration(<path>)` directly — **not marker-gated** (a deliberate, targeted user action),
+idempotent via the source rename, and **safe with Tower running** (global.db is WAL +
+`busy_timeout`; Tower never touches satellite `state.db` files post-fix, so no stop/start). This
+is the escape hatch for the accepted-loss case below: a user can pull in any *satellite*
+`state.db` whose rows weren't captured by the boot one-off. (Optional `--all` could reuse
+`known_workspaces` to sweep every remaining satellite — nice-to-have, not core.)
+
+**Accepted scope of the *automatic* one-off**: only the file active at the first post-upgrade
+boot is migrated automatically. Rows that live *only* in another workspace's `state.db` aren't
+auto-recovered — but they remain on disk and can be pulled in deliberately via
+`afx db consolidate <path>` (Caller 2). Auto-completeness depends on which workspace Tower is
+first started from after the upgrade; first-starting from the dominant start-cwd (the audit's
+40-row codev file) captures the bulk, and the manual command mops up the rest.
 
 ### D. Leave in place (per issue "what doesn't change")
 - `~/.agent-farm/global.db` location; `known_workspaces`, `terminal_sessions`,
@@ -171,8 +181,8 @@ standalone follow-up. (Architect to confirm cutting these two acceptance criteri
 - `packages/codev/src/agent-farm/db/index.ts` — `getDb()`→`getGlobalDb()`; remove
   `ensureLocalDatabase` + local migration ladder; bump `GLOBAL_CURRENT_VERSION` to 14 + add
   global migration v14; `getDbPath()`→`getGlobalDbPath()`; collapse `closeDb`.
-- `packages/codev/src/agent-farm/db/consolidate.ts` — **new**: `activeStateDbPath` /
-  `planMigration` / `applyMigration` + persistent one-off marker.
+- `packages/codev/src/agent-farm/db/consolidate.ts` — **new**: reusable engine
+  (`activeStateDbPath` / `planMigration` / `applyMigration`, upsert-if-newer). Marker-agnostic.
 - `packages/codev/src/agent-farm/state.ts` — builder functions thread `workspace_path`
   (derive in `upsertBuilder`; filter in `getBuilder`/`getBuilders`/`removeBuilder`/
   `getBuildersByStatus`/`lookupBuilderSpawningArchitect`); drop the per-workspace direct open.
@@ -180,13 +190,14 @@ standalone follow-up. (Architect to confirm cutting these two acceptance criteri
   callsite audit (scope by workspace where in scope).
 - `packages/codev/src/agent-farm/servers/overview.ts:808-836` — open `getGlobalDbPath()` /
   `getDb()` instead of `<ws>/.agent-farm/state.db`.
-- `packages/codev/src/agent-farm/servers/tower-server.ts` — invoke `applyConsolidation` at
-  boot (apply mode, marker-guarded).
+- `packages/codev/src/agent-farm/servers/tower-server.ts` — boot one-off caller: marker check →
+  `applyMigration(activeStateDbPath())` → write `_consolidation` marker (same txn).
 - `packages/codev/src/agent-farm/commands/tower.ts` — `--dry-run-migration` /
   `--apply-migration` handling in `towerStart` (preview-and-exit path).
-- `packages/codev/src/agent-farm/cli.ts` — register the new tower-start flags.
-- `packages/codev/src/agent-farm/commands/db.ts` — `--global`/local now alias the same file;
-  simplify or keep both for compat.
+- `packages/codev/src/agent-farm/commands/db.ts` — new `afx db consolidate <path>` subcommand
+  (dry-run default, `--apply`), calling the engine directly (not marker-gated). `--global`/local
+  now alias the same file; simplify or keep both for compat.
+- `packages/codev/src/agent-farm/cli.ts` — register the new tower-start flags + `db consolidate`.
 - Tests: update `__tests__/state.test.ts` mock (the four tables now come from `GLOBAL_SCHEMA`
   via `getGlobalDb`; `getDb` returns it); update `spec-755-lookup-builder.test.ts` to the
   single-file + `workspace_path`-scoped model; add `__tests__/consolidate.test.ts`. Audit other
@@ -264,6 +275,12 @@ standalone follow-up. (Architect to confirm cutting these two acceptance criteri
   not re-read, not re-renamed; global rows unchanged (no duplicates).
 - Crash-safety: simulate a crash after the migration commit but before rename — next boot
   short-circuits on the marker (no re-migrate), leaving the un-renamed file untouched.
+- Satellite upsert-if-newer (engine reuse): after a one-off, run `applyMigration` on a second
+  (satellite) file whose rows overlap an already-migrated workspace; assert the fresher existing
+  global row survives, the stale satellite copy is skipped, genuinely-new rows are added, and the
+  satellite is renamed. Not marker-gated — runs even though the boot marker is set.
+- `afx db consolidate <path>`: dry-run lists per-table counts + would-skip rows, no writes;
+  `--apply` commits + renames; second invocation on the now-renamed path is a friendly no-op.
 
 **Manual (dev-approval gate, against the local fragmented machine)**
 - `afx tower start --dry-run-migration` against the real active state.db: preview lists the
