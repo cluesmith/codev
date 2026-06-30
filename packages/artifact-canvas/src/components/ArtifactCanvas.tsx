@@ -305,50 +305,48 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setOverlayTop(el.offsetTop + lineHeight / 2);
   };
 
-  return React.createElement(
-    'div',
-    { className: 'codev-artifact-canvas', onMouseLeave: () => setActiveLine(null) },
-    React.createElement('div', {
-      ref: bodyRef,
-      className: 'codev-artifact-canvas-body',
-      onMouseOver: (e: React.MouseEvent) => activateFromTarget(e.target),
-      onFocus: (e: React.FocusEvent) => activateFromTarget(e.target),
-      onKeyDown: (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          const l = lineFromEvent(e.target);
-          if (l !== null) {
-            e.preventDefault();
-            openComposer(l); // open the inline composer for this block (#1107)
+  return (
+    <div className="codev-artifact-canvas" onMouseLeave={() => setActiveLine(null)}>
+      {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
+          React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
+      <div
+        ref={bodyRef}
+        className="codev-artifact-canvas-body"
+        onMouseOver={(e) => activateFromTarget(e.target)}
+        onFocus={(e) => activateFromTarget(e.target)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            const l = lineFromEvent(e.target);
+            if (l !== null) {
+              e.preventDefault();
+              openComposer(l); // open the inline composer for this block (#1107)
+            }
           }
-        }
-      },
-      // No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
-      // React never re-commits it (which would wipe the injected cards). Rendered with no children.
-    }),
-    // The overlay carries ONLY the "+" add-comment affordance. Existing markers render as
-    // always-visible inline cards below their block (injected above), not in this hover overlay —
-    // that's the layout fix that stopped the cards overlapping the block content (#863). The "+"
-    // is suppressed for the line whose composer is open (the composer is shown there instead).
-    activeLine !== null && activeLine !== composingLine
-      ? React.createElement(
-          'div',
-          { className: 'codev-canvas-overlay', style: { top: overlayTop } },
-          React.createElement(CommentAffordance, { line: activeLine, onActivate: openComposer }),
-        )
-      : null,
-    // Inline composer (#1107): portalled into the in-flow placeholder injected directly below the
-    // block, so the reviewer types where the comment will live. Keeping it React-owned (rather than
-    // hand-built DOM in the imperatively-managed body) gives clean state / focus / Esc handling.
-    composingLine !== null && composerHost
-      ? createPortal(
-          React.createElement(CommentComposer, {
-            line: composingLine,
-            onSubmit: submitComposer,
-            onCancel: cancelComposer,
-          }),
-          composerHost,
-        )
-      : null,
-    React.createElement(MarkerMinimap, { markers, bodyRef }),
+        }}
+      />
+      {/* The overlay carries ONLY the "+" add-comment affordance. Existing markers render as
+          always-visible inline cards below their block (injected above), not in this hover overlay —
+          that's the layout fix that stopped the cards overlapping the block content (#863). The "+"
+          is suppressed for the line whose composer is open (the composer is shown there instead). */}
+      {activeLine !== null && activeLine !== composingLine ? (
+        <div className="codev-canvas-overlay" style={{ top: overlayTop }}>
+          <CommentAffordance line={activeLine} onActivate={openComposer} />
+        </div>
+      ) : null}
+      {/* Inline composer (#1107): portalled into the in-flow placeholder injected directly below the
+          block, so the reviewer types where the comment will live. Keeping it React-owned (rather than
+          hand-built DOM in the imperatively-managed body) gives clean state / focus / Esc handling. */}
+      {composingLine !== null && composerHost
+        ? createPortal(
+            <CommentComposer
+              line={composingLine}
+              onSubmit={submitComposer}
+              onCancel={cancelComposer}
+            />,
+            composerHost,
+          )
+        : null}
+      <MarkerMinimap markers={markers} bodyRef={bodyRef} />
+    </div>
   );
 }

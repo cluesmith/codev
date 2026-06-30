@@ -15,8 +15,10 @@ export interface MarkdownViewProps {
  */
 export function MarkdownView({ source }: MarkdownViewProps): React.ReactElement {
   const html = React.useMemo(() => renderMarkdown(source), [source]);
-  return React.createElement('div', {
-    className: 'codev-artifact-canvas-rendered',
-    dangerouslySetInnerHTML: { __html: html },
-  });
+  return (
+    <div
+      className="codev-artifact-canvas-rendered"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }

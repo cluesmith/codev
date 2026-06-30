@@ -53,42 +53,36 @@ export function CommentComposer({ line, onSubmit, onCancel }: CommentComposerPro
 
   const empty = text.trim().length === 0;
 
-  return React.createElement(
-    'div',
-    { className: 'codev-canvas-comment-composer' },
-    React.createElement('textarea', {
-      ref: textareaRef,
-      className: 'codev-canvas-comment-composer-input',
-      // Human-facing line numbers are 1-based; the data model stays 0-based (spec D5).
-      'aria-label': `Add comment on line ${line + 1}`,
-      placeholder: 'Add a review comment… (⌘/Ctrl+Enter to submit, Esc to cancel)',
-      rows: 3,
-      value: text,
-      onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value),
-      onKeyDown,
-    }),
-    React.createElement(
-      'div',
-      { className: 'codev-canvas-comment-composer-actions' },
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          className: 'codev-canvas-comment-composer-cancel',
-          onClick: onCancel,
-        },
-        'Cancel',
-      ),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          className: 'codev-canvas-comment-composer-submit',
-          onClick: submit,
-          disabled: empty,
-        },
-        'Comment',
-      ),
-    ),
+  return (
+    <div className="codev-canvas-comment-composer">
+      <textarea
+        ref={textareaRef}
+        className="codev-canvas-comment-composer-input"
+        // Human-facing line numbers are 1-based; the data model stays 0-based (spec D5).
+        aria-label={`Add comment on line ${line + 1}`}
+        placeholder="Add a review comment… (⌘/Ctrl+Enter to submit, Esc to cancel)"
+        rows={3}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
+      />
+      <div className="codev-canvas-comment-composer-actions">
+        <button
+          type="button"
+          className="codev-canvas-comment-composer-cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="codev-canvas-comment-composer-submit"
+          onClick={submit}
+          disabled={empty}
+        >
+          Comment
+        </button>
+      </div>
+    </div>
   );
 }
