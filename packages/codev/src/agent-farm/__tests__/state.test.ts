@@ -542,7 +542,7 @@ describe('State Management', () => {
         type: 'spec' as const,
       });
 
-      state.clearRuntime();
+      state.clearRuntime(WS);
 
       // Architects survive
       const architects = state.getArchitects(WS);
@@ -555,6 +555,24 @@ describe('State Management', () => {
       expect(result.builders).toEqual([]);
       expect(result.utils).toEqual([]);
       expect(result.annotations).toEqual([]);
+    });
+
+    it('Issue #1118: is workspace-scoped — clearRuntime(A) does not wipe B\'s builders', () => {
+      // Two workspaces' builders coexist in the shared global.db.
+      state.upsertBuilder({
+        id: 'A-1', name: 'a', status: 'implementing' as const, phase: 'init',
+        worktree: '/workspace/aaa/.builders/A-1', branch: 'm', type: 'spec' as const,
+      });
+      state.upsertBuilder({
+        id: 'B-1', name: 'b', status: 'implementing' as const, phase: 'init',
+        worktree: '/workspace/bbb/.builders/B-1', branch: 'm', type: 'spec' as const,
+      });
+
+      // Stopping workspace A must not touch workspace B.
+      state.clearRuntime('/workspace/aaa');
+
+      expect(state.getBuilders('/workspace/aaa')).toHaveLength(0);
+      expect(state.getBuilders('/workspace/bbb').map(b => b.id)).toEqual(['B-1']);
     });
 
     it('differs from clearState which wipes architects too', () => {
@@ -663,7 +681,7 @@ describe('State Management', () => {
       });
 
       // Simulate `afx workspace stop` (legacy path):
-      state.clearRuntime();
+      state.clearRuntime(WS_A);
 
       // Architects survive in the workspace's scope.
       expect(state.getArchitects(WS_A).map(a => a.name).sort()).toEqual(['main', 'ob-refine']);

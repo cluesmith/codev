@@ -422,22 +422,24 @@ export function clearState(): void {
  * Spec 786: clear runtime state but preserve the architect registry.
  *
  * Used by `afx workspace stop` so sibling architects survive a graceful stop/
- * start cycle. The `architect` table is the durable registration; `builders`,
- * `utils`, and `annotations` are runtime concerns and get wiped as before.
+ * start cycle. The `architect` table is the durable registration; `builders`
+ * are the runtime concern and get wiped.
+ *
+ * Issue #1118: now that all workspaces share one `global.db`, this MUST be
+ * scoped by `workspace_path` — an unscoped `DELETE FROM builders` would wipe
+ * every other workspace's builders when one workspace stops. `builders` is
+ * workspace-scoped (composite PK), so the delete filters by `workspace_path`.
+ * `utils`/`annotations` are global (UUID-keyed, no workspace column) and
+ * vestigial (no producers), so they are intentionally left untouched here to
+ * avoid a cross-workspace wipe; the full-wipe `clearState()` still clears them.
  *
  * `clearState()` (the full-wipe variant) is preserved for callers that genuinely
- * want everything gone (uninstall / nuke flows / `handleWorkspaceStopAll`).
+ * want everything gone (uninstall / nuke flows).
  */
-export function clearRuntime(): void {
+export function clearRuntime(workspacePath: string): void {
   const db = getDb();
-
-  const clear = db.transaction(() => {
-    db.prepare('DELETE FROM builders').run();
-    db.prepare('DELETE FROM utils').run();
-    db.prepare('DELETE FROM annotations').run();
-  });
-
-  clear();
+  const ws = canonicalize(workspacePath);
+  db.prepare('DELETE FROM builders WHERE workspace_path = ?').run(ws);
 }
 
 /**

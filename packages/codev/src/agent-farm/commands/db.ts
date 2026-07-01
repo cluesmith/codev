@@ -175,8 +175,19 @@ export function dbStats(options: { global?: boolean } = {}): void {
  */
 export function dbConsolidate(stateDbPath: string, options: { apply?: boolean } = {}): void {
   const sourcePath = resolve(stateDbPath);
+
+  // Idempotent repeat-runs (Issue #1118, codex review): re-running the same
+  // command after a successful `--apply` renamed the source is a friendly no-op,
+  // not a hard error — the work is already done.
   if (!existsSync(sourcePath)) {
-    fatal(`No state.db found at ${sourcePath}`);
+    logger.info(`Nothing to consolidate — no state.db at ${sourcePath} (already migrated?).`);
+    return;
+  }
+  // Guard against re-consolidating a file this command already archived, which
+  // would migrate it again (harmlessly, all rows skipped) and double-rename it.
+  if (/\.pre-merge-/.test(sourcePath)) {
+    logger.info(`Skipping ${sourcePath} — it is already a consolidated archive (*.pre-merge-*).`);
+    return;
   }
 
   const db = getGlobalDb();

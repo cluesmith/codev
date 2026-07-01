@@ -43,7 +43,7 @@ export async function stop(): Promise<void> {
       // `afx workspace stop` + `start`. The full-wipe `clearState()` would
       // have undone Tower's intentional-stop preservation. Use `clearRuntime`
       // for graceful stop; `clearState` remains for uninstall / nuke flows.
-      clearRuntime();
+      clearRuntime(workspacePath);
       return;
     }
 
@@ -96,7 +96,7 @@ export async function stop(): Promise<void> {
   }
 
   // Spec 786 Phase 3: clear runtime state but preserve architects (see top).
-  clearRuntime();
+  clearRuntime(workspacePath);
 
   logger.blank();
   if (stopped > 0) {

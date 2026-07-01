@@ -182,3 +182,30 @@ describe('Database Schema', () => {
     });
   });
 });
+
+// Issue #1118 (codex review): `afx db consolidate` must be idempotent on
+// repeat-runs. Both guards return before opening global.db, so no DB is touched.
+describe('dbConsolidate idempotency (Issue #1118)', () => {
+  const idemDir = resolve(process.cwd(), '.test-db-idem');
+
+  beforeEach(() => {
+    if (existsSync(idemDir)) rmSync(idemDir, { recursive: true });
+    mkdirSync(idemDir, { recursive: true });
+  });
+  afterEach(() => {
+    if (existsSync(idemDir)) rmSync(idemDir, { recursive: true });
+  });
+
+  it('is a friendly no-op on a missing source (re-run after the source was renamed)', async () => {
+    const { dbConsolidate } = await import('../commands/db.js');
+    expect(() => dbConsolidate(resolve(idemDir, 'already-migrated-state.db'))).not.toThrow();
+  });
+
+  it('skips an already-archived *.pre-merge-* file instead of re-migrating it', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const { dbConsolidate } = await import('../commands/db.js');
+    const archived = resolve(idemDir, 'state.db.pre-merge-2026-01-01T00-00-00-000Z');
+    writeFileSync(archived, 'x'); // exists + matches pattern → early skip
+    expect(() => dbConsolidate(archived)).not.toThrow();
+  });
+});
