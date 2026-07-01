@@ -9,13 +9,15 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, rmSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import {
   planMigration,
   applyMigration,
   isConsolidationDone,
+  runBootConsolidation,
 } from '../db/consolidate.js';
 
 const testDir = resolve(process.cwd(), '.test-consolidate');
@@ -242,5 +244,70 @@ describe('Issue #1118 — consolidation engine', () => {
     const renamed = readdirSync(join(wsA, '.agent-farm')).filter((f) => f.includes('.pre-merge-'));
     expect(renamed).toHaveLength(1);
     expect(globalDb.prepare('SELECT COUNT(*) AS n FROM architect').get()).toEqual({ n: 1 });
+  });
+});
+
+// The actual boot path (wired into tower-server.ts). Exercises the real
+// activeStateDbPath() (getConfig().stateDir resolved from cwd) + strict marker.
+describe('Issue #1118 — runBootConsolidation (strict boot one-off)', () => {
+  const origCwd = process.cwd();
+  let bootDir: string;
+  let globalDb: Database.Database;
+
+  beforeEach(() => {
+    bootDir = mkdtempSync(join(tmpdir(), 'boot-consolidation-'));
+    mkdirSync(join(bootDir, 'codev'), { recursive: true }); // findWorkspaceRoot marker
+    mkdirSync(join(bootDir, '.agent-farm'), { recursive: true });
+    process.chdir(bootDir);
+    globalDb = new Database(':memory:');
+    globalDb.exec(GLOBAL_SCHEMA);
+  });
+
+  afterEach(() => {
+    process.chdir(origCwd);
+    globalDb.close();
+    rmSync(bootDir, { recursive: true, force: true });
+  });
+
+  /** Seed the active state.db (the file activeStateDbPath() resolves to). */
+  function seedActiveStateDb(): string {
+    const p = join(bootDir, '.agent-farm', 'state.db');
+    const s = new Database(p);
+    s.exec(GLOBAL_SCHEMA);
+    s.prepare(
+      "INSERT INTO architect (workspace_path, id, pid, port, cmd, started_at) VALUES (?, 'main', 1, 0, 'claude', '2026-06-01 10:00:00')",
+    ).run(realpathSync(bootDir));
+    s.close();
+    return p;
+  }
+
+  it('first boot migrates the active state.db, sets the marker, and renames the source', () => {
+    const src = seedActiveStateDb();
+    const result = runBootConsolidation(globalDb);
+
+    expect(result?.migrated).toBe(true);
+    expect(isConsolidationDone(globalDb)).toBe(true);
+    expect(existsSync(src)).toBe(false); // renamed to *.pre-merge-*
+    expect(globalDb.prepare('SELECT COUNT(*) AS n FROM architect').get()).toEqual({ n: 1 });
+  });
+
+  it('is a no-op once the marker is set — does not reopen/re-migrate state.db', () => {
+    seedActiveStateDb();
+    runBootConsolidation(globalDb); // first boot sets the marker
+
+    // A new active state.db appears; the marker means it is NOT touched.
+    const src2 = seedActiveStateDb();
+    expect(runBootConsolidation(globalDb)).toBeNull();
+    expect(existsSync(src2)).toBe(true); // untouched
+    expect(globalDb.prepare('SELECT COUNT(*) AS n FROM architect').get()).toEqual({ n: 1 });
+  });
+
+  it('strict: marks done even when the active state.db is absent (then no-ops)', () => {
+    // No state.db seeded at all.
+    const result = runBootConsolidation(globalDb);
+
+    expect(result?.migrated).toBe(false);
+    expect(isConsolidationDone(globalDb)).toBe(true); // marked done regardless
+    expect(runBootConsolidation(globalDb)).toBeNull(); // subsequent boots no-op
   });
 });

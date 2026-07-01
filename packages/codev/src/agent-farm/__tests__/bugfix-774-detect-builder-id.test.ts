@@ -86,6 +86,18 @@ describe('detectCurrentBuilderId — issue #774 / #1118', () => {
     expect(detectCurrentBuilderId()).toBe('builder-bugfix-1599');
   });
 
+  it('resolves the INNER builder for a nested worktree (greedy .builders match — codex iter3)', () => {
+    // Unsupported anti-pattern (spawn from inside a worktree), but the parse
+    // must resolve the LAST `/.builders/`, not the first.
+    const innerWs = join(workspacePath, '.builders', 'pir-outer');
+    const innerWorktree = join(innerWs, '.builders', 'bugfix-inner');
+    mkdirSync(innerWorktree, { recursive: true });
+    seedBuilder(dbState.globalDbPath, innerWs, 'builder-bugfix-inner', innerWorktree);
+
+    process.chdir(innerWorktree);
+    expect(detectCurrentBuilderId()).toBe('builder-bugfix-inner');
+  });
+
   // Issue #1094: unverifiable id inside a confirmed worktree must THROW.
 
   it('throws (not bare name) when global.db is missing', () => {

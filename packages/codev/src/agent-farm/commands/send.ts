@@ -29,8 +29,13 @@ const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
  */
 export function detectWorkspaceRoot(): string | null {
   let dir = process.cwd();
-  // If inside .builders/<id>/, the workspace root is two levels up
-  const buildersMatch = dir.match(/^(.+?)\/\.builders\/[^/]+/);
+  // If inside .builders/<id>/, the workspace root is the prefix before the
+  // LAST `/.builders/`. Greedy `.+` (not lazy `.+?`) so a nested worktree path
+  // like `<repo>/.builders/a/.builders/b` resolves the inner builder's
+  // workspace, not the outer one — mirrors deriveWorkspaceFromWorktree's
+  // lastIndexOf (Issue #1118 codex review). Nesting is an unsupported
+  // anti-pattern, but the parse should be consistent with the rest of the code.
+  const buildersMatch = dir.match(/^(.+)\/\.builders\/[^/]+/);
   if (buildersMatch) return buildersMatch[1];
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
@@ -82,32 +87,32 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
 }
 
 /**
- * Detect the current builder ID from worktree path.
+ * Detect the current builder ID from the worktree path.
  *
- * Looks up the canonical builder ID by opening the **workspace's** state.db
- * directly (not the singleton). When CWD is `.builders/<id>/`, the singleton
- * `getDb()` resolves to the worktree's own state.db — which is empty because
- * the worktree is itself a full git checkout with its own `codev/`. Reading
- * that empty DB causes the lookup to miss; that miss must NOT fall back to the
- * worktree directory name (e.g. `bugfix-774`), because the canonical ID is
- * `builder-bugfix-774` and a non-canonical id misroutes affinity routing
- * downstream (issue #774, then issue #1094 for the silent-fallback class).
+ * Issue #1118: builders live in the single shared `global.db`, scoped by
+ * `workspace_path` (per-workspace `state.db` is retired). This resolves the
+ * canonical builder ID by reading `global.db` (read-only), scoped to the
+ * worktree's owning workspace — NOT the singleton `getDb()`. The miss must NOT
+ * fall back to the bare worktree directory name (e.g. `bugfix-774`), because the
+ * canonical ID is `builder-bugfix-774` and a non-canonical id misroutes affinity
+ * routing downstream (issue #774, then issue #1094 for the silent-fallback class).
  *
- * Mirrors the per-workspace-handle pattern used by
- * `lookupBuilderSpawningArchitect` in state.ts.
+ * Mirrors the workspace-scoped lookup used by `lookupBuilderSpawningArchitect`
+ * in state.ts.
  *
  * Contract:
  *   - Returns `null` when CWD is not inside a builder worktree (not a builder).
- *   - Returns the canonical builder ID when it can be verified against state.db.
+ *   - Returns the canonical builder ID when it can be verified against global.db.
  *   - **Throws `BuilderIdResolutionError`** when CWD *is* a builder worktree but
- *     the canonical ID cannot be verified (state.db missing, unopenable, or no
+ *     the canonical ID cannot be verified (global.db missing, unopenable, or no
  *     matching row). Failing loud here is deliberate: returning a bare,
  *     unverified id silently misroutes `afx send architect` to `main` (#1094).
  */
 export function detectCurrentBuilderId(): string | null {
   const cwd = process.cwd();
-  // Builder worktrees are at .builders/<dir-name>/
-  const match = cwd.match(/^(.+?)\/\.builders\/([^/]+)/);
+  // Builder worktrees are at .builders/<dir-name>/. Greedy `.+` (not lazy `.+?`)
+  // so a nested worktree resolves the INNER builder (the LAST `/.builders/`).
+  const match = cwd.match(/^(.+)\/\.builders\/([^/]+)/);
   if (!match) return null;
 
   const workspacePath = match[1];
