@@ -29,6 +29,7 @@ export interface DbArchitect {
  * Database row type for builders table
  */
 export interface DbBuilder {
+  workspace_path: string;   // Issue #1118: builders are workspace-scoped (composite PK with id)
   id: string;
   name: string;
   port: number;

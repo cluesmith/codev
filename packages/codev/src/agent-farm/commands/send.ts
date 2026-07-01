@@ -14,6 +14,8 @@ import Database from 'better-sqlite3';
 import type { SendOptions } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
+import { getGlobalDbPath } from '../db/index.js';
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
@@ -27,8 +29,13 @@ const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
  */
 export function detectWorkspaceRoot(): string | null {
   let dir = process.cwd();
-  // If inside .builders/<id>/, the workspace root is two levels up
-  const buildersMatch = dir.match(/^(.+?)\/\.builders\/[^/]+/);
+  // If inside .builders/<id>/, the workspace root is the prefix before the
+  // LAST `/.builders/`. Greedy `.+` (not lazy `.+?`) so a nested worktree path
+  // like `<repo>/.builders/a/.builders/b` resolves the inner builder's
+  // workspace, not the outer one — mirrors deriveWorkspaceFromWorktree's
+  // lastIndexOf (Issue #1118 codex review). Nesting is an unsupported
+  // anti-pattern, but the parse should be consistent with the rest of the code.
+  const buildersMatch = dir.match(/^(.+)\/\.builders\/[^/]+/);
   if (buildersMatch) return buildersMatch[1];
   // Walk up looking for markers
   for (let i = 0; i < 20; i++) {
@@ -80,54 +87,55 @@ export function describeStateDbOpenFailure(dbPath: string, worktreeDirName: stri
 }
 
 /**
- * Detect the current builder ID from worktree path.
+ * Detect the current builder ID from the worktree path.
  *
- * Looks up the canonical builder ID by opening the **workspace's** state.db
- * directly (not the singleton). When CWD is `.builders/<id>/`, the singleton
- * `getDb()` resolves to the worktree's own state.db — which is empty because
- * the worktree is itself a full git checkout with its own `codev/`. Reading
- * that empty DB causes the lookup to miss; that miss must NOT fall back to the
- * worktree directory name (e.g. `bugfix-774`), because the canonical ID is
- * `builder-bugfix-774` and a non-canonical id misroutes affinity routing
- * downstream (issue #774, then issue #1094 for the silent-fallback class).
+ * Issue #1118: builders live in the single shared `global.db`, scoped by
+ * `workspace_path` (per-workspace `state.db` is retired). This resolves the
+ * canonical builder ID by reading `global.db` (read-only), scoped to the
+ * worktree's owning workspace — NOT the singleton `getDb()`. The miss must NOT
+ * fall back to the bare worktree directory name (e.g. `bugfix-774`), because the
+ * canonical ID is `builder-bugfix-774` and a non-canonical id misroutes affinity
+ * routing downstream (issue #774, then issue #1094 for the silent-fallback class).
  *
- * Mirrors the per-workspace-handle pattern used by
- * `lookupBuilderSpawningArchitect` in state.ts.
+ * Mirrors the workspace-scoped lookup used by `lookupBuilderSpawningArchitect`
+ * in state.ts.
  *
  * Contract:
  *   - Returns `null` when CWD is not inside a builder worktree (not a builder).
- *   - Returns the canonical builder ID when it can be verified against state.db.
+ *   - Returns the canonical builder ID when it can be verified against global.db.
  *   - **Throws `BuilderIdResolutionError`** when CWD *is* a builder worktree but
- *     the canonical ID cannot be verified (state.db missing, unopenable, or no
+ *     the canonical ID cannot be verified (global.db missing, unopenable, or no
  *     matching row). Failing loud here is deliberate: returning a bare,
  *     unverified id silently misroutes `afx send architect` to `main` (#1094).
  */
 export function detectCurrentBuilderId(): string | null {
   const cwd = process.cwd();
-  // Builder worktrees are at .builders/<dir-name>/
-  const match = cwd.match(/^(.+?)\/\.builders\/([^/]+)/);
+  // Builder worktrees are at .builders/<dir-name>/. Greedy `.+` (not lazy `.+?`)
+  // so a nested worktree resolves the INNER builder (the LAST `/.builders/`).
+  const match = cwd.match(/^(.+)\/\.builders\/([^/]+)/);
   if (!match) return null;
 
   const workspacePath = match[1];
   const worktreeDirName = match[2];
 
-  // Open the WORKSPACE's state.db readonly — not the singleton getDb(),
-  // which resolves to the worktree-local state.db when CWD is inside
-  // .builders/<id>/. From here on we are unambiguously in a builder worktree,
-  // so any inability to resolve the canonical id is an ERROR condition, not a
-  // "this isn't a builder" condition.
-  const dbPath = join(workspacePath, '.agent-farm', 'state.db');
+  // Issue #1118: builders live in the single shared global.db, scoped by
+  // workspace_path (state.db is retired). Open global.db readonly and scope the
+  // query to THIS workspace — so a same-id builder in another repo can't be
+  // matched. From here on we are unambiguously in a builder worktree, so any
+  // inability to resolve the canonical id is an ERROR condition, not a "this
+  // isn't a builder" condition (issue #1094 anti-spoofing).
+  const dbPath = getGlobalDbPath();
   if (!existsSync(dbPath)) {
     throw new BuilderIdResolutionError(
       `Cannot resolve builder identity for worktree '${worktreeDirName}': ` +
-        `workspace state.db not found at ${dbPath} (is Tower running for this workspace?). ` +
+        `global.db not found at ${dbPath} (has Tower ever run?). ` +
         `Refusing to send with an unverified identity — it would silently misroute to 'main' (issue #1094).`,
     );
   }
 
-  let wsDb: Database.Database;
+  let gdb: Database.Database;
   try {
-    wsDb = new Database(dbPath, { readonly: true });
+    gdb = new Database(dbPath, { readonly: true });
   } catch (err) {
     throw new BuilderIdResolutionError(describeStateDbOpenFailure(dbPath, worktreeDirName, err));
   }
@@ -135,11 +143,13 @@ export function detectCurrentBuilderId(): string | null {
   try {
     // Match by canonical worktree path first (most precise), then fall back
     // to a tail-segment match for legacy rows that recorded a different
-    // absolute prefix.
+    // absolute prefix. Scoped by workspace_path so only this workspace's
+    // builders are considered.
+    const ws = normalizeWorkspacePath(workspacePath);
     const canonicalWorktree = join(workspacePath, '.builders', worktreeDirName);
-    const rows = wsDb
-      .prepare('SELECT id, worktree FROM builders WHERE worktree IS NOT NULL')
-      .all() as Array<{ id: string; worktree: string }>;
+    const rows = gdb
+      .prepare('SELECT id, worktree FROM builders WHERE workspace_path = ? AND worktree IS NOT NULL')
+      .all(ws) as Array<{ id: string; worktree: string }>;
 
     const exact = rows.find(r => r.worktree === canonicalWorktree);
     if (exact) return exact.id;
@@ -149,11 +159,11 @@ export function detectCurrentBuilderId(): string | null {
 
     throw new BuilderIdResolutionError(
       `Cannot resolve canonical builder id for worktree '${worktreeDirName}': ` +
-        `no matching builder row in ${dbPath} (the worktree may be stale or unregistered). ` +
+        `no matching builder row in ${dbPath} for workspace ${ws} (the worktree may be stale or unregistered). ` +
         `Refusing to send with an unverified identity — it would silently misroute to 'main' (issue #1094).`,
     );
   } finally {
-    wsDb.close();
+    gdb.close();
   }
 }
 

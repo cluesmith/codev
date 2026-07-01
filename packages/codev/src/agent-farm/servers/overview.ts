@@ -32,6 +32,8 @@ import type {
   OverviewData,
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
+import { getGlobalDbPath } from '../db/index.js';
+import { normalizeWorkspacePath } from './tower-utils.js';
 
 // =============================================================================
 // Status YAML parser (lightweight, no library dependency)
@@ -805,22 +807,22 @@ export class OverviewCache {
       builders = builders.filter(b => b.roleId !== null && activeBuilderRoleIds.has(b.roleId));
     }
 
-    // Enrich issueId and spawnedByArchitect from state.db.builders — protocol-
+    // Enrich issueId and spawnedByArchitect from the builders table — protocol-
     // agnostic (fixes #664 for issueId; adds spawnedByArchitect per Spec 823).
-    // Open DB directly using workspaceRoot to avoid singleton path issues when
-    // Tower serves multiple workspaces.
+    // Issue #1118: builders now live in the single shared global.db, scoped by
+    // workspace_path; read that file (read-only) and scope to this workspace.
     //
     // Spec 823: dropped the `WHERE issue_number IS NOT NULL` filter so soft-mode
     // builders (issue_number=null) also enrich their spawnedByArchitect. Each
     // field is applied conditionally on per-row non-nullness.
     try {
-      const dbPath = path.join(workspaceRoot, '.agent-farm', 'state.db');
+      const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
         const db = new Database(dbPath, { readonly: true });
         try {
           const rows = db.prepare(
-            'SELECT worktree, issue_number, spawned_by_architect FROM builders',
-          ).all() as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
+            'SELECT worktree, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
+          ).all(normalizeWorkspacePath(workspaceRoot)) as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
           for (const row of rows) {
             const builder = builders.find(b => b.worktreePath === row.worktree);
             if (!builder) continue;

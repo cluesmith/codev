@@ -50,6 +50,8 @@ import {
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
+import { getGlobalDb } from '../db/index.js';
+import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { validateHost } from '../utils/server-utils.js';
 import { version } from '../../version.js';
@@ -426,6 +428,20 @@ server.listen(port, bindHost, async () => {
 
   // Spec 403: Start send buffer for typing-aware message delivery
   startSendBuffer(log);
+
+  // Issue #1118: one-time state.db → global.db consolidation. Runs once ever
+  // (strict `_consolidation` marker), BEFORE initInstances() reads architect /
+  // builder rows. Migrates this boot's active state.db; satellite files are
+  // recovered on demand via `afx db consolidate <path>`.
+  try {
+    const consolidation = runBootConsolidation(getGlobalDb());
+    if (consolidation?.migrated) {
+      const moved = consolidation.stats.reduce((n, s) => n + s.inserted + s.updated, 0);
+      log('INFO', `state.db consolidation: migrated ${moved} row(s) from ${consolidation.sourcePath} into global.db; source renamed to ${consolidation.renamedTo}`);
+    }
+  } catch (err) {
+    log('ERROR', `state.db consolidation failed: ${(err as Error).message}`);
+  }
 
   // TICK-001: Reconcile terminal sessions from previous run.
   // Must run BEFORE initInstances() so that API request handlers

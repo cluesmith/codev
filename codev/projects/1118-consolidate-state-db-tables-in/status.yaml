@@ -1,0 +1,29 @@
+id: '1118'
+title: consolidate-state-db-tables-in
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-06-29T23:26:42.680Z'
+    approved_at: '2026-06-30T06:35:22.421Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-06-30T07:12:02.675Z'
+    approved_at: '2026-07-01T06:50:38.564Z'
+  pr:
+    status: pending
+    requested_at: '2026-07-01T07:29:33.516Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-29T23:21:05.933Z'
+updated_at: '2026-07-01T07:29:33.518Z'
+pr_history:
+  - phase: review
+    pr_number: 1127
+    branch: builder/pir-1118
+    created_at: '2026-07-01T06:55:19.034Z'
+pr_ready_for_human: true

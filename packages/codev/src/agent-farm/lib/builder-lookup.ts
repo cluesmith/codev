@@ -25,7 +25,10 @@ import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
  * Find a builder by issue number. Local state first, then Tower fallback.
  */
 export function findBuilderByIssue(issueNumber: number): Builder | null {
-  const local = getBuilders().find((b) => b.issueNumber === issueNumber);
+  // Issue #1118: scope to this workspace (matches loadTowerBuilderRows below),
+  // now that builders from every workspace share one global.db.
+  const workspaceRoot = normalizeWorkspacePath(getConfig().workspaceRoot);
+  const local = getBuilders(workspaceRoot).find((b) => b.issueNumber === issueNumber);
   if (local) return local;
 
   const rows = loadTowerBuilderRows();
@@ -43,10 +46,13 @@ export function findBuilderByIssue(issueNumber: number): Builder | null {
  * Tower's terminal_sessions rows.
  */
 export function findBuilderById(id: string): Builder | null {
-  const exact = getBuilder(id);
+  // Issue #1118: scope to this workspace so a same-id builder in another
+  // workspace can't shadow this one's lookup.
+  const workspaceRoot = normalizeWorkspacePath(getConfig().workspaceRoot);
+  const exact = getBuilder(id, workspaceRoot);
   if (exact) return exact;
 
-  const local = resolveAgentName(id, getBuilders());
+  const local = resolveAgentName(id, getBuilders(workspaceRoot));
   if (local.builder) return local.builder;
   if (local.ambiguous) {
     logger.error(`Ambiguous builder ID "${id}". Matches:`);

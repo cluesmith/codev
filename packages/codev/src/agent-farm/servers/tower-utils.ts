@@ -71,18 +71,10 @@ export function startRateLimitCleanup(): ReturnType<typeof setInterval> {
 // Path Utilities
 // ============================================================================
 
-/**
- * Normalize a workspace path to its canonical form for consistent SQLite storage.
- * Uses realpath to resolve symlinks and relative paths.
- */
-export function normalizeWorkspacePath(workspacePath: string): string {
-  try {
-    return fs.realpathSync(workspacePath);
-  } catch {
-    // Path doesn't exist yet, normalize without realpath
-    return path.resolve(workspacePath);
-  }
-}
+// Issue #1118: normalizeWorkspacePath moved to the leaf module utils/workspace-path.ts
+// so the data layer (state.ts, db/consolidate.ts) can share it without importing
+// the server layer. Re-exported here so existing server-side importers are unchanged.
+export { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 /**
  * Get workspace name from path.

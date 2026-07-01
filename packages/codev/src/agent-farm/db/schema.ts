@@ -5,8 +5,15 @@
  */
 
 /**
- * Local state schema (state.db)
- * Stores dashboard state: architect, builders, utils, annotations
+ * Legacy local state schema (the retired per-workspace state.db).
+ *
+ * Issue #1118: state.db is retired — its four tables now live in global.db
+ * (see GLOBAL_SCHEMA below). LOCAL_SCHEMA is no longer exec'd by the production
+ * `getDb()` path. It is retained as the canonical description of a *legacy*
+ * state.db's shape — used by the one-time consolidation engine's test fixtures
+ * (db/consolidate.ts) and by older migration tests. Note its `builders` table is
+ * keyed by `id` alone (the pre-#1118 shape); global.db's `builders` is keyed by
+ * the composite `(workspace_path, id)`.
  */
 export const LOCAL_SCHEMA = `
 -- Schema versioning
@@ -154,5 +161,86 @@ CREATE TABLE IF NOT EXISTS cron_tasks (
   last_output TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   UNIQUE(workspace_path, task_name)
+);
+
+-- ===========================================================================
+-- Issue #1118: tables absorbed from the retired per-workspace state.db.
+-- architect/utils/annotations move as-is; builders is RESHAPED to be
+-- workspace-scoped (composite PK), mirroring architect (Bugfix #826) — builder
+-- ids are <protocol>-<issueNumber>, unique within a workspace but reused across
+-- repos, so a single shared table must disambiguate by workspace_path.
+-- ===========================================================================
+
+-- Architect sessions (Spec 755 multi-architect; Bugfix #826 workspace-scoped;
+-- Issue #832 session_id). id is the architect's name ('main', siblings).
+CREATE TABLE IF NOT EXISTS architect (
+  workspace_path TEXT NOT NULL,
+  id TEXT NOT NULL,
+  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL,
+  cmd TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  terminal_id TEXT,
+  session_id TEXT,
+  PRIMARY KEY (workspace_path, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_architect_workspace ON architect(workspace_path);
+
+-- Builder sessions. Issue #1118: workspace_path + composite PK so the same
+-- builder id can exist in multiple workspaces without collision.
+CREATE TABLE IF NOT EXISTS builders (
+  workspace_path TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'spawning'
+    CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
+  phase TEXT NOT NULL DEFAULT '',
+  worktree TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'spec'
+    CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix', 'pir')),
+  task_text TEXT,
+  protocol_name TEXT,
+  issue_number TEXT,
+  terminal_id TEXT,
+  spawned_by_architect TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (workspace_path, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
+CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
+
+CREATE TRIGGER IF NOT EXISTS builders_updated_at
+  AFTER UPDATE ON builders
+  FOR EACH ROW
+  BEGIN
+    UPDATE builders SET updated_at = datetime('now')
+      WHERE workspace_path = NEW.workspace_path AND id = NEW.id;
+  END;
+
+-- Utility terminals (UUID-keyed; moved as-is).
+CREATE TABLE IF NOT EXISTS utils (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
+  terminal_id TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Annotations / file viewers (UUID-keyed; moved as-is).
+CREATE TABLE IF NOT EXISTS annotations (
+  id TEXT PRIMARY KEY,
+  file TEXT NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
+  parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
+  parent_id TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;

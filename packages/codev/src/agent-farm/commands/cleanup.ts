@@ -377,8 +377,9 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     }
   }
 
-  // Remove from state
-  removeBuilder(builder.id);
+  // Remove from state. Issue #1118: scope by workspace (the builder was loaded
+  // via loadState(config.workspaceRoot), so its row is keyed to this workspace).
+  removeBuilder(builder.id, config.workspaceRoot);
 
   // Clean up porch state (codev/projects/NNNN-*/) so fresh kickoff gets fresh state
   if (!isShellMode) {

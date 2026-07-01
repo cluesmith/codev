@@ -29,13 +29,16 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockFetchCurrentUser } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockFetchCurrentUser, dbState } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
   mockFetchRecentlyClosed: vi.fn(),
   mockFetchMergedPRs: vi.fn(),
   mockLoadProtocol: vi.fn(),
   mockFetchCurrentUser: vi.fn(),
+  // Issue #1118: overview reads builders from getGlobalDbPath(); point it at a
+  // per-test path under tmpDir so each test is isolated.
+  dbState: { globalDbPath: '' },
 }));
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
@@ -53,6 +56,15 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
 vi.mock('../../commands/porch/protocol.js', () => ({
   loadProtocol: mockLoadProtocol,
 }));
+
+// Issue #1118: builders now live in global.db; redirect getGlobalDbPath to a
+// per-test file (set in beforeEach) so the enrichment read is isolated.
+vi.mock('../db/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../db/index.js')>();
+  return { ...actual, getGlobalDbPath: () => dbState.globalDbPath };
+});
+
+import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 
 // ============================================================================
 // Temp directory helper
@@ -113,15 +125,27 @@ function createStateDb(
   root: string,
   rows: Array<{ worktree: string; issue_number?: number | string | null; spawned_by_architect?: string | null }>,
 ): void {
-  const agentFarmDir = path.join(root, '.agent-farm');
-  fs.mkdirSync(agentFarmDir, { recursive: true });
-  const db = new Database(path.join(agentFarmDir, 'state.db'));
-  db.exec('CREATE TABLE IF NOT EXISTS builders (worktree TEXT, issue_number TEXT, spawned_by_architect TEXT)');
+  // Issue #1118: builders live in global.db, keyed by (workspace_path, id) and
+  // read scoped by workspace_path. Write to the per-test global path with rows
+  // tagged for this workspace.
+  fs.mkdirSync(path.dirname(dbState.globalDbPath), { recursive: true });
+  const db = new Database(dbState.globalDbPath);
+  db.exec(`CREATE TABLE IF NOT EXISTS builders (
+    workspace_path TEXT NOT NULL,
+    id TEXT NOT NULL,
+    worktree TEXT,
+    issue_number TEXT,
+    spawned_by_architect TEXT,
+    PRIMARY KEY (workspace_path, id)
+  )`);
+  const ws = normalizeWorkspacePath(root);
   const insert = db.prepare(
-    'INSERT INTO builders (worktree, issue_number, spawned_by_architect) VALUES (?, ?, ?)',
+    'INSERT INTO builders (workspace_path, id, worktree, issue_number, spawned_by_architect) VALUES (?, ?, ?, ?, ?)',
   );
   for (const row of rows) {
     insert.run(
+      ws,
+      row.worktree, // id: unique per workspace
       row.worktree,
       row.issue_number == null ? null : String(row.issue_number),
       row.spawned_by_architect ?? null,
@@ -138,6 +162,8 @@ describe('overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tmpDir = makeTmpDir();
+    // Issue #1118: per-test global.db path (file created lazily by createStateDb).
+    dbState.globalDbPath = path.join(tmpDir, '.agent-farm', 'global.db');
     mockFetchPRList.mockResolvedValue([]);
     mockFetchIssueList.mockResolvedValue([]);
     mockFetchRecentlyClosed.mockResolvedValue([]);

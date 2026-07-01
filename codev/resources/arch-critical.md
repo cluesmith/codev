@@ -11,7 +11,7 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 - Two trees: codev/ = our instance, codev-skeleton/ = the template shipped to adopters. Mirror every framework change in BOTH.
 - CLAUDE.md and AGENTS.md MUST stay byte-identical (same content, two tool ecosystems).
 - Porch is a pure planner: it emits task JSON, Claude Code executes. Never hand-edit status.yaml.
-- State lives in .agent-farm/state.db + ~/.agent-farm/global.db (single source of truth); one Tower on port 4100. Never modify state by hand.
+- State lives in a single user-global ~/.agent-farm/global.db (Issue #1118 retired the per-workspace state.db; architect/builders keyed by workspace_path); one Tower on port 4100. Never modify state by hand.
 - Worktrees in .builders/ are Agent-Farm-managed — never delete manually (use afx cleanup); run afx from the main workspace root only.
 - Forge concept commands abstract the VCS provider — add a dedicated concept; don't bolt env flags onto a shared one.
 - Two human gates (spec-approval, plan-approval) plus the pr gate; only humans transition conceived→specified and committed→integrated.

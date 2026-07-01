@@ -11,6 +11,9 @@ import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { isPortAvailable } from '../utils/shell.js';
+import Database from 'better-sqlite3';
+import { getGlobalDbPath } from '../db/index.js';
+import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -22,6 +25,7 @@ const STARTUP_CHECK_INTERVAL_MS = 200;
 export interface TowerStartOptions {
   port?: number;
   wait?: boolean; // Defaults to true. Set false for fire-and-forget startup.
+  dryRunMigration?: boolean; // Issue #1118: preview the state.db→global.db one-off and exit.
 }
 
 export interface TowerStopOptions {
@@ -31,6 +35,48 @@ export interface TowerStopOptions {
 
 export function shouldWaitForTowerStart(options: TowerStartOptions = {}): boolean {
   return options.wait ?? true;
+}
+
+/**
+ * Issue #1118: preview the one-time state.db→global.db migration for this start's
+ * active state.db, without spawning the server or applying anything. Opens
+ * global.db read-only (or an empty in-memory db if it doesn't exist yet) so the
+ * preview is side-effect-free.
+ */
+async function previewStateDbMigration(): Promise<void> {
+  const source = activeStateDbPath();
+  const globalPath = getGlobalDbPath();
+
+  logger.header('state.db → global.db migration (dry-run)');
+  logger.kv('Active state.db', source);
+  logger.kv('Target global.db', globalPath);
+  logger.blank();
+
+  if (!existsSync(source)) {
+    logger.info('No active state.db at this path — nothing would be migrated on this start.');
+    return;
+  }
+
+  let globalDb: Database.Database;
+  if (existsSync(globalPath)) {
+    globalDb = new Database(globalPath, { readonly: true });
+  } else {
+    globalDb = new Database(':memory:');
+  }
+  try {
+    const plan = planMigration(globalDb, source);
+    if (plan.total === 0) {
+      logger.info('Active state.db has no rows to migrate.');
+      return;
+    }
+    for (const s of plan.stats) {
+      logger.kv(`  ${s.table}`, `${s.inserted} new, ${s.updated} newer (replace), ${s.skipped} older (skip)`);
+    }
+    logger.blank();
+    logger.info('Dry-run only. Run `afx tower start` to apply the one-off on next boot.');
+  } finally {
+    globalDb.close();
+  }
 }
 
 /**
@@ -125,6 +171,14 @@ export function getProcessesOnPort(port: number): number[] {
 export async function towerStart(options: TowerStartOptions = {}): Promise<void> {
   const port = options.port || DEFAULT_TOWER_PORT;
   const wait = shouldWaitForTowerStart(options);
+
+  // Issue #1118: `--dry-run-migration` previews the state.db→global.db one-off
+  // against this start's active state.db and exits without spawning the server.
+  // Opens global.db read-only so the preview never applies the migration.
+  if (options.dryRunMigration) {
+    await previewStateDbMigration();
+    return;
+  }
 
   // Check if already running and responding
   if (await isServerResponding(port)) {

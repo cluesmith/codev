@@ -549,6 +549,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Issue #1118: pull a satellite state.db into global.db (missed by the boot one-off)
+  dbCmd
+    .command('consolidate <state-db-path>')
+    .description('Migrate a legacy state.db into global.db (dry-run by default)')
+    .option('--apply', 'Apply the migration and rename the source (default: dry-run)')
+    .action(async (stateDbPath: string, options: { apply?: boolean }) => {
+      const { dbConsolidate } = await import('./commands/db.js');
+      try {
+        dbConsolidate(stateDbPath, { apply: options.apply });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Cron commands (Spec 399)
   const cronCmd = program
     .command('cron')
@@ -704,11 +719,13 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Start the tower dashboard and wait for readiness by default')
     .option('-p, --port <port>', 'Port to run on (default: 4100)')
     .option('--wait', 'Deprecated no-op: tower start waits for readiness by default')
+    .option('--dry-run-migration', 'Preview the one-time state.db→global.db migration and exit (Issue #1118)')
     .action(async (options) => {
       try {
         await towerStart({
           port: options.port ? parseInt(options.port, 10) : undefined,
           wait: true,
+          dryRunMigration: options.dryRunMigration,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

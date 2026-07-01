@@ -6,16 +6,15 @@
  */
 
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, copyFileSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { AGENT_FARM_DIR } from '../lib/tower-client.js';
-import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from './schema.js';
-import { migrateLocalFromJson } from './migrate.js';
-import { getConfig } from '../utils/index.js';
+import { GLOBAL_SCHEMA } from './schema.js';
 
-// Singleton instances
-let _localDb: Database.Database | null = null;
+// Singleton instance. Issue #1118: there is now a single user-global database
+// (~/.agent-farm/global.db). getDb() and getGlobalDb() both return it; the
+// retired per-workspace state.db is no longer opened.
 let _globalDb: Database.Database | null = null;
 
 /**
@@ -48,14 +47,17 @@ function configurePragmas(db: Database.Database): void {
 }
 
 /**
- * Get the local database instance (state.db)
- * Creates and initializes the database if it doesn't exist
+ * Get the database instance.
+ *
+ * Issue #1118: state.db is retired. getDb() now returns the single user-global
+ * global.db connection — the same instance as getGlobalDb(). Per-workspace rows
+ * (architect, builders) are disambiguated by their `workspace_path` column
+ * within the shared file, so the connection no longer depends on Tower's
+ * start-cwd. Kept as a distinct export so the many existing callsites that read
+ * dashboard state (architect/builders/utils/annotations) don't churn.
  */
 export function getDb(): Database.Database {
-  if (!_localDb) {
-    _localDb = ensureLocalDatabase();
-  }
-  return _localDb;
+  return getGlobalDb();
 }
 
 /**
@@ -70,13 +72,12 @@ export function getGlobalDb(): Database.Database {
 }
 
 /**
- * Close the local database connection
+ * Close the database connection.
+ * Issue #1118: getDb() aliases the global connection, so this closes the shared
+ * global.db. Kept for callsites that historically closed "the local db".
  */
 export function closeDb(): void {
-  if (_localDb) {
-    _localDb.close();
-    _localDb = null;
-  }
+  closeGlobalDb();
 }
 
 /**
@@ -98,11 +99,11 @@ export function closeAllDbs(): void {
 }
 
 /**
- * Get the path to the local database
+ * Get the path to the database.
+ * Issue #1118: the local db path is now the global db path.
  */
 export function getDbPath(): string {
-  const config = getConfig();
-  return resolve(config.stateDir, 'state.db');
+  return getGlobalDbPath();
 }
 
 /**
@@ -121,505 +122,6 @@ export function getGlobalDbPath(): string {
 }
 
 /**
- * Initialize the local database (state.db)
- */
-function ensureLocalDatabase(): Database.Database {
-  const config = getConfig();
-  const dbPath = resolve(config.stateDir, 'state.db');
-  const jsonPath = resolve(config.stateDir, 'state.json');
-
-  // Ensure directory exists
-  ensureDir(config.stateDir);
-
-  // Create/open database
-  const db = new Database(dbPath);
-  configurePragmas(db);
-
-  // Run schema (creates tables if they don't exist)
-  db.exec(LOCAL_SCHEMA);
-
-  // Check if migration is needed
-  const migrated = db.prepare('SELECT version FROM _migrations WHERE version = 1').get();
-
-  if (!migrated && existsSync(jsonPath)) {
-    // Migrate from JSON.
-    // Bugfix #826: pass workspaceRoot so the architect row gets tagged
-    // with workspace_path (the new composite-PK column).
-    migrateLocalFromJson(db, jsonPath, config.workspaceRoot);
-
-    // Record migration
-    db.prepare('INSERT INTO _migrations (version) VALUES (1)').run();
-
-    // Backup original JSON and remove it
-    copyFileSync(jsonPath, jsonPath + '.bak');
-    unlinkSync(jsonPath);
-
-    console.log('[info] Migrated state.json to state.db (backup at state.json.bak)');
-  } else if (!migrated) {
-    // Fresh install, just mark migration as done
-    db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (1)').run();
-    console.log('[info] Created new state.db at', dbPath);
-  }
-
-  // Migration v2: Add terminal_id columns (node-pty rewrite)
-  const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
-  if (!v2) {
-    // Add terminal_id to tables that may already exist without it
-    const tables = ['architect', 'builders', 'utils'];
-    for (const table of tables) {
-      try {
-        db.exec(`ALTER TABLE ${table} ADD COLUMN terminal_id TEXT`);
-      } catch {
-        // Column already exists (fresh install ran full schema)
-      }
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
-  }
-
-  // Migration v3: Remove UNIQUE constraint from utils.port (node-pty shells use port=0)
-  const v3 = db.prepare('SELECT version FROM _migrations WHERE version = 3').get();
-  if (!v3) {
-    // Check if utils table has the UNIQUE constraint on port
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='utils'")
-      .get() as { sql: string } | undefined;
-
-    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
-      // SQLite can't drop constraints, so recreate table
-      db.exec(`
-        CREATE TABLE utils_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          port INTEGER NOT NULL DEFAULT 0,
-          pid INTEGER NOT NULL DEFAULT 0,
-          tmux_session TEXT,
-          terminal_id TEXT,
-          started_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO utils_new SELECT id, name, port, pid, tmux_session, terminal_id, started_at FROM utils;
-        DROP TABLE utils;
-        ALTER TABLE utils_new RENAME TO utils;
-      `);
-      console.log('[info] Migrated utils table: removed UNIQUE constraint from port');
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (3)').run();
-  }
-
-  // Migration v4: Remove UNIQUE constraint from builders.port (PTY-backed builders use port=0)
-  const v4 = db.prepare('SELECT version FROM _migrations WHERE version = 4').get();
-  if (!v4) {
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
-      .get() as { sql: string } | undefined;
-
-    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
-      // SQLite can't drop constraints, so recreate table
-      db.exec(`
-        CREATE TABLE builders_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          port INTEGER NOT NULL DEFAULT 0,
-          pid INTEGER NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'spawning'
-            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
-          phase TEXT NOT NULL DEFAULT '',
-          worktree TEXT NOT NULL,
-          branch TEXT NOT NULL,
-          tmux_session TEXT,
-          type TEXT NOT NULL DEFAULT 'spec'
-            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
-          task_text TEXT,
-          protocol_name TEXT,
-          issue_number INTEGER,
-          terminal_id TEXT,
-          started_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO builders_new SELECT * FROM builders;
-        DROP TABLE builders;
-        ALTER TABLE builders_new RENAME TO builders;
-        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
-        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
-        CREATE TRIGGER IF NOT EXISTS builders_updated_at
-          AFTER UPDATE ON builders
-          FOR EACH ROW
-          BEGIN
-            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
-          END;
-      `);
-      console.log('[info] Migrated builders table: removed UNIQUE constraint from port');
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
-  }
-
-  // Migration v5: Remove UNIQUE constraint from annotations.port (all annotations use port=0)
-  const v5 = db.prepare('SELECT version FROM _migrations WHERE version = 5').get();
-  if (!v5) {
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='annotations'")
-      .get() as { sql: string } | undefined;
-
-    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
-      db.exec(`
-        CREATE TABLE annotations_new (
-          id TEXT PRIMARY KEY,
-          file TEXT NOT NULL,
-          port INTEGER NOT NULL DEFAULT 0,
-          pid INTEGER NOT NULL DEFAULT 0,
-          parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
-          parent_id TEXT,
-          started_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO annotations_new SELECT id, file, port, pid, parent_type, parent_id, started_at FROM annotations;
-        DROP TABLE annotations;
-        ALTER TABLE annotations_new RENAME TO annotations;
-      `);
-      console.log('[info] Migrated annotations table: removed UNIQUE constraint from port');
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (5)').run();
-  }
-
-  // Migration v6: Drop tmux_session columns (Spec 0104 - tmux replaced by shepherd)
-  const v6 = db.prepare('SELECT version FROM _migrations WHERE version = 6').get();
-  if (!v6) {
-    const tables = ['architect', 'builders', 'utils'];
-    for (const table of tables) {
-      try {
-        db.exec(`ALTER TABLE ${table} DROP COLUMN tmux_session`);
-      } catch {
-        // Column may not exist (fresh install with updated schema)
-      }
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (6)').run();
-  }
-
-  // Migration v7: Rename builder status 'pr-ready' → 'pr' (Bugfix #368)
-  const v7 = db.prepare('SELECT version FROM _migrations WHERE version = 7').get();
-  if (!v7) {
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
-      .get() as { sql: string } | undefined;
-
-    if (tableInfo?.sql?.includes('pr-ready')) {
-      // SQLite can't alter CHECK constraints, so recreate table
-      db.exec(`
-        CREATE TABLE builders_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          port INTEGER NOT NULL DEFAULT 0,
-          pid INTEGER NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'spawning'
-            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
-          phase TEXT NOT NULL DEFAULT '',
-          worktree TEXT NOT NULL,
-          branch TEXT NOT NULL,
-          type TEXT NOT NULL DEFAULT 'spec'
-            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
-          task_text TEXT,
-          protocol_name TEXT,
-          issue_number INTEGER,
-          terminal_id TEXT,
-          started_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO builders_new
-          SELECT id, name, port, pid,
-            CASE WHEN status = 'pr-ready' THEN 'pr' ELSE status END,
-            phase, worktree, branch, type, task_text, protocol_name,
-            issue_number, terminal_id, started_at, updated_at
-          FROM builders;
-        DROP TABLE builders;
-        ALTER TABLE builders_new RENAME TO builders;
-        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
-        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
-        CREATE TRIGGER IF NOT EXISTS builders_updated_at
-          AFTER UPDATE ON builders
-          FOR EACH ROW
-          BEGIN
-            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
-          END;
-      `);
-      console.log('[info] Migrated builders table: renamed status pr-ready to pr');
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (7)').run();
-  }
-
-  // Migration v8: Widen issue_number from INTEGER to TEXT (Linear identifiers like "ENG-123")
-  const v8 = db.prepare('SELECT version FROM _migrations WHERE version = 8').get();
-  if (!v8) {
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
-      .get() as { sql: string } | undefined;
-
-    if (tableInfo?.sql?.includes('issue_number INTEGER')) {
-      db.exec(`
-        CREATE TABLE builders_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          port INTEGER NOT NULL DEFAULT 0,
-          pid INTEGER NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'spawning'
-            CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
-          phase TEXT NOT NULL DEFAULT '',
-          worktree TEXT NOT NULL,
-          branch TEXT NOT NULL,
-          type TEXT NOT NULL DEFAULT 'spec'
-            CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix')),
-          task_text TEXT,
-          protocol_name TEXT,
-          issue_number TEXT,
-          terminal_id TEXT,
-          started_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO builders_new
-          SELECT id, name, port, pid, status, phase, worktree, branch, type,
-            task_text, protocol_name, CAST(issue_number AS TEXT),
-            terminal_id, started_at, updated_at
-          FROM builders;
-        DROP TABLE builders;
-        ALTER TABLE builders_new RENAME TO builders;
-        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
-        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
-        CREATE TRIGGER IF NOT EXISTS builders_updated_at
-          AFTER UPDATE ON builders
-          FOR EACH ROW
-          BEGIN
-            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
-          END;
-      `);
-      console.log('[info] Migrated builders table: widened issue_number to TEXT');
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (8)').run();
-  }
-
-  // Migration v9: Multi-architect support (Spec 755)
-  //   - Rebuild architect table: drop CHECK(id=1), change id to TEXT PRIMARY KEY.
-  //     Rekey the existing singleton row's id from 1 to 'main'.
-  //   - Add builders.spawned_by_architect TEXT column (nullable).
-  const v9 = db.prepare('SELECT version FROM _migrations WHERE version = 9').get();
-  if (!v9) {
-    const tableInfo = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='architect'")
-      .get() as { sql: string } | undefined;
-
-    // Architect table rebuild — only if it still has the old integer/CHECK shape.
-    // Detect via 'CHECK (id = 1)' (or normalized variants) in the stored DDL.
-    if (tableInfo?.sql && /CHECK\s*\(\s*id\s*=\s*1\s*\)/i.test(tableInfo.sql)) {
-      db.exec(`
-        CREATE TABLE architect_v9 (
-          id TEXT PRIMARY KEY,
-          pid INTEGER NOT NULL,
-          port INTEGER NOT NULL,
-          cmd TEXT NOT NULL,
-          started_at TEXT NOT NULL DEFAULT (datetime('now')),
-          terminal_id TEXT
-        );
-        INSERT INTO architect_v9 (id, pid, port, cmd, started_at, terminal_id)
-          SELECT 'main', pid, port, cmd, started_at, terminal_id FROM architect;
-        DROP TABLE architect;
-        ALTER TABLE architect_v9 RENAME TO architect;
-      `);
-      console.log('[info] Migrated architect table: multi-architect support (Spec 755)');
-    }
-
-    // Add spawned_by_architect column to builders if absent.
-    try {
-      db.exec(`ALTER TABLE builders ADD COLUMN spawned_by_architect TEXT`);
-    } catch {
-      // Column already exists (fresh install ran the updated schema).
-    }
-
-    db.prepare('INSERT INTO _migrations (version) VALUES (9)').run();
-  }
-
-  // Migration v10: Add 'pir' to builders.type CHECK constraint (Issue 691).
-  // Reintroduced post main-merge (the original collided with main's v9).
-  // Drift-robust: derive builders_new from the LIVE builders DDL (only the
-  // table name + the type CHECK literal are rewritten), so `SELECT *` can
-  // never column-mismatch regardless of columns earlier migrations added
-  // (e.g. v9's spawned_by_architect). Idempotent: skips if 'pir' is already
-  // in the constraint (covers fresh installs and DBs that ran the old v9).
-  const v10 = db.prepare('SELECT version FROM _migrations WHERE version = 10').get();
-  if (!v10) {
-    const builders = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='builders'")
-      .get() as { sql: string } | undefined;
-
-    if (builders?.sql && !builders.sql.includes("'pir'")) {
-      const newSql = builders.sql
-        .replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["'`]?builders["'`]?/i, 'CREATE TABLE builders_new')
-        .replace(/(CHECK\s*\(\s*type\s+IN\s*\([^)]*)\)/i, "$1, 'pir')");
-      db.exec(`
-        ${newSql};
-        INSERT INTO builders_new SELECT * FROM builders;
-        DROP TABLE builders;
-        ALTER TABLE builders_new RENAME TO builders;
-        CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
-        CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
-        CREATE TRIGGER IF NOT EXISTS builders_updated_at
-          AFTER UPDATE ON builders
-          FOR EACH ROW
-          BEGIN
-            UPDATE builders SET updated_at = datetime('now') WHERE id = NEW.id;
-          END;
-      `);
-      console.log("[info] Migrated builders table: added 'pir' to type CHECK constraint (v10)");
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (10)').run();
-  }
-
-  // Migration v11: Workspace-scoped architect rows (Bugfix #826).
-  //
-  // The architect table was global per Tower process, anchored to Tower's
-  // startup CWD. With multi-architect (Spec 755 / 786), this meant siblings
-  // registered in workspace A were re-spawned into workspace B at the next
-  // launchInstance(B) — a real PTY leak. Fix by construction: add
-  // `workspace_path` as part of the primary key so rows are explicitly scoped.
-  //
-  // Backfill source: global.db.terminal_sessions has per-architect rows with
-  // workspace_path (its `role_id` column holds the architect name). We ATTACH
-  // global.db and copy that mapping into the new architect rows. Architects
-  // with no current terminal_session row are orphans (their PTY died and was
-  // cleaned up before this migration ran) — they are dropped.
-  //
-  // Idempotent: skips when workspace_path column already exists (handles fresh
-  // installs that ran the updated schema, and re-runs after partial failure).
-  const v11 = db.prepare('SELECT version FROM _migrations WHERE version = 11').get();
-  if (!v11) {
-    // Check if workspace_path column already exists (fresh install via LOCAL_SCHEMA).
-    const cols = db.prepare('PRAGMA table_info(architect)').all() as Array<{ name: string }>;
-    const alreadyMigrated = cols.some(c => c.name === 'workspace_path');
-
-    if (!alreadyMigrated) {
-      const globalDbPath = getGlobalDbPath();
-
-      // Step 1: rebuild table with composite PK (workspace_path, id).
-      //   - Create _v11 table with the new shape.
-      //   - Backfill workspace_path from global.db.terminal_sessions via ATTACH.
-      //     Use LIMIT 1 to handle the (rare) case where multiple rows match.
-      //   - Drop orphans (workspace_path IS NULL).
-      //   - DETACH global.db before swapping table names.
-      //   - Atomic swap: DROP architect, RENAME _v11 → architect.
-      db.exec(`
-        CREATE TABLE architect_v11 (
-          workspace_path TEXT NOT NULL,
-          id TEXT NOT NULL,
-          pid INTEGER NOT NULL,
-          port INTEGER NOT NULL,
-          cmd TEXT NOT NULL,
-          started_at TEXT NOT NULL DEFAULT (datetime('now')),
-          terminal_id TEXT,
-          PRIMARY KEY (workspace_path, id)
-        );
-      `);
-
-      try {
-        // ATTACH global.db so we can read terminal_sessions for the backfill.
-        db.prepare("ATTACH DATABASE ? AS globaldb").run(globalDbPath);
-        try {
-          // Backfill: for each architect row, look up its workspace_path in
-          // global.db.terminal_sessions.
-          //
-          // Disambiguation (Bugfix #826 iter-5): for users already hit by the
-          // leak, the same architect NAME can appear in MULTIPLE workspaces'
-          // terminal_sessions rows. Matching by `role_id` alone with `LIMIT 1`
-          // would pick non-deterministically and could migrate ob-refine to
-          // the wrong workspace. Use `terminal_id` as the primary disambiguator
-          // — it's the stable session UUID and uniquely identifies one
-          // terminal_session row. Fall back to `role_id` only when
-          // `terminal_id` doesn't match (legacy rows where terminal_id is NULL
-          // or its target row has been cleaned up).
-          db.exec(`
-            INSERT INTO architect_v11 (workspace_path, id, pid, port, cmd, started_at, terminal_id)
-            SELECT
-              COALESCE(
-                (SELECT ts.workspace_path
-                   FROM globaldb.terminal_sessions ts
-                  WHERE ts.id = a.terminal_id
-                    AND ts.type = 'architect'),
-                (SELECT ts.workspace_path
-                   FROM globaldb.terminal_sessions ts
-                  WHERE ts.role_id = a.id
-                    AND ts.type = 'architect'
-                  LIMIT 1)
-              ) AS workspace_path,
-              a.id,
-              a.pid,
-              a.port,
-              a.cmd,
-              a.started_at,
-              a.terminal_id
-            FROM architect a
-            WHERE EXISTS (
-              SELECT 1 FROM globaldb.terminal_sessions ts
-              WHERE (ts.id = a.terminal_id OR ts.role_id = a.id)
-                AND ts.type = 'architect'
-            );
-          `);
-        } finally {
-          db.prepare('DETACH DATABASE globaldb').run();
-        }
-      } catch (err) {
-        // If global.db can't be opened (e.g. doesn't exist yet in a fresh
-        // install where Tower hasn't started), the architect table must be
-        // empty for the migration to succeed. Verify and proceed; if there
-        // are pre-existing architect rows we genuinely can't backfill, drop
-        // them — they correspond to a never-started workspace.
-        const remaining = db.prepare('SELECT COUNT(*) AS n FROM architect').get() as { n: number };
-        if (remaining.n > 0) {
-          console.log(`[warn] Migration v11: dropping ${remaining.n} architect row(s) — global.db unavailable for backfill: ${(err as Error).message}`);
-        }
-        // architect_v11 is empty in this path; carry on.
-      }
-
-      // Step 2: atomic swap.
-      db.exec(`
-        DROP TABLE architect;
-        ALTER TABLE architect_v11 RENAME TO architect;
-      `);
-
-      console.log('[info] Migrated architect table: workspace-scoped rows (Bugfix #826)');
-    }
-
-    // Bugfix #826 iter-7: create the workspace_path index here, OUTSIDE the
-    // alreadyMigrated guard. The index is NOT in LOCAL_SCHEMA because
-    // db.exec(LOCAL_SCHEMA) runs before migrations on every open — and on a
-    // pre-v11 install the architect table lacks workspace_path, so CREATE
-    // INDEX would throw 'no such column' and abort ensureLocalDatabase before
-    // v11 can run. Placing it here ensures the index is created on both
-    // upgrade installs (after the migration body) and fresh installs (where
-    // LOCAL_SCHEMA already created the v11 table shape and the inner block
-    // was skipped). `IF NOT EXISTS` makes the second-open case a no-op.
-    db.exec('CREATE INDEX IF NOT EXISTS idx_architect_workspace ON architect(workspace_path);');
-
-    db.prepare('INSERT INTO _migrations (version) VALUES (11)').run();
-  }
-
-  // Migration v12: Per-architect conversation session id (Issue #832).
-  //
-  // Adds `architect.session_id` so Tower can resume each architect's prior agent
-  // conversation after a restart. The column is agent-neutral (Claude stores a
-  // UUID; other agents may use their own scheme). Additive and nullable: legacy
-  // rows read back null and fall back to a fresh spawn.
-  //
-  // Idempotent: the ALTER throws "duplicate column name" on fresh installs that
-  // already created the column via LOCAL_SCHEMA — swallowed, same idiom as v2.
-  const v12 = db.prepare('SELECT version FROM _migrations WHERE version = 12').get();
-  if (!v12) {
-    try {
-      db.exec('ALTER TABLE architect ADD COLUMN session_id TEXT');
-      console.log('[info] Migrated architect table: added session_id (Issue #832)');
-    } catch {
-      // Column already exists (fresh install ran the updated LOCAL_SCHEMA).
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (12)').run();
-  }
-
-  return db;
-}
-
-/**
  * Initialize the global database (global.db)
  */
 function ensureGlobalDatabase(): Database.Database {
@@ -634,7 +136,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 13;
+  const GLOBAL_CURRENT_VERSION = 14;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -946,6 +448,85 @@ function ensureGlobalDatabase(): Database.Database {
     `).run();
     db.prepare('INSERT INTO _migrations (version) VALUES (13)').run();
     console.log('[info] Backfilled architect role_id with \'main\' (Spec 755)');
+  }
+
+  // Migration v14: Absorb the retired state.db tables (Issue #1118).
+  // Creates architect/builders/utils/annotations in global.db at their final
+  // shape. architect/utils/annotations move as-is; builders is RESHAPED with a
+  // workspace_path column + composite PK (workspace_path, id) so the same
+  // builder id can exist in multiple workspaces. Idempotent via
+  // `CREATE TABLE IF NOT EXISTS`. The one-time data migration of legacy
+  // state.db files is a separate, marker-gated step run at Tower boot
+  // (db/consolidate.ts) — NOT here — so opening global.db never moves data.
+  const v14 = db.prepare('SELECT version FROM _migrations WHERE version = 14').get();
+  if (!v14) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS architect (
+        workspace_path TEXT NOT NULL,
+        id TEXT NOT NULL,
+        pid INTEGER NOT NULL,
+        port INTEGER NOT NULL,
+        cmd TEXT NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        terminal_id TEXT,
+        session_id TEXT,
+        PRIMARY KEY (workspace_path, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_architect_workspace ON architect(workspace_path);
+
+      CREATE TABLE IF NOT EXISTS builders (
+        workspace_path TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 0,
+        pid INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'spawning'
+          CHECK(status IN ('spawning', 'implementing', 'blocked', 'pr', 'complete')),
+        phase TEXT NOT NULL DEFAULT '',
+        worktree TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'spec'
+          CHECK(type IN ('spec', 'task', 'protocol', 'shell', 'worktree', 'bugfix', 'pir')),
+        task_text TEXT,
+        protocol_name TEXT,
+        issue_number TEXT,
+        terminal_id TEXT,
+        spawned_by_architect TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (workspace_path, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_builders_status ON builders(status);
+      CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
+      CREATE TRIGGER IF NOT EXISTS builders_updated_at
+        AFTER UPDATE ON builders
+        FOR EACH ROW
+        BEGIN
+          UPDATE builders SET updated_at = datetime('now')
+            WHERE workspace_path = NEW.workspace_path AND id = NEW.id;
+        END;
+
+      CREATE TABLE IF NOT EXISTS utils (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 0,
+        pid INTEGER NOT NULL DEFAULT 0,
+        terminal_id TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS annotations (
+        id TEXT PRIMARY KEY,
+        file TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 0,
+        pid INTEGER NOT NULL DEFAULT 0,
+        parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
+        parent_id TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (14)').run();
+    console.log('[info] Absorbed state.db tables into global.db (Issue #1118)');
   }
 
   return db;

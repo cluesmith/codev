@@ -1905,7 +1905,9 @@ async function handleWorkspaceState(
   // amortised across all builders rather than per-builder lookups.
   const spawnedByMap = new Map<string, string | null>();
   try {
-    for (const b of getBuilders()) {
+    // Issue #1118: scope to this workspace — handleWorkspaceState builds the
+    // modal for one workspace, and builder ids can collide across workspaces.
+    for (const b of getBuilders(workspacePath)) {
       spawnedByMap.set(b.id, b.spawnedByArchitect ?? null);
     }
   } catch {

@@ -6,41 +6,37 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from '../db/schema.js';
+import { GLOBAL_SCHEMA } from '../db/schema.js';
 
 // Test directory
 const testDir = resolve(process.cwd(), '.test-state');
-let testDb: Database.Database;
 let testGlobalDb: Database.Database;
 
-// Mock the db module to use test database
+// Mock the db module to use a test database. Issue #1118: getDb() and
+// getGlobalDb() both return the single global.db, so the mock returns one shared
+// db built from GLOBAL_SCHEMA (which now holds architect/builders/utils/
+// annotations — builders reshaped with workspace_path + composite PK).
 vi.mock('../db/index.js', () => {
+  const ensure = () => {
+    if (!testGlobalDb) {
+      testGlobalDb = new Database(resolve(testDir, 'global.db'));
+      testGlobalDb.pragma('journal_mode = WAL');
+      testGlobalDb.pragma('busy_timeout = 5000');
+      testGlobalDb.exec(GLOBAL_SCHEMA);
+    }
+    return testGlobalDb;
+  };
+  const close = () => {
+    if (testGlobalDb) {
+      testGlobalDb.close();
+      testGlobalDb = null as any;
+    }
+  };
   return {
-    getDb: () => {
-      if (!testDb) {
-        testDb = new Database(resolve(testDir, 'state.db'));
-        testDb.pragma('journal_mode = WAL');
-        testDb.pragma('busy_timeout = 5000');
-        testDb.exec(LOCAL_SCHEMA);
-        testDb.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (1)').run();
-      }
-      return testDb;
-    },
-    getGlobalDb: () => {
-      if (!testGlobalDb) {
-        testGlobalDb = new Database(resolve(testDir, 'global.db'));
-        testGlobalDb.pragma('journal_mode = WAL');
-        testGlobalDb.pragma('busy_timeout = 5000');
-        testGlobalDb.exec(GLOBAL_SCHEMA);
-      }
-      return testGlobalDb;
-    },
-    closeDb: () => {
-      if (testDb) {
-        testDb.close();
-        testDb = null as any;
-      }
-    },
+    getDb: ensure,
+    getGlobalDb: ensure,
+    closeDb: close,
+    closeGlobalDb: close,
   };
 });
 
@@ -54,10 +50,6 @@ const WS = '/workspace/test';
 describe('State Management', () => {
   beforeEach(() => {
     // Clean up before each test
-    if (testDb) {
-      testDb.close();
-      testDb = null as any;
-    }
     if (testGlobalDb) {
       testGlobalDb.close();
       testGlobalDb = null as any;
@@ -69,10 +61,6 @@ describe('State Management', () => {
   });
 
   afterEach(() => {
-    if (testDb) {
-      testDb.close();
-      testDb = null as any;
-    }
     if (testGlobalDb) {
       testGlobalDb.close();
       testGlobalDb = null as any;
@@ -247,7 +235,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       };
@@ -266,7 +254,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       };
@@ -288,7 +276,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
         spawnedByArchitect: 'sibling',
@@ -305,7 +293,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
         spawnedByArchitect: 'sibling',
@@ -318,7 +306,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'blocked' as const,
         phase: 'review',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
         // spawnedByArchitect intentionally omitted.
@@ -335,7 +323,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
@@ -352,7 +340,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
@@ -371,7 +359,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
@@ -442,7 +430,7 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
@@ -549,12 +537,12 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
 
-      state.clearRuntime();
+      state.clearRuntime(WS);
 
       // Architects survive
       const architects = state.getArchitects(WS);
@@ -567,6 +555,24 @@ describe('State Management', () => {
       expect(result.builders).toEqual([]);
       expect(result.utils).toEqual([]);
       expect(result.annotations).toEqual([]);
+    });
+
+    it('Issue #1118: is workspace-scoped — clearRuntime(A) does not wipe B\'s builders', () => {
+      // Two workspaces' builders coexist in the shared global.db.
+      state.upsertBuilder({
+        id: 'A-1', name: 'a', status: 'implementing' as const, phase: 'init',
+        worktree: '/workspace/aaa/.builders/A-1', branch: 'm', type: 'spec' as const,
+      });
+      state.upsertBuilder({
+        id: 'B-1', name: 'b', status: 'implementing' as const, phase: 'init',
+        worktree: '/workspace/bbb/.builders/B-1', branch: 'm', type: 'spec' as const,
+      });
+
+      // Stopping workspace A must not touch workspace B.
+      state.clearRuntime('/workspace/aaa');
+
+      expect(state.getBuilders('/workspace/aaa')).toHaveLength(0);
+      expect(state.getBuilders('/workspace/bbb').map(b => b.id)).toEqual(['B-1']);
     });
 
     it('differs from clearState which wipes architects too', () => {
@@ -669,13 +675,13 @@ describe('State Management', () => {
         name: 'test-builder',
         status: 'implementing' as const,
         phase: 'init',
-        worktree: '/tmp/worktree',
+        worktree: '/workspace/test/.builders/wt',
         branch: 'feature-branch',
         type: 'spec' as const,
       });
 
       // Simulate `afx workspace stop` (legacy path):
-      state.clearRuntime();
+      state.clearRuntime(WS_A);
 
       // Architects survive in the workspace's scope.
       expect(state.getArchitects(WS_A).map(a => a.name).sort()).toEqual(['main', 'ob-refine']);
@@ -818,7 +824,7 @@ describe('State Management', () => {
 
       // The persisted workspace_path is the canonical form (verifiable via
       // a direct DB query — single row, canonical workspace_path).
-      const allRows = testDb!.prepare('SELECT workspace_path, id FROM architect').all() as Array<{ workspace_path: string; id: string }>;
+      const allRows = testGlobalDb!.prepare('SELECT workspace_path, id FROM architect').all() as Array<{ workspace_path: string; id: string }>;
       expect(allRows).toEqual([{ workspace_path: canonicalRealDir, id: 'ob-refine' }]);
     });
 

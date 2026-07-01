@@ -38,7 +38,7 @@ For debugging common issues, start here:
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `upsertBuilder()` | Worktree creation, shellper session, role injection |
 | **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `afx send architect` directly at gate transitions (Spec 0108) |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
-| **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
+| **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite in the user-global `~/.agent-farm/global.db` (Issue #1118); rows scoped by `workspace_path` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/db/schema.ts` | Global registry at `~/.agent-farm/global.db` |
 | **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
 
@@ -90,7 +90,7 @@ tail -f ~/.agent-farm/tower.log
 
 **These MUST remain true - violating them will break the system:**
 
-1. **State Consistency**: `.agent-farm/state.db` is the single source of truth for builder/util state. Never modify it manually.
+1. **State Consistency**: the user-global `~/.agent-farm/global.db` is the single source of truth for architect/builder/util state (Issue #1118 retired the per-workspace `.agent-farm/state.db`; rows are disambiguated by `workspace_path`). Never modify it manually.
 
 2. **Single Tower Port**: All projects are served through Tower on port 4100. Per-project port blocks were removed in Spec 0098. Terminal sessions and workspace metadata are tracked in `~/.agent-farm/global.db`.
 
@@ -394,11 +394,21 @@ const baseEnv = {
 
 ### State Management
 
-Agent Farm uses SQLite for ACID-compliant state persistence with two databases:
+Agent Farm uses SQLite for ACID-compliant state persistence. Issue #1118 consolidated
+everything into **one user-global database** (`~/.agent-farm/global.db`); the per-workspace
+`.agent-farm/state.db` file was retired (its cwd-dependent location caused architect state to
+"disappear" across Tower restarts). `getDb()` and `getGlobalDb()` both return the single global
+connection.
 
-#### Local State (`.agent-farm/state.db`)
+#### Dashboard State tables (in `global.db`)
 
-Stores the current session's state with tables for `architect`, `builders`, `utils`, and `annotations`. See `packages/codev/src/agent-farm/db/schema.ts` for the full schema.
+`architect`, `builders`, `utils`, and `annotations` (formerly in `state.db`) live in `global.db`.
+`architect` and `builders` are keyed by a composite `(workspace_path, id)` so the same name/id
+can exist in multiple workspaces (a builder id is `<protocol>-<issueNumber>`, unique per repo but
+reused across repos); `utils`/`annotations` are UUID-keyed. `state.ts` reads/writes them via
+`getDb()`; the one-time on-disk migration of legacy `state.db` files lives in
+`db/consolidate.ts` (marker-gated boot one-off + the manual `afx db consolidate <path>`). See
+`packages/codev/src/agent-farm/db/schema.ts` (`GLOBAL_SCHEMA`, migration v14) for the full schema.
 
 #### State Operations (from `state.ts`)
 
