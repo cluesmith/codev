@@ -1,7 +1,7 @@
 id: '1118'
 title: consolidate-state-db-tables-in
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-06-29T23:21:05.933Z'
-updated_at: '2026-07-01T22:22:42.587Z'
+updated_at: '2026-07-01T22:22:54.282Z'
 pr_history:
   - phase: review
     pr_number: 1127
