@@ -293,3 +293,44 @@ standalone follow-up. (Architect to confirm cutting these two acceptance criteri
 - Spawn a builder + add a sibling architect post-merge; confirm `afx status`, dashboard, and the
   VS Code sidebar read correct state regardless of Tower's start CWD, and that messaging /
   spoofing-check authorization still resolves to the right architect.
+
+### Testing the migration — recipe & caveats (manual)
+
+**This change is Tower-*boot* behaviour, not a dev-server feature.** The one-off runs in
+`tower-server.ts main()`, so `afx dev <builder>` does **not** exercise it (that runs the
+worktree's `devCommand`). To run the new code you install the worktree build
+(`pnpm -w run local-install` from the worktree — builds, installs globally, restarts Tower);
+the boot one-off then runs on that Tower restart against whatever workspace the restart's cwd
+resolves to.
+
+**Which `state.db` gets read:** `activeStateDbPath()` = `<workspace-root-of-Tower's-cwd>/
+.agent-farm/state.db`. Started from the worktree → the worktree's *empty* file (nothing to
+migrate, and it would burn the strict marker). Started from the main checkout → main's real
+aggregate. **Do not copy `state.db` into the worktree** — it's the wrong vector and still writes
+to the real shared `~/.agent-farm/global.db`.
+
+**Safe preview (zero mutation)** — `--dry-run-migration` opens `global.db` read-only, writes
+nothing, renames nothing, never spawns the server. Point it at a chosen file via a scratch dir:
+
+```bash
+mkdir -p /tmp/cons/ws/.agent-farm && cd /tmp/cons/ws && git init -q && mkdir -p codev
+cp ~/repos/cluesmith/codev/.agent-farm/state.db /tmp/cons/ws/.agent-farm/state.db
+afx tower start --dry-run-migration          # per-table counts for the copy; exits, no writes
+afx db consolidate ~/repos/cluesmith/shannon/.agent-farm/state.db   # satellite preview (dry-run)
+```
+
+**Isolated apply test** — `AGENT_FARM_DIR` is `homedir()`-based, so a scratch `HOME` gives a
+throwaway `global.db`, keeping the live one untouched:
+
+```bash
+export HOME=/tmp/cons/home && mkdir -p $HOME/.agent-farm
+afx db consolidate /tmp/cons/ws/.agent-farm/state.db --apply        # writes throwaway global.db
+afx db query --global "SELECT workspace_path, id FROM architect"    # verify rows landed, scoped
+```
+
+**Live reboot test (real mutation, recoverable)** — the genuine end-to-end check: `afx tower
+stop` (from workspace A), `afx tower start` (from workspace B), confirm A's architects are
+visible from Tower at B. This writes the real `~/.agent-farm/global.db` and renames real
+`state.db` files to `*.pre-merge-<ts>` (idempotent; sources preserved for recovery). Do the
+apply-path validation under the scratch `HOME` first if you'd rather not mutate live state until
+the confidence check.
