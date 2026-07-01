@@ -137,3 +137,18 @@ Next: dev-approval gate.
 - PR #1127 body synced with consult outcome. Rebuttal done, porch checks green.
 - **pr gate PENDING**. Architect notified (led with codex findings). Waiting for human GitHub
   review + `porch approve 1118 pr`. After approval: gh pr merge --merge, porch done --merged 1127.
+
+### Cross-workspace audit (architect asked "other bugs like clearRuntime?") + cmap iter2
+The shared-DB conversion turns "per-file implicit scoping" into latent bugs anywhere code
+relied on the file boundary. Systematic audit + iter2 (claude APPROVE, gemini APPROVE, codex
+dry-run finding) found 2 MORE, both FIXED (commit 7f6ce330, +tests):
+- **HIGH (audit-found, missed by ALL 3 models)**: send.ts detectCurrentBuilderId opened the
+  RETIRED per-workspace state.db for `afx send` #1094 anti-spoofing → breaks afx send from a
+  worktree post-migration. LAST direct state.db open (siblings lookupBuilderSpawningArchitect +
+  overview.ts were already fixed). Now reads global.db scoped by workspace_path.
+- **MED (codex iter2)**: `afx db consolidate` dry-run called getGlobalDb() (eagerly migrates
+  global.db) → now opens read-only; only --apply uses RW connection.
+- **LOW (noted, not fixed)**: loadState returns utils/annotations unscoped — vestigial (no
+  producers), future cleanup.
+Audit complete: 3 direct-opens total (all fixed), all builder-fn callers scoped, clearState no
+callers. iter2 rebuttal written. Full suite 2018 passed. Architect re-notified.
