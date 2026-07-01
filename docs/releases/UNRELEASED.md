@@ -152,6 +152,58 @@ Legacy architect rows (created before migration v12) have no stored session id; 
 
 The harness wiring is **agent-neutral**: the persisted column is `session_id` (not `claude_session_id`), and the new `HarnessProvider.session?` interface lets each harness opt in to session-resume semantics — `claude` opts in (`--session-id` to mint, `--resume` to revive); `codex` and `gemini` opt out and spawn fresh, with no schema change needed when their CLIs grow native session-resume support.
 
+## State.db retired: single user-global database with automatic migration (#1118, PR #1127)
+
+Codev's per-workspace `.agent-farm/state.db` file is retired. All the tables it carried (`architect`, `builders`, `utils`, `annotations`) now live in the single user-global `~/.agent-farm/global.db`, with rows tagged by workspace_path exactly as they were internally. The path lie ("state.db lives inside my workspace, so it must only hold my workspace's data") is gone; the file location matches the data's actual scope, and the "some architects are missing their state after a restart" symptom that multi-workspace users saw is closed at the source.
+
+**What changes for users.** Nothing in day-to-day flows: `afx spawn`, `afx send`, `afx workspace start/stop`, the sidebar, the dashboard — all continue working, with the underlying storage now consistent regardless of which directory Tower was started from. The consolidation is transparent.
+
+**Upgrade migration.** On the first Tower start after the upgrade, Codev discovers any existing `.agent-farm/state.db` files under known workspaces plus the `~/.agent-farm/` fallback, merges their rows into `global.db` using `INSERT OR REPLACE` with latest-`started_at`-wins conflict resolution, and renames the source files to `state.db.pre-merge-<timestamp>`. Nothing is deleted; recovery is a rename away. Idempotent — re-running is a friendly no-op.
+
+**New CLI surface.** `afx db consolidate` provides a dry-run preview of the migration (side-effect-free — opens `global.db` read-only, so previewing can't perform the migration accidentally). `--apply` commits. Useful for users who want to inspect what would land before the automatic migration runs.
+
+**Two surface fixes caught during review.** (1) `afx workspace stop` on one workspace no longer wipes every other workspace's builders — the delete is now correctly scoped by `workspace_path`. (2) `afx send` from any builder worktree continues to work after the migration; a cross-workspace audit found the last direct `state.db` open in the codebase (in `send.ts`'s anti-spoofing identity resolution) and repointed it at `global.db` scoped by `workspace_path`. Missed by all three consult models; caught by the builder's own audit.
+
+Legacy `state.db` files are left renamed on disk, not deleted, so users who want to inspect or preserve the pre-merge state can. The `.agent-farm/` directory inside each workspace stays for forward-compat.
+
+## Codev Markdown Preview: inline composer for review comments (#1107, PR #1121)
+
+Adding a review comment from the Codev Markdown Preview no longer flashes a top-of-window Quick Pick input to collect the comment body. The `+` affordance next to a block now opens an inline composer *anchored below the block itself*, keeping the anchor visible while you type. Multi-line input, `Enter` to submit, `Esc` to cancel, focus restoration on dismiss. The composer inherits the preview's prose typography so the input reads like the document it's commenting on, not like a modal chrome slot.
+
+A subtle related fix landed in the same change: new comments on a block that *already has a thread* now write at the **bottom** of that thread (newest-last in reading order), matching the composer's visual position. Previously the write went to the top of the thread while the composer appeared below — a visible mismatch on any block with more than one prior comment. The `markerAppendLine` helper the composer uses is host-agnostic (`@cluesmith/codev-core/review-markers`), so any future host that mounts the canvas — the dashboard, IDEs beyond VS Code — writes markers in the same append-below-thread order automatically.
+
+The editor Comments-API path (reply-to-thread from the source-editor gutter) still prepends new markers at the top of the thread for now; that's tracked as a small follow-up (#1122) to align the two authoring surfaces on the same append semantics.
+
+## Open a specific issue by typing its ID (#1096, PR #1123)
+
+New `Codev: Open Issue by ID...` command bound to `Cmd+K I` / `Ctrl+K I` by default. Prompts for a numeric issue identifier (accepts `1234` or `#1234`, with whitespace tolerance), fetches the issue via Codev's forge-agnostic `getIssue` path, and opens its canonical page in your browser. Works on **any** issue — open, closed, archived, or one you've never had loaded in the backlog. Palette-discoverable; keybinding falls into the existing `Cmd+K` family alongside `Cmd+K A` (Add Architect) and `Cmd+K B` (forward selection to builder).
+
+Works across forges: the GitHub, GitLab, Gitea, and Linear adapters all now emit an issue `url` field on the shared forge contract, so the same command opens the right canonical page regardless of which forge your workspace is bound to. If a forge doesn't supply a URL, the command falls back to Codev's in-editor issue preview instead of erroring — the affordance stays useful even under sparse metadata. PRs are handled by the same command on forges where issues and PRs share a URL space (GitHub); the browser resolves the numeric id to whichever kind it is.
+
+The existing `Codev: Search Backlog` Quick Pick is untouched — it remains the right choice for filtering across the loaded backlog set. `Open Issue by ID` is the direct-input companion for when you know the exact number.
+
+## Tower SSE: reject-on-cap breaks the reconnect cascade that was causing port exhaustion (#1124, PR #1126)
+
+Tower's Server-Sent Events endpoint would evict its oldest client when it hit a per-Tower connection cap (previously 50). The evicted client then auto-reconnected, pushing the count back to cap, evicting another — a chain reaction that could run at ~800 connections per second and leave 2,900+ sockets in TIME_WAIT, consuming ~10% of the OS ephemeral port range on affected workstations. Users saw dashboard and VS Code extension connections cycling, delayed events, and occasional "no ephemeral port available" errors.
+
+Four coordinated changes fix it:
+
+- **Reject at cap, don't evict.** When the cap is hit, Tower returns HTTP 503 with `Retry-After: 5` instead of evicting an active client. Rejection is a dead end; eviction was a chain reaction.
+- **Raise the cap** from 50 to 200. SSE connections are lightweight; 50 was too low for the realistic workstation profile (dashboard + multiple VS Code windows + a couple of builders each holding a stream).
+- **Space out reconnections** via a `retry: 5000` SSE directive telling browsers to wait 5s before reconnecting rather than the default ~3s.
+- **Per-client max-age jitter** (±60s) so scheduled evictions don't fire in synchronized bursts.
+
+Also: the per-client connect/disconnect INFO logging that had been producing ~774K lines every 2.5 days is gone; the heartbeat still runs for dead-client detection.
+
+## agy consults stay on-task and no-verdict results no longer churn the porch review loop (#1032 / #1033, PR #1085)
+
+Two related fixes for the gemini/agy consultation lane that improve review-loop reliability:
+
+- **Headless on-task preamble** (`packages/codev/src/commands/consult/index.ts`). When Codev invokes agy for a review-time consult, the prompt now begins with a read-only headless-mode constraint block: don't list directories, don't check git, don't run exploratory commands, don't activate local skills, read only the files named in the prompt, and end the response with a parseable `VERDICT:` line. Applied on both the inline and large-prompt (temp-file) paths. Targets the "agy latches onto a local skill and emits no verdict" failure mode that the earlier argv-ordering fix (#1081) didn't address.
+- **No-verdict → COMMENT, not REQUEST_CHANGES** (`packages/codev/src/commands/porch/verdict.ts`). A consult that *ran* but produced no parseable `VERDICT:` line now scores as `COMMENT` (non-blocking) rather than `REQUEST_CHANGES`. Previously a missing verdict was scored as a change-request and churned the porch review loop.
+
+Together these two changes make the agy lane usable again in CMAP reviews without spurious iteration.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
@@ -166,6 +218,7 @@ The harness wiring is **agent-neutral**: the persisted column is `session_id` (n
 
 - **`afx send` fails loud on an unverifiable builder id instead of silently misrouting to main** (#1094, PR #1095). Previously, sending to a typo'd or stale builder id quietly fell back to the main architect — the message went to the wrong recipient with no indication to the sender. The fix returns a clear `NOT_FOUND` error naming the unrecognized id, so the sender notices the mistake immediately instead of discovering it later (or not at all).
 - **`consult --type integration` anchors the diff on the integration-branch base** (#1113, PR #1114). Integration-type reviews compare the working tree against the integration branch; the previous behaviour drifted the diff base over time as the integration branch advanced, causing scope to creep beyond what the reviewer expected. The diff base is now anchored deterministically, so consult's integration reviews stay scoped to the actual integration delta.
+- **CLAUDE.md / AGENTS.md hot-tier context now uses `@import` lines instead of an inlined managed block** (#1119, PR #1120). The previous approach materialised the hot-tier content (`arch-critical.md` + `lessons-critical.md`) directly into `CLAUDE.md` and `AGENTS.md` as an auto-generated block. That created a drift footgun: editing a hot file and forgetting `codev update` left the inlined block silently stale. The block now emits two `@import` lines that Claude Code expands into context at session launch, so the hot files are the single source of truth and the root docs can't drift from them. Existing adopters' inlined blocks auto-migrate to the `@import` form on their next `codev init` / `codev update`. Porch's phase-prompt injection is untouched — it reads the hot files live for models that don't expand `@import` (consult, agent SDK); only the interactive docs surface changes.
 
 ## Breaking changes
 
