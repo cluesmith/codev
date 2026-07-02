@@ -6,6 +6,8 @@ import {
   markerAppendLine,
   isReviewMarkerLine,
   isEligibleReviewPath,
+  matchesExpectedMarker,
+  rewriteReviewMarkerBody,
 } from '../review-markers.js';
 
 describe('serializeReviewMarker', () => {
@@ -34,7 +36,7 @@ describe('parseReviewMarkers', () => {
     // 1: <!-- REVIEW(@amr): on the heading -->
     const text = '# Heading\n<!-- REVIEW(@amr): on the heading -->';
     expect(parseReviewMarkers(text)).toEqual([
-      { author: 'amr', line: 0, text: 'on the heading', raw: '<!-- REVIEW(@amr): on the heading -->' },
+      { author: 'amr', line: 0, text: 'on the heading', raw: '<!-- REVIEW(@amr): on the heading -->', markerLine: 1 },
     ]);
   });
 
@@ -61,8 +63,79 @@ describe('parseReviewMarkers', () => {
   it('tolerates @-handles with dots and dashes and extra inner whitespace', () => {
     const text = 'x\n<!--  REVIEW (@a.b-c):   hello   -->';
     expect(parseReviewMarkers(text)).toEqual([
-      { author: 'a.b-c', line: 0, text: 'hello', raw: '<!--  REVIEW (@a.b-c):   hello   -->' },
+      { author: 'a.b-c', line: 0, text: 'hello', raw: '<!--  REVIEW (@a.b-c):   hello   -->', markerLine: 1 },
     ]);
+  });
+
+  it('records each stacked marker\'s own physical file line in markerLine (#1055 identity)', () => {
+    // Three comments stacked on one block share `line` (the block) but each has a
+    // distinct `markerLine` (its own file line) — the identity edit/delete use.
+    const text = [
+      'Paragraph.', // 0  the block
+      '<!-- REVIEW(@a): first -->', // 1
+      '<!-- REVIEW(@b): second -->', // 2
+      '<!-- REVIEW(@c): third -->', // 3
+    ].join('\n');
+    const markers = parseReviewMarkers(text);
+    expect(markers.map((m) => [m.line, m.markerLine, m.text])).toEqual([
+      [0, 1, 'first'],
+      [0, 2, 'second'],
+      [0, 3, 'third'],
+    ]);
+  });
+});
+
+describe('matchesExpectedMarker (#1055 optimistic-concurrency check)', () => {
+  it('matches on author + a body prefix', () => {
+    const line = '<!-- REVIEW(@amr): the full body text -->';
+    expect(matchesExpectedMarker(line, 'amr', 'the full body text')).toBe(true);
+    expect(matchesExpectedMarker(line, 'amr', 'the full')).toBe(true); // prefix
+  });
+
+  it('tolerates whitespace differences in the expected body (normalized before compare)', () => {
+    const line = '<!-- REVIEW(@amr): one two three -->';
+    expect(matchesExpectedMarker(line, 'amr', '  one   two  three  ')).toBe(true);
+  });
+
+  it('normalizes the ON-DISK body too, so a hand-authored marker with irregular internal whitespace still matches (#1055 codex/architect finding)', () => {
+    // Markers are human-writable; a hand-authored body can carry a double-space or tab run that the
+    // parser tolerates. The verify path must not spuriously reject it: normalizing only the expected
+    // side (comparing against the raw body) would make startsWith() false and refuse a real edit/delete.
+    expect(matchesExpectedMarker('<!-- REVIEW(@amr): foo  bar -->', 'amr', 'foo bar')).toBe(true);
+    expect(matchesExpectedMarker('<!-- REVIEW(@amr): foo\tbar -->', 'amr', 'foo bar')).toBe(true);
+    // And still rejects a genuinely different body.
+    expect(matchesExpectedMarker('<!-- REVIEW(@amr): foo  bar -->', 'amr', 'baz')).toBe(false);
+  });
+
+  it('rejects on author mismatch, body mismatch, or a non-marker line', () => {
+    const line = '<!-- REVIEW(@amr): hello world -->';
+    expect(matchesExpectedMarker(line, 'bob', 'hello world')).toBe(false);
+    expect(matchesExpectedMarker(line, 'amr', 'different body')).toBe(false);
+    expect(matchesExpectedMarker('just a paragraph', 'amr', 'hello')).toBe(false);
+  });
+});
+
+describe('rewriteReviewMarkerBody (#1055 edit)', () => {
+  it('updates the body while preserving the existing author', () => {
+    expect(rewriteReviewMarkerBody('<!-- REVIEW(@amr): old text -->', 'new text')).toBe(
+      '<!-- REVIEW(@amr): new text -->',
+    );
+  });
+
+  it('preserves the marker\'s indent', () => {
+    expect(rewriteReviewMarkerBody('    <!-- REVIEW(@amr): old -->', 'new')).toBe(
+      '    <!-- REVIEW(@amr): new -->',
+    );
+  });
+
+  it('normalizes a multi-line new body to a single line', () => {
+    expect(rewriteReviewMarkerBody('<!-- REVIEW(@amr): old -->', 'line one\nline two')).toBe(
+      '<!-- REVIEW(@amr): line one line two -->',
+    );
+  });
+
+  it('returns null for a non-marker line', () => {
+    expect(rewriteReviewMarkerBody('not a marker', 'new')).toBeNull();
   });
 });
 

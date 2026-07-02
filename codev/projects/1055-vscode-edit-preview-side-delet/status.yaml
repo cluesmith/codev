@@ -1,0 +1,29 @@
+id: '1055'
+title: vscode-edit-preview-side-delet
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-07-02T00:24:04.831Z'
+    approved_at: '2026-07-02T00:28:23.976Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-07-02T00:46:33.585Z'
+    approved_at: '2026-07-02T01:56:18.398Z'
+  pr:
+    status: pending
+    requested_at: '2026-07-02T02:16:40.675Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-07-02T00:18:59.419Z'
+updated_at: '2026-07-02T02:16:40.676Z'
+pr_history:
+  - phase: review
+    pr_number: 1132
+    branch: builder/pir-1055
+    created_at: '2026-07-02T02:01:02.026Z'
+pr_ready_for_human: true

@@ -26,7 +26,12 @@ import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
  * `parseReviewMarkers` produces (creation order). Author and body are set via `textContent`, so
  * document-supplied text can never inject markup into the canvas.
  */
-function buildMarkerCards(line: number, markers: ReviewMarker[]): HTMLUListElement {
+function buildMarkerCards(
+  line: number,
+  markers: ReviewMarker[],
+  canEdit: boolean,
+  canDelete: boolean,
+): HTMLUListElement {
   const stack = document.createElement('ul');
   stack.className = 'codev-canvas-marker-cards';
   // Human-facing line numbers are 1-based; the data model stays 0-based (spec D5).
@@ -49,13 +54,91 @@ function buildMarkerCards(line: number, markers: ReviewMarker[]): HTMLUListEleme
     body.textContent = m.text;
 
     card.append(icon, author, body);
+
+    // Edit/delete affordances (#1055). Only rendered when the host provided the matching intent
+    // callback AND the marker carries its own physical file line (the identity the host writes
+    // against). The buttons are tagged with `data-action` + `data-marker-line`; a delegated click
+    // handler on the body routes them (matching the imperative-DOM pattern the cards use). A
+    // read-only host (no callbacks) or a marker without `markerLine` renders a plain card, unchanged.
+    if (m.markerLine !== undefined && (canEdit || canDelete)) {
+      const actions = document.createElement('span');
+      actions.className = 'codev-canvas-marker-card-actions';
+      if (canEdit) {
+        actions.append(makeCardAction('edit', m.markerLine, `Edit comment by ${m.author}`));
+      }
+      if (canDelete) {
+        actions.append(makeCardAction('delete', m.markerLine, `Delete comment by ${m.author}`));
+      }
+      card.append(actions);
+    }
+
     stack.append(card);
   }
   return stack;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * A 16-grid stroke icon built from static path data (no user input, so no injection surface). We
+ * draw our own SVGs rather than reuse a font glyph or the host's icon set: the package is
+ * host-agnostic (it can't assume VS Code's codicon font is present in the webview), and emoji
+ * render inconsistently across platforms. `currentColor` lets the button's CSS drive the tint.
+ */
+function svgIcon(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '13');
+  svg.setAttribute('height', '13');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.3');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+// Pencil (edit) and trash-can (delete) — plain line icons matching a codicon-ish weight.
+const CARD_ICONS: Record<'edit' | 'delete', () => SVGSVGElement> = {
+  edit: () => svgIcon(['M10.8 2.9l2.3 2.3', 'M11.5 2.2a1 1 0 0 1 1.4 0l.9.9a1 1 0 0 1 0 1.4l-7.6 7.6-2.7.6.6-2.7 7.4-7.4z']),
+  delete: () =>
+    svgIcon([
+      'M3 4.5h10',
+      'M6.4 4.5V3.1a.6.6 0 0 1 .6-.6h2a.6.6 0 0 1 .6.6v1.4',
+      'M4.6 4.5l.5 8.4a1 1 0 0 0 1 .95h3.8a1 1 0 0 0 1-.95l.5-8.4',
+      'M6.8 6.8v4.4',
+      'M9.2 6.8v4.4',
+    ]),
+};
+
+/** One card action button (edit/delete). Identity travels on `data-marker-line`; the delegated
+ * handler resolves author + body from the marker list, so the button carries no user text. */
+function makeCardAction(
+  action: 'edit' | 'delete',
+  markerLine: number,
+  label: string,
+): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `codev-canvas-marker-card-action codev-canvas-marker-card-${action}`;
+  btn.dataset.action = action;
+  btn.dataset.markerLine = String(markerLine);
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+  btn.append(CARD_ICONS[action]());
+  return btn;
+}
+
 export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
-  const { uri, fileAdapter, markerAdapter, onAddComment, onError, refreshKey } = props;
+  const { uri, fileAdapter, markerAdapter, onAddComment, onEditComment, onDeleteComment, onError, refreshKey } = props;
+  const canEdit = onEditComment !== undefined;
+  const canDelete = onDeleteComment !== undefined;
 
   const [content, setContent] = React.useState<string>('');
   const [markers, setMarkers] = React.useState<ReviewMarker[]>([]);
@@ -66,7 +149,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // placeholder node the composer portals into — injected directly below that block (#1107).
   const [composingLine, setComposingLine] = React.useState<number | null>(null);
   const [composerHost, setComposerHost] = React.useState<HTMLElement | null>(null);
+  // The marker currently being edited (#1055): the composer opens prefilled with its body and
+  // submit routes to `onEditComment` instead of `onAddComment`. null → the empty add composer.
+  const [editingMarker, setEditingMarker] = React.useState<ReviewMarker | null>(null);
   const bodyRef = React.useRef<HTMLDivElement>(null);
+  // Latest markers, readable synchronously from the delegated click handler without re-binding it.
+  const markersRef = React.useRef<ReviewMarker[]>(markers);
+  markersRef.current = markers;
 
   const report = React.useCallback(
     (err: unknown) => {
@@ -204,7 +293,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (ms && ms.length > 0 && !decoratedLines.has(line)) {
         decoratedLines.add(line);
         el.classList.add('codev-canvas-has-marker');
-        el.after(buildMarkerCards(line, ms)); // inline-below, in flow (#863)
+        el.after(buildMarkerCards(line, ms, canEdit, canDelete)); // inline-below, in flow (#863)
       } else {
         // Inner siblings that share the line (and genuinely unmarked blocks) get no card and no
         // decoration; any stale class from a prior markers-only re-render is cleared here too.
@@ -219,7 +308,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setActiveLine((cur) =>
       cur !== null && !root.querySelector(`[data-line="${cur}"]`) ? null : cur,
     );
-  }, [html, markers]);
+  }, [html, markers, canEdit, canDelete]);
 
   // Manage the in-flow composer placeholder (#1107). When `composingLine` is set, inject a
   // placeholder `<div>` directly below that block — AFTER its marker-card stack if present, so the
@@ -261,19 +350,48 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // Comment-intent seam (#1107): clicking "+" / pressing Enter opens the inline composer for the
   // line; submitting emits `onAddComment(line, text)` (the host writes the marker); cancel/Esc just
   // closes it and restores focus to the block so keyboard users aren't stranded.
-  const openComposer = (line: number): void => setComposingLine(line);
+  const openComposer = (line: number): void => { setEditingMarker(null); setComposingLine(line); };
   const submitComposer = (text: string): void => {
     if (composingLine === null) { return; }
-    onAddComment(composingLine, text);
+    // Edit vs add (#1055): when a marker is being edited, route to `onEditComment` with the marker's
+    // identity (physical line) + the expected author/body for the host's optimistic-concurrency
+    // check; otherwise emit the add intent. The host verifies then writes either way.
+    if (editingMarker && editingMarker.markerLine !== undefined) {
+      onEditComment?.(editingMarker.markerLine, editingMarker.author, editingMarker.text, text);
+    } else {
+      onAddComment(composingLine, text);
+    }
+    setEditingMarker(null);
     setComposingLine(null);
   };
   const cancelComposer = (): void => {
     const line = composingLine;
+    setEditingMarker(null);
     setComposingLine(null);
     if (line !== null) {
       // The block element persists across this state change (the body is not rebuilt), so focus it
       // synchronously to return the reviewer to where they were.
       bodyRef.current?.querySelector<HTMLElement>(`[data-line="${line}"]`)?.focus();
+    }
+  };
+
+  // Card-action seam (#1055): a delegated click handler on the body routes the edit/delete buttons
+  // injected into each comment card (`data-action` + `data-marker-line`). Edit opens the composer
+  // prefilled with the marker's body; delete emits the delete intent immediately. Author + body are
+  // resolved from the current marker list (not read off the DOM), so the payload matches the model.
+  const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const btn = (e.target as HTMLElement | null)?.closest?.('[data-action]') as HTMLElement | null;
+    if (!btn) { return; }
+    const action = btn.dataset.action;
+    const markerLine = Number(btn.dataset.markerLine);
+    if (Number.isNaN(markerLine)) { return; }
+    const marker = markersRef.current.find((m) => m.markerLine === markerLine);
+    if (!marker) { return; }
+    if (action === 'delete') {
+      onDeleteComment?.(marker.markerLine as number, marker.author, marker.text);
+    } else if (action === 'edit') {
+      setEditingMarker(marker);
+      setComposingLine(marker.line); // portal the composer below this marker's block
     }
   };
 
@@ -314,6 +432,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         className="codev-artifact-canvas-body"
         onMouseOver={(e) => activateFromTarget(e.target)}
         onFocus={(e) => activateFromTarget(e.target)}
+        onClick={onBodyClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             const l = lineFromEvent(e.target);
@@ -339,9 +458,16 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       {composingLine !== null && composerHost
         ? createPortal(
             <CommentComposer
+              // Key on the edit target so switching cards remounts the composer and re-seeds its
+              // textarea from `initialText`. Two comments stacked on ONE block share `composingLine`,
+              // so without this a click on a second card leaves the first card's text in the box and a
+              // save would write it to the wrong marker (#1055 codex finding). `useState(initialText)`
+              // only reads its arg on mount, so a fresh mount is what refreshes the seed.
+              key={`composer-${editingMarker?.markerLine ?? 'add'}-${composingLine}`}
               line={composingLine}
               onSubmit={submitComposer}
               onCancel={cancelComposer}
+              initialText={editingMarker ? editingMarker.text : undefined}
             />,
             composerHost,
           )

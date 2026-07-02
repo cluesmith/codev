@@ -21,4 +21,10 @@ export interface HostToWebviewMessage {
 /** Webview → host: the canvas's lifecycle + comment-intent messages. */
 export type WebviewToHostMessage =
   | { type: 'ready' }
-  | { type: 'addComment'; line: number; text: string };
+  | { type: 'addComment'; line: number; text: string }
+  // Edit/delete a marker by its own physical file line (#1055). `expectedAuthor`/`expectedBodyPrefix`
+  // are the card's rendered author + body for the host's optimistic-concurrency check: if the marker
+  // at `markerLine` no longer matches (the file changed between click and write), the host refuses
+  // the write and refreshes rather than mutating a different marker.
+  | { type: 'editComment'; markerLine: number; expectedAuthor: string; expectedBodyPrefix: string; newBody: string }
+  | { type: 'deleteComment'; markerLine: number; expectedAuthor: string; expectedBodyPrefix: string };

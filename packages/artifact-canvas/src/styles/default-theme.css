@@ -280,9 +280,51 @@
   background: var(--codev-canvas-code-background);
   color: var(--codev-canvas-foreground);
   font-size: 0.9em;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
 }
 .codev-canvas-marker-card-icon { margin-right: 4px; }
 .codev-canvas-marker-card-author { font-weight: 600; color: var(--codev-canvas-muted); margin-right: 4px; }
+.codev-canvas-marker-card-body { flex: 1 1 auto; }
+
+/* Per-card edit/delete affordances (#1055). A small action row pinned to the card's trailing edge.
+   Muted and low-opacity at rest so a stack of comments reads cleanly; revealed on card hover and
+   whenever a button inside is focused, so keyboard users always see the active control. The buttons
+   stay in the DOM (not display:none) so they remain reachable by Tab regardless of hover. */
+.codev-canvas-marker-card-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  opacity: 0;
+  transition: opacity 0.1s ease-in-out;
+}
+.codev-canvas-marker-card:hover .codev-canvas-marker-card-actions,
+.codev-canvas-marker-card-actions:focus-within {
+  opacity: 1;
+}
+.codev-canvas-marker-card-action {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--codev-canvas-muted);
+  padding: 2px;
+  line-height: 0;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.codev-canvas-marker-card-action svg { display: block; }
+.codev-canvas-marker-card-action:hover {
+  color: var(--codev-canvas-foreground);
+  background: var(--codev-canvas-border);
+}
+.codev-canvas-marker-card-action:focus-visible {
+  outline: 1px solid var(--codev-canvas-comment-marker);
+  outline-offset: 1px;
+}
 
 /* Inline comment composer (#1107): rendered in-flow directly below the block (the host portals it
    into `.codev-canvas-comment-composer-host`), mirroring the marker-card stack's left rule + spacing

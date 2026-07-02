@@ -41,6 +41,14 @@ export interface ReviewMarker {
   text: string;
   /** Original on-disk marker text, for lossless round-tripping. */
   raw: string;
+  /**
+   * 0-based physical file line the marker itself occupies (distinct from `line`,
+   * which is the annotated block above it). This is the identity a surface uses to
+   * locate one specific marker for edit/delete: a stack of comments on one block
+   * shares `line` but each has a unique `markerLine` (one marker per line). No
+   * on-disk format change — it is the parser's own loop index, surfaced here (#1055).
+   */
+  markerLine: number;
   /** Reserved for region anchors (unused in v1). */
   lineRange?: { start: number; end: number };
 }
@@ -125,8 +133,55 @@ export function parseReviewMarkers(text: string): ReviewMarker[] {
     let anchor = i - 1;
     while (anchor >= 0 && isReviewMarkerLine(lines[anchor])) { anchor--; }
     if (anchor < 0) { continue; }
-    out.push({ author: m[2], line: anchor, text: m[3], raw: lines[i].trim() });
+    out.push({ author: m[2], line: anchor, text: m[3], raw: lines[i].trim(), markerLine: i });
   }
   return out;
+}
+
+/**
+ * Optimistic-concurrency check for edit/delete from a surface that only holds a
+ * line + the card's displayed author/body (the preview). Returns true iff
+ * `lineText` is a review marker whose author equals `expectedAuthor` AND whose
+ * normalized body **starts with** `expectedBodyPrefix`.
+ *
+ * A **prefix** (not equality) is used deliberately: the on-disk body is
+ * whitespace-normalized at write time (`serializeReviewMarker` collapses runs of
+ * whitespace to single spaces), so a prefix check tolerates that normalization
+ * while still refusing to mutate a genuinely different marker. Combined with the
+ * physical `markerLine` (one marker per line) this uniquely locates the intended
+ * marker even in a stack, and a mismatch means the file changed since the surface
+ * last rendered — the caller must refresh rather than write (#1055).
+ */
+export function matchesExpectedMarker(
+  lineText: string,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+): boolean {
+  const m = REVIEW_MARKER_RE.exec(lineText);
+  if (!m) { return false; }
+  if (m[2] !== expectedAuthor) { return false; }
+  // Normalize BOTH the on-disk body and the expected prefix the same way, so the prefix compare is
+  // whitespace-insensitive on both sides. The parser tolerates internal whitespace runs in a body
+  // (a hand-authored marker), so normalizing only the expected side would falsely reject a marker
+  // whose raw body carries extra internal spaces.
+  const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
+  return normalize(m[3]).startsWith(normalize(expectedBodyPrefix));
+}
+
+/**
+ * Rewrite a review marker line's body, preserving its existing author and indent.
+ * Returns the re-serialized marker line, or `null` if `lineText` is not a marker.
+ *
+ * The author is read back off the existing marker and NEVER taken from the caller,
+ * so an edit can rephrase the body but can never reassign authorship (#1055). The
+ * new body is whitespace-normalized by `serializeReviewMarker`, so the on-disk
+ * single-line marker format is unchanged.
+ */
+export function rewriteReviewMarkerBody(lineText: string, newBody: string): string | null {
+  const m = REVIEW_MARKER_RE.exec(lineText);
+  if (!m) { return null; }
+  const indent = m[1];
+  const author = m[2];
+  return serializeReviewMarker(author, newBody, indent);
 }
 

@@ -23,8 +23,33 @@ import {
   serializeReviewMarker,
   markerAppendLine,
   isEligibleReviewPath,
+  rewriteReviewMarkerBody,
 } from '@cluesmith/codev-core/review-markers';
 import type { OverviewCache } from '../views/overview-data.js';
+
+/**
+ * A comment sourced from an inline REVIEW marker. Carries a back-reference to its parent thread and
+ * the pre-edit body so the edit commands (#1055) can toggle `mode`, reassign `thread.comments` (VS
+ * Code only re-renders on reassignment), and restore the body on cancel. The thread is anchored at
+ * the marker's own physical file line, so `parent.range.start.line` locates the marker to rewrite.
+ */
+class ReviewComment implements vscode.Comment {
+  public parent?: vscode.CommentThread;
+  public savedBody: string;
+  constructor(
+    public body: vscode.MarkdownString,
+    public mode: vscode.CommentMode,
+    public author: vscode.CommentAuthorInformation,
+    public contextValue: string,
+  ) {
+    this.savedBody = body.value;
+  }
+}
+
+/** The plain-text body of a comment, whether VS Code handed back a string or a MarkdownString. */
+function commentBodyText(body: string | vscode.MarkdownString): string {
+  return typeof body === 'string' ? body : body.value;
+}
 
 /**
  * Matches the canonical inline form. Capture groups:
@@ -83,21 +108,20 @@ export function activateReviewComments(
     REVIEW_COMMENT_PATTERN.lastIndex = 0;
     while ((match = REVIEW_COMMENT_PATTERN.exec(text)) !== null) {
       const startPos = document.positionAt(match.index);
+      // contextValue is matched in the comment menus' `when` clauses so the edit/delete buttons only
+      // show on inline-sourced comments (not on new in-progress threads).
+      const comment = new ReviewComment(
+        new vscode.MarkdownString(match[2]),
+        vscode.CommentMode.Preview,
+        { name: match[1] },
+        'inline-review',
+      );
       const thread = controller.createCommentThread(
         document.uri,
         new vscode.Range(startPos, startPos),
-        [
-          {
-            body: new vscode.MarkdownString(match[2]),
-            mode: vscode.CommentMode.Preview,
-            author: { name: match[1] },
-            // contextValue is matched in the comment-context menu's `when`
-            // clause so the delete button only shows on inline-sourced
-            // comments (not on new in-progress threads).
-            contextValue: 'inline-review',
-          },
-        ],
+        [comment],
       );
+      comment.parent = thread;
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
       thread.canReply = false;
       thread.contextValue = 'inline-review';
@@ -145,6 +169,65 @@ export function activateReviewComments(
       },
     ),
   );
+
+  // Command: begin editing an inline review comment — flips the comment into VS Code's native inline
+  // edit surface (#1055). Reassigning `thread.comments` is required for VS Code to re-render.
+  context.subscriptions.push(
+    // eslint-disable-next-line no-restricted-syntax -- intentionally unguarded: CLI-independent command (edits local review markers), so no regCli guard is wanted (#791)
+    vscode.commands.registerCommand('codev.startEditReviewComment', (comment: ReviewComment) => {
+      const thread = comment.parent;
+      if (!thread) { return; }
+      comment.savedBody = commentBodyText(comment.body);
+      comment.mode = vscode.CommentMode.Editing;
+      thread.comments = [...thread.comments];
+    }),
+  );
+
+  // Command: cancel an in-progress edit — restore the pre-edit body and return to preview (#1055).
+  context.subscriptions.push(
+    // eslint-disable-next-line no-restricted-syntax -- intentionally unguarded: CLI-independent command (edits local review markers), so no regCli guard is wanted (#791)
+    vscode.commands.registerCommand('codev.cancelEditReviewComment', (comment: ReviewComment) => {
+      const thread = comment.parent;
+      if (!thread) { return; }
+      comment.body = new vscode.MarkdownString(comment.savedBody);
+      comment.mode = vscode.CommentMode.Preview;
+      thread.comments = [...thread.comments];
+    }),
+  );
+
+  // Command: save an edited inline review comment — rewrite the marker line preserving its author
+  // (#1055). The resulting file change fires refreshDoc, which recreates the thread from disk.
+  context.subscriptions.push(
+    // eslint-disable-next-line no-restricted-syntax -- intentionally unguarded: CLI-independent command (edits local review markers), so no regCli guard is wanted (#791)
+    vscode.commands.registerCommand('codev.saveEditReviewComment', async (comment: ReviewComment) => {
+      await saveEditReviewComment(comment);
+    }),
+  );
+}
+
+// Exported for unit testing. Rewrites the marker line at the comment's thread anchor with the edited
+// body, preserving the on-disk author. Re-confirms the line is still a REVIEW marker first (it could
+// have been edited out between opening the editor and saving), mirroring the delete path's guard.
+export async function saveEditReviewComment(comment: ReviewComment): Promise<void> {
+  const thread = comment.parent;
+  if (!thread || !thread.range) { return; }
+  const document = await vscode.workspace.openTextDocument(thread.uri);
+  const line = thread.range.start.line;
+  if (line >= document.lineCount) { return; }
+  const lineText = document.lineAt(line).text;
+  const newBody = commentBodyText(comment.body);
+  const rewritten = rewriteReviewMarkerBody(lineText, newBody);
+  if (rewritten === null) { return; } // not a marker anymore — refuse rather than corrupt
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    thread.uri,
+    new vscode.Range(new vscode.Position(line, 0), new vscode.Position(line, lineText.length)),
+    rewritten,
+  );
+  await vscode.workspace.applyEdit(edit);
+  await document.save();
+  comment.mode = vscode.CommentMode.Preview;
 }
 
 // Exported for unit testing (regression for #1122: append vs prepend). The

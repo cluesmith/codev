@@ -361,6 +361,20 @@
         "command": "codev.deleteReviewComment",
         "title": "Codev: Delete Review Comment",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codev.startEditReviewComment",
+        "title": "Codev: Edit Review Comment",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codev.saveEditReviewComment",
+        "title": "Codev: Save Review Comment",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.cancelEditReviewComment",
+        "title": "Codev: Cancel Edit"
       }
     ],
     "menus": {
@@ -732,6 +746,25 @@
           "command": "codev.deleteReviewComment",
           "group": "inline@1",
           "when": "commentController == codev-review && commentThread == inline-review"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "codev.startEditReviewComment",
+          "group": "group@1",
+          "when": "commentController == codev-review && comment == inline-review"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "codev.saveEditReviewComment",
+          "group": "inline@2",
+          "when": "commentController == codev-review"
+        },
+        {
+          "command": "codev.cancelEditReviewComment",
+          "group": "inline@1",
+          "when": "commentController == codev-review"
         }
       ]
     },

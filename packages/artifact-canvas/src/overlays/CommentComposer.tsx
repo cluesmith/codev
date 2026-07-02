@@ -7,6 +7,11 @@ export interface CommentComposerProps {
   onSubmit: (text: string) => void;
   /** Invoked when the reviewer cancels (Esc / Cancel button) without submitting. */
   onCancel: () => void;
+  /**
+   * Prefill body for editing an existing comment (#1055). When present the composer opens seeded
+   * with this text and the submit button reads "Save"; when absent it is the empty add composer.
+   */
+  initialText?: string;
 }
 
 /**
@@ -25,13 +30,24 @@ export interface CommentComposerProps {
  * It only signals intent via `onSubmit` / `onCancel`; it never writes a marker itself (the host
  * does that, preserving the package's D6 invariant). An empty / whitespace-only body is a no-op.
  */
-export function CommentComposer({ line, onSubmit, onCancel }: CommentComposerProps): React.ReactElement {
-  const [text, setText] = React.useState('');
+export function CommentComposer({
+  line,
+  onSubmit,
+  onCancel,
+  initialText,
+}: CommentComposerProps): React.ReactElement {
+  const isEdit = initialText !== undefined;
+  const [text, setText] = React.useState(initialText ?? '');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Autofocus on mount so the reviewer can type immediately after clicking "+".
+  // Autofocus on mount so the reviewer can type immediately after clicking "+" / the pencil.
+  // For an edit, place the caret at the end of the seeded text rather than selecting all.
   React.useEffect(() => {
-    textareaRef.current?.focus();
+    const el = textareaRef.current;
+    if (!el) { return; }
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
   }, []);
 
   const submit = (): void => {
@@ -59,7 +75,7 @@ export function CommentComposer({ line, onSubmit, onCancel }: CommentComposerPro
         ref={textareaRef}
         className="codev-canvas-comment-composer-input"
         // Human-facing line numbers are 1-based; the data model stays 0-based (spec D5).
-        aria-label={`Add comment on line ${line + 1}`}
+        aria-label={`${isEdit ? 'Edit' : 'Add'} comment on line ${line + 1}`}
         placeholder="Add a review comment… (⌘/Ctrl+Enter to submit, Esc to cancel)"
         rows={3}
         value={text}
@@ -80,7 +96,7 @@ export function CommentComposer({ line, onSubmit, onCancel }: CommentComposerPro
           onClick={submit}
           disabled={empty}
         >
-          Comment
+          {isEdit ? 'Save' : 'Comment'}
         </button>
       </div>
     </div>

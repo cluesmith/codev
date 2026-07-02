@@ -39,6 +39,14 @@ export interface ReviewMarker {
   text: string;
   /** The original on-disk marker text (e.g. `<!-- REVIEW(@a): … -->`) for round-tripping. */
   raw: string;
+  /**
+   * 0-based physical file line the marker itself occupies (distinct from `line`,
+   * the annotated block above it). Optional so read-only hosts are unaffected; when
+   * a host populates it, the card's edit/delete affordances become addressable —
+   * a stack of comments on one block shares `line` but each has a unique
+   * `markerLine` (#1055).
+   */
+  markerLine?: number;
   /** Reserved for region anchors (not used in v1). */
   lineRange?: { start: number; end: number };
 }
@@ -60,6 +68,24 @@ export interface ArtifactCanvasProps {
   themeAdapter: ThemeAdapter;
   /** Comment-intent event (spec D6); `line` is 0-based (spec D5), `text` is the trimmed body (#1107). */
   onAddComment(line: number, text: string): void;
+  /**
+   * Edit-intent event (#1055). Emitted when the reviewer submits an edit on a card. `markerLine` is
+   * the marker's own 0-based physical file line; `expectedAuthor`/`expectedBodyPrefix` are the
+   * card's currently-rendered author + body for the host's optimistic-concurrency check; `newBody`
+   * is the trimmed replacement text. The host verifies then writes (it never trusts the payload
+   * blindly). Optional: when omitted, no edit affordance renders (read-only hosts unaffected).
+   */
+  onEditComment?(
+    markerLine: number,
+    expectedAuthor: string,
+    expectedBodyPrefix: string,
+    newBody: string,
+  ): void;
+  /**
+   * Delete-intent event (#1055). Same identity + optimistic-concurrency payload as `onEditComment`,
+   * minus `newBody`. Optional: when omitted, no delete affordance renders.
+   */
+  onDeleteComment?(markerLine: number, expectedAuthor: string, expectedBodyPrefix: string): void;
   /** Optional host error sink; the package never throws out of an event handler (spec D2). */
   onError?(err: unknown): void;
   /**
