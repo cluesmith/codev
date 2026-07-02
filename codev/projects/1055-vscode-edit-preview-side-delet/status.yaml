@@ -1,7 +1,7 @@
 id: '1055'
 title: vscode-edit-preview-side-delet
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-07-02T00:18:59.419Z'
-updated_at: '2026-07-02T02:22:56.016Z'
+updated_at: '2026-07-02T02:22:57.681Z'
 pr_history:
   - phase: review
     pr_number: 1132
