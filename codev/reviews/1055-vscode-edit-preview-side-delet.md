@@ -61,6 +61,13 @@ Makes the markdown reviewer a functional reviewing tool by adding **edit** to bo
 - **Editor edit re-render**: `startEditReviewComment` reassigns `thread.comments` because VS Code only re-renders a thread on reassignment; the subsequent file-change `refreshDoc` recreates the thread from disk as the source of truth.
 - **Reviewer findings during dev-approval, all resolved**: (1) multi-line comments collapse to one line — inherent to the single-line marker format, same for add and edit, deferred to #1131 (no change); (2) card icons looked odd — replaced the emoji/dingbat glyphs with inline stroke SVGs (host-agnostic, no codicon-font dependency); (3) editor-gutter delete "no-op" — traced to a stale Extension Host, not reproducible after reload; the delete command/menu are unchanged from `main`.
 
+### PR-stage consult verdicts + dispositions (single-pass; not independently re-reviewed)
+
+The PR-stage consult was 2-of-2 (Claude + a Codex-family lens): **Claude → APPROVE** (HIGH, no issues); the **Codex lens → REQUEST_CHANGES** with two correctness findings, **both real and both fixed** (PIR is single-pass, so these fixes were NOT re-reviewed by the models — the human at the `pr` gate is the last check):
+
+1. **`matchesExpectedMarker` one-sided normalization** (`packages/core/src/review-markers.ts`) — the verify check normalized only `expectedBodyPrefix` and compared it against the *raw* on-disk body, so a hand-authored marker with irregular internal whitespace (e.g. `foo  bar`) falsely failed verification → preview edit/delete would spuriously refuse with a "this comment changed" toast. **Fixed**: normalize both sides before the prefix compare. Regression test added (double-space + tab bodies still match the normalized prefix; a genuinely different body still rejects). *(Independently confirmed by the architect's own second lens.)*
+2. **`CommentComposer` stale text on same-block re-edit** (`packages/artifact-canvas/src/components/ArtifactCanvas.tsx`) — two comments stacked on one block share `composingLine`, so clicking edit on a second card did not remount the composer and its textarea kept the first card's text; a save would write the wrong body to the second marker. **Fixed**: `key` the composer on the edit target (`markerLine`) so switching cards remounts it and re-seeds `useState(initialText)`. Regression test added (edit card #1 → edit card #2 same block → composer shows #2's text; save targets marker #2). This is the exact stacked-comment scenario the feature targets — worth a close look.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-1055` → **Review Diff**
