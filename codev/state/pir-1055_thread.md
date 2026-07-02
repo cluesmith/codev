@@ -11,3 +11,13 @@ Investigated the review-comment architecture:
 Design: add `markerLine` (physical 0-based file line) to the parsed `ReviewMarker`; surface it through the message channel; add `editComment`/`deleteComment` webview→host messages with optimistic-concurrency check (`expectedAuthor` + `expectedBodyPrefix`) verified in core.
 
 Plan-gate decisions surfaced (affordance UI, payload shape, race UX) per the issue.
+
+### Plan approved → Implement phase (complete, pre-commit)
+Implemented across four packages:
+- **core**: `markerLine` on `ReviewMarker` (physical file line, surfaced from parse loop); pure `matchesExpectedMarker` (optimistic-concurrency check, author + normalized body-prefix) + `rewriteReviewMarkerBody` (author/indent preserved). 40 tests pass.
+- **artifact-canvas**: optional `markerLine` + `onEditComment`/`onDeleteComment` props; per-card edit(✎)/delete(🗑) action row (rendered only when host provides the callback AND marker has markerLine); `CommentComposer` gained `initialText` (edit prefill → "Save"); delegated click handler resolves identity from marker list. 72 tests pass.
+- **vscode preview host**: `editComment`/`deleteComment` messages; exported `verifyReviewMarker`/`editReviewMarker`/`deleteReviewMarker` (verify-then-write, race → refresh + info toast). webview wires the two intents.
+- **vscode editor surface**: `ReviewComment` class carrying parent thread + saved body; `startEditReviewComment`/`saveEditReviewComment`/`cancelEditReviewComment` commands; package.json `comments/comment/title` (pencil) + `comments/comment/context` (save/cancel) menus.
+
+All green: core 40, canvas 72, vscode 543 (typecheck + lint + esbuild clean). Decisions implemented as recommended (trash+pencil action row; author+bodyPrefix payload; refresh + info toast on race).
+
