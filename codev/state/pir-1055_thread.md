@@ -21,3 +21,10 @@ Implemented across four packages:
 
 All green: core 40, canvas 72, vscode 543 (typecheck + lint + esbuild clean). Decisions implemented as recommended (trash+pencil action row; author+bodyPrefix payload; refresh + info toast on race).
 
+### Dev-approval gate — reviewer testing feedback
+Three issues raised while testing the running worktree:
+1. **Multi-line comments collapse to one line** — not a bug: the flat single-line marker format (`serializeReviewMarker` normalizes whitespace); same for add and edit; multi-line is format-v2, deferred to #1131. No change.
+2. **Card icons looked odd** — were raw emoji glyphs (✎/🗑) that render inconsistently and can't use VS Code codicons in a host-agnostic webview. Replaced with inline stroke SVGs (pencil/trash, currentColor, hover bg) via createElementNS. Fixed + committed.
+3. **Editor-gutter delete no-op** — investigated: delete command + menu are byte-identical to main (purely additive diff). Symptom was "trash visible, click does nothing." Turned out to be a **stale-build artifact — no longer reproducible after reload**. Briefly moved delete to per-comment placement speculatively, then **reverted** once confirmed environmental; editor delete stays unchanged on the thread header. No code change.
+
+
