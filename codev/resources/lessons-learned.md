@@ -420,6 +420,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Debugging and Root Cause Analysis
 
+- [From #1055] A VS Code command whose button is **visible but does nothing** after an extension change is often a **stale Extension Development Host**, not a code regression — package.json contribution + compiled-JS changes don't fully take effect until a `Developer: Reload Window`. Before hunting a dispatch bug, confirm the symptom survives a clean reload. Here an "editor delete no longer works" report against a byte-for-byte-unchanged delete command evaporated on reload; a speculative menu-placement fix was started, then reverted once it proved environmental. Diff-the-actual-code first, and let the tester rule out a stale host before you change working behavior.
 - [From 0107] Commander.js `.alias()` does NOT hide aliases from `--help` output -- they show as `command|alias`. Use `towerCmd.addCommand(cmd, { hidden: true })` to add hidden backward-compatible commands.
 - [From 0107] `body && body.name` treats `{ name: "" }` as falsy, falling through to reconnect instead of validation. Use `body && 'name' in body` for field presence checks where empty string is a meaningful (invalid) value.
 - [From 0107] Nonce must be embedded in the callback URL, not the initial auth URL, so that the OAuth callback can validate state.
