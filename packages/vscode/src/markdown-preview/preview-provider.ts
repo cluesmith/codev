@@ -32,6 +32,8 @@ import {
   serializeReviewMarker,
   markerAppendLine,
   parseReviewMarkers,
+  matchesExpectedMarker,
+  rewriteReviewMarkerBody,
 } from '@cluesmith/codev-core/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
@@ -91,6 +93,26 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       if (m.type === 'ready') { pushUpdate(); return; }
       if (m.type === 'addComment' && typeof m.line === 'number' && typeof m.text === 'string') {
         this.addComment(document, m.line, m.text);
+        return;
+      }
+      if (
+        m.type === 'editComment' &&
+        typeof m.markerLine === 'number' &&
+        typeof m.expectedAuthor === 'string' &&
+        typeof m.expectedBodyPrefix === 'string' &&
+        typeof m.newBody === 'string'
+      ) {
+        editReviewMarker(document, m.markerLine, m.expectedAuthor, m.expectedBodyPrefix, m.newBody, pushUpdate);
+        return;
+      }
+      if (
+        m.type === 'deleteComment' &&
+        typeof m.markerLine === 'number' &&
+        typeof m.expectedAuthor === 'string' &&
+        typeof m.expectedBodyPrefix === 'string'
+      ) {
+        deleteReviewMarker(document, m.markerLine, m.expectedAuthor, m.expectedBodyPrefix, pushUpdate);
+        return;
       }
     });
   }
@@ -136,4 +158,83 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       lineHeight: cfg.get<number>('lineHeight', 0),
     });
   }
+}
+
+/** The message shown when an edit/delete loses the optimistic-concurrency race (#1055). */
+const RACE_REFRESH_MESSAGE = 'This comment changed since you opened it — showing the latest.';
+
+/**
+ * Optimistic-concurrency guard shared by edit + delete (#1055). Returns the line text at
+ * `markerLine` if it is still the expected marker (author + body-prefix); otherwise re-pushes the
+ * current document to the webview via `refresh` (so the stale card corrects itself), surfaces a
+ * legible info message, and returns `null`. This is what makes a race fail loudly with a refresh
+ * rather than silently mutating a different marker. Exported for unit testing.
+ */
+export function verifyReviewMarker(
+  document: vscode.TextDocument,
+  markerLine: number,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+  refresh: () => void,
+): string | null {
+  const inRange = markerLine >= 0 && markerLine < document.lineCount;
+  const lineText = inRange ? document.lineAt(markerLine).text : '';
+  if (!inRange || !matchesExpectedMarker(lineText, expectedAuthor, expectedBodyPrefix)) {
+    refresh();
+    void vscode.window.showInformationMessage(RACE_REFRESH_MESSAGE);
+    return null;
+  }
+  return lineText;
+}
+
+/**
+ * Rewrite the marker at `markerLine` with `newBody`, preserving its author (#1055). Verifies the
+ * marker still matches first (race-safe); a mismatch refreshes instead of writing. Exported for
+ * unit testing; the runtime entry point is the `editComment` message handler.
+ */
+export async function editReviewMarker(
+  document: vscode.TextDocument,
+  markerLine: number,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+  newBody: string,
+  refresh: () => void,
+): Promise<void> {
+  if (!newBody.trim()) { return; }
+  const lineText = verifyReviewMarker(document, markerLine, expectedAuthor, expectedBodyPrefix, refresh);
+  if (lineText === null) { return; }
+  const rewritten = rewriteReviewMarkerBody(lineText, newBody);
+  if (rewritten === null) { return; }
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    document.uri,
+    new vscode.Range(new vscode.Position(markerLine, 0), new vscode.Position(markerLine, lineText.length)),
+    rewritten,
+  );
+  await vscode.workspace.applyEdit(edit);
+  await document.save();
+}
+
+/**
+ * Delete the marker line at `markerLine` (#1055) — the preview-surface counterpart of the
+ * editor-gutter delete. Removes the whole line including its trailing newline after the same
+ * race-safe verification. Exported for unit testing.
+ */
+export async function deleteReviewMarker(
+  document: vscode.TextDocument,
+  markerLine: number,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+  refresh: () => void,
+): Promise<void> {
+  const lineText = verifyReviewMarker(document, markerLine, expectedAuthor, expectedBodyPrefix, refresh);
+  if (lineText === null) { return; }
+  const edit = new vscode.WorkspaceEdit();
+  const end =
+    markerLine + 1 < document.lineCount
+      ? new vscode.Position(markerLine + 1, 0)
+      : new vscode.Position(markerLine, lineText.length);
+  edit.delete(document.uri, new vscode.Range(new vscode.Position(markerLine, 0), end));
+  await vscode.workspace.applyEdit(edit);
+  await document.save();
 }

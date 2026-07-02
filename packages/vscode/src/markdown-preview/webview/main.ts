@@ -76,6 +76,21 @@ function render(): void {
       themeAdapter,
       onAddComment: (line: number, text: string) =>
         vscodeApi.postMessage({ type: 'addComment', line, text }),
+      onEditComment: (
+        markerLine: number,
+        expectedAuthor: string,
+        expectedBodyPrefix: string,
+        newBody: string,
+      ) =>
+        vscodeApi.postMessage({
+          type: 'editComment',
+          markerLine,
+          expectedAuthor,
+          expectedBodyPrefix,
+          newBody,
+        }),
+      onDeleteComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string) =>
+        vscodeApi.postMessage({ type: 'deleteComment', markerLine, expectedAuthor, expectedBodyPrefix }),
       refreshKey,
     }),
   );
