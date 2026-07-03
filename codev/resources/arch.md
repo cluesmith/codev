@@ -1714,6 +1714,12 @@ Messages sent via `afx send` are not injected immediately — they pass through 
 
 `afx send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting.
 
+### 8. Identity Resolution (`afx whoami`) (Spec 1134)
+
+**Location**: `commands/whoami.ts` (composes `detectCurrentBuilderId`/`detectWorkspaceRoot` from `commands/send.ts` and `lookupBuilderSpawningArchitect` from `state.ts`)
+
+`afx whoami` reports the current terminal's agent identity (workspace, type, name) from Tower/global.db's perspective. Identity precedence is fixed: **builder-worktree cwd match** (canonical id verified against global.db — same resolution `afx send` uses, including the #1094 rule that an unverifiable worktree identity throws rather than falling through) → **`CODEV_ARCHITECT_NAME`** (the Tower-injected architect env var, read directly — NOT via `currentArchitectName()`, whose `main` default is deliberately not used here) → **unknown** (exit 1, no implicit `main`). Strictly read-only against global.db: `lookupBuilderSpawningArchitect(builderId, workspacePath?, db?)` accepts an optional connection so whoami passes its own readonly handle instead of the read-write `getDb()` singleton. Workspace display name comes from `known_workspaces` with directory-basename fallback (informational field only — fail-loud applies to type/name). `--json` emits `{workspace, type, name, architect?}`; failures emit `{"error": ...}` on stdout plus a human explanation on stderr. Works without Tower running. The shipped `/arch-init` skill (`.claude/skills/arch-init/`, mirrored in `codev-skeleton/`) builds on whoami for architect identity adoption + state recovery from `codev/state/<name>.md`.
+
 ## Installation Architecture
 
 **Entry Point**: `INSTALL.md` - Instructions for AI agents to install Codev

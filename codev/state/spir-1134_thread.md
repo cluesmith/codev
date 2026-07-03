@@ -53,3 +53,35 @@
   parameterization).
 - Committed `[Spec 1134] Plan with multi-agent review`.
 - **Gate reached: plan-approval.** Architect notified via afx send. Waiting.
+
+## Plan approved → Implement
+
+- Waleed approved the plan as written; recorded gate, advanced to implement.
+- **Phase 1 (whoami)**: implemented `commands/whoami.ts` + cli.ts registration +
+  optional `db?` param on `lookupBuilderSpawningArchitect`. 20 new unit tests
+  (scenarios 1–8, 10, 11 + JSON shapes). Manual smokes pass end-to-end: this
+  worktree → `builder-spir-1134 / architect: main`; /tmp → exit 1 fail-loud.
+  CMAP: 3× APPROVE (all HIGH).
+  - Environment hiccup during phase-1 CMAP: the GLOBAL codev install was being
+    reinstalled concurrently (~10:00), codex vendor binary ENOENT/churning.
+    Waited for it to settle (binary became a symlink to standalone
+    @openai/codex), then codex APPROVE. Worktree needed `pnpm install
+    --frozen-lockfile` + `pnpm build` before tests could run (fresh worktree).
+- **Phase 2 (arch-init skill)**: SKILL.md byte-identical in codev-skeleton/ and
+  .claude/skills/ + drift-guard test + first-ever copySkills() regression tests
+  (4). Skill confirmed loading in Claude Code. CMAP: 3× APPROVE.
+- **Phase 3 (docs sync)**: whoami section added to agent-farm.md + afx SKILL.md
+  in BOTH trees (verified identical section content cross-tree); state.db →
+  global.db wording drive-by in send.ts (3 stale spots; historical migration
+  comments kept). Full suite 3470 green. CMAP: 3× APPROVE (all HIGH).
+
+## Review phase
+
+- All 3 phases unanimously approved (9 APPROVE verdicts total across
+  implement; 0 REQUEST_CHANGES after the spec/plan iterations).
+- Review doc written with full consultation-feedback ledger.
+- Governance docs routed: arch.md COLD gets "Identity Resolution (afx whoami)"
+  Core Components subsection; lessons-learned.md COLD gets the
+  "skill text is a testable artifact" lesson. Both HOT files unchanged
+  (nothing cross-cutting enough to displace capped entries).
+- PR next, then porch done → pr gate.

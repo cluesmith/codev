@@ -420,6 +420,8 @@ rebuttal: `1134-plan-iter1-rebuttals.md`.
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-07-03 | Initial plan | — | builder spir-1134 |
+| 2026-07-03 | Iteration-1 CMAP revisions (read-only invariant, copySkills tests, resolveIdentity test approach) | Codex REQUEST_CHANGES | builder spir-1134 |
+| 2026-07-03 | Phases 1–3 completed, each with unanimous 3-way CMAP approval | — | builder spir-1134 |
 
 ## Notes
 
