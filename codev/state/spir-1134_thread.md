@@ -30,3 +30,26 @@
   stderr. Declined `codev whoami` alias (scope).
 - Committed `[Spec 1134] Specification with multi-agent review`.
 - **Gate reached: spec-approval.** Architect notified via afx send. Waiting.
+
+## Spec approved → Plan phase
+
+- Waleed approved the spec as written (relayed by architect); recorded gate via
+  `porch approve 1134 spec-approval --a-human-explicitly-approved-this`.
+- Drafted plan: 3 phases — (1) `whoami` command + tests, (2) `arch-init` skill
+  in both trees + tests, (3) docs sync (agent-farm.md + afx SKILL.md, both
+  trees) + state.db→global.db wording drive-by.
+- Plan decision: import identity helpers from `commands/send.ts` (already
+  exported/tested) rather than relocating them.
+
+## Plan — CMAP iteration 1
+
+- Verdicts: Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES.
+- Accepted all 3 Codex points: (a) whoami is now strictly read-only —
+  `lookupBuilderSpawningArchitect` gains optional `db?` param so whoami passes
+  its own readonly connection instead of read-write `getDb()` (draft had a
+  genuine spec violation here); (b) new `copySkills()` regression tests in
+  scaffold.test.ts (none exist today — scenario 9 was uncovered); (c) pinned
+  the resolveIdentity(env) + process.chdir test approach (no helper
+  parameterization).
+- Committed `[Spec 1134] Plan with multi-agent review`.
+- **Gate reached: plan-approval.** Architect notified via afx send. Waiting.
