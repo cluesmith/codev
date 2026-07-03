@@ -36,8 +36,8 @@ appears.)
 
 - [ ] All spec MUST criteria (1–9) met
 - [ ] All 12 spec test scenarios covered by automated tests where automatable
-      (1–8, 10–12; scenario 9 covered by existing dynamic `copySkills` behavior
-      + skill-presence test)
+      (1–8, 10–12; scenario 9 covered by new `copySkills()` regression tests
+      in `scaffold.test.ts` + skill-presence test)
 - [ ] No reduction in existing test coverage; all existing tests pass
 - [ ] Zero new lint errors
 - [ ] Both trees updated (skeleton + instance) for every framework file touched
@@ -74,8 +74,13 @@ appears.)
 #### Implementation Details
 
 **`commands/whoami.ts`** exports `whoami(options: { json?: boolean })` plus a
-pure, testable core `resolveIdentity(env, cwd)` returning a discriminated
-result:
+testable core `resolveIdentity(env)` returning a discriminated result.
+`resolveIdentity` takes `env` as a parameter but reads cwd implicitly through
+the reused send.ts helpers (`detectCurrentBuilderId` / `detectWorkspaceRoot`
+call `process.cwd()` internally — they are NOT parameterized; that churn isn't
+worth it for two consumers). Tests control cwd via `process.chdir()` into
+tmpdir fixtures, the established pattern in `send.test.ts:108–122`
+(consultation feedback, Codex):
 
 ```ts
 type WhoamiIdentity =
@@ -87,9 +92,21 @@ type WhoamiIdentity =
 
 Resolution algorithm (spec precedence, verbatim):
 
+**Read-only invariant** (spec non-functional requirement; consultation
+feedback, Codex): `whoami` never opens global.db read-write. It opens ONE
+`new Database(path, { readonly: true })` connection for all whoami-specific
+queries (`spawned_by_architect`, `known_workspaces`, `architect` cross-check)
+and closes it before exit. To reuse the shared SQL without the read-write
+`getDb()` singleton, `lookupBuilderSpawningArchitect(builderId, workspacePath?)`
+gains an optional third parameter `db?: Database.Database` — defaulting to
+`getDb()` so all existing callers are byte-for-byte unaffected; whoami passes
+its read-only connection. (`detectCurrentBuilderId` already opens its own
+read-only connection internally.)
+
 1. `detectCurrentBuilderId()` (import from `./send.js`):
    - returns id → type `builder`; `architect` field from
-     `lookupBuilderSpawningArchitect(id)` (`state.ts:537`), omitted when
+     `lookupBuilderSpawningArchitect(id, undefined, roDb)` (`state.ts:537`,
+     read-only handle per the invariant above), omitted when
      `null`/`undefined`.
    - throws `BuilderIdResolutionError` → rethrow as the failure result
      (message passed through verbatim — it already carries the #1094
@@ -170,12 +187,12 @@ behavior changes to existing commands.
 
 #### Risks
 
-- **Risk**: `getDb()` (used by `lookupBuilderSpawningArchitect`) opens
-  global.db read-write and may run migrations on a stale db.
-  - **Mitigation**: acceptable — `afx send` already does this from CLI
-    context on every builder message; whoami adds no new exposure. The
-    whoami-specific lookups (`known_workspaces`, `architect` cross-check) use
-    their own read-only connections.
+- **Risk**: the optional `db?` parameter on `lookupBuilderSpawningArchitect`
+  changes a long-lived API signature.
+  - **Mitigation**: additive optional parameter with `getDb()` default —
+    existing callers (grep before commit) and their tests are unaffected;
+    `spec-755-lookup-builder.test.ts` gains a case passing an explicit
+    read-only handle.
 - **Risk**: importing from `commands/send.ts` creates a command→command
   dependency.
   - **Mitigation**: exports are already public and tested; noted in code
@@ -197,6 +214,11 @@ behavior changes to existing commands.
 - [ ] `codev-skeleton/.claude/skills/arch-init/SKILL.md` (new)
 - [ ] `.claude/skills/arch-init/SKILL.md` (new, byte-identical)
 - [ ] `packages/codev/src/agent-farm/__tests__/spec-1134-arch-init-skill.test.ts` (new)
+- [ ] `copySkills()` regression tests added to
+      `packages/codev/src/__tests__/scaffold.test.ts` (none exist today —
+      consultation feedback, Codex): copying from the real skeleton into a
+      tmp target installs `arch-init/SKILL.md`; `skipExisting: true`
+      preserves an existing customized copy
 
 #### Implementation Details
 
@@ -251,6 +273,10 @@ enumerates `codev-skeleton/.claude/skills/*` dynamically, so `codev init` /
   guardrails) and forbidden content (`ps -p`, `$PPID`, `Shannon`). This is the
   spec's "skill-text assertions" approach — the shipped text is the testable
   artifact.
+- **Scaffold tests** (`scaffold.test.ts`): `copySkills()` from the real
+  skeleton dir into a tmpdir target installs `arch-init/SKILL.md` (proves the
+  init/adopt/update install path — spec scenario 9); `skipExisting: true`
+  leaves a pre-existing target copy untouched.
 - **Manual**: run `/arch-init` with an explicit name in an architect terminal
   (happy path) and confirm it reads `codev/state/<name>.md`; run with a
   path-shaped arg (`../../foo`) and confirm rejection.
@@ -334,10 +360,11 @@ Phase 1 (whoami) ──→ Phase 2 (arch-init skill)
 
 ## Integration Points
 
-- **global.db (`~/.agent-farm/global.db`)**: read-only queries
-  (`builders` via `detectCurrentBuilderId`, `known_workspaces`, `architect`);
-  read-write only via the pre-existing `getDb()` path that `afx send` already
-  exercises. No schema changes.
+- **global.db (`~/.agent-farm/global.db`)**: strictly read-only — `builders`
+  via `detectCurrentBuilderId` (own readonly connection) and
+  `spawned_by_architect` / `known_workspaces` / `architect` via whoami's
+  single shared readonly connection. `getDb()` (read-write) is never invoked
+  by whoami. No schema changes.
 - **Scaffold pipeline**: consumed as-is (`copySkills` dynamic enumeration);
   no changes.
 - **Tower**: not required at runtime (spec constraint); no API changes.
@@ -361,7 +388,32 @@ Phase 1 (whoami) ──→ Phase 2 (arch-init skill)
 
 ## Expert Review
 
-*(To be filled by porch-driven 3-way plan review.)*
+### Iteration 1 (plan review): Gemini APPROVE, Codex REQUEST_CHANGES, Claude APPROVE
+
+**Key feedback and adjustments:**
+
+- **Codex — read-only violation (accepted)**: the draft accepted
+  `lookupBuilderSpawningArchitect()` via read-write `getDb()`, contradicting
+  the spec's "opens global.db read-only" requirement. Fixed: whoami uses one
+  shared read-only connection for all its queries;
+  `lookupBuilderSpawningArchitect` gains an optional `db?` parameter
+  (defaults to `getDb()`, existing callers unaffected).
+- **Codex — scenario 9 coverage overstated (accepted)**: no `copySkills()`
+  tests exist today. Added Phase 2 deliverable: `copySkills()` regression
+  tests in `scaffold.test.ts` (installs `arch-init`, respects
+  `skipExisting`).
+- **Codex — `resolveIdentity` purity under-specified (accepted)**: clarified
+  that the send.ts helpers are NOT parameterized; `resolveIdentity(env)`
+  reads cwd through them, and tests control cwd via `process.chdir()`
+  (send.test.ts pattern). Claude's review raised the same purity point.
+- **Gemini — test assertions pinned to old "state.db" wording must update in
+  the same Phase 3 commit**: already covered under Phase 3 risks; kept.
+- **Claude — drive-by scope**: confirmed only the user-facing message +
+  doc comment change to "global.db"; historical "state.db is retired"
+  migration comments stay.
+
+Full reviews: `codev/projects/1134-afx-whoami-ship-arch-init-comm/1134-plan-iter1-{gemini,codex,claude}.txt`;
+rebuttal: `1134-plan-iter1-rebuttals.md`.
 
 ## Change Log
 
@@ -375,8 +427,8 @@ Phase 1 (whoami) ──→ Phase 2 (arch-init skill)
 - Phase commits use `[Spec 1134][Phase: <name>]` format; all phases ship in a
   single PR (per spawn-prompt PR strategy).
 - The spec's scenario 9 (`codev init` installs the skill) rides on existing
-  `copySkills` behavior; the presence/equality tests in Phase 2 are the
-  regression net for the artifact itself.
+  `copySkills` behavior, which gets its first regression tests in Phase 2
+  (none exist today); the presence/equality tests cover the artifact itself.
 
 ---
 
