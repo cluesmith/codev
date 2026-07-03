@@ -16,3 +16,17 @@
     (informational field only; fail-loud applies to type/name).
 - Open question flagged for reviewers: whether to cross-check `CODEV_ARCHITECT_NAME`
   against the `architect` table (default: trust env, no cross-check).
+
+## Specify — CMAP iteration 1
+
+- Verdicts: Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES.
+- Accepted all 4 Codex points: architect state-file minimum contract (+
+  disambiguation from `*_thread.md` builder threads), `[name]` validation via
+  `validateArchitectName` rule (path-traversal guard), `detectWorkspaceRoot()`
+  instead of "cwd = root" for architects, `/arch-init` acceptance rephrased as
+  shipped-skill-text assertions + new test scenarios 10–12.
+- Adopted Gemini: stderr warning when env-resolved architect lacks an
+  `architect` row (non-gating); `--json` failures emit JSON stdout + human
+  stderr. Declined `codev whoami` alias (scope).
+- Committed `[Spec 1134] Specification with multi-agent review`.
+- **Gate reached: spec-approval.** Architect notified via afx send. Waiting.
