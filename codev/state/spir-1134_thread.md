@@ -92,3 +92,6 @@
 - PR-level CMAP: Gemini APPROVE (HIGH), Codex APPROVE (MEDIUM), Claude APPROVE
   (HIGH) — no key issues anywhere in the project after spec/plan iterations.
 - **Gate reached: pr.** Architect notified. Waiting for human approval to merge.
+- 2026-07-04: Architect integration review posted on PR #1136 (APPROVE, no key
+  issues), but HOLD at pr gate: Waleed assigned final human review to
+  amrmelsayed. No merge until that review lands + explicit go-ahead.
